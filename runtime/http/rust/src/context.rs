@@ -4,7 +4,7 @@ use std::collections::HashMap;
 /// RequestContext is passed to generated implementation handlers.
 ///
 /// Headers are forwarded so route-impl code can extract request metadata
-/// (tenant identity, request id, idempotency keys, etc.) without bypassing
+/// (caller identity, request id, idempotency keys, etc.) without bypassing
 /// the generated router plumbing. Keys are lowercased per HTTP semantics.
 #[derive(Clone, Debug, Default)]
 pub struct RequestContext {

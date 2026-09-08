@@ -51,7 +51,7 @@ func (v *Validator) validateScalarValue(scalar *ir.ScalarDef, value any) []Valid
 // The registry governs every name it holds: when a validator is registered
 // for scalar.Name the value goes to it and the result is returned as-is,
 // regardless of HasCustomValidate. [DefaultRegistry] registers the linked
-// scalar core's dispatch for every name it knows, which carries the PAR-12
+// scalar core's dispatch for every name it knows, which carries the deep
 // custom validators (Embedding.Vector / Generic.StringMap deep serde,
 // Asset.FilePath / Text.Markdown min_length 1) that the generic IR
 // pattern/min/max logic below cannot express. An injected registry decides

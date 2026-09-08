@@ -61,7 +61,7 @@ export class HttpClient {
 
   /**
    * Serialize query params. Arrays become comma-separated values (e.g. ?tier=a,b)
-   * per EDR-0002 format conventions; null and undefined values are dropped.
+   * per the API format conventions; null and undefined values are dropped.
    */
   private serializeParams(params: Record<string, unknown> | undefined): string {
     if (!params) {

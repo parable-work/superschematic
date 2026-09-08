@@ -946,7 +946,7 @@ func requireBun(t *testing.T) {
 }
 
 // genericOnlyCatalog is a scalar catalog holding only scalars the superscalar
-// core defines (no Parable extension scalar): the shape the engine sees when
+// core defines (no Acme extension scalar): the shape the engine sees when
 // no extension registers a catalog. The rows come from the linked scalar
 // package so the test asserts catalog membership, not metadata values.
 func genericOnlyCatalog(t *testing.T) registry.ScalarCatalog {

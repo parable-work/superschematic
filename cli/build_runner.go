@@ -112,8 +112,8 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 	}
 
 	// Persist the sidecar documents' crawled module graph for cache
-	// invalidation (EDR-0087 amendment 2). Runs for single-schema builds
-	// too, so a direct `psgen build` refreshes the depfile.
+	// invalidation. Runs for single-schema builds
+	// too, so a direct `superschematic build` refreshes the depfile.
 	if err := prof.Measure("build.authoring-imports", func() error {
 		hasDocs := len(schema.Documents) > 0
 		return buildcache.WriteAuthoringImports(absOutputRoot, schema.Name, opts.ServicePath, schema.AuthoringImports, hasDocs)

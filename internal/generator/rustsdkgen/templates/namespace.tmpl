@@ -377,7 +377,7 @@ impl {{.Namespace.StructName}} {
 {{- range .ScalarArgs}}
 {{- if .IsArray}}
 {{- if .Required}}
-        // EDR-0002: comma-separated format for array query params
+        // comma-separated format for array query params
         if !input.{{.RustName}}.is_empty() {
             let joined: String = input.{{.RustName}}.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",");
             query_params.push(("{{.Name}}".to_string(), joined));

@@ -398,7 +398,7 @@ func TestUndeclaredDependencyIsAnError(t *testing.T) {
 // TestServiceScopeComesFromInputNaming: the service-import scope is the
 // configured npm scope carried on Input, not a process-wide value. Under an
 // @acme scope an @acme import is a service reference (and so needs a
-// declared dependency) while a @parable-platform import is neither a
+// declared dependency) while a @acme-platform import is neither a
 // toolchain nor a service import and passes untouched.
 func TestServiceScopeComesFromInputNaming(t *testing.T) {
 	acme := naming.Naming{NpmScope: "@acme"}
@@ -424,7 +424,7 @@ func TestServiceScopeComesFromInputNaming(t *testing.T) {
 		},
 	})
 	if len(r.Errors) != 0 {
-		t.Errorf("@parable-platform import is not a service reference under the @acme scope, got %v", errorStrings(r))
+		t.Errorf("@acme-platform import is not a service reference under the @acme scope, got %v", errorStrings(r))
 	}
 }
 

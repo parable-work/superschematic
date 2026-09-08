@@ -6,7 +6,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Method};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
-use psgen_http_runtime::{
+use {{ .RuntimeCrateIdent }}::{
     error_response, request_id_from_headers, wrap_envelope, RequestContext,
 };
 use serde_json::Value;
@@ -39,8 +39,8 @@ fn method_from_str(method: &str) -> Method {
 }
 
 /// Convert an axum `HeaderMap` to a plain string map for `RequestContext`.
-/// Header names are lowercased; non-UTF-8 values are dropped (per
-/// EDR-0002 the SDK only forwards ASCII-safe headers anyway).
+/// Header names are lowercased; non-UTF-8 values are dropped (the SDK
+/// only forwards ASCII-safe headers anyway).
 fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
     let mut out = HashMap::with_capacity(headers.len());
     for (name, value) in headers.iter() {

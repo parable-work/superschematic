@@ -142,7 +142,7 @@ func buildCommonHeaderParameters(output *APIOutput) []map[string]interface{} {
 
 // buildScalarQueryParams converts GET endpoint scalar args into OpenAPI query
 // parameter definitions. Array args use style=form + explode=false
-// (comma-separated: ?k=a,b) per EDR-0002 format conventions.
+// (comma-separated: ?k=a,b) per the API format conventions.
 func buildScalarQueryParams(args []Param, scalarExamples, scalarDescriptions, scalarMap map[string]string) []map[string]interface{} {
 	var params []map[string]interface{}
 	for _, arg := range args {

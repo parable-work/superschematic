@@ -35,8 +35,8 @@ func DependencyServiceName(pkg string) string {
 
 // resolveImports classifies every named import in the schema against its
 // dependency schema. DB dependencies stay named-only so a single codegen
-// import cannot publish the full secret-bearing catalog into the API barrel
-// (PARABLE-970). General and other non-DB dependencies expand to the full
+// import cannot publish the full secret-bearing catalog into the API barrel.
+// General and other non-DB dependencies expand to the full
 // catalog so consumers can keep importing enums/error codes from the API
 // types package. Scalars are skipped because they resolve through
 // scalar-lib. @source / foreign extends must not appear in schema.Imports —

@@ -37,7 +37,7 @@ type Context struct {
 	Enums map[string]*ir.EnumDef
 
 	// DefLocations maps same-service definition names to the extension-free
-	// schema file base that declares them (e.g. "src/tenant.schema"), for
+	// schema file base that declares them (e.g. "src/orders.schema"), for
 	// relative imports of definitions declared in sibling files.
 	DefLocations map[string]string
 

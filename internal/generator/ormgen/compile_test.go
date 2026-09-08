@@ -283,7 +283,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)` + "`" + `, tenantTwoID.ToUUID(),
 		t.Fatalf("t4 users len = %d, want child moved to another tenant excluded", len(snapshot4.Users))
 	}
 
-	// PARABLE-345 regression: hard delete of a versioned row must succeed and
+	// Regression: hard delete of a versioned row must succeed and
 	// record a tombstone at OLD._version + 1. The buggy trigger wrote the
 	// tombstone at OLD._version, colliding on the unique (id, _version) history
 	// index and aborting every hard delete with 23505 -- so the DELETE at t3

@@ -187,10 +187,10 @@ func (c *HTTPClient) DoJSON(
 	return nil
 }
 
-// unwrapEnvelope enforces the EDR-0002 success response contract and returns
+// unwrapEnvelope enforces the success response contract and returns
 // the inner data payload from {data, meta: {requestId}}.
 // SYNC: keep strict envelope validation in sync with
-// utils/psgen/http-runtime/go/response/unwrap.go.
+// runtime/http/go/response/unwrap.go.
 func unwrapEnvelope(body []byte) ([]byte, error) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(body, &envelope); err != nil {

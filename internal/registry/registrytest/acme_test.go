@@ -23,7 +23,7 @@ import (
 func acmeRegistry(t *testing.T) *registry.Registry {
 	t.Helper()
 	// The default naming with the core's own auth provider selected: the
-	// in-tree default names the Parable provider, which only the Parable
+	// in-tree default names the Acme provider, which only the Acme
 	// extension registers, and Acme registers none.
 	n := naming.Default()
 	n.AuthProvider = sessionauth.Name

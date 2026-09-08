@@ -201,7 +201,7 @@ func TestCoreRegistryPipelinesMatchTheFormerKindSwitch(t *testing.T) {
 
 // TestCoreRegistryCarriesNoDocumentsOrHooks pins the W5 split: the core
 // registers no sidecar documents and no build-all hooks (the deploy family
-// registers both from the Parable extension), and a core-only run leaves a
+// registers both from the Acme extension), and a core-only run leaves a
 // document it has no spec for untouched instead of failing on it.
 func TestCoreRegistryCarriesNoDocumentsOrHooks(t *testing.T) {
 	reg := CoreRegistry(naming.Default())

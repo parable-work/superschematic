@@ -99,7 +99,7 @@ BEGIN
   IF (TG_OP = 'DELETE') THEN
     -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
     -- the unique history index holds and the latest history row for a deleted key
-    -- is the DELETE (PARABLE-345). The data payload is the pre-delete image.
+    -- is the DELETE. The data payload is the pre-delete image.
     INSERT INTO tenant_history (id, _version, operation, data)
     VALUES (OLD.id, OLD._version + 1, 'DELETE', to_jsonb(OLD));
     RETURN OLD;
@@ -126,7 +126,7 @@ BEGIN
   IF (TG_OP = 'DELETE') THEN
     -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
     -- the unique history index holds and the latest history row for a deleted key
-    -- is the DELETE (PARABLE-345). The data payload is the pre-delete image.
+    -- is the DELETE. The data payload is the pre-delete image.
     INSERT INTO tenant_user_history (id, _version, operation, data)
     VALUES (OLD.id, OLD._version + 1, 'DELETE', to_jsonb(OLD));
     RETURN OLD;

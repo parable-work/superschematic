@@ -41,7 +41,7 @@ func TestStoreRestoreRoundTrip(t *testing.T) {
 	repoA := filepath.Join(base, "repo-a")
 	repoB := filepath.Join(base, "repo-b")
 	cacheRoot := filepath.Join(base, "cache")
-	rel := filepath.ToSlash(filepath.Join("platform-schemas", "dist", "types", "typescript", "demo"))
+	rel := filepath.ToSlash(filepath.Join("schemas", "dist", "types", "typescript", "demo"))
 	out := filepath.Join(repoA, filepath.FromSlash(rel))
 
 	writeFile(t, filepath.Join(out, "src", "index.ts"), "export const x = 1;")
@@ -70,7 +70,7 @@ func TestRestoreRejectsDamagedEntry(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "repo")
 	cacheRoot := filepath.Join(base, "cache")
-	rel := filepath.ToSlash(filepath.Join("platform-schemas", "dist", "types", "go", "demo"))
+	rel := filepath.ToSlash(filepath.Join("schemas", "dist", "types", "go", "demo"))
 	writeFile(t, filepath.Join(repo, filepath.FromSlash(rel), "types.go"), "package demo")
 
 	require.NoError(t, StoreEntry(cacheRoot, "schemas", "demo", stringsOf("a", 64), repo, []string{rel}))
@@ -85,14 +85,13 @@ func TestRestoreRejectsDamagedEntry(t *testing.T) {
 
 func TestComputeInputHashesPropagatesDependencyChanges(t *testing.T) {
 	repo := t.TempDir()
-	writeFile(t, filepath.Join(repo, "utils", "psgen", "main.go"), "package main")
 	writeFile(t, filepath.Join(repo, "vendor", "scalars", "permissions.yml"), "{}")
-	writeFile(t, filepath.Join(repo, "platform-schemas", "package.json"), "{}")
-	writeFile(t, filepath.Join(repo, "platform-schemas", "bun.lock"), "")
+	writeFile(t, filepath.Join(repo, "schemas", "package.json"), "{}")
+	writeFile(t, filepath.Join(repo, "schemas", "bun.lock"), "")
 
-	baseDir := filepath.Join(repo, "platform-schemas", "services", "base")
-	leafDir := filepath.Join(repo, "platform-schemas", "services", "leaf")
-	otherDir := filepath.Join(repo, "platform-schemas", "services", "other")
+	baseDir := filepath.Join(repo, "schemas", "services", "base")
+	leafDir := filepath.Join(repo, "schemas", "services", "leaf")
+	otherDir := filepath.Join(repo, "schemas", "services", "other")
 	writeFile(t, filepath.Join(baseDir, "src", "base.schema.ts"), "export class Base {}")
 	writeFile(t, filepath.Join(leafDir, "src", "leaf.schema.ts"), "export class Leaf {}")
 	writeFile(t, filepath.Join(otherDir, "src", "other.schema.ts"), "export class Other {}")
@@ -124,31 +123,30 @@ func TestComputeInputHashesPropagatesDependencyChanges(t *testing.T) {
 
 func TestAuthoringImportsInvalidateInputHash(t *testing.T) {
 	repo := t.TempDir()
-	writeFile(t, filepath.Join(repo, "utils", "psgen", "main.go"), "package main")
 	writeFile(t, filepath.Join(repo, "vendor", "scalars", "permissions.yml"), "{}")
-	writeFile(t, filepath.Join(repo, "platform-schemas", "package.json"), "{}")
-	writeFile(t, filepath.Join(repo, "platform-schemas", "bun.lock"), "")
+	writeFile(t, filepath.Join(repo, "schemas", "package.json"), "{}")
+	writeFile(t, filepath.Join(repo, "schemas", "bun.lock"), "")
 
-	envDir := filepath.Join(repo, "platform-schemas", "services", "env")
-	modelDir := filepath.Join(repo, "platform-schemas", "services", "model")
+	envDir := filepath.Join(repo, "schemas", "services", "env")
+	modelDir := filepath.Join(repo, "schemas", "services", "model")
 	writeFile(t, filepath.Join(envDir, "deploy.values.ts"), "export default {}")
 	modelFile := filepath.Join(modelDir, "workloads.ts")
 	writeFile(t, modelFile, "export const a = 1")
 	ownFile := filepath.Join(envDir, "helper.ts")
 	writeFile(t, ownFile, "export const b = 2")
-	outsideFile := filepath.Join(repo, "utils", "psgen", "packages", "deploy", "index.ts")
+	outsideFile := filepath.Join(repo, "packages", "deploy", "index.ts")
 	writeFile(t, outsideFile, "export const c = 3")
 
 	services := []buildplan.Service{
 		{Name: "env", Dir: envDir, Config: &schemaconfig.SchemaConfig{Name: "env", Kind: ir.SchemaKindGeneral}},
 	}
-	distRoot := filepath.Join(repo, "platform-schemas", "dist")
+	distRoot := filepath.Join(repo, "schemas", "dist")
 
-	// The depfile records only platform-schemas files outside the service
-	// directory: the service's own files and utils/psgen sources are covered
+	// The depfile records only schemas files outside the service
+	// directory: the service's own files and the tool are covered
 	// by the service and toolchain digests.
 	require.NoError(t, WriteAuthoringImports(distRoot, "env", envDir, []string{modelFile, ownFile, outsideFile}, true))
-	assert.Equal(t, []string{"platform-schemas/services/model/workloads.ts"}, ReadAuthoringImports(repo, "env"))
+	assert.Equal(t, []string{"schemas/services/model/workloads.ts"}, ReadAuthoringImports(repo, "env"))
 
 	before, err := ComputeInputHashes(services, repo, naming.Naming{})
 	require.NoError(t, err)
@@ -177,8 +175,7 @@ func TestAuthoringImportsInvalidateInputHash(t *testing.T) {
 // build.
 func TestComputeInputHashesFollowNaming(t *testing.T) {
 	repo := t.TempDir()
-	writeFile(t, filepath.Join(repo, "utils", "psgen", "main.go"), "package main")
-	svcDir := filepath.Join(repo, "platform-schemas", "services", "svc")
+	svcDir := filepath.Join(repo, "schemas", "services", "svc")
 	writeFile(t, filepath.Join(svcDir, "src", "svc.schema.ts"), "export class Svc {}")
 	services := []buildplan.Service{
 		{Name: "svc", Dir: svcDir, Config: &schemaconfig.SchemaConfig{Name: "svc", Kind: ir.SchemaKindGeneral}},
@@ -204,10 +201,9 @@ func TestComputeInputHashesFollowNaming(t *testing.T) {
 // path declared, they do, and so does declaring the path itself.
 func TestComputeInputHashesFollowCacheInputs(t *testing.T) {
 	repo := t.TempDir()
-	writeFile(t, filepath.Join(repo, "utils", "psgen", "main.go"), "package main")
 	perms := filepath.Join(repo, "vendor", "scalars", "permissions.yml")
 	writeFile(t, perms, "a: 1")
-	svcDir := filepath.Join(repo, "platform-schemas", "services", "svc")
+	svcDir := filepath.Join(repo, "schemas", "services", "svc")
 	writeFile(t, filepath.Join(svcDir, "src", "svc.schema.ts"), "export class Svc {}")
 	services := []buildplan.Service{
 		{Name: "svc", Dir: svcDir, Config: &schemaconfig.SchemaConfig{Name: "svc", Kind: ir.SchemaKindGeneral}},

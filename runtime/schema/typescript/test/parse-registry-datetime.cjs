@@ -1,5 +1,5 @@
 // Parse-registry DateTime adapter must agree with the core canonical for every
-// DateTime corpus vector. Pins the EDR-0076 fix that routes the adapter through
+// DateTime corpus vector. Pins the fix that routes the adapter through
 // the core (it was Luxon + Date.toISOString(), which forced `.000`/UTC and
 // diverged from the core's sub-second-preserving, offset-keeping RFC3339Nano).
 // Lived in superscalar's conformance runner until the runtime moved here.

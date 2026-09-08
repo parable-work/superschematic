@@ -78,8 +78,8 @@ var schemaFileExtensions = []string{".schema.ts", ".schema.json", ".schema.yaml"
 
 const platformDefaultSuffix = ".platform-default.json"
 
-// ownerBase converts an Owner path ("src/tenant.schema.ts") into the
-// extension-free schema file base ("src/tenant.schema"). It returns false
+// ownerBase converts an Owner path ("src/orders.schema.ts") into the
+// extension-free schema file base ("src/orders.schema"). It returns false
 // when the owner is not a schema file path (enums carry the service name).
 func ownerBase(owner string) (string, bool) {
 	for _, ext := range schemaFileExtensions {
@@ -92,7 +92,7 @@ func ownerBase(owner string) (string, bool) {
 
 // SplitSchema is the inverse of schemafile.Merge: it splits a service's
 // assembled IR into per-file documents keyed by the extension-free schema
-// file base ("src/tenant.schema"). Types group by their Owner
+// file base ("src/orders.schema"). Types group by their Owner
 // path; definitions with no file attribution (scalars, enums, unions,
 // and operation sets) land in the first document
 // in sorted order, or in "src/<service>.schema" when the service has no

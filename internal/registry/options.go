@@ -15,7 +15,7 @@ type Naming = naming.Naming
 
 // Options configures a generator run.
 type Options struct {
-	// OutputRoot is the shadow output root (e.g., platform-schemas/dist).
+	// OutputRoot is the shadow output root (e.g., schemas/dist).
 	OutputRoot string
 
 	// ServicePath is the service directory the schema was loaded from.

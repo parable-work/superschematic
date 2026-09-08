@@ -123,7 +123,7 @@ type ScalarTraits struct {
 // language-agnostic representation that each generator extends.
 //
 // The field name is the JSON name: custom JSON tags are not a feature of the
-// Parable Schema.
+// schema language.
 type FieldInfo struct {
 	// Name is the schema field name (and the JSON serialization key).
 	Name string

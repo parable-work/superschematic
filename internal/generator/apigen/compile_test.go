@@ -24,9 +24,9 @@ import (
 // dist layout, wires the real scalar-lib runtime, and runs go build and go
 // vet on the API module. It is also the W7 proof that the core session
 // provider emits an API module whose dependency closure holds the generic
-// http-runtime session package and none of the Parable runtime packages
-// (docs/extension-model.md section 8.2). The Parable provider's module is
-// compiled by every service that builds against platform-schemas/dist.
+// http-runtime session package and none of the Acme runtime packages
+// (docs/extension-model.md section 8.2). The Acme provider's module is
+// compiled by every service that builds against the schemas dist.
 func TestSessionProviderAPIDependsOnGenericRuntimeOnly(t *testing.T) {
 	apiDir := buildFixtureAPI(t, sessionauth.Provider{})
 
@@ -47,19 +47,19 @@ func TestSessionProviderAPIDependsOnGenericRuntimeOnly(t *testing.T) {
 		case "session":
 			sawSession = true
 		case "authmw", "authz":
-			t.Errorf("session-provider API depends on Parable runtime package %s", dep)
+			t.Errorf("session-provider API depends on Acme runtime package %s", dep)
 		}
 		// requestctx is allowed: its logger, client-IP and CheckContext half is
 		// generic and the core context.tmpl uses it; its authctx.go half is
-		// Parable's and moves out with the W12 shim module.
+		// Acme's and moves out with the W12 shim module.
 	}
 	if !sawSession {
 		t.Errorf("session-provider API does not depend on %s/session; runtime deps: %v", runtimeModule, deps)
 	}
 
-	// The emitted source itself carries no Parable auth vocabulary. (The
+	// The emitted source itself carries no Acme auth vocabulary. (The
 	// fixture schema has its own Tenant table and TenantView type, so the
-	// check names the Parable auth identifiers, not the word.)
+	// check names the Acme auth identifiers, not the word.)
 	sources, err := filepath.Glob(filepath.Join(apiDir, "*.go"))
 	if err != nil {
 		t.Fatalf("glob generated sources: %v", err)

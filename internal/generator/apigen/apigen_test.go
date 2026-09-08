@@ -29,12 +29,12 @@ func (stubProvider) OpenAPIParameters(*APIOutput) []map[string]any              
 
 func TestOpenAPIIncludesImportedDiscriminatedUnionMembers(t *testing.T) {
 	apiSchema := ir.NewSchema("fixture-api", ir.SchemaKindAPI)
-	apiSchema.Types["ParablePrimaryView"] = &ir.TypeDef{
-		Name: "ParablePrimaryView",
+	apiSchema.Types["AcmePrimaryView"] = &ir.TypeDef{
+		Name: "AcmePrimaryView",
 		Role: ir.RoleAPIView,
 		Fields: []*ir.FieldDef{{
 			Name:     "configuration",
-			TypeRef:  ir.TypeRef{Name: "ParableTypeConfigurationView"},
+			TypeRef:  ir.TypeRef{Name: "AcmeTypeConfigurationView"},
 			Required: true,
 		}},
 	}
@@ -44,10 +44,10 @@ func TestOpenAPIIncludesImportedDiscriminatedUnionMembers(t *testing.T) {
 		name  string
 		value string
 	}{
-		{name: "ProblemParableConfigurationView", value: "PROBLEM"},
-		{name: "PlaybookParableConfigurationView", value: "PLAYBOOK"},
-		{name: "PlatformParableConfigurationView", value: "PLATFORM"},
-		{name: "PrimitiveParableConfigurationView", value: "PRIMITIVE"},
+		{name: "ProblemAcmeConfigurationView", value: "PROBLEM"},
+		{name: "PlaybookAcmeConfigurationView", value: "PLAYBOOK"},
+		{name: "PlatformAcmeConfigurationView", value: "PLATFORM"},
+		{name: "PrimitiveAcmeConfigurationView", value: "PRIMITIVE"},
 	}
 	memberNames := make([]string, 0, len(members))
 	for _, member := range members {
@@ -65,20 +65,20 @@ func TestOpenAPIIncludesImportedDiscriminatedUnionMembers(t *testing.T) {
 			}},
 		}
 	}
-	shared.Unions["ParableTypeConfigurationView"] = &ir.UnionDef{
-		Name:  "ParableTypeConfigurationView",
+	shared.Unions["AcmeTypeConfigurationView"] = &ir.UnionDef{
+		Name:  "AcmeTypeConfigurationView",
 		Types: memberNames,
 	}
 
 	schemas := buildOpenAPISchemas(
-		[]EndpointInfo{{OutputType: "ParablePrimaryView"}},
+		[]EndpointInfo{{OutputType: "AcmePrimaryView"}},
 		map[string]string{},
 		map[string]string{},
 		map[string]string{"string": "string"},
 		apiSchema,
 		map[string]*ir.Schema{"fixture-shared": shared},
 	)
-	union, ok := schemas["ParableTypeConfigurationView"].(map[string]interface{})
+	union, ok := schemas["AcmeTypeConfigurationView"].(map[string]interface{})
 	if !ok {
 		t.Fatal("imported union component was not materialized")
 	}
@@ -564,7 +564,7 @@ func TestGenerateClassifiesDependencyInputTypesAsRequestBody(t *testing.T) {
 	}
 }
 
-// updateUserSchema builds the PARABLE-603 shape: PATCH users/{userId} taking a
+// updateUserSchema builds the regression shape: PATCH users/{userId} taking a
 // userId argument plus an input body. queryParam controls whether userId is
 // declared @query, which is the contradiction the guard must reject.
 func updateUserSchema(queryParam bool) (*ir.Schema, map[string]*ir.Schema) {
@@ -632,7 +632,7 @@ func generateUpdateUser(t *testing.T, queryParam bool) (*APIOutput, error) {
 	})
 }
 
-// PARABLE-603: a @query argument whose name is embedded in the rest path is a
+// Regression: a @query argument whose name is embedded in the rest path is a
 // contradiction. It used to be accepted silently, producing a handler that read
 // the id from the query string and an SDK that never substituted {userId}.
 func TestGenerateRejectsQueryParamEmbeddedInRestPath(t *testing.T) {
@@ -645,7 +645,7 @@ func TestGenerateRejectsQueryParamEmbeddedInRestPath(t *testing.T) {
 	}
 }
 
-// PARABLE-603 regression: without the QueryParam<> wrapper, userId must be
+// Regression: without the QueryParam<> wrapper, userId must be
 // classified as a path parameter and must not leak into the query string.
 func TestGenerateClassifiesPathEmbeddedArgAsPathParam(t *testing.T) {
 	output, err := generateUpdateUser(t, false)

@@ -203,6 +203,6 @@ func TestEmbeddedDefinitionIsCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.TrimSuffix(string(regenerated), "\n") != strings.TrimSuffix(string(definitionBytes), "\n") {
-		t.Error("embedded schema-config.schema.json is stale; run: cd utils/psgen/packages/schema-config && bun run gen-json-schema")
+		t.Error("embedded schema-config.schema.json is stale; run: cd packages/schema-config && bun run gen-json-schema")
 	}
 }

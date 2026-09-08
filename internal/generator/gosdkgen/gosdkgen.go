@@ -243,7 +243,7 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 				ns.NeedsRuntimePkg = true
 			} else if ep.HasScalarArgs && ep.HTTPMethod == "GET" {
 				// runtime.AddQueryParam is only called for non-array scalar args;
-				// array args use strings.Join (EDR-0002 comma-separated format).
+				// array args use strings.Join (comma-separated format).
 				for _, arg := range ep.ScalarArgs {
 					if !arg.IsArray {
 						ns.NeedsRuntimePkg = true

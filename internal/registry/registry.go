@@ -98,8 +98,7 @@ func New(n naming.Naming) *Registry {
 		}
 	}
 	// The core session provider is the only one the core registers; every
-	// other provider arrives through an extension (the Parable one from
-	// utils/parable-schematic/ext/auth). Finalize rejects a Naming whose
+	// other provider arrives through an extension. Finalize rejects a Naming whose
 	// AuthProvider names one that never arrived. See
 	// docs/extension-model.md section 8.
 	if err := r.RegisterAuthProvider(sessionauth.Provider{}); err != nil {

@@ -17,9 +17,8 @@ import (
 // config.go (or src/config.rs) so every service that uses the generated
 // loader also has a machine-readable env var manifest.
 //
-// The drift check test under infrastructure/.../helm/parable_apps reads
-// these files to verify Helm values files do not set env vars that the
-// schema does not declare.
+// A deployment's drift check reads these files to verify its Helm values
+// files do not set env vars that the schema does not declare.
 const valuesSchemaFileName = "values-schema.json"
 
 // valuesSchema is the on-disk format. It is a JSON Schema draft 2020-12

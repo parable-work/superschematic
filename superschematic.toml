@@ -1,0 +1,71 @@
+# Naming file for the superschematic core. Every module path, package name,
+# crate prefix and in-tree path a generated manifest carries comes from a
+# file like this one at the schemas root (<schemas-root>/superschematic.toml,
+# or --naming). The values here are the defaults the binary uses when the
+# file is absent, written out so a deployment can copy the file and change
+# what it needs. A key left out keeps its default.
+#
+# Coordinates of the generated packages. The service name is appended:
+# example.com/schemas/types/go/shop-db, @schemas/shop-db-types,
+# schemas_types_shop_db, schemas-shop-db-types.
+go_module_root = "example.com/schemas"
+npm_scope = "@schemas"
+python_types_module_prefix = "schemas_types_"
+python_sdk_module_prefix = "schemas_"
+python_sdk_module_suffix = "_sdk"
+rust_crate_prefix = "schemas-"
+
+# Coordinates of the scalar library the generated code imports.
+scalar_go_module = "github.com/parable-work/superscalar/go"
+scalar_npm_package = "superscalar"
+scalar_pypi_dist = "superscalar"
+scalar_python_module = "superscalar"
+scalar_rust_crate = "superscalar"
+
+# Coordinates of this repository's runtime modules.
+schema_ir_go_module = "github.com/parable-work/superschematic/ir"
+schema_runtime_go_module = "github.com/parable-work/superschematic/runtime/schema/go"
+http_runtime_go_module = "github.com/parable-work/superschematic/runtime/http/go"
+http_runtime_rust_crate = "superschematic-http-runtime"
+ptr_go_module = "github.com/parable-work/superschematic/runtime/schema/go/ptr"
+
+# Prose the generated readmes and package manifests carry.
+schema_language = "Superschematic"
+package_author = "superschematic"
+meta_schema_url_prefix = "superschematic://"
+
+# The auth provider the api generator renders with. The core registers
+# "session"; an extension that registers another provider names it here.
+auth_provider = "session"
+
+# The TypeScript packages a .schema.ts file may import symbols from. A
+# distribution that republishes them under its own names lists those names
+# here and maps each to the declaring package in [package_aliases]:
+#
+#   authoring_packages = ["@acme/api", "@acme/db", "@acme/schema", "@acme/schema-config", "@acme/scalars"]
+#   [package_aliases]
+#   "@acme/api" = "@superschematic/api"
+authoring_packages = [
+  "@superschematic/api",
+  "@superschematic/db",
+  "@superschematic/deploy",
+  "@superschematic/schema",
+  "@superschematic/schema-config",
+  "superscalar",
+]
+
+# Where the runtime modules live when generated manifests should point path
+# dependencies at a checkout (go.mod replace, Cargo path, npm file:). Every
+# key is optional and relative to the repository root, the parent of the
+# schemas root. An unset key emits no path dependency and the generated
+# manifest resolves the published module. These are this repository's own
+# paths; a consumer replaces them with the location of its checkout or
+# leaves the table out.
+[paths]
+scalar_go = "third_party/superscalar/go"
+scalar_typescript = "third_party/superscalar/bindings/typescript"
+scalar_rust = "third_party/superscalar/crates/core"
+schema_ir = "ir"
+schema_runtime_go = "runtime/schema/go"
+http_runtime_go = "runtime/http/go"
+http_runtime_rust = "runtime/http/rust"

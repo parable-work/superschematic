@@ -1,7 +1,7 @@
 """JSON Schema draft-07 -> Schema parser.
 
 Reads the JSON Schema + ``x-*`` extension dialect that ``superschematic`` emits to
-``platform-schemas/dist/**``.
+``schemas/dist/**``.
 """
 
 from __future__ import annotations

@@ -39,11 +39,11 @@ func TestWrapOptionalType(t *testing.T) {
 
 func TestCrateNameToModulePath(t *testing.T) {
 	cases := map[string]string{
-		"parable-fixture-db-types": "parable_fixture_db_types",
-		"parable-web-api-types":    "parable_web_api_types",
-		"":                         "dep",
-		"123-crate":                "dep_123_crate",
-		"type":                     "type_",
+		"acme-fixture-db-types": "acme_fixture_db_types",
+		"acme-web-api-types":    "acme_web_api_types",
+		"":                      "dep",
+		"123-crate":             "dep_123_crate",
+		"type":                  "type_",
 	}
 	for in, want := range cases {
 		if got := CrateNameToModulePath(in); got != want {

@@ -20,7 +20,7 @@ import { BUILTIN_SCALARS } from '../builtin-scalars.generated';
  * Reader for the psgen Schema IR JSON format (`psgen build --emit-ir`).
  *
  * The IR is the format-agnostic representation emitted by the Go schema
- * loader (utils/psgen/schema-ir/go/ir). It retains the legacy runtime
+ * loader (ir/). It retains the legacy runtime
  * the runtime schema payload fields (primitive, jsonTag, restMethod, ...) specifically
  * so runtime consumers can be fed from it. This module maps
  * that JSON into the runtime `Schema` shape used by validation and the

@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde_json::{json, Value};
 
-/// EDR-0002 success envelope key for response metadata.
+/// success envelope key for response metadata.
 const META_REQUEST_ID_HEADER: &str = "x-request-id";
 
 pub fn json_response(status: StatusCode, body: Value) -> (StatusCode, Json<Value>) {
@@ -20,7 +20,7 @@ pub fn error_response(err: ApiError) -> (StatusCode, Json<Value>) {
     (err.status, Json(body))
 }
 
-/// Wraps a success payload in the EDR-0002 envelope `{data, meta:
+/// Wraps a success payload in the success envelope `{data, meta:
 /// {requestId}}`. The Go and Rust SDKs reject responses that don't carry
 /// this shape, so every generated success path runs through this helper.
 ///

@@ -23,7 +23,7 @@ func (k SchemaKind) String() string {
 }
 
 // Schema is the top-level format-agnostic intermediate representation of a
-// Parable platform schema. It contains all definitions extracted from a
+// schema documents. It contains all definitions extracted from a
 // service's schema files, regardless of whether the source format was
 // TypeScript, JSON, or YAML.
 //
@@ -50,7 +50,7 @@ type Schema struct {
 	Imports []Import `json:"imports,omitempty" yaml:"imports,omitempty"`
 
 	// RootType is retained for services that still consume the legacy runtime
-	// ParableSchema shape during the psgen flip.
+	// runtime schema shape during the IR flip.
 	RootType string `json:"rootType,omitempty" yaml:"rootType,omitempty"`
 
 	// Scalars maps scalar names to their definitions.
@@ -61,7 +61,7 @@ type Schema struct {
 	Types map[string]*TypeDef `json:"types,omitempty" yaml:"types,omitempty"`
 
 	// Inputs is retained for services that still consume the legacy runtime
-	// ParableSchema shape during the psgen flip.
+	// runtime schema shape during the IR flip.
 	Inputs map[string]*TypeDef `json:"inputs,omitempty" yaml:"inputs,omitempty"`
 
 	// Enums maps enum type names to their definitions.
@@ -93,10 +93,10 @@ type Schema struct {
 	Extensions map[string]json.RawMessage `json:"extensions,omitempty" yaml:"extensions,omitempty"`
 
 	// AuthoringImports is the union of the sidecar documents' transitive
-	// module graphs, as absolute file paths reported by the bun harness
-	// (EDR-0087 amendment 2). The build layer persists the platform-schemas
-	// files outside the service directory for cache invalidation. Not part
-	// of the decoded document contract.
+	// module graphs, as absolute file paths reported by the bun harness.
+	// The build layer persists the files under the schemas root but outside
+	// the service directory for cache invalidation. Not part of the decoded
+	// document contract.
 	AuthoringImports []string `json:"-" yaml:"-"`
 }
 
@@ -129,7 +129,7 @@ type CompositeDefaultDef struct {
 // contains the "*" wildcard. Readers reject wildcard imports at parse time;
 // [Schema.Validate] enforces the invariant on the assembled IR.
 type Import struct {
-	// From is retained for legacy runtime ParableSchema payloads.
+	// From is retained for legacy runtime schema payloads.
 	From string `json:"from,omitempty" yaml:"from,omitempty"`
 
 	// Package is the resolved package name (e.g., "@schemas/web-db").

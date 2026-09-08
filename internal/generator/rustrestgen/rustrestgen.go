@@ -45,17 +45,19 @@ type APIOutput struct {
 
 // NamespaceOutput contains data for generating namespace scaffold files.
 type NamespaceOutput struct {
-	SchemaName string
-	Namespace  string
-	CrateName  string
+	SchemaName        string
+	Namespace         string
+	CrateName         string
+	RuntimeCrateIdent string
 }
 
 // EndpointOutput contains data for generating endpoint scaffold files.
 type EndpointOutput struct {
-	SchemaName string
-	Namespace  string
-	CrateName  string
-	Endpoint   EndpointInfo
+	SchemaName        string
+	Namespace         string
+	CrateName         string
+	RuntimeCrateIdent string
+	Endpoint          EndpointInfo
 }
 
 // Options configures Rust REST API generation.
@@ -189,17 +191,19 @@ func WriteScaffolds(output *APIOutput, scaffoldsDir string) (*codegen.ScaffoldRe
 		},
 		NamespaceData: func(namespace string) any {
 			return NamespaceOutput{
-				SchemaName: output.SchemaName,
-				Namespace:  namespace,
-				CrateName:  output.CrateName,
+				SchemaName:        output.SchemaName,
+				Namespace:         namespace,
+				CrateName:         output.CrateName,
+				RuntimeCrateIdent: output.RuntimeCrateIdent,
 			}
 		},
 		EndpointData: func(namespace string, endpoint EndpointInfo) any {
 			return EndpointOutput{
-				SchemaName: output.SchemaName,
-				Namespace:  namespace,
-				CrateName:  output.CrateName,
-				Endpoint:   endpoint,
+				SchemaName:        output.SchemaName,
+				Namespace:         namespace,
+				CrateName:         output.CrateName,
+				RuntimeCrateIdent: output.RuntimeCrateIdent,
+				Endpoint:          endpoint,
 			}
 		},
 		EndpointFileName: func(endpoint EndpointInfo) string {

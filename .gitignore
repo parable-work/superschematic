@@ -7,7 +7,7 @@ third_party/
 /bin/
 
 # Rust build output.
-/target
+target/
 *.err
 
 # Binding and package build output.

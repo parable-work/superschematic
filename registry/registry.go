@@ -1,6 +1,5 @@
-// Package registry is the public face of psgen's extension seam. A
-// downstream module (the Parable extension under utils/parable-schematic, or
-// any other superschematic user) implements Extension against these names;
+// Package registry is the public face of the extension seam. A downstream
+// module implements Extension against these names;
 // the engine keeps its implementation in internal/registry, which Go's
 // internal rule hides from other modules. Every identifier here is an alias
 // or a forwarding function, so the two packages cannot drift.
@@ -113,7 +112,7 @@ func Assemble(n Naming, exts ...Extension) (*Registry, error) {
 	return reg, nil
 }
 
-// DefaultNaming is Parable's current naming, the value used when no
+// DefaultNaming is the core's naming, the value used when no
 // superschematic.toml is found; see internal/generator/naming.Default.
 func DefaultNaming() Naming { return naming.Default() }
 

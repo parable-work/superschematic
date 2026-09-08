@@ -4,8 +4,8 @@
 // real loader runs), one vector table, one expected-outcome column: a
 // validator semantic that drifts in any language fails here. This is the
 // generator-layer counterpart of scalar-lib's shared conformance corpus
-// (utils/parable-scalars/conformance/), and the class of bug it exists for is
-// PARABLE-3350: Go decode turned absent optional lists into empty ones, so
+// (the scalar package/conformance/), and the class of bug it exists for is
+// Regression: Go decode turned absent optional lists into empty ones, so
 // only Go fired listMin on omitted fields. Reverting that fix makes the go
 // subtest fail on every vector that omits optList.
 //
@@ -127,7 +127,7 @@ var vectors = []struct {
 		want:    map[string][]string{},
 	},
 	{
-		// The PARABLE-3350 regression shape: omitted optional list must not
+		// The regression shape: omitted optional list must not
 		// trip listMin.
 		name:    "optional_fields_absent",
 		payload: `{"reqStr": "ok", "reqList": ["a"]}`,

@@ -59,7 +59,7 @@ func (p *Profiler) Record(phase string, duration time.Duration) {
 
 	_, _ = fmt.Fprintf(
 		p.w,
-		"psgen-profile service=%s phase=%s duration_ms=%d\n",
+		"superschematic-profile service=%s phase=%s duration_ms=%d\n",
 		p.service,
 		sanitize(phase),
 		duration.Milliseconds(),

@@ -96,7 +96,7 @@ func TestToolsNamespaceUsesSDKPropertyIdentifier(t *testing.T) {
 	}
 	for index := range toolsOutput.Namespaces {
 		if !toolsOutput.Namespaces[index].IsScopedNS {
-			toolsOutput.Namespaces[index].Name = "parable-authoring"
+			toolsOutput.Namespaces[index].Name = "acme-authoring"
 			break
 		}
 	}
@@ -112,10 +112,10 @@ func TestToolsNamespaceUsesSDKPropertyIdentifier(t *testing.T) {
 		t.Fatalf("execute tools template: %v", err)
 	}
 	generated := buf.String()
-	if !strings.Contains(generated, "sdk.parableAuthoring.") {
+	if !strings.Contains(generated, "sdk.acmeAuthoring.") {
 		t.Fatalf("hyphenated namespace did not use its SDK property identifier")
 	}
-	if strings.Contains(generated, "sdk.parable-authoring.") {
+	if strings.Contains(generated, "sdk.acme-authoring.") {
 		t.Fatalf("hyphenated namespace produced invalid TypeScript property access")
 	}
 }
@@ -240,19 +240,19 @@ func TestNamespaceScalarGetArgsStayPositional(t *testing.T) {
 			Name:      "vendors",
 			ClassName: "VendorsNamespace",
 			Imports: []string{
-				"ParableSlug",
+				"AcmeSlug",
 				"newValidationErrors",
 				"setFieldErrors",
-				"validateParableSlugRequired",
+				"validateAcmeSlugRequired",
 			},
 			Endpoints: []EndpointInfo{{
-				Name:       "parableVendorGrouping",
-				Path:       "/api/vendors/parable-vendor-grouping",
-				TSPath:     "/api/vendors/parable-vendor-grouping",
+				Name:       "acmeVendorGrouping",
+				Path:       "/api/vendors/acme-vendor-grouping",
+				TSPath:     "/api/vendors/acme-vendor-grouping",
 				Method:     "GET",
-				OutputType: "ParableVendorGrouping",
+				OutputType: "AcmeVendorGrouping",
 				ScalarArgs: []apigen.ScalarArg{
-					{Name: "vendorSlug", Type: "Parable.Slug", Required: true},
+					{Name: "vendorSlug", Type: "Acme.Slug", Required: true},
 					{Name: "groupingPath", Type: "string", Required: true},
 				},
 			}},
@@ -266,11 +266,11 @@ func TestNamespaceScalarGetArgsStayPositional(t *testing.T) {
 	got := buf.String()
 
 	requiredSnippets := []string{
-		"public async parableVendorGrouping(\n    vendorSlug: any,\n    groupingPath: any,\n    signal?: any,",
+		"public async acmeVendorGrouping(\n    vendorSlug: any,\n    groupingPath: any,\n    signal?: any,",
 		"let scalarInput = {\n      vendorSlug,\n      groupingPath,\n    };",
 		"if (typeof vendorSlug === 'object' && vendorSlug !== null && !Array.isArray(vendorSlug))",
 		"requestSignal = groupingPath;",
-		"validateParableSlugRequired(scalarInput.vendorSlug)",
+		"validateAcmeSlugRequired(scalarInput.vendorSlug)",
 		"if (scalarInput.groupingPath === undefined || scalarInput.groupingPath === null)",
 		"const scalarParams = { ...scalarInput };",
 	}
@@ -298,20 +298,20 @@ func TestNamespaceBodyInputUsesGeneratedType(t *testing.T) {
 	}{
 		SDK: &SDKOutput{TypesPackage: "@schemas/web-api-types"},
 		Namespace: NamespaceInfo{
-			Name:      "parable-authoring",
-			ClassName: "ParableAuthoringNamespace",
+			Name:      "acme-authoring",
+			ClassName: "AcmeAuthoringNamespace",
 			Imports: []string{
-				"PrepareParableProposalInput",
-				"PrepareParableProposalResult",
-				"validatePrepareParableProposalInput",
+				"PrepareAcmeProposalInput",
+				"PrepareAcmeProposalResult",
+				"validatePrepareAcmeProposalInput",
 			},
 			Endpoints: []EndpointInfo{{
-				Name:          "prepareAdminParableProposal",
-				Path:          "/api/parable/proposals/{proposalId}/actions/prepare",
-				TSPath:        "/api/parable/proposals/${proposalId}/actions/prepare",
+				Name:          "prepareAdminAcmeProposal",
+				Path:          "/api/acme/proposals/{proposalId}/actions/prepare",
+				TSPath:        "/api/acme/proposals/${proposalId}/actions/prepare",
 				Method:        "POST",
-				InputType:     "PrepareParableProposalInput",
-				OutputType:    "PrepareParableProposalResult",
+				InputType:     "PrepareAcmeProposalInput",
+				OutputType:    "PrepareAcmeProposalResult",
 				HasInput:      true,
 				InputRequired: true,
 				PathParams: []PathParam{{
@@ -328,7 +328,7 @@ func TestNamespaceBodyInputUsesGeneratedType(t *testing.T) {
 		t.Fatalf("execute namespace template: %v", err)
 	}
 	got := buf.String()
-	if !strings.Contains(got, "input: PrepareParableProposalInput,") {
+	if !strings.Contains(got, "input: PrepareAcmeProposalInput,") {
 		t.Fatalf("generated SDK mutation input is not typed:\n%s", got)
 	}
 	if strings.Contains(got, "input: any,") {

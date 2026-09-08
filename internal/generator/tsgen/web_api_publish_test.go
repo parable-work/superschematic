@@ -13,7 +13,7 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// TestSourceLineageDoesNotPublishWebDBTypes encodes PARABLE-970 for the real
+// TestSourceLineageDoesNotPublishWebDBTypes encodes the fix for the real
 // API package names: @source-style compile-time lineage (SourceRef present,
 // web-db absent from schema.Imports) must not put web-db-types into
 // package.json or re-export DB validators from the barrel.

@@ -2,8 +2,8 @@
 // build-all scans the manifests under the output root (package.json, go.mod,
 // pyproject.toml, Cargo.toml) for packages under the naming's scopes and
 // writes <dist>/.deps.json. Tooling that pins consumers to a closure of
-// generated packages reads it back with Read and Closure; the Parable
-// extension's pin subcommand is one such consumer (PARABLE-975).
+// generated packages reads it back with Read and Closure; an extension's
+// pin subcommand is one such consumer.
 package schemadeps
 
 import (

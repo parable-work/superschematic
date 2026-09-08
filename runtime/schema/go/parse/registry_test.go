@@ -72,7 +72,7 @@ func TestDefaultParseRegistry_TemporalIntegerUnits(t *testing.T) {
 // DefaultParseRegistry holds exactly the names the Parser consults it for:
 // those whose core metadata marks a custom parse step. Names with a no-op
 // parse (Contact.Email) are not registered; the extension's registry in
-// utils/parable-schematic/ext/scalars keeps its passthrough entries.
+// an extension module keeps its passthrough entries.
 func TestDefaultParseRegistry_NamesFollowCoreMetadata(t *testing.T) {
 	r := DefaultParseRegistry()
 	for name, meta := range scalarlib.ScalarMetadataByCanonical {

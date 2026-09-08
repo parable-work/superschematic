@@ -302,7 +302,7 @@ impl HttpClient {
         // life of the client, so a provider that mints short-lived credentials
         // would be called exactly once and its token reused past expiry. The Go
         // client has always resolved per call; this keeps the two in step.
-        // Providers are expected to do their own caching (parable-servicetoken's
+        // Providers are expected to do their own caching (a service-token provider's
         // CachedMinter re-mints only inside a refresh margin), so the per-request
         // cost here is a mutex lock rather than a signing operation.
         if let Some(token_provider) = &self.auth.token_provider {

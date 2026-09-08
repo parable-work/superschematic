@@ -1,4 +1,4 @@
-// Package cli is the psgen command line as a library. A binary is one call:
+// Package cli is the superschematic command line as a library. A binary is one call:
 //
 //	cli.New(cli.Config{}).Execute()
 //
@@ -19,10 +19,10 @@ import (
 	"github.com/parable-work/superschematic/registry"
 )
 
-// Config sets what a binary says about itself. The zero value is the psgen
-// core.
+// Config sets what a binary says about itself. The zero value is the
+// superschematic core.
 type Config struct {
-	// Name is the command name in usage text. Empty means "psgen".
+	// Name is the command name in usage text. Empty means "superschematic".
 	Name string
 	// Short and Long replace the root command's descriptions when set.
 	Short string
@@ -49,7 +49,7 @@ type app struct {
 func New(cfg Config, exts ...registry.Extension) *cobra.Command {
 	name := cfg.Name
 	if name == "" {
-		name = "psgen"
+		name = "superschematic"
 	}
 	short := cfg.Short
 	if short == "" {

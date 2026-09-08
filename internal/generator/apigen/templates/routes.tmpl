@@ -759,7 +759,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- range .ScalarArgs }}
 		{{- if .IsArray }}
 
-		// Parse {{ .Name }} from query string (comma-separated: ?{{ .Name }}=a,b) per EDR-0002.
+		// Parse {{ .Name }} from query string (comma-separated: ?{{ .Name }}=a,b) per the API format conventions.
 		// Each provided element is validated individually — if present, it must be a valid
 		// value regardless of whether the array argument itself is required or optional.
 		var {{ .GoName }} []{{ .GoType }}

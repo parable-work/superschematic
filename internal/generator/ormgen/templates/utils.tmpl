@@ -24,7 +24,7 @@ import (
 //
 // One populated self-FK made that walk linear in the chain's length. TWO made it
 // EXPONENTIAL: each level fans out along both edges and both edges lead back
-// into the same chain. Measured on parable_commit, which self-references three
+// into the same chain. Measured on a commit table that self-references three
 // times: a 50-commit line took 51s to revert with one edge populated and had not
 // finished at 600s with two.
 //
@@ -56,8 +56,8 @@ import (
 // SetRelationHydrationObserver.
 
 // MaxRelationHydrationDepth bounds how many distinct types one load may descend
-// through. The deepest chain any caller in this repository reads is three
-// (row -> ref -> deployment -> parable), so the cap is not reachable by accident.
+// through. The deepest chain measured in practice is three
+// (row -> ref -> deployment -> owner), so the cap is not reachable by accident.
 const MaxRelationHydrationDepth = 8
 
 // RelationHydrationGuardReason says which half of the guard stopped an

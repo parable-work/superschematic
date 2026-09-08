@@ -64,8 +64,8 @@ func generateFixtureAPIWith(t *testing.T, provider apigen.AuthProvider) *apigen.
 // with the core session provider and compares every emitted file against its
 // golden copy: the auth half of context.go, middleware.go and routes.go comes
 // from the generic session snippets and the OpenAPI document has no
-// tenant header. The same module under the Parable provider is golden-tested
-// in utils/parable-schematic/ext/auth. Regenerate with:
+// tenant header. The same module under the Acme provider is golden-tested
+// in an extension module. Regenerate with:
 // go test ./internal/generator/apigen -run TestWriteAPIGoldenSessionProvider -update
 func TestWriteAPIGoldenSessionProvider(t *testing.T) {
 	checkFixtureAPIGolden(t, sessionauth.Provider{}, "fixture-api-session")

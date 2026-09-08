@@ -4,7 +4,7 @@ import type { ValidationErrors } from '{{.TypesPackage}}';
 
 {{- if .HasFilterableEndpoints}}
 // Operator list must match filterparse.ValidOperators in
-// utils/psgen/http-runtime/go/filterparse/parse.go. Adding an operator
+// http-runtime/go/filterparse/parse.go. Adding an operator
 // requires updating (1) filterparse (Go), (2) this template, (3) the Rust
 // SDK's runtime.tmpl FilterOp enum, (4) the test assertions in
 // sdkgen_test.go + rustsdkgen_test.go that enumerate the operator set.

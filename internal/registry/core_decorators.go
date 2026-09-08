@@ -8,8 +8,8 @@ import (
 )
 
 // Core authoring packages the decorators below are declared in. These are
-// the packages whose package.json owns the declarations (utils/psgen/packages);
-// the Parable @superschematic/* packages re-export them, and the frontend resolves an
+// the packages whose package.json owns the declarations (packages/); a
+// distribution's own packages may re-export them, and the frontend resolves an
 // identity through re-exports to the declaring package (tsreader/identity.go).
 const (
 	pkgAPI          = "@superschematic/api"
@@ -162,7 +162,7 @@ func coreDecorators() []DecoratorSpec {
 }
 
 // temporalFormat reads @temporalFormat('unix_millis'). The unit is a fact
-// about the source API (PARABLE-2886): only the epoch members of
+// about the source API: only the epoch members of
 // IncrementalTimeFormatEnum are valid, and only on a plain Temporal.DateTime
 // field -- an ISO field needs no declaration, and any other type would give
 // the annotation nothing to decode into.

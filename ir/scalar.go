@@ -45,7 +45,7 @@ type ScalarDef struct {
 	// LanguagePrimitive is the host-language primitive this scalar bottoms out on.
 	LanguagePrimitive LanguagePrimitive `json:"languagePrimitive" yaml:"languagePrimitive"`
 
-	// Primitive is retained for legacy runtime ParableSchema payloads.
+	// Primitive is retained for legacy runtime schema payloads.
 	Primitive string `json:"primitive,omitempty" yaml:"primitive,omitempty"`
 
 	// TypeMappings maps target languages to their type representations.

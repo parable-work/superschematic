@@ -1,8 +1,8 @@
 // Package ir defines the format-agnostic intermediate representation (IR) for
-// Parable platform schemas.
+// schema documents.
 //
 // This is the breaking restructure of the original IR (which lives in the v1
-// tool at utils/psgen/schema-ir/go/ir). It lives at psgen's canonical package
+// tool at ir/). It lives at psgen's canonical package
 // path with no version suffix -- the version is the tool, not a package path.
 // The v1 IR and all of its consumers stay untouched during the migration
 // window; this package takes over the canonical schema-ir path in the flip PR
@@ -15,7 +15,7 @@
 //     scalar names, the Object/Input TypeKind split (replaced by [Role]),
 //     custom JSON tags, the [T!] element-nullability distinction, and
 //     wildcard imports.
-//   - Adds the TypeScript-shaped concepts the Parable Schema needs:
+//   - Adds the TypeScript-shaped concepts the schema language needs:
 //     [TypeDef.Role], pre-flattened inheritance ([TypeDef.Extends] with
 //     [FieldDef.InheritedFrom]), traits ([TypeDef.Implements],
 //     [TypeDef.IsTrait], [TypeDef.TraitConfig]), raw heritage clauses

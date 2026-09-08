@@ -33,7 +33,7 @@ const maxEvalDepth = 16
 // Only literals are supported: strings, numbers, booleans, null, arrays,
 // object literals, enum member references, and service sentinel constants
 // (identifiers whose initializer is a service({...}) call). Anything computed
-// is rejected -- the execution path (PAR-25) is the backstop for runtime
+// is rejected -- the execution path is the backstop for runtime
 // values.
 //
 // Results are Go values: string, float64, bool, nil, []any, map[string]any,

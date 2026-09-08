@@ -807,7 +807,7 @@ func TestAssignIndexNamesRejectsCollision(t *testing.T) {
 }
 
 // TestAssignIndexNamesOnIngestionParentOutputGroups is the case that started
-// PARABLE-3211: four indexes on a 30-byte table name, all readable and distinct
+// Regression: four indexes on a 30-byte table name, all readable and distinct
 // once each one carries a purpose.
 func TestAssignIndexNamesOnIngestionParentOutputGroups(t *testing.T) {
 	indexes, err := assignIndexNames("ingestion_parent_output_groups", []pendingIndex{
@@ -874,10 +874,10 @@ func TestServerConstraintNameMatchesPostgres(t *testing.T) {
 			want: "fk_" + strings.Repeat("x", postgresIdentifierLimit-3),
 		},
 		{
-			// Verified against PostgreSQL 14: this exact pair appears in web-db.
+			// Verified against PostgreSQL 14: this exact pair was observed on a production database.
 			name: "overlong name truncates the way the server does",
-			in:   "fk_parable_custom_registration_operation_receipt_result_revision_id",
-			want: "fk_parable_custom_registration_operation_receipt_result_revisio",
+			in:   "fk_acme_org_custom_registration_operation_receipt_result_revision_id",
+			want: "fk_acme_org_custom_registration_operation_receipt_result_revisi",
 		},
 	}
 
@@ -931,7 +931,7 @@ func TestAssignForeignKeyNamesStampsEveryConstraint(t *testing.T) {
 // PostgreSQL cuts them to 63 bytes.
 func TestAssignForeignKeyNamesRejectsTruncatedCollision(t *testing.T) {
 	table := &Table{
-		Name: "parable_deployment_rollout_delivery_projection",
+		Name: "acme_deployment_rollout_delivery_projection",
 		ForeignKeys: []ForeignKey{
 			{Column: "delivery_applied_commit_id"},
 			{Column: "delivery_applied_commit_ref"},

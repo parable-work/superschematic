@@ -1,9 +1,8 @@
-// psgen schema IR: the TypeScript view of the runtime schema document that
-// psgen emits (Go: utils/psgen/schema-ir/go/ir). Types only; nothing at
-// runtime. The schema runtime (@superschematic/schema-runtime) and the Parable scalar
-// package (superscalar, for the Parable.Schema scalar type) both import
-// from here, which keeps the dependency graph acyclic: this package imports
-// nothing.
+// Schema IR: the TypeScript view of the runtime schema document that
+// superschematic emits (Go: ir/). Types only; nothing at runtime. The schema
+// runtime (@superschematic/schema-runtime) and any scalar package that types
+// a schema-document scalar import from here, which keeps the dependency
+// graph acyclic: this package imports nothing.
 
 export type DefinitionKind = 'type' | 'input' | 'enum';
 export type TypeKind = 'object' | 'input';
@@ -75,11 +74,11 @@ export interface FieldDef {
   uiHidden: boolean;
   semanticRole: string;
   // Wire encoding of a Temporal.DateTime field whose source sends a bare
-  // epoch count instead of ISO text (PARABLE-2886): unix, unix_millis,
+  // epoch count instead of ISO text: unix, unix_millis,
   // unix_micros, or unix_nanos. temporalFormat in the runtime-IR wire form,
   // x-temporal-format in the legacy JSON-Schema form. Empty = ISO text.
   temporalFormat: string;
-  // Promote-path transform directives (PARABLE-126): camelCase transform*
+  // Promote-path transform directives: camelCase transform*
   // flags in the runtime-IR wire form, x-transform* keys in the legacy
   // JSON-Schema form, @transform* directives in GraphQL SDL.
   transformDedupKey: boolean;

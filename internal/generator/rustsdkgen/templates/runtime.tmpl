@@ -22,7 +22,7 @@ use crate::errors::SDKError;
 
 {{- if .HasFilterableEndpoints }}
 // FilterOp variants must match filterparse.ValidOperators in
-// utils/psgen/http-runtime/go/filterparse/parse.go. Adding an operator
+// http-runtime/go/filterparse/parse.go. Adding an operator
 // requires updating (1) filterparse (Go), (2) the TypeScript SDK's
 // types.tmpl FilterParam union, (3) this enum, (4) the test assertions
 // in sdkgen_test.go + rustsdkgen_test.go that enumerate the operator set.

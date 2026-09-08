@@ -99,7 +99,7 @@ func TestGenerateTypedRecordFields(t *testing.T) {
 		t.Fatalf("load fixture-maps: %v", err)
 	}
 	output, err := Generate(schema, Options{
-		ModulePath: "github.com/parable-platform/fixture-maps",
+		ModulePath: "github.com/acme-platform/fixture-maps",
 		Clock:      codegen.FixedClock(time.Unix(0, 0).UTC()),
 	})
 	if err != nil {
@@ -172,7 +172,7 @@ func TestGenerateRequiredNestedArrayWithZeroMinimumAllowsEmpty(t *testing.T) {
 
 	output, err := Generate(schema, Options{
 		SchemaName: "archive-contract",
-		ModulePath: "github.com/parable-platform/archive-contract",
+		ModulePath: "github.com/acme-platform/archive-contract",
 		Clock:      codegen.FixedClock(time.Unix(0, 0).UTC()),
 	})
 	if err != nil {

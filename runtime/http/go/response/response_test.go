@@ -649,7 +649,7 @@ func TestLoggedValidationErrors_WithErrorCode(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// E. Error with ErrorCode (EDR-0011 + RFC 9457)
+// E. Error with ErrorCode (RFC 9457)
 // ---------------------------------------------------------------------------
 
 func TestError_WithCode(t *testing.T) {

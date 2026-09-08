@@ -21,7 +21,7 @@ func TestRunDocument_Fixture(t *testing.T) {
 	}
 
 	// The harness crawl reports the module graph; at minimum the entry
-	// module itself (EDR-0087 amendment 2).
+	// module itself.
 	foundEntry := false
 	for _, imp := range res.AuthoringImports {
 		if strings.HasSuffix(imp, "deploy.values.ts") {

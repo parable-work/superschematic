@@ -66,7 +66,7 @@ type SchemaConfig struct {
 	// system in the data forms to derive it from.
 	Dependencies []ServiceDependency `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
 
-	// Outputs is the raw outputs configuration. The v2 generators (PAR-23)
+	// Outputs is the raw outputs configuration. The v2 generators
 	// own its typed interpretation.
 	Outputs map[string]any `json:"outputs,omitempty" yaml:"outputs,omitempty"`
 }

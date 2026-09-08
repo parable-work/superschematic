@@ -42,14 +42,14 @@ func newBuildAllCmd(a *app) *cobra.Command {
 	flags := &buildAllFlags{}
 	cmd := &cobra.Command{
 		Use:   "build-all <services-root>",
-		Short: "Build all schema services in one psgen process",
+		Short: "Build all schema services in one process",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runBuildAll(cmd, a, flags, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <services-root>/../dist)")
-	cmd.Flags().BoolVar(&flags.profile, "profile", false, "emit psgen build phase timings to stderr")
+	cmd.Flags().BoolVar(&flags.profile, "profile", false, "emit build phase timings to stderr")
 	cmd.Flags().BoolVar(&flags.cache, "cache", false, "share schema outputs across worktrees via a content-addressed cache")
 	cmd.Flags().StringVar(&flags.cacheRoot, "cache-root", "", "schema output cache root (default: SUPERSCHEMATIC_BUILD_CACHE_DIR, then [cache] root, then the XDG cache directory)")
 	cmd.Flags().BoolVar(&flags.parallel, "parallel", false, "build independent schemas concurrently within each dependency phase")
@@ -105,6 +105,7 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		return fmt.Errorf("resolving output root: %w", err)
 	}
 	repoRoot := filepath.Clean(filepath.Join(servicesRoot, "..", ".."))
+	buildcache.SchemasDir = filepath.Base(filepath.Clean(filepath.Join(servicesRoot, "..")))
 
 	// Resolved before any schema loads: the loader and generators take it as
 	// an option; schemadeps (EmitFromDist, below) reads the active value.
@@ -146,8 +147,7 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 	}
 
 	// The discovery pass doubles as the schema catalog: entity schema
-	// references in deploy documents resolve against it (EDR-0087
-	// amendment 2) without adding build-order edges.
+	// references in deploy documents resolve against it without adding build-order edges.
 	catalog := make(map[string]registry.SchemaCatalogEntry, len(services))
 	for _, service := range services {
 		catalog[service.Name] = registry.SchemaCatalogEntry{Kind: string(service.Config.Kind), AuthDB: service.Config.AuthDB}
@@ -294,7 +294,7 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		return err
 	}
 	// Every service has built, so hooks that need all of them at once (the
-	// chart's merged values, PARABLE-3410) run from here.
+	// chart's merged values) run from here.
 	hookContext := registry.BuildAllContext{
 		ServiceNames: names,
 		SchemaFor:    schemaCache.get,
@@ -576,7 +576,7 @@ func (p *profileTotals) Write(data []byte) (int, error) {
 			continue
 		}
 		parts := strings.Fields(line)
-		if len(parts) != 4 || parts[0] != "psgen-profile" {
+		if len(parts) != 4 || parts[0] != "superschematic-profile" {
 			continue
 		}
 		phase := strings.TrimPrefix(parts[2], "phase=")

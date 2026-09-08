@@ -51,7 +51,7 @@ type EndpointInfo struct {
 	ScalarArgs     []apigen.ScalarArg // Scalar arguments (not input types)
 	Description    string             // Endpoint description
 	TSPath         string             // TypeScript template literal path
-	ResourceTSPath string             // EDR-0002: resource route path as TypeScript template literal
+	ResourceTSPath string             // resource route path as TypeScript template literal
 	Encrypted      bool               // Whether endpoint payload must be encrypted
 	Filterable     bool               // Whether endpoint accepts bracket-notation filter query params
 

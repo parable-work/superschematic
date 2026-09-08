@@ -18,15 +18,18 @@ import (
 
 // APIOutputBase contains shared Rust API output metadata.
 type APIOutputBase struct {
-	SchemaName     string
-	CrateName      string
-	TypesCrate     string
-	TypesDir       string
-	TypesDepPath   string
-	RuntimeCrate   string
-	RuntimeDepPath string
-	Namespaces     []string
-	Timestamp      string
+	SchemaName   string
+	CrateName    string
+	TypesCrate   string
+	TypesDir     string
+	TypesDepPath string
+	RuntimeCrate string
+	// RuntimeCrateIdent is RuntimeCrate as a Rust path segment: Cargo maps
+	// the hyphens of a package name to underscores in `use` statements.
+	RuntimeCrateIdent string
+	RuntimeDepPath    string
+	Namespaces        []string
+	Timestamp         string
 }
 
 // GenerateOutput contains shared generation output and extracted endpoints.
@@ -84,13 +87,14 @@ func Generate(schema *ir.Schema, opts Options) (*GenerateOutput, error) {
 
 	return &GenerateOutput{
 		Base: APIOutputBase{
-			SchemaName:   opts.SchemaName,
-			CrateName:    opts.Naming.RustAPICrate(opts.SchemaName),
-			TypesCrate:   typesCrate,
-			TypesDir:     opts.TypesDir,
-			TypesDepPath: ResolveTypesDependencyPath(opts.OutputDir, opts.TypesDir),
-			RuntimeCrate: opts.RuntimeCrate,
-			Timestamp:    opts.Clock.RFC3339(),
+			SchemaName:        opts.SchemaName,
+			CrateName:         opts.Naming.RustAPICrate(opts.SchemaName),
+			TypesCrate:        typesCrate,
+			TypesDir:          opts.TypesDir,
+			TypesDepPath:      ResolveTypesDependencyPath(opts.OutputDir, opts.TypesDir),
+			RuntimeCrate:      opts.RuntimeCrate,
+			RuntimeCrateIdent: strings.ReplaceAll(opts.RuntimeCrate, "-", "_"),
+			Timestamp:         opts.Clock.RFC3339(),
 		},
 		Endpoints: apiOutput.Endpoints,
 	}, nil

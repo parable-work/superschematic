@@ -2,7 +2,7 @@ package generator
 
 import "path/filepath"
 
-// The shadow output layout mirrors today's platform-schemas/dist/ structure
+// The shadow output layout mirrors the schemas root's dist/ structure
 // under a root that nothing consumes until the flip (dist by default).
 // At the flip the shadow root is renamed to the canonical dist/; the
 // per-artifact layout is unchanged. There is no graphql/ directory: the

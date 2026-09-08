@@ -636,7 +636,7 @@ func collectCompositeDefaults(schema *ir.Schema, dependencies map[string]*ir.Sch
 // uniqueIndexPredicate returns the partial-index predicate for a unique
 // index on a soft-deletable table (one with a deleted_at column):
 // "deleted_at IS NULL", so soft-deleted tombstones do not permanently
-// occupy the unique slot (PARABLE-442). Non-unique indexes, tables without
+// occupy the unique slot. Non-unique indexes, tables without
 // deleted_at, and indexes that key on deleted_at itself get no predicate.
 func uniqueIndexPredicate(idx ir.IndexDef, columns []Column, indexColumns []string) string {
 	if !idx.Unique {

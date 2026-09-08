@@ -50,7 +50,7 @@ func DependencyServiceName(pkg string) string {
 
 // resolveImports classifies every named import in the schema against its
 // dependency schema and produces alias metadata grouped by definition kind.
-// DB dependencies stay named-only (PARABLE-970); other kinds expand to the
+// DB dependencies stay named-only; other kinds expand to the
 // full catalog. Imports are always named in v2 (wildcards do not exist).
 func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 	result := &resolvedImports{modulePaths: map[string]string{}}
@@ -95,7 +95,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 			enumsByName[e.Name] = e
 		}
 
-		// DB deps stay named-only (PARABLE-970); other kinds expand the
+		// DB deps stay named-only; other kinds expand the
 		// full catalog so API packages keep re-exporting shared enums.
 		symbolSet := map[string]struct{}{}
 		for _, symbol := range imp.Types {

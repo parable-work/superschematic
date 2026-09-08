@@ -27,9 +27,8 @@ func NewRegistry() *Registry {
 // Default returns the registry a Runtime uses when none is injected:
 // [parse.DefaultParseRegistry], [parse.DefaultNormalizeRegistry] and
 // [validate.DefaultRegistry], the scalar core this module links, dispatched
-// by canonical name. An extension assembled over the core (the Parable set
-// lives in utils/parable-schematic/ext/scalars) supplies its own bundle via
-// [WithRegistry].
+// by canonical name. An extension assembled over the core supplies its own
+// bundle via [WithRegistry].
 func Default() *Registry {
 	return &Registry{
 		Parse:     parse.DefaultParseRegistry(),

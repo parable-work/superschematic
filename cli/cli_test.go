@@ -34,9 +34,9 @@ func TestNewNamesTheBinaryFromConfig(t *testing.T) {
 	assert.Contains(t, root.Long, "acme-schemas reads schema service directories")
 
 	core := New(Config{})
-	assert.Equal(t, "psgen", core.Use)
-	assert.NotContains(t, core.Short, "Parable")
-	assert.NotContains(t, core.Long, "Parable")
+	assert.Equal(t, "superschematic", core.Use)
+	assert.NotContains(t, core.Short, "Acme")
+	assert.NotContains(t, core.Long, "Acme")
 }
 
 // commandExtension registers nothing and contributes one subcommand.

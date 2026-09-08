@@ -173,7 +173,7 @@ func TestParseReadsCacheTable(t *testing.T) {
 	n, err := Parse([]byte(`
 [cache]
 root = "~/psgen-cache"
-inputs = ["utils/parable-scalars/permissions.yml", "docs/extra.yml"]
+inputs = ["the scalar package/permissions.yml", "docs/extra.yml"]
 `), "superschematic.toml")
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -181,7 +181,7 @@ inputs = ["utils/parable-scalars/permissions.yml", "docs/extra.yml"]
 	if n.Cache.Root != "~/psgen-cache" {
 		t.Fatalf("Cache.Root = %q", n.Cache.Root)
 	}
-	want := []string{"utils/parable-scalars/permissions.yml", "docs/extra.yml"}
+	want := []string{"the scalar package/permissions.yml", "docs/extra.yml"}
 	if !reflect.DeepEqual(n.Cache.Inputs, want) {
 		t.Fatalf("Cache.Inputs = %v, want %v", n.Cache.Inputs, want)
 	}

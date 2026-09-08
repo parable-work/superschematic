@@ -98,7 +98,7 @@ func WithProfiler(prof *profile.Profiler) Option {
 
 // WithSchemaCatalog supplies the discovered schema set (name -> kind/authDb)
 // so entity schema references in deploy documents resolve against real
-// schemas (EDR-0087 amendment 2). Identity resolution only -- the catalog
+// schemas. Identity resolution only -- the catalog
 // adds no build-order edges. Without the option the resolution check is
 // skipped (single-schema builds); build-all always supplies it, so CI
 // enforces.

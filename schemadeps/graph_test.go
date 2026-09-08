@@ -29,7 +29,7 @@ func TestCollectFromDist_TypeScriptOmitsWebDBFromAPI(t *testing.T) {
 	api := mustPkg(t, g, "typescript", "web-api-types")
 	for _, dep := range api.Deps {
 		if dep == "web-db-types" {
-			t.Fatalf("web-api-types must not depend on web-db-types (PARABLE-970), deps=%v", api.Deps)
+			t.Fatalf("web-api-types must not depend on web-db-types, deps=%v", api.Deps)
 		}
 	}
 	if len(api.Deps) != 1 || api.Deps[0] != "enums-types" {

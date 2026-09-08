@@ -2,7 +2,7 @@
 
 TypeScript SDK for the fixture-api API. Auto-generated from GraphQL schema.
 
-**Do not edit manually.** Regenerate via: `psgen build schemas/fixture-api/schema.json` (from platform-schemas directory).
+**Do not edit manually.** Regenerate via: `psgen build schemas/fixture-api/schema.json` (from the schemas root).
 
 ## Installation
 

@@ -36,13 +36,13 @@ func (r Role) String() string {
 	return string(r)
 }
 
-// TypeKind is retained for legacy runtime ParableSchema payloads.
+// TypeKind is retained for legacy runtime schema payloads.
 type TypeKind = Role
 
 const (
-	// TypeKindObject is retained for legacy runtime ParableSchema payloads.
+	// TypeKindObject is retained for legacy runtime schema payloads.
 	TypeKindObject TypeKind = RoleAPIView
-	// TypeKindInput is retained for legacy runtime ParableSchema payloads.
+	// TypeKindInput is retained for legacy runtime schema payloads.
 	TypeKindInput TypeKind = RoleAPIInput
 )
 
@@ -66,7 +66,7 @@ type TypeDef struct {
 	// Role classifies what this type is for. Generators key off Role.
 	Role Role `json:"role" yaml:"role"`
 
-	// Kind is retained for legacy runtime ParableSchema payloads.
+	// Kind is retained for legacy runtime schema payloads.
 	Kind TypeKind `json:"kind,omitempty" yaml:"kind,omitempty"`
 
 	// Extends is the single base-class name this type inherits fields from.
@@ -207,12 +207,12 @@ type SourceRef struct {
 // and general decorators (@secret, @default, ...).
 //
 // The field name is the JSON name; custom JSON tags are not a feature of the
-// Parable Schema.
+// schema language.
 type FieldDef struct {
 	// Name is the field name as declared in the schema.
 	Name string `json:"name" yaml:"name"`
 
-	// JSONTag is retained for legacy runtime ParableSchema payloads.
+	// JSONTag is retained for legacy runtime schema payloads.
 	JSONTag string `json:"jsonTag,omitempty" yaml:"jsonTag,omitempty"`
 
 	// Description is the human-readable field description.
@@ -321,10 +321,10 @@ type FieldDef struct {
 	// to clients (@secret).
 	Secret bool `json:"secret,omitempty" yaml:"secret,omitempty"`
 
-	// Exclude hides a tenant overlay field from the serving layer
+	// Exclude hides an overlay field from the serving layer
 	// (x-exclude): promote does not plan the column and the query catalog
 	// never exposes it; ingestion still collects it into bronze.
-	// Top-level only; nested exclude is rejected at write (PARABLE-2165).
+	// Top-level only; nested exclude is rejected at write.
 	Exclude bool `json:"exclude,omitempty" yaml:"exclude,omitempty"`
 
 	// SemanticRole carries the existing x-semantic-role column annotation used
@@ -335,7 +335,7 @@ type FieldDef struct {
 	// whose source sends a bare epoch count instead of ISO text
 	// (@temporalFormat / x-temporal-format). Values are the epoch members of
 	// IncrementalTimeFormatEnum: unix, unix_millis, unix_micros, unix_nanos.
-	// Empty means ISO text (PARABLE-2886).
+	// Empty means ISO text.
 	TemporalFormat string `json:"temporalFormat,omitempty" yaml:"temporalFormat,omitempty"`
 
 	// TransformDedupKey marks this field as part of the tap's business/dedup key
@@ -429,7 +429,7 @@ type FieldDef struct {
 	// carries its method. Empty for non-operation fields.
 	HTTPMethod string `json:"httpMethod,omitempty" yaml:"httpMethod,omitempty"`
 
-	// RestMethod is retained for legacy runtime ParableSchema payloads.
+	// RestMethod is retained for legacy runtime schema payloads.
 	RestMethod string `json:"restMethod,omitempty" yaml:"restMethod,omitempty"`
 
 	// RestPath overrides the auto-generated REST path segment for this
@@ -482,7 +482,7 @@ type TypeRef struct {
 	// IsArray indicates this is a list/array type.
 	IsArray bool `json:"isArray,omitempty" yaml:"isArray,omitempty"`
 
-	// ElemNonNull is retained for legacy runtime ParableSchema payloads.
+	// ElemNonNull is retained for legacy runtime schema payloads.
 	ElemNonNull bool `json:"elemNonNull,omitempty" yaml:"elemNonNull,omitempty"`
 
 	// IsMap indicates this is a map/dictionary type with string keys.
@@ -506,7 +506,7 @@ type IndexDef struct {
 // RelationDef represents a foreign key relation to another type.
 type RelationDef struct {
 	// Type is the related type name. If empty, it is inferred from the field
-	// name (e.g., "tenantId" infers relation to "Tenant").
+	// name (e.g., "orderId" infers relation to "Order").
 	Type string `json:"type,omitempty" yaml:"type,omitempty"`
 
 	// Field is the foreign key field name. If empty, it is inferred by the generator.

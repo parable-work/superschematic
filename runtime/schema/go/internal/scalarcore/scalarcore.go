@@ -3,11 +3,9 @@
 // Default*Registry constructors derive their name sets from it instead of
 // carrying hand-maintained lists.
 //
-// In the monorepo the linked core is github.com/parable-work/superscalar/go
-// (the Parable extension assembled over superscalar). The OSS extraction
-// swaps that import for superscalar/go, so Default() becomes the generic
-// set with no other change; Parable's scalars then arrive through the
-// parable-schematic extension's runtime registry.
+// The linked core is github.com/parable-work/superscalar/go, so Default()
+// is the generic set; an extension's scalars arrive through its runtime
+// registry ([runtime.WithRegistry]).
 package scalarcore
 
 import (

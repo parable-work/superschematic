@@ -299,7 +299,7 @@ func TestValidationAppError_ErrorAndUnwrap(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// EDR-0011: WithCode and ErrorCode tests
+// WithCode and ErrorCode tests
 // ---------------------------------------------------------------------------
 
 func TestWithCode_ShallowCopy(t *testing.T) {
@@ -363,7 +363,7 @@ func TestRespond_AppError_WithoutCode(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// EDR-0011 Phase 5: ErrorCodeRecorder integration tests
+// ErrorCodeRecorder integration tests
 // ---------------------------------------------------------------------------
 
 // errorCodeWriter wraps httptest.ResponseRecorder and implements SetErrorCode

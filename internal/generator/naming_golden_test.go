@@ -19,14 +19,13 @@ var updateNamingGolden = flag.Bool("update", false, "rewrite the naming golden m
 
 const namingFixtureDir = "testdata/naming"
 
-// parableCoordinateRE matches every default coordinate a manifest could
-// carry: module roots, npm scope, Python module prefixes, crate prefixes and
-// the scalar library. The author string "Parable Platform" is branding, not a
-// coordinate, and is out of scope here.
-var parableCoordinateRE = regexp.MustCompile(`parable-platform|@parable-platform|superscalar|parable_types_|parable_scalars|parable-scalar|parable-[a-z0-9-]+-(types|sdk|api)|parable-scalars-core|psgen-http-runtime`)
+// defaultCoordinateRE matches every default coordinate a manifest could
+// carry: module roots, npm scope, Python module prefixes, crate prefixes,
+// the runtime modules and the scalar library.
+var defaultCoordinateRE = regexp.MustCompile(`example\.com/schemas|@schemas/|schemas_types_|schemas_[a-z0-9_]+_sdk|schemas-[a-z0-9-]+-(types|sdk|api)|parable-work/superschematic|parable-work/superscalar|superschematic-http-runtime|\bsuperscalar\b`)
 
 // TestRunWithFixtureNamingEmitsFixtureNames builds the fixture services with
-// a superschematic.toml whose every value differs from the Parable defaults,
+// a superschematic.toml whose every value differs from the core defaults,
 // scans every generated file for a default coordinate, and compares the
 // emitted manifests (go.mod, package.json, pyproject.toml, Cargo.toml)
 // against goldens. Regenerate the goldens with:
@@ -103,7 +102,7 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if m := parableCoordinateRE.Find(got); m != nil {
+		if m := defaultCoordinateRE.Find(got); m != nil {
 			rel, _ := filepath.Rel(outputRoot, path)
 			t.Errorf("%s still carries the default coordinate %q", rel, m)
 		}

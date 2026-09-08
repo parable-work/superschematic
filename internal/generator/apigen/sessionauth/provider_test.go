@@ -59,7 +59,7 @@ func TestRoutePermissionsRendersPlainStringPermissions(t *testing.T) {
 		t.Fatalf("routePermissions = %q, want plain-string RequirePermissions", got)
 	}
 	if strings.Contains(got, "scalars.") || strings.Contains(got, "Tenant") {
-		t.Fatalf("routePermissions = %q, must carry no Parable vocabulary", got)
+		t.Fatalf("routePermissions = %q, must carry no Acme vocabulary", got)
 	}
 	files := sessionauth.Provider{}.Files(&apigen.APIOutput{SchemaName: "web-api"})
 	if len(files) != 0 {

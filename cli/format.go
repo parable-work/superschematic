@@ -46,9 +46,9 @@ An existing file is not overwritten without --force. Use --stdout to print
 the conversion instead of writing it.
 
 Examples:
-  psgen format --to=yaml ./src/tenant.schema.json
-  psgen format --to=ts ./src/tenant.schema.yaml --stdout
-  psgen format --to=json ./src/tenant.schema.ts --force`,
+  superschematic format --to=yaml ./src/orders.schema.json
+  superschematic format --to=ts ./src/orders.schema.yaml --stdout
+  superschematic format --to=json ./src/orders.schema.ts --force`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runFormat(cmd, flags, args[0])

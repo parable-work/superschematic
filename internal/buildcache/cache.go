@@ -139,6 +139,40 @@ func fileSHA256(path string) (sum string, err error) {
 }
 
 // ToolchainFingerprint returns versions of external tools that shape outputs.
+// SchemasDir is the schemas root's directory name under the repository root
+// ("<repoRoot>/<SchemasDir>/services", "<repoRoot>/<SchemasDir>/dist").
+// build-all sets it from the services root it is given; the default matches
+// the layout the README describes.
+var SchemasDir = "schemas"
+
+// toolDigestOverride lets a binary that embeds its own source digest (or a
+// test) pin the tool component of every cache key. Empty means the running
+// executable's hash.
+var toolDigestOverride string
+
+// ToolDigest is the tool component of every cache key: a hash of the
+// running executable, so a rebuilt binary invalidates entries built by the
+// previous one. It is computed once per process.
+func ToolDigest() string {
+	if toolDigestOverride != "" {
+		return toolDigestOverride
+	}
+	toolDigestOnce.Do(func() {
+		exe, err := os.Executable()
+		if err != nil {
+			toolDigestValue = "unknown"
+			return
+		}
+		toolDigestValue = fileHashOrMissing(exe)
+	})
+	return toolDigestValue
+}
+
+var (
+	toolDigestOnce  sync.Once
+	toolDigestValue string
+)
+
 func ToolchainFingerprint() string {
 	toolchainFingerprintOnce.Do(func() {
 		toolchainFingerprintValue = computeToolchainFingerprint()
@@ -185,17 +219,17 @@ type InputHasher struct {
 // missing file and one spelling out the defaults hash alike and a --naming
 // override cannot reuse entries built under different names. Its [cache]
 // inputs (repo-relative files generation reads from outside the schema
-// tree, such as Parable's permissions.yml) are hashed by path in the order
+// tree, such as a permissions file) are hashed by path in the order
 // declared.
 func NewInputHasher(services []buildplan.Service, repoRoot string, names naming.Naming) *InputHasher {
 	names = names.OrDefault()
-	tool := TreeDigest(filepath.Join(repoRoot, "utils", "psgen"))
+	tool := ToolDigest()
 	var extra strings.Builder
 	for _, rel := range names.Cache.Inputs {
 		_, _ = fmt.Fprintf(&extra, "%s=%s;", rel, fileHashOrMissing(filepath.Join(repoRoot, filepath.FromSlash(rel))))
 	}
-	workspace := fileHashOrMissing(filepath.Join(repoRoot, "platform-schemas", "package.json"))
-	lock := fileHashOrMissing(filepath.Join(repoRoot, "platform-schemas", "bun.lock"))
+	workspace := fileHashOrMissing(filepath.Join(repoRoot, SchemasDir, "package.json"))
+	lock := fileHashOrMissing(filepath.Join(repoRoot, SchemasDir, "bun.lock"))
 	namesSum := sha256.Sum256([]byte(fmt.Sprintf("%+v", names)))
 	base := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s", CacheVersion, tool, extra.String(), workspace, lock, hex.EncodeToString(namesSum[:]), ToolchainFingerprint())
 
@@ -229,7 +263,7 @@ func (ih *InputHasher) Recompute(service buildplan.Service, depHashes map[string
 	if service.Config.AuthDB != "" {
 		authDir := ih.serviceDirs[service.Config.AuthDB]
 		if authDir == "" {
-			authDir = filepath.Join(ih.repoRoot, "platform-schemas", "services", service.Config.AuthDB)
+			authDir = filepath.Join(ih.repoRoot, SchemasDir, "services", service.Config.AuthDB)
 		}
 		_, _ = fmt.Fprintf(h, "|authdb:%s:%s", service.Config.AuthDB, TreeDigest(authDir))
 	}
@@ -607,7 +641,7 @@ func fileExists(path string) bool {
 }
 
 func stampPath(repoRoot, name string) string {
-	return filepath.Join(repoRoot, "platform-schemas", "dist", ".build-stamps", name)
+	return filepath.Join(repoRoot, SchemasDir, "dist", ".build-stamps", name)
 }
 
 // ReadStamp reads the worktree-local stamp for a schema.

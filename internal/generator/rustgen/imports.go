@@ -41,7 +41,7 @@ func DependencyServiceName(pkg string) string {
 }
 
 // resolveImports classifies every named import in the schema against its
-// dependency schema. DB dependencies stay named-only (PARABLE-970); other
+// dependency schema. DB dependencies stay named-only; other
 // kinds expand to the full catalog. Imported definitions become `pub type`
 // aliases re-exported from types.rs; scalars are skipped because their
 // aliases are regenerated locally.
@@ -170,7 +170,7 @@ func localSchemaSymbols(schema *ir.Schema) map[string]struct{} {
 }
 
 // importSymbolsForDependency returns symbols to alias from a dependency.
-// DB schemas stay named-only (PARABLE-970); other kinds expand the catalog.
+// DB schemas stay named-only; other kinds expand the catalog.
 func importSymbolsForDependency(imp ir.Import, depSchema *ir.Schema) []string {
 	if depSchema.Kind == ir.SchemaKindDB {
 		return append([]string{}, imp.Types...)

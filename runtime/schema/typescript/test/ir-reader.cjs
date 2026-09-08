@@ -132,7 +132,7 @@ test('maps field directive metadata and array typeRefs', () => {
   assert.strictEqual(hidden.required, false);
   assert.strictEqual(hidden.jsonKey, 'secretNote');
 
-  // Declared epoch unit (PARABLE-2886) survives the IR wire form.
+  // Declared epoch unit survives the IR wire form.
   const occurredAt = fields.find((f) => f.name === 'occurredAt');
   assert.strictEqual(occurredAt.temporalFormat, 'unix_millis');
 });

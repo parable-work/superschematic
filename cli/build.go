@@ -27,7 +27,7 @@ type buildFlags struct {
 	namingPath string
 }
 
-// newBuildCmd is the psgen orchestrator entrypoint: it loads a service
+// newBuildCmd is the build orchestrator entrypoint: it loads a service
 // directory through the format-dispatching loader into the Schema IR, then
 // runs the generators selected by the schema kind and the config's outputs
 // block. Requested outputs without a registered generator are reported and
@@ -52,7 +52,7 @@ in-tree paths come from <schemas-root>/superschematic.toml or --naming.
 Use --emit-ir to print the IR as JSON instead of generating code.
 
 Example:
-  psgen build ./schemas/services/web-db`,
+  superschematic build ./schemas/services/shop-db`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runBuild(cmd, a, flags, args[0])
@@ -60,7 +60,7 @@ Example:
 	}
 	cmd.Flags().BoolVar(&flags.emitIR, "emit-ir", false, "print the Schema IR as JSON to stdout")
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <service-dir>/../../dist)")
-	cmd.Flags().BoolVar(&flags.profile, "profile", false, "emit psgen build phase timings to stderr")
+	cmd.Flags().BoolVar(&flags.profile, "profile", false, "emit build phase timings to stderr")
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
 	return cmd

@@ -25,7 +25,7 @@ export default {
       common: { ENVIRONMENT: "production" },
       perService: {
         "web-api": {
-          env: { JWT_SECRET: secretRef("parable-apps-jwt", "jwt-secret") },
+          env: { JWT_SECRET: secretRef("acme-apps-jwt", "jwt-secret") },
           scaling: { replicas: 3 }
         }
       }

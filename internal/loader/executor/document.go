@@ -30,7 +30,7 @@ type documentOutput struct {
 
 // Document is one executed sidecar document module: its default export as
 // raw JSON plus the transitive module graph (absolute file paths) the
-// harness crawled for it (EDR-0087 amendment 2).
+// harness crawled for it.
 type Document struct {
 	Document         json.RawMessage
 	AuthoringImports []string
@@ -52,7 +52,7 @@ func RunDocument(servicePath, file string, opts ...Option) (result *Document, er
 		bunPath, err = exec.LookPath("bun")
 		return err
 	}); err != nil {
-		return nil, fmt.Errorf("%s executes with bun, which was not found on PATH (see platform-schemas/package.json for the pinned version): %w", file, err)
+		return nil, fmt.Errorf("%s executes with bun, which was not found on PATH (see the schemas root package.json for the pinned version): %w", file, err)
 	}
 
 	var harnessPath string

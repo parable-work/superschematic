@@ -83,7 +83,7 @@ type ConfigField struct {
 	// Description is the field doc text from the schema.
 	Description string
 	// Secret indicates the field carries @secret in the IR. Deploy values
-	// must bind such fields with a secretRef, never a literal (EDR-0087).
+	// must bind such fields with a secretRef, never a literal.
 	Secret bool
 }
 

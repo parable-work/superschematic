@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// Authoring imports (EDR-0087 amendment 2): deploy documents are executable
+// Authoring imports: deploy documents are executable
 // TypeScript and may import source files from other schema directories (a
 // deploy.values.ts importing the platform model). Those imports change the
 // schema's output bytes without being declared dependencies, so each build
@@ -29,19 +29,19 @@ import (
 // would let a later worktree with different import contents false-hit.
 
 func authoringImportsPath(repoRoot, name string) string {
-	return filepath.Join(repoRoot, "platform-schemas", "dist", ".authoring-imports", name+".json")
+	return filepath.Join(repoRoot, SchemasDir, "dist", ".authoring-imports", name+".json")
 }
 
 // WriteAuthoringImports persists the schema's authoring-import depfile.
 // imports are absolute paths as reported by the harness; only files under
-// platform-schemas/ but outside the schema's own directory are recorded
-// (the schema directory has its own tree digest, and utils/psgen sources
-// are covered by the toolchain digest). hasDocs distinguishes "no sidecar
+// the schemas root but outside the schema's own directory are recorded
+// (the schema directory has its own tree digest, and the tool is covered by
+// ToolDigest). hasDocs distinguishes "no sidecar
 // documents" (any stale depfile is removed) from "documents with no
 // external imports" (an empty list is written, replacing stale content).
 func WriteAuthoringImports(distRoot, name, servicePath string, imports []string, hasDocs bool) error {
-	platformSchemas := filepath.Dir(distRoot)
-	repoRoot := filepath.Dir(platformSchemas)
+	schemasRoot := filepath.Dir(distRoot)
+	repoRoot := filepath.Dir(schemasRoot)
 	path := authoringImportsPath(repoRoot, name)
 
 	if !hasDocs {
@@ -55,9 +55,9 @@ func WriteAuthoringImports(distRoot, name, servicePath string, imports []string,
 	if err != nil {
 		return fmt.Errorf("resolving service path %s: %w", servicePath, err)
 	}
-	schemasReal, err := filepath.EvalSymlinks(platformSchemas)
+	schemasReal, err := filepath.EvalSymlinks(schemasRoot)
 	if err != nil {
-		return fmt.Errorf("resolving platform-schemas root: %w", err)
+		return fmt.Errorf("resolving schemas root: %w", err)
 	}
 	// Relativize against the resolved root so a symlinked checkout (macOS
 	// /var -> /private/var, most temp dirs) yields clean repo-relative paths.

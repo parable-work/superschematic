@@ -21,7 +21,7 @@ func RespondError(w http.ResponseWriter, r *http.Request, status int, message st
 }
 
 // RespondValidationErrors sends a logged validation errors response.
-// Hardcodes WA-VL-001 per EDR-0011: schema-level validation errors always
+// Hardcodes WA-VL-001 per schema-level validation errors always
 // use this code because they originate in the generated route handler before
 // reaching route-impl, so there is no call site to chain .WithCode() on.
 func RespondValidationErrors(w http.ResponseWriter, r *http.Request, errors types.ValidationErrors) {
@@ -38,7 +38,7 @@ func RespondNoContent(w http.ResponseWriter) {
 	runtimeresponse.NoContent(w)
 }
 
-// RespondJSONEnvelope sends a JSON response wrapped in the EDR-0002 envelope format.
+// RespondJSONEnvelope sends a JSON response wrapped in the success envelope format.
 func RespondJSONEnvelope(w http.ResponseWriter, status int, data interface{}, r *http.Request) {
 	runtimeresponse.JSONEnvelope(w, status, data, requestMeta(r), nil)
 }

@@ -127,7 +127,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 }
 
 // importSymbolsForDependency returns symbols to bind from a dependency.
-// DB schemas stay named-only (PARABLE-970); other kinds expand the catalog.
+// DB schemas stay named-only; other kinds expand the catalog.
 func importSymbolsForDependency(imp ir.Import, depSchema *ir.Schema) []string {
 	if depSchema.Kind == ir.SchemaKindDB {
 		return append([]string{}, imp.Types...)

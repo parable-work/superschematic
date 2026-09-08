@@ -50,13 +50,13 @@ func TestBuildCommand_Profile(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Contains(t, out.String(), "Loaded schema fixture-db (kind DB)")
-	assert.Contains(t, errOut.String(), "psgen-profile service=fixture-db phase=build.load duration_ms=")
-	assert.Contains(t, errOut.String(), "psgen-profile service=fixture-db phase=tsreader.program duration_ms=")
-	assert.Contains(t, errOut.String(), "psgen-profile service=fixture-db phase=tsreader.program.host duration_ms=")
-	assert.Contains(t, errOut.String(), "psgen-profile service=fixture-db phase=tsreader.program.config duration_ms=")
-	assert.Contains(t, errOut.String(), "psgen-profile service=fixture-db phase=tsreader.program.create duration_ms=")
-	assert.Contains(t, errOut.String(), "psgen-profile service=fixture-db phase=tsreader.program.source-classify duration_ms=")
-	assert.Contains(t, errOut.String(), "psgen-profile service=fixture-db phase=generator.output.types-go duration_ms=")
+	assert.Contains(t, errOut.String(), "superschematic-profile service=fixture-db phase=build.load duration_ms=")
+	assert.Contains(t, errOut.String(), "superschematic-profile service=fixture-db phase=tsreader.program duration_ms=")
+	assert.Contains(t, errOut.String(), "superschematic-profile service=fixture-db phase=tsreader.program.host duration_ms=")
+	assert.Contains(t, errOut.String(), "superschematic-profile service=fixture-db phase=tsreader.program.config duration_ms=")
+	assert.Contains(t, errOut.String(), "superschematic-profile service=fixture-db phase=tsreader.program.create duration_ms=")
+	assert.Contains(t, errOut.String(), "superschematic-profile service=fixture-db phase=tsreader.program.source-classify duration_ms=")
+	assert.Contains(t, errOut.String(), "superschematic-profile service=fixture-db phase=generator.output.types-go duration_ms=")
 }
 
 func TestBuildCommand_EmitIR(t *testing.T) {

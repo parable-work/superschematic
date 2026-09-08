@@ -13,8 +13,7 @@
  * Output: one JSON document on stdout ({ document, authoringImports,
  * diagnostics }); exit 1 if any diagnostics were collected.
  *
- * authoringImports is the document's transitive module graph (EDR-0087
- * amendment 2): every source file the bundler resolves for the entry module,
+ * authoringImports is the document's transitive module graph: every source file the bundler resolves for the entry module,
  * as absolute paths. The build cache hashes the files that fall outside the
  * schema's own directory, so cross-directory authoring imports (a
  * deploy.values.ts importing the platform model) invalidate the cache

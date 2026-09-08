@@ -172,7 +172,7 @@ type ModuleOutput struct {
 	UsesScalarLib bool
 
 	// ScalarLibDepPath is the Cargo.toml path entry for the scalar runtime
-	// crate (utils/parable-scalars/ext), computed relative to the output
+	// crate (an extension crate), computed relative to the output
 	// directory via SetScalarLibPath.
 	ScalarLibDepPath string
 

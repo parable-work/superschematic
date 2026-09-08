@@ -439,7 +439,7 @@ func TestGeneratePruneHistoryMethod(t *testing.T) {
 // TestGenerateDateTimeFilterIsNullPredicate verifies the generated
 // DateTimeFilter carries an IsNull predicate and that buildWhereClause emits
 // IS NULL / IS NOT NULL for a non-audit DateTime column. Without this a caller
-// cannot filter "retractedAt IS NULL" server-side (PARABLE-395 audit): the
+// cannot filter "retractedAt IS NULL" server-side: the
 // keyset scan workaround in the revert path existed only because the generated
 // DateTime filter had comparison ops but no null predicate.
 func TestGenerateDateTimeFilterIsNullPredicate(t *testing.T) {
@@ -542,7 +542,7 @@ func TestGenerateCreateOnePreservesExplicitPrimaryKey(t *testing.T) {
 
 // TestGenerateCreateManyIncludesRelationFK verifies the generated CreateMany
 // carries the same relation foreign-key columns CreateOne does. The bulk insert
-// used to omit Relation<> FK columns entirely (PARABLE-395 audit): fieldNames
+// used to omit Relation<> FK columns entirely: fieldNames
 // and the per-row value loop only ranged over scalar fields, so bulk-inserting
 // rows with relations silently dropped the FK and callers fell back to per-row
 // CreateOne. TenantUser has a required to-one Tenant relationship (tenant_id).

@@ -80,7 +80,7 @@ func DiscoverWith(servicesRoot string, outputRoot string, reg *registry.Registry
 }
 
 // validateDependencyKinds rejects declared dependencies on schemas that emit
-// no packages (EDR-0087 amendment 2). Such a dependency can only be an
+// no packages. Such a dependency can only be an
 // authoring import in disguise -- source files imported by an executable
 // deploy document -- and those are auto-tracked into the build cache, so the
 // declaration is both unnecessary and a misuse of the codegen-dependency
@@ -97,7 +97,7 @@ func validateDependencyKinds(services []Service) error {
 				continue
 			}
 			if len(depService.Config.Outputs) == 0 {
-				return fmt.Errorf("%s: dependency %q emits no packages; authoring imports are auto-tracked (EDR-0087 amendment 2), remove the dependency from schema.config", service.Name, dep.Name)
+				return fmt.Errorf("%s: dependency %q emits no packages; authoring imports are auto-tracked, remove the dependency from schema.config", service.Name, dep.Name)
 			}
 		}
 	}
@@ -131,7 +131,7 @@ func readConfig(serviceDir string, configPath string, reg *registry.Registry) (*
 var configImportPattern = regexp.MustCompile(`(?m)^\s*import\b[^'"]*['"]([^'"]+)['"]`)
 
 // checkConfigPurity enforces the identity layer's cycle-proofing rule
-// (EDR-0087 amendment 2): schema.config.ts may import only
+// : schema.config.ts may import only
 // @superschematic/schema-config. Configs are imported as identity references by the
 // platform model; any richer import graph would drag arbitrary code into
 // every consumer's evaluation.
@@ -142,7 +142,7 @@ func checkConfigPurity(configPath string) error {
 	}
 	for _, match := range configImportPattern.FindAllStringSubmatch(string(data), -1) {
 		if match[1] != "@superschematic/schema-config" {
-			return fmt.Errorf("%s: imports %q; schema.config.ts may import only @superschematic/schema-config (EDR-0087 amendment 2: configs are identity references and must stay dependency-free)", configPath, match[1])
+			return fmt.Errorf("%s: imports %q; schema.config.ts may import only @superschematic/schema-config (configs are identity references and must stay dependency-free)", configPath, match[1])
 		}
 	}
 	return nil

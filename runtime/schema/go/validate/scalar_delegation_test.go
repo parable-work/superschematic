@@ -11,7 +11,7 @@ import (
 // par12Schema declares scalars by their CANONICAL names (the keys in
 // scalar-lib's ScalarIDByCanonical), each carrying only the generic IR
 // constraints psgen would emit. The point of these tests is that the generic
-// constraints alone DO NOT catch the PAR-12 deep checks (Embedding.Vector /
+// constraints alone DO NOT catch the deep semantic checks (Embedding.Vector /
 // Generic.StringMap serde, Asset.FilePath / Text.Markdown min_length 1) -- those
 // live in the Rust core and must be reached by delegation, not by the IR.
 func par12Schema() *ir.Schema {
@@ -58,7 +58,7 @@ func par12Schema() *ir.Schema {
 
 // TestScalarDelegation_RegistryGovernsEveryName is the W8 contract: the
 // validator reaches the scalar core only through the injected registry. With
-// an empty registry the same PAR-12 values fall back to the generic IR
+// an empty registry the same deep-check values fall back to the generic IR
 // constraints (which the fixture leaves empty) and are accepted; the old
 // KnownScalar short-circuit would have rejected them behind the registry's
 // back.
@@ -86,7 +86,7 @@ func TestScalarDelegation_RegistryGovernsEveryName(t *testing.T) {
 }
 
 // TestScalarDelegation_RejectsInvalidPAR12 asserts the runtime validator now
-// surfaces the core's PAR-12 checks. Against the old hand-rolled validator
+// surfaces the core's deep checks. Against the old hand-rolled validator
 // (generic IR constraints only) every one of these would pass, which is the
 // over-acceptance bug being closed.
 func TestScalarDelegation_RejectsInvalidPAR12(t *testing.T) {
@@ -161,8 +161,8 @@ func TestScalarDelegation_OptionalInvalidStillRejected(t *testing.T) {
 	assert.NotEmpty(t, errs.GetFieldErrors("altVector"))
 }
 
-// TestScalarDelegation_AcceptsValidPAR12 asserts valid PAR-12 values pass cleanly.
-func TestScalarDelegation_AcceptsValidPAR12(t *testing.T) {
+// TestScalarDelegation_AcceptsValidDeepChecks asserts valid deep-check values pass cleanly.
+func TestScalarDelegation_AcceptsValidDeepChecks(t *testing.T) {
 	v := New(par12Schema(), WithRegistry(DefaultRegistry()))
 
 	errs := v.ValidateType("Doc", map[string]any{
@@ -172,5 +172,5 @@ func TestScalarDelegation_AcceptsValidPAR12(t *testing.T) {
 		"body":   "# Title\n\nbody",
 	})
 
-	assert.False(t, errs.HasErrors(), "valid PAR-12 values should pass, got: %v", errs)
+	assert.False(t, errs.HasErrors(), "valid deep-check values should pass, got: %v", errs)
 }

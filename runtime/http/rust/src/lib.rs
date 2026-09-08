@@ -1,4 +1,4 @@
-//! Shared runtime crate for psgen-generated Rust REST APIs.
+//! Shared runtime crate for generated Rust REST APIs.
 
 mod context;
 mod error;

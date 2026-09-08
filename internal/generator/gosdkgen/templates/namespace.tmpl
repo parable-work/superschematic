@@ -331,7 +331,7 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- end}}
 	{{- range .ScalarArgs}}
 	{{- if .IsArray}}
-	// EDR-0002: comma-separated format for array query params
+	// comma-separated format for array query params
 	if len(input.{{.GoName}}) > 0 {
 		strs := make([]string, len(input.{{.GoName}}))
 		for i, v := range input.{{.GoName}} {
