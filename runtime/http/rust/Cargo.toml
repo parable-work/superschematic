@@ -1,0 +1,18 @@
+[package]
+name = "psgen-http-runtime"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+authors = ["Parable Platform"]
+description = "Shared Rust runtime helpers for psgen-generated REST APIs"
+license = "MIT"
+
+[dependencies]
+axum = { workspace = true, features = ["json"] }
+http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+
+[lints]
+workspace = true

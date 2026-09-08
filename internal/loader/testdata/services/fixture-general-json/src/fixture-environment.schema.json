@@ -1,0 +1,9 @@
+{
+  "name": "FixtureEnvironment",
+  "kind": "Enum",
+  "comment": "Runtime environment classification.",
+  "values": [
+    { "name": "Development", "serializedAs": "development" },
+    { "name": "Production", "serializedAs": "production" }
+  ]
+}

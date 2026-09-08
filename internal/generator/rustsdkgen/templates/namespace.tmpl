@@ -1,0 +1,574 @@
+#[allow(unused_imports)]
+use serde::Serialize;
+{{if .Namespace.NeedsRegex}}
+use regex::Regex;
+{{end}}
+
+use crate::client::HttpClient;
+use crate::errors::SDKError;
+use crate::runtime;
+use crate::types;
+
+#[derive(Clone)]
+pub struct {{.Namespace.StructName}} {
+    client: HttpClient,
+{{- if .Namespace.IsTenantNS}}
+    {{.Namespace.TenantFieldName}}: String,
+{{- end}}
+}
+
+{{- range .Namespace.Endpoints}}
+{{- if .HasScalarArgs}}
+#[derive(Debug, Clone, Serialize)]
+pub struct {{.ScalarInputStructName}} {
+{{- range .ScalarArgs}}
+{{- if not .Required}}
+    #[serde(skip_serializing_if = "Option::is_none")]
+{{- end}}
+    pub {{.RustName}}: {{.RustType}},
+{{- end}}
+}
+
+{{end}}
+{{- if .HasQueryParams}}
+#[derive(Debug, Clone)]
+pub struct {{.QueryStructName}} {
+{{- range .QueryParams}}
+{{- if .Required}}
+    pub {{.RustName}}: {{.RustType}},
+{{- else}}
+    pub {{.RustName}}: Option<{{.RustType}}>,
+{{- end}}
+{{- end}}
+}
+
+{{end}}
+{{- if .HasFileUpload}}
+#[derive(Debug, Clone)]
+pub struct {{.FilesStructName}} {
+{{- range .FileUploadFields}}
+    pub {{.RustName}}: runtime::UploadFile,
+{{- end}}
+}
+
+{{end}}
+{{- end}}
+
+impl {{.Namespace.StructName}} {
+    pub(crate) fn new(
+        client: HttpClient,
+{{- if .Namespace.IsTenantNS}}
+        {{.Namespace.TenantFieldName}}: String,
+{{- end}}
+    ) -> Self {
+        Self {
+            client,
+{{- if .Namespace.IsTenantNS}}
+            {{.Namespace.TenantFieldName}},
+{{- end}}
+        }
+    }
+
+{{- range .Namespace.Endpoints}}
+    /// {{if .Description}}{{.Description | rustDoc}}{{else}}{{.MethodName}} endpoint.{{end}}
+{{- if .RequiresAuth}}
+    ///
+    /// Requires authentication.
+{{- end}}
+{{- if .HasFileUpload}}
+    ///
+    /// Convenience helper that builds multipart payload from typed arguments.
+    /// Use `{{.MethodName}}_raw` for full multipart control.
+{{- end}}
+{{- if .HasQueryParams}}
+    ///
+    /// - `query`: optional query parameters for this request.
+{{- end}}
+{{- if .Filterable}}
+    ///
+    /// - `filters`: optional bracket-notation filters serialized as `filter[field]=value` or `filter[field][op]=value`.
+{{- end}}
+{{- if .HasEncryptedBody}}
+    ///
+    /// - `options.public_encryption_key`: optional per-request encryption key override.
+    /// - `options.request_options.timeout_ms`: optional per-request timeout override.
+    /// - `options.request_options.request_hook`: optional request builder hook.
+{{- else}}
+    ///
+    /// - `options.timeout_ms`: optional per-request timeout override.
+    /// - `options.request_hook`: optional request builder hook.
+{{- end}}
+    pub async fn {{.MethodName}}(
+        &self,
+{{- range .PathParams}}
+        {{.RustName}}: {{.RustType}},
+{{- end}}
+{{- if .HasInput}}
+        input: {{.InputType}},
+{{- else if .HasScalarArgs}}
+        input: {{.ScalarInputStructName}},
+{{- end}}
+{{- if .HasFileUpload}}
+        files: {{.FilesStructName}},
+{{- end}}
+{{- if .HasQueryParams}}
+        query: Option<&{{.QueryStructName}}>,
+{{- end}}
+{{- if .Filterable}}
+        filters: Option<&std::collections::HashMap<String, runtime::FilterValue>>,
+{{- end}}
+{{- if .HasEncryptedBody}}
+        options: Option<&runtime::EncryptedRequestOptions>,
+{{- else}}
+        options: Option<&runtime::RequestOptions>,
+{{- end}}
+    ) -> Result<{{.OutputRustType}}, SDKError> {
+{{- if .HasFileUpload}}
+{{- if or .HasInput .HasScalarArgs}}
+        let json_data = Some(runtime::strip_fields_for_multipart(&input, &[
+{{- range .FileUploadFields}}
+            "{{.Name}}",
+{{- end}}
+        ])?);
+{{- else}}
+        let json_data = None;
+{{- end}}
+        let mut files_map = std::collections::BTreeMap::new();
+{{- range .FileUploadFields}}
+{{- if .Required}}
+        if files.{{.RustName}}.is_empty() {
+            return Err(SDKError::config("{{.Name}} file is required"));
+        }
+{{- end}}
+        if !files.{{.RustName}}.is_empty() {
+            files_map.insert("{{.Name}}".to_string(), files.{{.RustName}});
+        }
+{{- end}}
+
+        let body = runtime::MultipartBody {
+            json_data,
+            files: files_map,
+        };
+
+        self.{{.MethodName}}_raw(
+{{- range .PathParams}}
+            {{.RustName}},
+{{- end}}
+            body,
+{{- if .HasQueryParams}}
+            query,
+{{- end}}
+            options,
+        )
+        .await
+{{- else}}
+{{- if .PathQueryBindings}}
+        let query_for_path = query.ok_or_else(|| SDKError::config("query parameters are required"))?;
+{{- range .PathQueryBindings}}
+{{- if .Required}}
+        let {{.RustName}} = &query_for_path.{{.RustName}};
+{{- else}}
+        let {{.RustName}} = query_for_path.{{.RustName}}.as_ref().ok_or_else(|| SDKError::config("{{.Name}} is required"))?;
+{{- end}}
+{{- end}}
+{{- end}}
+{{- if .PathArgs}}
+        let path = format!("{{.PathFormat}}", {{join .PathArgs ", "}});
+{{- else}}
+        let path = "{{.PathFormat}}";
+{{- end}}
+
+{{- if .HasInput}}
+        let input_value = serde_json::to_value(&input)?;
+        runtime::validate_input("{{.InputSchemaName}}", &input_value)?;
+
+{{- end}}
+{{- if .HasScalarArgs}}
+{{- range .ScalarArgs}}
+{{- if .NeedsGeneratedValidation}}
+{{- if .IsArray}}
+{{- if .Required}}
+{{- if .ValidateListMin}}
+        if input.{{.RustName}}.len() < {{.ValidateListMin}} {
+            return Err(SDKError::config("{{.Name}} must contain at least {{.ValidateListMin}} items"));
+        }
+{{- end}}
+{{- if .ValidateListMax}}
+        if input.{{.RustName}}.len() > {{.ValidateListMax}} {
+            return Err(SDKError::config("{{.Name}} must contain at most {{.ValidateListMax}} items"));
+        }
+{{- end}}
+{{- else}}
+        if let Some(values) = &input.{{.RustName}} {
+{{- if .ValidateListMin}}
+            if values.len() < {{.ValidateListMin}} {
+                return Err(SDKError::config("{{.Name}} must contain at least {{.ValidateListMin}} items"));
+            }
+{{- end}}
+{{- if .ValidateListMax}}
+            if values.len() > {{.ValidateListMax}} {
+                return Err(SDKError::config("{{.Name}} must contain at most {{.ValidateListMax}} items"));
+            }
+{{- end}}
+        }
+{{- end}}
+{{- else}}
+{{- if .Required}}
+        let scalar_arg_value = &input.{{.RustName}};
+{{- else}}
+        if let Some(scalar_arg_value) = &input.{{.RustName}} {
+{{- end}}
+{{- if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern .ValidateListMin .ValidateListMax}}
+        let scalar_arg_text = scalar_arg_value.to_string();
+{{- end}}
+{{- if or .ValidateMin .ValidateMax}}
+        let scalar_arg_number = scalar_arg_text
+            .parse::<f64>()
+            .map_err(|_| SDKError::config("{{.Name}} must be numeric"))?;
+{{- end}}
+{{- if .ValidateMin}}
+        if scalar_arg_number < {{float64Lit .ValidateMin}} {
+            return Err(SDKError::config("{{.Name}} must be at least {{.ValidateMin}}"));
+        }
+{{- end}}
+{{- if .ValidateMax}}
+        if scalar_arg_number > {{float64Lit .ValidateMax}} {
+            return Err(SDKError::config("{{.Name}} must be at most {{.ValidateMax}}"));
+        }
+{{- end}}
+{{- if .ValidateMinLength}}
+        if scalar_arg_text.len() < {{.ValidateMinLength}} {
+            return Err(SDKError::config("{{.Name}} must be at least {{.ValidateMinLength}} characters"));
+        }
+{{- end}}
+{{- if .ValidateMaxLength}}
+        if scalar_arg_text.len() > {{.ValidateMaxLength}} {
+            return Err(SDKError::config("{{.Name}} must be at most {{.ValidateMaxLength}} characters"));
+        }
+{{- end}}
+{{- if .ValidatePattern}}
+        let scalar_arg_pattern = Regex::new({{printf "%q" .ValidatePattern}})
+            .map_err(|err| SDKError::config(format!("invalid validation pattern for {{.Name}}: {}", err)))?;
+        if !scalar_arg_pattern.is_match(&scalar_arg_text) {
+            return Err(SDKError::config("{{.Name}} has an invalid format"));
+        }
+{{- end}}
+{{- if .ValidateListMin}}
+        let scalar_arg_items = scalar_arg_text.split(',').filter(|item| !item.is_empty()).count();
+        if scalar_arg_items < {{.ValidateListMin}} {
+            return Err(SDKError::config("{{.Name}} must contain at least {{.ValidateListMin}} items"));
+        }
+{{- end}}
+{{- if .ValidateListMax}}
+        let scalar_arg_items = scalar_arg_text.split(',').filter(|item| !item.is_empty()).count();
+        if scalar_arg_items > {{.ValidateListMax}} {
+            return Err(SDKError::config("{{.Name}} must contain at most {{.ValidateListMax}} items"));
+        }
+{{- end}}
+{{- if not .Required}}
+        }
+{{- end}}
+{{- end}}
+{{- end}}
+{{- end}}
+{{- end}}
+{{- if or .HasQueryParams .Filterable}}
+        let mut query_params: Vec<(String, String)> = Vec::new();
+{{- if .HasQueryParams}}
+        if let Some(query) = query {
+{{- range .QueryParams}}
+{{- if .Required}}
+            let query_param_value = &query.{{.RustName}};
+{{- else}}
+            if let Some(query_param_value) = &query.{{.RustName}} {
+{{- end}}
+{{- if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern .ValidateListMin .ValidateListMax}}
+            let query_param_text = query_param_value.to_string();
+{{- end}}
+{{- if or .ValidateMin .ValidateMax}}
+            let query_param_number = query_param_text
+                .parse::<f64>()
+                .map_err(|_| SDKError::config("{{.Name}} must be numeric"))?;
+{{- end}}
+{{- if .ValidateMin}}
+            if query_param_number < {{float64Lit .ValidateMin}} {
+                return Err(SDKError::config("{{.Name}} must be at least {{.ValidateMin}}"));
+            }
+{{- end}}
+{{- if .ValidateMax}}
+            if query_param_number > {{float64Lit .ValidateMax}} {
+                return Err(SDKError::config("{{.Name}} must be at most {{.ValidateMax}}"));
+            }
+{{- end}}
+{{- if .ValidateMinLength}}
+            if query_param_text.len() < {{.ValidateMinLength}} {
+                return Err(SDKError::config("{{.Name}} must be at least {{.ValidateMinLength}} characters"));
+            }
+{{- end}}
+{{- if .ValidateMaxLength}}
+            if query_param_text.len() > {{.ValidateMaxLength}} {
+                return Err(SDKError::config("{{.Name}} must be at most {{.ValidateMaxLength}} characters"));
+            }
+{{- end}}
+{{- if .ValidatePattern}}
+            let query_param_pattern = Regex::new({{printf "%q" .ValidatePattern}})
+                .map_err(|err| SDKError::config(format!("invalid validation pattern for {{.Name}}: {}", err)))?;
+            if !query_param_pattern.is_match(&query_param_text) {
+                return Err(SDKError::config("{{.Name}} has an invalid format"));
+            }
+{{- end}}
+{{- if .ValidateListMin}}
+            let query_param_items = query_param_text.split(',').filter(|item| !item.is_empty()).count();
+            if query_param_items < {{.ValidateListMin}} {
+                return Err(SDKError::config("{{.Name}} must contain at least {{.ValidateListMin}} items"));
+            }
+{{- end}}
+{{- if .ValidateListMax}}
+            let query_param_items = query_param_text.split(',').filter(|item| !item.is_empty()).count();
+            if query_param_items > {{.ValidateListMax}} {
+                return Err(SDKError::config("{{.Name}} must contain at most {{.ValidateListMax}} items"));
+            }
+{{- end}}
+            query_params.push(("{{.Name}}".to_string(), query_param_value.to_string()));
+{{- if not .Required}}
+            }
+{{- end}}
+{{- end}}
+        }{{if .HasRequiredQueryParams}} else {
+            return Err(SDKError::config("query parameters are required"));
+        }{{end}}
+{{- end}}
+{{- if .Filterable}}
+        if let Some(filters) = filters {
+            query_params.extend(runtime::filters_to_query_params(filters));
+        }
+{{- end}}
+{{- else}}
+{{- if and .HasScalarArgs (eq .HTTPMethod "GET")}}
+        let mut query_params: Vec<(String, String)> = Vec::new();
+{{- else}}
+        let query_params: Vec<(String, String)> = Vec::new();
+{{- end}}
+{{- end}}
+
+{{- if .HasEncryptedBody}}
+        let payload = serde_json::json!({
+{{- if .HasInput}}
+            "input": input_value
+{{- else if .HasScalarArgs}}
+            "input": serde_json::to_value(&input)?
+{{- end}}
+        });
+        let key_override = options.and_then(|opts| opts.public_encryption_key.as_ref());
+        let request_options = options.and_then(|opts| opts.request_options.as_ref());
+        let encrypted = runtime::encrypt_request_payload(payload, key_override)?;
+        let body = Some(serde_json::to_value(encrypted)?);
+
+        self.client
+            .request_json("{{.HTTPMethod}}", &path, &query_params, body, request_options)
+            .await
+{{- else if .HasInput}}
+        let body = Some(input_value);
+        self.client
+            .request_json("{{.HTTPMethod}}", &path, &query_params, body, options)
+            .await
+{{- else if and .HasScalarArgs (eq .HTTPMethod "GET")}}
+        // GET endpoint: scalar args go as query parameters, not request body.
+{{- range .ScalarArgs}}
+{{- if .IsArray}}
+{{- if .Required}}
+        // EDR-0002: comma-separated format for array query params
+        if !input.{{.RustName}}.is_empty() {
+            let joined: String = input.{{.RustName}}.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",");
+            query_params.push(("{{.Name}}".to_string(), joined));
+        }
+{{- else}}
+        if let Some(ref arr) = input.{{.RustName}} {
+            if !arr.is_empty() {
+                let joined: String = arr.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",");
+                query_params.push(("{{.Name}}".to_string(), joined));
+            }
+        }
+{{- end}}
+{{- else}}
+{{- if .Required}}
+        query_params.push(("{{.Name}}".to_string(), input.{{.RustName}}.to_string()));
+{{- else}}
+        if let Some(ref val) = input.{{.RustName}} {
+            query_params.push(("{{.Name}}".to_string(), val.to_string()));
+        }
+{{- end}}
+{{- end}}
+{{- end}}
+        self.client
+            .request_json("{{.HTTPMethod}}", &path, &query_params, None, options)
+            .await
+{{- else if .HasScalarArgs}}
+        let body = Some(serde_json::to_value(input)?);
+        self.client
+            .request_json("{{.HTTPMethod}}", &path, &query_params, body, options)
+            .await
+{{- else}}
+        self.client
+            .request_json("{{.HTTPMethod}}", &path, &query_params, None, options)
+            .await
+{{- end}}
+{{- end}}
+    }
+
+{{- if .SupportsListAll}}
+    /// Fetches every page of `{{.MethodName}}` via limit/offset until a page
+    /// comes back shorter than the server's maximum page size
+    /// ({{.ListAllPageSize}}, the schema-declared `limit` maximum). Any
+    /// `limit`/`offset` values on `query` are overridden; other query
+    /// fields apply to every page. Any page error fails the whole load,
+    /// since a partial result would silently truncate the list.
+    pub async fn {{.MethodName}}_all(
+        &self,
+        query: Option<&{{.QueryStructName}}>,
+        options: Option<&runtime::RequestOptions>,
+    ) -> Result<{{.OutputRustType}}, SDKError> {
+        const PAGE_SIZE: usize = {{.ListAllPageSize}};
+        let mut page_query = match query {
+            Some(query) => query.clone(),
+            None => {{.QueryStructName}} {
+{{- range .QueryParams}}
+                {{.RustName}}: None,
+{{- end}}
+            },
+        };
+        let mut all = Vec::new();
+        let mut offset = 0usize;
+        loop {
+            page_query.limit = Some(PAGE_SIZE as f64);
+            page_query.offset = Some(offset as f64);
+            let page = self.{{.MethodName}}(Some(&page_query), options).await?;
+            let page_len = page.len();
+            all.extend(page);
+            if page_len < PAGE_SIZE {
+                return Ok(all);
+            }
+            offset += PAGE_SIZE;
+        }
+    }
+
+{{- end}}
+{{- if .HasFileUpload}}
+    /// {{if .Description}}{{.Description | rustDoc}}{{else}}{{.MethodName}} endpoint.{{end}}
+{{- if .RequiresAuth}}
+    ///
+    /// Requires authentication.
+{{- end}}
+    ///
+    /// Raw multipart variant for advanced use cases.
+    /// Construct `runtime::MultipartBody` manually when you need custom multipart behavior.
+{{- if .HasQueryParams}}
+    ///
+    /// - `query`: optional query parameters for this request.
+{{- end}}
+    ///
+    /// - `options.timeout_ms`: optional per-request timeout override.
+    /// - `options.request_hook`: optional request builder hook.
+    pub async fn {{.MethodName}}_raw(
+        &self,
+{{- range .PathParams}}
+        {{.RustName}}: {{.RustType}},
+{{- end}}
+        body: runtime::MultipartBody,
+{{- if .HasQueryParams}}
+        query: Option<&{{.QueryStructName}}>,
+{{- end}}
+        options: Option<&runtime::RequestOptions>,
+    ) -> Result<{{.OutputRustType}}, SDKError> {
+{{- if .PathQueryBindings}}
+        let query_for_path = query.ok_or_else(|| SDKError::config("query parameters are required"))?;
+{{- range .PathQueryBindings}}
+{{- if .Required}}
+        let {{.RustName}} = &query_for_path.{{.RustName}};
+{{- else}}
+        let {{.RustName}} = query_for_path.{{.RustName}}.as_ref().ok_or_else(|| SDKError::config("{{.Name}} is required"))?;
+{{- end}}
+{{- end}}
+{{- end}}
+{{- if .PathArgs}}
+        let path = format!("{{.PathFormat}}", {{join .PathArgs ", "}});
+{{- else}}
+        let path = "{{.PathFormat}}";
+{{- end}}
+
+{{- if .HasQueryParams}}
+        let mut query_params: Vec<(String, String)> = Vec::new();
+        if let Some(query) = query {
+{{- range .QueryParams}}
+{{- if .Required}}
+            let query_param_value = &query.{{.RustName}};
+{{- else}}
+            if let Some(query_param_value) = &query.{{.RustName}} {
+{{- end}}
+{{- if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern .ValidateListMin .ValidateListMax}}
+            let query_param_text = query_param_value.to_string();
+{{- end}}
+{{- if or .ValidateMin .ValidateMax}}
+            let query_param_number = query_param_text
+                .parse::<f64>()
+                .map_err(|_| SDKError::config("{{.Name}} must be numeric"))?;
+{{- end}}
+{{- if .ValidateMin}}
+            if query_param_number < {{float64Lit .ValidateMin}} {
+                return Err(SDKError::config("{{.Name}} must be at least {{.ValidateMin}}"));
+            }
+{{- end}}
+{{- if .ValidateMax}}
+            if query_param_number > {{float64Lit .ValidateMax}} {
+                return Err(SDKError::config("{{.Name}} must be at most {{.ValidateMax}}"));
+            }
+{{- end}}
+{{- if .ValidateMinLength}}
+            if query_param_text.len() < {{.ValidateMinLength}} {
+                return Err(SDKError::config("{{.Name}} must be at least {{.ValidateMinLength}} characters"));
+            }
+{{- end}}
+{{- if .ValidateMaxLength}}
+            if query_param_text.len() > {{.ValidateMaxLength}} {
+                return Err(SDKError::config("{{.Name}} must be at most {{.ValidateMaxLength}} characters"));
+            }
+{{- end}}
+{{- if .ValidatePattern}}
+            let query_param_pattern = Regex::new({{printf "%q" .ValidatePattern}})
+                .map_err(|err| SDKError::config(format!("invalid validation pattern for {{.Name}}: {}", err)))?;
+            if !query_param_pattern.is_match(&query_param_text) {
+                return Err(SDKError::config("{{.Name}} has an invalid format"));
+            }
+{{- end}}
+{{- if .ValidateListMin}}
+            let query_param_items = query_param_text.split(',').filter(|item| !item.is_empty()).count();
+            if query_param_items < {{.ValidateListMin}} {
+                return Err(SDKError::config("{{.Name}} must contain at least {{.ValidateListMin}} items"));
+            }
+{{- end}}
+{{- if .ValidateListMax}}
+            let query_param_items = query_param_text.split(',').filter(|item| !item.is_empty()).count();
+            if query_param_items > {{.ValidateListMax}} {
+                return Err(SDKError::config("{{.Name}} must contain at most {{.ValidateListMax}} items"));
+            }
+{{- end}}
+            query_params.push(("{{.Name}}".to_string(), query_param_value.to_string()));
+{{- if not .Required}}
+            }
+{{- end}}
+{{- end}}
+        }{{if .HasRequiredQueryParams}} else {
+            return Err(SDKError::config("query parameters are required"));
+        }{{end}}
+{{- else}}
+        let query_params: Vec<(String, String)> = Vec::new();
+{{- end}}
+
+        self.client
+            .request_multipart("{{.HTTPMethod}}", &path, &query_params, body, options)
+            .await
+    }
+{{- end}}
+
+{{- end}}
+}

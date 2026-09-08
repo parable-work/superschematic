@@ -1,0 +1,259 @@
+{
+  "name": "fixture-api",
+  "kind": "API",
+  "scalars": {
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "languagePrimitive": "object",
+      "typeMappings": {
+        "sql": "JSONB"
+      }
+    },
+    "Identity.Name": {
+      "name": "Identity.Name",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "VARCHAR(80)"
+      }
+    },
+    "Identity.Slug": {
+      "name": "Identity.Slug",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "CITEXT"
+      }
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "UUID"
+      }
+    },
+    "Temporal.DateTime": {
+      "name": "Temporal.DateTime",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "TIMESTAMPTZ"
+      }
+    }
+  },
+  "types": {
+    "CreateTenantInput": {
+      "name": "CreateTenantInput",
+      "owner": "src/tenant-api.schema.ts",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "required": true
+        },
+        {
+          "name": "slug",
+          "typeRef": {
+            "name": "Identity.Slug"
+          },
+          "required": true
+        }
+      ]
+    },
+    "TenantView": {
+      "name": "TenantView",
+      "owner": "src/tenant-api.schema.ts",
+      "comment": "Customer-facing projection of the Tenant table.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-db.Tenant",
+        "virtual": [
+          "userCount",
+          "internalDebugLabel"
+        ],
+        "omittedFromSource": [
+          "createdAt",
+          "updatedAt",
+          "slug",
+          "email",
+          "status",
+          "isActive",
+          "seatCount",
+          "metadata",
+          "users"
+        ]
+      },
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "required": true
+        },
+        {
+          "name": "userCount",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true,
+          "virtual": true
+        },
+        {
+          "name": "internalDebugLabel",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "virtual": true,
+          "uiHidden": true
+        }
+      ]
+    }
+  },
+  "operationSets": [
+    {
+      "name": "TenantQueries",
+      "operations": [
+        {
+          "name": "getTenant",
+          "comment": "Fetch one tenant by id.",
+          "typeRef": {
+            "name": "TenantView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "includeArchived",
+              "typeRef": {
+                "name": "boolean"
+              },
+              "required": true,
+              "isQuery": true
+            }
+          ],
+          "auth": true,
+          "permissions": [
+            "tenants.read"
+          ],
+          "httpMethod": "GET",
+          "restPath": "tenants/{id}",
+          "middleware": {
+            "timeout": 5
+          }
+        },
+        {
+          "name": "listTenants",
+          "typeRef": {
+            "name": "TenantView",
+            "isArray": true
+          },
+          "required": true,
+          "auth": true,
+          "permissions": [
+            "tenants.read"
+          ],
+          "httpMethod": "GET",
+          "restPath": "tenants"
+        }
+      ],
+      "middleware": {
+        "rateLimit": 60,
+        "bodyLimit": 1
+      }
+    },
+    {
+      "name": "SessionQueries",
+      "operations": [
+        {
+          "name": "currentTenant",
+          "typeRef": {
+            "name": "TenantView"
+          },
+          "required": true,
+          "auth": true,
+          "httpMethod": "GET",
+          "restPath": "auth/me"
+        }
+      ]
+    },
+    {
+      "name": "TenantMutations",
+      "operations": [
+        {
+          "name": "createTenant",
+          "typeRef": {
+            "name": "TenantView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "CreateTenantInput"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "tenants.write"
+          ],
+          "httpMethod": "POST",
+          "restPath": "tenants"
+        },
+        {
+          "name": "updateSecret",
+          "typeRef": {
+            "name": "TenantView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "secret",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true
+            }
+          ],
+          "requireOwnership": true,
+          "permissions": [
+            "tenants.write"
+          ],
+          "httpMethod": "PATCH",
+          "restPath": "tenants/{id}"
+        },
+        {
+          "name": "customHandler",
+          "typeRef": {
+            "name": "TenantView"
+          },
+          "required": true,
+          "manualRouteRegistration": true
+        }
+      ],
+      "encrypted": true
+    }
+  ]
+}

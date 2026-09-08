@@ -1,0 +1,24 @@
+name: shop
+kind: Catalog
+scalars:
+  Identity.Slug:
+    name: Identity.Slug
+    languagePrimitive: string
+types:
+  Product:
+    name: Product
+    role: EmbeddedStruct
+    extensions:
+      acme:
+        tagged: true
+        meta: { region: eu, tiers: [1, 2] }
+    fields:
+      - name: sku
+        typeRef: { name: Identity.Slug }
+        required: true
+        extensions:
+          acme:
+            shelf: { aisle: 3 }
+      - name: name
+        typeRef: { name: string }
+        required: true

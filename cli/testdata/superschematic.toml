@@ -1,0 +1,4 @@
+# Naming file the core-only cli tests build with. The in-tree default
+# auth_provider is "parable", a provider only the Parable extension
+# registers; a core-only registry finalizes only against "session".
+auth_provider = "session"

@@ -1,0 +1,50 @@
+use crate::client::{ClientConfig, HttpClient};
+use crate::errors::SDKError;
+use crate::namespaces;
+
+#[derive(Clone)]
+pub struct {{.SDKStructName}} {
+    client: HttpClient,
+{{- range .Namespaces}}
+{{- if not .IsTenantNS}}
+    pub {{.FieldName}}: namespaces::{{.StructName}},
+{{- end}}
+{{- end}}
+}
+
+impl {{.SDKStructName}} {
+    pub fn new(config: ClientConfig) -> Result<Self, SDKError> {
+        let client = HttpClient::new(config)?;
+        Ok(Self {
+            client: client.clone(),
+{{- range .Namespaces}}
+{{- if not .IsTenantNS}}
+            {{.FieldName}}: namespaces::{{.StructName}}::new(client.clone()),
+{{- end}}
+{{- end}}
+        })
+    }
+
+    pub fn client(&self) -> &HttpClient {
+        &self.client
+    }
+
+{{- if .HasAuth}}
+    pub fn set_token(&self, token: impl Into<String>) {
+        self.client.set_token(token);
+    }
+
+    pub fn clear_token(&self) {
+        self.client.clear_token();
+    }
+
+{{- end}}
+{{- range .Namespaces}}
+{{- if .IsTenantNS}}
+    pub fn {{.FieldName}}_namespace(&self, {{.TenantFieldName}}: impl Into<String>) -> namespaces::{{.StructName}} {
+        namespaces::{{.StructName}}::new(self.client.clone(), {{.TenantFieldName}}.into())
+    }
+
+{{- end}}
+{{- end}}
+}

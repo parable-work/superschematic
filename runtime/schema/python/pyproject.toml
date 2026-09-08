@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "psgen-schema-runtime"
+version = "0.1.0"
+description = "psgen schema runtime for Python: JSON/YAML schema reader, parse, validate, mask, merge, and serialize over the psgen IR, with parable-scalar-lib supplying the scalar functions."
+requires-python = ">=3.9"
+dependencies = ["parable-scalar-lib"]
+
+[project.optional-dependencies]
+yaml = [
+    "PyYAML>=6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "PyYAML>=6.0",
+]
+
+[tool.uv.sources]
+parable-scalar-lib = { path = "../../../parable-scalars/python", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["psgen_schema_runtime"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

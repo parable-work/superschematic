@@ -1,0 +1,6 @@
+name: fixture-comments
+kind: API
+dependencies:
+  - name: web-db
+    kind: DB
+outputs: {}

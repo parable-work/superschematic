@@ -1,0 +1,143 @@
+# {{.SchemaName}} TypeScript Types
+
+Auto-generated TypeScript types and validation helpers for the `{{.SchemaName}}` schema.
+
+## Overview
+
+This module provides type-safe TypeScript interfaces and utilities for working with the {{.SchemaName}} schema on the client side. It includes:
+
+- **Type definitions** - TypeScript interfaces for all types, scalars, enums, and unions
+- **Validation** - Client-side validation matching server-side constraints
+
+## Installation
+
+```bash
+bun install
+bun run build
+```
+
+## Usage
+
+### Importing Types
+
+```typescript
+// Type-only import (zero runtime) - use for smallest bundle
+import type { {{range .Scalars}}{{.Symbol}}, {{end}}{{range .Enums}}{{.Name}}, {{end}}{{range .Types}}{{.Name}}, {{end}} } from '{{.PackageName}}/types';
+
+// Or from main entry (re-exports everything, including scalar-lib validation)
+import { ValidationErrors, ValidationResult } from '{{.PackageName}}';
+```
+
+### Validation
+
+All scalar types and complex types have validation functions. Use subpath imports for smaller bundles:
+
+```typescript
+// Granular import (~1KB) - recommended for tree-shaking
+import { validateEmail, validateEmailRequired } from '{{.PackageName}}/validators/scalars/email';
+
+// Or import all validators (full bundle)
+import { validateEmail } from '{{.PackageName}}';
+
+// Optional validation
+const [valid, errors1] = validateEmail("user@example.com");
+
+// Required validation
+const [valid2, errors2] = validateEmailRequired(null);
+```
+
+### Validation Error Format
+
+Validation errors follow a standardized format (see `validation_errors.md`):
+
+```typescript
+{
+  "fieldName": [
+    { "validator": "maxLength", "message": "must be less than 255 characters" }
+  ],
+  "fieldName2": [
+    { "validator": "required", "message": "required field" }
+  ],
+  "nestedField": {
+    "nestedFieldName": [
+      { "validator": "pattern", "message": "invalid format" }
+    ]
+  }
+}
+```
+
+## Generated Files
+
+- `types/` - Pure TypeScript types (no runtime); use `{{.PackageName}}/types` for zero-runtime imports
+- `validators/` - Validation functions; use `{{.PackageName}}/validators/scalars/<name>` for granular imports
+- `mask/` - Secret-masking helpers for types with @secret fields
+- `index.ts` - Main export (re-exports all; backward compatible)
+
+## Type System
+
+{{if .Scalars}}
+### Scalars ({{len .Scalars}})
+
+{{range .Scalars}}
+- **{{.Name}}**{{if .Doc}} - {{.Doc}}{{end}}
+  - TypeScript type: `{{.TSType}}`{{if eq .Name "Temporal.DateTime"}}
+  - Wire format: TypeScript schemas use `@temporalFormat('...')`; JSON/YAML schemas use `x-temporal-format`.{{end}}
+{{if .Pattern}}  - Pattern: `{{.Pattern}}`
+{{end}}{{if .MinLength}}  - Min length: {{.MinLength}}
+{{end}}{{if .MaxLength}}  - Max length: {{.MaxLength}}
+{{end}}{{if .Minimum}}  - Minimum: {{.Minimum}}
+{{end}}{{if .Maximum}}  - Maximum: {{.Maximum}}
+{{end}}
+{{end}}
+{{end}}
+
+{{if .Enums}}
+### Enums ({{len .Enums}})
+
+{{range .Enums}}
+- **{{.Name}}**{{if .Doc}} - {{.Doc}}{{end}}
+  - Values: {{range $index, $val := .Values}}{{if $index}}, {{end}}`{{$val.Name}}`{{end}}
+{{end}}
+{{end}}
+
+{{if .Types}}
+### Types ({{len .Types}})
+
+{{range .Types}}
+- **{{.Name}}**{{if .Doc}} - {{.Doc}}{{end}}
+{{end}}
+{{end}}
+
+## Development
+
+### Building
+
+```bash
+bun run build
+```
+
+### Watching for Changes
+
+```bash
+bun run watch
+```
+
+### Cleaning
+
+```bash
+bun run clean
+```
+
+## Regeneration
+
+```bash
+psgen build <service-dir>
+```
+
+Run from project root. Output: `types/typescript/{{.SchemaName}}/` under the configured output root.
+
+## Notes
+
+- This is an auto-generated module. **DO NOT EDIT** these files manually.
+- All validation is client-side only and should be considered a convenience feature.
+- Server-side validation is always authoritative.

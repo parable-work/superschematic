@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "paths": {
+      "@psgen/scalar-lib/validation": ["../../../parable-scalars/typescript/dist/validation.d.ts"],
+      "@psgen/scalar-lib/scalars": ["../../../parable-scalars/typescript/dist/generated.d.ts"],
+      "@psgen/scalar-lib/backend": ["../../../parable-scalars/typescript/dist/backend.d.ts"],
+      "@psgen/scalar-lib/pem": ["../../../parable-scalars/typescript/dist/pem.d.ts"],
+      "@psgen/scalar-lib/permissions": ["../../../parable-scalars/typescript/dist/platform/Permission.generated.d.ts"],
+      "@psgen/scalar-lib/platform/types": ["../../../parable-scalars/typescript/dist/platform/types.d.ts"],
+      "@psgen/schema-ir": ["../../schema-ir/typescript/index.d.ts"]
+    }
+  },
+  "comment": "The CJS pass pins @psgen/scalar-lib subpaths to that package's CJS declarations: its exports map lists the dist/esm .d.ts under `types`, and moduleResolution node cannot read exports maps at all. The ESM pass (tsconfig.esm.json, moduleResolution bundler) goes through the exports map. At runtime both resolve through node_modules (scripts/link-local-deps.mjs here, the consumer's own install elsewhere).",
+  "include": ["src/**/*.ts"]
+}

@@ -1,0 +1,159 @@
+{
+  "$id": "psgen://schema-config.schema.json",
+  "$ref": "#/definitions/SchemaConfigDocument",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ApiOutputConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "scaffoldsOutputDir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "ExtensionKind": {
+      "description": "The name of a kind an extension registers (\"Platform\"). The authoring packages cannot see the registry, so the name is any string here; psgen checks it against the registered kinds when it loads the config.",
+      "type": "string"
+    },
+    "SchemaConfigDocument": {
+      "additionalProperties": false,
+      "description": "The schema.config.json / schema.config.yaml document shape.\n\nThis is the SchemaConfig contract projected onto plain data: authDb is the service name, and dependencies is an explicit array (there is no import system in the JSON/YAML forms to derive it from). psgen validates the data forms against the JSON Schema generated from this type (see the gen-json-schema package script).",
+      "properties": {
+        "authDb": {
+          "type": "string"
+        },
+        "dependencies": {
+          "items": {
+            "$ref": "#/definitions/ServiceDependencyRef"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/definitions/SchemaKindName"
+        },
+        "name": {
+          "type": "string"
+        },
+        "outputs": {
+          "$ref": "#/definitions/SchemaOutputs"
+        },
+        "public": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "outputs"
+      ],
+      "type": "object"
+    },
+    "SchemaKind": {
+      "description": "The kinds the core compiler registers. Closed: an extension adds a kind by registering it with psgen, not by extending this enum.",
+      "enum": [
+        "DB",
+        "API",
+        "General"
+      ],
+      "type": "string"
+    },
+    "SchemaKindName": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaKind"
+        },
+        {
+          "$ref": "#/definitions/ExtensionKind"
+        }
+      ],
+      "description": "What a config's `kind` admits: a core SchemaKind member or an extension kind name."
+    },
+    "SchemaOutputs": {
+      "additionalProperties": false,
+      "properties": {
+        "api": {
+          "$ref": "#/definitions/ApiOutputConfig"
+        },
+        "sdk": {
+          "$ref": "#/definitions/SdkOutputConfig"
+        },
+        "types": {
+          "$ref": "#/definitions/TypesOutputConfig"
+        }
+      },
+      "type": "object"
+    },
+    "SdkOutputConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "go": {
+          "$ref": "#/definitions/TargetOutputConfig"
+        },
+        "python": {
+          "$ref": "#/definitions/TargetOutputConfig"
+        },
+        "rust": {
+          "$ref": "#/definitions/TargetOutputConfig"
+        },
+        "typescript": {
+          "$ref": "#/definitions/TargetOutputConfig"
+        }
+      },
+      "type": "object"
+    },
+    "ServiceDependencyRef": {
+      "additionalProperties": false,
+      "description": "A dependency reference in the JSON/YAML config forms. The TypeScript form builds ServiceHandle sentinels with the service() helper; the data forms carry the same name + kind pair as a plain object.",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/SchemaKindName"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TargetOutputConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "TypesOutputConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "go": {
+          "$ref": "#/definitions/TargetOutputConfig"
+        },
+        "python": {
+          "$ref": "#/definitions/TargetOutputConfig"
+        },
+        "rust": {
+          "$ref": "#/definitions/TargetOutputConfig"
+        },
+        "typescript": {
+          "$ref": "#/definitions/TargetOutputConfig"
+        }
+      },
+      "type": "object"
+    }
+  }
+}

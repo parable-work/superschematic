@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@superschematic/platform": ["../../../packages/platform/src/index.ts"],
+      "@psgen/scalar-lib": ["../../../../../../parable-scalars/typescript/src/index.ts"],
+      "@superschematic/schema": ["../../../../../packages/schema/src/index.ts"],
+      "@superschematic/schema-config": ["../../../../../packages/schema-config/src/index.ts"]
+    }
+  },
+  "include": ["schema.config.ts", "src/**/*.ts"]
+}

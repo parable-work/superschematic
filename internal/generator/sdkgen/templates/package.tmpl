@@ -1,0 +1,51 @@
+{
+  "name": "{{.PackageName}}",
+  "version": "{{.Version}}",
+  "description": "TypeScript SDK for {{.SchemaName}} API",
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": {
+      "types": "./index.ts",
+      "import": "./index.ts"
+    },
+    "./client": {
+      "types": "./client.ts",
+      "import": "./client.ts"
+    },
+    "./types": {
+      "types": "./types.ts",
+      "import": "./types.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "format": "prettier --write \"**/*.ts\"",
+    "prepublishOnly": "bun run clean && bun run build"
+  },
+  "keywords": [
+    "api",
+    "sdk",
+    "typescript",
+    "{{.SchemaName}}"
+  ],
+  "author": "Parable Platform",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {},
+  "peerDependencies": {
+    "{{.TypesPackage}}": "*"
+  },
+  "peerDependenciesMeta": {
+    "{{.TypesPackage}}": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "20.0.0",
+    "prettier": "3.8.0",
+    "typescript": "5.9.3"
+  }
+}

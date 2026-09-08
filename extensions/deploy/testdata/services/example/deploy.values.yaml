@@ -1,0 +1,14 @@
+# Values every environment starts from. API_TOKEN is @secret, so it must be
+# a secretRef; PORT has a default in the schema and may be omitted.
+env:
+  PORT: 9000
+  API_TOKEN:
+    secretRef: { name: example-secrets, key: api-token }
+environments:
+  staging:
+    env:
+      DATABASE_URL: postgres://db.staging.internal/example
+      LOG_LEVEL: debug
+  production:
+    env:
+      DATABASE_URL: postgres://db.internal/example

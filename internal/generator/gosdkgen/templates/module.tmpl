@@ -1,0 +1,21 @@
+module {{.ModulePath}}
+
+go 1.26.4
+
+require {{.TypesModule}} v0.0.0
+{{- if .HasFilterableEndpoints}}
+require {{ .Naming.HTTPRuntimeGoModule }} v0.0.0
+{{- end}}
+
+{{- if .TypesReplacePath}}
+replace {{.TypesModule}} => {{.TypesReplacePath}}
+{{- end}}
+{{- if .HasFilterableEndpoints}}
+// Local path: {{ .Naming.HTTPRuntimeGoModule }} is not published — resolve it relative
+// to the monorepo layout so `go build` works without go.sum entries.
+// Path depth: platform-schemas/dist/sdk/go/<name>/ → ../../../../../utils/psgen/http-runtime/go.
+replace {{ .Naming.HTTPRuntimeGoModule }} => ../../../../../utils/psgen/http-runtime/go
+{{- end}}
+{{- range .TypeModuleReplaces}}
+replace {{.Module}} => {{.RelPath}}
+{{- end}}

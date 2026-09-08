@@ -1,0 +1,78 @@
+package {{.PackageName}}
+
+import (
+	"fmt"
+	"{{.ModulePath}}/namespaces"
+)
+
+// {{.SDKStructName}} is the root client for {{.SchemaName}} endpoints.
+type {{.SDKStructName}} struct {
+	client *HTTPClient
+	{{- range .Namespaces}}
+	{{- if not .IsTenantNS}}
+	// {{.StructName}} exposes {{.Name}} namespace operations.
+	{{- if .Endpoints}}
+	//
+	// Endpoints:
+	{{- range .Endpoints}}
+	// - {{.MethodName}}: {{docLine .Description (printf "%s endpoint." .MethodName)}}{{if .RequiresAuth}} Requires authentication.{{end}}
+	{{- end}}
+	{{- end}}
+	{{.StructName}} *namespaces.{{.StructName}}
+	{{- end}}
+	{{- end}}
+}
+
+// New creates a new {{.SDKStructName}}.
+func New(config SDKConfig) (*{{.SDKStructName}}, error) {
+	if config.BaseURL == "" {
+		return nil, fmt.Errorf("base URL is required")
+	}
+
+	client, err := NewHTTPClient(config)
+	if err != nil {
+		return nil, fmt.Errorf("create HTTP client: %w", err)
+	}
+	sdk := &{{.SDKStructName}}{
+		client: client,
+		{{- range .Namespaces}}
+		{{- if not .IsTenantNS}}
+		{{.StructName}}: namespaces.New{{.StructName}}(client),
+		{{- end}}
+		{{- end}}
+	}
+	return sdk, nil
+}
+
+{{- range .Namespaces}}
+{{- if .IsTenantNS}}
+// {{.StructName}} returns a {{.Name}} namespace client scoped to {{.TenantFieldName}}.
+{{- if .Endpoints}}
+//
+// Endpoints:
+{{- range .Endpoints}}
+// - {{.MethodName}}: {{docLine .Description (printf "%s endpoint." .MethodName)}}{{if .RequiresAuth}} Requires authentication.{{end}}
+{{- end}}
+{{- end}}
+func (s *{{$.SDKStructName}}) {{.StructName}}({{.TenantFieldName}} string) *namespaces.{{.StructName}} {
+	return namespaces.New{{.StructName}}(s.client, {{.TenantFieldName}})
+}
+{{- end}}
+{{- end}}
+
+{{- if .Runtime.HasAuth}}
+// SetToken sets the static auth token used by the SDK client.
+func (s *{{.SDKStructName}}) SetToken(token string) {
+	s.client.SetToken(token)
+}
+
+// ClearToken removes the static auth token used by the SDK client.
+func (s *{{.SDKStructName}}) ClearToken() {
+	s.client.ClearToken()
+}
+{{- end}}
+
+// SetPublicEncryptionKey sets the default key for encrypted requests.
+func (s *{{.SDKStructName}}) SetPublicEncryptionKey(key *PublicEncryptionKey) {
+	s.client.SetPublicEncryptionKey(key)
+}

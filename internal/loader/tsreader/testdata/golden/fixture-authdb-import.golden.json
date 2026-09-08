@@ -1,0 +1,21 @@
+{
+  "name": "fixture-authdb-import",
+  "kind": "API",
+  "enums": {
+    "AuthProbeStatus": {
+      "name": "AuthProbeStatus",
+      "owner": "fixture-authdb-import",
+      "comment": "Minimal schema content: the fixture exists to exercise authDb wired to an\nimported service sentinel in schema.config.ts.",
+      "values": [
+        {
+          "name": "Ok",
+          "serializedAs": "ok"
+        },
+        {
+          "name": "Denied",
+          "serializedAs": "denied"
+        }
+      ]
+    }
+  }
+}

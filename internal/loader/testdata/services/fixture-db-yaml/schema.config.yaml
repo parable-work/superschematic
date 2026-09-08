@@ -1,0 +1,6 @@
+name: fixture-db
+kind: DB
+outputs:
+  types:
+    typescript: { enabled: true }
+    go: { enabled: true }

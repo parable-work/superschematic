@@ -1,0 +1,5 @@
+# Naming for the core fixture tree: a core-only psgen (no extension linked)
+# builds these services as-is. The in-tree default auth_provider is
+# "parable", a provider only the Parable extension registers; the core
+# registers "session" alone.
+auth_provider = "session"

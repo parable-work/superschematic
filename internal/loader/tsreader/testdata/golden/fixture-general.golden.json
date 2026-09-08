@@ -1,0 +1,118 @@
+{
+  "name": "fixture-general",
+  "kind": "General",
+  "scalars": {
+    "Network.Url": {
+      "name": "Network.Url",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "varchar(4096)"
+      }
+    }
+  },
+  "types": {
+    "FixtureConfig": {
+      "name": "FixtureConfig",
+      "owner": "src/config.schema.ts",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "DATABASE_URL",
+          "typeRef": {
+            "name": "Network.Url"
+          },
+          "required": true
+        },
+        {
+          "name": "JWT_SECRET",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "secret": true
+        },
+        {
+          "name": "PORT",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true,
+          "default": "8080"
+        },
+        {
+          "name": "ENVIRONMENT",
+          "typeRef": {
+            "name": "FixtureEnvironment"
+          },
+          "required": true,
+          "default": "development"
+        }
+      ],
+      "envVars": true
+    },
+    "FixtureFilter": {
+      "name": "FixtureFilter",
+      "owner": "src/config.schema.ts",
+      "comment": "JSON-persisted filter: exercises optional-list constraint gating.\nAbsent/null must skip listMin; an explicit [] must fail it (decode must\nnot normalize an absent optional list into an empty non-nil slice).",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "kind",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMaxLength": 32
+        },
+        {
+          "name": "values",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "validateMaxLength": 64,
+          "validateListMin": 1,
+          "validateListMax": 10
+        }
+      ],
+      "jsonField": true
+    },
+    "RetryPolicy": {
+      "name": "RetryPolicy",
+      "owner": "src/config.schema.ts",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "maxAttempts",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true
+        },
+        {
+          "name": "backoffSeconds",
+          "typeRef": {
+            "name": "number"
+          }
+        }
+      ]
+    }
+  },
+  "enums": {
+    "FixtureEnvironment": {
+      "name": "FixtureEnvironment",
+      "owner": "fixture-general",
+      "comment": "Runtime environment classification.",
+      "values": [
+        {
+          "name": "Development",
+          "serializedAs": "development"
+        },
+        {
+          "name": "Production",
+          "serializedAs": "production"
+        }
+      ]
+    }
+  }
+}

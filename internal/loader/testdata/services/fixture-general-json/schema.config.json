@@ -1,0 +1,10 @@
+{
+  "name": "fixture-general",
+  "kind": "General",
+  "outputs": {
+    "types": {
+      "typescript": { "enabled": true },
+      "python": { "enabled": true }
+    }
+  }
+}

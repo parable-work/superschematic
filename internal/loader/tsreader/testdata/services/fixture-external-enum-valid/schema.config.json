@@ -1,0 +1,8 @@
+{
+  "name": "fixture-external-enum-valid",
+  "kind": "General",
+  "dependencies": [
+    { "name": "fixture-enum-guardrails", "kind": "General" }
+  ],
+  "outputs": {}
+}

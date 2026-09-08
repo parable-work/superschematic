@@ -1,0 +1,8 @@
+{
+  "name": "fixture-json-config",
+  "kind": "General",
+  "dependencies": [{ "name": "fixture-db", "kind": "DB" }],
+  "outputs": {
+    "types": { "typescript": { "enabled": true } }
+  }
+}

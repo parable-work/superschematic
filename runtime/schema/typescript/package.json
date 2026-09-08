@@ -1,0 +1,38 @@
+{
+  "name": "@psgen/schema-runtime",
+  "version": "0.1.0",
+  "description": "psgen schema runtime for TypeScript: JSON/YAML schema reader and writer, IR reader, parse, validate, mask, merge, and the scalar validators facade (./platform). Needs @psgen/scalar-lib and @psgen/schema-ir next to it in node_modules; see scripts/link-local-deps.mjs.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./platform": {
+      "types": "./dist/esm/platform/index.d.ts",
+      "import": "./dist/esm/platform/index.js",
+      "require": "./dist/platform/index.js"
+    },
+    "./runtime/*": {
+      "types": "./dist/esm/runtime/*.d.ts",
+      "import": "./dist/esm/runtime/*.js",
+      "require": "./dist/runtime/*.js"
+    }
+  },
+  "scripts": {
+    "link-deps": "node scripts/link-local-deps.mjs",
+    "build": "node scripts/link-local-deps.mjs && tsc -p tsconfig.json && tsc -p tsconfig.esm.json && node scripts/fix-esm-extensions.mjs",
+    "test": "node scripts/link-local-deps.mjs && node test/ir-reader.cjs && node test/field-length-parity.cjs && node test/parse-registry-datetime.cjs && node test/parse-registry-names.cjs"
+  },
+  "dependencies": {
+    "js-yaml": "4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "4.0.9",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.3"
+  }
+}

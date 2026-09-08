@@ -1,0 +1,14 @@
+# Rust REST implementation scaffolds for `{{ .SchemaName }}`
+
+These files are starter implementations for generated Rust REST handlers.
+
+- One directory is created per namespace.
+- `implementation.rs` provides the namespace implementation struct.
+- One file is generated per endpoint method.
+- Existing files are never overwritten.
+
+Regenerate safely:
+
+```bash
+psgen build schemas/{{ .SchemaName }}/schema.json
+```

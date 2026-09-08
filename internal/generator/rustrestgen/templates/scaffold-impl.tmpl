@@ -1,0 +1,15 @@
+//! {{ .Endpoint.FunctionName }} scaffold.
+//! NOTE: Generated once and never overwritten.
+
+use async_trait::async_trait;
+use psgen_http_runtime::{ApiError, RequestContext};
+use serde_json::Value;
+
+use crate::interfaces::{{ toPascalCase .Namespace }}Implementation;
+
+#[async_trait]
+impl {{ toPascalCase .Namespace }}Implementation for Implementation {
+    async fn {{ .Endpoint.FunctionName }}(&self, _ctx: RequestContext, _payload: Value) -> Result<Value, ApiError> {
+        Err(ApiError::not_implemented("{{ .Endpoint.FunctionName }} is not implemented"))
+    }
+}

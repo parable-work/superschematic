@@ -1,0 +1,194 @@
+{{/* Core session auth snippets: the hook points the core apigen templates
+     render through authSnippet (apigen.AuthSnippets). Generated code imports
+     only the generic http-runtime session package. Each non-empty snippet
+     starts with the newline separating it from the line before; the data is
+     the APIOutput unless the hook says otherwise. */}}
+
+{{ define "contextImports" }}
+
+	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
+{{- end }}
+
+{{ define "contextAuth" }}
+
+// ===========================================================================
+// Auth Context (delegated to http-runtime/session)
+// ===========================================================================
+
+// ContextWithPrincipalID returns a new context with the authenticated principal's ID set.
+func ContextWithPrincipalID(ctx context.Context, principalID string) context.Context {
+	return runtimesession.ContextWithPrincipalID(ctx, principalID)
+}
+
+// GetPrincipalID extracts the authenticated principal's ID from context.
+func GetPrincipalID(ctx context.Context) string {
+	return runtimesession.GetPrincipalID(ctx)
+}
+
+// HasPrincipalID reports whether a principal ID is set on the context.
+func HasPrincipalID(ctx context.Context) bool {
+	return runtimesession.HasPrincipalID(ctx)
+}
+
+// ContextWithPrincipalName returns a new context with the principal's display name set.
+func ContextWithPrincipalName(ctx context.Context, name string) context.Context {
+	return runtimesession.ContextWithPrincipalName(ctx, name)
+}
+
+// GetPrincipalName extracts the principal's display name from context.
+func GetPrincipalName(ctx context.Context) string {
+	return runtimesession.GetPrincipalName(ctx)
+}
+
+// ContextWithSessionID returns a new context with the session ID set.
+func ContextWithSessionID(ctx context.Context, sessionID string) context.Context {
+	return runtimesession.ContextWithSessionID(ctx, sessionID)
+}
+
+// GetSessionID extracts the session ID from context.
+func GetSessionID(ctx context.Context) string {
+	return runtimesession.GetSessionID(ctx)
+}
+
+// ContextWithRoles returns a new context with the principal's roles set.
+func ContextWithRoles(ctx context.Context, roles []runtimesession.Role) context.Context {
+	return runtimesession.ContextWithRoles(ctx, roles)
+}
+
+// GetRoles extracts the principal's roles from context. Returns nil when no
+// roles are set.
+func GetRoles(ctx context.Context) []runtimesession.Role {
+	return runtimesession.GetRoles(ctx)
+}
+{{- end }}
+
+{{ define "middlewareStdImports" }}
+{{- if or .Auth.HasSessionStore .Auth.HasPrincipalStore }}
+	"errors"
+{{- end }}
+{{- end }}
+
+{{ define "middlewareImports" }}
+	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
+{{- end }}
+
+{{ define "middlewareAliases" }}
+
+// ===========================================================================
+// Type Aliases (delegated to http-runtime/session)
+// ===========================================================================
+
+// Role is the role projection (id + name + permissions) propagated through
+// request context.
+type Role = runtimesession.Role
+
+// SessionRecord is the session row the SessionStore returns.
+type SessionRecord = runtimesession.Record
+
+// Principal is the authenticated principal the PrincipalStore returns.
+type Principal = runtimesession.Principal
+{{- end }}
+
+{{ define "middlewareAuthz" }}
+
+// ===========================================================================
+// Authorization (delegated to http-runtime/session)
+// ===========================================================================
+
+var (
+	RequireAuth        = runtimesession.RequireAuth
+	RequirePermissions = runtimesession.RequirePermissions
+	HasAnyPermission   = runtimesession.HasAnyPermission
+)
+{{- end }}
+
+{{ define "middlewareStores" }}
+
+// ===========================================================================
+// ORM Store Adapters
+// ===========================================================================
+// Each adapter is generated only when the upstream DB schema declares the
+// table shape it queries, so this file always compiles against the upstream
+// ORM regardless of which auth tables the schema defines.
+
+{{- if .Auth.HasSessionStore }}
+
+type ormSessionStore struct {
+	db orm.DatabaseInterface
+}
+
+func (s *ormSessionStore) FindByJTI(ctx context.Context, jti string) (runtimesession.Record, error) {
+	session, err := s.db.GetSessionRepository().FindOne(ctx, &orm.SessionFilter{
+		Jti: &orm.UUIDFilter{Eq: &jti},
+	}, &orm.SessionFindOptions{
+		IncludeDeleted: true,
+	})
+	if err != nil {
+		if errors.Is(err, orm.ErrNotFound) {
+			return runtimesession.Record{}, runtimesession.ErrNotFound
+		}
+		return runtimesession.Record{}, err
+	}
+	return runtimesession.Record{
+		ID:          session.Id.String(),
+		PrincipalID: session.User.Id.String(),
+		ExpiresAt:   session.ExpiresAt,
+		DeletedAt:   session.DeletedAt,
+	}, nil
+}
+
+// NewSessionStore creates a SessionStore backed by the generated ORM.
+func NewSessionStore(db orm.DatabaseInterface) runtimesession.Store {
+	return &ormSessionStore{db: db}
+}
+{{- end }}
+
+{{- if .Auth.HasPrincipalStore }}
+
+type ormPrincipalStore struct {
+	db orm.DatabaseInterface
+}
+
+func (s *ormPrincipalStore) GetByID(ctx context.Context, id string) (runtimesession.Principal, error) {
+	user, err := s.db.GetUserRepository().FindOne(ctx, &orm.UserFilter{
+		Id: &orm.UUIDFilter{Eq: &id},
+	}, nil)
+	if err != nil {
+		if errors.Is(err, orm.ErrNotFound) {
+			return runtimesession.Principal{}, runtimesession.ErrNotFound
+		}
+		return runtimesession.Principal{}, err
+	}
+	return runtimesession.Principal{
+		ID:   user.Id.String(),
+		Name: string(user.Name),
+	}, nil
+}
+
+// NewPrincipalStore creates a PrincipalStore backed by the generated ORM.
+func NewPrincipalStore(db orm.DatabaseInterface) runtimesession.PrincipalStore {
+	return &ormPrincipalStore{db: db}
+}
+{{- end }}
+{{- end }}
+
+{{ define "routesImports" }}
+{{- if .HasPermissionEndpoints }}
+	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
+{{- end }}
+{{- end }}
+
+{{ define "routesConfigStores" }}{{ end }}
+{{ define "routesConfigMiddlewares" }}{{ end }}
+{{ define "routesConfigValidate" }}{{ end }}
+{{ define "routesConfigExample" }}{{ end }}
+{{ define "routesSetupPre" }}{{ end }}
+{{ define "routesSetup" }}{{ end }}
+{{ define "routesProtectedMiddleware" }}{{ end }}
+
+{{ define "routePermissions" }}
+				runtimesession.RequirePermissions({{- range $i, $perm := .RequiredPerms }}{{ if $i }}, {{ end }}"{{ $perm }}"{{- end }}),
+{{- end }}
+
+{{ define "moduleRequires" }}{{ end }}
+{{ define "moduleReplaces" }}{{ end }}
