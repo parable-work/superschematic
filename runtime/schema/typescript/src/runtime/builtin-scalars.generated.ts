@@ -1,193 +1,10 @@
 // @generated; do not edit
-// Builtin scalar catalog generated from the parable-scalars-core registry
-// (utils/parable-scalars/ext/src/lib.rs registry(): the Parable scalars
-// assembled over the superscalar built-in catalog).
-// Regenerate with: cd utils/parable-scalars && make codegen
+// Builtin scalar catalog: one row per scalar in the superscalar Go package
+// this repository pins (superscalar.pin). Regenerate with:
+//   go run ./internal/tools/scalarcatalog
 import type { ScalarDef } from './validation/types';
 
 export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
-  "Artifact_File": {
-    "name": "Artifact_File",
-    "description": "Artifact file metadata with GCS storage path",
-    "primitive": "Type",
-    "minLength": 0,
-    "maxLength": 0,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "{\"gcsPath\":\"gs://bucket/artifacts/tenant/file.csv\",\"mimeType\":\"text/csv\",\"size\":204800,\"filename\":\"export.csv\"}",
-    "fileUpload": {
-      "maxSize": 1073741824,
-      "allowedTypes": [
-        "text/csv",
-        "application/octet-stream",
-        "application/zip",
-        "application/x-zip-compressed",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-excel",
-        "application/vnd.apple.numbers",
-        "application/vnd.oasis.opendocument.spreadsheet"
-      ],
-      "category": "artifact"
-    },
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": true,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "ArtifactFileMetadata",
-      "python": "ArtifactFileMetadata",
-      "go": "ArtifactFileMetadata",
-      "rust": "serde_json::Value",
-      "sql": "JSONB",
-      "json_schema": "object"
-    }
-  },
-  "Asset_File": {
-    "name": "Asset_File",
-    "description": "Generic file metadata",
-    "primitive": "Type",
-    "minLength": 0,
-    "maxLength": 0,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "{\"url\":\"https://cdn.example.com/file.pdf\",\"mimeType\":\"application/pdf\",\"size\":204800,\"filename\":\"document.pdf\",\"assetId\":\"abc123\"}",
-    "fileUpload": {
-      "maxSize": 52428800,
-      "allowedTypes": [],
-      "category": "file"
-    },
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": true,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "FileMetadata",
-      "python": "FileMetadata",
-      "go": "FileMetadata",
-      "rust": "serde_json::Value",
-      "sql": "JSONB",
-      "json_schema": "object"
-    }
-  },
-  "Asset_FilePath": {
-    "name": "Asset_FilePath",
-    "description": "A file system path",
-    "primitive": "String",
-    "minLength": 1,
-    "maxLength": 0,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "../dist/api/web-api",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "json_schema": "string"
-    }
-  },
-  "Asset_Image": {
-    "name": "Asset_Image",
-    "description": "Image metadata",
-    "primitive": "Type",
-    "minLength": 0,
-    "maxLength": 0,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "{\"url\":\"https://cdn.example.com/img.jpg\",\"mimeType\":\"image/jpeg\",\"size\":102400,\"width\":800,\"height\":600,\"filename\":\"photo.jpg\"}",
-    "fileUpload": {
-      "maxSize": 2000000,
-      "allowedTypes": [
-        "image/jpeg",
-        "image/png",
-        "image/gif",
-        "image/webp"
-      ],
-      "category": "image"
-    },
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": true,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "ImageMetadata",
-      "python": "ImageMetadata",
-      "go": "ImageMetadata",
-      "rust": "serde_json::Value",
-      "sql": "JSONB",
-      "json_schema": "object"
-    }
-  },
-  "Asset_LogoImage": {
-    "name": "Asset_LogoImage",
-    "description": "Transparent PNG logo image",
-    "primitive": "Type",
-    "minLength": 0,
-    "maxLength": 0,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "{\"url\":\"https://cdn.example.com/logo.png\",\"mimeType\":\"image/png\",\"size\":51200,\"width\":512,\"height\":512,\"filename\":\"logo.png\",\"hasTransparency\":true}",
-    "fileUpload": {
-      "maxSize": 1000000,
-      "allowedTypes": [
-        "image/png"
-      ],
-      "category": "image"
-    },
-    "imageConstraints": {
-      "maxWidth": 0,
-      "maxHeight": 0,
-      "minAspectRatio": null,
-      "maxAspectRatio": null,
-      "requireTransparency": true
-    },
-    "hasCustomNormalize": false,
-    "hasCustomValidate": true,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "LogoImageMetadata",
-      "python": "LogoImageMetadata",
-      "go": "LogoImageMetadata",
-      "rust": "serde_json::Value",
-      "sql": "JSONB",
-      "json_schema": "object"
-    }
-  },
   "Auth_JWT": {
     "name": "Auth_JWT",
     "description": "JSON Web Token string",
@@ -209,12 +26,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "TEXT",
-      "json_schema": "string"
+      "go": "AuthJWT",
+      "json_schema": "string",
+      "sql": "TEXT"
     }
   },
   "Auth_Password": {
@@ -238,44 +52,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(128)",
-      "json_schema": "string"
-    }
-  },
-  "Connector_Slug": {
-    "name": "Connector_Slug",
-    "description": "An opaque identifier for a connector definition",
-    "primitive": "String",
-    "minLength": 1,
-    "maxLength": 32,
-    "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
-    "format": "",
-    "reservedWords": [
-      "identity",
-      "artifacts"
-    ],
-    "caseInsensitive": true,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "anaplan",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "CITEXT",
-      "json_schema": "string"
+      "go": "AuthPassword",
+      "json_schema": "string",
+      "sql": "VARCHAR(128)"
     }
   },
   "Contact_Email": {
@@ -287,7 +66,7 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
     "format": "",
     "reservedWords": [],
-    "caseInsensitive": true,
+    "caseInsensitive": false,
     "reservedWordsCaseInsensitive": false,
     "reservedWordsMatchPartial": false,
     "minimum": null,
@@ -299,12 +78,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": true,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "CITEXT",
-      "json_schema": "string"
+      "go": "ContactEmail",
+      "json_schema": "string",
+      "sql": "CITEXT"
     }
   },
   "Contact_PhoneNumber": {
@@ -328,12 +104,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": true,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(16)",
-      "json_schema": "string"
+      "go": "ContactPhoneNumber",
+      "json_schema": "string",
+      "sql": "VARCHAR(16)"
     }
   },
   "Crypto_RSAPrivateKey": {
@@ -357,12 +130,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "TEXT",
-      "json_schema": "string"
+      "go": "CryptoRSAPrivateKey",
+      "json_schema": "string",
+      "sql": "TEXT"
     }
   },
   "Crypto_RSAPublicKey": {
@@ -386,12 +156,35 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "TEXT",
-      "json_schema": "string"
+      "go": "CryptoRSAPublicKey",
+      "json_schema": "string",
+      "sql": "TEXT"
+    }
+  },
+  "Crypto_SHA256": {
+    "name": "Crypto_SHA256",
+    "description": "Lowercase hexadecimal SHA-256 digest",
+    "primitive": "String",
+    "minLength": 64,
+    "maxLength": 64,
+    "pattern": "^[0-9a-f]{64}$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "CryptoSHA256",
+      "json_schema": "string",
+      "sql": "VARCHAR(64)"
     }
   },
   "Design_Color": {
@@ -415,12 +208,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": true,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(9)",
-      "json_schema": "string"
+      "go": "DesignColor",
+      "json_schema": "string",
+      "sql": "VARCHAR(9)"
     }
   },
   "Embedding_Vector": {
@@ -444,10 +234,7 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "number[]",
-      "python": "list[float]",
-      "go": "[]float32",
-      "rust": "Vec<f32>",
+      "go": "EmbeddingVector",
       "json_schema": "array"
     }
   },
@@ -472,12 +259,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "number",
-      "python": "int",
-      "go": "int64",
-      "rust": "i64",
-      "sql": "BIGINT",
-      "json_schema": "integer"
+      "go": "FileSizeBytes",
+      "json_schema": "integer",
+      "sql": "BIGINT"
     }
   },
   "Finance_Money": {
@@ -501,12 +285,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": true,
     "typeMappings": {
-      "typescript": "number",
-      "python": "int",
-      "go": "int64",
-      "rust": "i64",
-      "sql": "BIGINT",
-      "json_schema": "integer"
+      "go": "FinanceMoney",
+      "json_schema": "integer",
+      "sql": "BIGINT"
     }
   },
   "Generic_Int64": {
@@ -530,12 +311,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": true,
     "typeMappings": {
-      "typescript": "number",
-      "python": "int",
-      "go": "int64",
-      "rust": "i64",
-      "sql": "BIGINT",
-      "json_schema": "integer"
+      "go": "GenericInt64",
+      "json_schema": "integer",
+      "sql": "BIGINT"
     }
   },
   "Generic_JSON": {
@@ -559,12 +337,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "Record<string, any>",
-      "python": "dict",
-      "go": "json.RawMessage",
-      "rust": "serde_json::Value",
-      "sql": "JSONB",
-      "json_schema": "object"
+      "go": "GenericJSON",
+      "json_schema": "object",
+      "sql": "JSONB"
     }
   },
   "Generic_Probability": {
@@ -588,12 +363,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "number",
-      "python": "float",
-      "go": "float64",
-      "rust": "f64",
-      "sql": "DOUBLE PRECISION",
-      "json_schema": "number"
+      "go": "GenericProbability",
+      "json_schema": "number",
+      "sql": "DOUBLE PRECISION"
     }
   },
   "Generic_StringMap": {
@@ -617,12 +389,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "Record<string, string>",
-      "python": "Dict[str, str]",
-      "go": "map[string]string",
-      "rust": "std::collections::HashMap<String, String>",
-      "sql": "JSONB",
-      "json_schema": "object"
+      "go": "GenericStringMap",
+      "json_schema": "object",
+      "sql": "JSONB"
     }
   },
   "Geo_Location": {
@@ -646,12 +415,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "{ lat: number; lon: number }",
-      "python": "dict",
-      "go": "struct{ Lat float64; Lon float64 }",
-      "rust": "struct Location { lat: f64, lon: f64 }",
-      "sql": "POINT",
-      "json_schema": "object"
+      "go": "GeoLocation",
+      "json_schema": "object",
+      "sql": "POINT"
     }
   },
   "Identity_Name": {
@@ -675,12 +441,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(80)",
-      "json_schema": "string"
+      "go": "IdentityName",
+      "json_schema": "string",
+      "sql": "VARCHAR(80)"
     }
   },
   "Identity_Slug": {
@@ -692,7 +455,7 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
     "format": "",
     "reservedWords": [],
-    "caseInsensitive": true,
+    "caseInsensitive": false,
     "reservedWordsCaseInsensitive": false,
     "reservedWordsMatchPartial": false,
     "minimum": null,
@@ -704,12 +467,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "CITEXT",
-      "json_schema": "string"
+      "go": "IdentitySlug",
+      "json_schema": "string",
+      "sql": "CITEXT"
     }
   },
   "Identity_UUID": {
@@ -733,12 +493,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": true,
     "typeMappings": {
-      "typescript": "string",
-      "python": "uuid.UUID",
-      "go": "uuid.UUID",
-      "rust": "uuid::Uuid",
-      "sql": "UUID",
-      "json_schema": "string"
+      "go": "IdentityUUID",
+      "json_schema": "string",
+      "sql": "UUID"
     }
   },
   "Identity_UserID": {
@@ -762,12 +519,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": true,
     "typeMappings": {
-      "typescript": "string",
-      "python": "uuid.UUID",
-      "go": "uuid.UUID",
-      "rust": "uuid::Uuid",
-      "sql": "UUID",
-      "json_schema": "string"
+      "go": "IdentityUserID",
+      "json_schema": "string",
+      "sql": "UUID"
     }
   },
   "Localization_Locale": {
@@ -791,12 +545,35 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(35)",
-      "json_schema": "string"
+      "go": "LocalizationLocale",
+      "json_schema": "string",
+      "sql": "VARCHAR(35)"
+    }
+  },
+  "Network_DnsLabel": {
+    "name": "Network_DnsLabel",
+    "description": "Single DNS label (RFC 1035): one hostname segment, no dots",
+    "primitive": "String",
+    "minLength": 0,
+    "maxLength": 63,
+    "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "mycompany",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "NetworkDnsLabel",
+      "json_schema": "string",
+      "sql": "CITEXT"
     }
   },
   "Network_DomainName": {
@@ -808,7 +585,7 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)*$",
     "format": "",
     "reservedWords": [],
-    "caseInsensitive": true,
+    "caseInsensitive": false,
     "reservedWordsCaseInsensitive": false,
     "reservedWordsMatchPartial": false,
     "minimum": null,
@@ -820,12 +597,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "CITEXT",
-      "json_schema": "string"
+      "go": "NetworkDomainName",
+      "json_schema": "string",
+      "sql": "CITEXT"
     }
   },
   "Network_IpAddress": {
@@ -849,12 +623,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "INET",
-      "json_schema": "string"
+      "go": "NetworkIpAddress",
+      "json_schema": "string",
+      "sql": "INET"
     }
   },
   "Network_Uri": {
@@ -878,12 +649,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "TEXT",
-      "json_schema": "string"
+      "go": "NetworkUri",
+      "json_schema": "string",
+      "sql": "TEXT"
     }
   },
   "Network_Url": {
@@ -892,7 +660,7 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "primitive": "String",
     "minLength": 0,
     "maxLength": 2048,
-    "pattern": "^https?://[\\w\\-\\{\\}]+(\\.[\\w\\-\\{\\}]+)+([:/?#][\\w\\-\\._~:/?#\\[\\]@!\\$&'\\(\\)\\*\\+,;=\\{\\}%]*)?$",
+    "pattern": "^https?://[\\w\\-\\{\\}]+(\\.[\\w\\-\\{\\}]+)+([:/?#][\\w\\-\\._~:/?#\\[\\]@!\\$\u0026'\\(\\)\\*\\+,;=\\{\\}%]*)?$",
     "format": "",
     "reservedWords": [],
     "caseInsensitive": false,
@@ -907,250 +675,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "varchar(4096)",
-      "json_schema": "string"
-    }
-  },
-  "Parable_ErrorCode": {
-    "name": "Parable_ErrorCode",
-    "description": "Application error code",
-    "primitive": "String",
-    "minLength": 0,
-    "maxLength": 50,
-    "pattern": "^[A-Z_][A-Z0-9_]*$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(50)",
-      "json_schema": "string"
-    }
-  },
-  "Parable_LtreePath": {
-    "name": "Parable_LtreePath",
-    "description": "Hierarchical path expressed as a dot-separated ltree (e.g., 'reports.q1.draft').",
-    "primitive": "String",
-    "minLength": 0,
-    "maxLength": 2048,
-    "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "reports.q1.draft",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "ltree",
-      "json_schema": "string"
-    }
-  },
-  "Parable_Permission": {
-    "name": "Parable_Permission",
-    "description": "Hierarchical permission string (e.g., 'admin.users.read')",
-    "primitive": "String",
-    "minLength": 0,
-    "maxLength": 255,
-    "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)*$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "admin.users.read",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": true,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "ltree",
-      "json_schema": "string"
-    }
-  },
-  "Parable_Scalar": {
-    "name": "Parable_Scalar",
-    "description": "Canonical name of a Parable scalar (e.g., Identity.UUID, Generic.Int64)",
-    "primitive": "String",
-    "minLength": 3,
-    "maxLength": 128,
-    "pattern": "^[A-Z][A-Za-z0-9]*\\.[A-Z][A-Za-z0-9]*$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "Identity.UUID",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(128)",
-      "json_schema": "string"
-    }
-  },
-  "Parable_Schema": {
-    "name": "Parable_Schema",
-    "description": "A Parable Schema in JSON",
-    "primitive": "Type",
-    "minLength": 0,
-    "maxLength": 0,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "{\"$schema\":\"https://parable.work/schemas/parable-schema.json\",\"definitions\":{\"ExampleType\":{\"properties\":{\"accountId\":{\"$ref\":\"#/definitions/scalars/Identity.UUID\"},\"clientSecret\":{\"type\":\"string\",\"x-secret\":true},\"url\":{\"$ref\":\"#/definitions/scalars/Network.Url\"}},\"required\":[\"accountId\",\"clientSecret\",\"url\"],\"type\":\"object\",\"x-kind\":\"type\"}}}",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "ParableSchemaType",
-      "python": "ParableSchemaType",
-      "go": "ParableSchemaType",
-      "rust": "serde_json::Value",
-      "sql": "JSONB",
-      "json_schema": "object"
-    }
-  },
-  "Parable_SchemaData": {
-    "name": "Parable_SchemaData",
-    "description": "A Parable Schema in JSON",
-    "primitive": "Type",
-    "minLength": 0,
-    "maxLength": 0,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "{\"__typename\": \"ExampleType\", \"accountId\": \"YQJpYwUwvbaLOwTUr4thA\", \"clientSecret\": \"secret123\", \"url\": \"https://example.com\"}",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "ParableSchemaDataType",
-      "python": "ParableSchemaDataType",
-      "go": "ParableSchemaDataType",
-      "rust": "serde_json::Value",
-      "sql": "JSONB",
-      "json_schema": "object"
-    }
-  },
-  "Parable_Slug": {
-    "name": "Parable_Slug",
-    "description": "A URL friendly version of a string",
-    "primitive": "String",
-    "minLength": 1,
-    "maxLength": 17,
-    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-    "format": "",
-    "reservedWords": [
-      "parable",
-      "admin",
-      "trust",
-      "cdn",
-      "app"
-    ],
-    "caseInsensitive": true,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "acme-corp",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "CITEXT",
-      "json_schema": "string"
-    }
-  },
-  "Tap_Identifier": {
-    "name": "Tap_Identifier",
-    "description": "A machine identifier for a data tap (lowercase alphanumeric, underscores, and hyphens)",
-    "primitive": "String",
-    "minLength": 1,
-    "maxLength": 200,
-    "pattern": "^[a-z][a-z0-9_-]*$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "group_members",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(80)",
-      "json_schema": "string"
+      "go": "NetworkUrl",
+      "json_schema": "string",
+      "sql": "varchar(4096)"
     }
   },
   "Temporal_CronExpression": {
@@ -1174,12 +701,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(100)",
-      "json_schema": "string"
+      "go": "TemporalCronExpression",
+      "json_schema": "string",
+      "sql": "VARCHAR(100)"
     }
   },
   "Temporal_Date": {
@@ -1203,12 +727,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "DATE",
-      "json_schema": "string"
+      "go": "TemporalDate",
+      "json_schema": "string",
+      "sql": "DATE"
     }
   },
   "Temporal_DateTime": {
@@ -1232,412 +753,9 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": true,
     "typeMappings": {
-      "typescript": "Date",
-      "python": "datetime.datetime",
-      "go": "time.Time",
-      "rust": "chrono::DateTime<chrono::Utc>",
-      "sql": "TIMESTAMPTZ",
-      "json_schema": "string"
-    }
-  },
-  "Temporal_Duration": {
-    "name": "Temporal_Duration",
-    "description": "Duration for timeouts and intervals",
-    "primitive": "String",
-    "minLength": 0,
-    "maxLength": 32,
-    "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "30s",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": true,
-    "hasCustomValidate": true,
-    "hasCustomParse": true,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "time.Duration",
-      "rust": "String",
-      "sql": "INTERVAL",
-      "json_schema": "string"
-    }
-  },
-  "Temporal_Milliseconds": {
-    "name": "Temporal_Milliseconds",
-    "description": "Signed integer count of milliseconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix_millis.",
-    "primitive": "Int",
-    "minLength": 0,
-    "maxLength": 0,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": -9007199254740991,
-    "maximum": 9007199254740991,
-    "example": "1000",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": true,
-    "typeMappings": {
-      "typescript": "number",
-      "python": "int",
-      "go": "int64",
-      "rust": "i64",
-      "sql": "BIGINT",
-      "json_schema": "integer"
-    }
-  },
-  "Temporal_Month": {
-    "name": "Temporal_Month",
-    "description": "Calendar month, normalized to two-digit numeric (01-12). Accepts '2', '02', 'Feb', 'February' (case-insensitive).",
-    "primitive": "String",
-    "minLength": 0,
-    "maxLength": 9,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "02",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(2)",
-      "json_schema": "string"
-    }
-  },
-  "Temporal_Quarter": {
-    "name": "Temporal_Quarter",
-    "description": "Calendar quarter (Q1-Q4)",
-    "primitive": "String",
-    "minLength": 2,
-    "maxLength": 2,
-    "pattern": "^[Qq][1-4]$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": true,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "Q1",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(2)",
-      "json_schema": "string"
-    }
-  },
-  "Temporal_QuarterYear": {
-    "name": "Temporal_QuarterYear",
-    "description": "Quarter and year, normalized to 'YYYY-Q#'. Accepts '2025-Q1', 'Q1/2025', 'Q1-2025', 'Q1-25' (2-digit years interpreted as 20XX).",
-    "primitive": "String",
-    "minLength": 0,
-    "maxLength": 8,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "2025-Q1",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(7)",
-      "json_schema": "string"
-    }
-  },
-  "Temporal_Time": {
-    "name": "Temporal_Time",
-    "description": "Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.",
-    "primitive": "String",
-    "minLength": 0,
-    "maxLength": 0,
-    "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "12:25",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "TIME",
-      "json_schema": "string"
-    }
-  },
-  "Temporal_TimeZone": {
-    "name": "Temporal_TimeZone",
-    "description": "IANA timezone identifier (e.g., America/New_York, UTC, Etc/UTC)",
-    "primitive": "String",
-    "minLength": 0,
-    "maxLength": 100,
-    "pattern": "^(?:UTC|[A-Za-z]+/[A-Za-z_/]+)$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "America/New_York",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(100)",
-      "json_schema": "string"
-    }
-  },
-  "Temporal_Year": {
-    "name": "Temporal_Year",
-    "description": "Calendar year as a 4-digit string (e.g., 2025)",
-    "primitive": "String",
-    "minLength": 4,
-    "maxLength": 4,
-    "pattern": "^[1-9]\\d{3}$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "2025",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(4)",
-      "json_schema": "string"
-    }
-  },
-  "Text_Markdown": {
-    "name": "Text_Markdown",
-    "description": "Markdown text",
-    "primitive": "String",
-    "minLength": 1,
-    "maxLength": 0,
-    "pattern": "^[\\s\\S]*$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "## Hello, World!",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "TEXT",
-      "json_schema": "string"
-    }
-  },
-  "Parable_Handle": {
-    "name": "Parable_Handle",
-    "description": "A mutable camelCase code, path, and file identifier; URLs use stable UUIDs",
-    "primitive": "String",
-    "minLength": 1,
-    "maxLength": 200,
-    "pattern": "^[a-z][A-Za-z0-9]*$",
-    "format": "",
-    "reservedWords": [
-      "con",
-      "prn",
-      "aux",
-      "nul",
-      "com1",
-      "com2",
-      "com3",
-      "com4",
-      "com5",
-      "com6",
-      "com7",
-      "com8",
-      "com9",
-      "lpt1",
-      "lpt2",
-      "lpt3",
-      "lpt4",
-      "lpt5",
-      "lpt6",
-      "lpt7",
-      "lpt8",
-      "lpt9"
-    ],
-    "caseInsensitive": true,
-    "reservedWordsCaseInsensitive": true,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "revenueForecast",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "CITEXT",
-      "json_schema": "string"
-    }
-  },
-  "Temporal_Seconds": {
-    "name": "Temporal_Seconds",
-    "description": "Signed integer count of seconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix.",
-    "primitive": "Int",
-    "minLength": 0,
-    "maxLength": 0,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": -9007199254740991,
-    "maximum": 9007199254740991,
-    "example": "60",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": true,
-    "typeMappings": {
-      "typescript": "number",
-      "python": "int",
-      "go": "int64",
-      "rust": "i64",
-      "sql": "BIGINT",
-      "json_schema": "integer"
-    }
-  },
-  "Temporal_Minutes": {
-    "name": "Temporal_Minutes",
-    "description": "Signed integer count of minutes: an amount of elapsed time, never a point in time.",
-    "primitive": "Int",
-    "minLength": 0,
-    "maxLength": 0,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": -9007199254740991,
-    "maximum": 9007199254740991,
-    "example": "5",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": true,
-    "typeMappings": {
-      "typescript": "number",
-      "python": "int",
-      "go": "int64",
-      "rust": "i64",
-      "sql": "BIGINT",
-      "json_schema": "integer"
-    }
-  },
-  "Temporal_Hours": {
-    "name": "Temporal_Hours",
-    "description": "Signed integer count of hours: an amount of elapsed time, never a point in time.",
-    "primitive": "Int",
-    "minLength": 0,
-    "maxLength": 0,
-    "pattern": "",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": -9007199254740991,
-    "maximum": 9007199254740991,
-    "example": "2",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": true,
-    "typeMappings": {
-      "typescript": "number",
-      "python": "int",
-      "go": "int64",
-      "rust": "i64",
-      "sql": "BIGINT",
-      "json_schema": "integer"
+      "go": "TemporalDateTime",
+      "json_schema": "string",
+      "sql": "TIMESTAMPTZ"
     }
   },
   "Temporal_Days": {
@@ -1661,128 +779,191 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": true,
     "typeMappings": {
-      "typescript": "number",
-      "python": "int",
-      "go": "int64",
-      "rust": "i64",
-      "sql": "BIGINT",
-      "json_schema": "integer"
+      "go": "TemporalDays",
+      "json_schema": "integer",
+      "sql": "BIGINT"
     }
   },
-  "Text_Sql": {
-    "name": "Text_Sql",
-    "description": "SQL text",
-    "primitive": "String",
-    "minLength": 1,
-    "maxLength": 0,
-    "pattern": "^[\\s\\S]*$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "SELECT 1",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "TEXT",
-      "json_schema": "string"
-    }
-  },
-  "Parable_Icon": {
-    "name": "Parable_Icon",
-    "description": "Serialized icon spec: a Font Awesome pack/weight/fill/name, an emoji, or an asset URL",
-    "primitive": "String",
-    "minLength": 1,
-    "maxLength": 2048,
-    "pattern": "^(?:fa:[a-z0-9]+(?:-[a-z0-9]+)*:[a-z0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*:[a-z0-9]+(?:-[a-z0-9]+)*(?:@#[0-9a-f]{6})?|emoji:\\S+|image:\\S+)$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "fa:classic:regular-outline:circle-check",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "TEXT",
-      "json_schema": "string"
-    }
-  },
-  "Crypto_SHA256": {
-    "name": "Crypto_SHA256",
-    "description": "Lowercase hexadecimal SHA-256 digest",
-    "primitive": "String",
-    "minLength": 64,
-    "maxLength": 64,
-    "pattern": "^[0-9a-f]{64}$",
-    "format": "",
-    "reservedWords": [],
-    "caseInsensitive": false,
-    "reservedWordsCaseInsensitive": false,
-    "reservedWordsMatchPartial": false,
-    "minimum": null,
-    "maximum": null,
-    "example": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-    "fileUpload": null,
-    "imageConstraints": null,
-    "hasCustomNormalize": false,
-    "hasCustomValidate": false,
-    "hasCustomParse": false,
-    "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(64)",
-      "json_schema": "string"
-    }
-  },
-  "Network_DnsLabel": {
-    "name": "Network_DnsLabel",
-    "description": "Single DNS label (RFC 1035): one hostname segment, no dots",
+  "Temporal_Duration": {
+    "name": "Temporal_Duration",
+    "description": "Duration for timeouts and intervals",
     "primitive": "String",
     "minLength": 0,
-    "maxLength": 63,
-    "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$",
+    "maxLength": 32,
+    "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
     "format": "",
     "reservedWords": [],
-    "caseInsensitive": true,
+    "caseInsensitive": false,
     "reservedWordsCaseInsensitive": false,
     "reservedWordsMatchPartial": false,
     "minimum": null,
     "maximum": null,
-    "example": "mycompany",
+    "example": "30s",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": true,
+    "hasCustomValidate": true,
+    "hasCustomParse": true,
+    "typeMappings": {
+      "go": "TemporalDuration",
+      "json_schema": "string",
+      "sql": "INTERVAL"
+    }
+  },
+  "Temporal_Hours": {
+    "name": "Temporal_Hours",
+    "description": "Signed integer count of hours: an amount of elapsed time, never a point in time.",
+    "primitive": "Int",
+    "minLength": 0,
+    "maxLength": 0,
+    "pattern": "",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": -9007199254740991,
+    "maximum": 9007199254740991,
+    "example": "2",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": true,
+    "typeMappings": {
+      "go": "TemporalHours",
+      "json_schema": "integer",
+      "sql": "BIGINT"
+    }
+  },
+  "Temporal_Milliseconds": {
+    "name": "Temporal_Milliseconds",
+    "description": "Signed integer count of milliseconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix_millis.",
+    "primitive": "Int",
+    "minLength": 0,
+    "maxLength": 0,
+    "pattern": "",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": -9007199254740991,
+    "maximum": 9007199254740991,
+    "example": "1000",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": true,
+    "typeMappings": {
+      "go": "TemporalMilliseconds",
+      "json_schema": "integer",
+      "sql": "BIGINT"
+    }
+  },
+  "Temporal_Minutes": {
+    "name": "Temporal_Minutes",
+    "description": "Signed integer count of minutes: an amount of elapsed time, never a point in time.",
+    "primitive": "Int",
+    "minLength": 0,
+    "maxLength": 0,
+    "pattern": "",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": -9007199254740991,
+    "maximum": 9007199254740991,
+    "example": "5",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": true,
+    "typeMappings": {
+      "go": "TemporalMinutes",
+      "json_schema": "integer",
+      "sql": "BIGINT"
+    }
+  },
+  "Temporal_Month": {
+    "name": "Temporal_Month",
+    "description": "Calendar month, normalized to two-digit numeric (01-12). Accepts '2', '02', 'Feb', 'February' (case-insensitive).",
+    "primitive": "String",
+    "minLength": 0,
+    "maxLength": 9,
+    "pattern": "",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "02",
     "fileUpload": null,
     "imageConstraints": null,
     "hasCustomNormalize": false,
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "CITEXT",
-      "json_schema": "string"
+      "go": "TemporalMonth",
+      "json_schema": "string",
+      "sql": "VARCHAR(2)"
+    }
+  },
+  "Temporal_Quarter": {
+    "name": "Temporal_Quarter",
+    "description": "Calendar quarter (Q1-Q4)",
+    "primitive": "String",
+    "minLength": 2,
+    "maxLength": 2,
+    "pattern": "^[Qq][1-4]$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "Q1",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "TemporalQuarter",
+      "json_schema": "string",
+      "sql": "VARCHAR(2)"
+    }
+  },
+  "Temporal_QuarterYear": {
+    "name": "Temporal_QuarterYear",
+    "description": "Quarter and year, normalized to 'YYYY-Q#'. Accepts '2025-Q1', 'Q1/2025', 'Q1-2025', 'Q1-25' (2-digit years interpreted as 20XX).",
+    "primitive": "String",
+    "minLength": 0,
+    "maxLength": 8,
+    "pattern": "",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "2025-Q1",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "TemporalQuarterYear",
+      "json_schema": "string",
+      "sql": "VARCHAR(7)"
     }
   },
   "Temporal_RecurrenceRule": {
@@ -1806,41 +987,165 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "VARCHAR(512)",
-      "json_schema": "string"
+      "go": "TemporalRecurrenceRule",
+      "json_schema": "string",
+      "sql": "VARCHAR(512)"
     }
   },
-  "Parable_CatalogSlug": {
-    "name": "Parable_CatalogSlug",
-    "description": "An immutable data-catalog segment: parables.{parable_slug}.{plot_slug}",
-    "primitive": "String",
-    "minLength": 1,
-    "maxLength": 255,
-    "pattern": "^[a-z][a-z0-9]*(_[a-z0-9]+)*$",
+  "Temporal_Seconds": {
+    "name": "Temporal_Seconds",
+    "description": "Signed integer count of seconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix.",
+    "primitive": "Int",
+    "minLength": 0,
+    "maxLength": 0,
+    "pattern": "",
     "format": "",
     "reservedWords": [],
-    "caseInsensitive": true,
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": -9007199254740991,
+    "maximum": 9007199254740991,
+    "example": "60",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": true,
+    "typeMappings": {
+      "go": "TemporalSeconds",
+      "json_schema": "integer",
+      "sql": "BIGINT"
+    }
+  },
+  "Temporal_Time": {
+    "name": "Temporal_Time",
+    "description": "Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.",
+    "primitive": "String",
+    "minLength": 0,
+    "maxLength": 0,
+    "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
     "reservedWordsCaseInsensitive": false,
     "reservedWordsMatchPartial": false,
     "minimum": null,
     "maximum": null,
-    "example": "q1_sales",
+    "example": "12:25",
     "fileUpload": null,
     "imageConstraints": null,
     "hasCustomNormalize": false,
     "hasCustomValidate": false,
     "hasCustomParse": false,
     "typeMappings": {
-      "typescript": "string",
-      "python": "str",
-      "go": "string",
-      "rust": "String",
-      "sql": "CITEXT",
-      "json_schema": "string"
+      "go": "TemporalTime",
+      "json_schema": "string",
+      "sql": "TIME"
+    }
+  },
+  "Temporal_TimeZone": {
+    "name": "Temporal_TimeZone",
+    "description": "IANA timezone identifier (e.g., America/New_York, UTC, Etc/UTC)",
+    "primitive": "String",
+    "minLength": 0,
+    "maxLength": 100,
+    "pattern": "^(?:UTC|[A-Za-z]+/[A-Za-z_/]+)$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "America/New_York",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "TemporalTimeZone",
+      "json_schema": "string",
+      "sql": "VARCHAR(100)"
+    }
+  },
+  "Temporal_Year": {
+    "name": "Temporal_Year",
+    "description": "Calendar year as a 4-digit string (e.g., 2025)",
+    "primitive": "String",
+    "minLength": 4,
+    "maxLength": 4,
+    "pattern": "^[1-9]\\d{3}$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "2025",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "TemporalYear",
+      "json_schema": "string",
+      "sql": "VARCHAR(4)"
+    }
+  },
+  "Text_Markdown": {
+    "name": "Text_Markdown",
+    "description": "Markdown text",
+    "primitive": "String",
+    "minLength": 1,
+    "maxLength": 0,
+    "pattern": "^[\\s\\S]*$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "## Hello, World!",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "TextMarkdown",
+      "json_schema": "string",
+      "sql": "TEXT"
+    }
+  },
+  "Text_Sql": {
+    "name": "Text_Sql",
+    "description": "SQL text",
+    "primitive": "String",
+    "minLength": 1,
+    "maxLength": 0,
+    "pattern": "^[\\s\\S]*$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "SELECT 1",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "TextSql",
+      "json_schema": "string",
+      "sql": "TEXT"
     }
   }
 };

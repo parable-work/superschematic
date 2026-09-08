@@ -1,16 +1,4 @@
 import * as generatedScalars from 'superscalar/scalars';
-import {
-  validateArtifactFile,
-  validateCryptoRSAPrivateKey,
-  validateFile,
-  validateImage,
-  validateJSON,
-  validateLocation,
-  validateLogoImage,
-  validateParableSchema,
-  validateParableSchemaData,
-  validatePermission,
-} from '../../platform';
 import type { ValidationError } from 'superscalar/validation';
 import type { ScalarRegistry, ScalarValidateFn } from './types';
 
@@ -59,31 +47,12 @@ function registerGeneratedValidator(
   validators[canonicalName] = (value: string) => normalizeScalarResult(candidate(value));
 }
 
-function registerPlatformValidator(
-  validators: Record<string, ScalarValidateFn>,
-  canonicalName: string,
-  fn: ScalarValidatorFn
-): void {
-  validators[canonicalName] = (value: string) => normalizeScalarResult(fn(value));
-}
-
 function createDefaultScalarValidators(): Record<string, ScalarValidateFn> {
   const validators: Record<string, ScalarValidateFn> = {};
 
   for (const meta of generatedScalars.SCALAR_METADATA) {
     registerGeneratedValidator(validators, meta.canonicalName, meta.symbol);
   }
-
-  registerPlatformValidator(validators, 'Artifact.File', validateArtifactFile);
-  registerPlatformValidator(validators, 'Asset.File', validateFile);
-  registerPlatformValidator(validators, 'Asset.Image', validateImage);
-  registerPlatformValidator(validators, 'Asset.LogoImage', validateLogoImage);
-  registerPlatformValidator(validators, 'Crypto.RSAPrivateKey', validateCryptoRSAPrivateKey);
-  registerPlatformValidator(validators, 'Generic.JSON', validateJSON);
-  registerPlatformValidator(validators, 'Geo.Location', validateLocation);
-  registerPlatformValidator(validators, 'Parable.Permission', validatePermission);
-  registerPlatformValidator(validators, 'Parable.Schema', validateParableSchema);
-  registerPlatformValidator(validators, 'Parable.SchemaData', validateParableSchemaData);
 
   return validators;
 }

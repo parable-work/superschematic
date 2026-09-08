@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from psgen_schema_runtime import parse_schema, parse_type
-from psgen_schema_runtime.parse.defaults import apply_default
-from psgen_schema_runtime.parse.registry import create_default_scalar_parse_registry
-from psgen_schema_runtime.validation.types import FieldDef, ScalarDef, TypeRef
+from superschematic_schema_runtime import parse_schema, parse_type
+from superschematic_schema_runtime.parse.defaults import apply_default
+from superschematic_schema_runtime.parse.registry import create_default_scalar_parse_registry
+from superschematic_schema_runtime.validation.types import FieldDef, ScalarDef, TypeRef
 
 
 def _field(name: str, type_name: str, default: str | None) -> FieldDef:

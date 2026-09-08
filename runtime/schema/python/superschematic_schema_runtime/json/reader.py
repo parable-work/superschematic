@@ -1,6 +1,6 @@
 """JSON Schema draft-07 -> Schema parser.
 
-Reads the JSON Schema + ``x-*`` extension dialect that ``psgen`` emits to
+Reads the JSON Schema + ``x-*`` extension dialect that ``superschematic`` emits to
 ``platform-schemas/dist/**``.
 """
 

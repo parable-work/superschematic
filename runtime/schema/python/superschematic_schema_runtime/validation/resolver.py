@@ -10,7 +10,7 @@ def resolve_schema(schema: SchemaInput) -> Schema:
     """Coerce ``schema`` into a :class:`Schema` instance.
 
     Strings and bytes are parsed as JSON; dicts are parsed as JSON-Schema-shaped
-    payloads (see ``psgen_schema_runtime.json.reader.parse_schema``);
+    payloads (see ``superschematic_schema_runtime.json.reader.parse_schema``);
     :class:`Schema` instances are returned as-is.
     """
     if isinstance(schema, Schema):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from psgen_schema_runtime import (
+from superschematic_schema_runtime import (
     Runtime,
     RuntimeOptions,
     has_errors,
@@ -23,7 +23,7 @@ def test_load_type_happy_path(connector_schema):
         "Connector",
         {
             "email": "  ALICE@example.com  ",
-            "password": "p4ss",
+            "password": "p4ssw0rd!",
             "count": "10",
             "active": "true",
             "tags": ["a", "b"],
@@ -40,18 +40,18 @@ def test_load_type_invalid_email(connector_schema):
     result = load_type(
         connector_schema,
         "Connector",
-        {"email": "not-an-email", "password": "p"},
+        {"email": "not-an-email", "password": "p4ssw0rd!"},
     )
     assert has_errors(result.errors)
     assert "email" in result.errors
-    assert result.errors["email"][0].validator == "parse"
+    assert result.errors["email"][0].validator in {"pattern", "custom"}
 
 
 def test_load_type_defaults_applied(connector_schema):
     result = load_type(
         connector_schema,
         "Connector",
-        {"email": "alice@example.com", "password": "p"},
+        {"email": "alice@example.com", "password": "p4ssw0rd!"},
     )
     assert not has_errors(result.errors)
     assert result.data["count"] == 5
@@ -65,7 +65,7 @@ def test_load_type_required_missing(connector_schema):
 
 
 def test_load_type_from_json_bytes(connector_schema):
-    payload = json.dumps({"email": "bob@example.com", "password": "p"}).encode()
+    payload = json.dumps({"email": "bob@example.com", "password": "p4ssw0rd!"}).encode()
     result = load_type(connector_schema, "Connector", payload)
     assert not has_errors(result.errors)
     assert result.data["email"] == "bob@example.com"
@@ -75,7 +75,7 @@ def test_load_type_strict_rejects_unknown_field(connector_schema):
     result = load_type_strict(
         connector_schema,
         "Connector",
-        {"email": "a@b.com", "password": "p", "extra": "rogue"},
+        {"email": "a@b.com", "password": "p4ssw0rd!", "extra": "rogue"},
     )
     assert has_errors(result.errors)
     assert "extra" in result.errors
@@ -83,7 +83,7 @@ def test_load_type_strict_rejects_unknown_field(connector_schema):
 
 
 def test_validate_only(connector_schema):
-    errs = validate_type(connector_schema, "Connector", {"email": "x@x.io", "password": "p"})
+    errs = validate_type(connector_schema, "Connector", {"email": "x@x.io", "password": "p4ssw0rd!"})
     assert errs == {}
 
 
@@ -91,7 +91,7 @@ def test_marshal_type_emits_schema_order(connector_schema):
     parsed = parse_type(
         connector_schema,
         "Connector",
-        {"email": "alice@example.com", "password": "p", "tags": ["t"]},
+        {"email": "alice@example.com", "password": "p4ssw0rd!", "tags": ["t"]},
     )
     m = marshal_type(connector_schema, "Connector", parsed.data)
     assert not has_errors(m.errors)
@@ -105,15 +105,15 @@ def test_marshal_type_emits_schema_order(connector_schema):
 
 def test_runtime_class_caches_registries(connector_schema):
     rt = Runtime(connector_schema)
-    r1 = rt.load_type("Connector", {"email": "alice@example.com", "password": "p"})
-    r2 = rt.load_type("Connector", {"email": "bob@example.com", "password": "q"})
+    r1 = rt.load_type("Connector", {"email": "alice@example.com", "password": "p4ssw0rd!"})
+    r2 = rt.load_type("Connector", {"email": "bob@example.com", "password": "qwertyuiop"})
     assert not has_errors(r1.errors)
     assert not has_errors(r2.errors)
 
 
 def test_load_input(connector_schema):
     result = load_input(
-        connector_schema, "ConnectorInput", {"email": "alice@example.com", "password": "p"}
+        connector_schema, "ConnectorInput", {"email": "alice@example.com", "password": "p4ssw0rd!"}
     )
     assert not has_errors(result.errors)
 
@@ -131,6 +131,6 @@ def test_parse_error_merges_with_validate(connector_schema):
 
 def test_runtime_options_strict_override(connector_schema):
     rt = Runtime(connector_schema, RuntimeOptions(strict=True))
-    result = rt.load_type("Connector", {"email": "a@b.com", "password": "p", "extra": 1})
+    result = rt.load_type("Connector", {"email": "a@b.com", "password": "p4ssw0rd!", "extra": 1})
     assert has_errors(result.errors)
     assert "extra" in result.errors

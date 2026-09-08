@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from parable_scalars import ValidationError
+from superscalar import ValidationError
 
 
 ValidationErrors = dict[str, Any]

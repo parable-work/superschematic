@@ -2,7 +2,8 @@ import type { ValidationError, ValidationResult } from 'superscalar/validation';
 import type { SchemaInput } from '@superschematic/schema-ir';
 
 // The IR document types live in @superschematic/schema-ir (types only) so that
-// superscalar can name Parable.Schema without importing this runtime.
+// a scalar package can name the schema document type without importing this
+// runtime.
 export type {
   ArgumentDef,
   DefinitionKind,

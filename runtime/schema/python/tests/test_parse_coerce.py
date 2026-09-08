@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from psgen_schema_runtime.parse.coerce import coerce_bool, coerce_float, coerce_int
+from superschematic_schema_runtime.parse.coerce import coerce_bool, coerce_float, coerce_int
 
 
 @pytest.mark.parametrize(

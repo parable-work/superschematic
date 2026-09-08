@@ -21,7 +21,7 @@ import { BUILTIN_SCALARS } from '../builtin-scalars.generated';
  *
  * The IR is the format-agnostic representation emitted by the Go schema
  * loader (utils/psgen/schema-ir/go/ir). It retains the legacy runtime
- * ParableSchema fields (primitive, jsonTag, restMethod, ...) specifically
+ * the runtime schema payload fields (primitive, jsonTag, restMethod, ...) specifically
  * so runtime consumers can be fed from it. This module maps
  * that JSON into the runtime `Schema` shape used by validation and the
  * schema-renderer.

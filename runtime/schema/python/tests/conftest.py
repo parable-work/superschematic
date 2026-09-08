@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from psgen_schema_runtime import parse_schema
+from superschematic_schema_runtime import parse_schema
 
 
 @pytest.fixture
@@ -17,8 +17,7 @@ def connector_schema():
                     "type": "string",
                     "x-typeMapping": {"python": "str"},
                     "x-hasCustomNormalize": True,
-                    "x-hasCustomParse": True,
-                    "x-hasCustomValidate": True,
+                                        "x-hasCustomValidate": True,
                     "pattern": "^[^@]+@[^@]+\\.[a-zA-Z]{2,}$",
                 },
                 "Auth.Password": {

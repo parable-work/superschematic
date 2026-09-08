@@ -1,4 +1,4 @@
-"""psgen schema runtime for Python. See ``facade.py`` for the recommended entry points."""
+"""superschematic schema runtime for Python. See ``facade.py`` for the recommended entry points."""
 
 from .errors import (
     ValidationError,

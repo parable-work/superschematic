@@ -3,7 +3,7 @@
 // ESM rejects at runtime (ERR_MODULE_NOT_FOUND). builtin-scalars.generated.js
 // is @generated and must not be hand-edited at the source, so the fix is
 // applied to the emitted output. Idempotent: a specifier that already ends in
-// .js or .mjs is skipped. Same script as utils/parable-scalars/typescript
+// .js or .mjs is skipped. Same script as superscalar bindings/typescript
 // minus that package's backend renames.
 import { readdirSync, readFileSync, writeFileSync, statSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";

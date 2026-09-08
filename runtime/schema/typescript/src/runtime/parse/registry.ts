@@ -1,6 +1,6 @@
 /**
  * Scalar parse and normalize registries: map canonical scalar names (e.g.
- * "Contact.Email") to generated scalar-lib implementations. Validation has its
+ * "Contact.Email") to generated superscalar implementations. Validation has its
  * own registry in runtime/validation/registry.ts.
  */
 
@@ -144,7 +144,7 @@ function dateTimeAdapter(input: string): [string, ValidationError[]] {
 type GeneratedScalarFn = (input: unknown) => unknown | null;
 
 /**
- * Looks up the generated scalar-lib `parse<Symbol>` / `normalize<Symbol>`
+ * Looks up the generated superscalar `parse<Symbol>` / `normalize<Symbol>`
  * function for a canonical name, using the symbol the metadata table carries.
  */
 function generatedScalarFn(prefix: 'parse' | 'normalize', symbol: string): GeneratedScalarFn | undefined {
@@ -157,8 +157,8 @@ function generatedScalarFn(prefix: 'parse' | 'normalize', symbol: string): Gener
 
 /**
  * Default parse registry: every scalar whose generated catalog entry
- * (builtin-scalars.generated.ts, written by the parable-scalars xtask) marks a
- * custom parse step, adapted over the generated scalar-lib parse function. The
+ * (builtin-scalars.generated.ts, written by internal/tools/scalarcatalog) marks a
+ * custom parse step, adapted over the generated superscalar parse function. The
  * walker only consults the registry for hasCustomParse scalars, so those are
  * the only names registered; the set follows the catalog, not a hand list.
  * Temporal.DateTime routes through the core directly for the exact RFC3339Nano
@@ -183,7 +183,7 @@ export function createDefaultScalarParseRegistry(): ScalarParseRegistry {
 
 /**
  * Default normalize registry: every scalar whose generated catalog entry marks
- * a custom normalize step, adapted over the generated scalar-lib normalize
+ * a custom normalize step, adapted over the generated superscalar normalize
  * function.
  */
 export function createDefaultScalarNormalizeRegistry(): ScalarNormalizeRegistry {

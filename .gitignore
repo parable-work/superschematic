@@ -1,1 +1,25 @@
+# superscalar checkout scripts/superscalar-dep.sh stands up at the pinned commit.
 third_party/
+
+# Go build output.
+*.test
+*.out
+/bin/
+
+# Rust build output.
+/target
+*.err
+
+# Binding and package build output.
+node_modules/
+dist/
+.venv/
+__pycache__/
+.pytest_cache/
+*.so
+*.tgz
+
+# Editor and OS files.
+.DS_Store
+.idea/
+.vscode/

@@ -10,13 +10,11 @@ const { scalarIdByCanonical } = require('superscalar/scalars');
 const { napiBackend } = require('superscalar/backend');
 const { createDefaultScalarParseRegistry } = require('../dist/runtime/parse/registry.js');
 
-// Temporal.DateTime is a generic scalar, so its vectors are in the superscalar
-// corpus (the Parable extension file has no DateTime entries). That file is not
-// committed: `make -C utils/parable-scalars corpus` copies it out of the pinned
-// superscalar checkout (make test-scalar-lib-ts runs the sync first).
+// Temporal.DateTime vectors come from the superscalar conformance corpus in
+// the checkout scripts/superscalar-dep.sh stands up under third_party/.
 const corpus = JSON.parse(
   fs.readFileSync(
-    path.join(__dirname, '..', '..', '..', '..', 'parable-scalars', 'conformance', 'core-scalars.v2.json'),
+    path.join(__dirname, '..', '..', '..', '..', 'third_party', 'superscalar', 'conformance', 'core-scalars.v2.json'),
     'utf8'
   )
 );

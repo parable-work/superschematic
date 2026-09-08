@@ -6,13 +6,13 @@ import pytest
 
 yaml = pytest.importorskip("yaml")
 
-from psgen_schema_runtime import has_errors, load_type_yaml  # noqa: E402
+from superschematic_schema_runtime import has_errors, load_type_yaml  # noqa: E402
 
 
 def test_load_type_yaml_happy(connector_schema):
     payload = b"""
 email: alice@example.com
-password: hunter2
+password: hunter2hunter2
 count: '7'
 """
     result = load_type_yaml(connector_schema, "Connector", payload)

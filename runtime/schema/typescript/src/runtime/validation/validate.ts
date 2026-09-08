@@ -257,7 +257,7 @@ function validateScalarValue(
 }
 
 /**
- * Object-valued scalars (primitive: "Type", e.g. Parable_Schema, Asset_File).
+ * Object-valued scalars (primitive: "Type", e.g. Generic_JSON, Geo_Location).
  * Only the primitive shape (object, non-array, non-null) is checked here. The
  * string-typed scalar validator registry is deliberately not consulted --
  * ScalarValidateFn is `(value: string) => ...`, meaningless for object scalars.

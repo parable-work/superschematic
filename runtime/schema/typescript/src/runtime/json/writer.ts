@@ -533,10 +533,21 @@ export function writeScalarsJson(scalars: Record<string, ScalarDef>): string {
   return `${JSON.stringify(sortObject(root), null, 2)}\n`;
 }
 
-export function writeSchemaJson(schema: Schema): string {
+// DEFAULT_META_SCHEMA_URL is the $id the compiler gives its schema-file
+// meta-schema under default naming (Naming.MetaSchemaURL("schema-file.json")).
+// A deployment that renames the prefix in its naming file passes its own URL
+// through WriteSchemaJsonOptions.
+export const DEFAULT_META_SCHEMA_URL = 'superschematic://schema-file.json';
+
+export interface WriteSchemaJsonOptions {
+  metaSchemaUrl?: string;
+}
+
+export function writeSchemaJson(schema: Schema, options: WriteSchemaJsonOptions = {}): string {
   const scalarNames = new Set(Object.keys(schema.scalars || {}));
+  const metaSchemaUrl = options.metaSchemaUrl || DEFAULT_META_SCHEMA_URL;
   const root: JsonObject = {
-    $schema: 'https://parable.work/schemas/parable-schema.json',
+    $schema: metaSchemaUrl,
     ...(schema.name ? { title: schema.name } : {}),
     ...(schema.kind ? { 'x-kind': schema.kind } : {}),
     ...(schema.description ? { description: schema.description } : {}),

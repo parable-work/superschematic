@@ -4,22 +4,20 @@
 // purpose. bun installs a `file:` dependency into the consumer's node_modules
 // (a copy, or per-file symlinks into the source tree, depending on platform)
 // and resolves any `file:` spec nested inside it relative to the consumer, so
-// a nested spec fails (apps/ installs this package that way). The consumer
-// therefore declares all three packages itself (apps/package.json). For this
-// package's own tsc and tests the same resolution comes from these symlinks;
-// bun install leaves them alone, and bun's install into a consumer drops them.
+// a nested spec fails. The consumer therefore declares all three packages
+// itself. For this package's own tsc and tests the same resolution comes from
+// these symlinks; bun install leaves them alone, and bun's install into a
+// consumer drops them. superscalar resolves to the checkout
+// scripts/superscalar-dep.sh stands up under third_party/.
 import { existsSync, lstatSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const scope = join(root, "node_modules", "@psgen");
-mkdirSync(scope, { recursive: true });
-
-const scalarLib = join(root, "..", "..", "..", "parable-scalars", "typescript");
+const repo = join(root, "..", "..", "..");
 const links = [
-  { link: join(scope, "scalar-lib"), target: scalarLib },
-  { link: join(scope, "schema-ir"), target: join(root, "..", "..", "schema-ir", "typescript") },
+  { link: join(root, "node_modules", "superscalar"), target: join(repo, "third_party", "superscalar", "bindings", "typescript") },
+  { link: join(root, "node_modules", "@superschematic", "schema-ir"), target: join(repo, "ir", "typescript") },
 ];
 
 for (const { link, target } of links) {

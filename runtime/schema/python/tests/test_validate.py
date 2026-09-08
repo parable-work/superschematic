@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from psgen_schema_runtime import (
+from superschematic_schema_runtime import (
     ScalarValidatorRegistry,
     ValidationError,
     create_default_scalar_validator_registry,
@@ -78,7 +78,7 @@ def test_validate_custom_registry_used():
         }
     )
     errs = validate_type(
-        schema, "T", {"x": "hello"}, options=__import__("psgen_schema_runtime", fromlist=["RuntimeOptions"]).RuntimeOptions(validate_registry=reg)
+        schema, "T", {"x": "hello"}, options=__import__("superschematic_schema_runtime", fromlist=["RuntimeOptions"]).RuntimeOptions(validate_registry=reg)
     )
     assert "x" in errs
     assert calls == ["hello"]

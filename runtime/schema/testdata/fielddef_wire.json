@@ -1,0 +1,28 @@
+{
+  "name": "connector-data",
+  "kind": "General",
+  "rootType": "ConnectorAuthInput",
+  "inputs": {
+    "ConnectorAuthInput": {
+      "name": "ConnectorAuthInput",
+      "role": "APIInput",
+      "kind": "APIInput",
+      "fields": [
+        {
+          "name": "clientSecret",
+          "typeRef": { "name": "String" },
+          "secret": true
+        },
+        {
+          "name": "client_domain",
+          "description": "Salesforce My Domain name",
+          "title": "My Domain name",
+          "placeholder": "acme",
+          "typeRef": { "name": "String" },
+          "required": true,
+          "validatePattern": "^[A-Za-z0-9][A-Za-z0-9-]*$"
+        }
+      ]
+    }
+  }
+}

@@ -1,4 +1,4 @@
-"""IR dataclasses for the psgen schema runtime.
+"""IR dataclasses for the superschematic schema runtime.
 
 Python uses snake_case attributes; the JSON Schema source uses camelCase
 ``x-*`` extension keys (the JSON reader translates between the two).

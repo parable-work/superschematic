@@ -11,13 +11,10 @@
     "skipLibCheck": true,
     "types": ["node"],
     "paths": {
-      "superscalar/validation": ["../../../parable-scalars/typescript/dist/validation.d.ts"],
-      "superscalar/scalars": ["../../../parable-scalars/typescript/dist/generated.d.ts"],
-      "superscalar/backend": ["../../../parable-scalars/typescript/dist/backend.d.ts"],
-      "superscalar/pem": ["../../../parable-scalars/typescript/dist/pem.d.ts"],
-      "superscalar/permissions": ["../../../parable-scalars/typescript/dist/platform/Permission.generated.d.ts"],
-      "superscalar/platform/types": ["../../../parable-scalars/typescript/dist/platform/types.d.ts"],
-      "@superschematic/schema-ir": ["../../schema-ir/typescript/index.d.ts"]
+      "superscalar/validation": ["../../../third_party/superscalar/bindings/typescript/dist/validation.d.ts"],
+      "superscalar/scalars": ["../../../third_party/superscalar/bindings/typescript/dist/generated.d.ts"],
+      "superscalar/backend": ["../../../third_party/superscalar/bindings/typescript/dist/backend.d.ts"],
+      "@superschematic/schema-ir": ["../../../ir/typescript/index.d.ts"]
     }
   },
   "comment": "The CJS pass pins superscalar subpaths to that package's CJS declarations: its exports map lists the dist/esm .d.ts under `types`, and moduleResolution node cannot read exports maps at all. The ESM pass (tsconfig.esm.json, moduleResolution bundler) goes through the exports map. At runtime both resolve through node_modules (scripts/link-local-deps.mjs here, the consumer's own install elsewhere).",

@@ -2,7 +2,7 @@
 
 Wraps ``yaml.safe_load`` so the facade can accept YAML bytes/string for
 ``load_type_yaml`` / ``load_input_yaml``. PyYAML is an optional dependency
-installed via the ``yaml`` extra (``pip install parable-scalar-lib[yaml]``).
+installed via the ``yaml`` extra (``pip install superschematic-schema-runtime[yaml]``).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ def load_yaml_object(payload: str | bytes) -> tuple[Any, ValidationErrors]:
             "",
             ValidationError(
                 validator="yaml",
-                message="PyYAML is not installed; install parable-scalar-lib[yaml]",
+                message="PyYAML is not installed; install superschematic-schema-runtime[yaml]",
             ),
         )
         raise exc

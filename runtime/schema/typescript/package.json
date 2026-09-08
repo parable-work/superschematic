@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/schema-runtime",
   "version": "0.1.0",
-  "description": "psgen schema runtime for TypeScript: JSON/YAML schema reader and writer, IR reader, parse, validate, mask, merge, and the scalar validators facade (./platform). Needs superscalar and @superschematic/schema-ir next to it in node_modules; see scripts/link-local-deps.mjs.",
+  "description": "Schema runtime for TypeScript: JSON/YAML schema reader and writer, IR reader, parse, validate, mask, merge, over the superscalar scalar functions. Needs superscalar and @superschematic/schema-ir next to it in node_modules; see scripts/link-local-deps.mjs.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -10,11 +10,6 @@
       "import": "./dist/esm/index.js",
       "require": "./dist/index.js",
       "default": "./dist/index.js"
-    },
-    "./platform": {
-      "types": "./dist/esm/platform/index.d.ts",
-      "import": "./dist/esm/platform/index.js",
-      "require": "./dist/platform/index.js"
     },
     "./runtime/*": {
       "types": "./dist/esm/runtime/*.d.ts",
@@ -34,5 +29,6 @@
     "@types/js-yaml": "4.0.9",
     "@types/node": "^22.0.0",
     "typescript": "^5.6.3"
-  }
+  },
+  "license": "Apache-2.0"
 }

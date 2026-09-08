@@ -7,7 +7,7 @@ declaration order.
 - Unknown fields are dropped in lenient mode; reported as
   ``{"validator": "unknown_field"}`` when ``strict=True``.
 - Missing / ``None`` arrays become ``[]`` in output (not ``null``).
-- ``mask_secrets=True`` composes with :mod:`psgen_schema_runtime.mask` to
+- ``mask_secrets=True`` composes with :mod:`superschematic_schema_runtime.mask` to
   zero ``@secret`` fields before serializing.
 - JSON keys are emitted in :class:`TypeDef` declaration order so output is
   byte-stable across calls.

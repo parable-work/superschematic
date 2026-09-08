@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from psgen_schema_runtime import mask_type, merge_type, parse_schema
+from superschematic_schema_runtime import mask_type, merge_type, parse_schema
 
 
 def _schema():

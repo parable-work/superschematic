@@ -211,7 +211,7 @@ const { parseSchema } = require('../dist/runtime/index.js');
 const { writeSchemaJson } = require('../dist/runtime/index.js');
 
 const legacyMetadataSchema = JSON.parse(
-  fs.readFileSync(path.join(__dirname, '../../../../parable-scalars/go/testdata/fielddef_legacy.json'), 'utf8')
+  fs.readFileSync(path.join(__dirname, '../../testdata/fielddef_legacy.json'), 'utf8')
 );
 
 function metadataFields(schema) {
@@ -226,7 +226,7 @@ test('parseSchema picks up field title and x-placeholder', () => {
   const schema = parseSchema(legacyMetadataSchema);
   const fields = metadataFields(schema);
   assert.strictEqual(fields.client_domain.title, 'My Domain name');
-  assert.strictEqual(fields.client_domain.placeholder, 'sunrun');
+  assert.strictEqual(fields.client_domain.placeholder, 'acme');
   assert.strictEqual(fields.client_domain.validatePattern, '^[A-Za-z0-9][A-Za-z0-9-]*$');
 });
 
@@ -235,7 +235,7 @@ test('writeSchemaJson round-trips title and x-placeholder to legacy keys', () =>
   const written = JSON.parse(writeSchemaJson(schema));
   const prop = written.definitions.ConnectorAuthInput.properties.client_domain;
   assert.strictEqual(prop.title, 'My Domain name');
-  assert.strictEqual(prop['x-placeholder'], 'sunrun');
+  assert.strictEqual(prop['x-placeholder'], 'acme');
   assert.strictEqual(prop['x-validatePattern'], '^[A-Za-z0-9][A-Za-z0-9-]*$');
 });
 
@@ -248,12 +248,12 @@ test('writeSchemaJson omits title and x-placeholder when unset', () => {
 });
 
 test('parseSchemaIR picks up wire-form title and placeholder (shared Go fixture)', () => {
-  const fixturePath = path.join(__dirname, '../../../../parable-scalars/go/testdata/fielddef_wire.json');
+  const fixturePath = path.join(__dirname, '../../testdata/fielddef_wire.json');
   const wire = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
   const schema = parseSchemaIR(wire);
   const fields = metadataFields(schema);
   assert.strictEqual(fields.client_domain.title, 'My Domain name');
-  assert.strictEqual(fields.client_domain.placeholder, 'sunrun');
+  assert.strictEqual(fields.client_domain.placeholder, 'acme');
   assert.strictEqual(fields.client_domain.validatePattern, '^[A-Za-z0-9][A-Za-z0-9-]*$');
   assert.strictEqual(fields.clientSecret.title, undefined);
   assert.strictEqual(fields.clientSecret.placeholder, undefined);

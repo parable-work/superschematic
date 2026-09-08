@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from psgen_schema_runtime import parse_schema
+from superschematic_schema_runtime import parse_schema
 
 _FIXTURE = (
-    Path(__file__).resolve().parents[4] / "parable-scalars" / "go" / "testdata" / "fielddef_legacy.json"
+    Path(__file__).resolve().parents[2] / "testdata" / "fielddef_legacy.json"
 )
 LEGACY_SCHEMA = json.loads(_FIXTURE.read_text())
 
@@ -23,7 +23,7 @@ def _fields():
 def test_title_and_placeholder_parsed():
     fields = _fields()
     assert fields["client_domain"].title == "My Domain name"
-    assert fields["client_domain"].placeholder == "sunrun"
+    assert fields["client_domain"].placeholder == "acme"
     assert fields["client_domain"].validate_pattern == "^[A-Za-z0-9][A-Za-z0-9-]*$"
 
 

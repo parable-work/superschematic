@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 
-from psgen_schema_runtime import (
+from superschematic_schema_runtime import (
     marshal_type,
     parse_schema,
     type_to_map,
 )
-from psgen_schema_runtime.serialize import SerializeOptions
+from superschematic_schema_runtime.serialize import SerializeOptions
 
 
 def _schema():
