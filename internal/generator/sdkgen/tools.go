@@ -26,7 +26,7 @@ type ToolDefinition struct {
 	Description  string           // From GraphQL @description, includes auth note if required
 	RequiresAuth bool             // Whether authentication is required
 	Namespace    string           // Namespace for grouping e.g., "auth"
-	IsTenantNS   bool             // Whether this is a tenant-scoped endpoint
+	IsScopedNS   bool             // Whether the endpoint's namespace hoists a scope parameter
 	Parameters   JSONSchemaObject // JSON Schema for parameters
 	Returns      JSONSchemaReturn // JSON Schema for return type
 	PathParams   []ToolPathParam  // Path parameters for invocation
@@ -40,14 +40,14 @@ type ToolDefinition struct {
 
 // MCPToolBinding describes deterministic runtime invocation bindings.
 type MCPToolBinding struct {
-	ToolName    string                     `json:"toolName"`
-	APIID       string                     `json:"apiId"`
-	Namespace   string                     `json:"namespace"`
-	MethodName  string                     `json:"methodName"`
-	IsTenantNS  bool                       `json:"isTenantScoped"`
-	TenantParam string                     `json:"tenantParam,omitempty"`
-	Arguments   []MCPToolArgumentBinding   `json:"arguments"`
-	MethodArgs  []MCPMethodArgumentBinding `json:"methodArgs"`
+	ToolName   string                     `json:"toolName"`
+	APIID      string                     `json:"apiId"`
+	Namespace  string                     `json:"namespace"`
+	MethodName string                     `json:"methodName"`
+	IsScopedNS bool                       `json:"isScoped"`
+	ScopeParam string                     `json:"scopeParam,omitempty"`
+	Arguments  []MCPToolArgumentBinding   `json:"arguments"`
+	MethodArgs []MCPMethodArgumentBinding `json:"methodArgs"`
 }
 
 // MCPToolArgumentBinding maps one tool parameter to an invocation target.
@@ -83,7 +83,8 @@ type ToolsNamespace struct {
 	Name       string           // Namespace name e.g., "auth"
 	ClassName  string           // Namespace class name e.g., "AuthNamespace"
 	Tools      []ToolDefinition // Tools in this namespace
-	IsTenantNS bool             // Whether this is tenant namespace
+	IsScopedNS bool             // Whether the namespace hoists a scope parameter
+	ScopeParam string           // Name of the hoisted scope parameter if IsScopedNS
 }
 
 // GenerateTools generates tool calling bindings from SDK and API output
@@ -115,7 +116,8 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 			Name:       ns.Name,
 			ClassName:  ns.ClassName,
 			Tools:      []ToolDefinition{},
-			IsTenantNS: ns.IsTenantNS,
+			IsScopedNS: ns.IsScopedNS,
+			ScopeParam: ns.ScopeParamName,
 		}
 
 		for _, endpoint := range ns.Endpoints {
@@ -192,7 +194,7 @@ func endpointToTool(apiID string, endpoint EndpointInfo, ns NamespaceInfo, input
 		Description:  description,
 		RequiresAuth: endpoint.RequiresAuth,
 		Namespace:    ns.Name,
-		IsTenantNS:   ns.IsTenantNS,
+		IsScopedNS:   ns.IsScopedNS,
 		Parameters:   parameters,
 		Returns:      returns,
 		PathParams:   pathParams,
@@ -222,7 +224,7 @@ func buildMCPToolBinding(
 	methodArgs := make([]MCPMethodArgumentBinding, 0)
 	position := 0
 
-	nonTenantPathSources := make([]string, 0)
+	nonScopePathSources := make([]string, 0)
 	for _, pathParam := range endpoint.PathParams {
 		paramName := pathParam.TSName
 		_, isRequired := required[paramName]
@@ -232,17 +234,17 @@ func buildMCPToolBinding(
 			Kind:          "path",
 			Target:        fmt.Sprintf("path.%s", pathParam.Name),
 		})
-		if ns.IsTenantNS && pathParam.Name == ns.TenantParamName {
+		if ns.IsScopedNS && pathParam.Name == ns.ScopeParamName {
 			continue
 		}
-		nonTenantPathSources = append(nonTenantPathSources, paramName)
+		nonScopePathSources = append(nonScopePathSources, paramName)
 	}
-	if len(nonTenantPathSources) > 0 {
+	if len(nonScopePathSources) > 0 {
 		methodArgs = append(methodArgs, MCPMethodArgumentBinding{
 			Position: position,
 			Kind:     "path",
 			Target:   "path",
-			Sources:  nonTenantPathSources,
+			Sources:  nonScopePathSources,
 		})
 		position++
 	}
@@ -326,20 +328,20 @@ func buildMCPToolBinding(
 		})
 	}
 
-	tenantParam := ""
-	if ns.IsTenantNS {
-		tenantParam = ns.TenantParamName
+	scopeParam := ""
+	if ns.IsScopedNS {
+		scopeParam = ns.ScopeParamName
 	}
 
 	return MCPToolBinding{
-		ToolName:    toolName,
-		APIID:       apiID,
-		Namespace:   ns.Name,
-		MethodName:  endpoint.Name,
-		IsTenantNS:  ns.IsTenantNS,
-		TenantParam: tenantParam,
-		Arguments:   arguments,
-		MethodArgs:  methodArgs,
+		ToolName:   toolName,
+		APIID:      apiID,
+		Namespace:  ns.Name,
+		MethodName: endpoint.Name,
+		IsScopedNS: ns.IsScopedNS,
+		ScopeParam: scopeParam,
+		Arguments:  arguments,
+		MethodArgs: methodArgs,
 	}
 }
 

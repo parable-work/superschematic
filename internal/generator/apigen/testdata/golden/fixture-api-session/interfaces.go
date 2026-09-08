@@ -7,8 +7,8 @@ package fixtureapi
 
 import (
 	"context"
-	"fmt"
 	types "example.com/schemas/types/go/fixture-api"
+	"fmt"
 )
 
 // SessionImplementation defines the interface for session namespace handlers.

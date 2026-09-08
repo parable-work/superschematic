@@ -6,10 +6,10 @@ import (
 	"context"
 	"fmt"
 
+	types "example.com/schemas/types/go/fixture-db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	types "example.com/schemas/types/go/fixture-db"
 )
 
 // contextKey is a custom type for context keys to avoid collisions

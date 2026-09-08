@@ -108,9 +108,9 @@ func (impl *Implementation) {{ .Endpoint.ShortImplName }}(ctx context.Context{{-
 	//    userRoles := GetUserRoles(ctx)
 	//
 {{- end }}
-{{- if .Endpoint.IsTenantEndpoint }}
-	// 3. This is a tenant-scoped endpoint. The tenant context is set by middleware.
-	//    Access tenant info from context if needed.
+{{- if .Endpoint.IsScopedEndpoint }}
+	// 3. This endpoint is scoped by a hoisted path parameter. The auth
+	//    provider's middleware resolves the scope into the request context.
 	//
 {{- end }}
 {{- if .Endpoint.HasInput }}

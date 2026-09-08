@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/joho/godotenv"
 	types "example.com/schemas/types/go/fixture-general"
+	"github.com/joho/godotenv"
 )
 
 // Type aliases for enum types from the types module.

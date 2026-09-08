@@ -9,6 +9,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-replace github.com/parable-work/superscalar/go => ../parable-scalars/go
+replace github.com/parable-work/superscalar/go => ../scalars/go
 
-replace github.com/parable-work/superschematic/ir => ../psgen/schema-ir/go
+replace github.com/parable-work/superschematic/ir => ../ir

@@ -5,14 +5,14 @@ requires = ["setuptools>=68.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "parable_types_fixture_api"
+name = "schemas_types_fixture_api"
 version = "1.0.0"
 description = "Generated Python types for fixture-api schema"
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
-    {name = "Parable Platform"}
+    {name = "superschematic"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -25,7 +25,7 @@ classifiers = [
 dependencies = [
     "pydantic>=2.12.0,<3.0.0",
     "PyYAML>=6.0.0",
-    "parable-scalar-lib>=1.0.0",
+    "superscalar>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -37,10 +37,10 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["parable_types_fixture_api"]
+packages = ["schemas_types_fixture_api"]
 
 [tool.setuptools.package-data]
-"parable_types_fixture_api" = ["py.typed"]
+"schemas_types_fixture_api" = ["py.typed"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -95,7 +95,7 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = [
-    "--cov=parable_types_fixture_api",
+    "--cov=schemas_types_fixture_api",
     "--cov-report=term-missing",
     "--cov-report=html",
     "--strict-markers",

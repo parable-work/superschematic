@@ -15,6 +15,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/ormgen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -89,31 +90,7 @@ func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider) string {
 		t.Skip("skipping compile check in -short mode")
 	}
 
-	scalarLib, err := filepath.Abs("../../../../parable-scalars")
-	if err != nil {
-		t.Fatalf("resolve scalar-lib path: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(scalarLib, "go")); err != nil {
-		t.Skipf("scalar-lib runtime not available: %v", err)
-	}
-	// The generators derive the schema-ir, schema-runtime, http-runtime and
-	// ptr replace paths from scalar-lib's parent, which was utils/psgen until
-	// #6109 moved scalar-lib to utils/parable-scalars; the dist modules only
-	// build because the consuming services carry their own replaces. This
-	// tree builds the generated module standalone, so point the replaces at
-	// the real directories.
-	psgenRoot, err := filepath.Abs("../../..")
-	if err != nil {
-		t.Fatalf("resolve psgen root: %v", err)
-	}
-	relTo := func(from, target string) string {
-		rel, err := filepath.Rel(from, target)
-		if err != nil {
-			t.Fatalf("relative path %s -> %s: %v", from, target, err)
-		}
-		return filepath.ToSlash(rel)
-	}
-	schemaIR := filepath.Join(psgenRoot, "schema-ir", "go")
+	paths := testpaths.Local(t)
 
 	dbSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
 	if err != nil {
@@ -142,10 +119,9 @@ func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider) string {
 	if err != nil {
 		t.Fatalf("generate fixture-db types: %v", err)
 	}
-	if err := typegen.SetReplacePaths(dbTypesOutput, scalarLib, dbTypesDir); err != nil {
+	if err := typegen.SetReplacePaths(dbTypesOutput, paths, dbTypesDir); err != nil {
 		t.Fatalf("set fixture-db types replace paths: %v", err)
 	}
-	dbTypesOutput.SchemaIRReplacePath = relTo(dbTypesDir, schemaIR)
 	if err := typegen.WriteTypes(dbTypesOutput, dbTypesDir); err != nil {
 		t.Fatalf("write fixture-db types: %v", err)
 	}
@@ -164,10 +140,9 @@ func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider) string {
 	if err != nil {
 		t.Fatalf("generate fixture-api types: %v", err)
 	}
-	if err := typegen.SetReplacePaths(apiTypesOutput, scalarLib, apiTypesDir); err != nil {
+	if err := typegen.SetReplacePaths(apiTypesOutput, paths, apiTypesDir); err != nil {
 		t.Fatalf("set fixture-api types replace paths: %v", err)
 	}
-	apiTypesOutput.SchemaIRReplacePath = relTo(apiTypesDir, schemaIR)
 	if err := typegen.WriteTypes(apiTypesOutput, apiTypesDir); err != nil {
 		t.Fatalf("write fixture-api types: %v", err)
 	}
@@ -181,10 +156,9 @@ func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider) string {
 	if err != nil {
 		t.Fatalf("generate orm: %v", err)
 	}
-	if err := ormgen.SetReplacePaths(ormOutput, scalarLib, ormDir); err != nil {
+	if err := ormgen.SetReplacePaths(ormOutput, paths, ormDir); err != nil {
 		t.Fatalf("set orm replace paths: %v", err)
 	}
-	ormOutput.SchemaIRReplacePath = relTo(ormDir, schemaIR)
 	if err := ormgen.WriteORM(ormOutput, ormDir); err != nil {
 		t.Fatalf("write orm: %v", err)
 	}
@@ -205,13 +179,9 @@ func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider) string {
 	if apiOutput == nil {
 		t.Fatal("expected API output for fixture-api")
 	}
-	if err := apigen.SetReplacePaths(apiOutput, scalarLib, apiDir); err != nil {
+	if err := apigen.SetReplacePaths(apiOutput, paths, apiDir); err != nil {
 		t.Fatalf("set api replace paths: %v", err)
 	}
-	apiOutput.SchemaIRReplacePath = relTo(apiDir, schemaIR)
-	apiOutput.SchemaRuntimeReplacePath = relTo(apiDir, filepath.Join(psgenRoot, "schema-runtime", "go"))
-	apiOutput.HTTPRuntimeReplacePath = relTo(apiDir, filepath.Join(psgenRoot, "http-runtime", "go"))
-	apiOutput.PtrReplacePath = relTo(apiDir, filepath.Join(psgenRoot, "..", "..", "services", "pkg", "ptr"))
 	if err := apigen.WriteAPI(apiOutput, apiDir); err != nil {
 		t.Fatalf("write api: %v", err)
 	}

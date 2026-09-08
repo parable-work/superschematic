@@ -34,8 +34,8 @@ func (Provider) Analyze(_, upstream *ir.Schema) (apigen.AuthModel, error) {
 	return apigen.AnalyzeSessionStores(upstream), nil
 }
 
-// Endpoint implements apigen.AuthProvider. The session model has no tenant
-// scope, so every endpoint keeps IsTenantEndpoint false.
+// Endpoint implements apigen.AuthProvider. The session model hoists no
+// scope parameter, so every endpoint keeps IsScopedEndpoint false.
 func (Provider) Endpoint(*ir.FieldDef, *ir.OperationSet, *apigen.EndpointInfo) error {
 	return nil
 }

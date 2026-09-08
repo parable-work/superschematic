@@ -41,7 +41,7 @@ export interface ToolDefinition {
   namespace: string;
   methodName: string;
   requiresAuth: boolean;
-  isTenantScoped: boolean;
+  isScoped: boolean;
   parameters: {
     type: 'object';
     properties: Record<string, JSONSchemaProperty>;
@@ -138,7 +138,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     namespace: 'session',
     methodName: 'currentTenant',
     requiresAuth: true,
-    isTenantScoped: false,
+    isScoped: false,
     parameters: {
       type: 'object',
       properties: {
@@ -155,7 +155,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     namespace: 'tenant',
     methodName: 'customHandler',
     requiresAuth: false,
-    isTenantScoped: false,
+    isScoped: false,
     parameters: {
       type: 'object',
       properties: {
@@ -176,7 +176,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     namespace: 'tenant',
     methodName: 'listTenants',
     requiresAuth: true,
-    isTenantScoped: false,
+    isScoped: false,
     parameters: {
       type: 'object',
       properties: {
@@ -197,7 +197,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     namespace: 'tenant',
     methodName: 'createTenant',
     requiresAuth: true,
-    isTenantScoped: false,
+    isScoped: false,
     parameters: {
       type: 'object',
       properties: {
@@ -232,7 +232,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     namespace: 'tenant',
     methodName: 'getTenant',
     requiresAuth: true,
-    isTenantScoped: false,
+    isScoped: false,
     parameters: {
       type: 'object',
       properties: {
@@ -255,7 +255,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     namespace: 'tenant',
     methodName: 'updateSecret',
     requiresAuth: true,
-    isTenantScoped: false,
+    isScoped: false,
     parameters: {
       type: 'object',
       properties: {

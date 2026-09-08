@@ -6,7 +6,7 @@ use crate::namespaces;
 pub struct {{.SDKStructName}} {
     client: HttpClient,
 {{- range .Namespaces}}
-{{- if not .IsTenantNS}}
+{{- if not .IsScopedNS}}
     pub {{.FieldName}}: namespaces::{{.StructName}},
 {{- end}}
 {{- end}}
@@ -18,7 +18,7 @@ impl {{.SDKStructName}} {
         Ok(Self {
             client: client.clone(),
 {{- range .Namespaces}}
-{{- if not .IsTenantNS}}
+{{- if not .IsScopedNS}}
             {{.FieldName}}: namespaces::{{.StructName}}::new(client.clone()),
 {{- end}}
 {{- end}}
@@ -40,9 +40,9 @@ impl {{.SDKStructName}} {
 
 {{- end}}
 {{- range .Namespaces}}
-{{- if .IsTenantNS}}
-    pub fn {{.FieldName}}_namespace(&self, {{.TenantFieldName}}: impl Into<String>) -> namespaces::{{.StructName}} {
-        namespaces::{{.StructName}}::new(self.client.clone(), {{.TenantFieldName}}.into())
+{{- if .IsScopedNS}}
+    pub fn {{.FieldName}}_namespace(&self, {{.ScopeFieldName}}: impl Into<String>) -> namespaces::{{.StructName}} {
+        namespaces::{{.StructName}}::new(self.client.clone(), {{.ScopeFieldName}}.into())
     }
 
 {{- end}}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/profile"
 )
 
@@ -27,7 +28,7 @@ var templatesFS embed.FS
 //	├── go.mod          # Module definition
 //	├── interfaces.go   # Implementation interfaces per namespace
 //	├── routes.go       # RegisterRoutes() with handler factories
-//	├── middleware.go   # Auth/tenant middleware + ORM store adapters (public only)
+//	├── middleware.go   # Auth middleware + ORM store adapters (public only)
 //	├── openapi.go      # Embedded OpenAPI spec constant
 //	├── openapi.json    # Standalone spec for downstream tooling
 //	├── index.go        # Index page HTML
@@ -180,49 +181,26 @@ func WriteScaffoldsWithProfile(output *APIOutput, scaffoldsDir string, prof *pro
 	})
 }
 
-// SetReplacePaths computes the go.mod replace directive paths for the local
-// runtime modules based on the resolved scalarLibPath and the output
-// directory where the generated module will live. Generated artifacts keep
-// importing the existing v1 runtime packages; the dependency flip is
-// sequenced in a separate workstream.
-func SetReplacePaths(output *APIOutput, scalarLibPath, outputDir string) error {
-	if scalarLibPath == "" || outputDir == "" {
-		return nil
+// SetReplacePaths sets the go.mod replace directive paths for the runtime
+// modules relative to the output directory where the generated module will
+// live. An unset path emits no directive.
+func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir string) error {
+	var err error
+	if output.ScalarLibReplacePath, err = naming.RelPath(outputDir, paths.ScalarGo); err != nil {
+		return fmt.Errorf("scalar library replace path: %w", err)
 	}
-
-	absScalarLib, err := filepath.Abs(scalarLibPath)
-	if err != nil {
-		return fmt.Errorf("resolve scalar-lib absolute path: %w", err)
+	if output.SchemaIRReplacePath, err = naming.RelPath(outputDir, paths.SchemaIR); err != nil {
+		return fmt.Errorf("schema-ir replace path: %w", err)
 	}
-	absOutputDir, err := filepath.Abs(outputDir)
-	if err != nil {
-		return fmt.Errorf("resolve output dir absolute path: %w", err)
+	if output.SchemaRuntimeReplacePath, err = naming.RelPath(outputDir, paths.SchemaRuntimeGo); err != nil {
+		return fmt.Errorf("schema runtime replace path: %w", err)
 	}
-
-	rel := func(target string) (string, error) {
-		relPath, err := filepath.Rel(absOutputDir, filepath.Clean(target))
-		if err != nil {
-			return "", err
-		}
-		return filepath.ToSlash(relPath), nil
+	if output.HTTPRuntimeReplacePath, err = naming.RelPath(outputDir, paths.HTTPRuntimeGo); err != nil {
+		return fmt.Errorf("http runtime replace path: %w", err)
 	}
-
-	if output.ScalarLibReplacePath, err = rel(filepath.Join(absScalarLib, "go")); err != nil {
-		return fmt.Errorf("compute relative scalar-lib path: %w", err)
+	if output.PtrReplacePath, err = naming.RelPath(outputDir, paths.Ptr); err != nil {
+		return fmt.Errorf("ptr replace path: %w", err)
 	}
-	if output.SchemaIRReplacePath, err = rel(filepath.Join(absScalarLib, "..", "schema-ir", "go")); err != nil {
-		return fmt.Errorf("compute relative schema-ir path: %w", err)
-	}
-	if output.SchemaRuntimeReplacePath, err = rel(filepath.Join(absScalarLib, "..", "schema-runtime", "go")); err != nil {
-		return fmt.Errorf("compute relative schema-runtime path: %w", err)
-	}
-	if output.HTTPRuntimeReplacePath, err = rel(filepath.Join(absScalarLib, "..", "http-runtime", "go")); err != nil {
-		return fmt.Errorf("compute relative http-runtime path: %w", err)
-	}
-	if output.PtrReplacePath, err = rel(filepath.Join(absScalarLib, "..", "..", "..", "services", "pkg", "ptr")); err != nil {
-		return fmt.Errorf("compute relative ptr path: %w", err)
-	}
-
 	return nil
 }
 

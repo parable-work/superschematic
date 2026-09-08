@@ -1,5 +1,5 @@
 [package]
-name = "parable-fixture-api-api"
+name = "schemas-fixture-api-api"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,5 +9,5 @@ axum = { version = "0.8.9", features = ["json", "matched-path"] }
 http = "1"
 serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
-psgen-http-runtime = { path = "../../../../utils/psgen/http-runtime/rust" }
-parable-fixture-api-types = { path = "../../types/rust/fixture-api" }
+superschematic-http-runtime = { path = "../../../../runtime/http/rust" }
+schemas-fixture-api-types = { path = "../../types/rust/fixture-api" }

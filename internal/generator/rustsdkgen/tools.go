@@ -21,7 +21,7 @@ type ToolDefinition struct {
 	Description  string           // Description with auth hint when required
 	RequiresAuth bool             // Whether authentication is required
 	Namespace    string           // Namespace for grouping (e.g. "auth")
-	IsTenantNS   bool             // Whether this is a tenant-scoped endpoint
+	IsScopedNS   bool             // Whether the endpoint's namespace hoists a scope parameter
 	Parameters   JSONSchemaObject // JSON Schema for parameters
 	Returns      JSONSchemaReturn // JSON Schema for return type
 	PathParams   []ToolPathParam  // Path parameters for invocation helpers
@@ -52,7 +52,7 @@ type ToolsNamespace struct {
 	Name       string           // Namespace name
 	StructName string           // Namespace struct name
 	Tools      []ToolDefinition // Tools in this namespace
-	IsTenantNS bool             // Whether this is a tenant namespace
+	IsScopedNS bool             // Whether the namespace hoists a scope parameter
 }
 
 // GenerateTools generates tool-calling bindings metadata from Rust SDK and API output.
@@ -103,11 +103,11 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 		})
 
 		nsMeta, hasMeta := namespaceMeta[nsName]
-		isTenantNS := hasMeta && nsMeta.IsTenantNS
-		if !isTenantNS {
+		isScopedNS := hasMeta && nsMeta.IsScopedNS
+		if !isScopedNS {
 			for _, endpoint := range endpoints {
-				if endpoint.IsTenantEndpoint {
-					isTenantNS = true
+				if endpoint.IsScopedEndpoint {
+					isScopedNS = true
 					break
 				}
 			}
@@ -117,7 +117,7 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 			Name:       nsName,
 			StructName: nsMeta.StructName,
 			Tools:      []ToolDefinition{},
-			IsTenantNS: isTenantNS,
+			IsScopedNS: isScopedNS,
 		}
 
 		for _, endpoint := range endpoints {
@@ -181,7 +181,7 @@ func endpointToTool(
 		Description:  description,
 		RequiresAuth: endpoint.RequiresAuth,
 		Namespace:    ns.Name,
-		IsTenantNS:   ns.IsTenantNS || endpoint.IsTenantEndpoint,
+		IsScopedNS:   ns.IsScopedNS || endpoint.IsScopedEndpoint,
 		Parameters:   parameters,
 		Returns:      returns,
 		PathParams:   pathParams,

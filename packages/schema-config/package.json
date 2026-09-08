@@ -13,7 +13,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test src/**/*.test.ts",
-    "gen-json-schema": "ts-json-schema-generator --path src/index.ts --type SchemaConfigDocument --id psgen://schema-config.schema.json --out ../../internal/loader/schemaconfig/schema-config.schema.json"
+    "gen-json-schema": "ts-json-schema-generator --path src/index.ts --type SchemaConfigDocument --id superschematic://schema-config.schema.json --out ../../internal/loader/schemaconfig/schema-config.schema.json"
   },
   "devDependencies": {
     "ts-json-schema-generator": "^2.4.0",

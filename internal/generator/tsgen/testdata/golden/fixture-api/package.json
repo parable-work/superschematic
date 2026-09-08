@@ -48,7 +48,7 @@
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {
-    "superscalar": "file:../parable-scalars/typescript",
+    "superscalar": "file:../scalars/typescript",
     "js-yaml": "4.1.1"
   },
   "devDependencies": {

@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -23,20 +24,7 @@ func TestGeneratedORMCompiles(t *testing.T) {
 		t.Skip("skipping compile check in -short mode")
 	}
 
-	// The Parable scalar package lives at utils/parable-scalars. From this test
-	// dir (utils/psgen/internal/generator/ormgen) that is four levels up +
-	// parable-scalars.
-	scalarLib, err := filepath.Abs("../../../../parable-scalars")
-	if err != nil {
-		t.Fatalf("resolve scalar-lib path: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(scalarLib, "go")); err != nil {
-		t.Skipf("scalar-lib runtime not available: %v", err)
-	}
-	ptrPath := filepath.Clean(filepath.Join(scalarLib, "..", "..", "services", "pkg", "ptr"))
-	if _, err := os.Stat(ptrPath); err != nil {
-		t.Skipf("ptr module not available: %v", err)
-	}
+	paths := testpaths.Local(t)
 
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
 	if err != nil {
@@ -59,7 +47,7 @@ func TestGeneratedORMCompiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate types: %v", err)
 	}
-	if err := typegen.SetReplacePaths(typesOutput, scalarLib, typesDir); err != nil {
+	if err := typegen.SetReplacePaths(typesOutput, paths, typesDir); err != nil {
 		t.Fatalf("set types replace paths: %v", err)
 	}
 	if err := typegen.WriteTypes(typesOutput, typesDir); err != nil {
@@ -78,7 +66,7 @@ func TestGeneratedORMCompiles(t *testing.T) {
 	if ormOutput == nil {
 		t.Fatal("expected ORM output for fixture-db")
 	}
-	if err := SetReplacePaths(ormOutput, scalarLib, ormDir); err != nil {
+	if err := SetReplacePaths(ormOutput, paths, ormDir); err != nil {
 		t.Fatalf("set orm replace paths: %v", err)
 	}
 	if err := WriteORM(ormOutput, ormDir); err != nil {
@@ -101,18 +89,6 @@ func TestGeneratedORMCompiles(t *testing.T) {
 		t.Fatalf("read create.sql: %v", err)
 	}
 
-	// Replace directives in the types module's go.mod do not apply when the
-	// ORM is the main module, so the compile check adds the private ptr
-	// replace (a test dependency of schema-ir) to the ORM go.mod, matching
-	// the typegen compile test.
-	gomod, err := os.ReadFile(filepath.Join(ormDir, "go.mod"))
-	if err != nil {
-		t.Fatalf("read orm go.mod: %v", err)
-	}
-	gomod = append(gomod, []byte("\nreplace github.com/parable-work/superschematic/runtime/schema/go/ptr => "+ptrPath+"\n")...)
-	if err := os.WriteFile(filepath.Join(ormDir, "go.mod"), gomod, 0o644); err != nil {
-		t.Fatalf("write orm go.mod: %v", err)
-	}
 	historyDecoderTest := `package orm
 
 import (

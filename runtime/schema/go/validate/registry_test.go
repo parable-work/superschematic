@@ -110,7 +110,7 @@ func TestRegistry_MissingValidators_AllCovered(t *testing.T) {
 	s := ir.NewSchema("test", ir.SchemaKindGeneral)
 	s.Scalars["Contact.Email"] = &ir.ScalarDef{Name: "Contact.Email", HasCustomValidate: true}
 	s.Scalars["Contact.PhoneNumber"] = &ir.ScalarDef{Name: "Contact.PhoneNumber", HasCustomValidate: true}
-	s.Scalars["Parable.Slug"] = &ir.ScalarDef{Name: "Parable.Slug", HasCustomValidate: false}
+	s.Scalars["Acme.Slug"] = &ir.ScalarDef{Name: "Acme.Slug", HasCustomValidate: false}
 
 	r := NewRegistry()
 	r.Register("Contact.Email", func(string) []ValidationError { return nil })
@@ -125,7 +125,7 @@ func TestRegistry_MissingValidators_Partial(t *testing.T) {
 	s.Scalars["Contact.Email"] = &ir.ScalarDef{Name: "Contact.Email", HasCustomValidate: true}
 	s.Scalars["Design.Color"] = &ir.ScalarDef{Name: "Design.Color", HasCustomValidate: true}
 	s.Scalars["Contact.PhoneNumber"] = &ir.ScalarDef{Name: "Contact.PhoneNumber", HasCustomValidate: true}
-	s.Scalars["Parable.Slug"] = &ir.ScalarDef{Name: "Parable.Slug", HasCustomValidate: false}
+	s.Scalars["Acme.Slug"] = &ir.ScalarDef{Name: "Acme.Slug", HasCustomValidate: false}
 
 	r := NewRegistry()
 	r.Register("Contact.Email", func(string) []ValidationError { return nil })
@@ -137,7 +137,7 @@ func TestRegistry_MissingValidators_Partial(t *testing.T) {
 func TestRegistry_MissingValidators_NoneCustom(t *testing.T) {
 	s := ir.NewSchema("test", ir.SchemaKindGeneral)
 	s.Scalars["Identity.Name"] = &ir.ScalarDef{Name: "Identity.Name", HasCustomValidate: false}
-	s.Scalars["Parable.Slug"] = &ir.ScalarDef{Name: "Parable.Slug", HasCustomValidate: false}
+	s.Scalars["Acme.Slug"] = &ir.ScalarDef{Name: "Acme.Slug", HasCustomValidate: false}
 
 	r := NewRegistry()
 
@@ -147,11 +147,11 @@ func TestRegistry_MissingValidators_NoneCustom(t *testing.T) {
 
 func TestRegistry_MissingValidators_NamespacedCollisionIsolation(t *testing.T) {
 	s := ir.NewSchema("test", ir.SchemaKindGeneral)
-	s.Scalars["Parable.Slug"] = &ir.ScalarDef{Name: "Parable.Slug", HasCustomValidate: true}
+	s.Scalars["Acme.Slug"] = &ir.ScalarDef{Name: "Acme.Slug", HasCustomValidate: true}
 	s.Scalars["Identity.Slug"] = &ir.ScalarDef{Name: "Identity.Slug", HasCustomValidate: true}
 
 	r := NewRegistry()
-	r.Register("Parable.Slug", func(string) []ValidationError { return nil })
+	r.Register("Acme.Slug", func(string) []ValidationError { return nil })
 
 	missing := r.MissingValidators(s)
 	assert.Equal(t, []string{"Identity.Slug"}, missing)
@@ -284,120 +284,6 @@ func TestDefaultRegistry_Duration_Invalid(t *testing.T) {
 	assert.NotEmpty(t, errs)
 }
 
-func TestDefaultRegistry_Permission_Valid(t *testing.T) {
-	r := DefaultRegistry()
-
-	fn, ok := r.Get("Parable.Permission")
-	require.True(t, ok)
-
-	errs := fn("admin")
-	assert.Empty(t, errs)
-}
-
-func TestDefaultRegistry_Permission_Invalid(t *testing.T) {
-	r := DefaultRegistry()
-
-	fn, ok := r.Get("Parable.Permission")
-	require.True(t, ok)
-
-	errs := fn("not.a.real.permission")
-	assert.NotEmpty(t, errs)
-}
-
-func TestDefaultRegistry_File_ValidJSON(t *testing.T) {
-	r := DefaultRegistry()
-
-	fn, ok := r.Get("Asset.File")
-	require.True(t, ok)
-
-	errs := fn(`{"url":"https://cdn.example.com/a.txt","mimeType":"text/plain","size":42,"filename":"a.txt"}`)
-	assert.Empty(t, errs)
-}
-
-func TestDefaultRegistry_File_FailsStructValidation(t *testing.T) {
-	r := DefaultRegistry()
-
-	fn, ok := r.Get("Asset.File")
-	require.True(t, ok)
-
-	errs := fn(`{"url":"https://cdn.example.com/a.txt","mimeType":"","size":0,"filename":""}`)
-	require.Len(t, errs, 1)
-	assert.Equal(t, "scalar", errs[0].Validator)
-}
-
-func TestDefaultRegistry_File_InvalidJSON(t *testing.T) {
-	r := DefaultRegistry()
-
-	fn, ok := r.Get("Asset.File")
-	require.True(t, ok)
-
-	errs := fn(`{not json}`)
-	require.Len(t, errs, 1)
-	assert.Equal(t, "scalar", errs[0].Validator)
-}
-
-func TestDefaultRegistry_Image_Valid(t *testing.T) {
-	r := DefaultRegistry()
-
-	fn, ok := r.Get("Asset.Image")
-	require.True(t, ok)
-
-	errs := fn(`{"url":"https://cdn.example.com/a.png","mimeType":"image/png","size":1024,"width":100,"height":100,"filename":"a.png"}`)
-	assert.Empty(t, errs)
-}
-
-func TestDefaultRegistry_Image_InvalidMimeType(t *testing.T) {
-	r := DefaultRegistry()
-
-	fn, ok := r.Get("Asset.Image")
-	require.True(t, ok)
-
-	errs := fn(`{"url":"https://cdn.example.com/a.bmp","mimeType":"image/bmp","size":1024,"width":100,"height":100,"filename":"a.bmp"}`)
-	require.NotEmpty(t, errs)
-	assert.Equal(t, "scalar", errs[0].Validator)
-}
-
-func TestDefaultRegistry_LogoImage_Valid(t *testing.T) {
-	r := DefaultRegistry()
-
-	fn, ok := r.Get("Asset.LogoImage")
-	require.True(t, ok)
-
-	errs := fn(`{"url":"https://cdn.example.com/logo.png","mimeType":"image/png","size":2048,"width":256,"height":256,"filename":"logo.png","hasTransparency":true}`)
-	assert.Empty(t, errs)
-}
-
-func TestDefaultRegistry_LogoImage_RejectsNonPNG(t *testing.T) {
-	r := DefaultRegistry()
-
-	fn, ok := r.Get("Asset.LogoImage")
-	require.True(t, ok)
-
-	errs := fn(`{"url":"https://cdn.example.com/logo.jpg","mimeType":"image/jpeg","size":2048,"width":256,"height":256,"filename":"logo.jpg"}`)
-	require.NotEmpty(t, errs)
-	assert.Equal(t, "scalar", errs[0].Validator)
-}
-
-func TestDefaultRegistry_ArtifactFile_Valid(t *testing.T) {
-	r := DefaultRegistry()
-
-	fn, ok := r.Get("Artifact.File")
-	require.True(t, ok)
-
-	errs := fn(`{"gcsPath":"gs://bucket/path/file.csv","mimeType":"text/csv","size":1024,"filename":"file.csv"}`)
-	assert.Empty(t, errs)
-}
-
-func TestDefaultRegistry_ArtifactFile_FailsStructValidation(t *testing.T) {
-	r := DefaultRegistry()
-
-	fn, ok := r.Get("Artifact.File")
-	require.True(t, ok)
-
-	errs := fn(`{"gcsPath":"","mimeType":"","size":0,"filename":""}`)
-	require.NotEmpty(t, errs)
-}
-
 func TestNew_WithStrictRegistry_PanicsOnMissing(t *testing.T) {
 	s := ir.NewSchema("test", ir.SchemaKindGeneral)
 	s.Scalars["Custom.Missing"] = &ir.ScalarDef{Name: "Custom.Missing", HasCustomValidate: true}
@@ -432,34 +318,6 @@ func TestNew_DefaultNoStrict_NoPanic(t *testing.T) {
 		v := New(s, WithRegistry(NewRegistry()))
 		assert.NotNil(t, v)
 	})
-}
-
-func TestRegistry_IntegrationWithValidator_FileScalar(t *testing.T) {
-	s := ir.NewSchema("test", ir.SchemaKindGeneral)
-	s.Scalars["Asset.File"] = &ir.ScalarDef{
-		Name:              "Asset.File",
-		Primitive:         "String",
-		HasCustomValidate: true,
-	}
-	s.Types["Document"] = &ir.TypeDef{
-		Name: "Document",
-		Kind: ir.TypeKindObject,
-		Fields: []*ir.FieldDef{
-			{Name: "attachment", TypeRef: ir.TypeRef{Name: "Asset.File"}, Required: true},
-		},
-	}
-
-	v := New(s, WithRegistry(DefaultRegistry()))
-
-	errs := v.ValidateType("Document", map[string]any{
-		"attachment": `{"url":"https://cdn.example.com/a.txt","mimeType":"text/plain","size":42,"filename":"a.txt"}`,
-	})
-	assert.False(t, errs.HasErrors())
-
-	errs = v.ValidateType("Document", map[string]any{
-		"attachment": `{"url":"https://cdn.example.com/a.txt","mimeType":"","size":0,"filename":""}`,
-	})
-	assert.True(t, errs.HasErrors())
 }
 
 func TestRegistry_FallbackToIRConstraints(t *testing.T) {

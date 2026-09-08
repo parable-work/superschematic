@@ -12,8 +12,3 @@ export type {
 {{- if $scalarLibTypes}}
 export type { {{join $scalarLibTypes ", "}} } from '{{$.Naming.ScalarNpmPackage}}/scalars';
 {{- end}}
-{{range .Scalars}}
-{{- if eq .Symbol "ParablePermission"}}
-export type Permission = string;
-{{- end}}
-{{end}}

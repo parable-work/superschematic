@@ -32,18 +32,18 @@ import {
  * {{.Namespace.ClassName}} - API methods for {{.Namespace.Name}}
  */
 export class {{.Namespace.ClassName}} {
-  {{- if .Namespace.IsTenantNS}}
-  private readonly {{.Namespace.TenantParamName}}: string;
+  {{- if .Namespace.IsScopedNS}}
+  private readonly {{.Namespace.ScopeParamName}}: string;
   {{- end}}
 
   constructor(
     private readonly client: HttpClient
-    {{- if .Namespace.IsTenantNS -}}
-    , {{.Namespace.TenantParamName}}: string
+    {{- if .Namespace.IsScopedNS -}}
+    , {{.Namespace.ScopeParamName}}: string
     {{- end}}
   ) {
-    {{- if .Namespace.IsTenantNS}}
-    this.{{.Namespace.TenantParamName}} = {{.Namespace.TenantParamName}};
+    {{- if .Namespace.IsScopedNS}}
+    this.{{.Namespace.ScopeParamName}} = {{.Namespace.ScopeParamName}};
     {{- end}}
   }
 
@@ -62,7 +62,7 @@ export class {{.Namespace.ClassName}} {
    {{- end}}
    {{- if .PathParams}}
    {{- range .PathParams}}
-   {{- if not (and $.Namespace.IsTenantNS (eq .TSName $.Namespace.TenantParamName))}}
+   {{- if not (and $.Namespace.IsScopedNS (eq .TSName $.Namespace.ScopeParamName))}}
    * @param {{.TSName}} - {{.Name}} parameter
    {{- end}}
    {{- end}}
@@ -80,8 +80,8 @@ export class {{.Namespace.ClassName}} {
    * @throws {ApiError} if the API request fails
    */
   public async {{.Name}}(
-    {{- if has_non_tenant_params .PathParams $.Namespace.IsTenantNS $.Namespace.TenantParamName}}
-    {{join_params_filtered .PathParams $.Namespace.IsTenantNS $.Namespace.TenantParamName}},
+    {{- if has_non_scope_params .PathParams $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}
+    {{join_params_filtered .PathParams $.Namespace.IsScopedNS $.Namespace.ScopeParamName}},
     {{- end}}
     {{- if .HasInput}}
     input: Omit<{{.InputType}}, {{file_upload_field_union .FileUploadFields}}>,
@@ -104,7 +104,7 @@ export class {{.Namespace.ClassName}} {
     {{- end}}
 
     const result = await this.client.{{multipart_method .Method}}<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
-      `{{tenant_path (.TSPath) $.Namespace.IsTenantNS $.Namespace.TenantParamName}}`,
+      `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       formData,
       { signal }
     );
@@ -134,7 +134,7 @@ export class {{.Namespace.ClassName}} {
    {{- end}}
    {{- if .PathParams}}
    {{- range .PathParams}}
-   {{- if not (and $.Namespace.IsTenantNS (eq .TSName $.Namespace.TenantParamName))}}
+   {{- if not (and $.Namespace.IsScopedNS (eq .TSName $.Namespace.ScopeParamName))}}
    * @param {{.TSName}} - {{.Name}} parameter
    {{- end}}
    {{- end}}
@@ -145,14 +145,14 @@ export class {{.Namespace.ClassName}} {
    * @throws {ApiError} if the API request fails
    */
   public async {{.Name}}Raw(
-    {{- if has_non_tenant_params .PathParams $.Namespace.IsTenantNS $.Namespace.TenantParamName}}
-    {{join_params_filtered .PathParams $.Namespace.IsTenantNS $.Namespace.TenantParamName}},
+    {{- if has_non_scope_params .PathParams $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}
+    {{join_params_filtered .PathParams $.Namespace.IsScopedNS $.Namespace.ScopeParamName}},
     {{- end}}
     formData: FormData,
     signal?: AbortSignal
   ): Promise<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}> {
     const result = await this.client.{{multipart_method .Method}}<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
-      `{{tenant_path (.TSPath) $.Namespace.IsTenantNS $.Namespace.TenantParamName}}`,
+      `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       formData,
       { signal }
     );
@@ -177,7 +177,7 @@ export class {{.Namespace.ClassName}} {
    {{- end}}
    {{- if .PathParams}}
    {{- range .PathParams}}
-   {{- if not (and $.Namespace.IsTenantNS (eq .TSName $.Namespace.TenantParamName))}}
+   {{- if not (and $.Namespace.IsScopedNS (eq .TSName $.Namespace.ScopeParamName))}}
    * @param {{.TSName}} - {{.Name}} parameter
    {{- end}}
    {{- end}}
@@ -207,9 +207,9 @@ export class {{.Namespace.ClassName}} {
    * @throws {ApiError} if the API request fails
    */
   public async {{.Name}}(
-    {{- if has_non_tenant_params .PathParams $.Namespace.IsTenantNS $.Namespace.TenantParamName}}
+    {{- if has_non_scope_params .PathParams $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}
     {{- range .PathParams}}
-    {{- if not (and $.Namespace.IsTenantNS (eq .TSName $.Namespace.TenantParamName))}}
+    {{- if not (and $.Namespace.IsScopedNS (eq .TSName $.Namespace.ScopeParamName))}}
     {{.TSName}}: {{.TSType}},
     {{- end}}
     {{- end}}
@@ -436,13 +436,13 @@ export class {{.Namespace.ClassName}} {
     const scalarParams = { {{if has_query_params .QueryParams}}...requestParams, {{end}}...scalarInput };
     {{- end}}
     const result = await this.client.get<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
-      `{{tenant_path (.TSPath) $.Namespace.IsTenantNS $.Namespace.TenantParamName}}`,
+      `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       { signal{{if .ScalarArgs}}: requestSignal{{end}}{{if .HasInput}}, data: input{{end}}{{if and .ScalarArgs (not .HasInput)}}{{if .Filterable}}, params: { ...scalarParams, ...filterParams }{{else}}, params: scalarParams{{end}}{{else if and (has_query_params .QueryParams) .Filterable}}, params: { ...params, ...filterParams }{{else if has_query_params .QueryParams}}, params{{else if .Filterable}}, params: filterParams{{end}} }
     );
     {{- else if eq .Method "POST"}}
     // Make POST request
     const result = await this.client.post<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
-      `{{tenant_path (.TSPath) $.Namespace.IsTenantNS $.Namespace.TenantParamName}}`,
+      `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       {{- if has_encrypted_body .Method .Encrypted}}
       requestPayload,
       {{- else if .HasInput}}
@@ -457,7 +457,7 @@ export class {{.Namespace.ClassName}} {
     {{- else if eq .Method "PUT"}}
     // Make PUT request
     const result = await this.client.put<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
-      `{{tenant_path (.TSPath) $.Namespace.IsTenantNS $.Namespace.TenantParamName}}`,
+      `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       {{- if has_encrypted_body .Method .Encrypted}}
       requestPayload,
       {{- else if .HasInput}}
@@ -472,7 +472,7 @@ export class {{.Namespace.ClassName}} {
     {{- else if eq .Method "PATCH"}}
     // Make PATCH request
     const result = await this.client.patch<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
-      `{{tenant_path (.TSPath) $.Namespace.IsTenantNS $.Namespace.TenantParamName}}`,
+      `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       {{- if has_encrypted_body .Method .Encrypted}}
       requestPayload,
       {{- else if .HasInput}}
@@ -487,7 +487,7 @@ export class {{.Namespace.ClassName}} {
     {{- else if eq .Method "DELETE"}}
     // Make DELETE request
     const result = await this.client.delete<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
-      `{{tenant_path (.TSPath) $.Namespace.IsTenantNS $.Namespace.TenantParamName}}`,
+      `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       { signal{{if .ScalarArgs}}: requestSignal{{end}}{{if and (has_query_params .QueryParams) .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if has_query_params .QueryParams}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}} }
     );
     {{- end}}

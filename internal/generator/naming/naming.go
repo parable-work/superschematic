@@ -75,6 +75,19 @@ type Naming struct {
 	HTTPRuntimeRustCrate  string `toml:"http_runtime_rust_crate"`
 	PtrGoModule           string `toml:"ptr_go_module"`
 
+	// SchemaLanguage is how generated readmes and the schema-file JSON
+	// Schema name the schema language ("generated from <SchemaLanguage>
+	// definitions").
+	SchemaLanguage string `toml:"schema_language"`
+
+	// PackageAuthor is the author field generated package manifests carry
+	// (package.json, pyproject.toml, setup.py).
+	PackageAuthor string `toml:"package_author"`
+
+	// MetaSchemaURLPrefix prefixes the $id of the JSON Schemas the tool
+	// emits and validates against (the schema-file document schema).
+	MetaSchemaURLPrefix string `toml:"meta_schema_url_prefix"`
+
 	// AuthoringPackages lists the npm packages whose exports the TypeScript
 	// frontend treats as toolchain: decorators and type wrappers must
 	// resolve from one of them, and the per-kind import rules apply to
@@ -111,24 +124,88 @@ type Naming struct {
 	Paths PathsConfig `toml:"paths"`
 }
 
-// PathsConfig is the [paths] table of superschematic.toml. Every key is
-// optional and repo-relative (the repository root is the parent of the
-// schemas root, as for [cache] inputs); the zero value pins nothing.
+// PathsConfig is the [paths] table of superschematic.toml: where the
+// runtime modules the generated code imports live in the repository, for
+// generated manifests to point path dependencies at (go.mod replace, Cargo
+// path, npm file:). Every key is optional and repo-relative (the repository
+// root is the parent of the schemas root, as for [cache] inputs) and names
+// the directory that holds the module, package or crate itself. An unset
+// key emits no path dependency, so the generated manifest resolves the
+// published module instead.
 type PathsConfig struct {
-	// ScalarLib is the scalar library checkout (the directory holding its
-	// go/ module). When set, generated Go and Rust modules carry replace
-	// directives pointing at it, so they build against the in-tree copy;
-	// unset, they carry none and resolve the published module.
-	ScalarLib string `toml:"scalar_lib"`
+	// ScalarGo holds the scalar library's Go module (its go.mod).
+	ScalarGo string `toml:"scalar_go"`
+	// ScalarTypeScript holds the scalar library's npm package (its
+	// package.json).
+	ScalarTypeScript string `toml:"scalar_typescript"`
+	// ScalarRust holds the scalar library's Rust crate (its Cargo.toml).
+	ScalarRust string `toml:"scalar_rust"`
+	// SchemaIR holds the schema IR Go module.
+	SchemaIR string `toml:"schema_ir"`
+	// SchemaRuntimeGo holds the schema runtime Go module.
+	SchemaRuntimeGo string `toml:"schema_runtime_go"`
+	// HTTPRuntimeGo holds the http runtime Go module.
+	HTTPRuntimeGo string `toml:"http_runtime_go"`
+	// HTTPRuntimeRust holds the http runtime Rust crate.
+	HTTPRuntimeRust string `toml:"http_runtime_rust"`
+	// Ptr holds the ptr Go module when it is a module of its own rather
+	// than a package of the schema runtime.
+	Ptr string `toml:"ptr"`
 }
 
-// ScalarLibPath resolves [paths] scalar_lib against repoRoot; "" when the
-// key is unset.
-func (n Naming) ScalarLibPath(repoRoot string) string {
-	if n.Paths.ScalarLib == "" {
-		return ""
+// LocalPaths is PathsConfig resolved against a repository root: every set
+// key as an absolute path, every unset key "".
+type LocalPaths struct {
+	ScalarGo         string
+	ScalarTypeScript string
+	ScalarRust       string
+	SchemaIR         string
+	SchemaRuntimeGo  string
+	HTTPRuntimeGo    string
+	HTTPRuntimeRust  string
+	Ptr              string
+}
+
+// LocalPaths resolves the [paths] table against repoRoot.
+func (n Naming) LocalPaths(repoRoot string) LocalPaths {
+	resolve := func(rel string) string {
+		if rel == "" {
+			return ""
+		}
+		return filepath.Join(repoRoot, filepath.FromSlash(rel))
 	}
-	return filepath.Join(repoRoot, filepath.FromSlash(n.Paths.ScalarLib))
+	return LocalPaths{
+		ScalarGo:         resolve(n.Paths.ScalarGo),
+		ScalarTypeScript: resolve(n.Paths.ScalarTypeScript),
+		ScalarRust:       resolve(n.Paths.ScalarRust),
+		SchemaIR:         resolve(n.Paths.SchemaIR),
+		SchemaRuntimeGo:  resolve(n.Paths.SchemaRuntimeGo),
+		HTTPRuntimeGo:    resolve(n.Paths.HTTPRuntimeGo),
+		HTTPRuntimeRust:  resolve(n.Paths.HTTPRuntimeRust),
+		Ptr:              resolve(n.Paths.Ptr),
+	}
+}
+
+// RelPath returns target relative to outputDir in slash form for a
+// generated manifest, or "" when target is unset so the manifest omits the
+// path dependency.
+func RelPath(outputDir, target string) (string, error) {
+	if target == "" || outputDir == "" {
+		return "", nil
+	}
+	absOutput, err := filepath.Abs(outputDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve output dir: %w", err)
+	}
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", target, err)
+	}
+	rel, err := filepath.Rel(absOutput, absTarget)
+	if err != nil {
+		return "", fmt.Errorf("relate %s to %s: %w", target, outputDir, err)
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 // CacheConfig is the [cache] table of superschematic.toml. Both keys are
@@ -176,6 +253,9 @@ func Default() Naming {
 		HTTPRuntimeGoModule:     "github.com/parable-work/superschematic/runtime/http/go",
 		HTTPRuntimeRustCrate:    "superschematic-http-runtime",
 		PtrGoModule:             "github.com/parable-work/superschematic/runtime/schema/go/ptr",
+		SchemaLanguage:          "Superschematic",
+		PackageAuthor:           "superschematic",
+		MetaSchemaURLPrefix:     "superschematic://",
 		AuthProvider:            "session",
 		AuthoringPackages: []string{
 			"@superschematic/api",
@@ -213,6 +293,9 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.HTTPRuntimeGoModule, d.HTTPRuntimeGoModule)
 	fill(&n.HTTPRuntimeRustCrate, d.HTTPRuntimeRustCrate)
 	fill(&n.PtrGoModule, d.PtrGoModule)
+	fill(&n.SchemaLanguage, d.SchemaLanguage)
+	fill(&n.PackageAuthor, d.PackageAuthor)
+	fill(&n.MetaSchemaURLPrefix, d.MetaSchemaURLPrefix)
 	fill(&n.AuthProvider, d.AuthProvider)
 	if len(n.AuthoringPackages) == 0 {
 		n.AuthoringPackages = append([]string(nil), d.AuthoringPackages...)
@@ -255,6 +338,11 @@ func (n Naming) AuthoringScope() string {
 		}
 	}
 	return scope
+}
+
+// MetaSchemaURL returns the $id for one of the tool's JSON Schemas.
+func (n Naming) MetaSchemaURL(name string) string {
+	return n.MetaSchemaURLPrefix + name
 }
 
 // DeclaringPackage returns the authoring package the import specifier

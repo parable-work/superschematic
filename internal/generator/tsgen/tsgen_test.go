@@ -66,8 +66,8 @@ func TestWriteTypesGolden(t *testing.T) {
 			// relative file: spec is deterministic across machines.
 			tempRoot := t.TempDir()
 			outDir := filepath.Join(tempRoot, tc.service)
-			scalarLib := filepath.Join(tempRoot, "parable-scalars")
-			if err := SetScalarLibSpec(output, scalarLib, outDir); err != nil {
+			paths := naming.LocalPaths{ScalarTypeScript: filepath.Join(tempRoot, "scalars", "typescript")}
+			if err := SetScalarLibSpec(output, paths, outDir); err != nil {
 				t.Fatalf("set scalar-lib spec: %v", err)
 			}
 
@@ -126,23 +126,6 @@ func TestGenerateTypedRecordObjectHelpers(t *testing.T) {
 	}
 	if !strings.Contains(string(validatorSource), "[k, parseMapValueFromJSON(v)]") {
 		t.Fatal("required nested map parsing must preserve non-null values")
-	}
-}
-
-func TestScalarLibHookSymbol(t *testing.T) {
-	tests := []struct {
-		canonical string
-		want      string
-	}{
-		{canonical: "Contact.Email", want: "Email"},
-		{canonical: "Network.Url", want: "NetworkUrl"},
-		{canonical: "Parable.Slug", want: "ParableSlug"},
-	}
-	for _, tt := range tests {
-		tokens := codegen.BuildScalarTokens(tt.canonical)
-		if got := scalarLibHookSymbol(tt.canonical, tokens); got != tt.want {
-			t.Fatalf("scalarLibHookSymbol(%q) = %q, want %q", tt.canonical, got, tt.want)
-		}
 	}
 }
 

@@ -43,7 +43,7 @@ func TestExtractSubdomain(t *testing.T) {
 	}{
 		{"standard subdomain", "acme.example.com", "example.com", "acme"},
 		{"bare domain", "example.com", "example.com", ""},
-		{"non-matching domain", "acme.example.com", "example.com", ""},
+		{"non-matching domain", "acme.other.com", "example.com", ""},
 		{"host with port", "acme.example.com:8080", "example.com", "acme"},
 		{"case insensitive", "ACME.Example.Com", "example.com", "acme"},
 		{"multi-level subdomain", "sub.acme.example.com", "example.com", "sub.acme"},

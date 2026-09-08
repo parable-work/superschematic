@@ -29,7 +29,7 @@ import (
 // definitionBytes is the JSON Schema generated from the SchemaConfigDocument
 // type in @superschematic/schema-config. Regenerate with:
 //
-//	cd utils/psgen/packages/schema-config && bun run gen-json-schema
+//	cd packages/schema-config && bun run gen-json-schema
 //
 //go:embed schema-config.schema.json
 var definitionBytes []byte
@@ -91,11 +91,11 @@ func compiledSchema() (*validator.Schema, error) {
 			return
 		}
 		compiler := validator.NewCompiler()
-		if err := compiler.AddResource("psgen://schema-config.schema.json", resource); err != nil {
+		if err := compiler.AddResource("superschematic://schema-config.schema.json", resource); err != nil {
 			compileErr = fmt.Errorf("registering schema-config JSON Schema: %w", err)
 			return
 		}
-		compiled, compileErr = compiler.Compile("psgen://schema-config.schema.json")
+		compiled, compileErr = compiler.Compile("superschematic://schema-config.schema.json")
 	})
 	return compiled, compileErr
 }

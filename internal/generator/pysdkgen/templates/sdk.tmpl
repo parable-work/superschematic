@@ -32,9 +32,9 @@ class {{.SDKClassName}}:
         self._client.clear_public_encryption_key()
 
 {{- range .Namespaces}}
-{{- if .IsTenantNS}}
-    def {{.AccessorName}}(self, {{.TenantParamName}}: {{.TenantParamType}}) -> {{.ClassName}}:
-        return {{.ClassName}}(self._client, {{.TenantParamName}})
+{{- if .IsScopedNS}}
+    def {{.AccessorName}}(self, {{.ScopeParamName}}: {{.ScopeParamType}}) -> {{.ClassName}}:
+        return {{.ClassName}}(self._client, {{.ScopeParamName}})
 
 {{- else}}
     @property

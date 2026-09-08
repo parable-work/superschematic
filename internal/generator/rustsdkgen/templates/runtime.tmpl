@@ -122,7 +122,7 @@ pub type RequestHook =
 
 /// Config-level request interceptor applied to every outgoing call. Mirrors
 /// the Go SDK's `RequestInterceptor` so Rust callers can attach headers
-/// (tenant identity, tracing context, service identity) without threading
+/// (routing scope, tracing context, service identity) without threading
 /// `RequestOptions` through every namespace method.
 ///
 /// Runs after the auth header is attached, before any per-call
@@ -138,22 +138,23 @@ pub struct RequestOptions {
 }
 
 impl RequestOptions {
-    /// Options scoped to one tenant: sets the `X-Tenant` routing header and,
-    /// when `auth_token` is given, a per-request `Authorization: Bearer`
-    /// header. Batch services pass their config-level service token (or
-    /// `None` when the token already lives on `ClientConfig`); interactive
-    /// callers pass the caller's JWT so each request carries its own
-    /// identity.
-    pub fn tenant_scoped(
-        tenant_slug: impl Into<String>,
+    /// Options that set one routing header (a scope such as an account or
+    /// workspace header) and, when `auth_token` is given, a per-request
+    /// `Authorization: Bearer` header. Batch services pass their
+    /// config-level service token (or `None` when the token already lives
+    /// on `ClientConfig`); interactive callers pass the caller's token so
+    /// each request carries its own identity.
+    pub fn with_header(
+        header_name: &'static str,
+        header_value: impl Into<String>,
         auth_token: Option<String>,
         timeout_ms: Option<u64>,
     ) -> Self {
-        let tenant_header: String = tenant_slug.into();
+        let header_value: String = header_value.into();
         Self {
             timeout_ms,
             request_hook: Some(Arc::new(move |request| {
-                let request = request.header("X-Tenant", tenant_header.clone());
+                let request = request.header(header_name, header_value.clone());
                 if let Some(ref token) = auth_token {
                     request.header("Authorization", format!("Bearer {token}"))
                 } else {

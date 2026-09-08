@@ -21,7 +21,7 @@ import (
 type buildServiceOptions struct {
 	ServicePath    string
 	OutputRoot     string
-	ScalarLibPath  string
+	Paths          naming.LocalPaths
 	LoadOptions    []loader.Option
 	LoadDependency func(name string) (*ir.Schema, error)
 	Log            io.Writer
@@ -98,7 +98,7 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 		result, err = generator.Run(schema, cfg, generator.Options{
 			OutputRoot:     absOutputRoot,
 			ServicePath:    opts.ServicePath,
-			ScalarLibPath:  opts.ScalarLibPath,
+			Paths:          opts.Paths,
 			LoadDependency: opts.LoadDependency,
 			Log:            opts.Log,
 			Profile:        prof,

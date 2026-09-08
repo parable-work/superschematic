@@ -175,7 +175,7 @@ func (r run) generateGoTypes() error {
 
 	dir := TypesDir(r.Options.OutputRoot, "go", r.Config.Name)
 	if err := r.measure("output.types-go.prepare", func() error {
-		return typegen.SetReplacePaths(output, r.Options.ScalarLibPath, dir)
+		return typegen.SetReplacePaths(output, r.Options.Paths, dir)
 	}); err != nil {
 		return fmt.Errorf("generator: go types for %s: %w", r.Config.Name, err)
 	}
@@ -225,7 +225,7 @@ func (r run) generateTSTypes() error {
 
 	dir := TypesDir(r.Options.OutputRoot, "typescript", r.Config.Name)
 	if err := r.measure("output.types-typescript.prepare", func() error {
-		return tsgen.SetScalarLibSpec(output, r.Options.ScalarLibPath, dir)
+		return tsgen.SetScalarLibSpec(output, r.Options.Paths, dir)
 	}); err != nil {
 		return fmt.Errorf("generator: typescript types for %s: %w", r.Config.Name, err)
 	}
@@ -289,7 +289,7 @@ func (r run) generateRustTypes() error {
 	}
 
 	dir := TypesDir(r.Options.OutputRoot, "rust", r.Config.Name)
-	if err := rustgen.SetScalarLibPath(output, r.Options.ScalarLibPath, dir); err != nil {
+	if err := rustgen.SetScalarLibPath(output, r.Options.Paths, dir); err != nil {
 		return fmt.Errorf("generator: rust types for %s: %w", r.Config.Name, err)
 	}
 	if err := rustgen.WriteTypes(output, dir); err != nil {
@@ -351,7 +351,7 @@ func (r run) generateORM() error {
 
 	dir := ORMDir(r.Options.OutputRoot, r.Config.Name)
 	if err := r.measure("output.orm.prepare", func() error {
-		return ormgen.SetReplacePaths(output, r.Options.ScalarLibPath, dir)
+		return ormgen.SetReplacePaths(output, r.Options.Paths, dir)
 	}); err != nil {
 		return fmt.Errorf("generator: orm for %s: %w", r.Config.Name, err)
 	}
@@ -496,7 +496,7 @@ func (r run) generateGoAPI() error {
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	if err := r.measure("output.api.prepare", func() error {
-		return apigen.SetReplacePaths(output, r.Options.ScalarLibPath, dir)
+		return apigen.SetReplacePaths(output, r.Options.Paths, dir)
 	}); err != nil {
 		return fmt.Errorf("generator: api for %s: %w", r.Config.Name, err)
 	}
@@ -548,7 +548,7 @@ func (r run) generateRustAPI() error {
 	}
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
-	if err := rustrestgen.SetReplacePaths(output, r.Options.ScalarLibPath, dir); err != nil {
+	if err := rustrestgen.SetReplacePaths(output, r.Options.Paths, dir); err != nil {
 		return fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
 	}
 	if err := rustrestgen.WriteAPI(output, dir); err != nil {
@@ -726,6 +726,9 @@ func (r run) generateGoSDK() error {
 
 	dir := SDKDir(r.Options.OutputRoot, "go", r.Config.Name)
 	typesDir := TypesDir(r.Options.OutputRoot, "go", r.Config.Name)
+	if err := gosdkgen.SetReplacePaths(sdkOutput, r.Options.Paths, dir); err != nil {
+		return fmt.Errorf("generator: go sdk for %s: %w", r.Config.Name, err)
+	}
 	if err := r.measure("output.sdk-go.write", func() error {
 		return gosdkgen.WriteSDKWithToolsProfiled(sdkOutput, apiOutput, dir, typesDir, r.Options.Clock, r.Options.Profile, r.Options.SkipFormat, codegenProfilePrefixes("output.sdk-go")...)
 	}); err != nil {

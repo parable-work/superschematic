@@ -95,7 +95,7 @@ func TestToolsNamespaceUsesSDKPropertyIdentifier(t *testing.T) {
 		t.Fatalf("GenerateTools: %v", err)
 	}
 	for index := range toolsOutput.Namespaces {
-		if !toolsOutput.Namespaces[index].IsTenantNS {
+		if !toolsOutput.Namespaces[index].IsScopedNS {
 			toolsOutput.Namespaces[index].Name = "parable-authoring"
 			break
 		}

@@ -10,7 +10,7 @@ pub type IdentityName = String;
 pub type IdentitySlug = String;
 
 /// UUID v4 with automatic base62 encoding for client-facing APIs
-pub type IdentityUUID = parable_scalars_core::Uuid;
+pub type IdentityUUID = superscalar::Uuid;
 
 /// ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
-pub type TemporalDateTime = parable_scalars_core::DateTime;
+pub type TemporalDateTime = superscalar::DateTime;

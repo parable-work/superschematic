@@ -224,26 +224,16 @@ func templateFuncs() template.FuncMap {
 
 // SetReplacePaths computes dependency path fields for generated Cargo.toml.
 // Unlike the Go targets, the http-runtime path dependency is mandatory: there
-// is no published crate for Cargo to fall back on, so empty inputs are an
-// error rather than a no-op.
-func SetReplacePaths(output *APIOutput, scalarLibPath, outputDir string) error {
-	if scalarLibPath == "" || outputDir == "" {
-		return fmt.Errorf("rustrestgen: scalar-lib path and output dir are required to locate the http-runtime crate")
+// is no published crate for Cargo to fall back on, so an unset [paths]
+// http_runtime_rust is an error rather than a no-op.
+func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir string) error {
+	if paths.HTTPRuntimeRust == "" || outputDir == "" {
+		return fmt.Errorf("rustrestgen: [paths] http_runtime_rust and an output dir are required to locate the http-runtime crate")
 	}
-
-	absScalarLib, err := filepath.Abs(scalarLibPath)
+	rel, err := naming.RelPath(outputDir, paths.HTTPRuntimeRust)
 	if err != nil {
-		return fmt.Errorf("resolve scalar-lib absolute path: %w", err)
+		return fmt.Errorf("http runtime crate path: %w", err)
 	}
-	absOutputDir, err := filepath.Abs(outputDir)
-	if err != nil {
-		return fmt.Errorf("resolve output dir absolute path: %w", err)
-	}
-
-	rel, err := filepath.Rel(absOutputDir, filepath.Join(absScalarLib, "..", "psgen", "http-runtime", "rust"))
-	if err != nil {
-		return fmt.Errorf("compute relative http-runtime path: %w", err)
-	}
-	output.RuntimeDepPath = filepath.ToSlash(rel)
+	output.RuntimeDepPath = rel
 	return nil
 }

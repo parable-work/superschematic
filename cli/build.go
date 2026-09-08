@@ -165,11 +165,11 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 	outputRoot = absOutputRoot
 
 	_, err = buildService(buildServiceOptions{
-		Naming:        names,
-		ServicePath:   servicePath,
-		OutputRoot:    outputRoot,
-		ScalarLibPath: names.ScalarLibPath(repoRoot),
-		LoadOptions:   loadOpts,
+		Naming:      names,
+		ServicePath: servicePath,
+		OutputRoot:  outputRoot,
+		Paths:       names.LocalPaths(repoRoot),
+		LoadOptions: loadOpts,
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(servicePath, "..", name), loader.WithProfiler(prof), loader.WithNaming(names), loader.WithRegistry(reg))
 		},

@@ -6,8 +6,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	types "example.com/schemas/types/go/fixture-db"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // TenantRepositoryInterface defines the contract for Tenant data access.

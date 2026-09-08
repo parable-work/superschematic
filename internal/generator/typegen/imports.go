@@ -209,8 +209,8 @@ func localSchemaSymbols(schema *ir.Schema) map[string]struct{} {
 // object field types. Returns true when at least one alias was emitted.
 //
 // Locally defined symbols always win: @source(DBType) must not redeclare an
-// API view that shares a name with a nested DB relation (e.g. web-api.Tenant
-// vs web-db.Tenant). Traits are skipped -- they are flattened into tables and
+// API view that shares a name with a nested DB relation (e.g. shop-api.Order
+// vs shop-db.Order). Traits are skipped -- they are flattened into tables and
 // are not emitted as Go types in the dependency module.
 func addImportedTypeAliases(result *[]ImportedTypeInfo, seen map[string]struct{}, localSymbols map[string]struct{}, depSchema *ir.Schema, typeDef *ir.TypeDef, alias string) bool {
 	if typeDef == nil {

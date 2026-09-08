@@ -1,7 +1,6 @@
 package tsgen
 
 import (
-	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -26,13 +26,7 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		t.Skip("bun not available; skipping TypeScript compile check")
 	}
 
-	scalarLib, err := filepath.Abs("../../../../parable-scalars")
-	if err != nil {
-		t.Fatalf("resolve scalar-lib path: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(scalarLib, "typescript")); err != nil {
-		t.Skipf("scalar-lib typescript runtime not available: %v", err)
-	}
+	paths := testpaths.Local(t)
 
 	// Resolve symlinks (macOS /var -> /private/var) so the relative file:
 	// spec computed against the temp dir resolves correctly at install time.
@@ -71,7 +65,7 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		}
 
 		outDir := filepath.Join(tempRoot, tc.name)
-		if err := SetScalarLibSpec(output, scalarLib, outDir); err != nil {
+		if err := SetScalarLibSpec(output, paths, outDir); err != nil {
 			t.Fatalf("set scalar-lib spec for %s: %v", tc.name, err)
 		}
 		if err := WriteTypes(output, outDir); err != nil {

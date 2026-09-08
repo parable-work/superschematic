@@ -1,6 +1,7 @@
 package tsreader
 
 import (
+	"github.com/parable-work/superschematic/internal/testpaths"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,7 @@ func decoratorTestService(t *testing.T, kind string, files map[string]string) st
 	pkg := func(name string) string {
 		return filepath.ToSlash(filepath.Join(root, "packages", name, "src", "index.ts"))
 	}
-	scalars := filepath.ToSlash(filepath.Join(root, "..", "parable-scalars", "typescript", "src", "index.ts"))
+	scalars := filepath.ToSlash(filepath.Join(testpaths.Local(t).ScalarTypeScript, "src", "index.ts"))
 	dir := t.TempDir()
 	all := map[string]string{
 		"package.json":       `{"private": true}`,
@@ -77,7 +78,7 @@ export abstract class Tenant {
   name: string;
 }
 `,
-			want: []string{"a.schema.ts:6:3: decorator @local does not come from a @psgen toolchain package"},
+			want: []string{"a.schema.ts:6:3: decorator @local does not come from a @superschematic toolchain package"},
 		},
 		{
 			name: "field decorator on a type",

@@ -84,8 +84,8 @@ type EndpointInfo struct {
 	Path          string // full route path including the /api prefix
 	RoutePath     string // route path relative to the /api mount point
 	Method        string // upper-case HTTP method ("GET", "POST", ...)
-	HandlerName   string // handler factory name stem (e.g. "TenantGetTenantHandler")
-	ImplName      string // namespace-qualified implementation name (e.g. "TenantGetTenant")
+	HandlerName   string // handler factory name stem (e.g. "OrdersGetOrderHandler")
+	ImplName      string // namespace-qualified implementation name (e.g. "OrdersGetOrder")
 	ShortImplName string // implementation method name without the namespace prefix
 	Namespace     string // kebab-case namespace derived from the operation set name
 
@@ -109,12 +109,13 @@ type EndpointInfo struct {
 	RequiredPerms    []string
 	RequireOwnership bool
 
-	// IsTenantEndpoint and TenantParamName are filled by the auth provider's
-	// Endpoint hook; the SDK generators read them to hoist the tenant path
-	// parameter to the namespace client. TenantParamName is the path
-	// parameter name for tenant-scoped routes.
-	IsTenantEndpoint bool
-	TenantParamName  string
+	// IsScopedEndpoint and ScopeParamName are filled by the auth provider's
+	// Endpoint hook; the SDK generators read them to hoist one path
+	// parameter (the scope: an account, a workspace, a project) to the
+	// namespace client's constructor. ScopeParamName is that path
+	// parameter's name.
+	IsScopedEndpoint bool
+	ScopeParamName   string
 	// Auth is provider-owned per-endpoint data the provider's templates read.
 	Auth any
 
@@ -263,8 +264,8 @@ type Options struct {
 	// input/output types.
 	Dependencies map[string]*ir.Schema
 
-	// IsPublic marks a public-facing API: auth middleware, tenant
-	// resolution, and the upstream ORM wiring are generated.
+	// IsPublic marks a public-facing API: auth middleware, the provider's
+	// request-scope resolution, and the upstream ORM wiring are generated.
 	IsPublic bool
 
 	// UpstreamSchema is the DB schema backing authentication (the authDb
@@ -452,7 +453,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 }
 
 // extractNamespace derives the kebab-case namespace from an operation set
-// name (e.g. "TenantQueries" -> "tenant", "ConnectorOperations" -> "connector").
+// name (e.g. "OrderQueries" -> "order", "ConnectorOperations" -> "connector").
 func extractNamespace(setName string) string {
 	if setName == "Query" || setName == "Mutation" {
 		return "root"
@@ -647,7 +648,7 @@ func resolveMiddleware(setMW, fieldMW *ir.MiddlewareConfig) (rateLimit, bodyLimi
 }
 
 // extractEmbeddedParams returns the set of parameter names embedded in a
-// @rest path template (e.g. "tenants/{id}" -> {"id"}).
+// @rest path template (e.g. "orders/{id}" -> {"id"}).
 func extractEmbeddedParams(restPath string) map[string]bool {
 	params := make(map[string]bool)
 	for i := 0; i < len(restPath); i++ {

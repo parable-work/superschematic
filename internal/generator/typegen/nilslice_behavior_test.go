@@ -9,6 +9,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
 // optionalListBehaviorTest runs inside the generated fixture-general module
@@ -84,13 +85,7 @@ func TestOptionalListRuntimeBehavior(t *testing.T) {
 		t.Skip("skipping generated-module test run in -short mode")
 	}
 
-	scalarLib, err := filepath.Abs("../../../../parable-scalars")
-	if err != nil {
-		t.Fatalf("resolve scalar-lib path: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(scalarLib, "go")); err != nil {
-		t.Skipf("scalar-lib runtime not available: %v", err)
-	}
+	paths := testpaths.Local(t)
 
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-general"))
 	if err != nil {
@@ -107,7 +102,7 @@ func TestOptionalListRuntimeBehavior(t *testing.T) {
 	}
 
 	outDir := filepath.Join(t.TempDir(), "fixture-general")
-	if err := SetReplacePaths(output, scalarLib, outDir); err != nil {
+	if err := SetReplacePaths(output, paths, outDir); err != nil {
 		t.Fatalf("set replace paths: %v", err)
 	}
 	if err := WriteTypes(output, outDir); err != nil {

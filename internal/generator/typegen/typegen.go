@@ -350,40 +350,17 @@ func (o *ModuleOutput) IsEmpty() bool {
 		len(o.ImportedUnions) == 0
 }
 
-// SetReplacePaths computes and sets the go.mod replace directive paths for
-// scalar-lib and schema-ir based on the resolved scalarLibPath and the output
-// directory where the generated module will live. Generated artifacts keep
-// importing the existing scalar-lib runtime packages; the scalar-lib
-// dependency flip is sequenced in a separate workstream.
-func SetReplacePaths(output *ModuleOutput, scalarLibPath, outputDir string) error {
-	if scalarLibPath == "" || outputDir == "" {
-		return nil
+// SetReplacePaths sets the go.mod replace directive paths for the scalar
+// library and the schema IR relative to the output directory where the
+// generated module will live. An unset path emits no directive.
+func SetReplacePaths(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
+	var err error
+	if output.ScalarLibReplacePath, err = naming.RelPath(outputDir, paths.ScalarGo); err != nil {
+		return fmt.Errorf("scalar library replace path: %w", err)
 	}
-
-	absScalarLib, err := filepath.Abs(scalarLibPath)
-	if err != nil {
-		return fmt.Errorf("resolve scalar-lib absolute path: %w", err)
+	if output.SchemaIRReplacePath, err = naming.RelPath(outputDir, paths.SchemaIR); err != nil {
+		return fmt.Errorf("schema-ir replace path: %w", err)
 	}
-
-	absOutputDir, err := filepath.Abs(outputDir)
-	if err != nil {
-		return fmt.Errorf("resolve output dir absolute path: %w", err)
-	}
-
-	scalarLibGoPath := filepath.Join(absScalarLib, "go")
-	relScalarLib, err := filepath.Rel(absOutputDir, scalarLibGoPath)
-	if err != nil {
-		return fmt.Errorf("compute relative scalar-lib path: %w", err)
-	}
-	output.ScalarLibReplacePath = filepath.ToSlash(relScalarLib)
-
-	schemaIRGoPath := filepath.Clean(filepath.Join(absScalarLib, "..", "psgen", "schema-ir", "go"))
-	relSchemaIR, err := filepath.Rel(absOutputDir, schemaIRGoPath)
-	if err != nil {
-		return fmt.Errorf("compute relative schema-ir path: %w", err)
-	}
-	output.SchemaIRReplacePath = filepath.ToSlash(relSchemaIR)
-
 	return nil
 }
 

@@ -23,6 +23,18 @@ import (
 //go:embed templates/*.tmpl
 var templatesFS embed.FS
 
+// SetReplacePaths sets the go.mod replace directive path for the http
+// runtime relative to the output directory. An unset path emits no
+// directive, so the module resolves the published runtime.
+func SetReplacePaths(output *SDKOutput, paths naming.LocalPaths, outputDir string) error {
+	rel, err := naming.RelPath(outputDir, paths.HTTPRuntimeGo)
+	if err != nil {
+		return fmt.Errorf("http runtime replace path: %w", err)
+	}
+	output.HTTPRuntimeReplacePath = rel
+	return nil
+}
+
 // SDKOutput contains all generated Go SDK metadata.
 type SDKOutput struct {
 	SchemaName             string
@@ -31,6 +43,7 @@ type SDKOutput struct {
 	TypesModule            string
 	TypesReplacePath       string
 	TypeModuleReplaces     []ModuleReplace
+	HTTPRuntimeReplacePath string // set by SetReplacePaths; empty omits the directive
 	SDKStructName          string
 	Namespaces             []NamespaceInfo
 	HasAuth                bool
@@ -57,20 +70,20 @@ type RuntimeSurface struct {
 
 // NamespaceInfo represents a namespace with its endpoints.
 type NamespaceInfo struct {
-	Name              string
-	StructName        string
-	FieldName         string
-	IsTenantNS        bool
-	TenantParamName   string
-	TenantFieldName   string
-	TenantFieldGoName string
-	RequiresTypes     bool
-	NeedsURLPkg       bool
-	NeedsRuntimePkg   bool
-	NeedsFmtPkg       bool
-	NeedsStringsPkg   bool
-	NeedsRegexpPkg    bool
-	Endpoints         []EndpointInfo
+	Name             string
+	StructName       string
+	FieldName        string
+	IsScopedNS       bool
+	ScopeParamName   string
+	ScopeFieldName   string
+	ScopeFieldGoName string
+	RequiresTypes    bool
+	NeedsURLPkg      bool
+	NeedsRuntimePkg  bool
+	NeedsFmtPkg      bool
+	NeedsStringsPkg  bool
+	NeedsRegexpPkg   bool
+	Endpoints        []EndpointInfo
 }
 
 // EndpointInfo represents a single API endpoint for the Go SDK.
@@ -203,14 +216,14 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 			}
 			namespaceMap[nsName] = ns
 		}
-		if endpoint.IsTenantEndpoint {
-			ns.IsTenantNS = true
-			ns.TenantParamName = endpoint.TenantParamName
-			ns.TenantFieldName = goutil.GoPrivateIdentifier(endpoint.TenantParamName)
-			ns.TenantFieldGoName = goutil.GoPublicIdentifier(endpoint.TenantParamName)
+		if endpoint.IsScopedEndpoint {
+			ns.IsScopedNS = true
+			ns.ScopeParamName = endpoint.ScopeParamName
+			ns.ScopeFieldName = goutil.GoPrivateIdentifier(endpoint.ScopeParamName)
+			ns.ScopeFieldGoName = goutil.GoPublicIdentifier(endpoint.ScopeParamName)
 		}
 
-		converted := convertEndpoint(endpoint, ns.IsTenantNS, ns.TenantParamName, goutil.GoPublicIdentifier(nsName))
+		converted := convertEndpoint(endpoint, ns.IsScopedNS, ns.ScopeParamName, goutil.GoPublicIdentifier(nsName))
 		if endpointUsesTypes(converted) {
 			ns.RequiresTypes = true
 		}
@@ -271,14 +284,14 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 	return output, nil
 }
 
-func convertEndpoint(ep apigen.EndpointInfo, isTenantNS bool, tenantParamName string, nsPrefix string) EndpointInfo {
+func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName string, nsPrefix string) EndpointInfo {
 	sdkPath := ep.Path
 	sdkHTTPMethod := ep.Method
-	pathFormat, pathArgs := convertPathToGoFormat(sdkPath, isTenantNS, tenantParamName)
+	pathFormat, pathArgs := convertPathToGoFormat(sdkPath, isScopedNS, scopeParamName)
 
 	pathParams := make([]PathParam, 0, len(ep.PathParams))
 	for _, param := range ep.PathParams {
-		if isTenantNS && param.Name == tenantParamName {
+		if isScopedNS && param.Name == scopeParamName {
 			continue
 		}
 		pathParams = append(pathParams, PathParam{
@@ -391,7 +404,7 @@ func isBodyMethod(method string) bool {
 
 var pathParamPattern = regexp.MustCompile(`\{([a-zA-Z0-9_]+)\}`)
 
-func convertPathToGoFormat(path string, isTenantNS bool, tenantParamName string) (string, []string) {
+func convertPathToGoFormat(path string, isScopedNS bool, scopeParamName string) (string, []string) {
 	matches := pathParamPattern.FindAllStringSubmatch(path, -1)
 	if len(matches) == 0 {
 		return path, nil
@@ -403,7 +416,7 @@ func convertPathToGoFormat(path string, isTenantNS bool, tenantParamName string)
 		paramName := match[1]
 		pathFormat = strings.Replace(pathFormat, "{"+paramName+"}", "%v", 1)
 
-		if isTenantNS && paramName == tenantParamName {
+		if isScopedNS && paramName == scopeParamName {
 			args = append(args, "n."+goutil.GoPrivateIdentifier(paramName))
 			continue
 		}

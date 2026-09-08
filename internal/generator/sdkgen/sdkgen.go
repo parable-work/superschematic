@@ -24,14 +24,14 @@ var templatesFS embed.FS
 
 // NamespaceInfo represents a namespace with its endpoints
 type NamespaceInfo struct {
-	Name                   string         // Namespace name (e.g., "auth", "tenant")
+	Name                   string         // Namespace name (e.g., "auth", "orders")
 	ClassName              string         // TypeScript class name (e.g., "AuthNamespace")
 	Endpoints              []EndpointInfo // Endpoints in this namespace
-	IsTenantNS             bool           // Whether this is the tenant namespace (requires parameter)
+	IsScopedNS             bool           // Whether the namespace hoists a scope path parameter to its constructor
 	HasAuth                bool           // Whether any endpoint requires auth
 	HasEncryptedPayload    bool           // Whether namespace has encrypted POST/PUT/PATCH endpoints
 	HasFilterableEndpoints bool           // Whether namespace has any @filterable endpoint
-	TenantParamName        string         // Name of tenant parameter if IsTenantNS
+	ScopeParamName         string         // Name of the hoisted scope parameter if IsScopedNS
 	Imports                []string       // Unique list of types to import from types package
 }
 
@@ -73,7 +73,7 @@ type FileUploadField struct {
 
 // PathParam represents a path parameter
 type PathParam struct {
-	Name   string // Parameter name (e.g., "tenantId")
+	Name   string // Parameter name (e.g., "orderId")
 	TSName string // TypeScript variable name
 	TSType string // TypeScript type
 	IRType string // Original IR type name (for JSON Schema conversion)
@@ -99,6 +99,7 @@ type QueryParam struct {
 // SDKOutput contains all generated SDK code metadata
 type SDKOutput struct {
 	SchemaName             string          // Schema name (e.g., "my-api")
+	Author                 string          // package.json author, from Naming.PackageAuthor
 	SDKClassName           string          // Main SDK class name (e.g., "WebApiSDK")
 	PackageName            string          // NPM package name (e.g., "@schemas/my-api-sdk")
 	TypesPackage           string          // Types package name (e.g., "@schemas/my-api-types")
@@ -127,6 +128,7 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		SDKClassName: toSDKClassName(apiOutput.SchemaName),
 		PackageName:  apiOutput.Naming.OrDefault().NpmSDKPackage(apiOutput.SchemaName),
 		TypesPackage: apiOutput.Naming.OrDefault().NpmTypesPackage(apiOutput.SchemaName),
+		Author:       apiOutput.Naming.OrDefault().PackageAuthor,
 		Namespaces:   []NamespaceInfo{},
 		HasAuth:      hasAuth,
 		Timestamp:    clock.RFC3339(),
@@ -152,14 +154,14 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 				Name:                ns,
 				ClassName:           tsutil.ToClassName(ns) + "Namespace",
 				Endpoints:           []EndpointInfo{},
-				IsTenantNS:          endpoint.IsTenantEndpoint,
+				IsScopedNS:          endpoint.IsScopedEndpoint,
 				HasAuth:             false,
 				HasEncryptedPayload: false,
 				Imports:             []string{},
 			}
 			importsMap[ns] = make(map[string]bool)
-			if endpoint.IsTenantEndpoint {
-				namespaceMap[ns].TenantParamName = endpoint.TenantParamName
+			if endpoint.IsScopedEndpoint {
+				namespaceMap[ns].ScopeParamName = endpoint.ScopeParamName
 			}
 		}
 
@@ -518,31 +520,31 @@ func customTemplateFuncs() template.FuncMap {
 			}
 			return strings.Join(names, ", ")
 		},
-		"join_params_filtered": func(params []PathParam, isTenantNS bool, tenantParamName string) string {
+		"join_params_filtered": func(params []PathParam, isScopedNS bool, scopeParamName string) string {
 			var names []string
 			for _, p := range params {
-				// Skip tenantId for tenant namespaces since it's already in the constructor
-				if isTenantNS && p.TSName == tenantParamName {
+				// Skip the scope parameter for scoped namespaces since the constructor holds it
+				if isScopedNS && p.TSName == scopeParamName {
 					continue
 				}
 				names = append(names, fmt.Sprintf("%s: %s", p.TSName, p.TSType))
 			}
 			return strings.Join(names, ", ")
 		},
-		"has_non_tenant_params": func(params []PathParam, isTenantNS bool, tenantParamName string) bool {
+		"has_non_scope_params": func(params []PathParam, isScopedNS bool, scopeParamName string) bool {
 			for _, p := range params {
-				if isTenantNS && p.TSName == tenantParamName {
+				if isScopedNS && p.TSName == scopeParamName {
 					continue
 				}
 				return true
 			}
 			return false
 		},
-		"tenant_path": func(path string, isTenantNS bool, tenantParamName string) string {
-			// For tenant namespaces, replace ${tenantId} with ${this.tenantId}
-			if isTenantNS {
-				placeholder := fmt.Sprintf("${%s}", tenantParamName)
-				replacement := fmt.Sprintf("${this.%s}", tenantParamName)
+		"scoped_path": func(path string, isScopedNS bool, scopeParamName string) string {
+			// For scoped namespaces, replace ${<scope>} with ${this.<scope>}
+			if isScopedNS {
+				placeholder := fmt.Sprintf("${%s}", scopeParamName)
+				replacement := fmt.Sprintf("${this.%s}", scopeParamName)
 				return strings.ReplaceAll(path, placeholder, replacement)
 			}
 			return path
@@ -740,10 +742,10 @@ func toolsTemplateFuncs() template.FuncMap {
 		"buildInvocationArgs": func(tool ToolDefinition, ns ToolsNamespace) string {
 			var args []string
 
-			// For tenant namespace, path params are handled via the tenant() factory
-			// So we skip tenantId for tenant namespaces
+			// A scoped namespace takes its scope parameter in the factory,
+			// so the invocation skips it.
 			for _, param := range tool.PathParams {
-				if ns.IsTenantNS && param.Name == "tenantId" {
+				if ns.IsScopedNS && param.Name == ns.ScopeParam {
 					continue
 				}
 				args = append(args, fmt.Sprintf("(params as %sParams).%s", toPascalCaseToolName(tool.Name), param.TSName))

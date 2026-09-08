@@ -170,11 +170,11 @@ func TestWriteSDKEmitsControlPlaneHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read runtime.rs: %v", err)
 	}
-	if !strings.Contains(string(runtimeSrc), "pub fn tenant_scoped(") {
-		t.Error("runtime.rs must expose RequestOptions::tenant_scoped")
+	if !strings.Contains(string(runtimeSrc), "pub fn with_header(") {
+		t.Error("runtime.rs must expose RequestOptions::with_header")
 	}
-	if !strings.Contains(string(runtimeSrc), "X-Tenant") {
-		t.Error("tenant_scoped must set the X-Tenant header")
+	if !strings.Contains(string(runtimeSrc), "request.header(header_name, header_value.clone())") {
+		t.Error("with_header must set the named header")
 	}
 
 	clientSrc, err := os.ReadFile(filepath.Join(outDir, "src", "client.rs"))
@@ -219,7 +219,7 @@ func TestWriteSDKGolden(t *testing.T) {
 	apiOutput := loadFixtureAPI(t)
 	clock := codegen.DefaultClock()
 
-	sdkOutput, err := Generate(apiOutput, "parable-fixture-api-sdk", naming.Default().RustTypesCrate("fixture-api"), clock)
+	sdkOutput, err := Generate(apiOutput, "schemas-fixture-api-sdk", naming.Default().RustTypesCrate("fixture-api"), clock)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}

@@ -22,10 +22,10 @@ type Options struct {
 	// Relative output paths (e.g., API scaffoldsOutputDir) resolve against it.
 	ServicePath string
 
-	// ScalarLibPath is the path to the scalar-lib runtime package directory.
-	// Generated Go modules emit go.mod replace directives relative to it.
-	// Empty disables the replace directives.
-	ScalarLibPath string
+	// Paths locates the runtime modules in the repository for generated
+	// manifests to point path dependencies at; the CLI resolves it from the
+	// [paths] table. An unset entry emits no path dependency.
+	Paths naming.LocalPaths
 
 	// Naming supplies every module, package and crate name the generators
 	// emit. Empty fields fall back to naming.Default() (today's names); the

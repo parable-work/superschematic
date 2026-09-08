@@ -366,7 +366,7 @@ func TestGeneratedCardAndWireUnionRoundTripGolden(t *testing.T) {
 	if err := os.Mkdir(testsDir, 0o755); err != nil {
 		t.Fatalf("create tests directory: %v", err)
 	}
-	const roundTripTest = `use parable_synthetic_types::{CardPayment, Payment, WirePayment};
+	const roundTripTest = `use schemas_synthetic_types::{CardPayment, Payment, WirePayment};
 
 #[test]
 fn card_and_wire_union_variants_round_trip_byte_identically() {

@@ -95,22 +95,22 @@ sdk.clearToken();
 ### Making API Calls
 
 {{- range .Namespaces}}
-{{- if .IsTenantNS}}
+{{- if .IsScopedNS}}
 
-#### {{.ClassName}} (Tenant-scoped)
+#### {{.ClassName}} (scoped)
 
 ```typescript
-const tenant = sdk.{{toCamelCase .Name}}('tenant-id-here');
+const scoped = sdk.{{toCamelCase .Name}}('scope-id-here');
 {{- range $i, $ep := .Endpoints}}
 {{- if eq $i 0}}
 
 // Example: {{$ep.Name}}
 {{- if $ep.HasInput}}
-const result = await tenant.{{$ep.Name}}({
+const result = await scoped.{{$ep.Name}}({
   // Input data
 });
 {{- else}}
-const result = await tenant.{{$ep.Name}}();
+const result = await scoped.{{$ep.Name}}();
 {{- end}}
 {{- end}}
 {{- end}}

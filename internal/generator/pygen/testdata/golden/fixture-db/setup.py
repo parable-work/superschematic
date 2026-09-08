@@ -3,18 +3,18 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="parable_types_fixture_db",
+    name="schemas_types_fixture_db",
     version="1.0.0",
     description="Generated Python types for fixture-db schema",
-    author="Parable Platform",
+    author="superschematic",
     packages=find_packages(),
     package_data={
-        "parable_types_fixture_db": ["py.typed"],
+        "schemas_types_fixture_db": ["py.typed"],
     },
     install_requires=[
         "pydantic>=2.12.0,<3.0.0",
         "PyYAML>=6.0.0",
-        "parable-scalar-lib>=1.0.0",
+        "superscalar>=1.0.0",
     ],
     python_requires=">=3.12",
     classifiers=[

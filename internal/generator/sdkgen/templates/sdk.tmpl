@@ -31,10 +31,10 @@
  * });
  *
  {{- range .Namespaces}}
- {{- if .IsTenantNS}}
- * // Tenant-namespaced endpoint
- * const tenant = sdk.{{toCamelCase .Name}}('tenant-id');
- * const result = await tenant.someMethod();
+ {{- if .IsScopedNS}}
+ * // Scoped namespace: the scope parameter is passed once
+ * const scoped = sdk.{{toCamelCase .Name}}('scope-id');
+ * const result = await scoped.someMethod();
  {{- else}}
  * // {{.Name}} endpoints
  * const result = await sdk.{{toCamelCase .Name}}.someMethod();
@@ -65,7 +65,7 @@ export {
 export class {{.SDKClassName}} {
   private readonly client: HttpClient;
   {{- range .Namespaces}}
-  {{- if not .IsTenantNS}}
+  {{- if not .IsScopedNS}}
   public readonly {{toCamelCase .Name}}: {{.ClassName}};
   {{- end}}
   {{- end}}
@@ -75,22 +75,22 @@ export class {{.SDKClassName}} {
 
     // Initialize namespace instances
     {{- range .Namespaces}}
-    {{- if not .IsTenantNS}}
+    {{- if not .IsScopedNS}}
     this.{{toCamelCase .Name}} = new {{.ClassName}}(this.client);
     {{- end}}
     {{- end}}
   }
 
   {{- range .Namespaces}}
-  {{- if .IsTenantNS}}
+  {{- if .IsScopedNS}}
 
   /**
-   * Get tenant-namespaced API methods
-   * @param {{.TenantParamName}} - Tenant identifier
+   * Get the {{.Name}} namespace scoped to one {{.ScopeParamName}}
+   * @param {{.ScopeParamName}} - Scope identifier
    * @returns {{.ClassName}} instance
    */
-  public {{toCamelCase .Name}}({{.TenantParamName}}: string): {{.ClassName}} {
-    return new {{.ClassName}}(this.client, {{.TenantParamName}});
+  public {{toCamelCase .Name}}({{.ScopeParamName}}: string): {{.ClassName}} {
+    return new {{.ClassName}}(this.client, {{.ScopeParamName}});
   }
   {{- end}}
   {{- end}}

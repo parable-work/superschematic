@@ -26,7 +26,7 @@ type AuthProvider interface {
 	Analyze(api, upstream *ir.Schema) (AuthModel, error)
 
 	// Endpoint fills the provider-owned fields of an endpoint from its
-	// operation: IsTenantEndpoint and TenantParamName (typed fields because
+	// operation: IsScopedEndpoint and ScopeParamName (typed fields because
 	// the SDK generators read them) and Auth, which is the provider's own.
 	// RequiresAuth and RequiredPerms are derived by core before the call.
 	Endpoint(op *ir.FieldDef, set *ir.OperationSet, ep *EndpointInfo) error
@@ -51,7 +51,8 @@ type AuthProvider interface {
 
 // AuthModel is what AuthProvider.Analyze returns. The two core flags gate
 // the session and principal store adapters; Extra is the provider's own
-// (Parable keeps its tenant, role and impersonation flags there).
+// (a multi-tenant provider keeps its tenancy, role and impersonation flags
+// there).
 type AuthModel struct {
 	// HasSessionStore reports an upstream Session(id, jti, user, expiresAt)
 	// table.

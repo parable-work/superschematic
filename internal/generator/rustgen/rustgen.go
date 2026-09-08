@@ -14,7 +14,6 @@ package rustgen
 import (
 	"embed"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -311,28 +310,14 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	return output, nil
 }
 
-// SetScalarLibPath computes the Cargo.toml path entry for the
-// parable-scalars-core crate (the ext/ member of utils/parable-scalars) as a
-// path relative to outputDir.
-func SetScalarLibPath(output *ModuleOutput, scalarLibPath, outputDir string) error {
-	if scalarLibPath == "" || outputDir == "" {
-		return nil
-	}
-
-	absScalarLib, err := filepath.Abs(scalarLibPath)
+// SetScalarLibPath computes the Cargo.toml path entry for the scalar
+// library's crate relative to outputDir. An unset path emits no path entry.
+func SetScalarLibPath(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
+	rel, err := naming.RelPath(outputDir, paths.ScalarRust)
 	if err != nil {
-		return fmt.Errorf("resolve scalar-lib absolute path: %w", err)
+		return fmt.Errorf("scalar library crate path: %w", err)
 	}
-	absOutputDir, err := filepath.Abs(outputDir)
-	if err != nil {
-		return fmt.Errorf("resolve output dir absolute path: %w", err)
-	}
-
-	rel, err := filepath.Rel(absOutputDir, filepath.Join(absScalarLib, "ext"))
-	if err != nil {
-		return fmt.Errorf("compute relative scalar-lib path: %w", err)
-	}
-	output.ScalarLibDepPath = filepath.ToSlash(rel)
+	output.ScalarLibDepPath = rel
 	return nil
 }
 

@@ -37,6 +37,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
 // verdicts is one language's normalized output: vector name -> field name ->
@@ -407,13 +408,7 @@ func TestGeneratedValidatorParity(t *testing.T) {
 	fixedClock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 
 	t.Run("go", func(t *testing.T) {
-		scalarLib, err := filepath.Abs("../../../../parable-scalars")
-		if err != nil {
-			t.Fatalf("resolve scalar-lib path: %v", err)
-		}
-		if _, err := os.Stat(filepath.Join(scalarLib, "go")); err != nil {
-			t.Skipf("scalar-lib go runtime not available: %v", err)
-		}
+		paths := testpaths.Local(t)
 
 		output, err := typegen.Generate(schema, typegen.Options{
 			SchemaName: "parity-fixture",
@@ -430,7 +425,7 @@ func TestGeneratedValidatorParity(t *testing.T) {
 			t.Fatalf("resolve temp dir: %v", err)
 		}
 		outDir := filepath.Join(tempRoot, "parity-fixture")
-		if err := typegen.SetReplacePaths(output, scalarLib, outDir); err != nil {
+		if err := typegen.SetReplacePaths(output, paths, outDir); err != nil {
 			t.Fatalf("set replace paths: %v", err)
 		}
 		if err := typegen.WriteTypes(output, outDir); err != nil {
@@ -461,13 +456,7 @@ func TestGeneratedValidatorParity(t *testing.T) {
 		if err != nil {
 			t.Skip("bun not available; skipping TypeScript parity check")
 		}
-		scalarLib, err := filepath.Abs("../../../../parable-scalars")
-		if err != nil {
-			t.Fatalf("resolve scalar-lib path: %v", err)
-		}
-		if _, err := os.Stat(filepath.Join(scalarLib, "typescript")); err != nil {
-			t.Skipf("scalar-lib typescript runtime not available: %v", err)
-		}
+		paths := testpaths.Local(t)
 
 		output, err := tsgen.Generate(schema, tsgen.Options{
 			SchemaName: "parity-fixture",
@@ -481,7 +470,7 @@ func TestGeneratedValidatorParity(t *testing.T) {
 			t.Fatalf("resolve temp dir: %v", err)
 		}
 		outDir := filepath.Join(tempRoot, "parity-fixture")
-		if err := tsgen.SetScalarLibSpec(output, scalarLib, outDir); err != nil {
+		if err := tsgen.SetScalarLibSpec(output, paths, outDir); err != nil {
 			t.Fatalf("set scalar-lib spec: %v", err)
 		}
 		if err := tsgen.WriteTypes(output, outDir); err != nil {

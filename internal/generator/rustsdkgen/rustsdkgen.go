@@ -42,14 +42,14 @@ type SDKOutput struct {
 
 // NamespaceInfo represents a namespace with its endpoints.
 type NamespaceInfo struct {
-	Name            string
-	ModuleName      string
-	StructName      string
-	FieldName       string
-	IsTenantNS      bool
-	TenantParamName string
-	TenantFieldName string
-	Endpoints       []EndpointInfo
+	Name           string
+	ModuleName     string
+	StructName     string
+	FieldName      string
+	IsScopedNS     bool
+	ScopeParamName string
+	ScopeFieldName string
+	Endpoints      []EndpointInfo
 }
 
 // EndpointInfo represents a single API endpoint for the Rust SDK.
@@ -233,13 +233,13 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 			namespaceMap[nsName] = ns
 		}
 
-		if endpoint.IsTenantEndpoint {
-			ns.IsTenantNS = true
-			ns.TenantParamName = endpoint.TenantParamName
-			ns.TenantFieldName = toRustFieldName(endpoint.TenantParamName)
+		if endpoint.IsScopedEndpoint {
+			ns.IsScopedNS = true
+			ns.ScopeParamName = endpoint.ScopeParamName
+			ns.ScopeFieldName = toRustFieldName(endpoint.ScopeParamName)
 		}
 
-		ns.Endpoints = append(ns.Endpoints, convertEndpoint(endpoint, ns.IsTenantNS, ns.TenantParamName))
+		ns.Endpoints = append(ns.Endpoints, convertEndpoint(endpoint, ns.IsScopedNS, ns.ScopeParamName))
 	}
 
 	namespaces := make([]NamespaceInfo, 0, len(namespaceMap))
@@ -411,12 +411,12 @@ func schemaNameFromRef(reference string) (string, bool) {
 	return schemaName, true
 }
 
-func convertEndpoint(ep apigen.EndpointInfo, isTenantNS bool, tenantParamName string) EndpointInfo {
-	pathFormat, pathArgs, pathQueryBindings := convertPathToRustFormat(ep, isTenantNS, tenantParamName)
+func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName string) EndpointInfo {
+	pathFormat, pathArgs, pathQueryBindings := convertPathToRustFormat(ep, isScopedNS, scopeParamName)
 
 	pathParams := make([]PathParam, 0, len(ep.PathParams))
 	for _, param := range ep.PathParams {
-		if isTenantNS && param.Name == tenantParamName {
+		if isScopedNS && param.Name == scopeParamName {
 			continue
 		}
 		pathParams = append(pathParams, PathParam{
@@ -590,12 +590,12 @@ var pathParamPattern = regexp.MustCompile(`\{([a-zA-Z0-9_]+)\}`)
 
 // convertPathToRustFormat converts an /api/... path with {param} placeholders
 // into a Rust format! string plus its argument expressions. Placeholders are
-// bound, in order of preference, to: the namespace tenant field (`self.<name>`),
+// bound, in order of preference, to: the namespace scope field (`self.<name>`),
 // a generated method path parameter, or a query-struct field (operations
 // declared with QueryParam<> arguments embed the same values in the @rest
 // path). Query-bound placeholders are returned so the template can
 // destructure the query struct into locals before building the path.
-func convertPathToRustFormat(ep apigen.EndpointInfo, isTenantNS bool, tenantParamName string) (string, []string, []PathQueryBinding) {
+func convertPathToRustFormat(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName string) (string, []string, []PathQueryBinding) {
 	matches := pathParamPattern.FindAllStringSubmatch(ep.Path, -1)
 	if len(matches) == 0 {
 		return ep.Path, nil, nil
@@ -618,7 +618,7 @@ func convertPathToRustFormat(ep apigen.EndpointInfo, isTenantNS bool, tenantPara
 		pathFormat = strings.Replace(pathFormat, "{"+paramName+"}", "{}", 1)
 		rustName := toRustFieldName(paramName)
 
-		if isTenantNS && paramName == tenantParamName {
+		if isScopedNS && paramName == scopeParamName {
 			args = append(args, "self."+rustName)
 			continue
 		}

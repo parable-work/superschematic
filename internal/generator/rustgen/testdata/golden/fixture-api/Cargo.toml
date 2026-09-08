@@ -1,5 +1,5 @@
 [package]
-name = "parable-fixture-api-types"
+name = "schemas-fixture-api-types"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.95.0"
@@ -8,5 +8,5 @@ license = "UNLICENSED"
 
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
-parable-scalars-core = "0.1.0"
+superscalar = "0.1.0"
 serde_json = { version = "1.0" }

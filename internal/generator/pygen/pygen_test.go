@@ -64,7 +64,7 @@ func TestWriteTypesGolden(t *testing.T) {
 			}
 
 			if tc.service == "fixture-general" {
-				generated, err := os.ReadFile(filepath.Join(outDir, "parable_types_fixture_general", "types.py"))
+				generated, err := os.ReadFile(filepath.Join(outDir, "schemas_types_fixture_general", "types.py"))
 				if err != nil {
 					t.Fatalf("read generated types.py: %v", err)
 				}
@@ -292,7 +292,7 @@ func TestGenerateUnionsAndDefaults(t *testing.T) {
 		t.Fatalf("write types: %v", err)
 	}
 
-	moduleDir := filepath.Join(outDir, "parable_types_synthetic")
+	moduleDir := filepath.Join(outDir, "schemas_types_synthetic")
 	for _, name := range []string{
 		"__init__.py",
 		"types.py",
@@ -366,7 +366,7 @@ func TestPythonDateTimeTypeMappingUsesDateTimeValidator(t *testing.T) {
 		t.Fatalf("write types: %v", err)
 	}
 
-	moduleDir := filepath.Join(outDir, "parable_types_python_datetime_mapping")
+	moduleDir := filepath.Join(outDir, "schemas_types_python_datetime_mapping")
 	scalarsContent, err := os.ReadFile(filepath.Join(moduleDir, "scalars.py"))
 	if err != nil {
 		t.Fatalf("read scalars.py: %v", err)

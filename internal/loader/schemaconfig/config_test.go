@@ -191,7 +191,7 @@ func TestEmbeddedDefinitionIsCurrent(t *testing.T) {
 	cmd := exec.Command(bun, "run", "ts-json-schema-generator",
 		"--path", "src/index.ts",
 		"--type", "SchemaConfigDocument",
-		"--id", "psgen://schema-config.schema.json",
+		"--id", "superschematic://schema-config.schema.json",
 		"--out", out)
 	cmd.Dir = pkgDir
 	if output, err := cmd.CombinedOutput(); err != nil {

@@ -39,6 +39,7 @@ var templatesFS embed.FS
 // SDKOutput contains all generated Python SDK metadata.
 type SDKOutput struct {
 	SchemaName             string
+	Author                 string // manifest author, from Naming.PackageAuthor
 	PackageName            string
 	TypesPackage           string
 	SDKClassName           string
@@ -55,10 +56,10 @@ type NamespaceInfo struct {
 	ModuleName             string
 	ClassName              string
 	AccessorName           string
-	IsTenantNS             bool
-	TenantParamName        string
-	TenantParamType        string
-	tenantParamOriginal    string
+	IsScopedNS             bool
+	ScopeParamName         string
+	ScopeParamType         string
+	scopeParamOriginal     string
 	Endpoints              []EndpointInfo
 	Imports                []string
 	HasAuth                bool
@@ -177,6 +178,7 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		PackageName:  resolvedPackageName,
 		TypesPackage: resolvedTypesPackage,
 		SDKClassName: toPythonClassName(apiOutput.SchemaName) + "SDK",
+		Author:       names.PackageAuthor,
 		Namespaces:   nil,
 		HasAuth:      apiOutput.IsPublic && apiOutput.HasAuth,
 		Timestamp:    clock.RFC3339(),
@@ -206,24 +208,21 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 			importsByNamespace[namespaceName] = make(map[string]struct{})
 		}
 
-		if endpoint.IsTenantEndpoint {
-			namespace.IsTenantNS = true
-			if namespace.tenantParamOriginal == "" {
-				namespace.tenantParamOriginal = endpoint.TenantParamName
+		if endpoint.IsScopedEndpoint {
+			namespace.IsScopedNS = true
+			if namespace.scopeParamOriginal == "" {
+				namespace.scopeParamOriginal = endpoint.ScopeParamName
 			}
-			if namespace.tenantParamOriginal == "" {
-				namespace.tenantParamOriginal = "tenantId"
+			namespace.ScopeParamName = toPythonIdentifier(namespace.scopeParamOriginal)
+			if namespace.ScopeParamType == "" {
+				namespace.ScopeParamType = mapIRTypeToPython(findPathParamType(endpoint.PathParams, namespace.scopeParamOriginal))
 			}
-			namespace.TenantParamName = toPythonIdentifier(namespace.tenantParamOriginal)
-			if namespace.TenantParamType == "" {
-				namespace.TenantParamType = mapIRTypeToPython(findPathParamType(endpoint.PathParams, namespace.tenantParamOriginal))
-			}
-			if namespace.TenantParamType == "" {
-				namespace.TenantParamType = "str"
+			if namespace.ScopeParamType == "" {
+				namespace.ScopeParamType = "str"
 			}
 		}
 
-		converted := convertEndpoint(endpoint, namespace.IsTenantNS, namespace.tenantParamOriginal)
+		converted := convertEndpoint(endpoint, namespace.IsScopedNS, namespace.scopeParamOriginal)
 		namespace.Endpoints = append(namespace.Endpoints, converted)
 
 		if endpoint.RequiresAuth {
@@ -289,10 +288,10 @@ func collectNamespaceImports(target map[string]struct{}, endpoint apigen.Endpoin
 	}
 }
 
-func convertEndpoint(endpoint apigen.EndpointInfo, isTenantNS bool, tenantParamOriginal string) EndpointInfo {
+func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOriginal string) EndpointInfo {
 	pathParams := make([]PathParam, 0, len(endpoint.PathParams))
 	for _, param := range endpoint.PathParams {
-		if isTenantNS && param.Name == tenantParamOriginal {
+		if isScopedNS && param.Name == scopeParamOriginal {
 			continue
 		}
 		pathParams = append(pathParams, PathParam{
@@ -359,7 +358,7 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isTenantNS bool, tenantParamO
 
 	sdkPath := endpoint.Path
 	sdkHTTPMethod := endpoint.Method
-	pathTemplate, pathIsFString := convertPathToPythonTemplate(sdkPath, endpoint.PathParams, isTenantNS, tenantParamOriginal)
+	pathTemplate, pathIsFString := convertPathToPythonTemplate(sdkPath, endpoint.PathParams, isScopedNS, scopeParamOriginal)
 	hasEncryptedBody := endpoint.Encrypted && isBodyMethod(sdkHTTPMethod)
 	// Endpoints with an explicit input object can require a JSON body even on GET
 	// (for example, GET /api/users/events with UserEventsSearchInput).
@@ -508,12 +507,12 @@ func buildMethodParams(
 	return methodParams
 }
 
-func convertPathToPythonTemplate(path string, pathParams []apigen.PathParam, isTenantNS bool, tenantParamOriginal string) (string, bool) {
+func convertPathToPythonTemplate(path string, pathParams []apigen.PathParam, isScopedNS bool, scopeParamOriginal string) (string, bool) {
 	result := path
 	for _, param := range pathParams {
 		placeholder := "{" + param.Name + "}"
 		replacementName := toPythonIdentifier(param.Name)
-		if isTenantNS && param.Name == tenantParamOriginal {
+		if isScopedNS && param.Name == scopeParamOriginal {
 			replacementName = "self._" + replacementName
 		}
 		result = strings.ReplaceAll(result, placeholder, "{"+replacementName+"}")

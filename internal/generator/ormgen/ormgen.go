@@ -15,7 +15,6 @@ package ormgen
 import (
 	"embed"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -271,41 +270,17 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	return output, nil
 }
 
-// SetReplacePaths computes the go.mod replace directive paths for scalar-lib
-// and schema-ir relative to the output directory. Generated artifacts keep
-// importing the existing scalar-lib runtime; the dependency flip is
-// sequenced in a separate workstream.
-func SetReplacePaths(output *ORMOutput, scalarLibPath, outputDir string) error {
-	if scalarLibPath == "" || outputDir == "" {
-		return nil
+// SetReplacePaths sets the go.mod replace directive paths for the scalar
+// library and the schema IR relative to the output directory. An unset path
+// emits no directive.
+func SetReplacePaths(output *ORMOutput, paths naming.LocalPaths, outputDir string) error {
+	var err error
+	if output.ScalarLibReplacePath, err = naming.RelPath(outputDir, paths.ScalarGo); err != nil {
+		return fmt.Errorf("scalar library replace path: %w", err)
 	}
-
-	absScalarLib, err := filepath.Abs(scalarLibPath)
-	if err != nil {
-		return fmt.Errorf("resolve scalar-lib absolute path: %w", err)
+	if output.SchemaIRReplacePath, err = naming.RelPath(outputDir, paths.SchemaIR); err != nil {
+		return fmt.Errorf("schema-ir replace path: %w", err)
 	}
-	absOutputDir, err := filepath.Abs(outputDir)
-	if err != nil {
-		return fmt.Errorf("resolve output dir absolute path: %w", err)
-	}
-
-	relScalarLib, err := filepath.Rel(absOutputDir, filepath.Join(absScalarLib, "go"))
-	if err != nil {
-		return fmt.Errorf("compute relative scalar-lib path: %w", err)
-	}
-	output.ScalarLibReplacePath = filepath.ToSlash(relScalarLib)
-
-	// schema-ir lives at utils/psgen/schema-ir/go, one level under psgen; the
-	// scalar package sits beside psgen at utils/parable-scalars. Resolve schema-ir
-	// as <scalarLib>/../psgen/schema-ir/go to match typegen.SetReplacePaths and the
-	// replace directive in parable-scalars/go/go.mod (../../psgen/schema-ir/go).
-	schemaIRGoPath := filepath.Clean(filepath.Join(absScalarLib, "..", "psgen", "schema-ir", "go"))
-	relSchemaIR, err := filepath.Rel(absOutputDir, schemaIRGoPath)
-	if err != nil {
-		return fmt.Errorf("compute relative schema-ir path: %w", err)
-	}
-	output.SchemaIRReplacePath = filepath.ToSlash(relSchemaIR)
-
 	return nil
 }
 

@@ -30,10 +30,9 @@ require (
 // Local module paths for development.
 // When consuming this module externally, these resolve via go.work or go.sum.
 replace example.com/schemas/types/go/fixture-api => ../../types/go/fixture-api
-replace github.com/parable-work/superschematic/runtime/http/go => ../../../../utils/http-runtime/go
-replace github.com/parable-work/superschematic/runtime/schema/go => ../../../../utils/schema-runtime/go
-replace github.com/parable-work/superschematic/ir => ../../../../utils/schema-ir/go
-replace github.com/parable-work/superscalar/go => ../../../../utils/parable-scalars/go
-replace github.com/parable-work/superschematic/runtime/schema/go/ptr => ../../../../../services/pkg/ptr
+replace github.com/parable-work/superschematic/runtime/http/go => ../../../../runtime/http/go
+replace github.com/parable-work/superschematic/runtime/schema/go => ../../../../runtime/schema/go
+replace github.com/parable-work/superschematic/ir => ../../../../ir
+replace github.com/parable-work/superscalar/go => ../../../../third_party/superscalar/go
 replace example.com/schemas/orm/fixture-db => ../../orm/fixture-db
 replace example.com/schemas/types/go/fixture-db => ../../types/go/fixture-db

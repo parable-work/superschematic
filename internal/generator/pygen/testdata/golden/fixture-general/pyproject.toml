@@ -5,14 +5,14 @@ requires = ["setuptools>=68.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "parable_types_fixture_general"
+name = "schemas_types_fixture_general"
 version = "1.0.0"
 description = "Generated Python types for fixture-general schema"
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
-    {name = "Parable Platform"}
+    {name = "superschematic"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -36,10 +36,10 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["parable_types_fixture_general"]
+packages = ["schemas_types_fixture_general"]
 
 [tool.setuptools.package-data]
-"parable_types_fixture_general" = ["py.typed"]
+"schemas_types_fixture_general" = ["py.typed"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -94,7 +94,7 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = [
-    "--cov=parable_types_fixture_general",
+    "--cov=schemas_types_fixture_general",
     "--cov-report=term-missing",
     "--cov-report=html",
     "--strict-markers",

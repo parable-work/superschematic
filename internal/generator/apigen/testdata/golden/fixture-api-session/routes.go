@@ -12,9 +12,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	orm "example.com/schemas/orm/fixture-db"
 	types "example.com/schemas/types/go/fixture-api"
+	"github.com/go-chi/chi/v5"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
 	runtimesession "github.com/parable-work/superschematic/runtime/http/go/session"
@@ -29,7 +29,7 @@ const (
 // Config holds all dependencies needed to register API routes.
 // Pass this to RegisterRoutes() to wire up your business logic.
 type Config struct {
-	// DB is the database connection for middleware operations (auth, tenant context, etc.)
+	// DB is the database connection for middleware operations (auth, request context, etc.)
 	DB orm.DatabaseInterface
 
 	// Logger is the base logger for request-scoped logging

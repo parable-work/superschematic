@@ -31,7 +31,7 @@
     "typescript",
     "fixture-api"
   ],
-  "author": "Parable Platform",
+  "author": "superschematic",
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {},

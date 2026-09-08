@@ -1005,34 +1005,46 @@ func TestLoadServiceHydratesGenericScalarWithoutExtension(t *testing.T) {
 	}
 }
 
-// TestLoadServiceRejectsExtensionScalarWithoutExtension: Parable.Slug is one
-// of the Parable extension's scalars (utils/parable-scalars/CONTEXT.md). A
-// catalog without the extension does not know it, and the loader says so
-// instead of emitting an unhydrated string scalar.
+// TestLoadServiceRejectsExtensionScalarWithoutExtension: Acme.Slug is a
+// scalar only an extension's scalar package defines. A catalog without that
+// package does not know it, and the loader says so instead of emitting an
+// unhydrated string scalar.
 func TestLoadServiceRejectsExtensionScalarWithoutExtension(t *testing.T) {
-	dir := scalarFixtureService(t, "Parable.Slug")
+	dir := scalarFixtureService(t, "Acme.Slug")
 	_, err := LoadService(dir, WithRegistry(registryWithCatalog(t, genericOnlyCatalog(t))))
 	if err == nil {
-		t.Fatal("LoadService accepted Parable.Slug against a catalog that does not define it")
+		t.Fatal("LoadService accepted Acme.Slug against a catalog that does not define it")
 	}
-	if !strings.Contains(err.Error(), "unknown scalar Parable.Slug") || !strings.Contains(err.Error(), "scalar registry") {
+	if !strings.Contains(err.Error(), "unknown scalar Acme.Slug") || !strings.Contains(err.Error(), "scalar registry") {
 		t.Errorf("error %q does not name the unknown scalar and the registry", err.Error())
 	}
 }
 
 // TestLoadServiceHydratesExtensionScalarWithAssembledCatalog: the same
-// schema loads when the registry carries the assembled catalog (the scalar
-// package the Parable extension registers; utils/parable-schematic repeats
-// this through ext.Extension).
+// schema loads when the registry carries a catalog that includes the
+// extension's row, the way an extension's RegisterScalars call supplies it.
 func TestLoadServiceHydratesExtensionScalarWithAssembledCatalog(t *testing.T) {
-	dir := scalarFixtureService(t, "Parable.Slug")
-	schema, err := LoadService(dir, WithRegistry(registryWithCatalog(t, registry.CoreScalars())))
+	dir := scalarFixtureService(t, "Acme.Slug")
+	rows := map[string]*scalars.ScalarMetadata{}
+	for name, row := range scalars.ScalarMetadataByCanonical {
+		rows[name] = row
+	}
+	rows["Acme.Slug"] = &scalars.ScalarMetadata{
+		CanonicalName: "Acme.Slug",
+		Symbol:        "AcmeSlug",
+		Primitive:     "String",
+		Description:   "URL-safe identifier",
+		GoType:        "string",
+		SQLType:       "CITEXT",
+		Pattern:       "^[a-z0-9-]+$",
+	}
+	schema, err := LoadService(dir, WithRegistry(registryWithCatalog(t, registry.ScalarCatalogOf(rows))))
 	if err != nil {
 		t.Fatalf("LoadService: %v", err)
 	}
-	def := schema.Scalars["Parable.Slug"]
+	def := schema.Scalars["Acme.Slug"]
 	if def == nil || def.Description == "" || def.Pattern == "" {
-		t.Fatalf("Parable.Slug was not hydrated from the assembled catalog: %+v", def)
+		t.Fatalf("Acme.Slug was not hydrated from the assembled catalog: %+v", def)
 	}
 }
 

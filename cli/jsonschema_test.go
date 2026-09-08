@@ -37,7 +37,7 @@ func TestJSONSchemaCommand(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &doc))
 	assert.Contains(t, doc, "oneOf")
 	assert.Contains(t, doc, "$defs")
-	compileSchema(t, buf.Bytes(), "psgen://schema-file.json")
+	compileSchema(t, buf.Bytes(), "superschematic://schema-file.json")
 }
 
 func TestJSONSchemaCommand_Config(t *testing.T) {
@@ -50,8 +50,8 @@ func TestJSONSchemaCommand_Config(t *testing.T) {
 
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &doc))
-	assert.Equal(t, "psgen://schema-config.schema.json", doc["$id"])
-	compileSchema(t, buf.Bytes(), "psgen://schema-config.schema.json")
+	assert.Equal(t, "superschematic://schema-config.schema.json", doc["$id"])
+	compileSchema(t, buf.Bytes(), "superschematic://schema-config.schema.json")
 }
 
 func TestBuildCommand_JSONService(t *testing.T) {

@@ -1,7 +1,6 @@
 package typegen
 
 import (
-	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -21,13 +21,7 @@ func TestGeneratedModulesCompile(t *testing.T) {
 		t.Skip("skipping compile check in -short mode")
 	}
 
-	scalarLib, err := filepath.Abs("../../../../parable-scalars")
-	if err != nil {
-		t.Fatalf("resolve scalar-lib path: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(scalarLib, "go")); err != nil {
-		t.Skipf("scalar-lib runtime not available: %v", err)
-	}
+	paths := testpaths.Local(t)
 
 	tempRoot := t.TempDir()
 	typesGoDir := filepath.Join(tempRoot, "types", "go")
@@ -70,7 +64,7 @@ func TestGeneratedModulesCompile(t *testing.T) {
 		}
 
 		outDir := filepath.Join(typesGoDir, tc.name)
-		if err := SetReplacePaths(output, scalarLib, outDir); err != nil {
+		if err := SetReplacePaths(output, paths, outDir); err != nil {
 			t.Fatalf("set replace paths for %s: %v", tc.name, err)
 		}
 		if err := WriteTypes(output, outDir); err != nil {
@@ -78,27 +72,8 @@ func TestGeneratedModulesCompile(t *testing.T) {
 		}
 	}
 
-	// schema-ir's test files import the private ptr module; `go mod tidy`
-	// resolves test deps of direct deps, and replace directives inside
-	// dependency go.mod files do not apply to the main module. The committed
-	// v1 dist modules have the same shape and rely on consumer-side
-	// workspaces, so add the ptr replace here only for the compile check.
-	ptrPath := filepath.Clean(filepath.Join(scalarLib, "..", "..", "services", "pkg", "ptr"))
-	if _, err := os.Stat(ptrPath); err != nil {
-		t.Skipf("ptr module not available: %v", err)
-	}
-
 	for _, tc := range cases {
 		outDir := filepath.Join(typesGoDir, tc.name)
-
-		gomod, err := os.ReadFile(filepath.Join(outDir, "go.mod"))
-		if err != nil {
-			t.Fatalf("read go.mod for %s: %v", tc.name, err)
-		}
-		gomod = append(gomod, []byte("\nreplace github.com/parable-work/superschematic/runtime/schema/go/ptr => "+ptrPath+"\n")...)
-		if err := os.WriteFile(filepath.Join(outDir, "go.mod"), gomod, 0o644); err != nil {
-			t.Fatalf("write go.mod for %s: %v", tc.name, err)
-		}
 
 		tidy := exec.Command("go", "mod", "tidy")
 		tidy.Dir = outDir

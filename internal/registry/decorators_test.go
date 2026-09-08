@@ -77,7 +77,7 @@ func TestIsAuthoringPackageCoversNamingAndDecoratorPackages(t *testing.T) {
 // [package_aliases], which also joins the authoring set.
 func TestCorePackagesAreAuthoringByRegistration(t *testing.T) {
 	core := []string{pkgAPI, pkgDB, pkgSchema, pkgSchemaConfig}
-	bare := New(naming.Naming{AuthoringPackages: []string{"@acme/scalars"}, ScalarNpmPackage: "@acme/scalars"})
+	bare := New(naming.Naming{AuthoringPackages: []string{"@acme/schematic"}, ScalarNpmPackage: "@acme/scalars"})
 	for _, pkg := range core {
 		if !bare.IsAuthoringPackage(pkg) {
 			t.Errorf("%s must be an authoring package with no list naming it", pkg)

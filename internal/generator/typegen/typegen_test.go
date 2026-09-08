@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -65,8 +66,8 @@ func TestWriteTypesGolden(t *testing.T) {
 			// relative replace paths are deterministic across machines.
 			tempRoot := t.TempDir()
 			outDir := filepath.Join(tempRoot, tc.service)
-			scalarLib := filepath.Join(tempRoot, "parable-scalars")
-			if err := SetReplacePaths(output, scalarLib, outDir); err != nil {
+			paths := naming.LocalPaths{ScalarGo: filepath.Join(tempRoot, "scalars", "go"), SchemaIR: filepath.Join(tempRoot, "ir")}
+			if err := SetReplacePaths(output, paths, outDir); err != nil {
 				t.Fatalf("set replace paths: %v", err)
 			}
 

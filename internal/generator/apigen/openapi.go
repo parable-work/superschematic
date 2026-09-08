@@ -119,7 +119,7 @@ func collectOpenAPIScalarMetadata(schema *ir.Schema, dependencies map[string]*ir
 }
 
 // buildCommonHeaderParameters lists the header parameters every operation
-// carries: the provider's own (X-Tenant for Parable) then X-Request-ID on
+// carries: the provider's own (a routing header, say) then X-Request-ID on
 // public APIs.
 func buildCommonHeaderParameters(output *APIOutput) []map[string]interface{} {
 	parameters := []map[string]interface{}{}

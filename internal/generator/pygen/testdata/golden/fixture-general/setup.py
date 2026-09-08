@@ -3,13 +3,13 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="parable_types_fixture_general",
+    name="schemas_types_fixture_general",
     version="1.0.0",
     description="Generated Python types for fixture-general schema",
-    author="Parable Platform",
+    author="superschematic",
     packages=find_packages(),
     package_data={
-        "parable_types_fixture_general": ["py.typed"],
+        "schemas_types_fixture_general": ["py.typed"],
     },
     install_requires=[
         "pydantic>=2.12.0,<3.0.0",

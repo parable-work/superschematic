@@ -11,7 +11,7 @@
       "httpMethod": "GET",
       "httpPath": "/api/auth/me",
       "requiresAuth": true,
-      "isTenantScoped": false,
+      "isScoped": false,
       "parameters": {
         "type": "object",
         "properties": {
@@ -30,7 +30,7 @@
       "httpMethod": "POST",
       "httpPath": "/api/tenant/custom-handler",
       "requiresAuth": false,
-      "isTenantScoped": false,
+      "isScoped": false,
       "parameters": {
         "type": "object",
         "properties": {
@@ -53,7 +53,7 @@
       "httpMethod": "GET",
       "httpPath": "/api/tenants",
       "requiresAuth": true,
-      "isTenantScoped": false,
+      "isScoped": false,
       "parameters": {
         "type": "object",
         "properties": {
@@ -76,7 +76,7 @@
       "httpMethod": "POST",
       "httpPath": "/api/tenants",
       "requiresAuth": true,
-      "isTenantScoped": false,
+      "isScoped": false,
       "parameters": {
         "type": "object",
         "properties": {
@@ -113,7 +113,7 @@
       "httpMethod": "GET",
       "httpPath": "/api/tenants/{id}",
       "requiresAuth": true,
-      "isTenantScoped": false,
+      "isScoped": false,
       "parameters": {
         "type": "object",
         "properties": {
@@ -138,7 +138,7 @@
       "httpMethod": "PATCH",
       "httpPath": "/api/tenants/{id}",
       "requiresAuth": true,
-      "isTenantScoped": false,
+      "isScoped": false,
       "parameters": {
         "type": "object",
         "properties": {

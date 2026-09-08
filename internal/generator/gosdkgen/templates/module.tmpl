@@ -10,11 +10,8 @@ require {{ .Naming.HTTPRuntimeGoModule }} v0.0.0
 {{- if .TypesReplacePath}}
 replace {{.TypesModule}} => {{.TypesReplacePath}}
 {{- end}}
-{{- if .HasFilterableEndpoints}}
-// Local path: {{ .Naming.HTTPRuntimeGoModule }} is not published — resolve it relative
-// to the monorepo layout so `go build` works without go.sum entries.
-// Path depth: platform-schemas/dist/sdk/go/<name>/ → ../../../../../utils/psgen/http-runtime/go.
-replace {{ .Naming.HTTPRuntimeGoModule }} => ../../../../../utils/psgen/http-runtime/go
+{{- if and .HasFilterableEndpoints .HTTPRuntimeReplacePath}}
+replace {{ .Naming.HTTPRuntimeGoModule }} => {{ .HTTPRuntimeReplacePath }}
 {{- end}}
 {{- range .TypeModuleReplaces}}
 replace {{.Module}} => {{.RelPath}}

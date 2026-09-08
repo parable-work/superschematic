@@ -94,7 +94,7 @@ func EscapeString(s string) string {
 // PermissionToPascalConstName converts a dot-separated permission string into
 // a PascalCase constant name.
 //
-// Example: "tenant.users.read" -> "TenantUsersRead".
+// Example: "billing.users.read" -> "BillingUsersRead".
 func PermissionToPascalConstName(permission string) string {
 	parts := strings.Split(permission, ".")
 	var result strings.Builder
@@ -112,7 +112,7 @@ func PermissionToPascalConstName(permission string) string {
 // PermissionToUpperSnakeConstName converts a dot-separated permission string
 // into an UPPER_SNAKE_CASE constant name.
 //
-// Example: "tenant.users.read" -> "TENANT_USERS_READ".
+// Example: "billing.users.read" -> "BILLING_USERS_READ".
 func PermissionToUpperSnakeConstName(permission string) string {
 	parts := strings.Split(permission, ".")
 	return strings.ToUpper(strings.Join(parts, "_"))

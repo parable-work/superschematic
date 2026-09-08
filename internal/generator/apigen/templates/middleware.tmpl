@@ -23,7 +23,7 @@ import (
 // Returns the claims map if valid, or an error if invalid.
 type JWTValidator = runtimemiddleware.JWTValidator
 
-// PayloadDecryptor decrypts an encrypted payload envelope ciphertext for a tenant.
+// PayloadDecryptor decrypts an encrypted payload envelope ciphertext.
 type PayloadDecryptor = runtimemiddleware.PayloadDecryptor
 {{- authSnippet "middlewareAliases" . }}
 

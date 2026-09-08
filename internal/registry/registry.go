@@ -233,7 +233,7 @@ func compileArgs(spec DecoratorSpec) (*validator.Schema, error) {
 		return nil, fmt.Errorf("registry: decorator @%s Args: %w", spec.Name, err)
 	}
 	compiler := validator.NewCompiler()
-	url := fmt.Sprintf("psgen://decorators/%s/%d.json", spec.Name, spec.Target)
+	url := fmt.Sprintf("superschematic://decorators/%s/%d.json", spec.Name, spec.Target)
 	if err := compiler.AddResource(url, resource); err != nil {
 		return nil, fmt.Errorf("registry: decorator @%s Args: %w", spec.Name, err)
 	}

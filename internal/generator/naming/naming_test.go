@@ -137,19 +137,32 @@ func TestParseRejectsUnknownTopLevelKeyNextToExtensionTable(t *testing.T) {
 }
 
 func TestParseReadsPathsTable(t *testing.T) {
-	n, err := Parse([]byte("[paths]\nscalar_lib = \"utils/parable-scalars\"\n"), "test")
+	n, err := Parse([]byte("[paths]\nscalar_go = \"vendor/scalars/go\"\nhttp_runtime_rust = \"runtime/http/rust\"\n"), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n.Paths.ScalarLib != "utils/parable-scalars" {
-		t.Fatalf("Paths.ScalarLib = %q", n.Paths.ScalarLib)
+	if n.Paths.ScalarGo != "vendor/scalars/go" {
+		t.Fatalf("Paths.ScalarGo = %q", n.Paths.ScalarGo)
 	}
-	want := filepath.Join("/repo", "utils", "parable-scalars")
-	if got := n.ScalarLibPath("/repo"); got != want {
-		t.Fatalf("ScalarLibPath = %q, want %q", got, want)
+	local := n.LocalPaths("/repo")
+	if want := filepath.Join("/repo", "vendor", "scalars", "go"); local.ScalarGo != want {
+		t.Fatalf("LocalPaths.ScalarGo = %q, want %q", local.ScalarGo, want)
 	}
-	if got := Default().ScalarLibPath("/repo"); got != "" {
-		t.Fatalf("ScalarLibPath with no [paths] = %q, want empty", got)
+	if want := filepath.Join("/repo", "runtime", "http", "rust"); local.HTTPRuntimeRust != want {
+		t.Fatalf("LocalPaths.HTTPRuntimeRust = %q, want %q", local.HTTPRuntimeRust, want)
+	}
+	if local.SchemaIR != "" {
+		t.Fatalf("unset key must resolve to empty, got %q", local.SchemaIR)
+	}
+	if got := Default().LocalPaths("/repo"); got != (LocalPaths{}) {
+		t.Fatalf("LocalPaths with no [paths] = %+v, want empty", got)
+	}
+	rel, err := RelPath("/repo/schemas/dist/types/go/svc", local.ScalarGo)
+	if err != nil || rel != "../../../../../vendor/scalars/go" {
+		t.Fatalf("RelPath = %q, %v", rel, err)
+	}
+	if rel, err := RelPath("/repo/out", ""); err != nil || rel != "" {
+		t.Fatalf("RelPath of unset target = %q, %v; want empty", rel, err)
 	}
 	if _, err := Parse([]byte("[paths]\nbogus = \"x\"\n"), "test"); err == nil {
 		t.Fatal("Parse accepted an unknown [paths] key")

@@ -18,9 +18,10 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// schemaResourceName is the synthetic URL the schema-file JSON Schema is
-// registered under in the validator.
-const schemaResourceName = "psgen://parable-schema-file.json"
+// schemaResourceName is the meta-schema file name; Naming.MetaSchemaURL
+// turns it into the $id the validator registers the schema-file JSON Schema
+// under.
+const schemaResourceName = "schema-file.json"
 
 // generateDefinition reflects the on-disk document model into an exhaustive
 // JSON Schema. The schema is generated from the Go structs so it can never
@@ -100,9 +101,10 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 	}
 
 	delete(root, "$ref")
-	root["$id"] = schemaResourceName
-	root["title"] = "Parable schema file"
-	root["description"] = "A Parable Schema source file in the JSON or YAML projection: a multi-definition document mirroring the Schema IR, or a single definition object."
+	n := reg.Naming()
+	root["$id"] = n.MetaSchemaURL(schemaResourceName)
+	root["title"] = n.SchemaLanguage + " schema file"
+	root["description"] = "A " + n.SchemaLanguage + " source file in the JSON or YAML projection: a multi-definition document mirroring the Schema IR, or a single definition object."
 	root["oneOf"] = []any{
 		map[string]any{"$ref": "#/$defs/Document"},
 		map[string]any{"$ref": "#/$defs/TypeDef"},
@@ -357,14 +359,15 @@ func ensureCompiled(reg *registry.Registry) *compiled {
 			return
 		}
 		compiler := validator.NewCompiler()
-		if err := compiler.AddResource(schemaResourceName, resource); err != nil {
+		resourceURL := reg.Naming().MetaSchemaURL(schemaResourceName)
+		if err := compiler.AddResource(resourceURL, resource); err != nil {
 			c.err = fmt.Errorf("registering generated JSON Schema: %w", err)
 			return
 		}
 
 		c.defs = make(map[string]*validator.Schema)
 		for _, defName := range []string{"Document", "TypeDef", "EnumFile", "UnionFile", "ScalarFile", "OperationSetFile"} {
-			sch, err := compiler.Compile(schemaResourceName + "#/$defs/" + defName)
+			sch, err := compiler.Compile(resourceURL + "#/$defs/" + defName)
 			if err != nil {
 				c.err = fmt.Errorf("compiling generated JSON Schema (%s): %w", defName, err)
 				return

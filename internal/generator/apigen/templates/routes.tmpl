@@ -67,7 +67,7 @@ const (
 // Pass this to RegisterRoutes() to wire up your business logic.
 type Config struct {
 {{- if .IsPublic }}
-	// DB is the database connection for middleware operations (auth, tenant context, etc.)
+	// DB is the database connection for middleware operations (auth, request context, etc.)
 	DB orm.DatabaseInterface
 {{- authSnippet "routesConfigStores" . }}
 {{- end }}
@@ -264,7 +264,7 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
 		{{- range .Endpoints }}
-		{{- if and (not .ManualRouteRegistration) .RequiresAuth .IsTenantEndpoint }}
+		{{- if and (not .ManualRouteRegistration) .RequiresAuth .IsScopedEndpoint }}
 		{{- if .Description }}
 
 		{{- range $line := splitLines .Description }}
@@ -280,7 +280,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{{- end }}
 		{{- end }}
 		{{- range .Endpoints }}
-		{{- if and (not .ManualRouteRegistration) .RequiresAuth (not .IsTenantEndpoint) }}
+		{{- if and (not .ManualRouteRegistration) .RequiresAuth (not .IsScopedEndpoint) }}
 		{{- if .Description }}
 
 		{{- range $line := splitLines .Description }}

@@ -11,7 +11,10 @@
 #   2. builds the superscalar-ffi static archive from that checkout with its
 #      own go/scripts/build_ffi.sh (needs a Rust toolchain; rustup reads the
 #      checkout's rust-toolchain.toml);
-#   3. prints the CGO_LDFLAGS value that lets `go build` and `go test` in
+#   3. builds the TypeScript binding (napi addon for this host plus the CJS
+#      and ESM tsc passes; the browser/wasm pass is skipped) so generated
+#      TypeScript packages can depend on it by path;
+#   4. prints the CGO_LDFLAGS value that lets `go build` and `go test` in
 #      this repository link it.
 #
 # The same checkout supplies the TypeScript sources the schema fixtures
@@ -69,6 +72,18 @@ git -C "$DEP" checkout --quiet --detach "$commit"
 
 if [ ! -f "$DEP/go/lib/${goos}_${goarch}/libsuperscalar_ffi.a" ] || [ "${SUPERSCALAR_REBUILD:-0}" = "1" ]; then
   (cd "$DEP" && bash go/scripts/build_ffi.sh)
+fi
+
+TS="$DEP/bindings/typescript"
+if [ ! -f "$TS/dist/esm/validation.js" ] || [ "${SUPERSCALAR_REBUILD:-0}" = "1" ]; then
+  (
+    cd "$TS"
+    bun install --frozen-lockfile >/dev/null 2>&1 || bun install >/dev/null
+    bun run build:napi >/dev/null
+    bunx tsc -p tsconfig.json
+    bunx tsc -p tsconfig.esm.json
+    node scripts/fix-esm-extensions.mjs
+  )
 fi
 
 echo "superscalar $commit ready under $DEP" >&2

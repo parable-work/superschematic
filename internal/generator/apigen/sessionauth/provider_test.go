@@ -41,7 +41,7 @@ func TestEndpointNeverMarksTenantScope(t *testing.T) {
 	if err := (sessionauth.Provider{}).Endpoint(nil, nil, ep); err != nil {
 		t.Fatalf("Endpoint: %v", err)
 	}
-	if ep.IsTenantEndpoint || ep.TenantParamName != "" {
+	if ep.IsScopedEndpoint || ep.ScopeParamName != "" {
 		t.Fatalf("endpoint = %+v, want no tenant scope", ep)
 	}
 }

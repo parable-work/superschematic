@@ -14,7 +14,6 @@ package tsgen
 import (
 	"embed"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,7 +34,6 @@ type ScalarInfo struct {
 	Name                         string
 	Symbol                       string
 	Module                       string
-	ScalarLibSymbol              string
 	TSType                       string
 	Primitive                    ir.LanguagePrimitive
 	Doc                          string
@@ -197,27 +195,19 @@ func ParseableTypeNames(output *ModuleOutput) map[string]bool {
 }
 
 // SetScalarLibSpec computes the package.json dependency spec for the
-// TypeScript scalar-lib runtime as a file: path relative to outputDir.
-func SetScalarLibSpec(output *ModuleOutput, scalarLibPath, outputDir string) error {
-	if scalarLibPath == "" || outputDir == "" {
+// scalar library's npm package as a file: path relative to outputDir. An
+// unset path leaves the spec empty so package.json names the published
+// version instead.
+func SetScalarLibSpec(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
+	rel, err := naming.RelPath(outputDir, paths.ScalarTypeScript)
+	if err != nil {
+		return fmt.Errorf("scalar library package path: %w", err)
+	}
+	if rel == "" {
+		output.ScalarLibSpec = ""
 		return nil
 	}
-
-	absScalarLib, err := filepath.Abs(scalarLibPath)
-	if err != nil {
-		return fmt.Errorf("resolve scalar-lib absolute path: %w", err)
-	}
-
-	absOutputDir, err := filepath.Abs(outputDir)
-	if err != nil {
-		return fmt.Errorf("resolve output dir absolute path: %w", err)
-	}
-
-	rel, err := filepath.Rel(absOutputDir, filepath.Join(absScalarLib, "typescript"))
-	if err != nil {
-		return fmt.Errorf("compute relative scalar-lib path: %w", err)
-	}
-	output.ScalarLibSpec = "file:" + filepath.ToSlash(rel)
+	output.ScalarLibSpec = "file:" + rel
 	return nil
 }
 
@@ -335,7 +325,6 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 			Name:                         s.Name,
 			Symbol:                       s.Tokens.Symbol,
 			Module:                       s.Tokens.Module,
-			ScalarLibSymbol:              scalarLibHookSymbol(s.Name, s.Tokens),
 			TSType:                       s.TargetType,
 			Primitive:                    s.Primitive,
 			Doc:                          codegen.DocText(s.Description, s.Comment),
@@ -358,17 +347,6 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 		}
 	}
 	return scalars
-}
-
-func scalarLibHookSymbol(canonical string, tokens codegen.ScalarTokens) string {
-	switch canonical {
-	case "Network.Url":
-		return "NetworkUrl"
-	case "Parable.Slug":
-		return "ParableSlug"
-	default:
-		return tokens.Leaf()
-	}
 }
 
 // convertUnions converts codegen.UnionInfo to tsgen.UnionInfo.

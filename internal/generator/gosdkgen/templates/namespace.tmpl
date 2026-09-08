@@ -35,25 +35,25 @@ import (
 {{- end}}
 type {{.Namespace.StructName}} struct {
 	client jsonClient
-	{{- if .Namespace.IsTenantNS}}
-	{{.Namespace.TenantFieldName}} string
+	{{- if .Namespace.IsScopedNS}}
+	{{.Namespace.ScopeFieldName}} string
 	{{- end}}
 }
 
 // New{{.Namespace.StructName}} creates a {{.Namespace.StructName}}.
-{{- if .Namespace.IsTenantNS}}
-// The {{.Namespace.TenantFieldName}} parameter scopes all namespace requests to a tenant.
+{{- if .Namespace.IsScopedNS}}
+// The {{.Namespace.ScopeFieldName}} parameter scopes every request the namespace makes.
 {{- end}}
 func New{{.Namespace.StructName}}(
 	client jsonClient,
-	{{- if .Namespace.IsTenantNS}}
-	{{.Namespace.TenantFieldName}} string,
+	{{- if .Namespace.IsScopedNS}}
+	{{.Namespace.ScopeFieldName}} string,
 	{{- end}}
 ) *{{.Namespace.StructName}} {
 	return &{{.Namespace.StructName}}{
 		client: client,
-		{{- if .Namespace.IsTenantNS}}
-		{{.Namespace.TenantFieldName}}: {{.Namespace.TenantFieldName}},
+		{{- if .Namespace.IsScopedNS}}
+		{{.Namespace.ScopeFieldName}}: {{.Namespace.ScopeFieldName}},
 		{{- end}}
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
 )
 
@@ -39,7 +40,7 @@ func generateFixtureAPIRust(t *testing.T) *APIOutput {
 		IsPublic:       true,
 		UpstreamSchema: "fixture-db",
 		UpstreamIR:     dbSchema,
-		TypesCrate:     "parable-fixture-api-types",
+		TypesCrate:     "schemas-fixture-api-types",
 		TypesDir:       typesDir,
 		OutputDir:      filepath.Join(outDir, "api", "fixture-api"),
 		Clock:          codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
@@ -59,7 +60,7 @@ func TestWriteRustAPIGolden(t *testing.T) {
 	// Compute the Cargo.toml runtime path against a fixed fake output
 	// location so the golden stays machine-independent; SetReplacePaths only
 	// computes strings, so the directories need not exist.
-	if err := SetReplacePaths(output, "/repo/utils/parable-scalars", "/repo/platform-schemas/dist/api/fixture-api"); err != nil {
+	if err := SetReplacePaths(output, naming.LocalPaths{HTTPRuntimeRust: "/repo/runtime/http/rust"}, "/repo/schemas/dist/api/fixture-api"); err != nil {
 		t.Fatalf("set replace paths: %v", err)
 	}
 
@@ -106,8 +107,8 @@ func TestWriteRustAPIGolden(t *testing.T) {
 func TestGenerateFixtureAPIShape(t *testing.T) {
 	output := generateFixtureAPIRust(t)
 
-	if output.CrateName != "parable-fixture-api-api" {
-		t.Errorf("CrateName = %q, want parable-fixture-api-api", output.CrateName)
+	if output.CrateName != "schemas-fixture-api-api" {
+		t.Errorf("CrateName = %q, want schemas-fixture-api-api", output.CrateName)
 	}
 	if len(output.Endpoints) != 6 {
 		t.Fatalf("expected 6 endpoints, got %d", len(output.Endpoints))

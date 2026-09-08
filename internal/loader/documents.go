@@ -135,7 +135,7 @@ func validateDocument(raw, schema json.RawMessage, source string) error {
 		return fmt.Errorf("%s: document schema: %w", source, err)
 	}
 	compiler := validator.NewCompiler()
-	const url = "psgen://documents/schema.json"
+	const url = "superschematic://documents/schema.json"
 	if err := compiler.AddResource(url, resource); err != nil {
 		return fmt.Errorf("%s: document schema: %w", source, err)
 	}

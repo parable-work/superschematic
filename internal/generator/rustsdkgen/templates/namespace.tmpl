@@ -12,8 +12,8 @@ use crate::types;
 #[derive(Clone)]
 pub struct {{.Namespace.StructName}} {
     client: HttpClient,
-{{- if .Namespace.IsTenantNS}}
-    {{.Namespace.TenantFieldName}}: String,
+{{- if .Namespace.IsScopedNS}}
+    {{.Namespace.ScopeFieldName}}: String,
 {{- end}}
 }
 
@@ -57,14 +57,14 @@ pub struct {{.FilesStructName}} {
 impl {{.Namespace.StructName}} {
     pub(crate) fn new(
         client: HttpClient,
-{{- if .Namespace.IsTenantNS}}
-        {{.Namespace.TenantFieldName}}: String,
+{{- if .Namespace.IsScopedNS}}
+        {{.Namespace.ScopeFieldName}}: String,
 {{- end}}
     ) -> Self {
         Self {
             client,
-{{- if .Namespace.IsTenantNS}}
-            {{.Namespace.TenantFieldName}},
+{{- if .Namespace.IsScopedNS}}
+            {{.Namespace.ScopeFieldName}},
 {{- end}}
         }
     }

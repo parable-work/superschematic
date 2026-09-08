@@ -226,10 +226,10 @@ func TestGenerateGoAPIDoesNotMutateCachedAPIOutput(t *testing.T) {
 	}
 
 	opts := Options{
-		OutputRoot:    t.TempDir(),
-		ServicePath:   filepath.Join(tsFixtures, "fixture-api"),
-		ScalarLibPath: filepath.Join(t.TempDir(), "scalar-lib"),
-		Naming:        naming.Default(),
+		OutputRoot:  t.TempDir(),
+		ServicePath: filepath.Join(tsFixtures, "fixture-api"),
+		Paths:       naming.LocalPaths{ScalarGo: filepath.Join(t.TempDir(), "scalar-lib", "go")},
+		Naming:      naming.Default(),
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(tsFixtures, name))
 		},

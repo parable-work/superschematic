@@ -35,7 +35,7 @@ func TestScalarSQLTypeMappingUsesScalarLibMetadata(t *testing.T) {
 		want  string
 	}{
 		{brand: "Contact.Email", want: "CITEXT"},
-		{brand: "Parable.Permission", want: "ltree"},
+		{brand: "Network.IpAddress", want: "INET"},
 	}
 
 	for _, tt := range tests {

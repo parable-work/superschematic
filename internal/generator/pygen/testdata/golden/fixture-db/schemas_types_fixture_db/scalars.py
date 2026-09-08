@@ -15,7 +15,7 @@ from datetime import datetime
 
 # Import custom scalar implementations from scalar-lib
 try:
-    from parable_scalars import (
+    from superscalar import (
 
         parse_identity_uuid,
 

@@ -1,5 +1,5 @@
 {
-  "$id": "psgen://schema-config.schema.json",
+  "$id": "superschematic://schema-config.schema.json",
   "$ref": "#/definitions/SchemaConfigDocument",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {

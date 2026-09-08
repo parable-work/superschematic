@@ -9,7 +9,7 @@ import (
 type {{.SDKStructName}} struct {
 	client *HTTPClient
 	{{- range .Namespaces}}
-	{{- if not .IsTenantNS}}
+	{{- if not .IsScopedNS}}
 	// {{.StructName}} exposes {{.Name}} namespace operations.
 	{{- if .Endpoints}}
 	//
@@ -36,7 +36,7 @@ func New(config SDKConfig) (*{{.SDKStructName}}, error) {
 	sdk := &{{.SDKStructName}}{
 		client: client,
 		{{- range .Namespaces}}
-		{{- if not .IsTenantNS}}
+		{{- if not .IsScopedNS}}
 		{{.StructName}}: namespaces.New{{.StructName}}(client),
 		{{- end}}
 		{{- end}}
@@ -45,8 +45,8 @@ func New(config SDKConfig) (*{{.SDKStructName}}, error) {
 }
 
 {{- range .Namespaces}}
-{{- if .IsTenantNS}}
-// {{.StructName}} returns a {{.Name}} namespace client scoped to {{.TenantFieldName}}.
+{{- if .IsScopedNS}}
+// {{.StructName}} returns a {{.Name}} namespace client scoped to {{.ScopeFieldName}}.
 {{- if .Endpoints}}
 //
 // Endpoints:
@@ -54,8 +54,8 @@ func New(config SDKConfig) (*{{.SDKStructName}}, error) {
 // - {{.MethodName}}: {{docLine .Description (printf "%s endpoint." .MethodName)}}{{if .RequiresAuth}} Requires authentication.{{end}}
 {{- end}}
 {{- end}}
-func (s *{{$.SDKStructName}}) {{.StructName}}({{.TenantFieldName}} string) *namespaces.{{.StructName}} {
-	return namespaces.New{{.StructName}}(s.client, {{.TenantFieldName}})
+func (s *{{$.SDKStructName}}) {{.StructName}}({{.ScopeFieldName}} string) *namespaces.{{.StructName}} {
+	return namespaces.New{{.StructName}}(s.client, {{.ScopeFieldName}})
 }
 {{- end}}
 {{- end}}

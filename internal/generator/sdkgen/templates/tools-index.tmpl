@@ -27,7 +27,7 @@ export interface ToolDefinition {
   namespace: string;
   methodName: string;
   requiresAuth: boolean;
-  isTenantScoped: boolean;
+  isScoped: boolean;
   parameters: {
     type: 'object';
     properties: Record<string, JSONSchemaProperty>;
@@ -117,7 +117,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     namespace: '{{.Namespace}}',
     methodName: '{{.MethodName}}',
     requiresAuth: {{.RequiresAuth}},
-    isTenantScoped: {{.IsTenantNS}},
+    isScoped: {{.IsScopedNS}},
     parameters: {
       type: 'object',
       properties: {
@@ -252,8 +252,8 @@ export async function invokeTool<T extends ToolName>(
 {{- $ns := .}}
 {{- range .Tools}}
     case {{formatToolName .Name}}:
-{{- if $ns.IsTenantNS}}
-      return sdk.tenant((params as {{toPascalCase .Name}}Params).tenantId).{{.MethodName}}({{buildInvocationArgs . $ns}});
+{{- if $ns.IsScopedNS}}
+      return sdk.{{toCamelCase $ns.Name}}((params as {{toPascalCase .Name}}Params).{{$ns.ScopeParam}}).{{.MethodName}}({{buildInvocationArgs . $ns}});
 {{- else}}
       return sdk.{{toCamelCase $ns.Name}}.{{.MethodName}}({{buildInvocationArgs . $ns}});
 {{- end}}

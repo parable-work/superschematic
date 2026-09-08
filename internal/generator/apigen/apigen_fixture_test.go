@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
 )
 
@@ -75,13 +76,16 @@ func checkFixtureAPIGolden(t *testing.T, provider apigen.AuthProvider, golden st
 	output := generateFixtureAPIWith(t, provider)
 
 	outDir := t.TempDir()
-	repoRoot, err := filepath.Abs("../../../../..")
-	if err != nil {
-		t.Fatalf("resolve repo root: %v", err)
+	// Fixed fake locations keep the golden machine-independent; SetReplacePaths
+	// only computes strings.
+	paths := naming.LocalPaths{
+		ScalarGo:        "/repo/third_party/superscalar/go",
+		SchemaIR:        "/repo/ir",
+		SchemaRuntimeGo: "/repo/runtime/schema/go",
+		HTTPRuntimeGo:   "/repo/runtime/http/go",
 	}
-	scalarLibPath := filepath.Join(repoRoot, "utils", "parable-scalars")
-	distAPIDir := filepath.Join(repoRoot, "platform-schemas", "dist", "api", "fixture-api")
-	if err := apigen.SetReplacePaths(output, scalarLibPath, distAPIDir); err != nil {
+	distAPIDir := "/repo/schemas/dist/api/fixture-api"
+	if err := apigen.SetReplacePaths(output, paths, distAPIDir); err != nil {
 		t.Fatalf("set replace paths: %v", err)
 	}
 	if err := apigen.WriteAPI(output, outDir); err != nil {

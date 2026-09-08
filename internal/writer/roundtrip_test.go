@@ -3,6 +3,7 @@ package writer
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/parable-work/superschematic/internal/testpaths"
 	"os"
 	"path/filepath"
 	"strings"
@@ -369,13 +370,9 @@ func writeTSProject(t *testing.T, dir string, schema *ir.Schema) {
 	for _, name := range []string{"api", "db", "schema", "schema-config"} {
 		paths["@superschematic/"+name] = []string{filepath.ToSlash(filepath.Join(packagesDir, name, "src", "index.ts"))}
 	}
-	// superscalar is the Parable scalar package beside psgen, not a
-	// utils/psgen/packages member.
-	scalarsIndex, err := filepath.Abs("../../../parable-scalars/typescript/src/index.ts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	paths["superscalar"] = []string{filepath.ToSlash(scalarsIndex)}
+	// superscalar is a dependency, not a packages/ member: it resolves to the
+	// checkout scripts/superscalar-dep.sh stands up.
+	paths["superscalar"] = []string{filepath.ToSlash(filepath.Join(testpaths.Local(t).ScalarTypeScript, "src", "index.ts"))}
 	for _, imp := range schema.Imports {
 		service := imp.Package[strings.LastIndex(imp.Package, "/")+1:]
 		paths[imp.Package] = []string{filepath.ToSlash(filepath.Join(servicesDir, service, "src", "index.ts"))}

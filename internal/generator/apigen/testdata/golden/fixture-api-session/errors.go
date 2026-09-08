@@ -82,7 +82,7 @@ func NotImplementedError(message string) *AppError {
 // Example:
 //
 //	errors := types.NewValidationErrors()
-//	errors.AddFieldError("slug", "unique", "A tenant with this name already exists")
+//	errors.AddFieldError("slug", "unique", "An account with this name already exists")
 //	return nil, fixtureapi.NewValidationError(errors, err)
 func NewValidationError(validationErrors types.ValidationErrors, err error) *ValidationAppError {
 	return runtimeapperror.NewValidationError(validationErrors, err)
@@ -94,7 +94,7 @@ func NewValidationError(validationErrors types.ValidationErrors, err error) *Val
 // Example:
 //
 //	if isUniqueViolation(err) {
-//	    return nil, fixtureapi.UniqueConstraintError("slug", "A tenant with this name already exists", err)
+//	    return nil, fixtureapi.UniqueConstraintError("slug", "An account with this name already exists", err)
 //	}
 func UniqueConstraintError(field, message string, err error) *ValidationAppError {
 	return runtimeapperror.UniqueConstraintError(field, message, err)

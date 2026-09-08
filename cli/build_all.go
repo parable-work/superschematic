@@ -473,10 +473,10 @@ func executeBuildAllTask(cmd *cobra.Command, task buildAllTask, ctx buildAllTask
 		prof = profile.New(service.Name, ctx.profileWriter)
 	}
 	result, err := buildService(buildServiceOptions{
-		ServicePath:   service.Dir,
-		OutputRoot:    ctx.outputRoot,
-		ScalarLibPath: ctx.naming.ScalarLibPath(ctx.repoRoot),
-		LoadOptions:   buildAllTaskLoadOptions(ctx),
+		ServicePath: service.Dir,
+		OutputRoot:  ctx.outputRoot,
+		Paths:       ctx.naming.LocalPaths(ctx.repoRoot),
+		LoadOptions: buildAllTaskLoadOptions(ctx),
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loadBuildAllDependency(name, ctx, prof)
 		},

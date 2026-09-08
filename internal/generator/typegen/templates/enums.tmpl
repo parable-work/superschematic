@@ -17,12 +17,6 @@ import (
 // ValidationError represents a single validation error.
 type ValidationError = scalars.ValidationError
 
-// JWT is a legacy scalar alias preserved for compatibility.
-type JWT = scalars.JWT
-
-// UUID is a legacy scalar alias preserved for compatibility.
-type UUID = scalars.UUID
-
 {{end}}
 {{range .ImportedEnums}}
 {{$enumName := .Name}}

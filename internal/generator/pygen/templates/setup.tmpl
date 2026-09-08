@@ -6,7 +6,7 @@ setup(
     name="{{.PythonModuleName}}",
     version="1.0.0",
     description="Generated Python types for {{.SchemaName}} schema",
-    author="Parable Platform",
+    author="{{.Naming.PackageAuthor}}",
     packages=find_packages(),
     package_data={
         "{{.PythonModuleName}}": ["py.typed"],

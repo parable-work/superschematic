@@ -1,12 +1,12 @@
-# parable_types_fixture_general
+# schemas_types_fixture_general
 
 Generated Python types for the **fixture-general** schema.
 
-> **Auto-generated Code**: This package is automatically generated from Parable Schema definitions. Do not edit manually. Regenerate with `psgen build <service-dir>`.
+> **Auto-generated Code**: This package is automatically generated from Superschematic definitions. Do not edit manually. Regenerate with `psgen build <service-dir>`.
 
 ## Overview
 
-This package provides type-safe Python models generated from Parable Schema definitions using Pydantic v2. All types include:
+This package provides type-safe Python models generated from Superschematic definitions using Pydantic v2. All types include:
 
 - **Runtime validation** with detailed error messages
 - **Type hints** for IDE autocomplete and static type checking
@@ -16,7 +16,7 @@ This package provides type-safe Python models generated from Parable Schema defi
 ## Installation
 
 ```bash
-uv pip install parable_types_fixture_general
+uv pip install schemas_types_fixture_general
 ```
 
 ## Dependencies
@@ -28,7 +28,7 @@ uv pip install parable_types_fixture_general
 ## Usage
 
 ```python
-from parable_types_fixture_general import *
+from schemas_types_fixture_general import *
 
 # Parse and validate payloads
 obj = SomeType.from_json(payload)

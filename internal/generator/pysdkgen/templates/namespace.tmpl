@@ -54,12 +54,12 @@ class {{.FilesTypeName}}(TypedDict, total=False):
 class {{.Namespace.ClassName}}:
     def __init__(
         self,
-        client: SyncHTTPClient{{if .Namespace.IsTenantNS}},
-        {{.Namespace.TenantParamName}}: {{.Namespace.TenantParamType}}{{end}},
+        client: SyncHTTPClient{{if .Namespace.IsScopedNS}},
+        {{.Namespace.ScopeParamName}}: {{.Namespace.ScopeParamType}}{{end}},
     ) -> None:
         self._client = client
-{{- if .Namespace.IsTenantNS}}
-        self._{{.Namespace.TenantParamName}} = {{.Namespace.TenantParamName}}
+{{- if .Namespace.IsScopedNS}}
+        self._{{.Namespace.ScopeParamName}} = {{.Namespace.ScopeParamName}}
 {{- end}}
 
     def _resolve_validation_type(self, type_name: str) -> Any | None:

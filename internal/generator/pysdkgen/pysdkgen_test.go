@@ -65,11 +65,11 @@ func TestGenerateDefaultPackageNames(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	if sdkOutput.PackageName != "parable_web_admin_api_sdk" {
-		t.Fatalf("PackageName = %q, want %q", sdkOutput.PackageName, "parable_web_admin_api_sdk")
+	if sdkOutput.PackageName != "schemas_web_admin_api_sdk" {
+		t.Fatalf("PackageName = %q, want %q", sdkOutput.PackageName, "schemas_web_admin_api_sdk")
 	}
-	if sdkOutput.TypesPackage != "parable_types_web_admin_api" {
-		t.Fatalf("TypesPackage = %q, want %q", sdkOutput.TypesPackage, "parable_types_web_admin_api")
+	if sdkOutput.TypesPackage != "schemas_types_web_admin_api" {
+		t.Fatalf("TypesPackage = %q, want %q", sdkOutput.TypesPackage, "schemas_types_web_admin_api")
 	}
 }
 

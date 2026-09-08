@@ -26,7 +26,7 @@ pub struct ClientConfig {
     pub auth_header: Option<String>,
     /// Optional config-level interceptor applied to every outgoing request
     /// after the auth header is attached. Use for header injection that is
-    /// constant for the lifetime of the SDK (eg. service identity, tenant
+    /// constant for the lifetime of the SDK (eg. service identity, scope
     /// routing, tracing baggage). Per-call dynamic headers should use
     /// [`RequestOptions::request_hook`] instead.
     pub request_interceptor: Option<RequestInterceptor>,
@@ -266,7 +266,7 @@ impl HttpClient {
 
         // Config-level interceptor runs before per-call hooks so caller
         // hooks observe (and can override) any default headers injected
-        // here. Used for cross-cutting concerns: tenant routing, tracing
+        // here. Used for cross-cutting concerns: scope routing, tracing
         // baggage, service identity.
         if let Some(interceptor) = &self.request_interceptor {
             request = interceptor(request);

@@ -1074,9 +1074,9 @@
       "type": "object"
     }
   },
-  "$id": "psgen://parable-schema-file.json",
+  "$id": "superschematic://schema-file.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "A Parable Schema source file in the JSON or YAML projection: a multi-definition document mirroring the Schema IR, or a single definition object.",
+  "description": "A Superschematic source file in the JSON or YAML projection: a multi-definition document mirroring the Schema IR, or a single definition object.",
   "oneOf": [
     {
       "$ref": "#/$defs/Document"
@@ -1097,5 +1097,5 @@
       "$ref": "#/$defs/OperationSetFile"
     }
   ],
-  "title": "Parable schema file"
+  "title": "Superschematic schema file"
 }
