@@ -84,6 +84,9 @@ func New(n naming.Naming) *Registry {
 	for _, pkg := range r.naming.AuthoringPackages {
 		r.authoring[pkg] = true
 	}
+	for specifier := range r.naming.PackageAliases {
+		r.authoring[specifier] = true
+	}
 	for _, spec := range coreKinds() {
 		if err := r.RegisterKind(spec); err != nil {
 			panic("registry: core kinds: " + err.Error())
@@ -404,6 +407,9 @@ func (r *Registry) Decorators() []DecoratorSpec {
 // of Naming.AuthoringPackages or the declaring package of a registered
 // decorator. The TS frontend accepts decorators and type wrappers only from
 // these, and verify applies the per-kind import rules to them.
+// IsAuthoringPackage reports whether pkg is an authoring package: one of
+// Naming.AuthoringPackages, a specifier the [package_aliases] table maps onto
+// one, or a package some registered decorator declares.
 func (r *Registry) IsAuthoringPackage(pkg string) bool {
 	return r.authoring[pkg]
 }
@@ -415,7 +421,7 @@ func (r *Registry) IsAuthoringPackage(pkg string) bool {
 // is restricted to other kinds offers a schema of this kind nothing it may
 // use, so verify rejects the import the way it rejects
 // KindSpec.ForbiddenPackages. This is how a grouping kind's authoring
-// package (@psgen/platform) stays out of DB, API and General schemas without
+// package (@superschematic/platform) stays out of DB, API and General schemas without
 // those kinds naming it.
 func (r *Registry) PackageAllowsKind(pkg string, kind string) bool {
 	declared := false

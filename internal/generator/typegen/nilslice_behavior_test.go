@@ -99,7 +99,7 @@ func TestOptionalListRuntimeBehavior(t *testing.T) {
 
 	output, err := Generate(schema, Options{
 		SchemaName: "fixture-general",
-		ModulePath: "github.com/parable-platform/platform-schemas/types/go/fixture-general",
+		ModulePath: "example.com/schemas/types/go/fixture-general",
 		Clock:      codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err != nil {

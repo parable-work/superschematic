@@ -12,7 +12,7 @@ import {
   newValidationErrors,
   setFieldErrors,
   type ValidationErrors,
-} from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
 import type { FieldDef, ScalarDef, Schema, TypeDef, TypeRef } from '../validation/types';
 import { coerceBool, coerceFloat, coerceInt } from './coerce';
 import { applyDefault } from './defaults';

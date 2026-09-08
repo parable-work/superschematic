@@ -42,7 +42,7 @@ func TestNewRegistersCoreDecoratorsForEveryWalkerCase(t *testing.T) {
 
 func TestIsAuthoringPackageCoversNamingAndDecoratorPackages(t *testing.T) {
 	reg := New(naming.Naming{})
-	for _, pkg := range []string{"@psgen/api", "@psgen/db", "@psgen/schema", "@psgen/schema-config", "@psgen/scalar-lib", "@psgen/deploy"} {
+	for _, pkg := range []string{"@superschematic/api", "@superschematic/db", "@superschematic/schema", "@superschematic/schema-config", "superscalar", "@superschematic/deploy"} {
 		if !reg.IsAuthoringPackage(pkg) {
 			t.Errorf("%s must be an authoring package by default", pkg)
 		}
@@ -72,9 +72,9 @@ func TestIsAuthoringPackageCoversNamingAndDecoratorPackages(t *testing.T) {
 
 // The core packages are authoring packages by registration, not by list:
 // every core decorator declares one of the @superschematic/* names, so they
-// resolve with a Naming whose list names none of them (the OSS default once
-// W11 flips it) as well as with Parable's @psgen/* list, which is why
-// superschematic.toml does not repeat them.
+// resolve with a Naming whose list names none of them, and a distribution
+// that re-exports them under its own scope adds the aliases through
+// [package_aliases], which also joins the authoring set.
 func TestCorePackagesAreAuthoringByRegistration(t *testing.T) {
 	core := []string{pkgAPI, pkgDB, pkgSchema, pkgSchemaConfig}
 	bare := New(naming.Naming{AuthoringPackages: []string{"@acme/scalars"}, ScalarNpmPackage: "@acme/scalars"})
@@ -83,21 +83,26 @@ func TestCorePackagesAreAuthoringByRegistration(t *testing.T) {
 			t.Errorf("%s must be an authoring package with no list naming it", pkg)
 		}
 	}
-	if bare.IsAuthoringPackage("@psgen/db") {
-		t.Error("@psgen/db is authoring only through Naming.AuthoringPackages")
+	if bare.IsAuthoringPackage("@acme/db") {
+		t.Error("@acme/db is authoring only through Naming.AuthoringPackages or PackageAliases")
 	}
 	if scope := bare.Naming().AuthoringScope(); scope != "@acme" {
 		t.Errorf("AuthoringScope() = %q, want @acme", scope)
 	}
 
-	parable := New(naming.Default())
-	for _, pkg := range append(core, "@psgen/api", "@psgen/db", "@psgen/schema", "@psgen/schema-config") {
-		if !parable.IsAuthoringPackage(pkg) {
-			t.Errorf("%s must be an authoring package under the Parable defaults", pkg)
+	aliased := New(naming.Naming{PackageAliases: map[string]string{"@acme/db": pkgDB}})
+	if !aliased.IsAuthoringPackage("@acme/db") {
+		t.Error("an aliased specifier must be an authoring package")
+	}
+
+	defaults := New(naming.Default())
+	for _, pkg := range append(core, "superscalar") {
+		if !defaults.IsAuthoringPackage(pkg) {
+			t.Errorf("%s must be an authoring package under the defaults", pkg)
 		}
 	}
-	if scope := parable.Naming().AuthoringScope(); scope != "@psgen" {
-		t.Errorf("AuthoringScope() = %q, want @psgen (the list must stay single-scope)", scope)
+	if scope := defaults.Naming().AuthoringScope(); scope != "@superschematic" {
+		t.Errorf("AuthoringScope() = %q, want @superschematic (the list must stay single-scope)", scope)
 	}
 }
 

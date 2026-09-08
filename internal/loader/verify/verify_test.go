@@ -44,9 +44,9 @@ func TestForbiddenToolchainImports(t *testing.T) {
 		kind ir.SchemaKind
 		pkg  string
 	}{
-		{ir.SchemaKindAPI, "@psgen/db"},
-		{ir.SchemaKindDB, "@psgen/api"},
-		{ir.SchemaKindGeneral, "@psgen/db"},
+		{ir.SchemaKindAPI, "@superschematic/db"},
+		{ir.SchemaKindDB, "@superschematic/api"},
+		{ir.SchemaKindGeneral, "@superschematic/db"},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.kind)+"_"+tc.pkg, func(t *testing.T) {
@@ -65,45 +65,42 @@ func TestForbiddenToolchainImports(t *testing.T) {
 	}
 }
 
-// TestForbiddenToolchainImportsUnderEitherName: the core authoring packages
-// are declared as @superschematic/* and re-exported as @psgen/*, and the
-// tsconfig maps both names, so a schema author can import either. The kind
-// rule is keyed on the import specifier (KindSpec.ForbiddenPackages) and on
-// the declaring package (Registry.PackageAllowsKind reads DecoratorSpec
-// .Packages); both spellings of a forbidden core package and both platform
-// twins must be rejected whichever check catches them.
-func TestForbiddenToolchainImportsUnderEitherName(t *testing.T) {
-	reg := registry.New(naming.Default())
-	if err := (platform.Extension{}).Register(reg); err != nil {
-		t.Fatal(err)
+// TestForbiddenToolchainImportsUnderAnAlias: a distribution may re-export
+// the core authoring packages under its own names and declare them in
+// [package_aliases]. The kind rule is keyed on the declaring package
+// (KindSpec.ForbiddenPackages, Registry.PackageAllowsKind); verify folds the
+// specifier the schema wrote onto it, so both spellings of a forbidden
+// package are rejected and the message names the author's spelling.
+func TestForbiddenToolchainImportsUnderAnAlias(t *testing.T) {
+	n := naming.Default()
+	n.PackageAliases = map[string]string{
+		"@acme/db":       "@superschematic/db",
+		"@acme/api":      "@superschematic/api",
+		"@acme/schema":   "@superschematic/schema",
+		"@acme/platform": "@superschematic/platform",
 	}
-	// Stand-in for the Parable platform extension, which lives in another
-	// module: same declaring package, same kind restriction.
-	if err := reg.RegisterDecorator(registry.DecoratorSpec{
-		Name: "parablePlatform", Extension: "parable", Packages: []string{"@psgen/platform"},
-		Target: registry.TargetType, Kinds: []string{platform.Kind},
-		Apply: func(registry.Node, []any, registry.Site) error { return nil },
-	}); err != nil {
+	reg := registry.New(n)
+	if err := (platform.Extension{}).Register(reg); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {
 		kind ir.SchemaKind
 		pkg  string
 	}{
-		{ir.SchemaKindAPI, "@psgen/db"},
 		{ir.SchemaKindAPI, "@superschematic/db"},
-		{ir.SchemaKindDB, "@psgen/api"},
+		{ir.SchemaKindAPI, "@acme/db"},
 		{ir.SchemaKindDB, "@superschematic/api"},
-		{ir.SchemaKindGeneral, "@psgen/db"},
+		{ir.SchemaKindDB, "@acme/api"},
 		{ir.SchemaKindGeneral, "@superschematic/db"},
-		{ir.SchemaKindGeneral, "@psgen/api"},
+		{ir.SchemaKindGeneral, "@acme/db"},
 		{ir.SchemaKindGeneral, "@superschematic/api"},
-		{ir.SchemaKindDB, "@psgen/platform"},
+		{ir.SchemaKindGeneral, "@acme/api"},
 		{ir.SchemaKindDB, "@superschematic/platform"},
+		{ir.SchemaKindDB, "@acme/platform"},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.kind)+"_"+tc.pkg, func(t *testing.T) {
-			r := Run(ir.NewSchema("svc", tc.kind), Input{Registry: reg, ImportSites: []ImportSite{
+			r := Run(ir.NewSchema("svc", tc.kind), Input{Registry: reg, Naming: n, ImportSites: []ImportSite{
 				{Package: tc.pkg, File: "src/a.schema.ts", Line: 2, Col: 1},
 			}})
 			want := "src/a.schema.ts:2:1: a " + string(tc.kind) + " schema cannot import " + tc.pkg
@@ -117,12 +114,16 @@ func TestForbiddenToolchainImportsUnderEitherName(t *testing.T) {
 		pkg  string
 	}{
 		{ir.SchemaKindDB, "@superschematic/db"},
+		{ir.SchemaKindDB, "@acme/db"},
 		{ir.SchemaKindAPI, "@superschematic/api"},
+		{ir.SchemaKindAPI, "@acme/api"},
 		{ir.SchemaKindGeneral, "@superschematic/schema"},
+		{ir.SchemaKindGeneral, "@acme/schema"},
 		{ir.SchemaKind(platform.Kind), "@superschematic/platform"},
+		{ir.SchemaKind(platform.Kind), "@acme/platform"},
 	}
 	for _, tc := range allowed {
-		r := Run(ir.NewSchema("svc", tc.kind), Input{Registry: reg, ImportSites: []ImportSite{{Package: tc.pkg, File: "src/a.schema.ts"}}})
+		r := Run(ir.NewSchema("svc", tc.kind), Input{Registry: reg, Naming: n, ImportSites: []ImportSite{{Package: tc.pkg, File: "src/a.schema.ts"}}})
 		if len(r.Errors) > 0 {
 			t.Errorf("%s importing %s: unexpected errors %v", tc.kind, tc.pkg, errorStrings(r))
 		}
@@ -160,10 +161,10 @@ func TestAllowedToolchainImports(t *testing.T) {
 		kind ir.SchemaKind
 		pkg  string
 	}{
-		{ir.SchemaKindDB, "@psgen/db"},
-		{ir.SchemaKindAPI, "@psgen/api"},
-		{ir.SchemaKindGeneral, "@psgen/schema"},
-		{ir.SchemaKindGeneral, "@psgen/scalar-lib"},
+		{ir.SchemaKindDB, "@superschematic/db"},
+		{ir.SchemaKindAPI, "@superschematic/api"},
+		{ir.SchemaKindGeneral, "@superschematic/schema"},
+		{ir.SchemaKindGeneral, "superscalar"},
 	}
 	for _, tc := range cases {
 		schema := ir.NewSchema("svc", tc.kind)
@@ -360,13 +361,13 @@ func TestCrossKindReferenceRules(t *testing.T) {
 			// Cross-kind rules apply to codegen imports (schema.Imports), not
 			// authoring-only ImportSites used for @source / extends.
 			schema.Imports = []ir.Import{{
-				Package: "@parable-platform/other",
+				Package: "@schemas/other",
 				Types:   []string{"Widget"},
 			}}
 			r := Run(schema, Input{
 				Dependencies: map[string]ir.SchemaKind{"other": tc.dep},
 				ImportSites: []ImportSite{
-					{Package: "@parable-platform/other", File: "src/a.schema.ts", Line: 3, Col: 1},
+					{Package: "@schemas/other", File: "src/a.schema.ts", Line: 3, Col: 1},
 				},
 			})
 			violation := hasError(r, "cannot reference types from")
@@ -383,11 +384,11 @@ func TestCrossKindReferenceRules(t *testing.T) {
 func TestUndeclaredDependencyIsAnError(t *testing.T) {
 	schema := ir.NewSchema("svc", ir.SchemaKindAPI)
 	schema.Imports = []ir.Import{{
-		Package: "@parable-platform/mystery",
+		Package: "@schemas/mystery",
 		Types:   []string{"Widget"},
 	}}
 	r := Run(schema, Input{ImportSites: []ImportSite{
-		{Package: "@parable-platform/mystery", File: "src/a.schema.ts", Line: 1, Col: 1},
+		{Package: "@schemas/mystery", File: "src/a.schema.ts", Line: 1, Col: 1},
 	}})
 	if !hasError(r, `declares no dependency on service "mystery"`) {
 		t.Errorf("expected an undeclared-dependency error, got %v", errorStrings(r))
@@ -415,11 +416,11 @@ func TestServiceScopeComesFromInputNaming(t *testing.T) {
 	}
 
 	other := ir.NewSchema("svc", ir.SchemaKindAPI)
-	other.Imports = []ir.Import{{Package: "@parable-platform/mystery", Types: []string{"Widget"}}}
+	other.Imports = []ir.Import{{Package: "@schemas/mystery", Types: []string{"Widget"}}}
 	r = Run(other, Input{
 		Naming: acme,
 		ImportSites: []ImportSite{
-			{Package: "@parable-platform/mystery", File: "src/a.schema.ts", Line: 1, Col: 1},
+			{Package: "@schemas/mystery", File: "src/a.schema.ts", Line: 1, Col: 1},
 		},
 	})
 	if len(r.Errors) != 0 {
@@ -433,7 +434,7 @@ func TestServiceScopeComesFromInputNaming(t *testing.T) {
 func TestAuthoringOnlyImportNeedsNoConfigDependency(t *testing.T) {
 	schema := ir.NewSchema("svc", ir.SchemaKindAPI)
 	r := Run(schema, Input{ImportSites: []ImportSite{
-		{Package: "@parable-platform/web-db", File: "src/a.schema.ts", Line: 1, Col: 1},
+		{Package: "@schemas/web-db", File: "src/a.schema.ts", Line: 1, Col: 1},
 	}})
 	if len(r.Errors) > 0 {
 		t.Errorf("authoring-only import must not require schema.config deps, got %v", errorStrings(r))
@@ -450,8 +451,8 @@ func TestSiblingSentinelKindServiceImportsAreUnrestricted(t *testing.T) {
 		t.Fatal(err)
 	}
 	schema := ir.NewSchema("deployment", ir.SchemaKind("Grouping"))
-	schema.Imports = []ir.Import{{Package: "@parable-platform/web-api", Types: []string{"WebApi"}}}
-	sites := []ImportSite{{Package: "@parable-platform/web-api", File: "src/p.schema.ts"}}
+	schema.Imports = []ir.Import{{Package: "@schemas/web-api", Types: []string{"WebApi"}}}
+	sites := []ImportSite{{Package: "@schemas/web-api", File: "src/p.schema.ts"}}
 	r := Run(schema, Input{Registry: reg, ImportSites: sites})
 	if len(r.Errors) > 0 {
 		t.Errorf("sentinel imports of a sibling-sentinel kind should be unrestricted, got %v", errorStrings(r))
@@ -680,7 +681,7 @@ func TestSourceImportedTargetStandsAsAuthored(t *testing.T) {
 	// A data-format schema declaring the target in its imports block keeps
 	// its recorded SourceRef; structural checks need the resolved type.
 	schema := ir.NewSchema("svc", ir.SchemaKindAPI)
-	schema.Imports = []ir.Import{{Package: "@parable-platform/web-db", Types: []string{"User"}}}
+	schema.Imports = []ir.Import{{Package: "@schemas/web-db", Types: []string{"User"}}}
 	schema.Types["UserView"] = &ir.TypeDef{
 		Name:   "UserView",
 		Role:   ir.RoleAPIView,

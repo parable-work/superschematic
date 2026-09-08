@@ -12,20 +12,15 @@ import (
 	"github.com/parable-work/superschematic/registry"
 )
 
-// sessionNaming is the naming file the core-only tests build with: the
-// in-tree default auth_provider is "parable", which only the Parable
-// extension registers, so a core-only registry finalizes only with
-// auth_provider = "session".
-const sessionNaming = "testdata/superschematic.toml"
-
-// TestCoreOnlyBinaryBuildsAFixture is the OSS proof: New with no extensions
-// is what utils/psgen/cmd/psgen runs, and it builds a fixture end to end.
+// TestCoreOnlyBinaryBuildsAFixture pins that New with no extensions, which
+// is what cmd/superschematic runs, builds a fixture end to end under the
+// default naming.
 func TestCoreOnlyBinaryBuildsAFixture(t *testing.T) {
 	out := t.TempDir()
 	buf := new(bytes.Buffer)
 	root := New(Config{})
 	root.SetOut(buf)
-	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-db"), "--out", out, "--naming", sessionNaming})
+	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-db"), "--out", out})
 
 	require.NoError(t, root.Execute())
 	assert.Contains(t, buf.String(), "Loaded schema fixture-db (kind DB)")

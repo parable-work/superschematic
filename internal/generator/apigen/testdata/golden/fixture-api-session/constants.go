@@ -5,7 +5,7 @@ package fixtureapi
 import (
 	"github.com/google/uuid"
 
-	types "github.com/parable-platform/platform-schemas/types/go/fixture-api"
+	types "example.com/schemas/types/go/fixture-api"
 )
 
 // SystemUserID is the UUID for the system user.

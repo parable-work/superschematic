@@ -13,7 +13,7 @@ import {
   addFieldError,
   newValidationErrors,
   type ValidationErrors,
-} from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
 import type { Schema, SchemaInput } from '../validation/types';
 import { resolveSchema } from '../validation/validate';
 import {

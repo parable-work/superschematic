@@ -3,14 +3,14 @@
 export type {
   ValidationErrors,
   ValidationResult,
-} from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
 export {
   newValidationErrors,
   addFieldError,
   addNestedErrors,
   setFieldErrors,
   mergeValidationErrors,
-} from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
 
 export * from './scalars';
 

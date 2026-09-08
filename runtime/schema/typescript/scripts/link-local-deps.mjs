@@ -1,6 +1,6 @@
 // Symlink the in-repo packages this one imports into node_modules.
 //
-// @psgen/scalar-lib and @psgen/schema-ir are not package.json dependencies on
+// superscalar and @superschematic/schema-ir are not package.json dependencies on
 // purpose. bun installs a `file:` dependency into the consumer's node_modules
 // (a copy, or per-file symlinks into the source tree, depending on platform)
 // and resolves any `file:` spec nested inside it relative to the consumer, so

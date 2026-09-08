@@ -1,6 +1,6 @@
-import { Network } from "@psgen/scalar-lib";
-import { Default, Nullable, Secret, Validate, jsonField } from "@psgen/schema";
-import { envVars } from "@psgen/schema-config";
+import { Network } from "superscalar";
+import { Default, Nullable, Secret, Validate, jsonField } from "@superschematic/schema";
+import { envVars } from "@superschematic/schema-config";
 
 // Runtime environment classification.
 export enum FixtureEnvironment {

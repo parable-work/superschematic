@@ -212,7 +212,7 @@ func TestValidate_Imports(t *testing.T) {
 	}{
 		{
 			name:    "named import is valid",
-			imports: []Import{{Package: "@parable-platform/web-db", Types: []string{"User"}}},
+			imports: []Import{{Package: "@schemas/web-db", Types: []string{"User"}}},
 			want:    nil,
 		},
 		{
@@ -222,17 +222,17 @@ func TestValidate_Imports(t *testing.T) {
 		},
 		{
 			name:    "no symbols",
-			imports: []Import{{Package: "@parable-platform/web-db", Types: nil}},
+			imports: []Import{{Package: "@schemas/web-db", Types: nil}},
 			want:    []string{"lists no symbols"},
 		},
 		{
 			name:    "wildcard symbol",
-			imports: []Import{{Package: "@parable-platform/web-db", Types: []string{"*"}}},
+			imports: []Import{{Package: "@schemas/web-db", Types: []string{"*"}}},
 			want:    []string{`uses the "*" wildcard`},
 		},
 		{
 			name:    "empty symbol",
-			imports: []Import{{Package: "@parable-platform/web-db", Types: []string{""}}},
+			imports: []Import{{Package: "@schemas/web-db", Types: []string{""}}},
 			want:    []string{"lists an empty symbol name"},
 		},
 	}

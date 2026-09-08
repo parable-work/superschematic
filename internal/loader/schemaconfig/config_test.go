@@ -167,7 +167,7 @@ func TestReadFileMissing(t *testing.T) {
 }
 
 // TestEmbeddedDefinitionIsCurrent regenerates the JSON Schema from
-// @psgen/schema-config and diffs it against the embedded artifact, so the
+// @superschematic/schema-config and diffs it against the embedded artifact, so the
 // checked-in copy cannot drift from the TypeScript contract. Skipped when
 // bun or the package's node_modules are unavailable.
 //

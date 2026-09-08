@@ -1,4 +1,4 @@
-import { defineConfig } from "@psgen/schema-config";
+import { defineConfig } from "@superschematic/schema-config";
 
 // An extension kind and output key: kind admits any registered kind name
 // (SchemaKindName), while the outputs type knows only the core keys, so that

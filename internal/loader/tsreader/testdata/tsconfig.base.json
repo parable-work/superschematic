@@ -14,12 +14,12 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@psgen/api": ["../../../../packages/api/src/index.ts"],
-      "@psgen/db": ["../../../../packages/db/src/index.ts"],
-      "@psgen/scalar-lib": ["../../../../../parable-scalars/typescript/src/index.ts"],
-      "@psgen/schema": ["../../../../packages/schema/src/index.ts"],
-      "@psgen/schema-config": ["../../../../packages/schema-config/src/index.ts"],
-      "@parable-platform/*": ["./services/*/src/index.ts"]
+      "@superschematic/api": ["../../../../packages/api/src/index.ts"],
+      "@superschematic/db": ["../../../../packages/db/src/index.ts"],
+      "superscalar": ["../../../../third_party/superscalar/bindings/typescript/src/index.ts"],
+      "@superschematic/schema": ["../../../../packages/schema/src/index.ts"],
+      "@superschematic/schema-config": ["../../../../packages/schema-config/src/index.ts"],
+      "@schemas/*": ["./services/*/src/index.ts"]
     }
   }
 }

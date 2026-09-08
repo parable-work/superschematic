@@ -1,4 +1,4 @@
-import { Trait } from "@psgen/schema";
+import { Trait } from "@superschematic/schema";
 
 // Naming a non-trait class through the Trait<T> carrier passes the compiler
 // (Trait<T> erases to an empty object type) but must fail verification:

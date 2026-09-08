@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	scalars "github.com/parable-work/superscalar/go"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/registry"
-	scalars "github.com/parable-work/superscalar/go"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -172,7 +172,7 @@ func TestLoadServiceImportsAreKnownExternals(t *testing.T) {
 			"outputs": {}
 		}`,
 		"src/a.schema.json": `{
-			"imports": [{"package": "@parable-platform/web-db", "types": ["Tenant"]}],
+			"imports": [{"package": "@schemas/web-db", "types": ["Tenant"]}],
 			"types": {
 				"Widget": {
 					"name": "Widget",
@@ -186,7 +186,7 @@ func TestLoadServiceImportsAreKnownExternals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadService: %v", err)
 	}
-	if len(schema.Imports) != 1 || schema.Imports[0].Package != "@parable-platform/web-db" {
+	if len(schema.Imports) != 1 || schema.Imports[0].Package != "@schemas/web-db" {
 		t.Errorf("imports = %+v", schema.Imports)
 	}
 }
@@ -195,7 +195,7 @@ func TestLoadServiceRejectsWildcardImports(t *testing.T) {
 	dir := writeService(t, map[string]string{
 		"schema.config.json": minimalConfig,
 		"src/a.schema.json": `{
-			"imports": [{"package": "@parable-platform/web-db", "types": ["*"]}],
+			"imports": [{"package": "@schemas/web-db", "types": ["*"]}],
 			"types": {}
 		}`,
 	})
@@ -492,7 +492,7 @@ func TestVerifyIllegalToolchainImportTS(t *testing.T) {
 		t.Fatal("expected schema errors")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "a General schema cannot import @psgen/db") {
+	if !strings.Contains(msg, "a General schema cannot import @superschematic/db") {
 		t.Errorf("expected kind/import rule error, got: %s", msg)
 	}
 	if !strings.Contains(msg, "illegal.schema.ts:2:1") {
@@ -553,7 +553,7 @@ func TestVerifyCrossKindReferenceJSON(t *testing.T) {
 			"outputs": {}
 		}`,
 		"src/a.schema.json": `{
-			"imports": [{"package": "@parable-platform/web-db", "types": ["Tenant"]}],
+			"imports": [{"package": "@schemas/web-db", "types": ["Tenant"]}],
 			"types": {
 				"Widget": {
 					"name": "Widget",
@@ -793,13 +793,13 @@ func TestLoadConfiguredVersionedTypeTS(t *testing.T) {
 				"strictPropertyInitialization": false,
 				"baseUrl": ".",
 				"paths": {
-					"@psgen/db": ["` + dbPackagePath + `"]
+					"@superschematic/db": ["` + dbPackagePath + `"]
 				}
 			},
 			"include": ["src/**/*.ts"]
 		}`,
 				"src/tenant.schema.ts": `
-import { key, versioned } from "@psgen/db";
+import { key, versioned } from "@superschematic/db";
 
 ` + tc.decorator + `
 export abstract class Tenant {

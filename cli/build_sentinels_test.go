@@ -35,7 +35,7 @@ func writeServiceDir(t *testing.T, files map[string]string) string {
 // sweep is decided by KindSpec.ImportsSiblingSentinels, read from the
 // data-form config directly and from the SchemaKind member named in a
 // TypeScript config, never from a kind literal. The data-form positive case
-// waits on @psgen/schema-config widening its kind enum (W10): the JSON
+// waits on @superschematic/schema-config widening its kind enum (W10): the JSON
 // Schema rejects a fixture kind before the registry sees it.
 func TestTargetImportsSiblingSentinelsReadsTheKindSpec(t *testing.T) {
 	reg := siblingRegistry(t)

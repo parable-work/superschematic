@@ -2,7 +2,7 @@
 name: fixture-comments
 kind: API
 imports:
-  - package: "@parable-platform/web-db"
+  - package: "@schemas/web-db"
     types: [Tenant]
 scalars:
   # Canonical widget identifier scalar.

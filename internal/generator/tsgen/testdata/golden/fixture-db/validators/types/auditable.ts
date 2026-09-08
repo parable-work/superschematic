@@ -4,14 +4,14 @@ import {
   newValidationErrors,
   addFieldError,
   setFieldErrors,
-} from '@psgen/scalar-lib/validation';
-import type { ScalarValidationResult, ValidationResult } from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
+import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { load as loadYaml } from 'js-yaml';
 import type { Auditable, JSDate } from '../../types';
 
 import { validateTemporalDateTimeRequired, validateTemporalDateTime } from '../scalars/temporal_date_time';
 
-import { parseTemporalDateTime as parseTemporalDateTimeFromLib } from '@psgen/scalar-lib/scalars';
+import { parseTemporalDateTime as parseTemporalDateTimeFromLib } from 'superscalar/scalars';
 
 /**
  * Validates a Auditable object

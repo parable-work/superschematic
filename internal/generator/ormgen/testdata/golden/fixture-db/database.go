@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	types "github.com/parable-platform/platform-schemas/types/go/fixture-db"
+	types "example.com/schemas/types/go/fixture-db"
 )
 
 // contextKey is a custom type for context keys to avoid collisions

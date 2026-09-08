@@ -1,4 +1,4 @@
 {
-  "name": "@parable-platform/fixture-authdb-import",
+  "name": "@schemas/fixture-authdb-import",
   "private": true
 }

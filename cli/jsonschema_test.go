@@ -29,7 +29,7 @@ func TestJSONSchemaCommand(t *testing.T) {
 	buf := new(bytes.Buffer)
 	root := New(Config{})
 	root.SetOut(buf)
-	root.SetArgs([]string{"json-schema", "--naming", sessionNaming})
+	root.SetArgs([]string{"json-schema"})
 
 	require.NoError(t, root.Execute())
 
@@ -44,7 +44,7 @@ func TestJSONSchemaCommand_Config(t *testing.T) {
 	buf := new(bytes.Buffer)
 	root := New(Config{})
 	root.SetOut(buf)
-	root.SetArgs([]string{"json-schema", "--config", "--naming", sessionNaming})
+	root.SetArgs([]string{"json-schema", "--config"})
 
 	require.NoError(t, root.Execute())
 
@@ -58,7 +58,7 @@ func TestBuildCommand_JSONService(t *testing.T) {
 	buf := new(bytes.Buffer)
 	root := New(Config{})
 	root.SetOut(buf)
-	root.SetArgs([]string{"build", filepath.Join(loaderTestdata, "fixture-db-json"), "--out", t.TempDir(), "--naming", sessionNaming})
+	root.SetArgs([]string{"build", filepath.Join(loaderTestdata, "fixture-db-json"), "--out", t.TempDir()})
 
 	require.NoError(t, root.Execute())
 	assert.Contains(t, buf.String(), "Loaded schema fixture-db (kind DB)")
@@ -68,7 +68,7 @@ func TestBuildCommand_YAMLService(t *testing.T) {
 	buf := new(bytes.Buffer)
 	root := New(Config{})
 	root.SetOut(buf)
-	root.SetArgs([]string{"build", filepath.Join(loaderTestdata, "fixture-general-yaml"), "--out", t.TempDir(), "--naming", sessionNaming})
+	root.SetArgs([]string{"build", filepath.Join(loaderTestdata, "fixture-general-yaml"), "--out", t.TempDir()})
 
 	require.NoError(t, root.Execute())
 	assert.Contains(t, buf.String(), "Loaded schema fixture-general (kind General)")

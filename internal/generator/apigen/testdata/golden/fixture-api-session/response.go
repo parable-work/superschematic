@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	types "github.com/parable-platform/platform-schemas/types/go/fixture-api"
+	types "example.com/schemas/types/go/fixture-api"
 	runtimeresponse "github.com/parable-work/superschematic/runtime/http/go/response"
 )
 

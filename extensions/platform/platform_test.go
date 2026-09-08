@@ -8,25 +8,14 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/extensions/platform"
+	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/loader"
 	"github.com/parable-work/superschematic/registry"
-	ir "github.com/parable-work/superschematic/ir"
 )
 
-// coreNaming is the default naming with the core's own auth provider
-// selected: the in-tree default names the Parable provider, which only the
-// Parable extension registers, and this extension registers none.
-func coreNaming() registry.Naming {
-	n := registry.DefaultNaming()
-	n.AuthProvider = "session"
-	return n
-}
-
-// assemble is what a psgen binary does once per process: the core plus this
-// extension, through the public registry package only.
 func assemble(t *testing.T) *registry.Registry {
 	t.Helper()
-	reg, err := registry.Assemble(coreNaming(), platform.Extension{})
+	reg, err := registry.Assemble(registry.DefaultNaming(), platform.Extension{})
 	if err != nil {
 		t.Fatal(err)
 	}

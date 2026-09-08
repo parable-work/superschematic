@@ -43,8 +43,8 @@ func generateFixtureAPIWith(t *testing.T, provider apigen.AuthProvider) *apigen.
 	output, err := apigen.Generate(apiSchema, apigen.Options{
 		Provider:       provider,
 		SchemaName:     "fixture-api",
-		ModulePath:     "github.com/parable-platform/platform-schemas/api/fixture-api",
-		TypesModule:    "github.com/parable-platform/platform-schemas/types/go/fixture-api",
+		ModulePath:     "example.com/schemas/api/fixture-api",
+		TypesModule:    "example.com/schemas/types/go/fixture-api",
 		IsPublic:       true,
 		UpstreamSchema: "fixture-db",
 		UpstreamIR:     dbSchema,

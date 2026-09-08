@@ -1,4 +1,4 @@
 {
-  "name": "@parable-platform/fixture-relation-ondelete",
+  "name": "@schemas/fixture-relation-ondelete",
   "private": true
 }

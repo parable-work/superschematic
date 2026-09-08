@@ -9,12 +9,13 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
 )
 
 // Target languages accepted in the outputs block (the TargetLanguage enum in
-// @psgen/schema-config).
+// @superschematic/schema-config).
 const (
 	LangGo         = registry.LangGo
 	LangTypeScript = registry.LangTypeScript
@@ -40,7 +41,7 @@ type (
 // core registry, for callers that have no registry of their own (buildplan,
 // tests). Run parses against Options.Registry.
 func ParseOutputs(raw map[string]any) (*Outputs, error) {
-	return registry.ParseOutputs(raw, CoreReadRegistry())
+	return registry.ParseOutputs(raw, CoreRegistry(naming.Default()))
 }
 
 // ExpectedOutputDirs returns the service-scoped output directories that may be
@@ -57,7 +58,7 @@ func ParseOutputs(raw map[string]any) (*Outputs, error) {
 // means the core registry.
 func ExpectedOutputDirs(root string, cfg *schemaconfig.SchemaConfig, serviceDir string, reg *registry.Registry) ([]string, error) {
 	if reg == nil {
-		reg = CoreReadRegistry()
+		reg = CoreRegistry(naming.Default())
 	}
 	outputs, err := registry.ParseOutputs(cfg.Outputs, reg)
 	if err != nil {

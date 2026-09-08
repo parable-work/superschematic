@@ -1,5 +1,5 @@
-import { Generic, Identity, Temporal } from "@psgen/scalar-lib";
-import { Default, Nullable, Validate } from "@psgen/schema";
+import { Generic, Identity, Temporal } from "superscalar";
+import { Default, Nullable, Validate } from "@superschematic/schema";
 import {
   AutoGenerate,
   HasMany,
@@ -12,7 +12,7 @@ import {
   sourceMustProject,
   unique,
   versioned
-} from "@psgen/db";
+} from "@superschematic/db";
 
 // Base class providing audit fields to every table.
 export abstract class Auditable {

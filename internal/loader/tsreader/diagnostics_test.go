@@ -78,9 +78,9 @@ func TestFormatLiteral(t *testing.T) {
 
 func TestServiceNameForPackage(t *testing.T) {
 	cases := map[string]string{
-		"@parable-platform/web-db": "web-db",
-		"@scope/name":              "name",
-		"plain":                    "plain",
+		"@schemas/web-db": "web-db",
+		"@scope/name":     "name",
+		"plain":           "plain",
 	}
 	for in, want := range cases {
 		if got := serviceNameForPackage(in); got != want {

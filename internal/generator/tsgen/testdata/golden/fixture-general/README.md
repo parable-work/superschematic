@@ -22,10 +22,10 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { NetworkUrl, FixtureEnvironment, FixtureConfig, FixtureFilter, RetryPolicy,  } from '@parable-platform/fixture-general-types/types';
+import type { NetworkUrl, FixtureEnvironment, FixtureConfig, FixtureFilter, RetryPolicy,  } from '@schemas/fixture-general-types/types';
 
 // Or from main entry (re-exports everything, including scalar-lib validation)
-import { ValidationErrors, ValidationResult } from '@parable-platform/fixture-general-types';
+import { ValidationErrors, ValidationResult } from '@schemas/fixture-general-types';
 ```
 
 ### Validation
@@ -34,10 +34,10 @@ All scalar types and complex types have validation functions. Use subpath import
 
 ```typescript
 // Granular import (~1KB) - recommended for tree-shaking
-import { validateEmail, validateEmailRequired } from '@parable-platform/fixture-general-types/validators/scalars/email';
+import { validateEmail, validateEmailRequired } from '@schemas/fixture-general-types/validators/scalars/email';
 
 // Or import all validators (full bundle)
-import { validateEmail } from '@parable-platform/fixture-general-types';
+import { validateEmail } from '@schemas/fixture-general-types';
 
 // Optional validation
 const [valid, errors1] = validateEmail("user@example.com");
@@ -68,8 +68,8 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 ## Generated Files
 
-- `types/` - Pure TypeScript types (no runtime); use `@parable-platform/fixture-general-types/types` for zero-runtime imports
-- `validators/` - Validation functions; use `@parable-platform/fixture-general-types/validators/scalars/<name>` for granular imports
+- `types/` - Pure TypeScript types (no runtime); use `@schemas/fixture-general-types/types` for zero-runtime imports
+- `validators/` - Validation functions; use `@schemas/fixture-general-types/validators/scalars/<name>` for granular imports
 - `mask/` - Secret-masking helpers for types with @secret fields
 - `index.ts` - Main export (re-exports all; backward compatible)
 

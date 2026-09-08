@@ -417,7 +417,7 @@ func TestGeneratedValidatorParity(t *testing.T) {
 
 		output, err := typegen.Generate(schema, typegen.Options{
 			SchemaName: "parity-fixture",
-			ModulePath: "github.com/parable-platform/platform-schemas/types/go/parity-fixture",
+			ModulePath: "example.com/schemas/types/go/parity-fixture",
 			Clock:      fixedClock,
 		})
 		if err != nil {

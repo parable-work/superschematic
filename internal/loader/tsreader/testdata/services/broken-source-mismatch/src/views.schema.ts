@@ -1,6 +1,6 @@
-import { Identity } from "@psgen/scalar-lib";
-import { source } from "@psgen/api";
-import { Tenant } from "@parable-platform/fixture-db";
+import { Identity } from "superscalar";
+import { source } from "@superschematic/api";
+import { Tenant } from "@schemas/fixture-db";
 
 // Projection with a type mismatch and an unmarked extra field: both are
 // verification errors.

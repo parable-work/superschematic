@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/profile"
@@ -58,7 +59,7 @@ func writeWidget(c registry.GenerateContext) error {
 
 func extensionRegistry(t *testing.T, exts ...registry.Extension) *registry.Registry {
 	t.Helper()
-	reg := registry.New(coreNaming())
+	reg := registry.New(naming.Default())
 	if err := RegisterCore(reg); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +124,7 @@ func TestRunSkipsDisabledExtensionGeneratorWithItsReason(t *testing.T) {
 func TestRunRejectsUnknownKindAndUnknownOutputWithTodaysText(t *testing.T) {
 	schema, cfg := catalogService(nil)
 
-	_, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), Naming: coreNaming()})
+	_, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), Naming: naming.Default()})
 	if err == nil || err.Error() != `generator: unknown schema kind "Catalog"` {
 		t.Fatalf("unknown kind error = %v", err)
 	}
@@ -136,7 +137,7 @@ func TestRunRejectsUnknownKindAndUnknownOutputWithTodaysText(t *testing.T) {
 		t.Fatalf("unknown output error = %v, want %q", err, want)
 	}
 
-	_, err = Run(schema, cfg, Options{OutputRoot: t.TempDir(), Naming: coreNaming()})
+	_, err = Run(schema, cfg, Options{OutputRoot: t.TempDir(), Naming: naming.Default()})
 	want = `schema config for shop: outputs block has unknown key "graphql" (expected types, api, sdk)`
 	if err == nil || err.Error() != want {
 		t.Fatalf("core-only unknown output error = %v, want %q", err, want)
@@ -175,7 +176,7 @@ func TestRunRejectsPipelineWhoseGeneratorsShareAnOutputDir(t *testing.T) {
 }
 
 func TestCoreRegistryPipelinesMatchTheFormerKindSwitch(t *testing.T) {
-	reg := CoreRegistry(coreNaming())
+	reg := CoreRegistry(naming.Default())
 	names := func(specs []registry.GeneratorSpec) []string {
 		var out []string
 		for _, spec := range specs {
@@ -203,7 +204,7 @@ func TestCoreRegistryPipelinesMatchTheFormerKindSwitch(t *testing.T) {
 // registers both from the Parable extension), and a core-only run leaves a
 // document it has no spec for untouched instead of failing on it.
 func TestCoreRegistryCarriesNoDocumentsOrHooks(t *testing.T) {
-	reg := CoreRegistry(coreNaming())
+	reg := CoreRegistry(naming.Default())
 	if docs := reg.Documents(); len(docs) != 0 {
 		t.Errorf("Documents() = %+v, want none", docs)
 	}
@@ -242,7 +243,7 @@ func TestRunKeepsProfilePhaseNames(t *testing.T) {
 		t.Fatalf("LoadServiceWithConfig: %v", err)
 	}
 	var profiles bytes.Buffer
-	if _, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), Naming: coreNaming(), Profile: profile.New("fixture-db", &profiles)}); err != nil {
+	if _, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), Naming: naming.Default(), Profile: profile.New("fixture-db", &profiles)}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	out := profiles.String()
@@ -262,7 +263,7 @@ func TestRunKeepsProfilePhaseNames(t *testing.T) {
 // kind with no Pipeline (a grouping kind an extension registers without
 // generators) produces nothing, logs why, and opens no kind phase.
 func TestRunKindWithoutPipelineLogsNoOutputsWithoutAKindPhase(t *testing.T) {
-	reg := registry.New(coreNaming())
+	reg := registry.New(naming.Default())
 	if err := RegisterCore(reg); err != nil {
 		t.Fatal(err)
 	}

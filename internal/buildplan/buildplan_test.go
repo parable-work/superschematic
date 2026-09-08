@@ -130,18 +130,18 @@ func TestCheckConfigPurity(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "schema.config.ts")
 
-	clean := `import { defineConfig, SchemaKind, service } from "@psgen/schema-config";
+	clean := `import { defineConfig, SchemaKind, service } from "@superschematic/schema-config";
 export default defineConfig({ name: "x", kind: SchemaKind.General, outputs: {} });
 `
 	require.NoError(t, os.WriteFile(path, []byte(clean), 0o644))
 	require.NoError(t, checkConfigPurity(path))
 
-	impure := `import { defineConfig } from "@psgen/schema-config";
+	impure := `import { defineConfig } from "@superschematic/schema-config";
 import { webDb } from "../platform-deploy/model";
 export default defineConfig({ name: "x", kind: "General", outputs: {} });
 `
 	require.NoError(t, os.WriteFile(path, []byte(impure), 0o644))
 	err := checkConfigPurity(path)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "may import only @psgen/schema-config")
+	assert.Contains(t, err.Error(), "may import only @superschematic/schema-config")
 }

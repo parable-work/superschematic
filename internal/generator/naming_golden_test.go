@@ -23,7 +23,7 @@ const namingFixtureDir = "testdata/naming"
 // carry: module roots, npm scope, Python module prefixes, crate prefixes and
 // the scalar library. The author string "Parable Platform" is branding, not a
 // coordinate, and is out of scope here.
-var parableCoordinateRE = regexp.MustCompile(`parable-platform|@parable-platform|@psgen/scalar-lib|parable_types_|parable_scalars|parable-scalar|parable-[a-z0-9-]+-(types|sdk|api)|parable-scalars-core|psgen-http-runtime`)
+var parableCoordinateRE = regexp.MustCompile(`parable-platform|@parable-platform|superscalar|parable_types_|parable_scalars|parable-scalar|parable-[a-z0-9-]+-(types|sdk|api)|parable-scalars-core|psgen-http-runtime`)
 
 // TestRunWithFixtureNamingEmitsFixtureNames builds the fixture services with
 // a superschematic.toml whose every value differs from the Parable defaults,
@@ -37,14 +37,16 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load fixture naming: %v", err)
 	}
-	// Every string key must be set in the fixture: a key added to Naming
-	// without a fixture value would otherwise keep its default and the scan
-	// below would pass without exercising it.
+	// Every string coordinate must be set in the fixture: a key added to
+	// Naming without a fixture value would otherwise keep its default and the
+	// scan below would pass without exercising it. AuthProvider selects a
+	// registered provider rather than naming an output, and the core
+	// registers only one, so it is exempt.
 	defaults := reflect.ValueOf(naming.Default())
 	fixture := reflect.ValueOf(names)
 	for i := 0; i < fixture.NumField(); i++ {
 		field := fixture.Type().Field(i)
-		if field.Type.Kind() != reflect.String {
+		if field.Type.Kind() != reflect.String || field.Name == "AuthProvider" {
 			continue
 		}
 		if fixture.Field(i).String() == defaults.Field(i).String() {

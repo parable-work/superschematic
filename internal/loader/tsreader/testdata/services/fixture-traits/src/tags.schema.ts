@@ -1,4 +1,4 @@
-import { Trait, trait } from "@psgen/schema";
+import { Trait, trait } from "@superschematic/schema";
 
 // Configuration accepted by the Tagged trait.
 export abstract class TagConfig {

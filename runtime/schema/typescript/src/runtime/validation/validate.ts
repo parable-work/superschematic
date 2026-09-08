@@ -7,7 +7,7 @@ import {
   type ValidationError,
   type ValidationErrors,
   type ValidationResult,
-} from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
 import { createDefaultScalarValidatorRegistry } from './registry';
 import { parseSchema, parseSchemaJson } from '../json/reader';
 import type { FieldDef, SchemaInput, ScalarDef, Schema, TypeDef, ValidationOptions } from './types';

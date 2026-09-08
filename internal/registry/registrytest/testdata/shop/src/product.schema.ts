@@ -1,5 +1,5 @@
 import { meta, shelf, tagged } from "@acme/schematic";
-import { Identity } from "@psgen/scalar-lib";
+import { Identity } from "superscalar";
 
 @tagged
 @meta({ region: "eu", tiers: [1, 2] })

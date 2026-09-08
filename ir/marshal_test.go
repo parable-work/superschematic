@@ -148,7 +148,7 @@ func TestSchema_JSONFieldNamesVerbatim(t *testing.T) {
 		Name:   "Status",
 		Values: []EnumValueDef{{Name: "Active", SerializedAs: "active"}},
 	}
-	s.Imports = []Import{{Package: "@parable-platform/enums", Types: []string{"TenantUserStatus"}}}
+	s.Imports = []Import{{Package: "@schemas/enums", Types: []string{"TenantUserStatus"}}}
 
 	data, err := json.Marshal(s)
 	if err != nil {

@@ -1,4 +1,4 @@
-import * as generatedScalars from '@psgen/scalar-lib/scalars';
+import * as generatedScalars from 'superscalar/scalars';
 import {
   validateArtifactFile,
   validateCryptoRSAPrivateKey,
@@ -11,7 +11,7 @@ import {
   validateParableSchemaData,
   validatePermission,
 } from '../../platform';
-import type { ValidationError } from '@psgen/scalar-lib/validation';
+import type { ValidationError } from 'superscalar/validation';
 import type { ScalarRegistry, ScalarValidateFn } from './types';
 
 function isScalarValidationResult(value: unknown): value is [boolean, ValidationError[] | null] {

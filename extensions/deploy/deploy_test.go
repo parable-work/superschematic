@@ -11,21 +11,9 @@ import (
 	"github.com/parable-work/superschematic/registry"
 )
 
-// coreNaming is the default naming with the core's own auth provider
-// selected: the in-tree default names the Parable provider, which only the
-// Parable extension registers, and this extension registers none.
-func coreNaming() registry.Naming {
-	n := registry.DefaultNaming()
-	n.AuthProvider = "session"
-	return n
-}
-
-// build assembles the core plus the deploy extension, loads the fixture
-// service and generates into a fresh output root, returning the root and the
-// error from Generate.
 func build(t *testing.T, servicePath string) (string, error) {
 	t.Helper()
-	reg, err := registry.Assemble(coreNaming(), deploy.Extension{})
+	reg, err := registry.Assemble(registry.DefaultNaming(), deploy.Extension{})
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -192,7 +180,7 @@ func TestLoaderRejectsMalformedDocument(t *testing.T) {
 	dir := writeExample(t, `env:
   API_TOKEN: { secretRef: { name: s } }
 `)
-	reg, err := registry.Assemble(coreNaming(), deploy.Extension{})
+	reg, err := registry.Assemble(registry.DefaultNaming(), deploy.Extension{})
 	if err != nil {
 		t.Fatal(err)
 	}

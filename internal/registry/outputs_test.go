@@ -4,11 +4,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/parable-work/superschematic/internal/generator/naming"
 )
 
 func coreOutputRegistry(t *testing.T) *Registry {
 	t.Helper()
-	reg := New(coreNaming())
+	reg := New(naming.Default())
 	for _, spec := range []GeneratorSpec{
 		{Name: "types", OutputKey: "types"},
 		{Name: "sql"},

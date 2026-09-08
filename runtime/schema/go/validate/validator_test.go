@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/parable-work/superschematic/runtime/schema/go/ptr"
 	"github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/runtime/schema/go/ptr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

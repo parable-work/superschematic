@@ -1,4 +1,4 @@
-# @parable-platform/fixture-api-sdk
+# @schemas/fixture-api-sdk
 
 TypeScript SDK for the fixture-api API. Auto-generated from GraphQL schema.
 
@@ -9,7 +9,7 @@ TypeScript SDK for the fixture-api API. Auto-generated from GraphQL schema.
 This is a local package. Install it from your monorepo:
 
 ```bash
-bun add @parable-platform/fixture-api-sdk
+bun add @schemas/fixture-api-sdk
 ```
 
 ## Usage
@@ -17,7 +17,7 @@ bun add @parable-platform/fixture-api-sdk
 ### Basic Setup
 
 ```typescript
-import { FixtureApiSDK } from '@parable-platform/fixture-api-sdk';
+import { FixtureApiSDK } from '@schemas/fixture-api-sdk';
 
 const sdk = new FixtureApiSDK({
   baseUrl: 'https://api.example.com',
@@ -112,7 +112,7 @@ import {
   AuthenticationError,
   AuthorizationError,
   NetworkError
-} from '@parable-platform/fixture-api-sdk';
+} from '@schemas/fixture-api-sdk';
 
 try {
   const result = await sdk.someNamespace.someMethod(input);
@@ -204,10 +204,10 @@ const sdk = new FixtureApiSDK({
 
 ## Type Safety
 
-All inputs and outputs are fully typed using the generated types from `@parable-platform/fixture-api-types`:
+All inputs and outputs are fully typed using the generated types from `@schemas/fixture-api-types`:
 
 ```typescript
-import type { SomeInputType, SomeOutputType } from '@parable-platform/fixture-api-types';
+import type { SomeInputType, SomeOutputType } from '@schemas/fixture-api-types';
 
 const input: SomeInputType = {
   // Type-safe input
@@ -242,4 +242,4 @@ try {
 ## Dependencies
 
 - Native `fetch` - HTTP client (override via `config.fetch`)
-- `@parable-platform/fixture-api-types` - TypeScript types (peer dependency, generated from schema)
+- `@schemas/fixture-api-types` - TypeScript types (peer dependency, generated from schema)

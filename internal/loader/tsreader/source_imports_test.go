@@ -23,7 +23,7 @@ func TestSourceImportIsCompileTimeOnly(t *testing.T) {
 	}
 
 	for _, imp := range schema.Imports {
-		if imp.Package == "@parable-platform/fixture-db" {
+		if imp.Package == "@schemas/fixture-db" {
 			t.Fatalf("fixture-db must not appear in schema.Imports (codegen); got %+v", schema.Imports)
 		}
 	}

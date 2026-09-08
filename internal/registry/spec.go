@@ -40,7 +40,7 @@ type KindSpec struct {
 	// AllowsOperationSets gates classes with methods; only API sets it.
 	AllowsOperationSets bool
 
-	// ForbiddenPackages lists authoring packages ("@psgen/db") a schema of
+	// ForbiddenPackages lists authoring packages ("@superschematic/db") a schema of
 	// this kind may not import.
 	ForbiddenPackages map[string]bool
 
@@ -118,9 +118,9 @@ type DecoratorSpec struct {
 	// write the typed IR field.
 	Extension string
 	// Packages lists the authoring packages the TS frontend accepts the
-	// identifier from: {"@psgen/api"}, {"@acme/schematic"}. Several entries
-	// are for names the core packages declare more than once (@psgen/api and
-	// @psgen/schema both declare source, uiHidden and virtual). Every entry
+	// identifier from: {"@superschematic/api"}, {"@acme/schematic"}. Several entries
+	// are for names the core packages declare more than once (@superschematic/api and
+	// @superschematic/schema both declare source, uiHidden and virtual). Every entry
 	// joins the set IsAuthoringPackage accepts.
 	Packages []string
 	// Target is which AST node the decorator may sit on. The same Name may

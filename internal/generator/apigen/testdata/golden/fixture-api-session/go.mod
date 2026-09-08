@@ -3,7 +3,7 @@
 //
 // Example usage:
 //
-//   import api "github.com/parable-platform/platform-schemas/api/fixture-api"
+//   import api "example.com/schemas/api/fixture-api"
 //
 //   func main() {
 //       r := chi.NewRouter()
@@ -13,15 +13,15 @@
 //       })
 //   }
 
-module github.com/parable-platform/platform-schemas/api/fixture-api
+module example.com/schemas/api/fixture-api
 
 go 1.26.4
 
 require (
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/google/uuid v1.6.0
-	github.com/parable-platform/platform-schemas/orm/fixture-db v0.0.0-00010101000000-000000000000
-	github.com/parable-platform/platform-schemas/types/go/fixture-api v0.0.0-00010101000000-000000000000
+	example.com/schemas/orm/fixture-db v0.0.0-00010101000000-000000000000
+	example.com/schemas/types/go/fixture-api v0.0.0-00010101000000-000000000000
 	github.com/parable-work/superschematic/runtime/http/go v0.0.0-00010101000000-000000000000
 	github.com/parable-work/superscalar/go v1.0.0
 	go.uber.org/zap v1.28.0
@@ -29,11 +29,11 @@ require (
 
 // Local module paths for development.
 // When consuming this module externally, these resolve via go.work or go.sum.
-replace github.com/parable-platform/platform-schemas/types/go/fixture-api => ../../types/go/fixture-api
+replace example.com/schemas/types/go/fixture-api => ../../types/go/fixture-api
 replace github.com/parable-work/superschematic/runtime/http/go => ../../../../utils/http-runtime/go
 replace github.com/parable-work/superschematic/runtime/schema/go => ../../../../utils/schema-runtime/go
 replace github.com/parable-work/superschematic/ir => ../../../../utils/schema-ir/go
 replace github.com/parable-work/superscalar/go => ../../../../utils/parable-scalars/go
 replace github.com/parable-work/superschematic/runtime/schema/go/ptr => ../../../../../services/pkg/ptr
-replace github.com/parable-platform/platform-schemas/orm/fixture-db => ../../orm/fixture-db
-replace github.com/parable-platform/platform-schemas/types/go/fixture-db => ../../types/go/fixture-db
+replace example.com/schemas/orm/fixture-db => ../../orm/fixture-db
+replace example.com/schemas/types/go/fixture-db => ../../types/go/fixture-db

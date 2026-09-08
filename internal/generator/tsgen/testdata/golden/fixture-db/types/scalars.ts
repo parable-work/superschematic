@@ -7,4 +7,4 @@ export type {
   IdentitySlug,
   IdentityUUID,
   TemporalDateTime,
-} from '@psgen/scalar-lib/scalars';
+} from 'superscalar/scalars';

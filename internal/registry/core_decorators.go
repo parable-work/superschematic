@@ -9,7 +9,7 @@ import (
 
 // Core authoring packages the decorators below are declared in. These are
 // the packages whose package.json owns the declarations (utils/psgen/packages);
-// the Parable @psgen/* packages re-export them, and the frontend resolves an
+// the Parable @superschematic/* packages re-export them, and the frontend resolves an
 // identity through re-exports to the declaring package (tsreader/identity.go).
 const (
 	pkgAPI          = "@superschematic/api"

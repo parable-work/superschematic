@@ -40,8 +40,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/parable-work/superschematic/registry"
 	ir "github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/registry"
 )
 
 // Name is the extension name and the key of its slot under every

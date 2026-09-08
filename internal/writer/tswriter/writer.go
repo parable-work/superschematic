@@ -22,9 +22,9 @@ import (
 	"sort"
 	"strings"
 
+	scalars "github.com/parable-work/superscalar/go"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
-	scalars "github.com/parable-work/superscalar/go"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -97,32 +97,33 @@ func (e *emitter) failf(format string, args ...any) {
 	e.errs = append(e.errs, fmt.Errorf(format, args...))
 }
 
-// symbolPackages maps every @psgen toolchain symbol the writer emits to its
-// declaring package.
+// symbolPackages maps every toolchain symbol the writer emits to its
+// declaring package; use folds each onto the specifier the active naming's
+// [package_aliases] table gives it.
 var symbolPackages = map[string]string{
-	// @psgen/schema
-	"Default": "@psgen/schema", "Nullable": "@psgen/schema",
-	"Validate": "@psgen/schema", "Secret": "@psgen/schema", "trait": "@psgen/schema",
-	"source": "@psgen/schema", "temporalFormat": "@psgen/schema", "virtual": "@psgen/schema",
-	// jsonField is exported by both @psgen/schema and @psgen/db; emit the
-	// @psgen/schema import so General schemas (which do not stage @psgen/db)
+	// @superschematic/schema
+	"Default": "@superschematic/schema", "Nullable": "@superschematic/schema",
+	"Validate": "@superschematic/schema", "Secret": "@superschematic/schema", "trait": "@superschematic/schema",
+	"source": "@superschematic/schema", "temporalFormat": "@superschematic/schema", "virtual": "@superschematic/schema",
+	// jsonField is exported by both @superschematic/schema and @superschematic/db; emit the
+	// @superschematic/schema import so General schemas (which do not stage @superschematic/db)
 	// round-trip.
-	"jsonField": "@psgen/schema",
-	// @psgen/db
-	"index": "@psgen/db", "key": "@psgen/db",
-	"searchField": "@psgen/db", "sourceMustProject": "@psgen/db", "unique": "@psgen/db",
-	"versioned":    "@psgen/db",
-	"AutoGenerate": "@psgen/db", "HasMany": "@psgen/db", "JsonField": "@psgen/db",
-	"ManyToMany": "@psgen/db", "Relation": "@psgen/db",
-	// @psgen/api
-	"Authenticated": "@psgen/api", "Encrypted": "@psgen/api",
-	"bodyLimit": "@psgen/api", "manualRouteRegistration": "@psgen/api",
-	"rateLimit": "@psgen/api", "requireOwnership": "@psgen/api",
-	"requirePermission": "@psgen/api", "rest": "@psgen/api",
-	"timeout": "@psgen/api", "uiHidden": "@psgen/api",
-	"HttpMethod": "@psgen/api", "EncryptedField": "@psgen/api", "QueryParam": "@psgen/api",
-	// @psgen/schema-config
-	"envVars": "@psgen/schema-config",
+	"jsonField": "@superschematic/schema",
+	// @superschematic/db
+	"index": "@superschematic/db", "key": "@superschematic/db",
+	"searchField": "@superschematic/db", "sourceMustProject": "@superschematic/db", "unique": "@superschematic/db",
+	"versioned":    "@superschematic/db",
+	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",
+	"ManyToMany": "@superschematic/db", "Relation": "@superschematic/db",
+	// @superschematic/api
+	"Authenticated": "@superschematic/api", "Encrypted": "@superschematic/api",
+	"bodyLimit": "@superschematic/api", "manualRouteRegistration": "@superschematic/api",
+	"rateLimit": "@superschematic/api", "requireOwnership": "@superschematic/api",
+	"requirePermission": "@superschematic/api", "rest": "@superschematic/api",
+	"timeout": "@superschematic/api", "uiHidden": "@superschematic/api",
+	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
+	// @superschematic/schema-config
+	"envVars": "@superschematic/schema-config",
 }
 
 // use records a toolchain symbol import and returns the symbol for inline use.
@@ -132,7 +133,7 @@ func (e *emitter) use(symbol string) string {
 		e.failf("internal: symbol %q has no package mapping", symbol)
 		return symbol
 	}
-	e.importSymbol(pkg, symbol)
+	e.importSymbol(naming.Active().Specifier(pkg), symbol)
 	return symbol
 }
 

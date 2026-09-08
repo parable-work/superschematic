@@ -27,8 +27,8 @@ func generateFixtureDB(t *testing.T) *ORMOutput {
 
 	output, err := Generate(schema, Options{
 		SchemaName:  "fixture-db",
-		ModulePath:  "github.com/parable-platform/platform-schemas/orm/fixture-db",
-		TypesModule: "github.com/parable-platform/platform-schemas/types/go/fixture-db",
+		ModulePath:  "example.com/schemas/orm/fixture-db",
+		TypesModule: "example.com/schemas/types/go/fixture-db",
 		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err != nil {

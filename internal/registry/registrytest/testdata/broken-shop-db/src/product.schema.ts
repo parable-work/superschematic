@@ -1,5 +1,5 @@
 import { shelf } from "@acme/schematic";
-import { Identity } from "@psgen/scalar-lib";
+import { Identity } from "superscalar";
 
 // @shelf is registered for the Catalog kind only.
 export abstract class Product {

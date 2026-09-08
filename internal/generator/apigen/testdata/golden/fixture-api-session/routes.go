@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	orm "github.com/parable-platform/platform-schemas/orm/fixture-db"
-	types "github.com/parable-platform/platform-schemas/types/go/fixture-api"
+	orm "example.com/schemas/orm/fixture-db"
+	types "example.com/schemas/types/go/fixture-api"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
 	runtimesession "github.com/parable-work/superschematic/runtime/http/go/session"

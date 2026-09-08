@@ -2,12 +2,12 @@
 // DateTime corpus vector. Pins the EDR-0076 fix that routes the adapter through
 // the core (it was Luxon + Date.toISOString(), which forced `.000`/UTC and
 // diverged from the core's sub-second-preserving, offset-keeping RFC3339Nano).
-// Lived in @psgen/scalar-lib's conformance runner until the runtime moved here.
+// Lived in superscalar's conformance runner until the runtime moved here.
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { scalarIdByCanonical } = require('@psgen/scalar-lib/scalars');
-const { napiBackend } = require('@psgen/scalar-lib/backend');
+const { scalarIdByCanonical } = require('superscalar/scalars');
+const { napiBackend } = require('superscalar/backend');
 const { createDefaultScalarParseRegistry } = require('../dist/runtime/parse/registry.js');
 
 // Temporal.DateTime is a generic scalar, so its vectors are in the superscalar

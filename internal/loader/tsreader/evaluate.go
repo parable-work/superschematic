@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-// serviceHandle is the evaluated value of a @psgen/schema-config service({...})
+// serviceHandle is the evaluated value of a @superschematic/schema-config service({...})
 // sentinel expression.
 type serviceHandle struct {
 	name string
@@ -192,7 +192,7 @@ func (w *walker) evaluateReference(node *astNode, depth int) (any, *SchemaError)
 }
 
 // evaluateCall evaluates the one call form the static walk understands: the
-// service({...}) sentinel constructor from @psgen/schema-config.
+// service({...}) sentinel constructor from @superschematic/schema-config.
 func (w *walker) evaluateCall(node *astNode, depth int) (any, *SchemaError) {
 	call := node.AsCallExpression()
 	id, ok := w.identityOf(call.Expression)

@@ -13,7 +13,7 @@ import (
 // checker (alias chains are skipped), so it is import-path independent and
 // robust to re-exports and renamed imports.
 type symbolIdentity struct {
-	// pkg is the originating package name (for example "@psgen/db"), or ""
+	// pkg is the originating package name (for example "@superschematic/db"), or ""
 	// when the symbol is declared outside any package.
 	pkg string
 
@@ -117,7 +117,7 @@ func (p *packageIndex) nameForDir(dir string) string {
 }
 
 // serviceNameForPackage derives the schema service name from a package name:
-// the scope prefix is stripped ("@parable-platform/web-db" -> "web-db").
+// the scope prefix is stripped ("@schemas/web-db" -> "web-db").
 func serviceNameForPackage(pkg string) string {
 	if i := strings.LastIndex(pkg, "/"); i >= 0 {
 		return pkg[i+1:]

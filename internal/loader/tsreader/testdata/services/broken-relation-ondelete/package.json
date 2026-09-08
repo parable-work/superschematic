@@ -1,4 +1,4 @@
 {
-  "name": "@parable-platform/broken-relation-ondelete",
+  "name": "@schemas/broken-relation-ondelete",
   "private": true
 }

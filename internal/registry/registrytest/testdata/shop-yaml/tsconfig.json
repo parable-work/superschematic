@@ -15,9 +15,9 @@
     "baseUrl": ".",
     "paths": {
       "@acme/schematic": ["../packages/schematic/src/index.ts"],
-      "@psgen/scalar-lib": ["../../../../../../parable-scalars/typescript/src/index.ts"],
-      "@psgen/schema": ["../../../../../packages/schema/src/index.ts"],
-      "@psgen/schema-config": ["../../../../../packages/schema-config/src/index.ts"]
+      "superscalar": ["../../../../../third_party/superscalar/bindings/typescript/src/index.ts"],
+      "@superschematic/schema": ["../../../../../packages/schema/src/index.ts"],
+      "@superschematic/schema-config": ["../../../../../packages/schema-config/src/index.ts"]
     }
   },
   "include": ["schema.config.ts", "src/**/*.ts"]

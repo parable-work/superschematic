@@ -18,7 +18,7 @@ type ServiceDependency = schemaconfig.ServiceDependency
 // readConfig reads the service config, preferring the TypeScript form. The
 // walker argument supplies the checker used for the static defineConfig read;
 // it is only required for the TypeScript form. The JSON and YAML forms are
-// validated against the JSON Schema generated from @psgen/schema-config and
+// validated against the JSON Schema generated from @superschematic/schema-config and
 // decoded by the schemaconfig package.
 func readConfig(w *walker, servicePath string, configFile *astSourceFile) (*SchemaConfig, error) {
 	if configFile != nil {
@@ -29,7 +29,7 @@ func readConfig(w *walker, servicePath string, configFile *astSourceFile) (*Sche
 
 // readConfigTS statically extracts the SchemaConfig from a schema.config.ts
 // source file: the default export must be a defineConfig({...}) call from
-// @psgen/schema-config whose argument is an object literal.
+// @superschematic/schema-config whose argument is an object literal.
 func readConfigTS(w *walker, file *astSourceFile) (*SchemaConfig, error) {
 	for _, stmt := range file.Statements.Nodes {
 		if stmt.Kind != kindExportAssignment {
@@ -42,7 +42,7 @@ func readConfigTS(w *walker, file *astSourceFile) (*SchemaConfig, error) {
 		call := expr.AsCallExpression()
 		id, ok := w.identityOf(call.Expression)
 		if !ok || !id.is("@superschematic/schema-config", "defineConfig") {
-			return nil, errorAtNode(expr, "schema.config.ts default export must call defineConfig from @psgen/schema-config")
+			return nil, errorAtNode(expr, "schema.config.ts default export must call defineConfig from @superschematic/schema-config")
 		}
 		if call.Arguments == nil || len(call.Arguments.Nodes) != 1 {
 			return nil, errorAtNode(expr, "defineConfig takes exactly one object literal argument")

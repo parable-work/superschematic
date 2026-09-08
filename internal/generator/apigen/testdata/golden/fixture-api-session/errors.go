@@ -8,7 +8,7 @@ import (
 	runtimeapperror "github.com/parable-work/superschematic/runtime/http/go/apperror"
 	"go.uber.org/zap"
 
-	types "github.com/parable-platform/platform-schemas/types/go/fixture-api"
+	types "example.com/schemas/types/go/fixture-api"
 )
 
 // Error code constants define standard error types for the application.

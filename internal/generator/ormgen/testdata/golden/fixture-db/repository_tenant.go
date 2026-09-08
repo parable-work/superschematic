@@ -12,7 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	types "github.com/parable-platform/platform-schemas/types/go/fixture-db"
+	types "example.com/schemas/types/go/fixture-db"
 )
 
 func decodeTenantHistoryData(raw []byte) (*types.Tenant, error) {

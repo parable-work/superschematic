@@ -18,7 +18,7 @@ import {
   mergeValidationErrors,
   newValidationErrors,
   type ValidationErrors,
-} from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
 import {
   ScalarNormalizeRegistry,
   ScalarParseRegistry,

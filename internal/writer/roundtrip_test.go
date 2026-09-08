@@ -115,7 +115,7 @@ func TestWriteJSONSourceLineageImports(t *testing.T) {
 	reloaded := writeAndReload(t, schema, FormatJSON)
 	found := false
 	for _, imp := range reloaded.Imports {
-		if imp.Package != "@parable-platform/fixture-db" {
+		if imp.Package != "@schemas/fixture-db" {
 			continue
 		}
 		for _, name := range imp.Types {
@@ -244,7 +244,7 @@ func TestTSWriterEmitsTemporalFormatDecorator(t *testing.T) {
 		t.Fatalf("reading TS output: %v", err)
 	}
 	for _, want := range []string{
-		`import { temporalFormat } from "@psgen/schema";`,
+		`import { temporalFormat } from "@superschematic/schema";`,
 		`@temporalFormat("unix_millis")`,
 	} {
 		if !strings.Contains(string(got), want) {
@@ -345,13 +345,13 @@ func writeServiceConfig(t *testing.T, dir string, schema *ir.Schema) {
 }
 
 // writeTSProject writes the package.json and tsconfig.json a generated
-// TypeScript service needs to compile: @psgen/* toolchain packages resolve
+// TypeScript service needs to compile: @superschematic/* toolchain packages resolve
 // to this repo's authoring packages, and cross-service imports resolve to
 // the original fixture services.
 func writeTSProject(t *testing.T, dir string, schema *ir.Schema) {
 	t.Helper()
 
-	pkg := fmt.Sprintf("{\n  \"name\": %q,\n  \"private\": true\n}\n", "@parable-platform/"+schema.Name)
+	pkg := fmt.Sprintf("{\n  \"name\": %q,\n  \"private\": true\n}\n", "@schemas/"+schema.Name)
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(pkg), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -367,15 +367,15 @@ func writeTSProject(t *testing.T, dir string, schema *ir.Schema) {
 
 	paths := make(map[string][]string)
 	for _, name := range []string{"api", "db", "schema", "schema-config"} {
-		paths["@psgen/"+name] = []string{filepath.ToSlash(filepath.Join(packagesDir, name, "src", "index.ts"))}
+		paths["@superschematic/"+name] = []string{filepath.ToSlash(filepath.Join(packagesDir, name, "src", "index.ts"))}
 	}
-	// @psgen/scalar-lib is the Parable scalar package beside psgen, not a
+	// superscalar is the Parable scalar package beside psgen, not a
 	// utils/psgen/packages member.
 	scalarsIndex, err := filepath.Abs("../../../parable-scalars/typescript/src/index.ts")
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths["@psgen/scalar-lib"] = []string{filepath.ToSlash(scalarsIndex)}
+	paths["superscalar"] = []string{filepath.ToSlash(scalarsIndex)}
 	for _, imp := range schema.Imports {
 		service := imp.Package[strings.LastIndex(imp.Package, "/")+1:]
 		paths[imp.Package] = []string{filepath.ToSlash(filepath.Join(servicesDir, service, "src", "index.ts"))}

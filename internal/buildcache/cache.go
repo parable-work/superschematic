@@ -38,10 +38,10 @@ var toolchainFingerprintOnce sync.Once
 var toolchainFingerprintValue string
 
 // DefaultRoot returns the schema build cache root when no --cache-root flag
-// is given: the PARABLE_BUILD_CACHE_DIR environment variable, then the
+// is given: the SUPERSCHEMATIC_BUILD_CACHE_DIR environment variable, then the
 // [cache] root from superschematic.toml, then the XDG cache directory.
 func DefaultRoot(configured string) string {
-	if env := os.Getenv("PARABLE_BUILD_CACHE_DIR"); env != "" {
+	if env := os.Getenv("SUPERSCHEMATIC_BUILD_CACHE_DIR"); env != "" {
 		return filepath.Join(expandHome(env), CacheFormat)
 	}
 	if configured != "" {
@@ -55,7 +55,7 @@ func DefaultRoot(configured string) string {
 		}
 		xdg = filepath.Join(home, ".cache")
 	}
-	return filepath.Join(xdg, "parable", "schema-build", CacheFormat)
+	return filepath.Join(xdg, "superschematic", "build", CacheFormat)
 }
 
 func expandHome(path string) string {

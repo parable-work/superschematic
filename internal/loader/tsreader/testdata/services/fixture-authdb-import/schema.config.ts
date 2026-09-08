@@ -1,5 +1,5 @@
-import { defineConfig, SchemaKind } from "@psgen/schema-config";
-import { FixtureDb } from "@parable-platform/fixture-db";
+import { defineConfig, SchemaKind } from "@superschematic/schema-config";
+import { FixtureDb } from "@schemas/fixture-db";
 
 export default defineConfig({
   name: "fixture-authdb-import",

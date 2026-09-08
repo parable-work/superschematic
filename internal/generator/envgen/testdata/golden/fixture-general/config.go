@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
-	types "github.com/parable-platform/platform-schemas/types/go/fixture-general"
+	types "example.com/schemas/types/go/fixture-general"
 )
 
 // Type aliases for enum types from the types module.

@@ -31,7 +31,7 @@ func TestResolveImportsSkipsLocalCollisionsAndTraits(t *testing.T) {
 
 	api := ir.NewSchema("web-api", ir.SchemaKindAPI)
 	api.Imports = []ir.Import{{
-		Package: "@parable-platform/web-db",
+		Package: "@schemas/web-db",
 		Types:   []string{"Tenant", "DeviceRecord", "SoftDeletable"},
 	}}
 	api.Types["Tenant"] = &ir.TypeDef{

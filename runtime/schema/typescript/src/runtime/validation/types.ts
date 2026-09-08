@@ -1,8 +1,8 @@
-import type { ValidationError, ValidationResult } from '@psgen/scalar-lib/validation';
-import type { SchemaInput } from '@psgen/schema-ir';
+import type { ValidationError, ValidationResult } from 'superscalar/validation';
+import type { SchemaInput } from '@superschematic/schema-ir';
 
-// The IR document types live in @psgen/schema-ir (types only) so that
-// @psgen/scalar-lib can name Parable.Schema without importing this runtime.
+// The IR document types live in @superschematic/schema-ir (types only) so that
+// superscalar can name Parable.Schema without importing this runtime.
 export type {
   ArgumentDef,
   DefinitionKind,
@@ -23,7 +23,7 @@ export type {
   TypeKind,
   TypeRef,
   UnionDef,
-} from '@psgen/schema-ir';
+} from '@superschematic/schema-ir';
 
 export type ScalarValidateFn = (value: string) => ValidationError[] | null;
 

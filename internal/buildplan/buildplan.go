@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -36,7 +37,7 @@ func Discover(servicesRoot string, outputRoot string) ([]Service, error) {
 // decide each service's OutputDirs. nil means the core registry.
 func DiscoverWith(servicesRoot string, outputRoot string, reg *registry.Registry) ([]Service, error) {
 	if reg == nil {
-		reg = generator.CoreReadRegistry()
+		reg = generator.CoreRegistry(naming.Default())
 	}
 	entries, err := os.ReadDir(servicesRoot)
 	if err != nil {
@@ -131,7 +132,7 @@ var configImportPattern = regexp.MustCompile(`(?m)^\s*import\b[^'"]*['"]([^'"]+)
 
 // checkConfigPurity enforces the identity layer's cycle-proofing rule
 // (EDR-0087 amendment 2): schema.config.ts may import only
-// @psgen/schema-config. Configs are imported as identity references by the
+// @superschematic/schema-config. Configs are imported as identity references by the
 // platform model; any richer import graph would drag arbitrary code into
 // every consumer's evaluation.
 func checkConfigPurity(configPath string) error {
@@ -140,8 +141,8 @@ func checkConfigPurity(configPath string) error {
 		return err
 	}
 	for _, match := range configImportPattern.FindAllStringSubmatch(string(data), -1) {
-		if match[1] != "@psgen/schema-config" {
-			return fmt.Errorf("%s: imports %q; schema.config.ts may import only @psgen/schema-config (EDR-0087 amendment 2: configs are identity references and must stay dependency-free)", configPath, match[1])
+		if match[1] != "@superschematic/schema-config" {
+			return fmt.Errorf("%s: imports %q; schema.config.ts may import only @superschematic/schema-config (EDR-0087 amendment 2: configs are identity references and must stay dependency-free)", configPath, match[1])
 		}
 	}
 	return nil

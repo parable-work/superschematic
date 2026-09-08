@@ -44,17 +44,18 @@ func TestNewRegistersOnlyTheSessionAuthProvider(t *testing.T) {
 	}
 }
 
-// TestFinalizeRejectsTheParableDefaultWithoutTheExtension: the in-tree
-// naming default still names the Parable provider (the flip to session is
-// W11), so a core-only registry under the defaults must fail at Finalize
-// with a message that names the provider and lists what is registered.
-func TestFinalizeRejectsTheParableDefaultWithoutTheExtension(t *testing.T) {
-	reg := New(naming.Default())
+// TestFinalizeRejectsAnUnregisteredAuthProvider: a naming that names a
+// provider no extension registered must fail at Finalize with a message
+// that names the provider and lists what is registered.
+func TestFinalizeRejectsAnUnregisteredAuthProvider(t *testing.T) {
+	n := naming.Default()
+	n.AuthProvider = "acme"
+	reg := New(n)
 	err := reg.Finalize()
 	if err == nil {
-		t.Fatal("Finalize accepted the Parable auth_provider with no extension registering it")
+		t.Fatal("Finalize accepted an auth_provider no extension registered")
 	}
-	for _, want := range []string{`auth_provider "parable"`, "names no registered auth provider", "[session]"} {
+	for _, want := range []string{`auth_provider "acme"`, "names no registered auth provider", "[session]"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Finalize() error %q does not contain %q", err.Error(), want)
 		}

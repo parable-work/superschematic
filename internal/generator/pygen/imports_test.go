@@ -40,7 +40,7 @@ func TestResolveImportsSkipsLocalCollisionsAndTraits(t *testing.T) {
 
 	api := ir.NewSchema("web-api", ir.SchemaKindAPI)
 	api.Imports = []ir.Import{{
-		Package: "@parable-platform/web-db",
+		Package: "@schemas/web-db",
 		Types:   []string{"TenantConnector", "SoftDeletable"},
 	}}
 	// API-owned Tenant view must win over the nested web-db.Tenant relation.

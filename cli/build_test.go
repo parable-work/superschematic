@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/sentinel"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -18,7 +19,7 @@ const tsreaderTestdata = "../internal/loader/tsreader/testdata/services"
 
 func TestBuildCommand_MissingDir(t *testing.T) {
 	root := New(Config{})
-	root.SetArgs([]string{"build", "/nonexistent/service", "--naming", sessionNaming})
+	root.SetArgs([]string{"build", "/nonexistent/service"})
 
 	err := root.Execute()
 	assert.Error(t, err)
@@ -29,7 +30,7 @@ func TestBuildCommand_Summary(t *testing.T) {
 	buf := new(bytes.Buffer)
 	root := New(Config{})
 	root.SetOut(buf)
-	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-db"), "--out", t.TempDir(), "--naming", sessionNaming})
+	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-db"), "--out", t.TempDir()})
 
 	err := root.Execute()
 	require.NoError(t, err)
@@ -43,7 +44,7 @@ func TestBuildCommand_Profile(t *testing.T) {
 	root := New(Config{})
 	root.SetOut(out)
 	root.SetErr(errOut)
-	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-db"), "--out", t.TempDir(), "--profile", "--naming", sessionNaming})
+	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-db"), "--out", t.TempDir(), "--profile"})
 
 	err := root.Execute()
 	require.NoError(t, err)
@@ -62,7 +63,7 @@ func TestBuildCommand_EmitIR(t *testing.T) {
 	buf := new(bytes.Buffer)
 	root := New(Config{})
 	root.SetOut(buf)
-	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-db"), "--emit-ir", "--naming", sessionNaming})
+	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-db"), "--emit-ir"})
 
 	err := root.Execute()
 	require.NoError(t, err)
@@ -78,7 +79,7 @@ func TestBuildCommand_EmitsSentinel(t *testing.T) {
 	buf := new(bytes.Buffer)
 	root := New(Config{})
 	root.SetOut(buf)
-	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-db"), "--out", t.TempDir(), "--naming", sessionNaming})
+	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "fixture-db"), "--out", t.TempDir()})
 
 	err := root.Execute()
 	require.NoError(t, err)
@@ -87,7 +88,7 @@ func TestBuildCommand_EmitsSentinel(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(tsreaderTestdata, "fixture-db", "src", "service.generated.ts"))
 	require.NoError(t, err)
-	assert.Equal(t, sentinel.Content("fixture-db", ir.SchemaKindDB), string(data))
+	assert.Equal(t, sentinel.Content("fixture-db", ir.SchemaKindDB, naming.Default()), string(data))
 }
 
 func TestBuildCommand_NoSentinelWithoutTSConfig(t *testing.T) {
@@ -95,7 +96,7 @@ func TestBuildCommand_NoSentinelWithoutTSConfig(t *testing.T) {
 	root := New(Config{})
 	root.SetOut(buf)
 	dataService := "../internal/loader/testdata/services/fixture-db-json"
-	root.SetArgs([]string{"build", dataService, "--out", t.TempDir(), "--naming", sessionNaming})
+	root.SetArgs([]string{"build", dataService, "--out", t.TempDir()})
 
 	err := root.Execute()
 	require.NoError(t, err)
@@ -107,9 +108,9 @@ func TestBuildCommand_NoSentinelWithoutTSConfig(t *testing.T) {
 
 func TestBuildCommand_SchemaError(t *testing.T) {
 	root := New(Config{})
-	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "broken-illegal-import"), "--naming", sessionNaming})
+	root.SetArgs([]string{"build", filepath.Join(tsreaderTestdata, "broken-illegal-import")})
 
 	err := root.Execute()
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot import @psgen/db")
+	assert.Contains(t, err.Error(), "cannot import @superschematic/db")
 }

@@ -1,4 +1,4 @@
 {
-  "name": "@parable-platform/fixture-json-config",
+  "name": "@schemas/fixture-json-config",
   "private": true
 }

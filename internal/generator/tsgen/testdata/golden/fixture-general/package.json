@@ -1,5 +1,5 @@
 {
-  "name": "@parable-platform/fixture-general-types",
+  "name": "@schemas/fixture-general-types",
   "version": "1.0.0",
   "description": "TypeScript types for fixture-general schema",
   "type": "module",
@@ -48,7 +48,7 @@
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {
-    "@psgen/scalar-lib": "file:../parable-scalars/typescript",
+    "superscalar": "file:../parable-scalars/typescript",
     "js-yaml": "4.1.1"
   },
   "devDependencies": {

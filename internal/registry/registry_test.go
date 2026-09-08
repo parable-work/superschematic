@@ -3,7 +3,6 @@ package registry
 import (
 	"context"
 	"errors"
-	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,14 +20,6 @@ type fakeExtension struct {
 
 func (e fakeExtension) Name() string               { return e.name }
 func (e fakeExtension) Register(r *Registry) error { return e.register(r) }
-
-// coreNaming is the zero naming (New fills the defaults) with the core's own
-// auth provider selected. The in-tree default selects the Parable provider,
-// which only the Parable extension registers, so a core-only registry
-// finalizes only under this.
-func coreNaming() naming.Naming {
-	return naming.Naming{AuthProvider: sessionauth.Name}
-}
 
 func TestNewRegistersCoreKindsWithTodaysPipelines(t *testing.T) {
 	reg := New(naming.Naming{})
@@ -61,7 +52,7 @@ func TestNewRegistersCoreKindsWithTodaysPipelines(t *testing.T) {
 	if api.StructRole != ir.RoleEmbeddedStruct || api.SourceProjectionRole != ir.RoleAPIView || !api.AllowsOperationSets {
 		t.Errorf("API kind authoring rules = %+v", api)
 	}
-	if !api.ForbiddenPackages["@psgen/db"] || api.ForbiddenPackages["@psgen/api"] {
+	if !api.ForbiddenPackages["@superschematic/db"] || api.ForbiddenPackages["@superschematic/api"] {
 		t.Errorf("API ForbiddenPackages = %v", api.ForbiddenPackages)
 	}
 	general, _ := reg.Kind("General")
@@ -74,7 +65,7 @@ func TestNewRegistersCoreKindsWithTodaysPipelines(t *testing.T) {
 }
 
 func TestRegisterRejectsDuplicatesAndPostFinalizeRegistration(t *testing.T) {
-	reg := New(coreNaming())
+	reg := New(naming.Default())
 
 	if err := reg.RegisterKind(KindSpec{Name: "DB"}); err == nil || !strings.Contains(err.Error(), `kind "DB" is already registered`) {
 		t.Fatalf("duplicate kind error = %v", err)
@@ -121,7 +112,7 @@ func TestRegisterRejectsDuplicatesAndPostFinalizeRegistration(t *testing.T) {
 }
 
 func TestFinalizeChecksPipelinesAndOutputKeys(t *testing.T) {
-	reg := New(coreNaming())
+	reg := New(naming.Default())
 	if err := reg.Finalize(); err == nil || !strings.Contains(err.Error(), `kind API pipeline names unregistered generator "types"`) {
 		t.Fatalf("Finalize with no generators = %v", err)
 	}
@@ -150,7 +141,7 @@ func TestFinalizeChecksPipelinesAndOutputKeys(t *testing.T) {
 }
 
 func TestUseIsFailClosed(t *testing.T) {
-	reg := New(coreNaming())
+	reg := New(naming.Default())
 	boom := errors.New("boom")
 	ext := fakeExtension{name: "acme", register: func(*Registry) error { return boom }}
 
@@ -201,7 +192,7 @@ func TestPipelineAppendsKindRestrictedGeneratorsInRegistrationOrder(t *testing.T
 }
 
 func TestOutputKeysListsCoreFirstThenExtensionsSorted(t *testing.T) {
-	reg := New(coreNaming())
+	reg := New(naming.Default())
 	core := []GeneratorSpec{
 		{Name: "types", OutputKey: "types"},
 		{Name: "sql"},
@@ -225,7 +216,7 @@ func TestOutputKeysListsCoreFirstThenExtensionsSorted(t *testing.T) {
 }
 
 func TestBuildAllHooksKeepRegistrationOrder(t *testing.T) {
-	reg := New(coreNaming())
+	reg := New(naming.Default())
 	noop := func(context.Context, BuildAllContext) error { return nil }
 	if err := reg.RegisterBuildAllHook(BuildAllHook{Name: "second", Run: noop}); err != nil {
 		t.Fatal(err)
@@ -240,7 +231,7 @@ func TestBuildAllHooksKeepRegistrationOrder(t *testing.T) {
 }
 
 func TestRegisterBuildAllHookRejectsInvalidAndLateRegistrations(t *testing.T) {
-	reg := New(coreNaming())
+	reg := New(naming.Default())
 	noop := func(context.Context, BuildAllContext) error { return nil }
 	if err := reg.RegisterBuildAllHook(BuildAllHook{Run: noop}); err == nil {
 		t.Error("nameless hook: want error")
@@ -312,8 +303,8 @@ func TestPackageAllowsKindDerivesImportRulesFromDecoratorKinds(t *testing.T) {
 		{"@acme/grouping", string(ir.SchemaKindDB), false},
 		{"@acme/mixed", string(ir.SchemaKindDB), true},
 		{"@acme/config", string(ir.SchemaKindDB), true},
-		{"@psgen/schema", string(ir.SchemaKindDB), true},
-		{"@psgen/api", string(ir.SchemaKindGeneral), true},
+		{"@superschematic/schema", string(ir.SchemaKindDB), true},
+		{"@superschematic/api", string(ir.SchemaKindGeneral), true},
 	}
 	for _, tc := range cases {
 		if got := reg.PackageAllowsKind(tc.pkg, tc.kind); got != tc.want {

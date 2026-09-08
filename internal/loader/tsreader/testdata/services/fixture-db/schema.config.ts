@@ -1,4 +1,4 @@
-import { defineConfig, SchemaKind, TargetLanguage } from "@psgen/schema-config";
+import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema-config";
 
 export default defineConfig({
   name: "fixture-db",

@@ -7,7 +7,7 @@ functions in `utils/parable-scalars` and never ships to the SuperScalar repo.
 
 ```
 go/          github.com/parable-work/superschematic/runtime/schema/go: ir, parse, validate, mask, merge, serialize
-typescript/  @psgen/schema-runtime: the runtime at ".", the scalar validators facade at "./platform"
+typescript/  @superschematic/schema-runtime: the runtime at ".", the scalar validators facade at "./platform"
 python/      psgen-schema-runtime, import psgen_schema_runtime
 ```
 
@@ -18,37 +18,37 @@ explains the import cycle that keeps them there.
 ## Dependency graph
 
 ```
-@psgen/schema-ir  <--  @psgen/scalar-lib  <--  @psgen/schema-runtime
+@superschematic/schema-ir  <--  superscalar  <--  @superschematic/schema-runtime
 (types only)          (utils/parable-scalars)   (this package)
 ```
 
-`@psgen/schema-ir` (`utils/psgen/schema-ir/typescript`) is one `index.d.ts`
+`@superschematic/schema-ir` (`utils/psgen/schema-ir/typescript`) is one `index.d.ts`
 and a manifest: the IR document types both other packages name, with no
-runtime code and no build step. `@psgen/scalar-lib` imports it to type
+runtime code and no build step. `superscalar` imports it to type
 `Parable.Schema`; this package imports both. Nothing under
 `utils/parable-scalars/typescript/src` imports this package, which keeps the
 graph acyclic.
 
 ## TypeScript: how the dependencies resolve
 
-`typescript/package.json` declares neither `@psgen/scalar-lib` nor
-`@psgen/schema-ir` as a dependency, on purpose. bun installs a `file:`
+`typescript/package.json` declares neither `superscalar` nor
+`@superschematic/schema-ir` as a dependency, on purpose. bun installs a `file:`
 dependency into the consumer's `node_modules` (a copy on Linux, per-file
 symlinks into the source tree on macOS with bun 1.4) and resolves any `file:`
 spec nested inside it relative to the consumer, not the package, so the
 nested spec fails (`Could not find package.json for "file:..."`). The
 consumer therefore declares all three packages itself:
 `apps/package.json`, `apps/web-app/package.json` and
-`apps/packages/schema-renderer/package.json` each list `@psgen/scalar-lib`,
-`@psgen/schema-ir` and `@psgen/schema-runtime` as `file:` deps.
+`apps/packages/schema-renderer/package.json` each list `superscalar`,
+`@superschematic/schema-ir` and `@superschematic/schema-runtime` as `file:` deps.
 
 For this package's own `tsc` and tests, `scripts/link-local-deps.mjs`
-symlinks the two packages into `node_modules/@psgen/`; `bun run build` and
+symlinks the two packages into `node_modules/@superschematic/`; `bun run build` and
 `bun run test` call it first. `bun install` leaves the symlinks alone and
 bun's install into a consumer drops them, so they never leak. Nothing links
-back the other way: `@psgen/scalar-lib` does not import this package, so
-there is one `@psgen/scalar-lib` instance and the runtime resolves
-`@psgen/scalar-lib/*` to the same files the consumer does.
+back the other way: `superscalar` does not import this package, so
+there is one `superscalar` instance and the runtime resolves
+`superscalar/*` to the same files the consumer does.
 
 Build order (`make build-schema-runtime-ts`, wired before `build-schemas`):
 `build-scalar-lib` builds `utils/parable-scalars/typescript/dist`, then this
@@ -63,14 +63,14 @@ regenerate with `cd utils/parable-scalars && make codegen`.
 
 ### Import paths
 
-Code imports `@psgen/schema-runtime` and `@psgen/schema-runtime/platform`
-directly. `@psgen/scalar-lib` does not re-export the `runtime`, `platform` or
+Code imports `@superschematic/schema-runtime` and `@superschematic/schema-runtime/platform`
+directly. `superscalar` does not re-export the `runtime`, `platform` or
 `scalarValidators` namespaces from its main entry (that would put it on both
 sides of the cycle) and no longer has `./runtime` or `./platform` subpaths;
 the shims that once served them were removed once every import site had
-moved. `import * as scalarValidators from '@psgen/schema-runtime/platform'`
-replaces the old namespace. `@psgen/scalar-lib/platform/types`,
-`@psgen/scalar-lib/permissions` and `@psgen/scalar-lib/pem` remain: they are
+moved. `import * as scalarValidators from '@superschematic/schema-runtime/platform'`
+replaces the old namespace. `superscalar/platform/types`,
+`superscalar/permissions` and `superscalar/pem` remain: they are
 leaf modules of that package which this one imports.
 
 ## Python

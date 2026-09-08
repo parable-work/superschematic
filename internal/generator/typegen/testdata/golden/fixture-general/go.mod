@@ -1,4 +1,4 @@
-module github.com/parable-platform/platform-schemas/types/go/fixture-general
+module example.com/schemas/types/go/fixture-general
 
 go 1.26.4
 

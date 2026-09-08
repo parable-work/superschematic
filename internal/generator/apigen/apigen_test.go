@@ -541,8 +541,8 @@ func TestGenerateClassifiesDependencyInputTypesAsRequestBody(t *testing.T) {
 	output, err := Generate(schema, Options{
 		Provider:     stubProvider{},
 		SchemaName:   "fixture-api",
-		ModulePath:   "github.com/parable-platform/platform-schemas/api/fixture-api",
-		TypesModule:  "github.com/parable-platform/platform-schemas/types/go/fixture-api",
+		ModulePath:   "example.com/schemas/api/fixture-api",
+		TypesModule:  "example.com/schemas/types/go/fixture-api",
 		Dependencies: dependencies,
 		Clock:        codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
@@ -625,8 +625,8 @@ func generateUpdateUser(t *testing.T, queryParam bool) (*APIOutput, error) {
 	return Generate(schema, Options{
 		Provider:     stubProvider{},
 		SchemaName:   "fixture-api",
-		ModulePath:   "github.com/parable-platform/platform-schemas/api/fixture-api",
-		TypesModule:  "github.com/parable-platform/platform-schemas/types/go/fixture-api",
+		ModulePath:   "example.com/schemas/api/fixture-api",
+		TypesModule:  "example.com/schemas/types/go/fixture-api",
 		Dependencies: dependencies,
 		Clock:        codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})

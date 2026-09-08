@@ -16,7 +16,7 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	if !reflect.DeepEqual(got, Default()) {
 		t.Fatalf("missing file must yield Default(), got %+v", got)
 	}
-	if got.GoTypesModule("web-db") != "github.com/parable-platform/platform-schemas/types/go/web-db" {
+	if got.GoTypesModule("web-db") != "example.com/schemas/types/go/web-db" {
 		t.Errorf("GoTypesModule = %q", got.GoTypesModule("web-db"))
 	}
 }
@@ -44,7 +44,7 @@ func TestLoadFileOverridesAndKeepsUnsetDefaults(t *testing.T) {
 	if got.ScalarGoModule != Default().ScalarGoModule {
 		t.Errorf("unset key must keep default, got %q", got.ScalarGoModule)
 	}
-	if got.PythonSDKModule("orders") != "parable_orders_sdk" {
+	if got.PythonSDKModule("orders") != "schemas_orders_sdk" {
 		t.Errorf("PythonSDKModule = %q", got.PythonSDKModule("orders"))
 	}
 }
@@ -211,17 +211,17 @@ func TestOrDefaultFillsEmptyFields(t *testing.T) {
 	if got.GoModuleRoot != Default().GoModuleRoot {
 		t.Errorf("empty field must be filled, got %q", got.GoModuleRoot)
 	}
-	if got.ScalarRustCrateIdent() != "parable_scalars_core" {
+	if got.ScalarRustCrateIdent() != "superscalar" {
 		t.Errorf("ScalarRustCrateIdent = %q", got.ScalarRustCrateIdent())
 	}
 }
 
 func TestNpmTypesPackageKeepsSingleSuffix(t *testing.T) {
 	n := Default()
-	if n.NpmTypesPackage("connectors-web-types") != "@parable-platform/connectors-web-types" {
+	if n.NpmTypesPackage("connectors-web-types") != "@schemas/connectors-web-types" {
 		t.Errorf("got %q", n.NpmTypesPackage("connectors-web-types"))
 	}
-	if n.NpmTypesPackage("web-db") != "@parable-platform/web-db-types" {
+	if n.NpmTypesPackage("web-db") != "@schemas/web-db-types" {
 		t.Errorf("got %q", n.NpmTypesPackage("web-db"))
 	}
 }
@@ -277,29 +277,73 @@ func TestDiscoverWithoutFileReturnsDefaults(t *testing.T) {
 func TestAuthoringPackagesDefaultToTodaysSetAndIncludeTheScalarPackage(t *testing.T) {
 	d := Default()
 	want := []string{
-		"@psgen/api", "@psgen/db", "@psgen/deploy",
-		"@psgen/scalar-lib", "@psgen/schema", "@psgen/schema-config",
+		"@superschematic/api", "@superschematic/db", "@superschematic/deploy",
+		"@superschematic/schema", "@superschematic/schema-config", "superscalar",
 	}
 	if !reflect.DeepEqual(d.AuthoringPackages, want) {
 		t.Fatalf("Default().AuthoringPackages = %v, want %v", d.AuthoringPackages, want)
 	}
-	if d.AuthoringScope() != "@psgen" {
-		t.Errorf("AuthoringScope() = %q, want @psgen", d.AuthoringScope())
+	if d.AuthoringScope() != "@superschematic" {
+		t.Errorf("AuthoringScope() = %q, want @superschematic", d.AuthoringScope())
 	}
 
 	fork := Naming{ScalarNpmPackage: "@acme/scalars"}.OrDefault()
 	if got := fork.AuthoringPackages[len(fork.AuthoringPackages)-1]; got != "@acme/scalars" {
 		t.Errorf("renamed scalar package not appended: %v", fork.AuthoringPackages)
 	}
-	if fork.AuthoringScope() != "" {
-		t.Errorf("mixed scopes must yield no common scope, got %q", fork.AuthoringScope())
+	if fork.AuthoringScope() != "@superschematic" {
+		t.Errorf("the scalar package is outside the scope check, got %q", fork.AuthoringScope())
+	}
+	mixed := Naming{AuthoringPackages: []string{"@acme/a", "@other/b"}}.OrDefault()
+	if mixed.AuthoringScope() != "" {
+		t.Errorf("mixed scopes must yield no common scope, got %q", mixed.AuthoringScope())
 	}
 
 	explicit, err := Parse([]byte(`authoring_packages = ["@acme/schematic"]`), "test.toml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(explicit.AuthoringPackages, []string{"@acme/schematic", "@psgen/scalar-lib"}) {
+	if !reflect.DeepEqual(explicit.AuthoringPackages, []string{"@acme/schematic", "superscalar"}) {
 		t.Errorf("explicit list = %v", explicit.AuthoringPackages)
+	}
+}
+
+// TestPackageAliasesFoldSpecifiersOntoDeclaringPackages: DeclaringPackage
+// follows the [package_aliases] table and is the identity for anything not
+// in it; Specifier inverts it, preferring the alphabetically first alias so
+// output is stable when several specifiers share a target.
+func TestPackageAliasesFoldSpecifiersOntoDeclaringPackages(t *testing.T) {
+	n := Default()
+	if got := n.DeclaringPackage("@superschematic/db"); got != "@superschematic/db" {
+		t.Errorf("identity without aliases: got %q", got)
+	}
+	if got := n.Specifier("@superschematic/db"); got != "@superschematic/db" {
+		t.Errorf("identity without aliases: got %q", got)
+	}
+	n.PackageAliases = map[string]string{
+		"@acme/db":     "@superschematic/db",
+		"@acme/legacy": "@superschematic/db",
+	}
+	if got := n.DeclaringPackage("@acme/db"); got != "@superschematic/db" {
+		t.Errorf("DeclaringPackage(@acme/db) = %q", got)
+	}
+	if got := n.DeclaringPackage("@acme/api"); got != "@acme/api" {
+		t.Errorf("unaliased specifier must be its own package, got %q", got)
+	}
+	if got := n.Specifier("@superschematic/db"); got != "@acme/db" {
+		t.Errorf("Specifier(@superschematic/db) = %q, want the first alias", got)
+	}
+}
+
+// TestParseReadsPackageAliases: the table round-trips from the toml file.
+func TestParseReadsPackageAliases(t *testing.T) {
+	n, err := Parse([]byte(`[package_aliases]
+"@acme/db" = "@superschematic/db"
+`), "superschematic.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := n.DeclaringPackage("@acme/db"); got != "@superschematic/db" {
+		t.Errorf("DeclaringPackage(@acme/db) = %q", got)
 	}
 }

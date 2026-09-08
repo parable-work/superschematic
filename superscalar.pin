@@ -1,0 +1,6 @@
+# The superscalar commit this repository builds and tests against until
+# superscalar publishes releases. scripts/superscalar-dep.sh checks it out
+# under third_party/superscalar and builds the Go static archive from it;
+# go.mod pins the same commit as a pseudo-version, and a test keeps the two
+# in agreement.
+commit=c9da122f99b80055bc652b612d81adb6284003c5

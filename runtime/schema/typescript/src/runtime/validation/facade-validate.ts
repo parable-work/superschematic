@@ -9,7 +9,7 @@ import {
   hasErrors,
   newValidationErrors,
   type ValidationErrors,
-} from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
 import type { Schema, SchemaInput, ValidationOptions } from './types';
 import {
   resolveSchema,

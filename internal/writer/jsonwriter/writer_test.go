@@ -48,7 +48,7 @@ func TestWriteDocumentFormRoundTrips(t *testing.T) {
 		Name:    "fixture-db",
 		Kind:    ir.SchemaKindDB,
 		Comment: "Top of file.",
-		Imports: []ir.Import{{Package: "@parable-platform/web-db", Types: []string{"Tenant"}}},
+		Imports: []ir.Import{{Package: "@schemas/web-db", Types: []string{"Tenant"}}},
 		Scalars: map[string]*ir.ScalarDef{
 			"Identity.UUID": {Name: "Identity.UUID", LanguagePrimitive: ir.LanguageString},
 		},

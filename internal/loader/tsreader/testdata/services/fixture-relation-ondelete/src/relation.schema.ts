@@ -1,5 +1,5 @@
-import { Identity } from "@psgen/scalar-lib";
-import { AutoGenerate, Relation, key } from "@psgen/db";
+import { Identity } from "superscalar";
+import { AutoGenerate, Relation, key } from "@superschematic/db";
 
 // Referenced parent table.
 export abstract class Parent {

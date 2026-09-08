@@ -11,7 +11,7 @@ import (
 	runtimesession "github.com/parable-work/superschematic/runtime/http/go/session"
 	"go.uber.org/zap"
 
-	orm "github.com/parable-platform/platform-schemas/orm/fixture-db"
+	orm "example.com/schemas/orm/fixture-db"
 )
 
 // ===========================================================================

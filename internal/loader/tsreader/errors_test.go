@@ -91,13 +91,13 @@ func TestImportSitesRecorded(t *testing.T) {
 	}
 	found := false
 	for _, site := range in.ImportSites {
-		if site.Package == "@psgen/db" && strings.HasSuffix(site.File, "illegal.schema.ts") &&
+		if site.Package == "@superschematic/db" && strings.HasSuffix(site.File, "illegal.schema.ts") &&
 			site.Line == 2 && site.Col == 1 {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected an import site for @psgen/db at illegal.schema.ts:2:1, got: %+v", in.ImportSites)
+		t.Errorf("expected an import site for @superschematic/db at illegal.schema.ts:2:1, got: %+v", in.ImportSites)
 	}
 }
 
@@ -122,8 +122,8 @@ func TestExternalEnumsRejectBareNameCollisionAcrossDependencies(t *testing.T) {
 	msg := err.Error()
 	for _, want := range []string{
 		`external enum "TenantStatus"`,
-		"@parable-platform/fixture-db",
-		"@parable-platform/fixture-enum-guardrails",
+		"@schemas/fixture-db",
+		"@schemas/fixture-enum-guardrails",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("missing diagnostic %q in: %s", want, msg)
@@ -140,8 +140,8 @@ func TestExternalEnumStringLiteralMembersRemainSupported(t *testing.T) {
 	if enum == nil {
 		t.Fatal("TenantStatus external enum was not recorded")
 	}
-	if enum.Owner != "@parable-platform/fixture-enum-guardrails" {
-		t.Fatalf("Owner = %q, want @parable-platform/fixture-enum-guardrails", enum.Owner)
+	if enum.Owner != "@schemas/fixture-enum-guardrails" {
+		t.Fatalf("Owner = %q, want @schemas/fixture-enum-guardrails", enum.Owner)
 	}
 	if len(enum.Values) != 2 || enum.Values[0].Name != "Active" || enum.Values[0].SerializedAs != "active" {
 		t.Fatalf("Values = %+v, want the existing string-literal enum mapping", enum.Values)

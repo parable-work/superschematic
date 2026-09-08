@@ -4,8 +4,8 @@ import {
   newValidationErrors,
   addFieldError,
   setFieldErrors,
-} from '@psgen/scalar-lib/validation';
-import type { ScalarValidationResult, ValidationResult } from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
+import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { load as loadYaml } from 'js-yaml';
 import type { Tenant, JSDate, TenantUser, TenantStatus } from '../../types';
 
@@ -21,7 +21,7 @@ import { validateGenericJSONRequired, validateGenericJSON } from '../scalars/gen
 
 import { validateTenantStatusRequired, validateTenantStatus } from '../enums';
 
-import { parseTemporalDateTime as parseTemporalDateTimeFromLib } from '@psgen/scalar-lib/scalars';
+import { parseTemporalDateTime as parseTemporalDateTimeFromLib } from 'superscalar/scalars';
 
 import { parseTenantUserFromJSON } from './tenantuser';
 

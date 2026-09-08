@@ -47,12 +47,12 @@ func TestWriteTypesGolden(t *testing.T) {
 					t.Fatalf("load dependency %s: %v", dep, err)
 				}
 				deps[dep] = depSchema
-				depModules[dep] = "github.com/parable-platform/platform-schemas/types/go/" + dep
+				depModules[dep] = "example.com/schemas/types/go/" + dep
 			}
 
 			output, err := Generate(schema, Options{
 				SchemaName:        tc.service,
-				ModulePath:        "github.com/parable-platform/platform-schemas/types/go/" + tc.service,
+				ModulePath:        "example.com/schemas/types/go/" + tc.service,
 				Dependencies:      deps,
 				DependencyModules: depModules,
 				Clock:             fixedClock,

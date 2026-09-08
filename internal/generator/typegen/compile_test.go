@@ -55,12 +55,12 @@ func TestGeneratedModulesCompile(t *testing.T) {
 	for _, tc := range cases {
 		depModules := map[string]string{}
 		for depName := range tc.deps {
-			depModules[depName] = "github.com/parable-platform/platform-schemas/types/go/" + depName
+			depModules[depName] = "example.com/schemas/types/go/" + depName
 		}
 
 		output, err := Generate(tc.schema, Options{
 			SchemaName:        tc.name,
-			ModulePath:        "github.com/parable-platform/platform-schemas/types/go/" + tc.name,
+			ModulePath:        "example.com/schemas/types/go/" + tc.name,
 			Dependencies:      tc.deps,
 			DependencyModules: depModules,
 			Clock:             fixedClock,

@@ -22,8 +22,8 @@ import (
 	"github.com/parable-work/superschematic/internal/profile"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sentinel"
-	"github.com/parable-work/superschematic/schemadeps"
 	ir "github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/schemadeps"
 )
 
 // buildAllFlags holds one build-all command's flag values.
@@ -51,7 +51,7 @@ func newBuildAllCmd(a *app) *cobra.Command {
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <services-root>/../dist)")
 	cmd.Flags().BoolVar(&flags.profile, "profile", false, "emit psgen build phase timings to stderr")
 	cmd.Flags().BoolVar(&flags.cache, "cache", false, "share schema outputs across worktrees via a content-addressed cache")
-	cmd.Flags().StringVar(&flags.cacheRoot, "cache-root", "", "schema output cache root (default: PARABLE_BUILD_CACHE_DIR, then [cache] root, then the XDG cache directory)")
+	cmd.Flags().StringVar(&flags.cacheRoot, "cache-root", "", "schema output cache root (default: SUPERSCHEMATIC_BUILD_CACHE_DIR, then [cache] root, then the XDG cache directory)")
 	cmd.Flags().BoolVar(&flags.parallel, "parallel", false, "build independent schemas concurrently within each dependency phase")
 	cmd.Flags().BoolVar(&flags.isolatedTS, "isolated-ts-programs", false, "use one TypeScript compiler program per schema service instead of the build-all shared program")
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")

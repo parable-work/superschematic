@@ -1,5 +1,5 @@
-import { Identity } from "@psgen/scalar-lib";
-import { key } from "@psgen/db";
+import { Identity } from "superscalar";
+import { key } from "@superschematic/db";
 
 export abstract class NotATable {
   @key

@@ -1,7 +1,7 @@
 // psgen schema IR: the TypeScript view of the runtime schema document that
 // psgen emits (Go: utils/psgen/schema-ir/go/ir). Types only; nothing at
-// runtime. The schema runtime (@psgen/schema-runtime) and the Parable scalar
-// package (@psgen/scalar-lib, for the Parable.Schema scalar type) both import
+// runtime. The schema runtime (@superschematic/schema-runtime) and the Parable scalar
+// package (superscalar, for the Parable.Schema scalar type) both import
 // from here, which keeps the dependency graph acyclic: this package imports
 // nothing.
 

@@ -463,7 +463,7 @@ func (w *walker) applyHeritage(node *astNode, td *ir.TypeDef) {
 // `implements Tagged<{...}>`. Field-bearing traits cannot be implemented
 // directly -- TypeScript demands implementers re-declare every member
 // (TS2720), which contradicts trait flattening -- so they are named through
-// the Trait<T> heritage carrier from @psgen/schema: `implements
+// the Trait<T> heritage carrier from @superschematic/schema: `implements
 // Trait<SoftDeletable>`. The carrier erases to an empty object type for the
 // compiler; here it unwraps to its type argument.
 func (w *walker) traitHeritageTarget(t *astNode, report bool) (symbolIdentity, []*astNode, bool) {
@@ -531,7 +531,7 @@ func (w *walker) applyTraitConfig(node *astNode, td *ir.TypeDef) {
 }
 
 // traitConfigFields resolves a trait Config constraint to its field schema.
-// The constraint is either the open TraitConfig shape from @psgen/schema (no
+// The constraint is either the open TraitConfig shape from @superschematic/schema (no
 // declared fields: any configuration is accepted), a schema class, an
 // object-shaped type alias, or an inline object type.
 func (w *walker) traitConfigFields(constraint *astNode) ([]*ir.FieldDef, bool) {
@@ -953,7 +953,7 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 			case id.is("@superschematic/api", "Encrypted"):
 				set.Encrypted = true
 			default:
-				w.addErr(errorAtNode(t, "operation sets may only extend Authenticated or Encrypted from @psgen/api"))
+				w.addErr(errorAtNode(t, "operation sets may only extend Authenticated or Encrypted from @superschematic/api"))
 			}
 		}
 	}

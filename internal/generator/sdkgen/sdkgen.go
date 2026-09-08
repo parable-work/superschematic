@@ -100,8 +100,8 @@ type QueryParam struct {
 type SDKOutput struct {
 	SchemaName             string          // Schema name (e.g., "my-api")
 	SDKClassName           string          // Main SDK class name (e.g., "WebApiSDK")
-	PackageName            string          // NPM package name (e.g., "@parable-platform/my-api-sdk")
-	TypesPackage           string          // Types package name (e.g., "@parable-platform/my-api-types")
+	PackageName            string          // NPM package name (e.g., "@schemas/my-api-sdk")
+	TypesPackage           string          // Types package name (e.g., "@schemas/my-api-types")
 	Namespaces             []NamespaceInfo // All namespaces
 	HasAuth                bool            // Whether any endpoint requires auth
 	HasFilterableEndpoints bool            // Whether any endpoint is @filterable (gates FilterParam in types.ts)

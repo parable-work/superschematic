@@ -30,7 +30,7 @@ function test(name, fn) {
 const sampleIR = {
   name: 'web-admin-api',
   kind: 'API',
-  imports: [{ package: '@parable-platform/enums', types: ['TenantTierEnum'] }],
+  imports: [{ package: '@schemas/enums', types: ['TenantTierEnum'] }],
   scalars: {
     'Identity.UserID': {
       name: 'Identity.UserID',
@@ -153,7 +153,7 @@ test('parses enums with serializedAs and merges builtin scalars', () => {
   // registry must still resolve its underscore form.
   assert.ok(schema.scalars.Contact_Email, 'builtin scalars merged into schema');
   assert.deepStrictEqual(schema.imports, [
-    { from: '@parable-platform/enums', types: ['TenantTierEnum'] },
+    { from: '@schemas/enums', types: ['TenantTierEnum'] },
   ]);
 });
 

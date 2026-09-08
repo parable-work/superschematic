@@ -31,7 +31,7 @@ decorator names fail validation.
 
 With --config, prints the JSON Schema for the schema.config.json and
 schema.config.yaml service configuration forms instead (generated from
-@psgen/schema-config).`,
+@superschematic/schema-config).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runJSONSchema(cmd, a, flags)

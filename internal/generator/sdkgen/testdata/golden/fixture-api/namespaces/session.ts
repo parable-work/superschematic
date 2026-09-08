@@ -4,10 +4,10 @@ import { HttpClient } from '../client';
 import { ValidationError } from '../types';
 import type {
   TenantView,
-} from '@parable-platform/fixture-api-types';
+} from '@schemas/fixture-api-types';
 import {
   parseTenantViewFromJSON,
-} from '@parable-platform/fixture-api-types';
+} from '@schemas/fixture-api-types';
 
 /**
  * SessionNamespace - API methods for session

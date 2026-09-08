@@ -18,12 +18,14 @@ import (
 func checkImports(schema *ir.Schema, in Input, r *Result) {
 	reg := in.registry()
 	kind, _ := reg.Kind(string(schema.Kind))
-	servicePackagePrefix := in.Naming.OrDefault().NpmServicePackagePrefix()
+	n := in.Naming.OrDefault()
+	servicePackagePrefix := n.NpmServicePackagePrefix()
 	codegenPackages := codegenImportPackages(schema)
 	for _, site := range in.ImportSites {
 		switch {
 		case reg.IsAuthoringPackage(site.Package):
-			if kind.ForbiddenPackages[site.Package] || !reg.PackageAllowsKind(site.Package, string(schema.Kind)) {
+			declaring := n.DeclaringPackage(site.Package)
+			if kind.ForbiddenPackages[declaring] || !reg.PackageAllowsKind(declaring, string(schema.Kind)) {
 				r.errorAt(site.File, site.Line, site.Col,
 					"a %s schema cannot import %s", schema.Kind, site.Package)
 			}
@@ -37,8 +39,8 @@ func checkImports(schema *ir.Schema, in Input, r *Result) {
 	}
 }
 
-// codegenImportPackages returns the set of @parable-platform/* packages that
-// appear in schema.Imports — the runtime/codegen dependency surface.
+// codegenImportPackages returns the set of service packages that appear in
+// schema.Imports, the runtime/codegen dependency surface.
 func codegenImportPackages(schema *ir.Schema) map[string]bool {
 	pkgs := make(map[string]bool, len(schema.Imports))
 	for _, imp := range schema.Imports {
@@ -48,7 +50,7 @@ func codegenImportPackages(schema *ir.Schema) map[string]bool {
 }
 
 // checkServiceReference enforces the cross-kind type-reference rules for one
-// @parable-platform/* import that appears in schema.Imports: the kind's
+// @schemas/* import that appears in schema.Imports: the kind's
 // AllowedReferences when it has a positive allowlist, else its
 // DeniedReferences.
 func checkServiceReference(schema *ir.Schema, kind registry.KindSpec, in Input, r *Result, site ImportSite) {
@@ -84,7 +86,7 @@ func checkServiceReference(schema *ir.Schema, kind registry.KindSpec, in Input, 
 }
 
 // serviceNameForPackage derives the schema service name from a package name:
-// the scope prefix is stripped ("@parable-platform/web-db" -> "web-db").
+// the scope prefix is stripped ("@schemas/web-db" -> "web-db").
 func serviceNameForPackage(pkg string) string {
 	if i := strings.LastIndex(pkg, "/"); i >= 0 {
 		return pkg[i+1:]

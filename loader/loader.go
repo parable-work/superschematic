@@ -10,8 +10,8 @@ package loader
 
 import (
 	"github.com/parable-work/superschematic/internal/loader"
-	"github.com/parable-work/superschematic/registry"
 	ir "github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/registry"
 )
 
 // Option configures LoadService.

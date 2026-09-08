@@ -21,7 +21,7 @@ func TestBuildAllCommand_ProfileJSONService(t *testing.T) {
 	root := New(Config{})
 	root.SetOut(out)
 	root.SetErr(errOut)
-	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--profile", "--naming", sessionNaming})
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--profile"})
 
 	err := root.Execute()
 	require.NoError(t, err)
@@ -47,7 +47,7 @@ func TestBuildAllCommand_SkipFormatSuppressesFormatterProfiles(t *testing.T) {
 	root := New(Config{})
 	root.SetOut(out)
 	root.SetErr(errOut)
-	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--profile", "--skip-format", "--naming", sessionNaming})
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--profile", "--skip-format"})
 
 	err := root.Execute()
 	require.NoError(t, err)
@@ -70,7 +70,7 @@ func TestBuildAllCommand_CacheSkipsUpToDateService(t *testing.T) {
 	root := New(Config{})
 	root.SetOut(new(bytes.Buffer))
 	root.SetErr(new(bytes.Buffer))
-	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--cache", "--cache-root", cacheRoot, "--naming", sessionNaming})
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--cache", "--cache-root", cacheRoot})
 	require.NoError(t, root.Execute())
 
 	depsPath := schemadeps.DepsPath(outDir)
@@ -82,7 +82,7 @@ func TestBuildAllCommand_CacheSkipsUpToDateService(t *testing.T) {
 	out := new(bytes.Buffer)
 	root.SetOut(out)
 	root.SetErr(new(bytes.Buffer))
-	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--cache", "--cache-root", cacheRoot, "--naming", sessionNaming})
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--cache", "--cache-root", cacheRoot})
 
 	require.NoError(t, root.Execute())
 	assert.Contains(t, out.String(), "OK: fixture-db (up to date")
@@ -101,7 +101,7 @@ func TestBuildAllCommand_CacheRestoresEmptyStampedOutput(t *testing.T) {
 	root := New(Config{})
 	root.SetOut(new(bytes.Buffer))
 	root.SetErr(new(bytes.Buffer))
-	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--cache", "--cache-root", cacheRoot, "--naming", sessionNaming})
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--cache", "--cache-root", cacheRoot})
 	require.NoError(t, root.Execute())
 
 	goOutput := filepath.Join(outDir, "types", "go", "fixture-db")
@@ -111,7 +111,7 @@ func TestBuildAllCommand_CacheRestoresEmptyStampedOutput(t *testing.T) {
 	out := new(bytes.Buffer)
 	root.SetOut(out)
 	root.SetErr(new(bytes.Buffer))
-	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--cache", "--cache-root", cacheRoot, "--naming", sessionNaming})
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--cache", "--cache-root", cacheRoot})
 
 	require.NoError(t, root.Execute())
 	assert.Contains(t, out.String(), "OK: fixture-db (restored from cache)")
@@ -126,7 +126,7 @@ func TestBuildAllCommand_UsesSharedTypeScriptProgramByDefault(t *testing.T) {
 	root := New(Config{})
 	root.SetOut(out)
 	root.SetErr(errOut)
-	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--profile", "--naming", sessionNaming})
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--profile"})
 
 	require.NoError(t, root.Execute())
 	assert.Contains(t, out.String(), "Shared TypeScript program: 1 service(s)")
@@ -142,7 +142,7 @@ func TestBuildAllCommand_IsolatedTypeScriptProgramsFallback(t *testing.T) {
 	root := New(Config{})
 	root.SetOut(out)
 	root.SetErr(errOut)
-	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--profile", "--isolated-ts-programs", "--naming", sessionNaming})
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--profile", "--isolated-ts-programs"})
 
 	require.NoError(t, root.Execute())
 	assert.NotContains(t, out.String(), "Shared TypeScript program")
@@ -152,7 +152,7 @@ func TestBuildAllCommand_IsolatedTypeScriptProgramsFallback(t *testing.T) {
 
 func prepareJSONServicesRoot(t *testing.T) string {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "platform-schemas")
+	root := filepath.Join(t.TempDir(), "schemas")
 	servicesRoot := filepath.Join(root, "services")
 	copyDir(t, "../internal/loader/testdata/services/fixture-db-json", filepath.Join(servicesRoot, "fixture-db-json"))
 	return servicesRoot
@@ -160,18 +160,18 @@ func prepareJSONServicesRoot(t *testing.T) string {
 
 func prepareTSServicesRoot(t *testing.T) string {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "platform-schemas")
+	root := filepath.Join(t.TempDir(), "schemas")
 	servicesRoot := filepath.Join(root, "services")
 	copyDir(t, "../internal/loader/tsreader/testdata/services/fixture-db", filepath.Join(servicesRoot, "fixture-db"))
 	baseConfig, err := os.ReadFile("../internal/loader/tsreader/testdata/tsconfig.base.json")
 	require.NoError(t, err)
 	packagesRoot, err := filepath.Abs("../packages")
 	require.NoError(t, err)
-	// @psgen/scalar-lib resolves to the Parable scalar package beside psgen,
-	// not to a utils/psgen/packages member.
-	scalarsRoot, err := filepath.Abs("../../parable-scalars")
+	// superscalar resolves to the pinned checkout under third_party, not to a
+	// packages member.
+	scalarsRoot, err := filepath.Abs("../third_party/superscalar")
 	require.NoError(t, err)
-	baseConfigText := strings.ReplaceAll(string(baseConfig), "../../../../../parable-scalars", filepath.ToSlash(scalarsRoot))
+	baseConfigText := strings.ReplaceAll(string(baseConfig), "../../../../third_party/superscalar", filepath.ToSlash(scalarsRoot))
 	baseConfigText = strings.ReplaceAll(baseConfigText, "../../../../packages", filepath.ToSlash(packagesRoot))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "tsconfig.base.json"), []byte(baseConfigText), 0o644))
 	return servicesRoot

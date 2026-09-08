@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@psgen/schema-runtime",
+      "name": "@superschematic/schema-runtime",
       "dependencies": {
         "js-yaml": "4.1.0",
       },

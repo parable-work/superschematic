@@ -1,4 +1,4 @@
 {
-  "name": "@parable-platform/fixture-enum-guardrails",
+  "name": "@schemas/fixture-enum-guardrails",
   "private": true
 }

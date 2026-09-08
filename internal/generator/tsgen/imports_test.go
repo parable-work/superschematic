@@ -33,7 +33,7 @@ func TestResolveImportsNamedOnlyForDB(t *testing.T) {
 
 	api := ir.NewSchema("web-api", ir.SchemaKindAPI)
 	api.Imports = []ir.Import{{
-		Package: "@parable-platform/web-db",
+		Package: "@schemas/web-db",
 		Types:   []string{"IngestToken"},
 	}}
 
@@ -75,7 +75,7 @@ func TestResolveImportsExpandsGeneralCatalog(t *testing.T) {
 
 	api := ir.NewSchema("web-api", ir.SchemaKindAPI)
 	api.Imports = []ir.Import{{
-		Package: "@parable-platform/error-codes",
+		Package: "@schemas/error-codes",
 		Types:   []string{"WebApiArtifactError"},
 	}}
 

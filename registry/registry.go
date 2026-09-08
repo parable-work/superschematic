@@ -11,6 +11,7 @@ package registry
 import (
 	ir "github.com/parable-work/superschematic/ir"
 
+	scalars "github.com/parable-work/superscalar/go"
 	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
@@ -18,7 +19,6 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/registry"
-	scalars "github.com/parable-work/superscalar/go"
 )
 
 type (

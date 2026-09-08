@@ -493,7 +493,7 @@ func TestGenerateUnionDiscriminatorDefaultFromImportedEnum(t *testing.T) {
 
 	schema := ir.NewSchema("agent", ir.SchemaKindGeneral)
 	schema.Imports = []ir.Import{
-		{Package: "@parable-platform/enums", Types: []string{"SampleKindEnum"}},
+		{Package: "@schemas/enums", Types: []string{"SampleKindEnum"}},
 	}
 	focusDefault := "focus_segment"
 	gapDefault := "coverage_gap"

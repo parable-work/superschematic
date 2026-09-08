@@ -1,5 +1,5 @@
-import { TenantStatus as DatabaseTenantStatus } from "@parable-platform/fixture-db";
-import { TenantStatus as GeneralTenantStatus } from "@parable-platform/fixture-enum-guardrails";
+import { TenantStatus as DatabaseTenantStatus } from "@schemas/fixture-db";
+import { TenantStatus as GeneralTenantStatus } from "@schemas/fixture-enum-guardrails";
 
 export abstract class CollisionExample {
   databaseStatus: DatabaseTenantStatus;

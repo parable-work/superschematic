@@ -13,7 +13,7 @@ func TestGenerateWithDependencies_ImportedEnumMetadata(t *testing.T) {
 		Name: "consumer",
 		Kind: ir.SchemaKindGeneral,
 		Imports: []ir.Import{
-			{Package: "@parable-platform/shared", Types: []string{"ImportedEnvironment"}},
+			{Package: "@schemas/shared", Types: []string{"ImportedEnvironment"}},
 		},
 		Scalars: map[string]*ir.ScalarDef{},
 		Types: map[string]*ir.TypeDef{

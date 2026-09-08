@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,15 +19,6 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// coreNaming is the default naming with the core's own auth provider
-// selected. The in-tree default selects the Parable provider, which only the
-// Parable extension registers, so the core alone finalizes only under this.
-func coreNaming() naming.Naming {
-	n := naming.Default()
-	n.AuthProvider = sessionauth.Name
-	return n
-}
-
 const tsFixtures = "../loader/tsreader/testdata/services"
 
 func TestRunDBSchemaReportsKindImpliedOutputs(t *testing.T) {
@@ -38,7 +28,7 @@ func TestRunDBSchemaReportsKindImpliedOutputs(t *testing.T) {
 	}
 
 	outputRoot := t.TempDir()
-	result, err := Run(schema, cfg, Options{OutputRoot: outputRoot, Naming: coreNaming()})
+	result, err := Run(schema, cfg, Options{OutputRoot: outputRoot, Naming: naming.Default()})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -92,7 +82,7 @@ func TestRunAPISchemaSelectsAPIOutputs(t *testing.T) {
 	outputRoot := t.TempDir()
 	result, err := Run(schema, cfg, Options{
 		OutputRoot: outputRoot,
-		Naming:     coreNaming(),
+		Naming:     naming.Default(),
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(tsFixtures, name))
 		},
@@ -167,7 +157,7 @@ func TestRunMemoizesDependencyLoadsWithinRun(t *testing.T) {
 	calls := make(map[string]int)
 	_, err = Run(schema, cfg, Options{
 		OutputRoot: t.TempDir(),
-		Naming:     coreNaming(),
+		Naming:     naming.Default(),
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			calls[name]++
 			return loader.LoadService(filepath.Join(tsFixtures, name))
@@ -194,7 +184,7 @@ func TestRunMemoizesAPIOutputWithinRun(t *testing.T) {
 	var profiles bytes.Buffer
 	_, err = Run(schema, cfg, Options{
 		OutputRoot: t.TempDir(),
-		Naming:     coreNaming(),
+		Naming:     naming.Default(),
 		Profile:    profile.New("fixture-api", &profiles),
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(tsFixtures, name))
@@ -239,7 +229,7 @@ func TestGenerateGoAPIDoesNotMutateCachedAPIOutput(t *testing.T) {
 		OutputRoot:    t.TempDir(),
 		ServicePath:   filepath.Join(tsFixtures, "fixture-api"),
 		ScalarLibPath: filepath.Join(t.TempDir(), "scalar-lib"),
-		Naming:        coreNaming(),
+		Naming:        naming.Default(),
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(tsFixtures, name))
 		},
@@ -371,7 +361,7 @@ func TestExpectedOutputDirsFollowsPipelineEnabled(t *testing.T) {
 // records its call and writes a marker file.
 func documentRegistry(t *testing.T, calls *[]string) *registry.Registry {
 	t.Helper()
-	reg := registry.New(coreNaming())
+	reg := registry.New(naming.Default())
 	if err := RegisterCore(reg); err != nil {
 		t.Fatal(err)
 	}

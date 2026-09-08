@@ -167,7 +167,7 @@ func TestDecodeMultiDefinitionDocument(t *testing.T) {
 	docJSON := `{
 		"name": "fixture",
 		"kind": "DB",
-		"imports": [{"package": "@parable-platform/web-db", "types": ["Tenant"]}],
+		"imports": [{"package": "@schemas/web-db", "types": ["Tenant"]}],
 		"scalars": {
 			"Identity.UUID": {"name": "Identity.UUID", "languagePrimitive": "string"}
 		},

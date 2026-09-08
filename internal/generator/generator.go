@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
@@ -35,20 +34,6 @@ func CoreRegistry(n naming.Naming) *registry.Registry {
 		panic("generator: core registry: " + err.Error())
 	}
 	return reg
-}
-
-// CoreReadRegistry is the registry the read-only fallbacks (buildplan's
-// discovery, ParseOutputs, ExpectedOutputDirs) use when a caller passes none:
-// the core under the default naming with the core's own auth provider
-// selected. Those callers read kinds and output keys, which do not depend on
-// the provider, and the in-tree default naming names a provider only the
-// Parable extension registers (W11 flips the default; this helper then
-// equals CoreRegistry(naming.Default())). Nothing generated flows through
-// it, so the provider choice cannot reach an output file.
-func CoreReadRegistry() *registry.Registry {
-	n := naming.Default()
-	n.AuthProvider = sessionauth.Name
-	return CoreRegistry(n)
 }
 
 // assembleCore runs New, RegisterCore, Finalize with no extensions.

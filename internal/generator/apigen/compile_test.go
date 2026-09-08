@@ -125,8 +125,8 @@ func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider) string {
 	}
 
 	fixedClock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
-	dbTypesModule := "github.com/parable-platform/platform-schemas/types/go/fixture-db"
-	apiTypesModule := "github.com/parable-platform/platform-schemas/types/go/fixture-api"
+	dbTypesModule := "example.com/schemas/types/go/fixture-db"
+	apiTypesModule := "example.com/schemas/types/go/fixture-api"
 
 	tempRoot := t.TempDir()
 	dbTypesDir := filepath.Join(tempRoot, "types", "go", "fixture-db")
@@ -174,7 +174,7 @@ func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider) string {
 
 	ormOutput, err := ormgen.Generate(dbSchema, ormgen.Options{
 		SchemaName:  "fixture-db",
-		ModulePath:  "github.com/parable-platform/platform-schemas/orm/fixture-db",
+		ModulePath:  "example.com/schemas/orm/fixture-db",
 		TypesModule: dbTypesModule,
 		Clock:       fixedClock,
 	})
@@ -192,7 +192,7 @@ func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider) string {
 	apiOutput, err := apigen.Generate(apiSchema, apigen.Options{
 		Provider:       provider,
 		SchemaName:     "fixture-api",
-		ModulePath:     "github.com/parable-platform/platform-schemas/api/fixture-api",
+		ModulePath:     "example.com/schemas/api/fixture-api",
 		TypesModule:    apiTypesModule,
 		IsPublic:       true,
 		UpstreamSchema: "fixture-db",

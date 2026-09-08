@@ -1,12 +1,12 @@
 // Package schemaconfig owns the service configuration contract shared by the
 // three schema frontends: the SchemaConfig struct, and validation of the
 // JSON/YAML config forms (schema.config.json, schema.config.yaml) against
-// the JSON Schema generated from @psgen/schema-config.
+// the JSON Schema generated from @superschematic/schema-config.
 //
 // The TypeScript form (schema.config.ts) is read statically by the tsreader
 // off the defineConfig({...}) object literal; the data forms decode directly
 // into SchemaConfig here. Either way the shape contract is the same package:
-// @psgen/schema-config declares it, gen-json-schema projects it to the
+// @superschematic/schema-config declares it, gen-json-schema projects it to the
 // embedded JSON Schema, and this package enforces it.
 package schemaconfig
 
@@ -27,7 +27,7 @@ import (
 )
 
 // definitionBytes is the JSON Schema generated from the SchemaConfigDocument
-// type in @psgen/schema-config. Regenerate with:
+// type in @superschematic/schema-config. Regenerate with:
 //
 //	cd utils/psgen/packages/schema-config && bun run gen-json-schema
 //

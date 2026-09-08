@@ -3,4 +3,4 @@
 export type {
   JSDate,
   NetworkUrl,
-} from '@psgen/scalar-lib/scalars';
+} from 'superscalar/scalars';

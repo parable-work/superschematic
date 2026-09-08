@@ -8,7 +8,7 @@
  *
  * @example
  * ```typescript
- * import { FixtureApiSDK } from '@parable-platform/fixture-api-sdk';
+ * import { FixtureApiSDK } from '@schemas/fixture-api-sdk';
  *
  * const sdk = new FixtureApiSDK({
  *   baseUrl: 'https://api.example.com',
@@ -48,7 +48,7 @@ export {
   // Re-export all types from the types package
   // Note: We explicitly don't re-export ValidationError to avoid conflicts
   type ValidationErrors,
-} from '@parable-platform/fixture-api-types';
+} from '@schemas/fixture-api-types';
 
 /**
  * Main SDK class

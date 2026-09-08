@@ -1,4 +1,4 @@
-import { NumericStatus } from "@parable-platform/fixture-enum-guardrails";
+import { NumericStatus } from "@schemas/fixture-enum-guardrails";
 
 export abstract class NumericEnumExample {
   status: NumericStatus;

@@ -48,7 +48,7 @@ func TestStoreRestoreRoundTrip(t *testing.T) {
 	writeFile(t, filepath.Join(out, "node_modules", "dep", "index.js"), "module.exports=1")
 	writeFile(t, filepath.Join(out, "Cargo.toml"), "[package]")
 	writeFile(t, filepath.Join(out, "target", "debug", "junk.o"), "binary")
-	require.NoError(t, os.Symlink(filepath.Join(repoA, "utils", "parable-scalars"), filepath.Join(out, "node_modules", "linked-pkg")))
+	require.NoError(t, os.Symlink(filepath.Join(repoA, "vendor", "scalars"), filepath.Join(out, "node_modules", "linked-pkg")))
 	require.NoError(t, os.Symlink("../dep/index.js", filepath.Join(out, "node_modules", "rel-link")))
 
 	require.NoError(t, StoreEntry(cacheRoot, "schemas", "demo", stringsOf("f", 64), repoA, []string{rel}))
@@ -61,7 +61,7 @@ func TestStoreRestoreRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	restored := filepath.Join(repoB, filepath.FromSlash(rel))
 	assert.Equal(t, "export const x = 1;", mustRead(t, filepath.Join(restored, "src", "index.ts")))
-	assert.Equal(t, filepath.Join(repoB, "utils", "parable-scalars"), mustReadlink(t, filepath.Join(restored, "node_modules", "linked-pkg")))
+	assert.Equal(t, filepath.Join(repoB, "vendor", "scalars"), mustReadlink(t, filepath.Join(restored, "node_modules", "linked-pkg")))
 	assert.Equal(t, "../dep/index.js", mustReadlink(t, filepath.Join(restored, "node_modules", "rel-link")))
 	assert.NoDirExists(t, filepath.Join(restored, "target"))
 }
@@ -86,7 +86,7 @@ func TestRestoreRejectsDamagedEntry(t *testing.T) {
 func TestComputeInputHashesPropagatesDependencyChanges(t *testing.T) {
 	repo := t.TempDir()
 	writeFile(t, filepath.Join(repo, "utils", "psgen", "main.go"), "package main")
-	writeFile(t, filepath.Join(repo, "utils", "parable-scalars", "permissions.yml"), "{}")
+	writeFile(t, filepath.Join(repo, "vendor", "scalars", "permissions.yml"), "{}")
 	writeFile(t, filepath.Join(repo, "platform-schemas", "package.json"), "{}")
 	writeFile(t, filepath.Join(repo, "platform-schemas", "bun.lock"), "")
 
@@ -125,7 +125,7 @@ func TestComputeInputHashesPropagatesDependencyChanges(t *testing.T) {
 func TestAuthoringImportsInvalidateInputHash(t *testing.T) {
 	repo := t.TempDir()
 	writeFile(t, filepath.Join(repo, "utils", "psgen", "main.go"), "package main")
-	writeFile(t, filepath.Join(repo, "utils", "parable-scalars", "permissions.yml"), "{}")
+	writeFile(t, filepath.Join(repo, "vendor", "scalars", "permissions.yml"), "{}")
 	writeFile(t, filepath.Join(repo, "platform-schemas", "package.json"), "{}")
 	writeFile(t, filepath.Join(repo, "platform-schemas", "bun.lock"), "")
 
@@ -205,14 +205,14 @@ func TestComputeInputHashesFollowNaming(t *testing.T) {
 func TestComputeInputHashesFollowCacheInputs(t *testing.T) {
 	repo := t.TempDir()
 	writeFile(t, filepath.Join(repo, "utils", "psgen", "main.go"), "package main")
-	perms := filepath.Join(repo, "utils", "parable-scalars", "permissions.yml")
+	perms := filepath.Join(repo, "vendor", "scalars", "permissions.yml")
 	writeFile(t, perms, "a: 1")
 	svcDir := filepath.Join(repo, "platform-schemas", "services", "svc")
 	writeFile(t, filepath.Join(svcDir, "src", "svc.schema.ts"), "export class Svc {}")
 	services := []buildplan.Service{
 		{Name: "svc", Dir: svcDir, Config: &schemaconfig.SchemaConfig{Name: "svc", Kind: ir.SchemaKindGeneral}},
 	}
-	declared := naming.Naming{Cache: naming.CacheConfig{Inputs: []string{"utils/parable-scalars/permissions.yml"}}}
+	declared := naming.Naming{Cache: naming.CacheConfig{Inputs: []string{"vendor/scalars/permissions.yml"}}}
 
 	plain, err := ComputeInputHashes(services, repo, naming.Naming{})
 	require.NoError(t, err)
@@ -235,19 +235,19 @@ func TestComputeInputHashesFollowCacheInputs(t *testing.T) {
 }
 
 func TestDefaultRootPrecedence(t *testing.T) {
-	t.Setenv("PARABLE_BUILD_CACHE_DIR", "")
+	t.Setenv("SUPERSCHEMATIC_BUILD_CACHE_DIR", "")
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "xdg"))
 
 	xdg := DefaultRoot("")
-	assert.Equal(t, filepath.Join(os.Getenv("XDG_CACHE_HOME"), "parable", "schema-build", CacheFormat), xdg)
+	assert.Equal(t, filepath.Join(os.Getenv("XDG_CACHE_HOME"), "superschematic", "build", CacheFormat), xdg)
 
-	configured := DefaultRoot("~/psgen-cache")
+	configured := DefaultRoot("~/schema-cache")
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(home, "psgen-cache", CacheFormat), configured, "[cache] root wins over XDG and expands ~")
+	assert.Equal(t, filepath.Join(home, "schema-cache", CacheFormat), configured, "[cache] root wins over XDG and expands ~")
 
-	t.Setenv("PARABLE_BUILD_CACHE_DIR", filepath.Join(t.TempDir(), "env"))
-	assert.Equal(t, filepath.Join(os.Getenv("PARABLE_BUILD_CACHE_DIR"), CacheFormat), DefaultRoot("~/psgen-cache"), "the environment wins over [cache] root")
+	t.Setenv("SUPERSCHEMATIC_BUILD_CACHE_DIR", filepath.Join(t.TempDir(), "env"))
+	assert.Equal(t, filepath.Join(os.Getenv("SUPERSCHEMATIC_BUILD_CACHE_DIR"), CacheFormat), DefaultRoot("~/schema-cache"), "the environment wins over [cache] root")
 }
 
 func stringsOf(value string, count int) string {

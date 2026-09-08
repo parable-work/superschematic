@@ -8,7 +8,7 @@ import (
 )
 
 // Target languages accepted in the outputs block (the TargetLanguage enum in
-// @psgen/schema-config).
+// @superschematic/schema-config).
 const (
 	LangGo         = "go"
 	LangTypeScript = "typescript"
@@ -52,7 +52,7 @@ const (
 )
 
 // Outputs is the typed interpretation of SchemaConfig.Outputs (the
-// SchemaOutputs shape declared by @psgen/schema-config). The loader carries
+// SchemaOutputs shape declared by @superschematic/schema-config). The loader carries
 // the block as raw data; the generators own its meaning.
 type Outputs struct {
 	// Types holds per-language type-library switches.

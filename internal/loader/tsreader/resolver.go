@@ -59,7 +59,7 @@ type typeInfo struct {
 }
 
 // wrapperNames is the set of type-level wrapper aliases recognized from the
-// @psgen/* toolchain packages. Identity is checked by declaring package, not
+// @superschematic/* toolchain packages. Identity is checked by declaring package, not
 // import path, so re-exports and renamed imports still resolve.
 var wrapperNames = map[string]bool{
 	"Default": true, "PlatformDefault": true, "Nullable": true, "Validate": true, "Secret": true,
@@ -186,7 +186,7 @@ func (w *walker) resolveTypeReference(node *astNode) (*typeInfo, *SchemaError) {
 		return nil, errorAtNode(node, "type %q is declared outside the service and outside any named package", id.name)
 	}
 	if w.isAuthoring(id) {
-		return nil, errorAtNode(node, "type %q from %s is not usable as a schema field type", id.name, id.pkg)
+		return nil, errorAtNode(node, "type %q from %s is not usable as a schema field type", id.name, w.reg.Naming().Specifier(id.pkg))
 	}
 	// Cross-service reference: keep the field type as the imported symbol name
 	// and record the package separately. Imports carry the provenance; target

@@ -18,8 +18,8 @@ Generated at: 2026-01-02T03:04:05Z
 
 ```go
 import (
-	orm "github.com/parable-platform/platform-schemas/orm/fixture-db"
-	types "github.com/parable-platform/platform-schemas/types/go/fixture-db"
+	orm "example.com/schemas/orm/fixture-db"
+	types "example.com/schemas/types/go/fixture-db"
 )
 
 db, err := orm.Connect(ctx, connString)

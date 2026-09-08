@@ -1,5 +1,5 @@
-import { Identity } from "@psgen/scalar-lib";
-import { Secret } from "@psgen/schema";
+import { Identity } from "superscalar";
+import { Secret } from "@superschematic/schema";
 import {
   Authenticated,
   Encrypted,
@@ -17,8 +17,8 @@ import {
   timeout,
   uiHidden,
   virtual
-} from "@psgen/api";
-import { Tenant } from "@parable-platform/fixture-db";
+} from "@superschematic/api";
+import { Tenant } from "@schemas/fixture-db";
 
 // Customer-facing projection of the Tenant table.
 @source(Tenant)

@@ -33,7 +33,7 @@ import {
   validateTemporalDuration,
   validateTemporalMonth,
   validateTemporalQuarterYear,
-} from '@psgen/scalar-lib/scalars';
+} from 'superscalar/scalars';
 import type {
   ArtifactFileMetadata,
   FileMetadata,
@@ -41,17 +41,17 @@ import type {
   LogoImageMetadata,
   ParableSchemaDataType,
   ParableSchemaType,
-} from '@psgen/scalar-lib/scalars';
-import { normalizePemNewlines } from '@psgen/scalar-lib/pem';
-import type { ScalarValidationResult, ValidationError } from '@psgen/scalar-lib/validation';
-import { toScalarResult } from '@psgen/scalar-lib/validation';
+} from 'superscalar/scalars';
+import { normalizePemNewlines } from 'superscalar/pem';
+import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
+import { toScalarResult } from 'superscalar/validation';
 import type { Schema } from '../runtime/validation/types';
 import {
   getPermissionDescription,
   PermissionDescriptions,
   PermissionEnum,
   type Permission,
-} from '@psgen/scalar-lib/permissions';
+} from 'superscalar/permissions';
 
 export {
   getPermissionDescription,
@@ -59,9 +59,9 @@ export {
   PermissionEnum,
   type Permission,
 };
-export { normalizePemNewlines } from '@psgen/scalar-lib/pem';
+export { normalizePemNewlines } from 'superscalar/pem';
 
-// The object-scalar metadata shapes are owned by @psgen/scalar-lib (its
+// The object-scalar metadata shapes are owned by superscalar (its
 // generated module types Asset.File, Asset.Image, Asset.LogoImage,
 // Artifact.File, Parable.Schema and Parable.SchemaData with them); they are
 // re-exported here so the validators facade keeps its public surface.
@@ -72,7 +72,7 @@ export type {
   LogoImageMetadata,
   ParableSchemaDataType,
   ParableSchemaType,
-} from '@psgen/scalar-lib/scalars';
+} from 'superscalar/scalars';
 
 export interface LogoImageConstraints {
   maxWidth?: number;

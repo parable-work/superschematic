@@ -6,21 +6,21 @@
  * Auto-generated type-safe interfaces and validation
  * for the fixture-db schema.
  *
- * For type-only imports (zero runtime): use '@parable-platform/fixture-db-types/types'
- * For granular validators: use '@parable-platform/fixture-db-types/validators/scalars/email' etc.
+ * For type-only imports (zero runtime): use '@schemas/fixture-db-types/types'
+ * For granular validators: use '@schemas/fixture-db-types/validators/scalars/email' etc.
  */
 
 export type {
   ValidationErrors,
   ValidationResult,
-} from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
 export {
   newValidationErrors,
   addFieldError,
   addNestedErrors,
   setFieldErrors,
   mergeValidationErrors,
-} from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
 
 // Re-export types (pure, no runtime)
 export * from './types';

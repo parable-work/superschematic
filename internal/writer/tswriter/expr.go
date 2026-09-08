@@ -71,7 +71,7 @@ func (e *emitter) renderScalar(name, owner string) string {
 }
 
 // serviceNameForPackage derives the schema service name from a package name:
-// the scope prefix is stripped ("@parable-platform/web-db" -> "web-db").
+// the scope prefix is stripped ("@schemas/web-db" -> "web-db").
 func serviceNameForPackage(pkg string) string {
 	if i := strings.LastIndex(pkg, "/"); i >= 0 {
 		return pkg[i+1:]

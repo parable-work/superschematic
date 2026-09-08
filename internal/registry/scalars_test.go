@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	scalars "github.com/parable-work/superscalar/go"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 )
 
 func TestScalarsFallsBackToCoreScalars(t *testing.T) {
-	reg := New(coreNaming())
+	reg := New(naming.Default())
 
 	if got, want := reg.Scalars().Names(), CoreScalars().Names(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Scalars() without RegisterScalars = %d names, want the core's %d", len(got), len(want))
@@ -20,7 +21,7 @@ func TestScalarsFallsBackToCoreScalars(t *testing.T) {
 }
 
 func TestRegisterScalarsInstallsOneCatalogPerRegistry(t *testing.T) {
-	reg := New(coreNaming())
+	reg := New(naming.Default())
 	row := scalars.ScalarMetadataByCanonical["Identity.UUID"]
 	first := ScalarCatalogOf(map[string]*scalars.ScalarMetadata{"Identity.UUID": row})
 
@@ -44,7 +45,7 @@ func TestRegisterScalarsInstallsOneCatalogPerRegistry(t *testing.T) {
 }
 
 func TestRegisterScalarsRejectsMissingOwnerAndNilCatalog(t *testing.T) {
-	reg := New(coreNaming())
+	reg := New(naming.Default())
 	if err := reg.RegisterScalars("", CoreScalars()); err == nil || !strings.Contains(err.Error(), "no owner") {
 		t.Fatalf("empty owner: err = %v", err)
 	}
@@ -57,7 +58,7 @@ func TestRegisterScalarsRejectsMissingOwnerAndNilCatalog(t *testing.T) {
 }
 
 func TestRegisterScalarsAfterFinalizeIsAnError(t *testing.T) {
-	reg := New(coreNaming())
+	reg := New(naming.Default())
 	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "transform", "ontology"} {
 		if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 			t.Fatal(err)

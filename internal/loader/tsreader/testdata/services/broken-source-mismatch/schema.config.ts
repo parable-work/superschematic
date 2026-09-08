@@ -1,4 +1,4 @@
-import { defineConfig, SchemaKind, service, TargetLanguage } from "@psgen/schema-config";
+import { defineConfig, SchemaKind, service, TargetLanguage } from "@superschematic/schema-config";
 
 export default defineConfig({
   name: "broken-source-mismatch",

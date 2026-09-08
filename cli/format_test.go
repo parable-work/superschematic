@@ -37,7 +37,7 @@ func TestFormatCommand_YAMLToTSStdout(t *testing.T) {
 		filepath.Join(loaderTestdata, "fixture-db-yaml/src/tenant.schema.yaml"))
 
 	require.NoError(t, err)
-	assert.Contains(t, out, `import { Generic, Identity, Temporal } from "@psgen/scalar-lib";`)
+	assert.Contains(t, out, `import { Generic, Identity, Temporal } from "superscalar";`)
 	assert.Contains(t, out, "export abstract class Tenant extends Auditable {")
 }
 

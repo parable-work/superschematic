@@ -8,7 +8,7 @@ import {
   addFieldError,
   newValidationErrors,
   type ValidationErrors,
-} from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
 
 export function loadYamlObject(
   source: string | Uint8Array

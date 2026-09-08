@@ -1,4 +1,4 @@
-import { defineConfig, SchemaKind } from "@psgen/schema-config";
+import { defineConfig, SchemaKind } from "@superschematic/schema-config";
 
 export default defineConfig({
   name: "broken-type-error",

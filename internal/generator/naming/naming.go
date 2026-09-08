@@ -1,7 +1,8 @@
 // Package naming holds every package, module and crate name the generators
 // stamp into their output. The values come from superschematic.toml at the
-// schemas root; a missing file yields Default(), which reproduces the names
-// psgen has always emitted, so dist/ does not change when the file is absent.
+// schemas root; a missing file yields Default(), the superschematic and
+// superscalar coordinates, so a tree with no file builds against the
+// published modules.
 //
 // Structural suffixes (-types, -sdk, -api, the types/go and sdk/go subpaths)
 // are not configurable: they describe the artifact kind and mirror the dist/
@@ -11,6 +12,11 @@
 // The same file carries [extension.<name>] tables for registered extensions.
 // The loader keeps them undecoded (Naming.Extensions, ExtensionConfig) and
 // rejects any other unknown top-level key.
+//
+// A downstream distribution that keeps older package names (a fork, or an
+// extension that re-exports the authoring packages under its own scope)
+// declares every name it needs in its own superschematic.toml; nothing in
+// the generators carries a literal.
 package naming
 
 import (
@@ -19,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -75,13 +82,22 @@ type Naming struct {
 	// the scalar package keeps it in scope.
 	AuthoringPackages []string `toml:"authoring_packages"`
 
+	// PackageAliases maps an import specifier a schema may write to the
+	// authoring package that declares the symbols it re-exports, for a
+	// distribution that publishes the core packages under its own names
+	// (["@acme/db"] = "@superschematic/db"). The loader resolves symbols to
+	// their declaring package, so the map is what lets the per-kind import
+	// rules, the writer and the diagnostics speak the author's spelling.
+	// Absent, every specifier is its own declaring package.
+	PackageAliases map[string]string `toml:"package_aliases"`
+
 	// AuthProvider names the registered auth provider the api generator
-	// renders with (docs/extension-model.md section 3.7). "parable" is
-	// today's emission; the generic core provider is "session".
+	// renders with. The core registers "session"; an extension that
+	// registers another provider names it here.
 	AuthProvider string `toml:"auth_provider"`
 
 	// Extensions holds every [extension.<name>] table verbatim. Nothing in
-	// psgen reads them; Registry.ExtensionConfig(name) hands each table to
+	// the core reads them; Registry.ExtensionConfig(name) hands each table to
 	// the extension that owns it, which validates its own keys. Nil when the
 	// file declares none.
 	Extensions map[string]map[string]any `toml:"extension"`
@@ -120,8 +136,9 @@ func (n Naming) ScalarLibPath(repoRoot string) string {
 // extra files.
 type CacheConfig struct {
 	// Root is the build cache directory ("~" expands). Empty means the XDG
-	// cache directory. The PARABLE_BUILD_CACHE_DIR environment variable and
-	// the --cache-root flag override it, in that order of precedence.
+	// cache directory. The SUPERSCHEMATIC_BUILD_CACHE_DIR environment
+	// variable and the --cache-root flag override it, in that order of
+	// precedence.
 	Root string `toml:"root"`
 
 	// Inputs are repo-relative files hashed into every build-all cache key
@@ -138,40 +155,41 @@ func (n Naming) ExtensionConfig(name string) (map[string]any, bool) {
 	return cfg, ok
 }
 
-// Default returns the names psgen emitted before naming became configurable.
-// This is the defaults table: the only place these literals appear.
+// Default returns the superschematic defaults: the published module, package
+// and crate coordinates of this repository and of superscalar. This is the
+// defaults table: the only place these literals appear.
 func Default() Naming {
 	return Naming{
-		GoModuleRoot:            "github.com/parable-platform/platform-schemas",
-		NpmScope:                "@parable-platform",
-		PythonTypesModulePrefix: "parable_types_",
-		PythonSDKModulePrefix:   "parable_",
+		GoModuleRoot:            "example.com/schemas",
+		NpmScope:                "@schemas",
+		PythonTypesModulePrefix: "schemas_types_",
+		PythonSDKModulePrefix:   "schemas_",
 		PythonSDKModuleSuffix:   "_sdk",
-		RustCratePrefix:         "parable-",
+		RustCratePrefix:         "schemas-",
 		ScalarGoModule:          "github.com/parable-work/superscalar/go",
-		ScalarNpmPackage:        "@psgen/scalar-lib",
-		ScalarPyPIDist:          "parable-scalar-lib",
-		ScalarPythonModule:      "parable_scalars",
-		ScalarRustCrate:         "parable-scalars-core",
+		ScalarNpmPackage:        "superscalar",
+		ScalarPyPIDist:          "superscalar",
+		ScalarPythonModule:      "superscalar",
+		ScalarRustCrate:         "superscalar",
 		SchemaIRGoModule:        "github.com/parable-work/superschematic/ir",
 		SchemaRuntimeGoModule:   "github.com/parable-work/superschematic/runtime/schema/go",
 		HTTPRuntimeGoModule:     "github.com/parable-work/superschematic/runtime/http/go",
-		HTTPRuntimeRustCrate:    "psgen-http-runtime",
+		HTTPRuntimeRustCrate:    "superschematic-http-runtime",
 		PtrGoModule:             "github.com/parable-work/superschematic/runtime/schema/go/ptr",
-		AuthProvider:            "parable",
+		AuthProvider:            "session",
 		AuthoringPackages: []string{
-			"@psgen/api",
-			"@psgen/db",
-			"@psgen/deploy",
-			"@psgen/scalar-lib",
-			"@psgen/schema",
-			"@psgen/schema-config",
+			"@superschematic/api",
+			"@superschematic/db",
+			"@superschematic/deploy",
+			"@superschematic/schema",
+			"@superschematic/schema-config",
+			"superscalar",
 		},
 	}
 }
 
 // OrDefault returns n with every empty field filled from Default(). Callers
-// that receive a zero Naming (tests, older call sites) get today's names.
+// that receive a zero Naming (tests, older call sites) get the defaults.
 func (n Naming) OrDefault() Naming {
 	d := Default()
 	fill := func(dst *string, def string) {
@@ -198,6 +216,12 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.AuthProvider, d.AuthProvider)
 	if len(n.AuthoringPackages) == 0 {
 		n.AuthoringPackages = append([]string(nil), d.AuthoringPackages...)
+		// The default list names the default scalar package; a fork that
+		// renames the scalar package replaces that entry rather than
+		// keeping a package it does not ship.
+		if n.ScalarNpmPackage != d.ScalarNpmPackage {
+			n.AuthoringPackages = slices.DeleteFunc(n.AuthoringPackages, func(pkg string) bool { return pkg == d.ScalarNpmPackage })
+		}
 	}
 	if !slices.Contains(n.AuthoringPackages, n.ScalarNpmPackage) {
 		n.AuthoringPackages = append(n.AuthoringPackages, n.ScalarNpmPackage)
@@ -205,18 +229,25 @@ func (n Naming) OrDefault() Naming {
 	return n
 }
 
-// AuthoringScope is the npm scope shared by every authoring package
-// ("@psgen" for the defaults), used to word the decorator-origin diagnostic.
-// It is "" when the packages share no scope.
+// AuthoringScope is the npm scope shared by every authoring package other
+// than the scalar package ("@superschematic" for the defaults), used to word
+// the decorator-origin diagnostic. The scalar package is exempt because it is
+// a separate project with its own name; AuthoringScope is "" when the
+// remaining packages share no scope.
 func (n Naming) AuthoringScope() string {
 	scope := ""
-	for i, pkg := range n.AuthoringPackages {
+	seen := false
+	for _, pkg := range n.AuthoringPackages {
+		if pkg == n.ScalarNpmPackage {
+			continue
+		}
 		slash := strings.Index(pkg, "/")
 		if slash < 0 {
 			return ""
 		}
-		if i == 0 {
+		if !seen {
 			scope = pkg[:slash]
+			seen = true
 			continue
 		}
 		if pkg[:slash] != scope {
@@ -224,6 +255,34 @@ func (n Naming) AuthoringScope() string {
 		}
 	}
 	return scope
+}
+
+// DeclaringPackage returns the authoring package the import specifier
+// resolves to: its PackageAliases target when one is declared, else the
+// specifier itself.
+func (n Naming) DeclaringPackage(specifier string) string {
+	if declaring, ok := n.PackageAliases[specifier]; ok {
+		return declaring
+	}
+	return specifier
+}
+
+// Specifier returns the import specifier a schema author writes for a
+// declaring package: the alphabetically first alias that maps to it, else
+// the declaring package itself. The writer and the diagnostics use it so a
+// distribution's authors read their own package names.
+func (n Naming) Specifier(declaring string) string {
+	keys := make([]string, 0, len(n.PackageAliases))
+	for specifier, target := range n.PackageAliases {
+		if target == declaring {
+			keys = append(keys, specifier)
+		}
+	}
+	if len(keys) == 0 {
+		return declaring
+	}
+	sort.Strings(keys)
+	return keys[0]
 }
 
 // GoTypesModule returns the module path of a schema's generated Go types.
@@ -320,7 +379,7 @@ func Load(schemasRoot string) (Naming, error) {
 
 // Discover walks up from start looking for superschematic.toml and loads the
 // first one found. Commands that take a file rather than the schemas root
-// (psgen format) use it; no file within the walk returns Default().
+// (format) use it; no file within the walk returns Default().
 func Discover(start string) (Naming, error) {
 	dir, err := filepath.Abs(start)
 	if err != nil {
@@ -383,8 +442,8 @@ var (
 )
 
 // Active returns the process-wide naming, the fallback for the two packages
-// with no options path: the schema writer (psgen format) and schemadeps
-// (psgen pin, the depfile build-all emits). Everything reached from
+// with no options path: the schema writer (format) and schemadeps (the
+// depfile build-all emits). Everything reached from
 // generator.Run reads Options.Naming and the loader reads
 // loader.WithNaming; new code should take the value as a parameter rather
 // than read it here.

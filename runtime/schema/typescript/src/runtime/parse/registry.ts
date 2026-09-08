@@ -4,10 +4,10 @@
  * own registry in runtime/validation/registry.ts.
  */
 
-import { backend } from '@psgen/scalar-lib/backend';
-import * as generatedScalars from '@psgen/scalar-lib/scalars';
-import { SCALAR_METADATA, scalarIdByCanonical } from '@psgen/scalar-lib/scalars';
-import type { ValidationError } from '@psgen/scalar-lib/validation';
+import { backend } from 'superscalar/backend';
+import * as generatedScalars from 'superscalar/scalars';
+import { SCALAR_METADATA, scalarIdByCanonical } from 'superscalar/scalars';
+import type { ValidationError } from 'superscalar/validation';
 import { BUILTIN_SCALARS } from '../builtin-scalars.generated';
 import type { Schema } from '../validation/types';
 

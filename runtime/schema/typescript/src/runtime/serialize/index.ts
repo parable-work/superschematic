@@ -19,7 +19,7 @@ import {
   hasErrors,
   newValidationErrors,
   type ValidationErrors,
-} from '@psgen/scalar-lib/validation';
+} from 'superscalar/validation';
 import type { FieldDef, Schema, SchemaInput, TypeDef, TypeRef } from '../validation/types';
 import { resolveSchema } from '../validation/validate';
 import { maskInput, maskType } from '../mask';

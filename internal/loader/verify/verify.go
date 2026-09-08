@@ -65,8 +65,8 @@ func (d *Diagnostic) Error() string {
 // collect sites so kind/import violations carry the import statement's
 // source location; the data formats supply file-level locations.
 type ImportSite struct {
-	// Package is the imported package name (e.g. "@psgen/db",
-	// "@parable-platform/web-db").
+	// Package is the imported package name (e.g. "@superschematic/db",
+	// "@schemas/web-db").
 	Package string
 
 	// File is the source file containing the import.

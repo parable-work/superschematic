@@ -1,9 +1,9 @@
-module github.com/parable-platform/platform-schemas/orm/fixture-db
+module example.com/schemas/orm/fixture-db
 
 go 1.26.4
 
 require (
-	github.com/parable-platform/platform-schemas/types/go/fixture-db v0.0.0-00010101000000-000000000000
+	example.com/schemas/types/go/fixture-db v0.0.0-00010101000000-000000000000
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/parable-work/superscalar/go v1.0.0
 	github.com/parable-work/superschematic/ir v0.0.0-00010101000000-000000000000
@@ -17,4 +17,4 @@ require (
 	golang.org/x/text v0.29.0 // indirect
 )
 
-replace github.com/parable-platform/platform-schemas/types/go/fixture-db => ../../types/go/fixture-db
+replace example.com/schemas/types/go/fixture-db => ../../types/go/fixture-db

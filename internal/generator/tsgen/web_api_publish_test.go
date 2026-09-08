@@ -70,12 +70,12 @@ func TestSourceLineageDoesNotPublishWebDBTypes(t *testing.T) {
 				t.Fatalf("PackageName = %q, want %q", output.PackageName, wantPkg)
 			}
 			for _, dep := range output.PackageDependencies {
-				if dep.Name == "@parable-platform/web-db-types" {
+				if dep.Name == "@schemas/web-db-types" {
 					t.Fatalf("PackageDependencies must omit web-db-types, got %#v", output.PackageDependencies)
 				}
 			}
 			for _, imp := range output.ImportedTypes {
-				if imp.ImportPackage == "@parable-platform/web-db-types" {
+				if imp.ImportPackage == "@schemas/web-db-types" {
 					t.Fatalf("ImportedTypes must omit web-db-types, got %#v", output.ImportedTypes)
 				}
 			}
@@ -99,8 +99,8 @@ func TestSourceLineageDoesNotPublishWebDBTypes(t *testing.T) {
 			if pkg.Name != wantPkg {
 				t.Fatalf("package.json name = %q, want %q", pkg.Name, wantPkg)
 			}
-			if _, ok := pkg.Dependencies["@parable-platform/web-db-types"]; ok {
-				t.Fatalf("package.json must omit @parable-platform/web-db-types, got %#v", pkg.Dependencies)
+			if _, ok := pkg.Dependencies["@schemas/web-db-types"]; ok {
+				t.Fatalf("package.json must omit @schemas/web-db-types, got %#v", pkg.Dependencies)
 			}
 
 			indexTS, err := os.ReadFile(filepath.Join(outDir, "index.ts"))

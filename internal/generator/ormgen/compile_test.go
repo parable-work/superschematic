@@ -45,7 +45,7 @@ func TestGeneratedORMCompiles(t *testing.T) {
 	extendFixtureForCompileCoverage(schema)
 
 	fixedClock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
-	typesModule := "github.com/parable-platform/platform-schemas/types/go/fixture-db"
+	typesModule := "example.com/schemas/types/go/fixture-db"
 
 	tempRoot := t.TempDir()
 	typesDir := filepath.Join(tempRoot, "types", "go", "fixture-db")
@@ -68,7 +68,7 @@ func TestGeneratedORMCompiles(t *testing.T) {
 
 	ormOutput, err := Generate(schema, Options{
 		SchemaName:  "fixture-db",
-		ModulePath:  "github.com/parable-platform/platform-schemas/orm/fixture-db",
+		ModulePath:  "example.com/schemas/orm/fixture-db",
 		TypesModule: typesModule,
 		Clock:       fixedClock,
 	})
@@ -118,7 +118,7 @@ func TestGeneratedORMCompiles(t *testing.T) {
 import (
 	"testing"
 
-	types "github.com/parable-platform/platform-schemas/types/go/fixture-db"
+	types "example.com/schemas/types/go/fixture-db"
 )
 
 func TestDecodeTenantHistoryDataSnakeCaseRoundTrip(t *testing.T) {
@@ -170,7 +170,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	types "github.com/parable-platform/platform-schemas/types/go/fixture-db"
+	types "example.com/schemas/types/go/fixture-db"
 )
 
 const strategyADDLSQL = ` + "`" + string(createSQL) + "`" + `

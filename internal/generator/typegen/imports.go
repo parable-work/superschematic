@@ -40,7 +40,7 @@ func (r *resolvedImports) moduleDependencies(selfModulePath string) []string {
 }
 
 // DependencyServiceName extracts the service name from a schema import
-// package (e.g. "@parable-platform/web-db" -> "web-db").
+// package (e.g. "@schemas/web-db" -> "web-db").
 func DependencyServiceName(pkg string) string {
 	if idx := strings.LastIndex(pkg, "/"); idx >= 0 {
 		return pkg[idx+1:]

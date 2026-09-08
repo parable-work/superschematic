@@ -132,7 +132,7 @@ type Import struct {
 	// From is retained for legacy runtime ParableSchema payloads.
 	From string `json:"from,omitempty" yaml:"from,omitempty"`
 
-	// Package is the resolved package name (e.g., "@parable-platform/web-db").
+	// Package is the resolved package name (e.g., "@schemas/web-db").
 	Package string `json:"package" yaml:"package"`
 
 	// Types lists the imported symbol names. Never empty, never "*".

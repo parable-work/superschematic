@@ -39,7 +39,7 @@ type Document struct {
 // RunDocument executes one sidecar document module through the document
 // harness and returns its default export. file is the service-relative
 // path. The harness runs with the service directory as its working
-// directory so bun picks up the service tsconfig (@psgen/* path mappings).
+// directory so bun picks up the service tsconfig (@superschematic/* path mappings).
 func RunDocument(servicePath, file string, opts ...Option) (result *Document, err error) {
 	var o options
 	for _, opt := range opts {

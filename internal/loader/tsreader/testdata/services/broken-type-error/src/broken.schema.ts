@@ -1,4 +1,4 @@
-import { Identity } from "@psgen/scalar-lib";
+import { Identity } from "superscalar";
 
 export abstract class Broken {
   id: Identity.DoesNotExist;

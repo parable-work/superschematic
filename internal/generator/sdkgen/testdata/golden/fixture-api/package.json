@@ -1,5 +1,5 @@
 {
-  "name": "@parable-platform/fixture-api-sdk",
+  "name": "@schemas/fixture-api-sdk",
   "version": "1.0.0",
   "description": "TypeScript SDK for fixture-api API",
   "type": "module",
@@ -36,10 +36,10 @@
   "private": true,
   "dependencies": {},
   "peerDependencies": {
-    "@parable-platform/fixture-api-types": "*"
+    "@schemas/fixture-api-types": "*"
   },
   "peerDependenciesMeta": {
-    "@parable-platform/fixture-api-types": {
+    "@schemas/fixture-api-types": {
       "optional": true
     }
   },

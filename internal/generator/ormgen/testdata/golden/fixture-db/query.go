@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	types "github.com/parable-platform/platform-schemas/types/go/fixture-db"
+	types "example.com/schemas/types/go/fixture-db"
 )
 
 // Filter operation types for different scalar types

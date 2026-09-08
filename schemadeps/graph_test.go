@@ -9,15 +9,15 @@ import (
 
 func TestCollectFromDist_TypeScriptOmitsWebDBFromAPI(t *testing.T) {
 	dist := t.TempDir()
-	writeTSPackage(t, dist, "types/typescript/web-api", "@parable-platform/web-api-types", map[string]string{
-		"@parable-platform/enums-types": "file:../enums",
-		"@psgen/scalar-lib":             "file:../../../../../utils/parable-scalars/typescript",
+	writeTSPackage(t, dist, "types/typescript/web-api", "@schemas/web-api-types", map[string]string{
+		"@schemas/enums-types": "file:../enums",
+		"superscalar":          "file:../../../../../third_party/superscalar/bindings/typescript",
 	})
-	writeTSPackage(t, dist, "types/typescript/enums", "@parable-platform/enums-types", nil)
-	writeTSPackage(t, dist, "types/typescript/web-db", "@parable-platform/web-db-types", map[string]string{
-		"@parable-platform/enums-types": "file:../enums",
+	writeTSPackage(t, dist, "types/typescript/enums", "@schemas/enums-types", nil)
+	writeTSPackage(t, dist, "types/typescript/web-db", "@schemas/web-db-types", map[string]string{
+		"@schemas/enums-types": "file:../enums",
 	})
-	writeTSPackage(t, dist, "sdk/typescript/web-api", "@parable-platform/web-api-sdk", map[string]string{
+	writeTSPackage(t, dist, "sdk/typescript/web-api", "@schemas/web-api-sdk", map[string]string{
 		"axios": "1.0.0",
 	})
 
@@ -52,9 +52,9 @@ func TestClosureAndWrite(t *testing.T) {
 	g := &Graph{
 		Version: 1,
 		Packages: []Package{
-			{ID: "enums-types", Language: "typescript", Kind: "types", Name: "@parable-platform/enums-types", Path: "types/typescript/enums"},
-			{ID: "web-api-types", Language: "typescript", Kind: "types", Name: "@parable-platform/web-api-types", Path: "types/typescript/web-api", Deps: []string{"enums-types"}},
-			{ID: "web-api-sdk", Language: "typescript", Kind: "sdk", Name: "@parable-platform/web-api-sdk", Path: "sdk/typescript/web-api", Deps: []string{"web-api-types"}},
+			{ID: "enums-types", Language: "typescript", Kind: "types", Name: "@schemas/enums-types", Path: "types/typescript/enums"},
+			{ID: "web-api-types", Language: "typescript", Kind: "types", Name: "@schemas/web-api-types", Path: "types/typescript/web-api", Deps: []string{"enums-types"}},
+			{ID: "web-api-sdk", Language: "typescript", Kind: "sdk", Name: "@schemas/web-api-sdk", Path: "sdk/typescript/web-api", Deps: []string{"web-api-types"}},
 		},
 	}
 	ids, err := g.Closure("typescript", []string{"web-api-sdk"})

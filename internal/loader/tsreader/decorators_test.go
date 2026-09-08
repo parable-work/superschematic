@@ -8,7 +8,7 @@ import (
 )
 
 // decoratorTestService lays out a temp TypeScript service whose tsconfig maps
-// the @psgen/* authoring packages to their sources. kind is the config kind;
+// the @superschematic/* authoring packages to their sources. kind is the config kind;
 // files are paths relative to the service directory.
 func decoratorTestService(t *testing.T, kind string, files map[string]string) string {
 	t.Helper()
@@ -30,10 +30,10 @@ func decoratorTestService(t *testing.T, kind string, files map[string]string) st
     "strict": true, "strictPropertyInitialization": false, "experimentalDecorators": true,
     "emitDecoratorMetadata": false, "skipLibCheck": true, "noEmit": true, "baseUrl": ".",
     "paths": {
-      "@psgen/api": ["` + pkg("api") + `"],
-      "@psgen/db": ["` + pkg("db") + `"],
-      "@psgen/schema": ["` + pkg("schema") + `"],
-      "@psgen/scalar-lib": ["` + scalars + `"]
+      "@superschematic/api": ["` + pkg("api") + `"],
+      "@superschematic/db": ["` + pkg("db") + `"],
+      "@superschematic/schema": ["` + pkg("schema") + `"],
+      "superscalar": ["` + scalars + `"]
     }
   },
   "include": ["src/**/*.ts"]
@@ -68,7 +68,7 @@ func TestDecoratorDiagnosticsArePinned(t *testing.T) {
 		{
 			name: "decorator outside the toolchain",
 			kind: "DB",
-			source: `import { key } from "@psgen/db";
+			source: `import { key } from "@superschematic/db";
 function local(): PropertyDecorator { return () => {}; }
 export abstract class Tenant {
   @key
@@ -82,7 +82,7 @@ export abstract class Tenant {
 		{
 			name: "field decorator on a type",
 			kind: "DB",
-			source: `import { key, unique } from "@psgen/db";
+			source: `import { key, unique } from "@superschematic/db";
 // @ts-expect-error field decorator on a class
 @unique
 export abstract class Tenant {
@@ -95,7 +95,7 @@ export abstract class Tenant {
 		{
 			name: "type decorator on a field",
 			kind: "DB",
-			source: `import { key, index } from "@psgen/db";
+			source: `import { key, index } from "@superschematic/db";
 export abstract class Tenant {
   @key
   // @ts-expect-error type decorator on a field
@@ -108,8 +108,8 @@ export abstract class Tenant {
 		{
 			name: "field decorator on an operation set and a type decorator on an operation",
 			kind: "API",
-			source: `import { HttpMethod, rest, uiHidden } from "@psgen/api";
-import { index } from "@psgen/db";
+			source: `import { HttpMethod, rest, uiHidden } from "@superschematic/api";
+import { index } from "@superschematic/db";
 // @ts-expect-error field decorator on a class
 @uiHidden
 export class Queries {
@@ -129,8 +129,8 @@ export class Queries {
 		{
 			name: "source outside API and General",
 			kind: "DB",
-			source: `import { key } from "@psgen/db";
-import { source } from "@psgen/schema";
+			source: `import { key } from "@superschematic/db";
+import { source } from "@superschematic/schema";
 export abstract class Tenant {
   @key
   id: string;
@@ -156,7 +156,7 @@ export abstract class TenantView {
 		{
 			name: "index argument errors point at the argument",
 			kind: "DB",
-			source: `import { key, index } from "@psgen/db";
+			source: `import { key, index } from "@superschematic/db";
 @index(["id"], { name: "Not Snake" })
 // @ts-expect-error unique is not a boolean
 @index(["id"], { unique: "yes" })
@@ -176,9 +176,9 @@ export abstract class Tenant {
 		{
 			name: "field argument errors",
 			kind: "DB",
-			source: `import { key } from "@psgen/db";
-import { temporalFormat } from "@psgen/schema";
-import { Temporal } from "@psgen/scalar-lib";
+			source: `import { key } from "@superschematic/db";
+import { temporalFormat } from "@superschematic/schema";
+import { Temporal } from "superscalar";
 export abstract class A {
   @key
   id: string;
@@ -194,7 +194,7 @@ export abstract class A {
 		{
 			name: "operation argument errors",
 			kind: "API",
-			source: `import { HttpMethod, hmacVerified, rateLimit, requirePermission, rest } from "@psgen/api";
+			source: `import { HttpMethod, hmacVerified, rateLimit, requirePermission, rest } from "@superschematic/api";
 // @ts-expect-error requestsPerMinute is not a number
 @rateLimit({ requestsPerMinute: "many" })
 export class Queries {
@@ -225,7 +225,7 @@ export class Queries {
 		{
 			name: "versioned config errors survive a failed field",
 			kind: "DB",
-			source: `import { key, versioned } from "@psgen/db";
+			source: `import { key, versioned } from "@superschematic/db";
 // @ts-expect-error retentionDays is not a number
 @versioned({ retentionDays: "x" })
 export abstract class Tenant {
@@ -243,7 +243,7 @@ export abstract class Tenant {
 		{
 			name: "middleware errors keep the operation",
 			kind: "API",
-			source: `import { rateLimit } from "@psgen/api";
+			source: `import { rateLimit } from "@superschematic/api";
 export class Queries {
   // @ts-expect-error requestsPerMinute is not a number
   @rateLimit({ requestsPerMinute: "many" })

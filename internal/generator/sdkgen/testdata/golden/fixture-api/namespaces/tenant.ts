@@ -7,13 +7,13 @@ import type {
   CreateTenantInput,
   TenantView,
   ValidationResult,
-} from '@parable-platform/fixture-api-types';
+} from '@schemas/fixture-api-types';
 import {
   newValidationErrors,
   parseTenantViewFromJSON,
   setFieldErrors,
   validateCreateTenantInput,
-} from '@parable-platform/fixture-api-types';
+} from '@schemas/fixture-api-types';
 
 /**
  * TenantNamespace - API methods for tenant
