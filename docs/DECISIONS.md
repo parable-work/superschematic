@@ -130,3 +130,43 @@ under `Naming.MetaSchemaURLPrefix` (default `superschematic://`), the
 TypeScript runtime's `writeSchemaJson` takes the `$schema` URL as an option
 with the same default, and generated readmes and package manifests read the
 schema language name and package author from `Naming`.
+
+## D8. What a downstream naming file can and cannot reproduce
+
+Recorded by the R15 review of the bootstrap import. A distribution that
+consumed the source tree's generator wants its generated output to stay
+byte-identical after it switches to this core plus its own extension. The
+review rendered three DB/General services from that tree and the API fixture
+with both binaries under one extended naming file, normalized the header
+timestamps, and diffed. Every difference falls into one of three buckets.
+
+Bucket (a): reproduced by the naming file. Bucket (b): reproduced after a
+code change made during the review. Bucket (c): unconditional; the consumer
+accepts the change and updates its readers.
+
+| # | Change | Bucket | Key or reason |
+|---|--------|--------|---------------|
+| 1 | Generated-header tool name | (c) | A literal in 38 templates and 61 generator files; `cli.Config.Name` only names the binary in usage text. The header says which program wrote the file, and that is this one. Threading a display name through every template so a fork can sign its output with another name is config in the wrong place. |
+| 2 | `x-psgen` -> `x-superschematic` in `values-schema.json` | (c) | A JSON struct tag (`envgen/values_schema.go`); the vendor-extension key names the tool that owns the schema. Readers of the old key update. |
+| 3 | Legacy alias blocks removed (`type UUID = scalars.UUID` and the Go `scalars.go` alias table; TS `Permission`) | (c) | The blocks re-exported one scalar library's whole symbol table under generated package names. The generated code never used them; downstream callers that wrote `dbtypes.UUID` migrate to the scalar package directly. A `[legacy_aliases]` table would keep a per-distribution list of symbols alive in the core. |
+| 4 | `isTenantScoped` -> `isScoped` (tools index, MCP binding), Rust SDK `tenant_scoped` -> `with_header`, `IsScopedEndpoint` in templates | (c) | The identifiers are the core's own vocabulary for a hoisted path parameter; tenancy is what the extraction removed. The emitted scope parameter name itself (`tenantId`) still comes from the auth provider, so the SDK method signatures are unchanged when the provider sets it. |
+| 5 | Python runtime import, Rust http runtime crate | (a) | `http_runtime_rust_crate` plus `[paths] http_runtime_rust` render the crate name and `use` ident; the Python schema runtime is never imported from generated packages, so its rename does not reach dist. |
+| 6 | Meta-schema `$id` / `$schema` URL | (a) | `meta_schema_url_prefix`. The ids appear only in the tool's own JSON meta-schemas, not in generated service output. |
+| 7 | Package author, readme text, schema language | (a) for author and the Python readmes (`package_author`, `schema_language`); (c) for the Go types readme | The Go types readme frames the value as "the {language} schema" while the Python readmes frame it as "{language} definitions"; the source tree wrote the noun lowercase in one ("X schema") and as part of the proper name in the other ("X Schema definitions"), and one key cannot reproduce both casings. Two keys to preserve a casing inconsistency is the wrong tool. |
+| 8 | Scalar symbols from the registry | (a) | Symbols come from the assembled `ScalarDef.Symbol`, so an extension that registers its scalars renders the same identifiers. Rendering confirmed identical for every core scalar; the distribution-specific scalars need the extension present. |
+
+Prose scrubbed from templates is also unconditional and lands in generated
+comments and readmes: `scalar-lib` -> `the scalar library`, ticket and
+decision-record ids removed from `create.tmpl`, `response.tmpl`,
+`routes.tmpl`, `client.tmpl` and `runtime.tmpl`, `A tenant with this name` ->
+`An account with this name` in `errors.tmpl`, the `PayloadDecryptor` and
+`utils.tmpl` chain comments, and "local package ... monorepo" -> "workspace
+package" in the SDK readme. The `scripts/scrub-check.sh` gate is what keeps
+those out; the consumer regenerates once and reviews the comment diff.
+
+Key names the review added to the source tree's naming file to reach this
+result: `schema_language`, `package_author`, `meta_schema_url_prefix`,
+`[paths] scalar_go / scalar_typescript / scalar_rust / schema_ir /
+schema_runtime_go / http_runtime_go / http_runtime_rust / ptr`, and a
+`[package_aliases]` table mapping the old authoring specifiers onto
+`@superschematic/*`. `paths.scalar_lib` no longer exists.
