@@ -70,6 +70,9 @@ func GetRoles(ctx context.Context) []runtimesession.Role {
 
 {{ define "middlewareImports" }}
 	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
+{{- if or .Auth.HasSessionStore .Auth.HasPrincipalStore }}
+	scalars "{{ $.Naming.ScalarGoModule }}"
+{{- end }}
 {{- end }}
 
 {{ define "middlewareAliases" }}
@@ -118,8 +121,14 @@ type ormSessionStore struct {
 }
 
 func (s *ormSessionStore) FindByJTI(ctx context.Context, jti string) (runtimesession.Record, error) {
+	// The filter takes the scalar UUID type, not its string form; a string
+	// that is not a UUID cannot name a session.
+	jtiUUID, err := scalars.ParseUUID(jti)
+	if err != nil {
+		return runtimesession.Record{}, runtimesession.ErrNotFound
+	}
 	session, err := s.db.GetSessionRepository().FindOne(ctx, &orm.SessionFilter{
-		Jti: &orm.UUIDFilter{Eq: &jti},
+		Jti: &orm.UUIDFilter{Eq: &jtiUUID},
 	}, &orm.SessionFindOptions{
 		IncludeDeleted: true,
 	})
@@ -150,8 +159,12 @@ type ormPrincipalStore struct {
 }
 
 func (s *ormPrincipalStore) GetByID(ctx context.Context, id string) (runtimesession.Principal, error) {
+	idUUID, err := scalars.ParseUUID(id)
+	if err != nil {
+		return runtimesession.Principal{}, runtimesession.ErrNotFound
+	}
 	user, err := s.db.GetUserRepository().FindOne(ctx, &orm.UserFilter{
-		Id: &orm.UUIDFilter{Eq: &id},
+		Id: &orm.UUIDFilter{Eq: &idUUID},
 	}, nil)
 	if err != nil {
 		if errors.Is(err, orm.ErrNotFound) {
