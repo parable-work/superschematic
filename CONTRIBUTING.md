@@ -111,8 +111,9 @@ of them; run them locally before pushing.
 | `make ts`             | `packages/` and `runtime/schema/typescript` typecheck, build and test |
 | `make python`         | `runtime/schema/python` pytest                                       |
 | `make rust`           | `runtime/http/rust` fmt, clippy `-D warnings`, test                  |
+| `make docs`           | Starlight site in `docs/` (`npm ci && npm run build`)                |
 | `make scrub`          | No leftover mentions of the source tree this repository was extracted from |
-| `make all`            | build, test and lint: everything above                               |
+| `make all`            | build, test and lint: everything above except `docs`                 |
 
 ## Rules
 

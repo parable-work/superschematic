@@ -19,7 +19,7 @@ GO_MODULES := . ir runtime/schema/go runtime/http/go
 BIN := bin/superschematic
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
-        go-goldens catalog-check ts python rust cli-smoke scrub clean
+        go-goldens catalog-check ts python rust docs cli-smoke scrub clean
 
 all: build test lint
 
@@ -73,6 +73,10 @@ python:
 
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+
+# Starlight site. CI runs this as the docs job (D9); release.yml deploys it.
+docs:
+	cd docs && npm ci && npm run build
 
 # The binary with no extension linked builds a DB, an API and a General
 # service from the fixture corpus.
