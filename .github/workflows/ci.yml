@@ -229,7 +229,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
 
       - name: Install Rust toolchain
         run: |

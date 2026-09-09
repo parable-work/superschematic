@@ -67,7 +67,7 @@ examples/acme-schematic/
   schemas/
     superschematic.toml       naming, auth_provider = "apikey", [paths], [extension.acme]
     tsconfig.base.json        path aliases for @superschematic/*, @acme/*, superscalar
-    services/shop-db          DB: User, ApiKey, Product tables
+    services/shop-db          DB: User, Session, ApiKey, Product tables
     services/shop-api         API: ProductQueries, ProductMutations over shop-db
     services/shop-config      General: ShopConfig with @envVars
     services/shop-catalog     Catalog: Product, Bundle with @shelf; catalog.config.yaml
@@ -325,7 +325,7 @@ keeps it fixed.
 ## A command
 
 `cli.New` returns the root cobra command with `build`, `build-all`,
-`jsonschema` and `format`. An extension that implements
+`json-schema` and `format`. An extension that implements
 `cli.CommandProvider` contributes more:
 
 ```go

@@ -19,7 +19,7 @@ of a generated artifact is always listed here with the bump it requires.
   generators (SQL, Go ORM, Go API with the `session` auth provider,
   TypeScript, Go, Python and Rust types, TypeScript, Go and Rust SDKs, env
   config, JSON Schema), the `superschematic` CLI (`build`, `build-all`,
-  `jsonschema`, `format`), the authoring packages `@superschematic/{schema,
+  `json-schema`, `format`), the authoring packages `@superschematic/{schema,
   db, api, schema-config}`, the schema runtimes for Go, TypeScript and
   Python, the http runtime for Go and Rust, and the `extensions/deploy` and
   `extensions/platform` reference extensions.
