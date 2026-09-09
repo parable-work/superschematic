@@ -152,9 +152,9 @@ import (
 const strategyADDLSQL = ` + "`" + string(createSQL) + "`" + `
 
 func TestStrategyACompositeHistoryAsOf(t *testing.T) {
-	dsn := os.Getenv("PSGEN_ORMGEN_TEST_DATABASE_URL")
+	dsn := os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("set PSGEN_ORMGEN_TEST_DATABASE_URL to run the generated ORM Strategy A integration test")
+		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the generated ORM Strategy A integration test")
 	}
 
 	ctx := context.Background()

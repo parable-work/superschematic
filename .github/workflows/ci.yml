@@ -120,6 +120,10 @@ jobs:
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
+          # The TypeScript compile gates skip when bun is missing so local
+          # `go test ./...` runs without it. Here bun is installed, so a skip
+          # is a broken gate and must fail.
+          SUPERSCHEMATIC_REQUIRE_TS_CHECKS: "1"
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           for m in . ir runtime/schema/go runtime/http/go; do
