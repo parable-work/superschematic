@@ -37,7 +37,7 @@ type Diagnostic struct {
 
 // writeHarness materializes an embedded harness to a temp file bun can run.
 func writeHarness(source []byte) (string, error) {
-	f, err := os.CreateTemp("", "psgen-harness-*.ts")
+	f, err := os.CreateTemp("", "superschematic-harness-*.ts")
 	if err != nil {
 		return "", fmt.Errorf("writing execution harness: %w", err)
 	}

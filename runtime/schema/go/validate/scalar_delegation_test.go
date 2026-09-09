@@ -9,8 +9,8 @@ import (
 )
 
 // par12Schema declares scalars by their CANONICAL names (the keys in
-// scalar-lib's ScalarIDByCanonical), each carrying only the generic IR
-// constraints psgen would emit. The point of these tests is that the generic
+// superscalar's ScalarIDByCanonical), each carrying only the generic IR
+// constraints superschematic would emit. The point of these tests is that the generic
 // constraints alone DO NOT catch the deep semantic checks (Embedding.Vector /
 // Generic.StringMap serde, Asset.FilePath / Text.Markdown min_length 1) -- those
 // live in the Rust core and must be reached by delegation, not by the IR.

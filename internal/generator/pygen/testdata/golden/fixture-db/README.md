@@ -2,7 +2,7 @@
 
 Generated Python types for the **fixture-db** schema.
 
-> **Auto-generated Code**: This package is automatically generated from Superschematic definitions. Do not edit manually. Regenerate with `psgen build <service-dir>`.
+> **Auto-generated Code**: This package is automatically generated from Superschematic definitions. Do not edit manually. Regenerate with `superschematic build <service-dir>`.
 
 ## Overview
 
@@ -11,7 +11,7 @@ This package provides type-safe Python models generated from Superschematic defi
 - **Runtime validation** with detailed error messages
 - **Type hints** for IDE autocomplete and static type checking
 - **JSON / YAML serialization and deserialization**
-- **Custom scalar validation** from the scalar-lib
+- **Custom scalar validation** from the scalar library
 - **Field-level constraints** (min/max length, patterns, ranges)
 
 ## Installation

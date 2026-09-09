@@ -43,7 +43,7 @@ func TestNew_DefaultRegistryMatchesExplicitDefault(t *testing.T) {
 	assert.Equal(t, "alice@example.com", got["email"])
 }
 
-// An injected empty registry drops the scalar-lib behaviour: the email is
+// An injected empty registry drops the superscalar behaviour: the email is
 // no longer normalized and the custom validator is not consulted.
 func TestNew_WithEmptyRegistry(t *testing.T) {
 	rt := New(testSchema(), WithRegistry(NewRegistry()))
@@ -52,9 +52,9 @@ func TestNew_WithEmptyRegistry(t *testing.T) {
 	assert.Equal(t, "ALICE@example.com", data["email"], "no normalizer registered")
 }
 
-// A registry carrying a validator for a scalar name scalar-lib does not
+// A registry carrying a validator for a scalar name superscalar does not
 // know proves the injected functions are the ones consulted. (Names
-// scalar-lib knows are delegated to it directly by the validate package.)
+// superscalar knows are delegated to it directly by the validate package.)
 func TestNew_WithCustomRegistry(t *testing.T) {
 	schema := testSchema()
 	schema.Scalars["Shelf"] = &ir.ScalarDef{Name: "Acme.Shelf", Primitive: "String", HasCustomValidate: true}

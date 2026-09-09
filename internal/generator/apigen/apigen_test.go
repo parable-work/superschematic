@@ -285,10 +285,10 @@ func TestOpenAPINullableEncodingValidatesUnder30Rules(t *testing.T) {
 		t.Fatal(err)
 	}
 	compiler := validator.NewCompiler()
-	if err := compiler.AddResource("psgen://openapi.json", openAPI30ToJSONSchema(doc)); err != nil {
+	if err := compiler.AddResource("superschematic://openapi.json", openAPI30ToJSONSchema(doc)); err != nil {
 		t.Fatal(err)
 	}
-	tapInfo, err := compiler.Compile("psgen://openapi.json#/components/schemas/TapInfo")
+	tapInfo, err := compiler.Compile("superschematic://openapi.json#/components/schemas/TapInfo")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,7 @@ export type OnDeleteAction = "CASCADE" | "RESTRICT" | "NO ACTION";
 export type RelationOptions = { onDelete?: OnDeleteAction };
 
 // Opts is a constrained phantom: the `extends RelationOptions` bound gives the
-// author typecheck and autocomplete on the option value, while the psgen Go
+// author typecheck and autocomplete on the option value, while the superschematic Go
 // loader reads the actual value from the second type-argument node (mirroring
 // Validate<T, C>). No embed is added because nothing reads a `__relationOpts`.
 export type Relation<T, Opts extends RelationOptions = {}> = T & { readonly __relation: true };

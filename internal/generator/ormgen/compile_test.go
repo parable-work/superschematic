@@ -17,7 +17,7 @@ import (
 
 // TestGeneratedORMCompiles generates the types module and the ORM module for
 // fixture-db into a temp tree mirroring the dist layout (orm/<name> resolves
-// types via ../../types/go/<name>), wires the real scalar-lib runtime, and
+// types via ../../types/go/<name>), wires the real superscalar module, and
 // runs `go build`. This is the end-to-end compile check for the ormgen port.
 func TestGeneratedORMCompiles(t *testing.T) {
 	if testing.Short() {
@@ -164,7 +164,7 @@ func TestStrategyACompositeHistoryAsOf(t *testing.T) {
 	}
 	defer basePool.Close()
 
-	schemaName := fmt.Sprintf("psgen_strategy_a_%d", time.Now().UnixNano())
+	schemaName := fmt.Sprintf("superschematic_strategy_a_%d", time.Now().UnixNano())
 	if _, err := basePool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA %s", schemaName)); err != nil {
 		t.Fatalf("create schema: %v", err)
 	}

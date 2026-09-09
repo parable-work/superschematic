@@ -1,4 +1,4 @@
-// Package codegen provides the shared types and utilities the psgen
+// Package codegen provides the shared types and utilities the superschematic
 // generators build on: casing helpers, template rendering, and the
 // language-agnostic extraction layer over the Schema IR.
 package codegen

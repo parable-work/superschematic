@@ -1,5 +1,5 @@
 // Package typegen generates the Go type library for a schema: scalar
-// aliases onto scalar-lib, enums, structs with validators and JSON/YAML
+// aliases onto superscalar, enums, structs with validators and JSON/YAML
 // codecs, and discriminated-union wrappers.
 //
 // This is the v2 port of the v1 typegen generator onto the refactored Schema
@@ -52,12 +52,12 @@ type ScalarInfo struct {
 	Tokens                       codegen.ScalarTokens
 	Traits                       codegen.ScalarTraits
 
-	// ParseTarget is the scalar-lib function the generated Parse alias binds
+	// ParseTarget is the superscalar function the generated Parse alias binds
 	// to (e.g. "ParseIdentityUUID", "ParseUUID"). Empty means no Parse alias
 	// is emitted for this scalar.
 	ParseTarget string
 
-	// ParseAsInt64 means the scalar-lib parse target returns a canonical string
+	// ParseAsInt64 means the superscalar parse target returns a canonical string
 	// that must be parsed into this module's int64-backed scalar alias.
 	ParseAsInt64 bool
 }
@@ -482,7 +482,7 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 	return scalars
 }
 
-// scalarLibParseTarget returns the scalar-lib function name the generated
+// scalarLibParseTarget returns the superscalar function name the generated
 // Parse<Symbol> alias binds to, or "" when no Parse alias applies.
 func scalarLibParseTarget(scalar ScalarInfo) string {
 	if scalar.HasCustomParse {

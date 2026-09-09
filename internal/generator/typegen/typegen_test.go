@@ -62,7 +62,7 @@ func TestWriteTypesGolden(t *testing.T) {
 				t.Fatalf("generate: %v", err)
 			}
 
-			// Use a scalar-lib path inside the temp tree so the computed
+			// Use a superscalar path inside the temp tree so the computed
 			// relative replace paths are deterministic across machines.
 			tempRoot := t.TempDir()
 			outDir := filepath.Join(tempRoot, tc.service)

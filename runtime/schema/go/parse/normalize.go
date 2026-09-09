@@ -10,7 +10,7 @@ import (
 
 // ScalarNormalizeFunc transforms a scalar's string form into its canonical
 // representation. Pure transform: no validation, no errors. Matches the
-// signature of scalar-lib's Normalize<Name>(string) string family.
+// signature of superscalar's Normalize<Name>(string) string family.
 type ScalarNormalizeFunc func(input string) string
 
 // NormalizeRegistry maps canonical scalar names (e.g. "Contact.Email") to
@@ -84,7 +84,7 @@ func (r *NormalizeRegistry) MissingNormalizers(schema *ir.Schema) []string {
 
 // NewDispatchNormalizeRegistry returns a NormalizeRegistry that routes every
 // name in names through normalize, the name-keyed entry point of a scalar
-// core (scalar-lib's Normalize). Normalize is a pure transform with no error
+// core (superscalar's Normalize). Normalize is a pure transform with no error
 // channel, so a core error leaves the input unchanged; validation reports it.
 func NewDispatchNormalizeRegistry(names []string, normalize func(canonical, value string) (string, error)) *NormalizeRegistry {
 	r := NewNormalizeRegistry()

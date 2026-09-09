@@ -51,7 +51,7 @@ type ExtractionConfig struct {
 // type mappings from ScalarDef.TypeMappings and falls back to
 // PrimitiveMapper when no mapping exists for the target language.
 //
-// Custom scalar-lib implementation flags (normalize/validate/parse) come from
+// Custom superscalar implementation flags (normalize/validate/parse) come from
 // the IR itself; there is no filesystem detection in v2.
 func ExtractScalars(schema *ir.Schema, config ExtractionConfig) []ScalarInfo {
 	var scalars []ScalarInfo
@@ -279,7 +279,7 @@ func ExtractFieldInfo(field *ir.FieldDef, scalarMap ScalarMap, schema *ir.Schema
 	return fieldInfo
 }
 
-// AddVersionFields appends psgen's readable _version metadata field to
+// AddVersionFields appends superschematic's readable _version metadata field to
 // versioned DB table type models. Generators opt in explicitly so Phase 2 can
 // scope the new type surface to the languages it supports.
 func AddVersionFields(types []TypeInfo, config ExtractionConfig) []TypeInfo {

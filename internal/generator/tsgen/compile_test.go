@@ -13,7 +13,7 @@ import (
 )
 
 // TestGeneratedPackagesCompile generates the TypeScript type packages for
-// the fixture services into a temp tree wired against the real scalar-lib
+// the fixture services into a temp tree wired against the real superscalar
 // runtime and runs `tsc --noEmit` on each. This is the cheap end-to-end
 // compile check for the tsgen port. Skips when bun is unavailable.
 func TestGeneratedPackagesCompile(t *testing.T) {
@@ -66,7 +66,7 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 
 		outDir := filepath.Join(tempRoot, tc.name)
 		if err := SetScalarLibSpec(output, paths, outDir); err != nil {
-			t.Fatalf("set scalar-lib spec for %s: %v", tc.name, err)
+			t.Fatalf("set superscalar spec for %s: %v", tc.name, err)
 		}
 		if err := WriteTypes(output, outDir); err != nil {
 			t.Fatalf("write %s: %v", tc.name, err)

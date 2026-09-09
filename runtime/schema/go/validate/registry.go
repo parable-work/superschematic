@@ -10,7 +10,7 @@ import (
 
 // ScalarValidateFunc validates a string value for a custom scalar type.
 // It returns a slice of validation errors, or nil if the value is valid.
-// This signature matches scalar-lib's Validate{Name}(input string) pattern.
+// This signature matches superscalar's Validate{Name}(input string) pattern.
 type ScalarValidateFunc func(value string) []ValidationError
 
 // Registry maps scalar type names to their custom validation functions.
@@ -86,7 +86,7 @@ func (r *Registry) MissingValidators(schema *ir.Schema) []string {
 }
 
 // NewDispatchRegistry returns a Registry that routes every name in names
-// through validate, the name-keyed entry point of a scalar core (scalar-lib's
+// through validate, the name-keyed entry point of a scalar core (superscalar's
 // Validate). A non-nil error becomes a single ValidationError tagged "scalar"
 // carrying the core's message; nil means the value is valid.
 //
@@ -107,7 +107,7 @@ func NewDispatchRegistry(names []string, validate func(canonical, value string) 
 }
 
 // DefaultRegistry returns the registry of the scalar core this module links:
-// every canonical name in scalar-lib's table, dispatched through
+// every canonical name in superscalar's table, dispatched through
 // [scalarlib.Validate]. The Validator consults it for every registered name
 // regardless of HasCustomValidate, so it carries the core's custom checks
 // (Embedding.Vector / Generic.StringMap serde, min_length rules) that the

@@ -24,7 +24,7 @@ bun run build
 // Type-only import (zero runtime) - use for smallest bundle
 import type { {{range .Scalars}}{{.Symbol}}, {{end}}{{range .Enums}}{{.Name}}, {{end}}{{range .Types}}{{.Name}}, {{end}} } from '{{.PackageName}}/types';
 
-// Or from main entry (re-exports everything, including scalar-lib validation)
+// Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '{{.PackageName}}';
 ```
 
@@ -131,7 +131,7 @@ bun run clean
 ## Regeneration
 
 ```bash
-psgen build <service-dir>
+superschematic build <service-dir>
 ```
 
 Run from project root. Output: `types/typescript/{{.SchemaName}}/` under the configured output root.

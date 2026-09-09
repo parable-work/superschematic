@@ -21,7 +21,7 @@ import (
 
 // TestSessionProviderAPIDependsOnGenericRuntimeOnly generates the types, ORM
 // and API modules for the fixture services into a temp tree mirroring the
-// dist layout, wires the real scalar-lib runtime, and runs go build and go
+// dist layout, wires the real superscalar module, and runs go build and go
 // vet on the API module. It is also the W7 proof that the core session
 // provider emits an API module whose dependency closure holds the generic
 // http-runtime session package and none of the Acme runtime packages

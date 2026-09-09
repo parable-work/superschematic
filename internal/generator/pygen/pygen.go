@@ -76,7 +76,7 @@ type ModuleOutput struct {
 	// imports the datetime module for it.
 	HasDateTime bool
 
-	// Custom scalar-lib implementation flags (any scalar).
+	// Custom superscalar implementation flags (any scalar).
 	HasCustomNormalize bool
 	HasCustomValidate  bool
 	HasCustomParse     bool
@@ -464,7 +464,7 @@ func pythonScalarSymbol(s codegen.ScalarInfo) string {
 }
 
 // pythonScalarModule returns the snake_case module stem for a scalar (e.g.
-// "Identity.UUID" -> "identity_uuid"), used to name scalar-lib functions.
+// "Identity.UUID" -> "identity_uuid"), used to name superscalar functions.
 func pythonScalarModule(s codegen.ScalarInfo) string {
 	if module := strings.TrimSpace(s.Tokens.Module); module != "" {
 		return module

@@ -598,9 +598,9 @@ func refineRustScalarType(scalar *codegen.ScalarInfo, scalarDef *ir.ScalarDef) {
 	}
 }
 
-// remapScalarLibType keeps scalars with a rich scalar-lib Rust representation
+// remapScalarLibType keeps scalars with a rich superscalar Rust representation
 // on the shared type so generated crates agree with each other and with the
-// other languages' scalar-lib bindings. scalarCrate is the scalar runtime
+// other languages' superscalar bindings. scalarCrate is the scalar runtime
 // crate as Rust spells it (Naming.ScalarRustCrateIdent):
 //   - UUID-like scalars -> <scalarCrate>::Uuid (canonical base62 serde)
 //   - Temporal.DateTime -> <scalarCrate>::DateTime (chrono<Utc> newtype
@@ -613,7 +613,7 @@ func remapScalarLibType(targetType string, scalar codegen.ScalarInfo, scalarCrat
 		return scalarCrate + "::DateTime"
 	}
 	// Generic.StringMap declares ("rust", "std::collections::HashMap<String, String>")
-	// in the scalar-lib catalog, but the loader only plumbs go/typescript/sql/
+	// in the superscalar catalog, but the loader only plumbs go/typescript/sql/
 	// json_schema TypeMappings through to codegen, so without this carve-out the
 	// alias degrades to the String primitive fallback and generated SDKs reject
 	// real map payloads (e.g. supportedAuthStrategies[].extraHeaders in the sync

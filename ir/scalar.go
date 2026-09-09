@@ -93,13 +93,13 @@ type ScalarDef struct {
 	// (nil for non-image scalars).
 	ImageConstraints *ImageConstraints `json:"imageConstraints,omitempty" yaml:"imageConstraints,omitempty"`
 
-	// HasCustomNormalize indicates the scalar-lib has a custom normalize implementation.
+	// HasCustomNormalize indicates the scalar library has a custom normalize implementation.
 	HasCustomNormalize bool `json:"hasCustomNormalize,omitempty" yaml:"hasCustomNormalize,omitempty"`
 
-	// HasCustomValidate indicates the scalar-lib has a custom validate implementation.
+	// HasCustomValidate indicates the scalar library has a custom validate implementation.
 	HasCustomValidate bool `json:"hasCustomValidate,omitempty" yaml:"hasCustomValidate,omitempty"`
 
-	// HasCustomParse indicates the scalar-lib has a custom parse implementation.
+	// HasCustomParse indicates the scalar library has a custom parse implementation.
 	HasCustomParse bool `json:"hasCustomParse,omitempty" yaml:"hasCustomParse,omitempty"`
 }
 

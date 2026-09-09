@@ -1,4 +1,4 @@
-// Package loader is the public face of psgen's frontend: it loads one
+// Package loader is the public face of superschematic's frontend: it loads one
 // service directory (TypeScript or data form) into an ir.Schema through a
 // registry the caller assembled. Extension modules use it to test their
 // kinds and decorators against real fixtures; the engine keeps the

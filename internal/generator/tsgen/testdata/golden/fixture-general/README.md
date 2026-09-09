@@ -24,7 +24,7 @@ bun run build
 // Type-only import (zero runtime) - use for smallest bundle
 import type { NetworkUrl, FixtureEnvironment, FixtureConfig, FixtureFilter, RetryPolicy,  } from '@schemas/fixture-general-types/types';
 
-// Or from main entry (re-exports everything, including scalar-lib validation)
+// Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-general-types';
 ```
 
@@ -133,7 +133,7 @@ bun run clean
 ## Regeneration
 
 ```bash
-psgen build <service-dir>
+superschematic build <service-dir>
 ```
 
 Run from project root. Output: `types/typescript/fixture-general/` under the configured output root.

@@ -1,5 +1,5 @@
-// Package registry is the extension seam of psgen: the kinds, decorators,
-// documents, generators and build-all hooks a psgen binary knows about are
+// Package registry is the extension seam of superschematic: the kinds, decorators,
+// documents, generators and build-all hooks a superschematic binary knows about are
 // registered here rather than enumerated in switches. Core registers today's
 // behaviour; a downstream Extension adds its own without editing engine code.
 //
@@ -325,7 +325,7 @@ func (r *Registry) SelectedAuthProvider() (AuthProvider, error) {
 	return p, nil
 }
 
-// RegisterBuildAllHook adds a hook `psgen build-all` runs after every
+// RegisterBuildAllHook adds a hook `superschematic build-all` runs after every
 // service has built. Hooks run in registration order. Like every other
 // Register*, it refuses registrations after Finalize: a hook added later
 // would run in some builds and not others depending on when the registering

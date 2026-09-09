@@ -12,7 +12,7 @@
 //	b, errs := runtime.MarshalType(schema, "MyType", data)
 //
 // Each call applies sensible defaults: the scalar registries come from
-// [Default] (the scalar-lib parse, normalize and validate functions),
+// [Default] (the superscalar parse, normalize and validate functions),
 // serialize runs with no secret masking, etc. Inject a different scalar
 // set with [WithRegistry].
 //

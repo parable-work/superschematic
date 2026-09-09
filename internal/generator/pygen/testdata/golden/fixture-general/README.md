@@ -2,7 +2,7 @@
 
 Generated Python types for the **fixture-general** schema.
 
-> **Auto-generated Code**: This package is automatically generated from Superschematic definitions. Do not edit manually. Regenerate with `psgen build <service-dir>`.
+> **Auto-generated Code**: This package is automatically generated from Superschematic definitions. Do not edit manually. Regenerate with `superschematic build <service-dir>`.
 
 ## Overview
 

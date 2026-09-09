@@ -2,11 +2,11 @@
 
 TypeScript SDK for the fixture-api API. Auto-generated from GraphQL schema.
 
-**Do not edit manually.** Regenerate via: `psgen build schemas/fixture-api/schema.json` (from the schemas root).
+**Do not edit manually.** Regenerate via: `superschematic build schemas/fixture-api/schema.json` (from the schemas root).
 
 ## Installation
 
-This is a local package. Install it from your monorepo:
+This is a workspace package. Add it from the repository that generated it:
 
 ```bash
 bun add @schemas/fixture-api-sdk

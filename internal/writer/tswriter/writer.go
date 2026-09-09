@@ -201,7 +201,7 @@ func (e *emitter) checkScalars() {
 		bare.LanguagePrimitive = ""
 		stripScalarLibHydratedMetadata(name, &bare)
 		if !reflect.DeepEqual(bare, ir.ScalarDef{}) {
-			e.failf("scalar %s: declares metadata beyond its language primitive, which TypeScript schemas cannot express (scalar metadata lives in scalar-lib)", name)
+			e.failf("scalar %s: declares metadata beyond its language primitive, which TypeScript schemas cannot express (scalar metadata lives in superscalar)", name)
 		}
 	}
 }

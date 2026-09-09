@@ -1,4 +1,4 @@
-// Package sessionauth is the core auth provider for the psgen api generator:
+// Package sessionauth is the core auth provider for the superschematic api generator:
 // bearer sessions over an upstream Session table, an optional principal
 // (User) table, plain-string permissions, and no tenancy. Its generated code
 // depends only on the generic http-runtime session package

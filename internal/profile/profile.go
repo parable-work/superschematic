@@ -1,4 +1,4 @@
-// Package profile provides opt-in phase timing for psgen builds.
+// Package profile provides opt-in phase timing for superschematic builds.
 package profile
 
 import (

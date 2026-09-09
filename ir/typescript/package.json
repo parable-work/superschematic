@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/schema-ir",
   "version": "0.1.0",
-  "description": "psgen schema IR types for TypeScript (types only, no runtime code).",
+  "description": "superschematic schema IR types for TypeScript (types only, no runtime code).",
   "types": "./index.d.ts",
   "exports": {
     ".": {

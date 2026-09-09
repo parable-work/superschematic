@@ -1,2 +1,2 @@
-// The service.generated re-export is managed by psgen; keep it in place.
+// The service.generated re-export is managed by superschematic; keep it in place.
 export * from "./service.generated";

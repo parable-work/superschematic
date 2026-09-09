@@ -52,7 +52,7 @@ func TestBuildValuesSchema_EnumMetadata(t *testing.T) {
 
 	valuesSchema := envgen.BuildValuesSchema(output)
 	index := -1
-	for i, envVar := range valuesSchema.XPsgen.EnvVars {
+	for i, envVar := range valuesSchema.XSuperschematic.EnvVars {
 		if envVar.Name == "ENVIRONMENT" {
 			index = i
 		}
@@ -60,7 +60,7 @@ func TestBuildValuesSchema_EnumMetadata(t *testing.T) {
 	if index < 0 {
 		t.Fatal("missing ENVIRONMENT in values schema")
 	}
-	env := valuesSchema.XPsgen.EnvVars[index]
+	env := valuesSchema.XSuperschematic.EnvVars[index]
 	if env.IRType != "FixtureEnvironment" {
 		t.Fatalf("IRType = %q, want FixtureEnvironment", env.IRType)
 	}

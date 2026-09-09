@@ -68,10 +68,10 @@ func customTemplateFuncs() template.FuncMap {
 	}
 }
 
-// scalarLibTypeName returns the structured scalar-lib type name a scalar's
+// scalarLibTypeName returns the structured superscalar type name a scalar's
 // TypeScript type resolves to, or "" when the scalar maps to a builtin shape
 // (string/number/boolean/JSDate/object literals/generics). Structured types
-// are declared in scalar-lib's scalar-validators module and must be imported
+// are declared in superscalar's scalar-validators module and must be imported
 // from there.
 func scalarLibTypeName(s ScalarInfo) string {
 	if s.Primitive != ir.LanguageObject {
@@ -83,8 +83,8 @@ func scalarLibTypeName(s ScalarInfo) string {
 	return s.TSType
 }
 
-// uniqueScalarLibTypeNames returns unique structured scalar-lib type names
-// used by the module's scalars, for re-export from scalar-lib.
+// uniqueScalarLibTypeNames returns unique structured superscalar type names
+// used by the module's scalars, for re-export from superscalar.
 func uniqueScalarLibTypeNames(scalars []ScalarInfo) []string {
 	seen := make(map[string]bool)
 	var names []string
@@ -242,7 +242,7 @@ func typeNeedsJSONParse(t *TypeInfo, generatedTypeNames map[string]bool) bool {
 }
 
 // typeParserScalarsUsed returns scalars that need parse-from-library calls in
-// parseFromJSON: DateTime-like scalars with a custom parse in scalar-lib.
+// parseFromJSON: DateTime-like scalars with a custom parse in superscalar.
 func typeParserScalarsUsed(t *TypeInfo) []ScalarInfo {
 	seen := make(map[string]bool)
 	var scalars []ScalarInfo

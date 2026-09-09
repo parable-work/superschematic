@@ -83,7 +83,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		// scalars.go also carries the ValidationErrors aliases types.go's
 		// Validate() references, so it must exist whenever types.go does --
 		// a schema with types but no scalars previously generated
-		// uncompilable Go (the go.mod requires scalar-lib unconditionally).
+		// uncompilable Go (the go.mod requires superscalar unconditionally).
 		{Condition: len(output.Scalars) > 0 || len(output.Types) > 0 || len(output.ImportedTypes) > 0 || len(output.ImportedUnions) > 0, Template: "scalars.tmpl", Filename: "scalars.go"},
 		{Condition: len(output.Enums) > 0 || len(output.ImportedEnums) > 0, Template: "enums.tmpl", Filename: "enums.go"},
 		{Condition: len(output.Types) > 0 || len(output.ImportedTypes) > 0 || len(output.ImportedUnions) > 0, Template: "types.tmpl", Filename: "types.go"},

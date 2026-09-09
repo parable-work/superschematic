@@ -575,7 +575,7 @@ func customTemplateFuncs() template.FuncMap {
 		"scalar_validator_symbol": normalizeTSTypeIdentifier,
 		"scalar_needs_validation": func(irType string) bool {
 			// Bare language primitives have no generated validators; only
-			// named scalars carry scalar-lib validation.
+			// named scalars carry superscalar validation.
 			return !codegen.IsLanguagePrimitive(irType)
 		},
 		"file_upload_field_union": func(fields []FileUploadField) string {

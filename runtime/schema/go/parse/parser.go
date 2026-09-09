@@ -52,7 +52,7 @@ func WithStrict(strict bool) Option {
 // New creates a Parser for the given schema. Both registries default to
 // empty; pass [WithParseRegistry] / [WithNormalizeRegistry] with the
 // DefaultParseRegistry / DefaultNormalizeRegistry constructors to wire the
-// scalar-lib defaults.
+// superscalar defaults.
 func New(schema *ir.Schema, opts ...Option) *Parser {
 	p := &Parser{
 		schema:   schema,

@@ -1,4 +1,4 @@
-// Package generator owns the psgen code-generation surface: the shadow
+// Package generator owns the superschematic code-generation surface: the shadow
 // output layout and the dispatch that runs each generator against the
 // Schema IR. The typed interpretation of the schema.config outputs block
 // lives in internal/registry and is aliased here.

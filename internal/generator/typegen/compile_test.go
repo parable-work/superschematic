@@ -13,7 +13,7 @@ import (
 )
 
 // TestGeneratedModulesCompile generates the Go type modules for the fixture
-// services into a temp tree wired against the real scalar-lib runtime and
+// services into a temp tree wired against the real superscalar module and
 // runs `go build` on each. This is the cheap end-to-end compile check for
 // the typegen port.
 func TestGeneratedModulesCompile(t *testing.T) {

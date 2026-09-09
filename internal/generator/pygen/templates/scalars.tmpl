@@ -15,7 +15,7 @@ import re
 from datetime import datetime
 {{end}}
 {{if or .HasCustomNormalize .HasCustomValidate .HasCustomParse}}
-# Import custom scalar implementations from scalar-lib
+# Import custom scalar implementations from the scalar library
 try:
     from {{.Naming.ScalarPythonModule}} import (
         {{range $scalar := .Scalars}}{{if or $scalar.HasCustomNormalize $scalar.HasCustomValidate $scalar.HasCustomParse}}
@@ -40,7 +40,7 @@ except ImportError:
 def _custom_parse_{{pythonScalarModule .}}(v: Any) -> Any:
     """Custom parse wrapper for {{.Name}}.
 
-    The scalar-lib native hooks are string-in/string-out, so non-string
+    The scalar library native hooks are string-in/string-out, so non-string
     inputs are stringified before the call and numeric targets are
     converted back afterwards.
     """
@@ -63,7 +63,7 @@ def _custom_parse_{{pythonScalarModule .}}(v: Any) -> Any:
 def _custom_normalize_{{pythonScalarModule .}}(v: Any) -> Any:
     """Custom normalize wrapper for {{.Name}}.
 
-    The scalar-lib native hooks are string-in/string-out, so non-string
+    The scalar library native hooks are string-in/string-out, so non-string
     inputs are stringified before the call and numeric targets are
     converted back afterwards.
     """
@@ -86,7 +86,7 @@ def _custom_normalize_{{pythonScalarModule .}}(v: Any) -> Any:
 def _custom_validate_{{pythonScalarModule .}}(v: Any) -> Any:
     """Custom validation wrapper for {{.Name}}.
 
-    Wraps the scalar-lib validator that returns list[ValidationError]
+    Wraps the scalar library validator that returns list[ValidationError]
     to the Pydantic-compatible pattern that raises ValueError.
     """
     if not _SCALAR_LIB_AVAILABLE:

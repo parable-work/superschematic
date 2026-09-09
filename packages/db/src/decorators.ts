@@ -27,7 +27,7 @@ export interface VersionedOptions {
    * that no reference is repeated. It cannot check the dangerous direction: a
    * table that declares retentionDays and has as-of readers but does NOT
    * declare the exclusion that protects them prunes their pinned images with
-   * no diagnostic. Nothing in psgen knows who reads a table's history, so that
+   * no diagnostic. Nothing in superschematic knows who reads a table's history, so that
    * one stays on the schema author and on repo-local tests.
    */
   readonly pruneKeepReferencedBy?: VersionedPruneReference | readonly VersionedPruneReference[];

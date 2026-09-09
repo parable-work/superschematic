@@ -42,7 +42,7 @@
 //
 // # Error shape
 //
-// Errors use the same scalar-lib ValidationErrors map that validate emits,
+// Errors use the same superscalar ValidationErrors map that validate emits,
 // so downstream error handling does not need to branch on which phase
 // produced them.
 package parse

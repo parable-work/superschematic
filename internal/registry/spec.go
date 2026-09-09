@@ -56,12 +56,12 @@ type KindSpec struct {
 	Pipeline []string
 
 	// NoSentinel marks a kind whose services are groupings of other
-	// services rather than importable members: psgen writes no
+	// services rather than importable members: superschematic writes no
 	// src/service.generated.ts for them and the sibling sweep skips them.
 	NoSentinel bool
 
 	// ImportsSiblingSentinels marks a kind whose schema files import other
-	// services' sentinels as values. `psgen build` writes every sibling's
+	// services' sentinels as values. `superschematic build` writes every sibling's
 	// sentinel before it constructs the program for a service of this kind,
 	// so the imports resolve on a fresh checkout.
 	ImportsSiblingSentinels bool
@@ -431,7 +431,7 @@ func (ctx GenerateContext) InstallTargetDir(relDir, kind string) (string, error)
 	return targetDir, nil
 }
 
-// BuildAllHook runs in `psgen build-all` after every service has built.
+// BuildAllHook runs in `superschematic build-all` after every service has built.
 type BuildAllHook struct {
 	Name      string
 	Extension string

@@ -97,7 +97,7 @@ func New(n Naming) *Registry { return registry.New(n) }
 func RegisterCore(reg *Registry) error { return generator.RegisterCore(reg) }
 
 // Assemble runs the whole sequence: New, RegisterCore, Use(exts...), Finalize.
-// It is what a psgen binary calls once per process.
+// It is what a superschematic binary calls once per process.
 func Assemble(n Naming, exts ...Extension) (*Registry, error) {
 	reg := registry.New(n)
 	if err := generator.RegisterCore(reg); err != nil {

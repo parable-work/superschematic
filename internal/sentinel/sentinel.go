@@ -6,7 +6,7 @@
 // arguments. Kinds whose KindSpec sets NoSentinel are groupings, not
 // members, and get none.
 //
-// This is the only psgen package that writes into the authoring tree; every
+// This is the only superschematic package that writes into the authoring tree; every
 // write is idempotent (read-compare-write) so committed sentinels stay
 // byte-stable across builds.
 package sentinel
@@ -211,7 +211,7 @@ func ensureIndexExport(servicePath string) (bool, error) {
 	path := filepath.Join(servicePath, "src", "index.ts")
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		content := "// The service.generated re-export is managed by psgen; keep it in place.\n" + indexExportLine + "\n"
+		content := "// The service.generated re-export is managed by superschematic; keep it in place.\n" + indexExportLine + "\n"
 		return writeIfChanged(path, content)
 	}
 	if err != nil {

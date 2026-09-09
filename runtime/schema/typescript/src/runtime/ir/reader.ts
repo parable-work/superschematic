@@ -17,7 +17,7 @@ import type {
 import { BUILTIN_SCALARS } from '../builtin-scalars.generated';
 
 /**
- * Reader for the psgen Schema IR JSON format (`psgen build --emit-ir`).
+ * Reader for the superschematic Schema IR JSON format (`superschematic build --emit-ir`).
  *
  * The IR is the format-agnostic representation emitted by the Go schema
  * loader (ir/). It retains the legacy runtime
@@ -342,7 +342,7 @@ function parseIRImports(raw: unknown): Import[] {
 }
 
 /**
- * Parses a psgen Schema IR JSON document (the `psgen build --emit-ir`
+ * Parses a superschematic Schema IR JSON document (the `superschematic build --emit-ir`
  * output, or several of them merged map-wise) into the runtime Schema.
  *
  * Types are split into runtime `types` and `inputs` by their IR role:

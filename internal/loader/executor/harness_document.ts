@@ -1,9 +1,9 @@
 /**
- * psgen sidecar-document harness: the entry point bun runs to execute a
+ * superschematic sidecar-document harness: the entry point bun runs to execute a
  * service's document module (a registered DocumentSpec's File, such as
  * deploy.values.ts) and capture its default export as JSON.
  *
- * Like harness.ts, this file is embedded in the psgen binary and written to
+ * Like harness.ts, this file is embedded in the superschematic binary and written to
  * a temp path at build time, so it must be fully standalone: it imports
  * nothing. The document is an arbitrary value expression, so there is no
  * registry to read -- the contract is simply the module's default export,
@@ -29,7 +29,7 @@
 
 function deny(api: string): never {
   throw new Error(
-    `psgen: document modules must be side-effect-free at import: ${api} is unavailable during execution`
+    `superschematic: document modules must be side-effect-free at import: ${api} is unavailable during execution`
   );
 }
 

@@ -263,7 +263,7 @@ func (w *walker) resolveRecordType(node *astNode) (*typeInfo, *SchemaError) {
 	return info, nil
 }
 
-// resolveWrapper applies one @psgen wrapper alias and recurses into its
+// resolveWrapper applies one @superschematic wrapper alias and recurses into its
 // payload type argument.
 func (w *walker) resolveWrapper(node *astNode, id symbolIdentity) (*typeInfo, *SchemaError) {
 	args := node.AsTypeReferenceNode().TypeArguments

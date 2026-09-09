@@ -1,6 +1,6 @@
 /**
  * The kinds the core compiler registers. Closed: an extension adds a kind by
- * registering it with psgen, not by extending this enum.
+ * registering it with superschematic, not by extending this enum.
  */
 export enum SchemaKind {
   DB = "DB",
@@ -10,7 +10,7 @@ export enum SchemaKind {
 
 /**
  * The name of a kind an extension registers ("Platform"). The authoring
- * packages cannot see the registry, so the name is any string here; psgen
+ * packages cannot see the registry, so the name is any string here; superschematic
  * checks it against the registered kinds when it loads the config.
  */
 // `string & {}` rather than `string`: a bare string in the SchemaKindName
@@ -77,7 +77,7 @@ export type ServiceDependencyRef = {
  *
  * This is the SchemaConfig contract projected onto plain data: authDb is the
  * service name, and dependencies is an explicit array (there is no import
- * system in the JSON/YAML forms to derive it from). psgen validates the data
+ * system in the JSON/YAML forms to derive it from). superschematic validates the data
  * forms against the JSON Schema generated from this type (see the
  * gen-json-schema package script).
  */

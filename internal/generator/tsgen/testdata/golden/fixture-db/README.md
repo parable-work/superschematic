@@ -24,7 +24,7 @@ bun run build
 // Type-only import (zero runtime) - use for smallest bundle
 import type { GenericJSON, IdentityName, IdentitySlug, IdentityUUID, TemporalDateTime, TenantStatus, Auditable, Tenant, TenantUser,  } from '@schemas/fixture-db-types/types';
 
-// Or from main entry (re-exports everything, including scalar-lib validation)
+// Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-db-types';
 ```
 
@@ -152,7 +152,7 @@ bun run clean
 ## Regeneration
 
 ```bash
-psgen build <service-dir>
+superschematic build <service-dir>
 ```
 
 Run from project root. Output: `types/typescript/fixture-db/` under the configured output root.

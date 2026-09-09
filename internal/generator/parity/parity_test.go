@@ -1,9 +1,9 @@
-// Package parity runs the same JSON payloads through the validators psgen
+// Package parity runs the same JSON payloads through the validators superschematic
 // generates for Go, TypeScript, and Python and asserts every language returns
 // the same verdicts. One schema (built in a temp dir, JSON-authored so the
 // real loader runs), one vector table, one expected-outcome column: a
 // validator semantic that drifts in any language fails here. This is the
-// generator-layer counterpart of scalar-lib's shared conformance corpus
+// generator-layer counterpart of superscalar's shared conformance corpus
 // (the scalar package/conformance/), and the class of bug it exists for is
 // Regression: Go decode turned absent optional lists into empty ones, so
 // only Go fired listMin on omitted fields. Reverting that fix makes the go
@@ -471,7 +471,7 @@ func TestGeneratedValidatorParity(t *testing.T) {
 		}
 		outDir := filepath.Join(tempRoot, "parity-fixture")
 		if err := tsgen.SetScalarLibSpec(output, paths, outDir); err != nil {
-			t.Fatalf("set scalar-lib spec: %v", err)
+			t.Fatalf("set superscalar spec: %v", err)
 		}
 		if err := tsgen.WriteTypes(output, outDir); err != nil {
 			t.Fatalf("write typescript types: %v", err)

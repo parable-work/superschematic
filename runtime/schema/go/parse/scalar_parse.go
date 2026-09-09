@@ -84,7 +84,7 @@ func (r *ParseRegistry) MissingParsers(schema *ir.Schema) []string {
 
 // NewDispatchParseRegistry returns a ParseRegistry that routes every name in
 // names through parse, the name-keyed entry point of a scalar core
-// (scalar-lib's Parse). On success the core's canonical form is returned; a
+// (superscalar's Parse). On success the core's canonical form is returned; a
 // non-nil error becomes a single ValidationError tagged "parse" and the
 // input is returned untouched.
 func NewDispatchParseRegistry(names []string, parse func(canonical, value string) (string, error)) *ParseRegistry {

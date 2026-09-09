@@ -14,4 +14,4 @@ This crate contains Rust types generated from the `fixture-api` schema.
 ## Notes
 
 - This crate is generated. Do not edit manually.
-- Re-generate with `psgen build` for the target schema.
+- Re-generate with `superschematic build` for the target schema.

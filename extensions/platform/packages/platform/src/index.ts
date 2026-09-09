@@ -1,7 +1,7 @@
 // @superschematic/platform: the authoring package for the example Platform
-// kind (extensions/platform). psgen reads the AST, so the
+// kind (extensions/platform). superschematic reads the AST, so the
 // decorator is a no-op at runtime, as in the core packages; the types exist
-// so authors get completion and tsc catches a bad argument before psgen does.
+// so authors get completion and tsc catches a bad argument before superschematic does.
 
 export type Visibility = "public" | "internal";
 

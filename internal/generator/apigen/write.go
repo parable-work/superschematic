@@ -33,8 +33,8 @@ var templatesFS embed.FS
 //	├── openapi.json    # Standalone spec for downstream tooling
 //	├── index.go        # Index page HTML
 //	├── rapidoc.go      # API docs page HTML
-//	├── errors.go       # Error shims over psgen-http-runtime
-//	├── response.go     # Response shims over psgen-http-runtime
+//	├── errors.go       # Error shims over superschematic-http-runtime
+//	├── response.go     # Response shims over superschematic-http-runtime
 //	├── context.go      # Request context shims
 //	├── constants.go    # SystemUserID (public schemas with a UUID scalar)
 //	└── fileupload.go   # Multipart upload helpers (only with file uploads)

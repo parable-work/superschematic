@@ -19,7 +19,7 @@ import (
 // requireOrSkipTSTooling decides what a missing TypeScript toolchain means.
 // Locally it stays a skip so `go test ./...` runs without bun. CI sets
 // PSGEN_REQUIRE_TS_CHECKS=1, where a skip is exactly the failure being guarded
-// against: TestGeneratedSDKCompiles skipped silently on a bad scalar-lib path.
+// against: TestGeneratedSDKCompiles skipped silently on a bad superscalar path.
 func requireOrSkipTSTooling(t *testing.T, reason string) {
 	t.Helper()
 	if os.Getenv("PSGEN_REQUIRE_TS_CHECKS") == "1" {
@@ -83,7 +83,7 @@ func TestGeneratedSDKCompiles(t *testing.T) {
 		}
 		typesDir := filepath.Join(tempRoot, "types", "typescript", tc.name)
 		if err := tsgen.SetScalarLibSpec(tsOutput, paths, typesDir); err != nil {
-			t.Fatalf("set scalar-lib spec for %s: %v", tc.name, err)
+			t.Fatalf("set superscalar spec for %s: %v", tc.name, err)
 		}
 		if err := tsgen.WriteTypes(tsOutput, typesDir); err != nil {
 			t.Fatalf("write types %s: %v", tc.name, err)

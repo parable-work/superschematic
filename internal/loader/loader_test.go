@@ -101,19 +101,19 @@ func TestHydrateScalarsFromRegistryPopulatesScalarLibMetadata(t *testing.T) {
 
 	scalar := schema.Scalars["Contact.Email"]
 	if scalar.Description == "" {
-		t.Fatal("Description was not hydrated from scalar-lib metadata")
+		t.Fatal("Description was not hydrated from superscalar metadata")
 	}
 	if scalar.LanguagePrimitive != ir.LanguageString {
 		t.Fatalf("LanguagePrimitive = %q, want %q", scalar.LanguagePrimitive, ir.LanguageString)
 	}
 	if !scalar.HasCustomValidate {
-		t.Fatal("HasCustomValidate was not hydrated from scalar-lib metadata")
+		t.Fatal("HasCustomValidate was not hydrated from superscalar metadata")
 	}
 	if !scalar.HasCustomNormalize {
-		t.Fatal("HasCustomNormalize was not hydrated from scalar-lib metadata")
+		t.Fatal("HasCustomNormalize was not hydrated from superscalar metadata")
 	}
 	if scalar.HasCustomParse {
-		t.Fatal("HasCustomParse should remain false until scalar-lib exposes an email parse hook to psgen")
+		t.Fatal("HasCustomParse should remain false until superscalar exposes an email parse hook to superschematic")
 	}
 	if scalar.TypeMappings["sql"] != "CITEXT" {
 		t.Fatalf("sql mapping = %q, want CITEXT", scalar.TypeMappings["sql"])
@@ -130,7 +130,7 @@ func TestHydrateScalarsFromRegistryPopulatesScalarLibMetadata(t *testing.T) {
 		t.Fatalf("Maximum = %v, want 9007199254740991", seconds.Maximum)
 	}
 	if !seconds.HasCustomParse {
-		t.Fatal("HasCustomParse was not hydrated from scalar-lib metadata")
+		t.Fatal("HasCustomParse was not hydrated from superscalar metadata")
 	}
 }
 
@@ -778,7 +778,7 @@ func TestLoadConfiguredVersionedTypeTS(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dbPackagePath := filepath.ToSlash(filepath.Join(psgenRoot(t), "packages", "db", "src", "index.ts"))
+			dbPackagePath := filepath.ToSlash(filepath.Join(repoRoot(t), "packages", "db", "src", "index.ts"))
 			dir := writeService(t, map[string]string{
 				"schema.config.json": `{"name": "temp-db", "kind": "DB", "outputs": {}}`,
 				"package.json":       `{"private":true}`,
@@ -835,7 +835,7 @@ export abstract class Tenant {
 	}
 }
 
-func psgenRoot(t *testing.T) string {
+func repoRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("../..")
 	if err != nil {

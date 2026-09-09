@@ -13,7 +13,7 @@ import (
 var languagePrimitives = map[string]bool{"string": true, "number": true, "boolean": true}
 
 // renderTypeName resolves a TypeRef base name into a TypeScript type
-// expression, recording whatever import it needs: a scalar-lib namespace, a
+// expression, recording whatever import it needs: a superscalar namespace, a
 // cross-service named import, a sibling-file relative import, or nothing for
 // local and primitive names.
 func (e *emitter) renderTypeName(name, owner string) string {
@@ -38,7 +38,7 @@ func (e *emitter) renderTypeName(name, owner string) string {
 				}
 			}
 		}
-		// Not a declared cross-service import: assume a scalar-lib brand the
+		// Not a declared cross-service import: assume a superscalar brand the
 		// document does not redeclare (single-file conversions reference
 		// scalars declared in sibling files).
 		return e.renderScalar(name, owner)
@@ -112,7 +112,7 @@ const (
 )
 
 // fieldTypeExpr renders a field's full type expression: the base reference
-// wrapped in the @psgen generic forms its IR metadata encodes. The wrapper
+// wrapped in the @superschematic generic forms its IR metadata encodes. The wrapper
 // nesting order keeps Default innermost (its value argument must extend the
 // unwrapped base type) and Nullable outermost.
 func (e *emitter) fieldTypeExpr(fd *ir.FieldDef, owner string, kind fieldKind) string {

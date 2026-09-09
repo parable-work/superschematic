@@ -72,7 +72,7 @@ type SchemaConfig struct {
 }
 
 // Definition returns the JSON Schema the data config forms validate against.
-// This is what `psgen json-schema --config` emits.
+// This is what `superschematic json-schema --config` emits.
 func Definition() []byte {
 	return definitionBytes
 }

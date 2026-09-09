@@ -13,7 +13,7 @@ from pydantic import Field, BeforeValidator, AfterValidator, PlainSerializer, Pl
 import re
 from datetime import datetime
 
-# Import custom scalar implementations from scalar-lib
+# Import custom scalar implementations from the scalar library
 try:
     from superscalar import (
 
@@ -30,7 +30,7 @@ except ImportError:
 def _custom_parse_identity_uuid(v: Any) -> Any:
     """Custom parse wrapper for Identity.UUID.
 
-    The scalar-lib native hooks are string-in/string-out, so non-string
+    The scalar library native hooks are string-in/string-out, so non-string
     inputs are stringified before the call and numeric targets are
     converted back afterwards.
     """
@@ -45,7 +45,7 @@ def _custom_parse_identity_uuid(v: Any) -> Any:
 def _custom_parse_temporal_date_time(v: Any) -> Any:
     """Custom parse wrapper for Temporal.DateTime.
 
-    The scalar-lib native hooks are string-in/string-out, so non-string
+    The scalar library native hooks are string-in/string-out, so non-string
     inputs are stringified before the call and numeric targets are
     converted back afterwards.
     """

@@ -331,7 +331,7 @@ func Definition() ([]byte, error) {
 }
 
 // DefinitionFor returns the canonical schema-file JSON Schema document for a
-// registry (nil for the core one): what `psgen json-schema` emits and what
+// registry (nil for the core one): what `superschematic json-schema` emits and what
 // both readers validate against. The result is cached per registry.
 func DefinitionFor(reg *registry.Registry) ([]byte, error) {
 	c := ensureCompiled(orCore(reg))

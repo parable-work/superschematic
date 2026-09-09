@@ -1,4 +1,4 @@
-// Package tsreader implements the psgen v2 TypeScript frontend: it walks
+// Package tsreader implements the superschematic v2 TypeScript frontend: it walks
 // .schema.ts files with the TypeScript 7.0 Go compiler (Project Corsa) and
 // produces the v2 Schema IR.
 //

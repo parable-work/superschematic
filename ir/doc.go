@@ -2,7 +2,7 @@
 // schema documents.
 //
 // This is the breaking restructure of the original IR (which lives in the v1
-// tool at ir/). It lives at psgen's canonical package
+// tool at ir/). It lives at superschematic's canonical package
 // path with no version suffix -- the version is the tool, not a package path.
 // The v1 IR and all of its consumers stay untouched during the migration
 // window; this package takes over the canonical schema-ir path in the flip PR

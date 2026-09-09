@@ -1,4 +1,4 @@
-// Package platform is a worked example of a psgen extension that adds a
+// Package platform is a worked example of a superschematic extension that adds a
 // schema kind: Platform, a service whose schema files declare named
 // platforms, each grouping other services under a visibility and listing
 // the resources those services share. It registers the kind, one decorator
@@ -91,7 +91,7 @@ var Args = json.RawMessage(`{
 	}
 }`)
 
-// Extension is what a psgen binary passes to registry.Assemble.
+// Extension is what a superschematic binary passes to registry.Assemble.
 type Extension struct{}
 
 // Name implements registry.Extension.

@@ -1,5 +1,5 @@
 // Standalone CLI test runner for the Schema IR reader (parseSchemaIR):
-// verifies psgen --emit-ir JSON converts into the runtime Schema shape the
+// verifies superschematic --emit-ir JSON converts into the runtime Schema shape the
 // validators and schema-renderer consume. Console output IS the report, so
 // no-console is disabled by design (same convention as conformance.cjs).
 /* eslint-disable no-console */

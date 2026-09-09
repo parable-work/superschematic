@@ -15,7 +15,7 @@ var cargoPathRE = regexp.MustCompile(`(?m)^([a-zA-Z0-9_-]+)\s*=\s*\{\s*path\s*=\
 
 // CollectFromDist builds a Graph by scanning generated manifests under distRoot.
 // Only edges under the configured npm scope / Go module root are recorded;
-// scalar-lib, axios, js-yaml, and other third-party deps are ignored.
+// superscalar, axios, js-yaml, and other third-party deps are ignored.
 func CollectFromDist(distRoot string) (*Graph, error) {
 	abs, err := filepath.Abs(distRoot)
 	if err != nil {

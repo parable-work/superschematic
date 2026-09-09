@@ -13,7 +13,7 @@ import (
 // resolvedImports holds the classified import surface of a schema: aliases
 // for dependency-owned enums, types, and unions, plus the Go imports they
 // require. Imported scalars need no aliases; scalar symbols resolve through
-// the shared scalar-lib import that every generated module already carries.
+// the shared superscalar import that every generated module already carries.
 type resolvedImports struct {
 	enums   []ImportedEnumInfo
 	types   []ImportedTypeInfo
@@ -154,7 +154,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 			}
 
 			if _, ok := depSchema.Scalars[symbol]; ok {
-				// Scalars resolve through scalar-lib; no per-module alias.
+				// Scalars resolve through superscalar; no per-module alias.
 				continue
 			}
 

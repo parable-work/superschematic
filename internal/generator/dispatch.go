@@ -24,7 +24,7 @@ import (
 
 // Per-artifact generation steps, one per output kind. Steps record an output
 // as skipped when the schema cannot produce it (e.g. an SDK for a schema with
-// no operations) so `psgen build` reports the full requested surface.
+// no operations) so `superschematic build` reports the full requested surface.
 
 // generateTypes runs the per-language type-library generators selected by
 // outputs.types.

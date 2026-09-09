@@ -1,4 +1,4 @@
-// Package registrytest holds the fixture extension the psgen tests register
+// Package registrytest holds the fixture extension the superschematic tests register
 // against: "acme", modelled on the acme-schematic worked example in
 // docs/extension-model.md section 10. It exercises every registration seam
 // an extension has (a kind, decorators on every target, a document, a

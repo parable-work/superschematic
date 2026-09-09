@@ -172,13 +172,13 @@ func TestParseReadsPathsTable(t *testing.T) {
 func TestParseReadsCacheTable(t *testing.T) {
 	n, err := Parse([]byte(`
 [cache]
-root = "~/psgen-cache"
+root = "~/superschematic-cache"
 inputs = ["the scalar package/permissions.yml", "docs/extra.yml"]
 `), "superschematic.toml")
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if n.Cache.Root != "~/psgen-cache" {
+	if n.Cache.Root != "~/superschematic-cache" {
 		t.Fatalf("Cache.Root = %q", n.Cache.Root)
 	}
 	want := []string{"the scalar package/permissions.yml", "docs/extra.yml"}

@@ -611,7 +611,7 @@ class SyncHTTPClient:
         data: Mapping[str, Any],
         files: Mapping[str, FilePart],
     ) -> tuple[bytes, str]:
-        boundary = f"----psgen-{uuid.uuid4().hex}"
+        boundary = f"----superschematic-{uuid.uuid4().hex}"
         body = bytearray()
 
         for key, value in data.items():

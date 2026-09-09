@@ -56,7 +56,7 @@ type ScalarInfo struct {
 	// emit a Number.isInteger check for them.
 	IsIntegerLike bool
 
-	// HasParseFromJSON marks DateTime-like scalars with a scalar-lib parse
+	// HasParseFromJSON marks DateTime-like scalars with a superscalar parse
 	// implementation; parseFromJSON helpers convert their wire strings into
 	// runtime Date values.
 	HasParseFromJSON bool
@@ -149,7 +149,7 @@ type ModuleOutput struct {
 	HasVersionedTypes   bool
 
 	// ScalarLibSpec is the package.json dependency spec for the TypeScript
-	// scalar-lib runtime package, computed relative to the output directory
+	// superscalar runtime package, computed relative to the output directory
 	// via SetScalarLibSpec.
 	ScalarLibSpec string
 

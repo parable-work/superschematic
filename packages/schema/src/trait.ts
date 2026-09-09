@@ -22,7 +22,7 @@ export function trait(_options: TraitOptions = {}): ClassDecorator {
  * TypeScript requires a class to re-declare every member of a type it
  * implements (TS2720), which contradicts trait flattening. Trait<T> resolves
  * to an empty object type, so the compiler imposes no member obligations,
- * while psgen reads T as the implemented trait and flattens its fields.
+ * while superschematic reads T as the implemented trait and flattens its fields.
  * Marker and config-only traits have no members and may be implemented bare.
  */
 export type Trait<T> = NonNullable<unknown>;
