@@ -52,14 +52,22 @@ func TestStoresParseStringIDsIntoScalarUUIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render middlewareStores: %v", err)
 	}
-	for _, want := range []string{"scalars.ParseUUID(jti)", "scalars.ParseUUID(id)", "Eq: &jtiUUID", "Eq: &idUUID"} {
+	for _, want := range []string{
+		"scalars.ParseUUID(jti)",
+		"scalars.ParseUUID(id)",
+		"Eq: &jtiUUID",
+		"Eq: &idUUID",
+		"return runtimesession.Record{}, runtimesession.ErrNotFound",
+		"return runtimesession.Principal{}, runtimesession.ErrNotFound",
+		"ExpiresAt:   time.Time(session.ExpiresAt)",
+	} {
 		if !strings.Contains(stores, want) {
 			t.Fatalf("middlewareStores lacks %q:\n%s", want, stores)
 		}
 	}
-	for _, reject := range []string{"Eq: &jti}", "Eq: &id}"} {
+	for _, reject := range []string{"Eq: &jti}", "Eq: &id}", "session.DeletedAt"} {
 		if strings.Contains(stores, reject) {
-			t.Fatalf("middlewareStores still passes a *string as a UUID filter (%q):\n%s", reject, stores)
+			t.Fatalf("middlewareStores still has %q:\n%s", reject, stores)
 		}
 	}
 	imports, err := snippet("middlewareImports", data)
@@ -68,6 +76,13 @@ func TestStoresParseStringIDsIntoScalarUUIDs(t *testing.T) {
 	}
 	if !strings.Contains(imports, `scalars "example.com/scalars"`) {
 		t.Fatalf("middlewareImports = %q, want the scalar import the stores use", imports)
+	}
+	std, err := snippet("middlewareStdImports", data)
+	if err != nil {
+		t.Fatalf("render middlewareStdImports: %v", err)
+	}
+	if !strings.Contains(std, `"time"`) {
+		t.Fatalf("middlewareStdImports = %q, want time for ExpiresAt", std)
 	}
 	none, err := snippet("middlewareImports", map[string]any{"Auth": &apigen.AuthModel{}, "Naming": data["Naming"]})
 	if err != nil {

@@ -22,7 +22,8 @@
 #   9. the core-only binary rejects the Catalog service with the registered
 #      kinds named, and rejects the naming file that selects apikey;
 #  10. the core-only binary builds shop-db and shop-api with the session
-#      provider and the result compiles (the regression the example found).
+#      provider, both ORM stores (Session and User) are generated, and the
+#      result compiles (the regression the example found).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -124,6 +125,12 @@ echo "==> core-only binary builds shop-db and shop-api with the session provider
 "$OUT/superschematic" build "$SCHEMAS/services/shop-db" --naming "$OUT/session.toml" --out "$OUT/session-dist" >/dev/null
 "$OUT/superschematic" build "$SCHEMAS/services/shop-api" --naming "$OUT/session.toml" --out "$OUT/session-dist" >/dev/null
 test ! -e "$OUT/session-dist/acme"
+# Both stores must be generated: shop-db has Session and User. A missing
+# table would skip the store and the UUID-parse compile check with it.
+grep -q 'scalars.ParseUUID(jti)' "$OUT/session-dist/api/shop-api/middleware.go"
+grep -q 'scalars.ParseUUID(id)' "$OUT/session-dist/api/shop-api/middleware.go"
+grep -q 'NewSessionStore' "$OUT/session-dist/api/shop-api/middleware.go"
+grep -q 'NewPrincipalStore' "$OUT/session-dist/api/shop-api/middleware.go"
 go_module_compiles "$OUT/session-dist/api/shop-api"
 
 echo "acme smoke: ok"

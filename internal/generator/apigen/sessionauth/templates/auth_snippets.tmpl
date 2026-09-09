@@ -66,6 +66,9 @@ func GetRoles(ctx context.Context) []runtimesession.Role {
 {{- if or .Auth.HasSessionStore .Auth.HasPrincipalStore }}
 	"errors"
 {{- end }}
+{{- if .Auth.HasSessionStore }}
+	"time"
+{{- end }}
 {{- end }}
 
 {{ define "middlewareImports" }}
@@ -141,8 +144,7 @@ func (s *ormSessionStore) FindByJTI(ctx context.Context, jti string) (runtimeses
 	return runtimesession.Record{
 		ID:          session.Id.String(),
 		PrincipalID: session.User.Id.String(),
-		ExpiresAt:   session.ExpiresAt,
-		DeletedAt:   session.DeletedAt,
+		ExpiresAt:   time.Time(session.ExpiresAt),
 	}, nil
 }
 

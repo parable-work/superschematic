@@ -20,6 +20,22 @@ export abstract class User extends Auditable {
   name: Identity.Name;
 }
 
+// A bearer session the core "session" auth provider looks up by jti. The
+// smoke compiles shop-api against that provider; without this table the
+// generated session store is skipped and the UUID-parse fix is untested.
+@versioned
+export abstract class Session extends Auditable {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  @unique
+  jti: Identity.UUID;
+
+  user: Relation<User, { onDelete: "CASCADE" }>;
+
+  expiresAt: Temporal.DateTime;
+}
+
 // An API key a User presents in the X-API-Key header. The acme "apikey" auth
 // provider (ext/auth) looks for a table of this shape (id, secret, user) in
 // the API's authDb and generates an ORM-backed key store when it finds one.
