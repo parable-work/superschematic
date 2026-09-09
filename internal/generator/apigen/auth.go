@@ -51,8 +51,8 @@ type AuthProvider interface {
 
 // AuthModel is what AuthProvider.Analyze returns. The two core flags gate
 // the session and principal store adapters; Extra is the provider's own
-// (a multi-tenant provider keeps its tenancy, role and impersonation flags
-// there).
+// (an organization-scoped provider keeps its scope, role and impersonation
+// flags there).
 type AuthModel struct {
 	// HasSessionStore reports an upstream Session(id, jti, user, expiresAt)
 	// table.

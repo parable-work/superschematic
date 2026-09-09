@@ -21,4 +21,29 @@ if [ -n "$hits" ]; then
   echo "$hits" >&2
   exit 1
 fi
+
+# Source-tree identifiers that have no meaning outside the monorepo: ticket
+# prefixes, decision-record ids, the schema tree and the old module paths.
+ids="$(rg -n 'PARABLE-[0-9]|PAR-[0-9]|EDR-[0-9]|PLG-[0-9]|platform-schemas|parable-platform|utils/psgen|utils/parable-|parable\.work' \
+  --glob '!third_party' --glob '!node_modules' --glob '!target' \
+  --glob '!*.lock' --glob '!bin' --glob '!scripts/scrub-check.sh' . || true)"
+
+if [ -n "$ids" ]; then
+  echo "scrub: monorepo identifiers:" >&2
+  echo "$ids" >&2
+  exit 1
+fi
+
+# The generic core models scope, not tenancy. Fixture schemas under testdata
+# and the tests that read them may keep a Tenant table; generator, runtime and
+# CLI source may not.
+tenancy="$(rg -n -i 'tenant' cli internal loader registry runtime schemadeps \
+  --glob '!**/testdata/**' --glob '!*_test.go' --glob '!**/test/**' --glob '!**/tests/**' \
+  --glob '!node_modules' --glob '!target' --glob '!*.lock' || true)"
+
+if [ -n "$tenancy" ]; then
+  echo "scrub: tenancy vocabulary in core source:" >&2
+  echo "$tenancy" >&2
+  exit 1
+fi
 echo "scrub: clean"
