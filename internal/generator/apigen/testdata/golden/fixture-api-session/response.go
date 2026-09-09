@@ -21,7 +21,7 @@ func RespondError(w http.ResponseWriter, r *http.Request, status int, message st
 }
 
 // RespondValidationErrors sends a logged validation errors response.
-// Hardcodes WA-VL-001 per schema-level validation errors always
+// Hardcodes WA-VL-001: schema-level validation errors always
 // use this code because they originate in the generated route handler before
 // reaching route-impl, so there is no call site to chain .WithCode() on.
 func RespondValidationErrors(w http.ResponseWriter, r *http.Request, errors types.ValidationErrors) {

@@ -430,7 +430,7 @@ func TestServiceScopeComesFromInputNaming(t *testing.T) {
 
 // TestAuthoringOnlyImportNeedsNoConfigDependency: ImportSites used only for
 // @source / extends (absent from schema.Imports) do not require a
-// schema.config dependencies entry — TypeScript owns those package imports.
+// schema.config dependencies entry -- TypeScript owns those package imports.
 func TestAuthoringOnlyImportNeedsNoConfigDependency(t *testing.T) {
 	schema := ir.NewSchema("svc", ir.SchemaKindAPI)
 	r := Run(schema, Input{ImportSites: []ImportSite{

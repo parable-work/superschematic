@@ -9,7 +9,7 @@ type ValidationError = scalarlib.ValidationError
 
 // ValidationErrors is the canonical error shape returned by every facade
 // function. Values are either []ValidationError (leaf errors) or
-// ValidationErrors (nested errors) — same shape as the generated
+// ValidationErrors (nested errors) -- same shape as the generated
 // Validate() helpers emit.
 type ValidationErrors = scalarlib.ValidationErrors
 

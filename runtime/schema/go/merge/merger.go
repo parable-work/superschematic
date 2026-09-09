@@ -4,7 +4,7 @@ import "github.com/parable-work/superschematic/ir"
 
 // Merger interprets an IR Schema to merge secret fields at runtime.
 // When a secret field in the new config has a zero value, the existing
-// value is preserved — preventing accidental overwrite of credentials
+// value is preserved -- preventing accidental overwrite of credentials
 // that are masked to empty on the client side.
 type Merger struct {
 	schema *ir.Schema

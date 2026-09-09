@@ -886,7 +886,7 @@ func CompileSDK(outputDir, typesDir string) error {
 	if typesDir != "" {
 		if err := linkTypesPackage(typesDir, outputDir); err != nil {
 			// Non-fatal: compilation will likely fail but we surface the real tsc error.
-			fmt.Printf("  ⚠ Warning: failed to link types package: %v\n", err)
+			fmt.Printf("  Warning: failed to link types package: %v\n", err)
 		}
 	}
 

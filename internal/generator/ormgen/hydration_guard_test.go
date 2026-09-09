@@ -152,7 +152,7 @@ func TestRelationHydrationGuard_SiblingBranchesIsolatePath(t *testing.T) {
 		t.Fatal("deeper first sibling must be allowed")
 	}
 
-	// Sibling starts from root's path, not branchOne's — Grand is not visible.
+	// Sibling starts from root's path, not branchOne's -- Grand is not visible.
 	_, allowed = enterRelationHydration(root, "Child", "other", "Other", true)
 	if !allowed {
 		t.Fatal("sibling branch must not inherit the other branch's path")

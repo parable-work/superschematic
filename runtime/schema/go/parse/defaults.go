@@ -11,7 +11,7 @@ import (
 // and the caller should emit a {Validator: "default"} ValidationError.
 //
 // Defaults on object-typed fields, inputs, and arrays are intentionally NOT
-// applied here in Phase C — those defaults are not used in current schemas.
+// applied here in Phase C -- those defaults are not used in current schemas.
 // Callers should skip applyDefault when the resolved kind is "type", "input",
 // or the field is an array.
 func applyDefault(field *ir.FieldDef, scalar *ir.ScalarDef) (any, bool) {

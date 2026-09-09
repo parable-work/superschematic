@@ -283,7 +283,7 @@ func TestMerger_TableDrivenScenarios(t *testing.T) {
 			expected:  map[string]any{"foo": "bar"},
 		},
 		{
-			name:      "new array longer than existing — extra elements kept as-is",
+			name:      "new array longer than existing -- extra elements kept as-is",
 			mergeKind: "type",
 			typeName:  "ServiceConfig",
 			newData: map[string]any{

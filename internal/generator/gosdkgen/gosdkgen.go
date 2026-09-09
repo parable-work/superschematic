@@ -652,7 +652,7 @@ func typeModuleReplacesFromGoMod(typesDir, sdkOutputDir, typesModule string) ([]
 	}
 
 	// Transitively collect replace directives from replaced modules so that
-	// deeply-nested local dependencies (e.g. schema-ir → ptr) are resolved
+	// deeply-nested local dependencies (e.g. schema-ir -> ptr) are resolved
 	// in the SDK's go.mod where Go does not propagate replaces.
 	for i := 0; i < len(replaces); i++ {
 		absDir := replaces[i].RelPath

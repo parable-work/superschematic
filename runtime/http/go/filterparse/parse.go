@@ -46,7 +46,7 @@ var ValidOperators = []string{
 // Filter represents a single parsed filter predicate.
 //
 // For single-value operators (eq, neq, contains, gt, gte, lt, lte) Values
-// contains exactly one element — use Values[0]. For the "in" operator Values
+// contains exactly one element -- use Values[0]. For the "in" operator Values
 // contains the comma-split list.
 //
 // Field names are validated against [a-zA-Z0-9_] by the parser, but whether a
@@ -156,8 +156,8 @@ func ParseFilters(q url.Values) ([]Filter, []ParseError) {
 //
 // Accepted forms:
 //
-//	filter[field]        → field="field", op=""
-//	filter[field][op]    → field="field", op="op"
+//	filter[field]        -> field="field", op=""
+//	filter[field][op]    -> field="field", op="op"
 func parseBracketKey(key string) (field, op string, err *ParseError) {
 	// Strip the leading "filter" prefix so we are left with the bracket chain.
 	chain := key[len("filter"):]
@@ -223,8 +223,8 @@ func parseOperator(s string) (Operator, bool) {
 }
 
 // Serialize is the canonical encoder for a []Filter into url.Values using the
-// bracket-notation wire format. This is the inverse of ParseFilters — the
-// invariant `ParseFilters(Serialize(fs)) ≈ fs` holds for any valid input
+// bracket-notation wire format. This is the inverse of ParseFilters -- the
+// invariant `ParseFilters(Serialize(fs)) ~= fs` holds for any valid input
 // (modulo map iteration order, which callers should not rely on).
 //
 // SDK generators should call this (or mirror it exactly) so the wire contract

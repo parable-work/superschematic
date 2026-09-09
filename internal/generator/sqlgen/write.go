@@ -26,7 +26,8 @@ func generateFile(templateName, outputPath string, output *DDLOutput) error {
 }
 
 // searchTextExpr generates the COALESCE expression for the search_text
-// generated column: COALESCE(f1, ”) || ' ' || COALESCE(f2, ”) || ...
+// generated column: each field wrapped in COALESCE with an empty-string
+// fallback, joined by a single space.
 func searchTextExpr(fields []string) string {
 	if len(fields) == 0 {
 		return "''"

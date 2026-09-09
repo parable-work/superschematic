@@ -39,7 +39,7 @@ func DependencyServiceName(pkg string) string {
 // General and other non-DB dependencies expand to the full
 // catalog so consumers can keep importing enums/error codes from the API
 // types package. Scalars are skipped because they resolve through
-// superscalar. @source / foreign extends must not appear in schema.Imports —
+// superscalar. @source / foreign extends must not appear in schema.Imports --
 // those are compile-time only in the TypeScript loader.
 func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 	result := &resolvedImports{enumNames: map[string]bool{}}

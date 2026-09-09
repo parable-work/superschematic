@@ -48,7 +48,7 @@ def test_strict_reports_unknown_field():
 
 def test_marshal_preserves_schema_order():
     schema = _schema()
-    # Provide keys out of order — output JSON should follow schema field order.
+    # Provide keys out of order -- output JSON should follow schema field order.
     out = marshal_type(schema, "T", {"tags": ["x"], "b": "B", "a": "A"})
     decoded = json.loads(out.json)
     assert list(decoded.keys()) == ["a", "b", "tags"]

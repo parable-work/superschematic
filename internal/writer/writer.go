@@ -310,7 +310,7 @@ func sortedKeys[V any](m map[string]V) []string {
 
 // sourceLineageImports returns the cross-service imports implied by @source
 // targets on the schema's types. Same-service (or unqualified) targets are
-// omitted — they resolve locally without an imports block entry.
+// omitted -- they resolve locally without an imports block entry.
 func sourceLineageImports(schema *ir.Schema) []ir.Import {
 	byPkg := map[string]map[string]bool{}
 	for _, name := range sortedKeys(schema.Types) {

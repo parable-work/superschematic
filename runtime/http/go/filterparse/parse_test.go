@@ -436,9 +436,9 @@ func TestSerializeEmitsBracketNotation(t *testing.T) {
 }
 
 // TestSerializeParseRoundtrip is the primary cross-layer contract test.
-// It asserts that any valid []Filter survives Serialize → ParseFilters
+// It asserts that any valid []Filter survives Serialize -> ParseFilters
 // without data loss. A regression here means SDK consumers can silently
-// lose values on the wire — the class of bug that caused the Go SDK's
+// lose values on the wire -- the class of bug that caused the Go SDK's
 // in-operator data-loss blocker in an earlier review.
 func TestSerializeParseRoundtrip(t *testing.T) {
 	t.Parallel()
