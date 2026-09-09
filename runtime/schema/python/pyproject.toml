@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "superschematic-schema-runtime"
+version = "0.1.0"
+description = "Schema runtime for Python: JSON/YAML schema reader, parse, validate, mask, merge, and serialize over the superschematic IR, with superscalar supplying the scalar functions."
+requires-python = ">=3.9"
+dependencies = ["superscalar"]
+
+[project.optional-dependencies]
+yaml = [
+    "PyYAML>=6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "PyYAML>=6.0",
+]
+
+[tool.uv.sources]
+superscalar = { path = "../../../third_party/superscalar/bindings/python", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["superschematic_schema_runtime"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

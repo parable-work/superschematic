@@ -1,0 +1,8 @@
+{
+  "name": "broken-external-enum-initializer",
+  "kind": "General",
+  "dependencies": [
+    { "name": "fixture-enum-guardrails", "kind": "General" }
+  ],
+  "outputs": {}
+}

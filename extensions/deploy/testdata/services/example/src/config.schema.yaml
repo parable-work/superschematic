@@ -1,0 +1,22 @@
+# The @envVars type deploy.values.yaml maps onto. Every key in that file
+# must be one of these fields; DATABASE_URL and API_TOKEN have no default,
+# so every environment must set them.
+types:
+  ExampleConfig:
+    name: ExampleConfig
+    role: EmbeddedStruct
+    envVars: true
+    fields:
+      - name: DATABASE_URL
+        typeRef: { name: string }
+        required: true
+      - name: API_TOKEN
+        typeRef: { name: string }
+        required: true
+        secret: true
+      - name: PORT
+        typeRef: { name: number }
+        required: true
+        default: "8080"
+      - name: LOG_LEVEL
+        typeRef: { name: string }

@@ -1,0 +1,21 @@
+[package]
+name = "acme-fixture-api-sdk"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95.0"
+description = "Generated Rust SDK for fixture-api schema"
+license = "UNLICENSED"
+
+[dependencies]
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "multipart", "query", "native-tls"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+serde_path_to_error = "0.1"
+regex = "1.12"
+thiserror = "2.0"
+base64 = "0.22"
+aes-gcm = "0.10"
+rand = "0.8"
+rsa = { version = "0.9", features = ["pem"] }
+sha2 = "0.10.9"
+acme-fixture-api-types = { path = "../../../types/rust/fixture-api" }

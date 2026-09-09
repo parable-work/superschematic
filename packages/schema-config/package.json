@@ -1,0 +1,22 @@
+{
+  "name": "@superschematic/schema-config",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test src/**/*.test.ts",
+    "gen-json-schema": "ts-json-schema-generator --path src/index.ts --type SchemaConfigDocument --id superschematic://schema-config.schema.json --out ../../internal/loader/schemaconfig/schema-config.schema.json"
+  },
+  "devDependencies": {
+    "ts-json-schema-generator": "^2.4.0",
+    "typescript": "^5.9.3"
+  }
+}

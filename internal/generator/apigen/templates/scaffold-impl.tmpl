@@ -1,0 +1,139 @@
+// Implementation scaffold for {{ .SchemaName }} API
+// Endpoint: {{ .Endpoint.Method }} {{ .Endpoint.Path }}
+//
+// This file contains your implementation of the {{ .Endpoint.ShortImplName }} method.
+// It implements the {{ toGoName .Endpoint.Namespace }}Implementation interface.
+//
+// NOTE: This file was generated as a scaffold and will NOT be overwritten.
+// Feel free to modify it as needed for your business logic.
+
+package {{ toPackageName .Endpoint.Namespace }}
+
+import (
+	"context"
+	"errors"
+{{- if .Endpoint.Filterable }}
+
+	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
+{{- end }}
+{{- if .Endpoint.HasFileUpload }}
+
+	api "{{ .ModulePath }}"
+{{- end }}
+{{- if .Endpoint.NeedsTypesImport }}
+
+	types "{{ .TypesModule }}"
+{{- end }}
+)
+
+// {{ .Endpoint.ShortImplName }} implements the business logic for {{ .Endpoint.Method }} {{ .Endpoint.Path }}
+{{- if .Endpoint.Description }}
+//
+{{- range $line := splitLines .Endpoint.Description }}
+// {{ $line }}
+{{- end }}
+{{- end }}
+{{- if or .Endpoint.RequiresAuth .Endpoint.RequiredPerms .Endpoint.RequireOwnership }}
+//
+// Security:
+{{- if .Endpoint.RequiresAuth }}
+//   - Requires authentication (@auth)
+{{- end }}
+{{- if .Endpoint.RequireOwnership }}
+//   - Requires ownership verification (@requireOwnership)
+{{- end }}
+{{- if .Endpoint.RequiredPerms }}
+//   - Required permissions:
+{{- range .Endpoint.RequiredPerms }}
+//     * {{ . }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .Endpoint.PathParams }}
+//
+// Path Parameters:
+{{- range .Endpoint.PathParams }}
+//   - {{ .Name }} ({{ .GoType }}): {{ if .Required }}Required{{ else }}Optional{{ end }}
+{{- end }}
+{{- end }}
+{{- if .Endpoint.QueryParams }}
+//
+// Query Parameters:
+{{- range .Endpoint.QueryParams }}
+//   - {{ .Name }} ({{ if .Required }}{{ .GoType }}{{ else }}*{{ .GoType }}{{ end }}): {{ if .Required }}Required{{ else }}Optional{{ end }}{{ if .DefaultValue }} (default: {{ .DefaultValue }}){{ end }}
+{{- end }}
+{{- end }}
+{{- if .Endpoint.HasInput }}
+//
+// Input:
+//   - input (*types.{{ .Endpoint.InputType }}): Request payload
+{{- else if .Endpoint.ScalarArgs }}
+//
+// Arguments:
+{{- range .Endpoint.ScalarArgs }}
+//   - {{ .Name }} ({{ if .IsArray }}[]{{ end }}{{ .GoType }}): {{ if .Required }}Required{{ else }}Optional{{ end }}
+{{- end }}
+{{- end }}
+{{- if .Endpoint.HasFileUpload }}
+//
+// File Uploads:
+//   - files (map[string]*FileUploadData): Uploaded file data keyed by field name
+{{- range .Endpoint.FileUploadFields }}
+//     * {{ .Name }} ({{ .ScalarType }}{{ if not .Required }}, optional{{ end }}): max {{ .MaxSize }} bytes
+{{- end }}
+{{- end }}
+//
+// Returns:
+{{- if .Endpoint.OutputIsArray }}
+//   - []{{ .Endpoint.OutputGoType }}: Success response
+{{- else }}
+//   - *{{ .Endpoint.OutputGoType }}: Success response
+{{- end }}
+//   - error: Error if operation fails
+func (impl *Implementation) {{ .Endpoint.ShortImplName }}(ctx context.Context{{- range .Endpoint.PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .Endpoint.QueryParams }}, {{ .Name }} {{ if .Required }}{{ .GoType }}{{ else }}*{{ .GoType }}{{ end }}{{- end }}{{- if .Endpoint.Filterable }}, filters []filterparse.Filter{{- end }}{{- if .Endpoint.HasInput }}, input *types.{{ .Endpoint.InputType }}{{- else if .Endpoint.ScalarArgs }}{{- range .Endpoint.ScalarArgs }}, {{ .Name }} {{ if .IsArray }}[]{{ end }}{{ .GoType }}{{- end }}{{- end }}{{- if .Endpoint.HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}) ({{- if .Endpoint.OutputIsArray }}[]{{ .Endpoint.OutputGoType }}{{- else }}*{{ .Endpoint.OutputGoType }}{{- end }}, error) {
+	// TODO: Implement {{ .Endpoint.ShortImplName }}
+	//
+	// Example implementation patterns:
+	//
+{{- if .IsPublic }}
+	// 1. Get database connection from your Implementation struct:
+	//    db := impl.DB
+	//
+{{- end }}
+{{- if or .Endpoint.RequiresAuth .Endpoint.RequiredPerms }}
+	// 2. Get authenticated user from context (set by middleware):
+	//    // These helpers should be imported from your shared package
+	//    userID := GetUserID(ctx)
+	//    userName := GetUserName(ctx)
+	//    userRoles := GetUserRoles(ctx)
+	//
+{{- end }}
+{{- if .Endpoint.IsScopedEndpoint }}
+	// 3. This endpoint is scoped by a hoisted path parameter. The auth
+	//    provider's middleware resolves the scope into the request context.
+	//
+{{- end }}
+{{- if .Endpoint.HasInput }}
+	// 4. Access validated input fields:
+{{- range .Endpoint.InputTypeFields }}
+	//    input.{{ .GoName }}
+{{- end }}
+	//
+{{- end }}
+{{- if .Endpoint.HasFileUpload }}
+	// 5. Access uploaded files from the files map:
+{{- range .Endpoint.FileUploadFields }}
+	//    {{ .Name }}File := files["{{ .Name }}"]  // {{ if .Required }}Required{{ else }}Optional (may be nil){{ end }}
+	//    if {{ .Name }}File != nil {
+	//        // Read file content: data, err := {{ .Name }}File.ReadAllBytes()
+	//        // Access metadata: {{ .Name }}File.Filename, {{ .Name }}File.ContentType, {{ .Name }}File.Size
+	//    }
+{{- end }}
+	//
+{{- end }}
+	// 6. Return your response or an error:
+	//    return &{{ .Endpoint.OutputGoType }}{...}, nil
+	//    return nil, errors.New("something went wrong")
+
+	return nil, errors.New("{{ .Endpoint.ShortImplName }}: not implemented")
+}

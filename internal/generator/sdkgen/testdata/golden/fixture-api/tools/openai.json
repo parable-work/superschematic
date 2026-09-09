@@ -1,0 +1,101 @@
+{
+  "functions": [
+    {
+      "name": "session.currentTenant",
+      "description": "currentTenant endpoint (Requires authentication)",
+      "parameters": {
+        "type": "object",
+        "properties": {
+        }
+      }
+    },
+    {
+      "name": "tenant.customHandler",
+      "description": "customHandler endpoint",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "publicEncryptionKey": {
+            "type": "object",
+            "description": "Public key details used to encrypt this request payload"
+          }
+        }
+      }
+    },
+    {
+      "name": "tenant.listTenants",
+      "description": "listTenants endpoint (Requires authentication)",
+      "parameters": {
+        "type": "object",
+        "properties": {
+        }
+      }
+    },
+    {
+      "name": "tenant.createTenant",
+      "description": "createTenant endpoint (Requires authentication)",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "An objects name",
+            "minLength": 2,
+            "maxLength": 80
+          },
+          "publicEncryptionKey": {
+            "type": "object",
+            "description": "Public key details used to encrypt this request payload"
+          },
+          "slug": {
+            "type": "string",
+            "description": "A URL friendly version of a string",
+            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+            "minLength": 1,
+            "maxLength": 255
+          }
+        },
+        "required": ["name", "slug"]
+      }
+    },
+    {
+      "name": "tenant.getTenant",
+      "description": "Fetch one tenant by id. (Requires authentication)",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "id parameter",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "tenant.updateSecret",
+      "description": "updateSecret endpoint (Requires authentication)",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "id parameter",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+          },
+          "publicEncryptionKey": {
+            "type": "object",
+            "description": "Public key details used to encrypt this request payload"
+          },
+          "secret": {
+            "type": "string",
+            "description": "A string value"
+          }
+        },
+        "required": ["id", "secret"]
+      }
+    }
+  ]
+}
+

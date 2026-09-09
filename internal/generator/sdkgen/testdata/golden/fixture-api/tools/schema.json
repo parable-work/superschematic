@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureApiSDK Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-api API",
+  "tools": [
+    {
+      "name": "session.currentTenant",
+      "description": "currentTenant endpoint (Requires authentication)",
+      "namespace": "session",
+      "methodName": "currentTenant",
+      "httpMethod": "GET",
+      "httpPath": "/api/auth/me",
+      "requiresAuth": true,
+      "isScoped": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "TenantView object"
+      }
+    },
+    {
+      "name": "tenant.customHandler",
+      "description": "customHandler endpoint",
+      "namespace": "tenant",
+      "methodName": "customHandler",
+      "httpMethod": "POST",
+      "httpPath": "/api/tenant/custom-handler",
+      "requiresAuth": false,
+      "isScoped": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "publicEncryptionKey": {
+            "type": "object",
+            "description": "Public key details used to encrypt this request payload"
+          }
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "TenantView object"
+      }
+    },
+    {
+      "name": "tenant.listTenants",
+      "description": "listTenants endpoint (Requires authentication)",
+      "namespace": "tenant",
+      "methodName": "listTenants",
+      "httpMethod": "GET",
+      "httpPath": "/api/tenants",
+      "requiresAuth": true,
+      "isScoped": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+        }
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of TenantView",
+        "items": {
+          "type": "object",
+          "description": "TenantView object"
+        }
+      }
+    },
+    {
+      "name": "tenant.createTenant",
+      "description": "createTenant endpoint (Requires authentication)",
+      "namespace": "tenant",
+      "methodName": "createTenant",
+      "httpMethod": "POST",
+      "httpPath": "/api/tenants",
+      "requiresAuth": true,
+      "isScoped": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "An objects name",
+            "minLength": 2,
+            "maxLength": 80
+          },
+          "publicEncryptionKey": {
+            "type": "object",
+            "description": "Public key details used to encrypt this request payload"
+          },
+          "slug": {
+            "type": "string",
+            "description": "A URL friendly version of a string",
+            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+            "minLength": 1,
+            "maxLength": 255
+          }
+        },
+        "required": ["name", "slug"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "TenantView object"
+      }
+    },
+    {
+      "name": "tenant.getTenant",
+      "description": "Fetch one tenant by id. (Requires authentication)",
+      "namespace": "tenant",
+      "methodName": "getTenant",
+      "httpMethod": "GET",
+      "httpPath": "/api/tenants/{id}",
+      "requiresAuth": true,
+      "isScoped": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "id parameter",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+          }
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "TenantView object"
+      }
+    },
+    {
+      "name": "tenant.updateSecret",
+      "description": "updateSecret endpoint (Requires authentication)",
+      "namespace": "tenant",
+      "methodName": "updateSecret",
+      "httpMethod": "PATCH",
+      "httpPath": "/api/tenants/{id}",
+      "requiresAuth": true,
+      "isScoped": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "id parameter",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+          },
+          "publicEncryptionKey": {
+            "type": "object",
+            "description": "Public key details used to encrypt this request payload"
+          },
+          "secret": {
+            "type": "string",
+            "description": "A string value"
+          }
+        },
+        "required": ["id", "secret"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "TenantView object"
+      }
+    }
+  ]
+}
+

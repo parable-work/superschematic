@@ -1,0 +1,23 @@
+[package]
+name = "{{.CrateName}}"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95.0"
+description = "Generated Rust types for {{.SchemaName}} schema"
+license = "UNLICENSED"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+{{- if .UsesScalarLib}}
+{{- if .ScalarLibDepPath}}
+{{.Naming.ScalarRustCrate}} = { path = "{{.ScalarLibDepPath}}" }
+{{- else}}
+{{.Naming.ScalarRustCrate}} = "0.1.0"
+{{- end}}
+{{- end}}
+{{- range .ExternalCrateDeps}}
+{{.Name}} = { version = "{{.Version}}"{{if .Features}}, features = [{{formatFeatures .Features}}]{{end}} }
+{{- end}}
+{{- range .CargoDependencies}}
+{{.Name}} = { path = "{{.RelativePath}}" }
+{{- end}}

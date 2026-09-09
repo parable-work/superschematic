@@ -1,0 +1,58 @@
+# Widget catalog schema, exercising comment metadata on every node position.
+name: fixture-comments
+kind: API
+imports:
+  - package: "@schemas/web-db"
+    types: [Tenant]
+scalars:
+  # Canonical widget identifier scalar.
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+types:
+  # A catalog widget.
+  Widget:
+    name: Widget
+    role: EmbeddedStruct
+    fields:
+      # Primary identifier.
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      # Owning tenant reference.
+      - name: tenant
+        typeRef: { name: Tenant }
+        required: true
+      # Free-form labels.
+      - name: labels
+        typeRef: { name: string, isArray: true }
+enums:
+  # Lifecycle states for widgets.
+  WidgetStatus:
+    name: WidgetStatus
+    values:
+      # Visible in the catalog.
+      - name: Active
+        serializedAs: active
+      # Hidden from the catalog.
+      - name: Retired
+        serializedAs: retired
+unions:
+  # Anything a catalog entry can point at.
+  CatalogEntry:
+    name: CatalogEntry
+    types: [Widget]
+operationSets:
+  # Read operations for widgets.
+  - name: WidgetQueries
+    operations:
+      # Fetch one widget by id.
+      - name: getWidget
+        typeRef: { name: Widget }
+        required: true
+        httpMethod: GET
+        arguments:
+          # The widget identifier.
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true

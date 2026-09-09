@@ -1,0 +1,63 @@
+-- Drop statements for schema: {{ .SchemaName }}
+-- This file is auto-generated. Do not edit manually.
+-- WARNING: This will drop all tables and data!
+
+-- Drop indexes
+{{- range $table := .Tables | reverse }}
+{{- if $table.Indexes }}
+{{- range $idx := $table.Indexes }}
+DROP INDEX IF EXISTS {{ $idx.Name }} CASCADE;
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .HistoryTables }}
+
+-- Drop history capture triggers and functions
+{{- range $history := .HistoryTables | reverseHistoryTables }}
+DROP TRIGGER IF EXISTS {{ $history.WriteTriggerName }} ON {{ $history.QuotedSourceTableName }};
+DROP TRIGGER IF EXISTS {{ $history.DeleteTriggerName }} ON {{ $history.QuotedSourceTableName }};
+{{- if gt $history.RetentionDays 0 }}
+DROP FUNCTION IF EXISTS {{ $history.PruneFunctionName }}(INTEGER);
+{{- end }}
+DROP FUNCTION IF EXISTS {{ $history.FunctionName }}();
+{{- end }}
+
+-- Drop history indexes
+{{- range $history := .HistoryTables | reverseHistoryTables }}
+DROP INDEX IF EXISTS {{ $history.RecordedIndexName }} CASCADE;
+{{- if eq $history.PartitionBy "month" }}
+DROP INDEX IF EXISTS {{ $history.VersionIndexName }} CASCADE;
+{{- else }}
+DROP INDEX IF EXISTS {{ $history.UniqueIndexName }} CASCADE;
+{{- end }}
+{{- end }}
+
+-- Drop history tables
+{{- range $history := .HistoryTables | reverseHistoryTables }}
+{{- if eq $history.PartitionBy "month" }}
+DROP TABLE IF EXISTS {{ $history.QuotedDefaultPartition }} CASCADE;
+{{- end }}
+DROP TABLE IF EXISTS {{ $history.QuotedName }} CASCADE;
+{{- end }}
+{{- end }}
+
+-- Drop join tables first
+{{- if .JoinTables }}
+{{- range .JoinTables }}
+DROP TABLE IF EXISTS {{ .QuotedName }} CASCADE;
+{{- end }}
+{{- end }}
+
+-- Drop tables in reverse order (to handle foreign key dependencies)
+{{- range $i := .Tables | reverse }}
+DROP TABLE IF EXISTS {{ $i.QuotedName }} CASCADE;
+{{- end }}
+
+{{- if .Extensions }}
+
+-- Note: Extensions are not dropped automatically
+-- To drop extensions, run:
+{{- range .Extensions }}
+-- DROP EXTENSION IF EXISTS {{ . }} CASCADE;
+{{- end }}
+{{- end }}

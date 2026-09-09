@@ -1,0 +1,18 @@
+module {{.ModulePath}}
+
+go 1.26.4
+
+require {{.TypesModule}} v0.0.0
+{{- if .HasFilterableEndpoints}}
+require {{ .Naming.HTTPRuntimeGoModule }} v0.0.0
+{{- end}}
+
+{{- if .TypesReplacePath}}
+replace {{.TypesModule}} => {{.TypesReplacePath}}
+{{- end}}
+{{- if and .HasFilterableEndpoints .HTTPRuntimeReplacePath}}
+replace {{ .Naming.HTTPRuntimeGoModule }} => {{ .HTTPRuntimeReplacePath }}
+{{- end}}
+{{- range .TypeModuleReplaces}}
+replace {{.Module}} => {{.RelPath}}
+{{- end}}

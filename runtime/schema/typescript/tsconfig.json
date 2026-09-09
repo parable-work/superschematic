@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "paths": {
+      "superscalar/validation": ["../../../third_party/superscalar/bindings/typescript/dist/validation.d.ts"],
+      "superscalar/scalars": ["../../../third_party/superscalar/bindings/typescript/dist/generated.d.ts"],
+      "superscalar/backend": ["../../../third_party/superscalar/bindings/typescript/dist/backend.d.ts"],
+      "@superschematic/schema-ir": ["../../../ir/typescript/index.d.ts"]
+    }
+  },
+  "comment": "The CJS pass pins superscalar subpaths to that package's CJS declarations: its exports map lists the dist/esm .d.ts under `types`, and moduleResolution node cannot read exports maps at all. The ESM pass (tsconfig.esm.json, moduleResolution bundler) goes through the exports map. At runtime both resolve through node_modules (scripts/link-local-deps.mjs here, the consumer's own install elsewhere).",
+  "include": ["src/**/*.ts"]
+}

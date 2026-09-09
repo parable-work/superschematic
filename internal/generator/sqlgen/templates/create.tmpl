@@ -1,0 +1,225 @@
+-- Generated PostgreSQL DDL for schema: {{ .SchemaName }}
+-- This file is auto-generated. Do not edit manually.
+
+{{- if .Extensions }}
+
+-- Enable required PostgreSQL extensions
+{{- range .Extensions }}
+{{- if eq . "pgcrypto" }}
+-- Note: pgcrypto is only needed for PostgreSQL < 13 (for gen_random_uuid)
+-- PostgreSQL 13+ has gen_random_uuid() built-in
+{{- end }}
+CREATE EXTENSION IF NOT EXISTS {{ . }};
+{{- end }}
+{{ end }}
+
+-- Create tables (without foreign key constraints)
+{{- range $table := .Tables }}
+
+CREATE TABLE {{ $table.QuotedName }} (
+{{- range $i, $col := $table.Columns }}{{ if $i }},{{ end }}
+  {{ $col.QuotedName }} {{ $col.Type }}{{ if $col.DefaultValue }} DEFAULT {{ $col.DefaultValue }}{{ end }}{{ if not $col.Nullable }} NOT NULL{{ end }}{{ if $col.IsPrimaryKey }} PRIMARY KEY{{ end }}
+{{- end }}
+{{- if $table.Unique }}{{ range $table.Unique }},
+  UNIQUE ({{ join . ", " }}){{ end }}
+{{- end }}
+);
+{{- if $table.SearchFields }}
+
+-- Add search_text generated column for trigram search
+ALTER TABLE {{ $table.QuotedName }} ADD COLUMN search_text TEXT GENERATED ALWAYS AS (
+  {{ searchTextExpr $table.SearchFields }}
+) STORED;
+{{- end }}
+
+COMMENT ON TABLE {{ $table.QuotedName }} IS '{{ if $table.Doc }}{{ replace $table.Doc "'" "''" }}{{ else }}Generated from schema type: {{ $table.OriginalName }}{{ end }}';
+{{- end }}
+{{- if .JoinTables }}
+
+-- Create join tables for many-to-many relationships
+{{- range $jt := .JoinTables }}
+
+CREATE TABLE {{ $jt.QuotedName }} (
+  {{ $jt.QuotedLeftColumn }} {{ $jt.LeftColumnType }} NOT NULL,
+  {{ $jt.QuotedRightColumn }} {{ $jt.RightColumnType }} NOT NULL,
+  PRIMARY KEY ({{ $jt.QuotedLeftColumn }}, {{ $jt.QuotedRightColumn }})
+);
+
+COMMENT ON TABLE {{ $jt.QuotedName }} IS 'Join table for {{ $jt.LeftTable }}.{{ $jt.OriginalField }}';
+{{- end }}
+{{- end }}
+{{- if .HistoryTables }}
+
+-- Create history tables for versioned entities
+{{- range $history := .HistoryTables }}
+
+CREATE TABLE {{ $history.QuotedName }} (
+  history_id UUID DEFAULT gen_random_uuid() NOT NULL{{ if ne $history.PartitionBy "month" }} PRIMARY KEY{{ end }},
+  {{ $history.QuotedKeyColumn }} {{ $history.KeyColumnType }} NOT NULL,
+  _version BIGINT NOT NULL,
+  operation TEXT NOT NULL,
+  data JSONB NOT NULL,
+  recorded_at TIMESTAMPTZ DEFAULT clock_timestamp() NOT NULL
+){{ if eq $history.PartitionBy "month" }} PARTITION BY RANGE (recorded_at){{ end }};
+{{ if eq $history.PartitionBy "month" }}
+CREATE TABLE {{ $history.QuotedDefaultPartition }} PARTITION OF {{ $history.QuotedName }} DEFAULT;
+{{ end -}}
+
+{{- if eq $history.PartitionBy "month" }}
+CREATE INDEX {{ $history.VersionIndexName }} ON {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version);
+{{- else }}
+CREATE UNIQUE INDEX {{ $history.UniqueIndexName }} ON {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version);
+{{- end }}
+CREATE INDEX {{ $history.RecordedIndexName }} ON {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, recorded_at);
+{{- if gt $history.RetentionDays 0 }}
+-- The prune function filters on recorded_at alone; the index above leads with
+-- the row key and cannot serve it, so retention would seq-scan the whole
+-- history table on every pass.
+CREATE INDEX {{ $history.RetentionIndexName }} ON {{ $history.QuotedName }} (recorded_at);
+{{- end }}
+
+COMMENT ON TABLE {{ $history.QuotedName }} IS 'Version history for {{ $history.SourceTableName }}';
+{{- end }}
+{{- end }}
+{{- if .HasUserTable }}
+
+-- Insert System User
+-- This is a special system user with a memorable UUID that can be used for
+-- system-generated records and bootstrapping the database
+INSERT INTO "user" (id, created_at, created_by, updated_at, updated_by, deleted_at, deleted_by, "name", email, timezone, locale)
+VALUES (
+  '{{ .SystemUserUUID }}',
+  CURRENT_TIMESTAMP,
+  '{{ .SystemUserUUID }}',
+  CURRENT_TIMESTAMP,
+  '{{ .SystemUserUUID }}',
+  NULL,
+  NULL,
+  '{{ .SystemUserName }}',
+  '{{ .SystemUserEmail }}',
+  NULL,
+  NULL
+)
+ON CONFLICT (id) DO NOTHING;
+
+{{- end }}
+
+-- Add foreign key constraints
+{{- range $table := .Tables }}
+{{- if $table.ForeignKeys }}
+{{- range $fk := $table.ForeignKeys }}
+
+ALTER TABLE {{ $table.QuotedName }}
+  ADD CONSTRAINT {{ $fk.ConstraintName }}
+  FOREIGN KEY ({{ $fk.QuotedColumn }})
+  REFERENCES {{ $fk.QuotedRefTable }}({{ $fk.QuotedRefColumn }})
+  ON DELETE {{ if $fk.OnDelete }}{{ $fk.OnDelete }}{{ else }}CASCADE{{ end }};
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .JoinTables }}
+
+-- Add foreign key constraints for join tables
+{{- range $jt := .JoinTables }}
+
+ALTER TABLE {{ $jt.QuotedName }}
+  ADD CONSTRAINT {{ $jt.LeftConstraintName }}
+  FOREIGN KEY ({{ $jt.QuotedLeftColumn }})
+  REFERENCES {{ $jt.QuotedLeftTable }}(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE {{ $jt.QuotedName }}
+  ADD CONSTRAINT {{ $jt.RightConstraintName }}
+  FOREIGN KEY ({{ $jt.QuotedRightColumn }})
+  REFERENCES {{ $jt.QuotedRightTable }}(id)
+  ON DELETE CASCADE;
+{{- end }}
+{{- end }}
+
+-- Create indexes
+{{- range $table := .Tables }}
+{{- if $table.Indexes }}
+{{- range $idx := $table.Indexes }}
+
+CREATE {{ if $idx.Unique }}UNIQUE {{ end }}INDEX {{ $idx.Name }} ON {{ $table.QuotedName }} USING {{ $idx.Type }} ({{ join $idx.Columns ", " }}){{ if $idx.Where }} WHERE {{ $idx.Where }}{{ end }};
+{{- end }}
+{{- end }}
+{{- if $table.SearchFields }}
+
+CREATE INDEX idx_{{ $table.Name }}_search_trgm ON {{ $table.QuotedName }} USING GIN (search_text gin_trgm_ops);
+{{- end }}
+{{- end }}
+{{- if .HistoryTables }}
+
+-- Create history capture functions and triggers
+{{- range $history := .HistoryTables }}
+
+CREATE OR REPLACE FUNCTION {{ $history.FunctionName }}() RETURNS trigger AS $$
+BEGIN
+  IF (TG_OP = 'DELETE') THEN
+    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
+    -- the unique history index holds and the latest history row for a deleted key
+    -- is the DELETE. The data payload is the pre-delete image.
+    INSERT INTO {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version, operation, data)
+    VALUES (OLD.{{ $history.QuotedKeyColumn }}, OLD._version + 1, 'DELETE', to_jsonb(OLD));
+    RETURN OLD;
+  END IF;
+  IF (TG_OP = 'UPDATE') THEN
+    NEW._version := OLD._version + 1;
+  END IF;
+  INSERT INTO {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version, operation, data)
+  VALUES (NEW.{{ $history.QuotedKeyColumn }}, NEW._version, TG_OP, to_jsonb(NEW));
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER {{ $history.WriteTriggerName }}
+  BEFORE INSERT OR UPDATE ON {{ $history.QuotedSourceTableName }}
+  FOR EACH ROW EXECUTE FUNCTION {{ $history.FunctionName }}();
+
+CREATE TRIGGER {{ $history.DeleteTriggerName }}
+  AFTER DELETE ON {{ $history.QuotedSourceTableName }}
+  FOR EACH ROW EXECUTE FUNCTION {{ $history.FunctionName }}();
+{{- if gt $history.RetentionDays 0 }}
+
+-- max_rows caps one call so a caller can drain a backlog in committed chunks
+-- instead of one unbounded DELETE; NULL means no cap. The retention filter uses
+-- now() (STABLE, folded once per statement and indexable) rather than
+-- clock_timestamp() (VOLATILE, re-evaluated per row).
+CREATE OR REPLACE FUNCTION {{ $history.PruneFunctionName }}(retention_days INTEGER DEFAULT {{ $history.RetentionDays }}, max_rows INTEGER DEFAULT NULL) RETURNS BIGINT AS $$
+DECLARE
+  deleted_count BIGINT;
+BEGIN
+  WITH candidates AS (
+    SELECT h.history_id
+    FROM {{ $history.QuotedName }} h
+    WHERE h.recorded_at < now() - make_interval(days => retention_days)
+      AND EXISTS (
+        SELECT 1
+        FROM {{ $history.QuotedName }} newer
+        WHERE newer.{{ $history.QuotedKeyColumn }} = h.{{ $history.QuotedKeyColumn }}
+          AND newer._version > h._version
+      )
+{{- range $pin := $history.PruneKeep }}
+      AND NOT EXISTS (
+        SELECT 1
+        FROM {{ $pin.QuotedTable }} {{ $pin.Alias }}
+        WHERE {{ $pin.Alias }}.{{ $pin.QuotedKeyColumn }} = h.{{ $history.QuotedKeyColumn }}
+          AND {{ $pin.Alias }}.{{ $pin.QuotedVersionColumn }} = h._version
+      )
+{{- end }}
+    LIMIT max_rows
+  ),
+  deleted AS (
+    DELETE FROM {{ $history.QuotedName }} h
+    USING candidates c
+    WHERE h.history_id = c.history_id
+    RETURNING 1
+  )
+  SELECT count(*) INTO deleted_count FROM deleted;
+  RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql;
+{{- end }}
+{{- end }}
+{{- end }}

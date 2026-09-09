@@ -1,0 +1,387 @@
+package namespaces
+
+import (
+	"context"
+{{- if .NeedsFmt}}
+	"fmt"
+{{- end}}
+{{- if .NeedsStrings}}
+	"strings"
+{{- end}}
+{{- if .NeedsURL}}
+	"net/url"
+{{- end}}
+{{- if .NeedsRegexp}}
+	"regexp"
+{{- end}}
+{{- if or .NeedsRuntime .NeedsTypes .NeedsFilterparse}}
+
+{{ if .NeedsFilterparse }}	"{{ .SDK.Naming.HTTPRuntimeGoModule }}/filterparse"
+{{ end -}}
+{{ if .NeedsRuntime }}	"{{.SDK.ModulePath}}/runtime"
+{{ end -}}
+{{ if .NeedsTypes }}	types "{{.SDK.TypesModule}}"
+{{ end -}}
+{{- end}}
+)
+
+// {{.Namespace.StructName}} contains API methods for the {{.Namespace.Name}} namespace.
+{{- if .Namespace.Endpoints}}
+//
+// Endpoints:
+{{- range .Namespace.Endpoints}}
+// - {{.MethodName}}: {{docLine .Description (printf "%s endpoint." .MethodName)}}{{if .RequiresAuth}} Requires authentication.{{end}}
+{{- end}}
+{{- end}}
+type {{.Namespace.StructName}} struct {
+	client jsonClient
+	{{- if .Namespace.IsScopedNS}}
+	{{.Namespace.ScopeFieldName}} string
+	{{- end}}
+}
+
+// New{{.Namespace.StructName}} creates a {{.Namespace.StructName}}.
+{{- if .Namespace.IsScopedNS}}
+// The {{.Namespace.ScopeFieldName}} parameter scopes every request the namespace makes.
+{{- end}}
+func New{{.Namespace.StructName}}(
+	client jsonClient,
+	{{- if .Namespace.IsScopedNS}}
+	{{.Namespace.ScopeFieldName}} string,
+	{{- end}}
+) *{{.Namespace.StructName}} {
+	return &{{.Namespace.StructName}}{
+		client: client,
+		{{- if .Namespace.IsScopedNS}}
+		{{.Namespace.ScopeFieldName}}: {{.Namespace.ScopeFieldName}},
+		{{- end}}
+	}
+}
+
+{{- range .Namespace.Endpoints}}
+{{- if .HasScalarArgs}}
+type {{.ScalarInputStructName}} struct {
+	{{- range .ScalarArgs}}
+	{{- if .IsArray}}
+	{{- if not .Required}}
+	{{.GoName}} {{.GoType}} `json:"{{.Name}},omitempty"`
+	{{- else}}
+	{{.GoName}} {{.GoType}} `json:"{{.Name}}"`
+	{{- end}}
+	{{- else if .Pointer}}
+	{{.GoName}} *{{.GoType}} `json:"{{.Name}},omitempty"`
+	{{- else}}
+	{{.GoName}} {{.GoType}} `json:"{{.Name}}"`
+	{{- end}}
+	{{- end}}
+}
+
+{{- end}}
+{{- if .HasQueryParams}}
+type {{.QueryStructName}} struct {
+	{{- range .QueryParams}}
+	{{- if .Pointer}}
+	{{.GoName}} *{{.GoType}} `json:"{{.Name}},omitempty"`
+	{{- else}}
+	{{.GoName}} {{.GoType}} `json:"{{.Name}}"`
+	{{- end}}
+	{{- end}}
+}
+
+{{- end}}
+{{- if .HasFileUpload}}
+type {{.FilesStructName}} struct {
+	{{- range .FileUploadFields}}
+	{{.GoName}} runtime.UploadFile
+	{{- end}}
+}
+
+{{- end}}
+{{$endpoint := .}}
+// {{.MethodName}} {{docLine .Description (printf "calls the %s %s endpoint." .HTTPMethod .PathFormat)}}
+{{- if .RequiresAuth}}
+// Requires authentication.
+{{- end}}
+func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
+	ctx context.Context,
+	{{- range .PathParams}}
+	{{.GoName}} {{.GoType}},
+	{{- end}}
+	{{- if .HasInput}}
+	input {{.InputType}},
+	{{- else if .HasScalarArgs}}
+	input {{.ScalarInputStructName}},
+	{{- end}}
+	{{- if .HasFileUpload}}
+	files {{.FilesStructName}},
+	{{- end}}
+	{{- if .HasQueryParams}}
+	query *{{.QueryStructName}},
+	{{- end}}
+	{{- if .Filterable}}
+	filters []filterparse.Filter,
+	{{- end}}
+	{{- if .HasEncryptedBody}}
+	options *runtime.EncryptedRequestOptions,
+	{{- end}}
+) ({{.OutputGoType}}, error) {
+	{{- if .PathArgs}}
+	path := fmt.Sprintf("{{.PathFormat}}", {{join .PathArgs ", "}})
+	{{- else}}
+	path := "{{.PathFormat}}"
+	{{- end}}
+
+	{{- if .HasQueryParams}}
+	{{- if hasQueryParamValidation .QueryParams}}
+	queryParamValidationErrors := types.NewValidationErrors()
+	if query != nil {
+		{{- range .QueryParams}}
+		{{- if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern}}
+		{{- if .Pointer}}
+		if query.{{.GoName}} != nil {
+			queryParamValue := *query.{{.GoName}}
+			queryParamFieldErrors := []types.ValidationError{}
+			{{- if .ValidateMin}}
+			if queryParamValue < {{.ValidateMin}} {
+				queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "min", Message: "{{.Name}} must be at least {{.ValidateMin}}"})
+			}
+			{{- end}}
+			{{- if .ValidateMax}}
+			if queryParamValue > {{.ValidateMax}} {
+				queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "max", Message: "{{.Name}} must be at most {{.ValidateMax}}"})
+			}
+			{{- end}}
+			{{- if .ValidateMinLength}}
+			if len(queryParamValue) < {{.ValidateMinLength}} {
+				queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "minLength", Message: "{{.Name}} must be at least {{.ValidateMinLength}} characters"})
+			}
+			{{- end}}
+			{{- if .ValidateMaxLength}}
+			if len(queryParamValue) > {{.ValidateMaxLength}} {
+				queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "maxLength", Message: "{{.Name}} must be at most {{.ValidateMaxLength}} characters"})
+			}
+			{{- end}}
+			{{- if .ValidatePattern}}
+			queryParamMatchesPattern, queryParamPatternErr := regexp.MatchString("{{escapeGoString .ValidatePattern}}", queryParamValue)
+			if queryParamPatternErr != nil || !queryParamMatchesPattern {
+				queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "pattern", Message: "{{.Name}} has an invalid format"})
+			}
+			{{- end}}
+			if len(queryParamFieldErrors) > 0 {
+				queryParamValidationErrors.SetFieldErrors("{{.Name}}", queryParamFieldErrors)
+			}
+		}
+		{{- else}}
+		queryParamValue := query.{{.GoName}}
+		queryParamFieldErrors := []types.ValidationError{}
+		{{- if .ValidateMin}}
+		if queryParamValue < {{.ValidateMin}} {
+			queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "min", Message: "{{.Name}} must be at least {{.ValidateMin}}"})
+		}
+		{{- end}}
+		{{- if .ValidateMax}}
+		if queryParamValue > {{.ValidateMax}} {
+			queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "max", Message: "{{.Name}} must be at most {{.ValidateMax}}"})
+		}
+		{{- end}}
+		{{- if .ValidateMinLength}}
+		if len(queryParamValue) < {{.ValidateMinLength}} {
+			queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "minLength", Message: "{{.Name}} must be at least {{.ValidateMinLength}} characters"})
+		}
+		{{- end}}
+		{{- if .ValidateMaxLength}}
+		if len(queryParamValue) > {{.ValidateMaxLength}} {
+			queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "maxLength", Message: "{{.Name}} must be at most {{.ValidateMaxLength}} characters"})
+		}
+		{{- end}}
+		{{- if .ValidatePattern}}
+		queryParamMatchesPattern, queryParamPatternErr := regexp.MatchString("{{escapeGoString .ValidatePattern}}", queryParamValue)
+		if queryParamPatternErr != nil || !queryParamMatchesPattern {
+			queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "pattern", Message: "{{.Name}} has an invalid format"})
+		}
+		{{- end}}
+		if len(queryParamFieldErrors) > 0 {
+			queryParamValidationErrors.SetFieldErrors("{{.Name}}", queryParamFieldErrors)
+		}
+		{{- end}}
+		{{- end}}
+		{{- end}}
+	}
+	if queryParamValidationErrors.HasErrors() {
+		var zero {{.OutputGoType}}
+		return zero, NewValidationError(queryParamValidationErrors)
+	}
+	{{- end}}
+	{{- end}}
+
+	{{- if or .HasQueryParams .Filterable}}
+	var queryValues url.Values
+	{{- if .HasQueryParams}}
+	if query != nil {
+		queryValues = url.Values{}
+		{{- range .QueryParams}}
+		{{- if .Pointer}}
+		if query.{{.GoName}} != nil {
+			runtime.AddQueryParam(queryValues, "{{.Name}}", *query.{{.GoName}})
+		}
+		{{- else}}
+		runtime.AddQueryParam(queryValues, "{{.Name}}", query.{{.GoName}})
+		{{- end}}
+		{{- end}}
+	}
+	{{- end}}
+	{{- if .Filterable}}
+	// Delegate to filterparse.Serialize so the wire contract lives in one
+	// place (the runtime package). Merge into any existing query params.
+	if serialized := filterparse.Serialize(filters); len(serialized) > 0 {
+		if queryValues == nil {
+			queryValues = url.Values{}
+		}
+		for k, v := range serialized {
+			queryValues[k] = v
+		}
+	}
+	{{- end}}
+	{{- end}}
+
+	{{- if or .HasInput .HasScalarArgs}}
+	validationErrors := types.NewValidationErrors()
+	{{- if .HasInput}}
+	appendInputValidationErrors(validationErrors, any(&input))
+	{{- end}}
+	{{- if .HasScalarArgs}}
+	{{- range .ScalarArgs}}
+	{{- if .IsArray}}
+	{{- if .Required}}
+	if len(input.{{.GoName}}) == 0 {
+		validationErrors.SetFieldErrors("{{.Name}}", []types.ValidationError{{"{"}}{Validator: "required", Message: "{{.Name}} is required"}{{"}"}})
+	}
+	{{- end}}
+	for _, elem := range input.{{.GoName}} {
+		appendRequiredScalarValidationErrors(validationErrors, "{{.Name}}", any(elem))
+	}
+	{{- else if .Pointer}}
+	if input.{{.GoName}} != nil {
+		appendScalarValidationErrors(validationErrors, "{{.Name}}", any(*input.{{.GoName}}))
+	}
+	{{- else if .Required}}
+	appendRequiredScalarValidationErrors(validationErrors, "{{.Name}}", any(input.{{.GoName}}))
+	{{- else}}
+	appendScalarValidationErrors(validationErrors, "{{.Name}}", any(input.{{.GoName}}))
+	{{- end}}
+	{{- end}}
+	{{- end}}
+	if validationErrors.HasErrors() {
+		var zero {{.OutputGoType}}
+		return zero, NewValidationError(validationErrors)
+	}
+	{{- end}}
+
+	var requestBody any
+	{{- if .HasFileUpload}}
+	payloadData, err := runtime.StripFieldsForMultipart(input, []string{
+		{{- range .FileUploadFields}}
+		"{{.Name}}",
+		{{- end}}
+	})
+	if err != nil {
+		var zero {{.OutputGoType}}
+		return zero, err
+	}
+
+	filesMap := map[string]runtime.UploadFile{}
+	{{- range .FileUploadFields}}
+	{{- if .Required}}
+	if len(files.{{.GoName}}.Reader) == 0 {
+		var zero {{$endpoint.OutputGoType}}
+		return zero, fmt.Errorf("{{.Name}} file is required")
+	}
+	{{- end}}
+	if len(files.{{.GoName}}.Reader) > 0 {
+		filesMap["{{.Name}}"] = files.{{.GoName}}
+	}
+	{{- end}}
+
+	requestBody = runtime.MultipartBody{
+		JSONData: payloadData,
+		Files:    filesMap,
+	}
+	{{- else if .HasEncryptedBody}}
+	payloadToEncrypt := map[string]any{}
+	{{- if or .HasInput .HasScalarArgs}}
+	payloadToEncrypt = map[string]any{
+		"input": input,
+	}
+	{{- end}}
+	var publicEncryptionKey *runtime.PublicEncryptionKey
+	if options != nil {
+		publicEncryptionKey = options.PublicEncryptionKey
+	}
+	encryptedPayload, err := n.client.EncryptRequestPayload(payloadToEncrypt, publicEncryptionKey)
+	if err != nil {
+		var zero {{.OutputGoType}}
+		return zero, err
+	}
+	requestBody = encryptedPayload
+	{{- else if or .HasInput .HasScalarArgs}}
+	{{- if and (not .HasInput) (eq .HTTPMethod "GET") .HasScalarArgs}}
+	// GET endpoints: scalar args go as query parameters, not request body.
+	{{- if not .HasQueryParams}}
+	queryValues := url.Values{}
+	{{- end}}
+	{{- range .ScalarArgs}}
+	{{- if .IsArray}}
+	// comma-separated format for array query params
+	if len(input.{{.GoName}}) > 0 {
+		strs := make([]string, len(input.{{.GoName}}))
+		for i, v := range input.{{.GoName}} {
+			strs[i] = fmt.Sprintf("%v", v)
+		}
+		queryValues.Set("{{.Name}}", strings.Join(strs, ","))
+	}
+	{{- else if .Pointer}}
+	if input.{{.GoName}} != nil {
+		runtime.AddQueryParam(queryValues, "{{.Name}}", *input.{{.GoName}})
+	}
+	{{- else}}
+	runtime.AddQueryParam(queryValues, "{{.Name}}", input.{{.GoName}})
+	{{- end}}
+	{{- end}}
+	{{- else}}
+	requestBody = input
+	{{- end}}
+	{{- end}}
+
+	{{- if .IsUnionOutput}}
+	var out {{.OutputUnionWrapperGoType}}
+	{{- else}}
+	var out {{.OutputGoType}}
+	{{- end}}
+	if err := n.client.DoJSON(
+		ctx,
+		"{{.HTTPMethod}}",
+		path,
+		{{- if or .HasQueryParams (and (not .HasInput) (eq .HTTPMethod "GET") .HasScalarArgs) .Filterable}}
+		queryValues,
+		{{- else}}
+		nil,
+		{{- end}}
+		requestBody,
+		&out,
+	); err != nil {
+		var zero {{.OutputGoType}}
+		return zero, err
+	}
+
+	{{- if .IsUnionOutput}}
+	if out.Value == nil {
+		var zero {{.OutputGoType}}
+		return zero, fmt.Errorf("decode {{.MethodName}} response: {{.OutputType}} union value is nil")
+	}
+	return out.Value, nil
+	{{- else}}
+	return out, nil
+	{{- end}}
+}
+
+{{- end}}

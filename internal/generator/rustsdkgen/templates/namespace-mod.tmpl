@@ -1,0 +1,7 @@
+{{- range .Namespaces}}
+pub mod {{.ModuleName}};
+{{- end}}
+
+{{- range .Namespaces}}
+pub use {{.ModuleName}}::{{.StructName}};
+{{- end}}

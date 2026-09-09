@@ -1,0 +1,22 @@
+name: fleet
+kind: Platform
+types:
+  Core:
+    name: Core
+    role: EmbeddedStruct
+    extensions:
+      platform:
+        platform:
+          description: Customer-facing API and its database
+          visibility: public
+          services: [api, db]
+          shared:
+            database: [api, db]
+  Observability:
+    name: Observability
+    role: EmbeddedStruct
+    extensions:
+      platform:
+        platform:
+          visibility: internal
+          services: [metrics]

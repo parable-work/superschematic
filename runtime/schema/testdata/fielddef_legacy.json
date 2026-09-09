@@ -1,0 +1,24 @@
+{
+  "$schema": "https://superschematic.dev/schemas/schema.json",
+  "x-rootType": "ConnectorAuthInput",
+  "definitions": {
+    "ConnectorAuthInput": {
+      "type": "object",
+      "x-kind": "input",
+      "required": ["client_domain"],
+      "properties": {
+        "client_domain": {
+          "type": "string",
+          "title": "My Domain name",
+          "description": "Salesforce My Domain name",
+          "x-placeholder": "acme",
+          "x-validatePattern": "^[A-Za-z0-9][A-Za-z0-9-]*$"
+        },
+        "clientSecret": {
+          "type": "string",
+          "x-secret": true
+        }
+      }
+    }
+  }
+}

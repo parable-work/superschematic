@@ -1,0 +1,110 @@
+# {{ .SchemaName }} Implementation Scaffolds
+
+This directory contains implementation scaffolds for the `{{ .SchemaName }}` API.
+
+These scaffolds implement the interfaces defined in the generated API module at:
+`{{ .ModulePath }}`
+
+## Directory Structure
+
+```
+{{- range .Namespaces }}
+{{ . }}/
+├── implementation.go    # Implementation struct with dependencies
+{{- $namespace := . }}
+{{- range $.Endpoints }}
+{{- if eq .Namespace $namespace }}
+├── {{ toSnakeCase .ShortImplName }}.go    # {{ .ShortImplName }}() method
+{{- end }}
+{{- end }}
+{{- end }}
+```
+
+## Usage
+
+### 1. Import the generated API module
+
+```go
+import (
+    api "{{ .ModulePath }}"
+{{- if .IsPublic }}
+    orm "{{ .ORMModule }}"
+{{- end }}
+    types "{{ .TypesModule }}"
+
+    // Import your implementations (scaffolds live in internal/route-impl/<namespace>)
+{{- range .Namespaces }}
+    "your-project/internal/route-impl/{{ . }}"
+{{- end }}
+)
+```
+
+### 2. Create implementation instances
+
+```go
+{{- range .Namespaces }}
+{{- if $.IsPublic }}
+{{ . }}Impl := {{ . }}.NewImplementation(db, logger)
+{{- else }}
+{{ . }}Impl := {{ . }}.NewImplementation(logger)
+{{- end }}
+{{- end }}
+```
+
+### 3. Register routes with the chi router
+
+```go
+r := chi.NewRouter()
+
+err := api.RegisterRoutes(r, api.Config{
+{{- if .IsPublic }}
+    DB:             db,
+{{- end }}
+    Logger:         logger,
+    Implementations: api.Implementations{
+{{- range .Namespaces }}
+        {{ toGoName . }}: {{ . }}Impl,
+{{- end }}
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+## Implementing Endpoints
+
+Each endpoint method is stubbed with a `not implemented` error. To implement an endpoint:
+
+1. Open the corresponding file (e.g., `auth/login.go`)
+2. Replace the stub implementation with your business logic
+3. Use the dependencies from the Implementation struct
+
+## Namespace Interfaces
+
+Each namespace implements an interface defined in the generated API module:
+
+{{- range .Namespaces }}
+
+### {{ toGoName . }}Implementation
+
+```go
+type {{ toGoName . }}Implementation interface {
+{{- $namespace := . }}
+{{- range $.Endpoints }}
+{{- if eq .Namespace $namespace }}
+    {{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .QueryParams }}, {{ .Name }} {{ if .Required }}{{ .GoType }}{{ else }}*{{ .GoType }}{{ end }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ if .IsArray }}[]{{ end }}{{ .GoType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}) ({{- if .OutputIsArray }}[]{{ .OutputGoType }}{{- else }}*{{ .OutputGoType }}{{- end }}, error)
+{{- end }}
+{{- end }}
+}
+```
+{{- end }}
+
+## Notes
+
+- Scaffolds are written to the path in `scaffoldsOutputDir` (e.g. `services/web-api/internal/route-impl`)
+- These scaffold files are generated once and never overwritten
+- Feel free to modify, refactor, and reorganize as needed
+- Add tests alongside your implementations (e.g., `auth/login_test.go`)
+- The generated API module handles HTTP parsing, validation, and routing
+- Your implementations focus purely on business logic

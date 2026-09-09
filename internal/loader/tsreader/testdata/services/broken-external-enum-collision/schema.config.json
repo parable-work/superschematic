@@ -1,0 +1,9 @@
+{
+  "name": "broken-external-enum-collision",
+  "kind": "General",
+  "dependencies": [
+    { "name": "fixture-db", "kind": "DB" },
+    { "name": "fixture-enum-guardrails", "kind": "General" }
+  ],
+  "outputs": {}
+}

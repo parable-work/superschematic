@@ -1,0 +1,66 @@
+// Implementation scaffold for {{ .Namespace }} endpoints
+// Schema: {{ .SchemaName }}
+//
+// This file defines the Implementation struct for the {{ .Namespace }} namespace.
+// It implements the {{ toGoName .Namespace }}Implementation interface from the generated API module.
+//
+// NOTE: This file was generated as a scaffold and will NOT be overwritten.
+// Feel free to add dependencies and modify as needed.
+
+package {{ toPackageName .Namespace }}
+
+{{- if .IsPublic }}
+
+import (
+	orm "{{ .ORMModule }}"
+	"go.uber.org/zap"
+)
+{{- else }}
+
+import (
+	"go.uber.org/zap"
+)
+{{- end }}
+
+// Implementation provides the business logic for {{ .Namespace }} endpoints.
+// This struct implements the {{ toGoName .Namespace }}Implementation interface.
+//
+// Add any dependencies here that your implementation needs:
+//   - Database connections
+//   - External service clients
+//   - Configuration
+//   - Caches
+type Implementation struct {
+{{- if .IsPublic }}
+	// DB is the database interface for queries
+	DB orm.DatabaseInterface
+{{- end }}
+
+	// Logger is the structured logger for this namespace
+	Logger *zap.Logger
+
+	// Add your own dependencies here:
+	// Cache    *cache.Client
+	// APIClient *external.Client
+}
+
+{{- if .IsPublic }}
+
+// NewImplementation creates a new Implementation with the given dependencies.
+// Use this constructor to ensure all required dependencies are provided.
+func NewImplementation(db orm.DatabaseInterface, logger *zap.Logger) *Implementation {
+	return &Implementation{
+		DB:     db,
+		Logger: logger.Named("{{ .Namespace }}"),
+	}
+}
+{{- else }}
+
+// NewImplementation creates a new Implementation with the given dependencies.
+// Use this constructor to ensure all required dependencies are provided.
+func NewImplementation(logger *zap.Logger) *Implementation {
+	return &Implementation{
+		Logger: logger.Named("{{ .Namespace }}"),
+	}
+}
+{{- end }}

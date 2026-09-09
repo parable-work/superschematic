@@ -1,0 +1,17 @@
+# Generated Rust Types: {{.SchemaName}}
+
+This crate contains Rust types generated from the `{{.SchemaName}}` schema.
+
+## Generated Files
+
+- `Cargo.toml` - crate manifest
+- `src/lib.rs` - module exports
+{{if gt (len .Scalars) 0}}- `src/scalars.rs` - scalar aliases{{end}}
+{{if gt (len .Enums) 0}}- `src/enums.rs` - enum definitions{{end}}
+{{if or (gt (len .Types) 0) (gt (len .ImportedTypes) 0)}}- `src/types.rs` - object/input structs and imported type aliases{{end}}
+{{if gt (len .Unions) 0}}- `src/unions.rs` - union enums{{end}}
+
+## Notes
+
+- This crate is generated. Do not edit manually.
+- Re-generate with `superschematic build` for the target schema.

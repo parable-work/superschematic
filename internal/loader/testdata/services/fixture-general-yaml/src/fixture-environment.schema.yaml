@@ -1,0 +1,8 @@
+# Runtime environment classification.
+name: FixtureEnvironment
+kind: Enum
+values:
+  - name: Development
+    serializedAs: development
+  - name: Production
+    serializedAs: production

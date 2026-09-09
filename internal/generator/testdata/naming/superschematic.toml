@@ -1,0 +1,23 @@
+# Fixture naming for TestRunWithFixtureNamingEmitsFixtureNames. Every
+# coordinate differs from the defaults so a generated manifest that still
+# carries a default proves a lookup was skipped. auth_provider is a selector,
+# not a coordinate, and the core registers only "session".
+go_module_root = "example.com/acme/schemas"
+npm_scope = "@acme"
+python_types_module_prefix = "acme_types_"
+python_sdk_module_prefix = "acme_"
+python_sdk_module_suffix = "_client"
+rust_crate_prefix = "acme-"
+scalar_go_module = "example.com/acme/scalars"
+scalar_npm_package = "@acme/scalars"
+scalar_pypi_dist = "acme-scalars"
+scalar_python_module = "acme_scalars"
+scalar_rust_crate = "acme-scalars-core"
+schema_ir_go_module = "example.com/acme/schema-ir"
+schema_runtime_go_module = "example.com/acme/schema-runtime"
+http_runtime_go_module = "example.com/acme/http-runtime"
+http_runtime_rust_crate = "acme-http-runtime"
+ptr_go_module = "example.com/acme/ptr"
+schema_language = "Acme Schema"
+package_author = "Acme Corp"
+meta_schema_url_prefix = "acme://"

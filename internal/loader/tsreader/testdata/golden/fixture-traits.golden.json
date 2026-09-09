@@ -1,0 +1,119 @@
+{
+  "name": "fixture-traits",
+  "kind": "General",
+  "types": {
+    "Expirable": {
+      "name": "Expirable",
+      "owner": "src/tags.schema.ts",
+      "comment": "Field-bearing trait: contributes fields to every implementing type via\nthe Trait\u003cT\u003e heritage carrier.",
+      "role": "Trait",
+      "isTrait": true,
+      "fields": [
+        {
+          "name": "expiresAt",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        }
+      ]
+    },
+    "Notification": {
+      "name": "Notification",
+      "owner": "src/tags.schema.ts",
+      "comment": "A notification routed through a tagging channel.",
+      "role": "EmbeddedStruct",
+      "implements": [
+        {
+          "name": "Tagged",
+          "configArgs": {
+            "channel": "email",
+            "priority": 2
+          }
+        },
+        {
+          "name": "Reviewed"
+        },
+        {
+          "name": "Expirable"
+        }
+      ],
+      "rawHeritage": {
+        "implements": [
+          "Tagged\u003c{ channel: \"email\"; priority: 2 }\u003e",
+          "Reviewed",
+          "Trait\u003cExpirable\u003e"
+        ]
+      },
+      "fields": [
+        {
+          "name": "expiresAt",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "inheritedFrom": "Expirable"
+        },
+        {
+          "name": "subject",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        }
+      ]
+    },
+    "Reviewed": {
+      "name": "Reviewed",
+      "owner": "src/tags.schema.ts",
+      "comment": "Marker trait carrying no configuration.",
+      "role": "Trait",
+      "isTrait": true
+    },
+    "TagConfig": {
+      "name": "TagConfig",
+      "owner": "src/tags.schema.ts",
+      "comment": "Configuration accepted by the Tagged trait.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "channel",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "priority",
+          "typeRef": {
+            "name": "number"
+          }
+        }
+      ]
+    },
+    "Tagged": {
+      "name": "Tagged",
+      "owner": "src/tags.schema.ts",
+      "comment": "Tags implementing types with routing configuration.",
+      "role": "Trait",
+      "isTrait": true,
+      "traitConfig": {
+        "fields": [
+          {
+            "name": "channel",
+            "typeRef": {
+              "name": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "priority",
+            "typeRef": {
+              "name": "number"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

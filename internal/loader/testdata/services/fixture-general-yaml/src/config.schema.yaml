@@ -1,0 +1,52 @@
+scalars:
+  Network.Url:
+    name: Network.Url
+    languagePrimitive: string
+types:
+  FixtureConfig:
+    name: FixtureConfig
+    role: EmbeddedStruct
+    envVars: true
+    fields:
+      - name: DATABASE_URL
+        typeRef: { name: Network.Url }
+        required: true
+      - name: JWT_SECRET
+        typeRef: { name: string }
+        required: true
+        secret: true
+      - name: PORT
+        typeRef: { name: number }
+        required: true
+        default: "8080"
+      - name: ENVIRONMENT
+        typeRef: { name: FixtureEnvironment }
+        required: true
+        default: development
+  RetryPolicy:
+    name: RetryPolicy
+    role: EmbeddedStruct
+    fields:
+      - name: maxAttempts
+        typeRef: { name: number }
+        required: true
+      - name: backoffSeconds
+        typeRef: { name: number }
+  FixtureFilter:
+    name: FixtureFilter
+    comment: |-
+      JSON-persisted filter: exercises optional-list constraint gating.
+      Absent/null must skip listMin; an explicit [] must fail it (decode must
+      not normalize an absent optional list into an empty non-nil slice).
+    role: EmbeddedStruct
+    jsonField: true
+    fields:
+      - name: kind
+        typeRef: { name: string }
+        required: true
+        validateMaxLength: 32
+      - name: values
+        typeRef: { name: string, isArray: true }
+        validateMaxLength: 64
+        validateListMin: 1
+        validateListMax: 10

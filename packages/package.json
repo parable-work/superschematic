@@ -1,0 +1,17 @@
+{
+  "name": "@superschematic/packages",
+  "private": true,
+  "workspaces": [
+    "api",
+    "db",
+    "schema",
+    "schema-config"
+  ],
+  "scripts": {
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

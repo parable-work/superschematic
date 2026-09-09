@@ -1,0 +1,52 @@
+{
+  "functions": [
+{{- range $i, $tool := .Tools}}
+{{- if $i}},{{end}}
+    {
+      "name": "{{$tool.Name}}",
+      "description": "{{escapeJSON $tool.Description}}",
+      "parameters": {
+        "type": "object",
+        "properties": {
+{{- $first := true}}
+{{- range $propName, $prop := $tool.Parameters.Properties}}
+{{- if not $first}},{{end}}
+{{- $first = false}}
+          "{{$propName}}": {
+            "type": "{{$prop.Type}}"
+{{- if $prop.Format}},
+            "format": "{{$prop.Format}}"
+{{- end}}
+{{- if $prop.Description}},
+            "description": "{{escapeJSON $prop.Description}}"
+{{- end}}
+{{- if $prop.Pattern}},
+            "pattern": "{{escapeJSON $prop.Pattern}}"
+{{- end}}
+{{- if $prop.Enum}},
+            "enum": [{{range $j, $e := $prop.Enum}}{{if $j}}, {{end}}"{{$e}}"{{end}}]
+{{- end}}
+{{- if $prop.MinLength}},
+            "minLength": {{$prop.MinLength}}
+{{- end}}
+{{- if $prop.MaxLength}},
+            "maxLength": {{$prop.MaxLength}}
+{{- end}}
+{{- if $prop.Minimum}},
+            "minimum": {{$prop.Minimum}}
+{{- end}}
+{{- if $prop.Maximum}},
+            "maximum": {{$prop.Maximum}}
+{{- end}}
+          }
+{{- end}}
+        }
+{{- if $tool.Parameters.Required}},
+        "required": [{{range $j, $r := $tool.Parameters.Required}}{{if $j}}, {{end}}"{{$r}}"{{end}}]
+{{- end}}
+      }
+    }
+{{- end}}
+  ]
+}
+

@@ -1,0 +1,19 @@
+version: "2"
+run:
+  timeout: 20m
+  tests: false
+formatters:
+  enable:
+    - gofmt
+    - goimports
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  exclusions:
+    generated: lax
+    paths:
+      - "testdata/"

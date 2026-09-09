@@ -1,0 +1,27 @@
+{
+  "name": "fixture-json-config",
+  "kind": "General",
+  "types": {
+    "LabelShape": {
+      "name": "LabelShape",
+      "owner": "src/labels.schema.ts",
+      "comment": "A label attached to fixture records.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "key",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "value",
+          "typeRef": {
+            "name": "string"
+          }
+        }
+      ]
+    }
+  }
+}

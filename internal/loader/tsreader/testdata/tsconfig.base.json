@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@superschematic/api": ["../../../../packages/api/src/index.ts"],
+      "@superschematic/db": ["../../../../packages/db/src/index.ts"],
+      "superscalar": ["../../../../third_party/superscalar/bindings/typescript/src/index.ts"],
+      "@superschematic/schema": ["../../../../packages/schema/src/index.ts"],
+      "@superschematic/schema-config": ["../../../../packages/schema-config/src/index.ts"],
+      "@schemas/*": ["./services/*/src/index.ts"]
+    }
+  }
+}

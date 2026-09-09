@@ -1,0 +1,58 @@
+{
+  "name": "@schemas/fixture-db-types",
+  "version": "1.0.0",
+  "description": "TypeScript types for fixture-db schema",
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": {
+      "types": "./index.ts",
+      "import": "./index.ts"
+    },
+    "./types": {
+      "types": "./types/index.ts",
+      "import": "./types/index.ts"
+    },
+    "./validators": {
+      "types": "./validators/index.ts",
+      "import": "./validators/index.ts"
+    },
+    "./validators/enums": {
+      "types": "./validators/enums.ts",
+      "import": "./validators/enums.ts"
+    },
+    "./validators/types": {
+      "types": "./validators/types/index.ts",
+      "import": "./validators/types/index.ts"
+    },
+    "./validators/scalars/*": {
+      "types": "./validators/scalars/*.ts",
+      "import": "./validators/scalars/*.ts"
+    },
+    "./validators/types/*": {
+      "types": "./validators/types/*.ts",
+      "import": "./validators/types/*.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "typescript",
+    "types",
+    "fixture-db"
+  ],
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "superscalar": "file:../scalars/typescript",
+    "js-yaml": "4.1.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "4.0.9",
+    "typescript": "5.9.3"
+  }
+}
