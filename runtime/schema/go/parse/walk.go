@@ -343,14 +343,6 @@ func fieldKey(f *ir.FieldDef) string {
 	return f.Name
 }
 
-// asString returns the string form of a value when it is already a string,
-// otherwise returns "". Used as a guard before invoking string-typed parse
-// functions on values whose runtime form is a string.
-func asString(v any) string {
-	s, _ := v.(string)
-	return s
-}
-
 func typeMismatchMessage(scalar *ir.ScalarDef) string {
 	if scalar == nil {
 		return "type mismatch"

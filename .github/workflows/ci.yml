@@ -1,0 +1,356 @@
+name: ci
+
+# Gates for the superschematic repository: DCO sign-off, the four Go modules
+# (build, vet, test, gofmt, golangci-lint, scalar catalog drift, CLI smoke
+# over the fixture corpus), the TypeScript authoring packages and schema
+# runtime, the Python schema runtime, the Rust http runtime, and the
+# extraction scrub. `ci-pass` is the single aggregating job the branch
+# ruleset requires; every other job must be listed in its `needs`.
+#
+# superscalar has no release yet, so every job that links it checks the
+# pinned commit out under third_party/superscalar and builds the static
+# archive from source (scripts/superscalar-dep.sh). The checkout is cached on
+# the pin so the Rust build runs once per pin bump per runner OS.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+# Least-privilege GITHUB_TOKEN: this workflow only reads the checkout.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same PR branch (head_ref). Pushes to main and
+# workflow_call runs are keyed by SHA and never cancelled.
+concurrency:
+  group: ci-${{ github.head_ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  dco:
+    name: dco sign-off
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Every commit in the pull request carries Signed-off-by
+        # A plain git check rather than a third-party action: the DCO
+        # convention is one trailer line per commit, and this keeps the
+        # sign-off gate free of an unpinned dependency.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for sha in $(git rev-list --no-merges "$BASE_SHA".."$HEAD_SHA"); do
+            # grep reads to EOF (no -q) so pipefail never sees a SIGPIPE from git log.
+            if ! git log -1 --format=%B "$sha" | grep -E '^Signed-off-by: .+ <[^>]+@[^>]+>$' >/dev/null; then
+              echo "missing Signed-off-by: $(git log -1 --format='%h %s' "$sha")"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Sign your commits: git commit -s (or git rebase --signoff). See CONTRIBUTING.md." >&2
+            exit 1
+          fi
+
+  scrub:
+    name: scrub (no source-tree leftovers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: scripts/scrub-check.sh
+
+  go:
+    name: go (build / vet / test / gofmt / lint / catalog / cli smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load pinned tool versions
+        # Emit only real KEY=VALUE pins; $GITHUB_ENV rejects '#' comments/blanks.
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Bun
+        # The superscalar TypeScript binding is built alongside the Go
+        # archive; the loader tests resolve fixture imports against it.
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache the superscalar checkout
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin') }}
+
+      - name: Install Rust toolchain
+        # Builds the superscalar ffi archive from source; the checkout carries
+        # its own rust-toolchain.toml which rustup reads when it builds.
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Build the superscalar dependency
+        run: scripts/superscalar-dep.sh
+
+      - name: Build, vet, test every module
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          CGO_ENABLED: "1"
+        run: |
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+          for m in . ir runtime/schema/go runtime/http/go; do
+            echo "==> $m"
+            (cd "$m" && go build ./... && go vet ./... && go test -count=1 ./...)
+          done
+
+      - name: gofmt
+        run: |
+          out="$(gofmt -l $(git ls-files '*.go'))"
+          if [ -n "$out" ]; then echo "gofmt: files need formatting:"; echo "$out"; exit 1; fi
+
+      - name: Scalar catalog drift (TypeScript + Python catalogs match the pinned superscalar)
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: |
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+          go run ./internal/tools/scalarcatalog -check
+
+      - name: CLI smoke (no extension builds DB, API and General fixtures)
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: |
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+          make cli-smoke
+
+      - name: golangci-lint (root module)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        with:
+          version: v${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: .
+
+      - name: golangci-lint (ir)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        with:
+          version: v${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: ir
+          install-mode: none
+
+      - name: golangci-lint (runtime/schema/go)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        with:
+          version: v${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: runtime/schema/go
+          install-mode: none
+
+      - name: golangci-lint (runtime/http/go)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        with:
+          version: v${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: runtime/http/go
+          install-mode: none
+
+  typescript:
+    name: typescript (authoring packages + schema runtime)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        # scripts/superscalar-dep.sh reads go env for the archive directory.
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache the superscalar checkout
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin') }}
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Build the superscalar dependency
+        run: scripts/superscalar-dep.sh
+
+      - name: packages/ typecheck + test
+        working-directory: packages
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test
+
+      - name: runtime/schema/typescript typecheck + build + test
+        working-directory: runtime/schema/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run build
+          bun run test
+
+  python:
+    name: python (schema runtime)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Cache the superscalar checkout
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin') }}
+
+      - name: Install Rust toolchain
+        # The superscalar Python package is built from the checkout by
+        # maturin when uv syncs the runtime's dependencies.
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Build the superscalar dependency
+        run: scripts/superscalar-dep.sh
+
+      - name: pytest
+        working-directory: runtime/schema/python
+        run: uv run pytest -q
+
+  rust:
+    name: rust (http runtime crate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy
+          rustup default "$RUST_VERSION"
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: runtime/http/rust
+
+      - name: fmt / clippy / test
+        working-directory: runtime/http/rust
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+
+  ci-pass:
+    # The only required status check on main (repository ruleset "main").
+    # Runs even when a needed job fails so the check is always reported, and
+    # fails if any needed job failed or was cancelled. A skipped job (the dco
+    # job on pushes to main) does not fail it.
+    name: ci-pass
+    if: always()
+    needs:
+      - dco
+      - scrub
+      - go
+      - typescript
+      - python
+      - rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any needed job failed or was cancelled
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          bad = {name: job["result"] for name, job in needs.items()
+                 if job["result"] in ("failure", "cancelled")}
+          for name, result in sorted(bad.items()):
+              print(f"{name}: {result}")
+          if bad:
+              sys.exit(1)
+          print("all gates passed")
+          PY

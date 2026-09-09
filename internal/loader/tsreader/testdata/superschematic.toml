@@ -1,5 +1,0 @@
-# Naming for the core fixture tree: a core-only superschematic (no extension linked)
-# builds these services as-is. The in-tree default auth_provider is
-# "acme", a provider only the Acme extension registers; the core
-# registers "session" alone.
-auth_provider = "session"
