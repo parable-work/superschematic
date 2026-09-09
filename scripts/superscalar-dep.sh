@@ -70,12 +70,22 @@ if ! git -C "$DEP" cat-file -e "$commit^{commit}" 2>/dev/null; then
 fi
 git -C "$DEP" checkout --quiet --detach "$commit"
 
-if [ ! -f "$DEP/go/lib/${goos}_${goarch}/libsuperscalar_ffi.a" ] || [ "${SUPERSCALAR_REBUILD:-0}" = "1" ]; then
+# The archive and the TS dist are build products of one specific commit. A
+# pin bump over an existing checkout must rebuild them even though the files
+# exist, or the Go binding at the new pseudo-version links an archive built
+# from the old commit. The stamp records which commit produced them.
+STAMP="$DEP/.built-commit"
+rebuild="${SUPERSCALAR_REBUILD:-0}"
+if [ "$(cat "$STAMP" 2>/dev/null)" != "$commit" ]; then
+  rebuild=1
+fi
+
+if [ ! -f "$DEP/go/lib/${goos}_${goarch}/libsuperscalar_ffi.a" ] || [ "$rebuild" = "1" ]; then
   (cd "$DEP" && bash go/scripts/build_ffi.sh)
 fi
 
 TS="$DEP/bindings/typescript"
-if [ ! -f "$TS/dist/esm/validation.js" ] || [ "${SUPERSCALAR_REBUILD:-0}" = "1" ]; then
+if [ ! -f "$TS/dist/esm/validation.js" ] || [ "$rebuild" = "1" ]; then
   (
     cd "$TS"
     bun install --frozen-lockfile >/dev/null 2>&1 || bun install >/dev/null
@@ -85,6 +95,7 @@ if [ ! -f "$TS/dist/esm/validation.js" ] || [ "${SUPERSCALAR_REBUILD:-0}" = "1" 
     node scripts/fix-esm-extensions.mjs
   )
 fi
+printf '%s\n' "$commit" > "$STAMP"
 
 echo "superscalar $commit ready under $DEP" >&2
 echo "CGO_LDFLAGS=\"$ldflags\"" >&2

@@ -104,7 +104,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
 
       - name: Install Rust toolchain
         # Builds the superscalar ffi archive from source; the checkout carries
@@ -213,7 +213,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
 
       - name: Install Rust toolchain
         run: |
@@ -279,7 +279,7 @@ jobs:
           path: |
             third_party/superscalar
             !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin') }}
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh') }}
 
       - name: Install Rust toolchain
         # The superscalar Python package is built from the checkout by
