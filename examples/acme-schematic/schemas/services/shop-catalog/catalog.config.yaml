@@ -1,0 +1,7 @@
+# Sidecar document of the acme "catalog.config" document type (ext/document.go).
+# The loader finds it next to schema.config.ts, validates it against the
+# document's JSON Schema and stores it under Schema.Documents["catalog.config"];
+# the document's generator writes dist/acme/catalog/<service>/config.json.
+region: eu
+currency: EUR
+aisles: 16

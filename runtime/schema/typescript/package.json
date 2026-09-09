@@ -1,6 +1,6 @@
 {
   "name": "@superschematic/schema-runtime",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "Schema runtime for TypeScript: JSON/YAML schema reader and writer, IR reader, parse, validate, mask, merge, over the superscalar scalar functions. Needs superscalar and @superschematic/schema-ir next to it in node_modules; see scripts/link-local-deps.mjs.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

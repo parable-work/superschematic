@@ -170,3 +170,12 @@ result: `schema_language`, `package_author`, `meta_schema_url_prefix`,
 schema_runtime_go / http_runtime_go / http_runtime_rust / ptr`, and a
 `[package_aliases]` table mapping the old authoring specifiers onto
 `@superschematic/*`. `paths.scalar_lib` no longer exists.
+
+## D9. Docs build on every pull request
+
+superscalar builds its Starlight site only in `release.yml` (`docs-deploy`
+on a `v*` tag). This repository also runs `npm ci && npm run build` in
+`docs/` as the `docs` job of `ci.yml`, listed in `ci-pass`. A broken
+internal link or a missing sidebar page fails the pull request instead of
+waiting for the first tag. The release job still deploys to GitHub Pages
+once the repository is public; the CI job does not deploy.

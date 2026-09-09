@@ -1,0 +1,24 @@
+{
+  "name": "superschematic-docs",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Documentation site for superschematic (Starlight on Astro).",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.42.0",
+    "astro": "7.3.1",
+    "sharp": "0.35.4"
+  },
+  "devDependencies": {
+    "starlight-links-validator": "0.26.0"
+  }
+}

@@ -1,13 +1,365 @@
 # acme-schematic
 
-Placeholder. This directory will hold the downstream example: a schemas root
-with a DB, an API and a General service, its own `superschematic.toml`
-(`@acme` scope, `example.com/acme` module root), and an extension that
-registers one kind, one decorator and one auth provider, built by a binary
-that links the extension. Its smoke script becomes a CI job, and adding a
-second decorator to the extension must change nothing outside this
-directory.
+A complete downstream extension of superschematic, small enough to read in
+one sitting. It is the acceptance test of the extension model: everything
+here is added without editing a file under the core, and
+`scripts/check_second_decorator.sh` proves that adding one more decorator
+stays that way.
 
-Until it lands, the fixture services under
-`internal/loader/tsreader/testdata/services` (`fixture-db`, `fixture-api`,
-`fixture-general`) are the runnable examples; `make cli-smoke` builds them.
+The extension adds one of each registration surface:
+
+| Surface | What acme adds | File |
+|---|---|---|
+| Kind | `Catalog`, with a `catalog` generator | `ext/kind.go` |
+| Decorator | `@shelf` from `@acme/schema`, into the field's `extensions.acme` slot | `ext/decorator.go`, `packages/schema` |
+| Document | `catalog.config.yaml` next to a Catalog schema, with a generator | `ext/document.go` |
+| Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
+| Auth provider | `apikey`, an `X-API-Key` header over the generic session runtime | `ext/auth/` |
+| Command | `describe`, through `cli.CommandProvider` | `ext/command.go` |
+| Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
+
+The schemas root under `schemas/` has one service per kind: `shop-db` (DB),
+`shop-api` (API, authenticated with `apikey`), `shop-config` (General) and
+`shop-catalog` (Catalog). Its `superschematic.toml` names the generated
+packages `example.com/acme/...`, `@acme/...`, `acme_types_...` and `acme-...`.
+
+## Run it
+
+From the repository root, after `make setup`:
+
+```sh
+examples/acme-schematic/scripts/smoke.sh
+examples/acme-schematic/scripts/check_second_decorator.sh
+```
+
+The smoke builds the module and both binaries, runs `build-all` over the
+schemas root, and asserts each surface did its job (the list is at the top of
+the script). The check applies `scripts/second_decorator.patch`, reruns the
+smoke, and fails if any path outside this directory changed. Both are the
+`acme` job in `.github/workflows/ci.yml`.
+
+To poke at it by hand:
+
+```sh
+export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+cd examples/acme-schematic
+go build -o /tmp/acme-schematic ./cmd/acme-schematic
+/tmp/acme-schematic describe schemas
+/tmp/acme-schematic build-all schemas/services
+/tmp/acme-schematic build schemas/services/shop-catalog --emit-ir | jq .types.Product
+```
+
+## Layout
+
+```
+examples/acme-schematic/
+  go.mod                      module example.com/acme/schematic; replace => ../..
+  cmd/acme-schematic/         the binary
+  ext/                        the extension (package ext)
+    extension.go              Extension: Name, Register, Commands; [extension.acme] config
+    kind.go                   Catalog kind + catalog generator
+    decorator.go              @shelf + the field codec
+    document.go               catalog.config document + generator
+    manifest.go               acmeManifest generator on every kind
+    command.go                describe subcommand
+    auth/                     apikey auth provider + its snippet templates
+  packages/schema/            @acme/schema, the authoring package @shelf is imported from
+  schemas/
+    superschematic.toml       naming, auth_provider = "apikey", [paths], [extension.acme]
+    tsconfig.base.json        path aliases for @superschematic/*, @acme/*, superscalar
+    services/shop-db          DB: User, Session, ApiKey, Product tables
+    services/shop-api         API: ProductQueries, ProductMutations over shop-db
+    services/shop-config      General: ShopConfig with @envVars
+    services/shop-catalog     Catalog: Product, Bundle with @shelf; catalog.config.yaml
+  scripts/smoke.sh            the end-to-end assertions
+  scripts/check_second_decorator.sh, second_decorator.patch
+```
+
+A real extension depends on `github.com/parable-work/superschematic` at a
+tag and drops the `replace` lines in `go.mod`. The `[paths]` table in
+`superschematic.toml` exists for the same reason: it points the generated
+modules' path dependencies at this checkout so the smoke can compile them.
+A deployment that consumes published modules leaves it out.
+
+## The extension type
+
+`registry.Extension` is two methods:
+
+```go
+type Extension struct{}
+
+func (Extension) Name() string { return "acme" }
+
+func (Extension) Register(r *registry.Registry) error {
+	cfg, err := decodeConfig(r.ExtensionConfig(Name))
+	// ... one register* call per surface ...
+	return r.RegisterAuthProvider(auth.Provider{})
+}
+```
+
+`Name()` is the key of the extension's slot everywhere: `extensions.acme` on
+every IR node, `[extension.acme]` in `superschematic.toml`, and the
+`Extension` field of every spec it registers. `Register` runs once per
+registry assembly, before `Finalize` checks the result (a generator naming a
+kind nobody registered, two decorators with the same name, a document on an
+unknown kind are all assembly errors, reported before any schema loads).
+
+`r.ExtensionConfig("acme")` returns the `[extension.acme]` table of the naming
+file undecoded. The core does not know the keys; `decodeConfig` in
+`extension.go` owns them and rejects the ones it does not recognize, so a
+typo in the toml fails the build instead of being ignored.
+
+Every file under `ext/` imports only `registry`, `cli` and `ir`. Those are the
+public packages; nothing under `internal/` is reachable from outside the core
+module, which is what makes "no core edits" checkable.
+
+## A kind
+
+`ext/kind.go` registers `Catalog`:
+
+```go
+r.RegisterKind(registry.KindSpec{
+	Name:              "Catalog",
+	Extension:         Name,
+	StructRole:        ir.RoleEmbeddedStruct,
+	Pipeline:          []string{"types", "catalog"},
+	AllowedReferences: map[string]bool{"General": true},
+})
+```
+
+- `StructRole` is what a plain `abstract class` in a schema of this kind
+  becomes in the IR. DB schemas make tables; API schemas make projections;
+  a Catalog makes embedded structs.
+- `Pipeline` names the generators that run for the kind, in order. `types`
+  is the core type generator, so a Catalog schema gets TypeScript, Go,
+  Python or Rust types like any other kind; `catalog` is registered below.
+- `AllowedReferences` says which other kinds a Catalog schema may import
+  types from. Tables and API projections are out; a shared General type
+  (`Money`, say) is in.
+
+A schema declares the kind with `kind: "Catalog"` in `schema.config.ts`.
+`SchemaKind` is a closed enum of the core three; `defineConfig` also takes
+any string, and the registry validates it. The core-only binary rejects the
+file with `unknown kind "Catalog" (registered kinds: API, DB, General)`,
+which is one of the smoke's assertions.
+
+## A generator
+
+The `catalog` generator is a `registry.GeneratorSpec`:
+
+```go
+r.RegisterGenerator(registry.GeneratorSpec{
+	Name:         "catalog",
+	Extension:    Name,
+	Kinds:        []string{"Catalog"},
+	OutputKey:    "catalog",
+	OutputSchema: CatalogOutputSchema,
+	Dirs:         func(c registry.GenerateContext) []string { ... },
+	Enabled:      func(c registry.GenerateContext) (bool, string) { ... },
+	Generate:     generateCatalog,
+})
+```
+
+- `OutputKey` is the key under `outputs:` in `schema.config` that switches
+  the generator on; `OutputSchema` is the JSON Schema of that block, checked
+  when the config loads. `registry.DecodeOutput(c.Outputs, "catalog", &o)`
+  reads it back in `Enabled`. The core's `outputs` type knows only the core
+  keys, so the schema config carries a `@ts-expect-error` on the line; the
+  registry, not tsc, is the authority.
+- `Dirs` lists every directory `Generate` writes to, so `build` can clean
+  stale output and `build-all` can compute what changed.
+- `Generate` gets the loaded `ir.Schema`, the config, the naming and the
+  output root in one `GenerateContext`, writes its files and calls
+  `c.Done(key, dir)` so the build log and `Result.Outputs` list them.
+
+`generateCatalog` walks every type's fields, reads the `@shelf` payload
+through the codec (next section), and writes `catalog.json`.
+
+The `acmeManifest` generator in `ext/manifest.go` is the other shape: a
+generator on kinds the extension did not define. It lists `Kinds: []string{"DB", "API", "General", "Catalog"}` and has no `OutputKey`, so it runs after
+every listed kind's own pipeline and cannot be switched off from a schema
+config. It writes `manifest.json` under `dist/acme/manifest/<service>/` with
+the region from `[extension.acme]`.
+
+## A decorator
+
+`@shelf` lives in two places. The TypeScript half, `packages/schema/src/index.ts`,
+is a no-op at run time; it exists so an author gets completion and tsc
+rejects a bad argument first:
+
+```ts
+export function shelf(_args: ShelfArgs): PropertyDecorator {
+  return () => {};
+}
+```
+
+The Go half registers the decorator and the meaning of its argument:
+
+```go
+r.RegisterDecorator(registry.DecoratorSpec{
+	Name:      "shelf",
+	Extension: Name,
+	Packages:  []string{"@acme/schema"},
+	Target:    registry.TargetField,
+	Kinds:     []string{"Catalog"},
+	Args:      ShelfArgs,
+	Apply: func(n registry.Node, args []any, _ registry.Site) error {
+		var s Shelf
+		if err := registry.DecodeArgs(args, &s); err != nil {
+			return err
+		}
+		return ir.UpdateExtension(n.Field, Name, func(f *fieldExt) { f.Shelf = &s })
+	},
+})
+```
+
+- `Packages` names the npm package the decorator is imported from.
+  Registering a decorator from `@acme/schema` makes it an authoring package:
+  the TypeScript frontend resolves symbols from it, and a schema importing
+  any other package fails to load.
+- `Target` is the node the decorator may sit on (type, field, operation
+  set, operation); `Kinds` restricts it to schema kinds. A `@shelf` on a DB
+  table field is a load error that names the decorator.
+- `Args` is the JSON Schema of the argument list. Both frontends validate a
+  use against it before `Apply` runs: the TypeScript reader from the AST,
+  the JSON/YAML reader from the `extensions.acme.shelf` value it finds in
+  the file. `Apply` only sees shapes that decode.
+- `Apply` writes into the field's open `Extensions` slot under the
+  extension's name. `ir.UpdateExtension` and `ir.GetExtension` are the codec:
+  the slot holds `json.RawMessage`, and `fieldExt` is the Go struct the
+  extension reads and writes it through. Every acme field decorator is a
+  member of `fieldExt`, so adding one is a new member, a new `DecoratorSpec`
+  and a new export from `@acme/schema`. That is exactly what
+  `scripts/second_decorator.patch` does.
+
+In the IR the payload appears as
+`{"name": "sku", ..., "extensions": {"acme": {"shelf": {"aisle": 3, "bay": "B"}}}}`,
+in the TypeScript form and the data form alike. `ShelfOf(fd)` is the read
+side the generators use.
+
+## A document
+
+Some inputs do not belong in a schema file: deployment values, a region
+table, anything a different team edits. A document is a sidecar file the
+loader reads from the service directory and stores on the schema:
+
+```go
+r.RegisterDocument(registry.DocumentSpec{
+	Name:      "catalog.config",
+	Extension: Name,
+	File:      "catalog.config.yaml",
+	Kinds:     []string{"Catalog"},
+	Schema:    DocumentSchema,
+	Loader: func(_ context.Context, lc registry.LoadContext) (json.RawMessage, []string, error) {
+		doc, err := lc.DecodeData("catalog.config.yaml", DocumentSchema)
+		return doc, nil, err
+	},
+	Dirs:     func(c registry.GenerateContext) []string { ... },
+	Generate: generateCatalogConfig,
+})
+```
+
+- `File` is what the loader looks for next to `schema.config.*`; `Kinds`
+  says which schemas may carry it. The file next to a DB schema is a load
+  error.
+- `Loader` turns the file into the JSON stored under
+  `Schema.Documents["catalog.config"]`. `lc.DecodeData` reads YAML or JSON
+  and validates it against `Schema`. The string slice is the list of extra
+  files the document depends on, for `build-all`'s change detection.
+- `Generate` receives the raw document alongside the `GenerateContext`. The
+  acme generator checks that no `@shelf` names an aisle past the document's
+  `aisles` count, which neither a schema nor a JSON Schema could express on
+  its own, then writes `config.json`.
+
+The `--emit-ir` output carries the document verbatim under `documents`.
+
+## An auth provider
+
+The `api` generator renders the generated middleware and routes through a
+set of named template snippets, and the naming file's `auth_provider` picks
+which provider supplies them. The core ships `session`. `ext/auth` ships
+`apikey`, which the acme `superschematic.toml` selects.
+
+`registry.AuthProvider` is:
+
+| Method | What acme does |
+|---|---|
+| `Name()` | `"apikey"` |
+| `Analyze(api, upstream)` | `registry.AnalyzeSessionStores(upstream)` for the core `User` probe, plus `registry.HasTable(upstream, "ApiKey", "id", "secret", "user")` into `AuthModel.Extra` |
+| `Endpoint(field, set, info)` | nothing; API keys scope no endpoint |
+| `Templates()` | the embedded `templates/auth_snippets.tmpl` |
+| `Funcs()` | nil |
+| `Files(out)` | none; every addition is a snippet |
+| `OpenAPIParameters(out)` | the `X-API-Key` header parameter on every authenticated route |
+
+`Analyze` runs against the schema `authDb` names in `schema.config`. It
+reports which stores the upstream DB can back, and the snippets branch on
+the model, so the generated code always compiles against the ORM it is
+given. `Config.APIKeys KeyStore` is always required; with an `ApiKey` table
+the module also generates `NewKeyStore(db)` over the ORM, without one the
+caller supplies its own.
+
+The snippet file defines one `{{ define }}` per hook point the core
+templates call: `contextImports`, `contextAuth`, `middlewareStdImports`,
+`middlewareImports`, `middlewareAliases`, `middlewareAuthz`,
+`middlewareStores`, `routesImports`, `routesConfigStores`,
+`routesConfigMiddlewares`, `routesConfigValidate`, `routesConfigExample`,
+`routesSetupPre`, `routesSetup`, `routesProtectedMiddleware`,
+`routePermissions`, `moduleRequires`, `moduleReplaces`. The api generator
+checks the set is complete when it parses the templates, before it renders
+a file; `registry.AuthSnippetFunc(provider)` in a provider test
+(`ext/auth/provider_test.go`) catches a missing one at `go test`. The acme
+snippets build on `runtime/http/go/session`
+(`Principal`, `PrincipalStore`, `RequirePermissions`, `ErrNotFound`) and add
+`APIKeyMiddleware`, which reads the header, resolves it through the key
+store to a principal id, loads the principal and puts it on the request
+context.
+
+The smoke `go build`s the generated `shop-api` module to prove the result
+compiles. It also builds `shop-db` and `shop-api` with the core-only binary
+and `auth_provider = "session"` and compiles that too. Writing this example
+is how the session provider's stores were found not to compile against a
+DB with a `User` table; the fix is in the core with a test, and the smoke
+keeps it fixed.
+
+## A command
+
+`cli.New` returns the root cobra command with `build`, `build-all`,
+`json-schema` and `format`. An extension that implements
+`cli.CommandProvider` contributes more:
+
+```go
+func (Extension) Commands() []*cobra.Command {
+	return []*cobra.Command{describeCommand()}
+}
+```
+
+`describe [<schemas-root>]` assembles the registry the way `build` does
+(`registry.LoadNaming` on the root, then `registry.Assemble(names,
+Extension{})`) and prints every kind with its pipeline, every document,
+every output key and every auth provider. It is the first thing to run when
+a schema is rejected: it shows what the binary knows.
+
+## The binary
+
+```go
+root := cli.New(cli.Config{
+	Name:  "acme-schematic",
+	Short: "Generate code from the acme schemas",
+}, ext.Extension{})
+```
+
+That is the whole of `cmd/acme-schematic/main.go`. The core assembles a
+fresh registry per command from the naming file the command resolves, with
+every extension passed here; `cmd/superschematic` is the same call with no
+extension.
+
+## Naming
+
+`schemas/superschematic.toml` is read from the schemas root by every
+command. The acme file sets `go_module_root`, `npm_scope`,
+`python_types_module_prefix`, `python_sdk_module_prefix`,
+`python_sdk_module_suffix`, `rust_crate_prefix`, `package_author`,
+`auth_provider`, `authoring_packages`, the `[paths]` table and
+`[extension.acme]`. A key left out keeps the default from the naming file
+at the repository root; the docs site's naming reference lists every key.

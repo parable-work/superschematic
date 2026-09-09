@@ -36,6 +36,63 @@ func TestAnalyzeReportsOnlyTheCoreStores(t *testing.T) {
 	}
 }
 
+// The ORM filters take the scalar UUID type, so the stores must parse the
+// string ids the runtime hands them instead of taking their address. Found
+// by examples/acme-schematic, whose upstream DB has a User table.
+func TestStoresParseStringIDsIntoScalarUUIDs(t *testing.T) {
+	snippet, err := apigen.AuthSnippetFunc(sessionauth.Provider{})
+	if err != nil {
+		t.Fatalf("AuthSnippetFunc: %v", err)
+	}
+	data := map[string]any{
+		"Auth":   &apigen.AuthModel{HasSessionStore: true, HasPrincipalStore: true},
+		"Naming": map[string]string{"HTTPRuntimeGoModule": "example.com/http", "ScalarGoModule": "example.com/scalars"},
+	}
+	stores, err := snippet("middlewareStores", data)
+	if err != nil {
+		t.Fatalf("render middlewareStores: %v", err)
+	}
+	for _, want := range []string{
+		"scalars.ParseUUID(jti)",
+		"scalars.ParseUUID(id)",
+		"Eq: &jtiUUID",
+		"Eq: &idUUID",
+		"return runtimesession.Record{}, runtimesession.ErrNotFound",
+		"return runtimesession.Principal{}, runtimesession.ErrNotFound",
+		"ExpiresAt:   time.Time(session.ExpiresAt)",
+	} {
+		if !strings.Contains(stores, want) {
+			t.Fatalf("middlewareStores lacks %q:\n%s", want, stores)
+		}
+	}
+	for _, reject := range []string{"Eq: &jti}", "Eq: &id}", "session.DeletedAt"} {
+		if strings.Contains(stores, reject) {
+			t.Fatalf("middlewareStores still has %q:\n%s", reject, stores)
+		}
+	}
+	imports, err := snippet("middlewareImports", data)
+	if err != nil {
+		t.Fatalf("render middlewareImports: %v", err)
+	}
+	if !strings.Contains(imports, `scalars "example.com/scalars"`) {
+		t.Fatalf("middlewareImports = %q, want the scalar import the stores use", imports)
+	}
+	std, err := snippet("middlewareStdImports", data)
+	if err != nil {
+		t.Fatalf("render middlewareStdImports: %v", err)
+	}
+	if !strings.Contains(std, `"time"`) {
+		t.Fatalf("middlewareStdImports = %q, want time for ExpiresAt", std)
+	}
+	none, err := snippet("middlewareImports", map[string]any{"Auth": &apigen.AuthModel{}, "Naming": data["Naming"]})
+	if err != nil {
+		t.Fatalf("render middlewareImports without stores: %v", err)
+	}
+	if strings.Contains(none, "scalars") {
+		t.Fatalf("middlewareImports = %q, must not import scalars when no store uses them", none)
+	}
+}
+
 func TestEndpointNeverMarksTenantScope(t *testing.T) {
 	ep := &apigen.EndpointInfo{Namespace: "tenant", PathParams: []apigen.Param{{Name: "tenantId"}}}
 	if err := (sessionauth.Provider{}).Endpoint(nil, nil, ep); err != nil {

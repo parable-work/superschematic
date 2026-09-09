@@ -27,7 +27,9 @@ naming file (`superschematic.toml`) that gives the generated packages their
 coordinates. A binary is `cli.New(cli.Config{Name: ...}, ext...)`; the
 `cmd/superschematic` binary links no extension. `extensions/deploy` and
 `extensions/platform` are worked examples. The design is written up in
-`docs/DECISIONS.md`.
+`docs/DECISIONS.md`. The Starlight site under `docs/` (quickstarts, the
+extension guide, the naming-file and CLI references) deploys to GitHub
+Pages on a release tag once the repository is public.
 
 ## Layout
 
@@ -73,15 +75,19 @@ bin/superschematic build path/to/schemas/services/my-service
 ```
 
 `superschematic build <service-dir>` reads `<schemas-root>/superschematic.toml`
-for names and writes to `<schemas-root>/dist`. The fixture corpus under
-`internal/loader/tsreader/testdata/services` is a usable set of examples until
-`examples/acme-schematic` lands.
+for names and writes to `<schemas-root>/dist`. `examples/acme-schematic` is a
+complete downstream example: a schemas root with one service per kind and an
+extension that adds a kind, a decorator, a document, a generator, an auth
+provider and a command without editing the core. Its README walks through
+each surface; `examples/acme-schematic/scripts/smoke.sh` runs it.
 
 ## Status
 
 Pre-release. The API surface an extension depends on (`registry`, `loader`,
-`cli`, `schemadeps`, `generator.Naming`) is not yet frozen. There is no
-release pipeline yet; the Go modules are consumed at a commit.
+`cli`, `schemadeps`, `generator.Naming`) is not yet frozen. The first tag is
+`v0.1.0-alpha.1`; until it is cut the Go modules are consumed at a commit and
+nothing is published to npm, PyPI or crates.io. `CONTRIBUTING.md`, "Releases",
+has the procedure.
 
 ## Contributing
 

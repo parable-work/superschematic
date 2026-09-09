@@ -10,7 +10,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 hits="$(rg -i -n 'parable' \
   --glob '!third_party' --glob '!node_modules' --glob '!target' \
   --glob '!*.lock' --glob '!LICENSE' --glob '!bin' --glob '!scripts/scrub-check.sh' . \
-  | rg -v 'github.com/parable-work/|parable-work/superschematic|parable-work/superscalar' \
+  | rg -v 'github.com/parable-work/|parable-work/superschematic|parable-work/superscalar|parable-work.github.io' \
   | rg -v '^\./(README|CONTRIBUTING|SECURITY|CODE_OF_CONDUCT)\.md:[0-9]+:.*(Parable Work|maintained by Parable|Parable maintains)' \
   | rg -v 'authors = \["Parable Work, Inc\."\]' \
   | rg -v 'comparable|incomparable|separable|inseparable|reparable' \
