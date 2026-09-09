@@ -82,8 +82,10 @@ each surface; `examples/acme-schematic/scripts/smoke.sh` runs it.
 ## Status
 
 Pre-release. The API surface an extension depends on (`registry`, `loader`,
-`cli`, `schemadeps`, `generator.Naming`) is not yet frozen. There is no
-release pipeline yet; the Go modules are consumed at a commit.
+`cli`, `schemadeps`, `generator.Naming`) is not yet frozen. The first tag is
+`v0.1.0-alpha.1`; until it is cut the Go modules are consumed at a commit and
+nothing is published to npm, PyPI or crates.io. `CONTRIBUTING.md`, "Releases",
+has the procedure.
 
 ## Contributing
 

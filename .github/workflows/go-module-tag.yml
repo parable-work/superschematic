@@ -1,0 +1,83 @@
+name: go-module-tag
+
+# Cuts the Go sub-module tags next to a release tag. A Go module in a
+# subdirectory is versioned by tags prefixed with that directory, so `go get`
+# of github.com/parable-work/superschematic/ir@vX.Y.Z looks for ir/vX.Y.Z,
+# runtime/schema/go@vX.Y.Z for runtime/schema/go/vX.Y.Z, and so on. The
+# release pull request set every sibling require to vX.Y.Z, so all four
+# modules are consistent at the one commit vX.Y.Z points at and the sub-module
+# tags are cut on that same commit. Nothing needs to run on the new tags, so
+# creating them with the workflow token (which starts no workflows) is fine.
+# The release-tags ruleset protects v* and */v* from deletion and force-push.
+#
+# Trigger: the vX.Y.Z tag push from scripts/tag_release.sh. The `v*` filter
+# does not match the sub-module tags (their names start with the directory),
+# so this workflow does not re-trigger on what it creates.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-module-tag-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: cut <module>/vX.Y.Z at the release commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the tree carries the tag's version
+        # Refuses a tag whose version the tree does not carry: the sibling
+        # requires in the go.mod files must name exactly this version or a
+        # consumer at the tag would ask the proxy for a version that does not
+        # exist.
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 scripts/bump_version.py check --expect "${REF_NAME#v}"
+
+      - name: Check every module path matches its directory
+        # Go resolves a subdirectory module only when the module path is the
+        # repository path plus the directory, and the tag prefix is that
+        # directory. Fail loudly instead of cutting a tag `go get` cannot use.
+        run: |
+          set -euo pipefail
+          while IFS= read -r dir; do
+            [ -n "$dir" ] || continue
+            module="$(sed -n 's/^module //p' "$dir/go.mod")"
+            expected="github.com/${GITHUB_REPOSITORY}/$dir"
+            if [ "$module" != "$expected" ]; then
+              echo "$dir/go.mod declares module $module, but a module in $dir/ must be $expected" >&2
+              echo "(and its tags $dir/vX.Y.Z), or the directory must move to match the module path." >&2
+              exit 1
+            fi
+          done < <(python3 scripts/bump_version.py go-modules)
+
+      - name: Create the sub-module tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r dir; do
+            [ -n "$dir" ] || continue
+            tag="$dir/$REF_NAME"
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+              echo "$tag already exists"
+              continue
+            fi
+            gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA"
+            echo "created $tag at $GITHUB_SHA"
+          done < <(python3 scripts/bump_version.py go-modules)

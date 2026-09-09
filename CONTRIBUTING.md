@@ -150,9 +150,106 @@ and concrete.
 
 ## Releases
 
-There is no release pipeline yet. The Go modules are consumed at a commit
-(`go get github.com/parable-work/superschematic@<sha>` plus the `ir` and
-`runtime/*` modules), and the npm and PyPI packages are not published. A
-release workflow, version pinning across the packages and a changelog follow
-the pattern in the superscalar repository and arrive with the first tagged
-release.
+One version for everything: the npm packages (`@superschematic/schema`, `db`,
+`api`, `schema-config`, `schema-runtime`), the PyPI distribution
+(`superschematic-schema-runtime`), the crate (`superschematic-http-runtime`)
+and the four Go modules all carry the SemVer version in `versions.env`, and
+`scripts/bump_version.py` is the only thing that writes it. `bump_version.py
+check` fails when any site disagrees; CI runs it on every pull request and the
+release workflow runs it before building anything. `0.0.0` means unreleased.
+
+The Go modules are versioned by tags, one per module because each is its own
+module: `vX.Y.Z` (root), `ir/vX.Y.Z`, `runtime/schema/go/vX.Y.Z` and
+`runtime/http/go/vX.Y.Z`. The `require` lines between them carry the release
+version so a consumer at a tag resolves the siblings from their tags; the
+`replace` lines next to them keep local builds on the checkout.
+
+`release-pr.yml` opens a pull request with the workflow token, which the
+repository setting "Allow GitHub Actions to create and approve pull requests"
+(Settings -> Actions -> General) must permit; it is off by default on a new
+repository.
+
+A release is three steps, each started by a person. For the first release,
+`v0.1.0-alpha.1`:
+
+1. Open the release pull request: run the `release-pr` workflow (Actions ->
+   release-pr -> Run workflow) with the version, without the leading `v`:
+
+   ```
+   gh workflow run release-pr.yml -f version=0.1.0-alpha.1
+   ```
+
+   It runs `bump_version.py set 0.1.0-alpha.1`, which writes the version into
+   `versions.env`, every package manifest and lockfile, the Go `require`
+   lines, and cuts the `Unreleased` section of `CHANGELOG.md` into a dated
+   `[0.1.0-alpha.1]` section, then opens `release/v0.1.0-alpha.1`. Review the
+   changelog. The pull request is opened with the workflow token, which does
+   not start CI: close and reopen it once so `ci-pass` runs, then merge it.
+   (Without the workflow: `python3 scripts/bump_version.py set 0.1.0-alpha.1`
+   on a branch and open the pull request yourself.)
+2. Cut the tag: on a clean checkout of `main` at that merge, run
+
+   ```
+   git checkout main && git pull --ff-only
+   scripts/tag_release.sh
+   ```
+
+   It re-checks every version site, refuses `0.0.0`, creates the annotated
+   tag `v0.1.0-alpha.1` and pushes it. The push starts two workflows:
+   `release.yml` and `go-module-tag.yml`.
+3. `go-module-tag.yml` checks the tree carries the tag's version and that
+   every sub-module's path matches its directory, then creates
+   `ir/v0.1.0-alpha.1`, `runtime/schema/go/v0.1.0-alpha.1` and
+   `runtime/http/go/v0.1.0-alpha.1` on the same commit. `release.yml` runs
+   the full CI, builds the CLI for linux and darwin on x64 and arm64 (each on
+   a runner of that os/arch, linked against the superscalar archive built
+   from the pinned checkout), refuses a set not built from the tag's commit,
+   writes `SHA256SUMS`, packs the npm tarballs and the PyPI sdist and wheel,
+   creates the GitHub release with build provenance and an SBOM, and, when
+   `RELEASE_PUBLISH_ENABLED` is `true`, publishes to npm, PyPI and
+   crates.io. Do not create any of the tags by hand.
+
+After the release, `go get github.com/parable-work/superschematic@v0.1.0-alpha.1`
+(and `.../ir@`, `.../runtime/schema/go@`, `.../runtime/http/go@` at the same
+version) resolves. The Go modules still link superscalar through cgo from a
+pseudo-version pin, so a consumer needs `CGO_LDFLAGS` from
+`scripts/superscalar-dep.sh --print` until superscalar publishes its
+`go/vX.Y.Z` tags; the docs quickstart says so.
+
+Pre-releases: `vX.Y.Z-alpha.N`, `-beta.N` and `-rc.N` are the supported
+forms. The GitHub release is marked as a pre-release, npm publishes under the
+`next` dist-tag instead of `latest`, and PyPI receives the PEP 440 spelling
+(`0.1.0a1`), which `pip` skips unless asked for `--pre`. The first release is
+`v0.1.0-alpha.1`.
+
+A dry run of the build on any branch: Actions -> release -> Run workflow with
+`dry_run` checked (or `gh workflow run release.yml --ref <branch> -f
+dry_run=true`). It runs the verify, build and assemble jobs and uploads the
+assembled release set as the `release-assets` workflow artifact; nothing is
+released, published or deployed.
+
+### Trusted publishing
+
+npm, PyPI and crates.io are configured for trusted publishing (OIDC); no
+registry tokens are stored in this repository. Each registry's trusted
+publisher entry is registered against the repository
+`parable-work/superschematic` and the workflow filename `release.yml`, with
+the GitHub environment named in the job (`npm`, `pypi`, `crates-io`). If the
+workflow is renamed or an environment name changes, every registry entry must
+be updated to match or publishing stops. The three publish jobs are gated on
+the repository variable `RELEASE_PUBLISH_ENABLED`; it is set to `true` once
+the registrations exist. crates.io only accepts a trusted publisher for a
+crate that already exists, so the first version of `superschematic-http-runtime`
+is published by hand with a personal token before the publisher is
+registered. The `@superschematic` npm scope is an npmjs.com organization
+that must exist and be owned by the publisher before the variable is set. The
+exact registrations are written at the top of each publish job in
+`release.yml`.
+
+### The changelog
+
+Every change to the IR, to a key of `superschematic.toml`, to a public Go
+package (`registry`, `loader`, `cli`, `ir`, `runtime/*`), to an authoring
+package's exported API or to the shape of a generated artifact ships with a
+`CHANGELOG.md` entry under `Unreleased` that names the bump it requires.
+`release-pr` refuses to cut a release whose `Unreleased` section is empty.

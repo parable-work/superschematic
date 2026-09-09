@@ -1,0 +1,600 @@
+name: release
+
+# Cut from one `vX.Y.Z` tag (scripts/tag_release.sh). Job graph:
+#
+#   preflight -> verify (full ci.yml) -> build [linux-x64, linux-arm64,
+#     darwin-arm64, darwin-x64] -> assemble -> github-release
+#     -> publish-npm, publish-pypi, publish-crates, docs-deploy
+#
+# preflight reads the version from the tag and refuses a tag whose version the
+# tree does not carry (scripts/bump_version.py against versions.env). build
+# produces, per runner, the superschematic CLI for its os/arch, linked against
+# the superscalar archive that scripts/superscalar-dep.sh builds from the
+# pinned checkout; each runner records the commit it built from. assemble
+# refuses a set whose binaries disagree on that commit, writes SHA256SUMS,
+# packs the five npm tarballs, and builds the PyPI sdist and wheel.
+# github-release attaches everything to a GitHub release with build provenance
+# and an SBOM. The three publish jobs use trusted publishing (OIDC; no
+# registry tokens in this repository) and are gated on the repository variable
+# RELEASE_PUBLISH_ENABLED. The Go modules need no publish step: `go get`
+# reads the tags, which go-module-tag.yml cuts on the same push.
+#
+# `workflow_dispatch` with dry_run runs preflight, verify, build and assemble on
+# any branch and uploads the assembled assets as a workflow artifact
+# (release-assets). It creates no release, publishes nothing and deploys
+# nothing.
+#
+# Every action is pinned to a commit SHA; tool versions come from tools.env
+# only.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and assemble only (no release, publish or deploy). The only supported value is true; releases come from a v* tag."
+        type: boolean
+        default: true
+
+# Least-privilege default; every job that needs more escalates only the scopes
+# it needs (id-token for trusted publishing and provenance, contents for the
+# release, attestations for provenance, pages for docs).
+permissions:
+  contents: read
+
+# Serialize releases per ref so two tag pushes cannot publish overlapping
+# artifact sets; never cancel an in-flight release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: preflight (tag matches the tree)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      pep440: ${{ steps.v.outputs.pep440 }}
+      tag: ${{ steps.v.outputs.tag }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      npm_dist_tag: ${{ steps.v.outputs.npm_dist_tag }}
+      dry_run: ${{ steps.v.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the version and release mode
+        id: v
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$DRY_RUN_INPUT" != "true" ]; then
+              echo "workflow_dispatch only supports dry_run=true; a release is cut from a v* tag (scripts/tag_release.sh)" >&2
+              exit 1
+            fi
+            dry_run=true
+            python3 scripts/bump_version.py check
+            version="$(python3 scripts/bump_version.py current)"
+            tag="v$version"
+          else
+            dry_run=false
+            tag="$REF_NAME"
+            version="${tag#v}"
+            # Refuses a tag whose version the tree does not carry, and a
+            # version without a CHANGELOG section.
+            python3 scripts/bump_version.py check --expect "$version"
+          fi
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          npm_dist_tag=latest
+          if [ "$prerelease" = true ]; then npm_dist_tag=next; fi
+          {
+            echo "version=$version"
+            echo "pep440=$(python3 scripts/bump_version.py pep440 "$version")"
+            echo "tag=$tag"
+            echo "prerelease=$prerelease"
+            echo "npm_dist_tag=$npm_dist_tag"
+            echo "dry_run=$dry_run"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  verify:
+    name: verify (full ci)
+    needs: preflight
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: build ${{ matrix.name }}
+    needs: [preflight, verify]
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # The CLI links the superscalar archive through cgo, so every
+          # os/arch builds natively on a runner of that os/arch rather than
+          # cross-compiling. ubuntu-24.04-arm is free on public repositories;
+          # while the repository is private it needs a larger-runner
+          # entitlement on the organization.
+          - os: ubuntu-latest
+            name: linux-x64
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-24.04-arm
+            name: linux-arm64
+            goos: linux
+            goarch: arm64
+          - os: macos-latest
+            name: darwin-arm64
+            goos: darwin
+            goarch: arm64
+          - os: macos-15-intel
+            name: darwin-x64
+            goos: darwin
+            goarch: amd64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load pinned tool versions
+        # Emit only real KEY=VALUE pins; $GITHUB_ENV rejects '#' comments/blanks.
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache the superscalar checkout
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('superscalar.pin') }}
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Build the superscalar dependency
+        run: scripts/superscalar-dep.sh
+
+      - name: Build the CLI
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          CGO_ENABLED: "1"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          NAME: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+          out="dist/superschematic_${VERSION}_${NAME}"
+          mkdir -p "$out"
+          go build -trimpath -ldflags "-s -w" -o "$out/superschematic" ./cmd/superschematic
+          "$out/superschematic" --help >/dev/null
+          cp LICENSE README.md CHANGELOG.md "$out/"
+          # The commit every binary must agree on; assemble refuses a set
+          # built from more than one.
+          printf '%s\n' "$GITHUB_SHA" > "$out/BUILD_COMMIT"
+          tar -C dist -czf "dist/superschematic_${VERSION}_${NAME}.tar.gz" "superschematic_${VERSION}_${NAME}"
+          ls -l dist
+
+      - name: Upload the tarball
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build-${{ matrix.name }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    name: assemble (one commit, checksums, npm tarballs, PyPI dists)
+    needs: [preflight, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Cache the superscalar checkout
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('superscalar.pin') }}
+
+      - name: Install Rust toolchain
+        # The schema runtime's TypeScript build links the superscalar binding
+        # from the pinned checkout (scripts/link-local-deps.mjs).
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Build the superscalar dependency
+        run: scripts/superscalar-dep.sh
+
+      - name: Download every build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: build-*
+          path: builds
+          merge-multiple: true
+
+      - name: Refuse a set built from more than one commit; write SHA256SUMS
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          mv builds/*.tar.gz release-assets/
+          cd release-assets
+          count="$(ls superschematic_"${VERSION}"_*.tar.gz | wc -l)"
+          if [ "$count" -ne 4 ]; then
+            echo "expected 4 tarballs, found $count" >&2
+            exit 1
+          fi
+          for tgz in superschematic_"${VERSION}"_*.tar.gz; do
+            tar -xzf "$tgz" --wildcards -O '*/BUILD_COMMIT'
+          done | sort -u > commits.txt
+          if [ "$(wc -l < commits.txt)" -ne 1 ] || [ "$(cat commits.txt)" != "$GITHUB_SHA" ]; then
+            echo "the binaries were not all built from $GITHUB_SHA:" >&2
+            cat commits.txt >&2
+            exit 1
+          fi
+          rm commits.txt
+          sha256sum superschematic_"${VERSION}"_*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Pack the npm tarballs
+        # The four authoring packages ship their TypeScript source; the schema
+        # runtime ships its compiled dist. npm pack writes
+        # superschematic-<name>-<version>.tgz for a scoped @superschematic/<name>.
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets/npm
+          for pkg in schema db api schema-config; do
+            (cd "packages/$pkg" && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
+          done
+          (cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
+          ls -l release-assets/npm
+          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 5
+
+      - name: Build the PyPI sdist and wheel
+        working-directory: runtime/schema/python
+        run: |
+          set -euo pipefail
+          uv build --out-dir "$GITHUB_WORKSPACE/release-assets/python"
+          ls -l "$GITHUB_WORKSPACE/release-assets/python"
+
+      - name: Upload the assembled release set
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets
+          path: release-assets
+          if-no-files-found: error
+          retention-days: 14
+
+  github-release:
+    name: github release + attestations
+    needs: [preflight, assemble]
+    if: needs.preflight.outputs.dry_run == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Generate the SBOM (SPDX) for the release commit
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: .
+          format: spdx-json
+          output-file: release-assets/superschematic-${{ needs.preflight.outputs.version }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest build provenance
+        # The org is on GitHub Enterprise Cloud, so attestations work while the
+        # repository is private; they are free once it is public.
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            release-assets/*.tar.gz
+            release-assets/SHA256SUMS
+            release-assets/npm/*.tgz
+            release-assets/python/*
+
+      - name: Attest the SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: release-assets/superschematic-${{ needs.preflight.outputs.version }}.spdx.json
+          sbom-path: release-assets/superschematic-${{ needs.preflight.outputs.version }}.spdx.json
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          {
+            python3 scripts/bump_version.py notes "$VERSION"
+            echo
+            echo "## Artifacts"
+            echo
+            echo "Every binary was built from commit \`$GITHUB_SHA\` and is listed in \`SHA256SUMS\`."
+            echo "Verify provenance with: \`gh attestation verify <asset> --repo ${GITHUB_REPOSITORY}\`."
+            echo
+            echo "Go modules: \`go get github.com/${GITHUB_REPOSITORY}@$TAG\`, \`.../ir@$TAG\`, \`.../runtime/schema/go@$TAG\`, \`.../runtime/http/go@$TAG\`."
+          } > notes.md
+          flags=()
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" \
+            --verify-tag \
+            --title "superschematic $TAG" \
+            --notes-file notes.md \
+            "${flags[@]}" \
+            release-assets/*.tar.gz release-assets/SHA256SUMS release-assets/*.spdx.json \
+            release-assets/npm/*.tgz release-assets/python/*
+
+  # ---------------------------------------------------------------------------
+  # Trusted publishing. All three jobs are gated on the repository variable
+  # RELEASE_PUBLISH_ENABLED (Settings -> Secrets and variables -> Actions ->
+  # Variables), set to "true" after registering the trusted publisher on each
+  # registry. Until then the release stops at the GitHub release. Each job
+  # header states the exact registration it expects.
+  # ---------------------------------------------------------------------------
+
+  publish-npm:
+    name: publish npm
+    # Registration (npmjs.com -> package -> Settings -> Trusted Publisher, once
+    # per package; the five exact names are
+    #   @superschematic/schema
+    #   @superschematic/db
+    #   @superschematic/api
+    #   @superschematic/schema-config
+    #   @superschematic/schema-runtime
+    # with organization or user: parable-work, repository: superschematic,
+    #   workflow filename: release.yml, environment name: npm).
+    # The @superschematic scope is an organization on npmjs.com that must
+    # exist and be owned by the publisher before RELEASE_PUBLISH_ENABLED is
+    # set. npm generates provenance on its own for trusted publishing.
+    # Pre-releases go to the `next` dist-tag, releases to `latest`.
+    needs: [preflight, github-release]
+    if: needs.preflight.outputs.dry_run == 'false' && vars.RELEASE_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+
+      - name: Download release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Publish the five packages
+        # The tarballs are the attested release assets, byte for byte. Order:
+        # @superschematic/schema first, since the other authoring packages
+        # name it in their docs; none of the five depends on another at
+        # install time.
+        env:
+          DIST_TAG: ${{ needs.preflight.outputs.npm_dist_tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          NPM_CONFIG_PROVENANCE: "true"
+        run: |
+          set -euo pipefail
+          npm --version
+          node -e 'const [maj, min, pat] = process.versions.npm.split(".").map(Number); if (maj < 11 || (maj === 11 && (min < 5 || (min === 5 && pat < 1)))) { console.error("npm >= 11.5.1 is required for trusted publishing"); process.exit(1); }'
+          cd release-assets/npm
+          for name in schema db api schema-config schema-runtime; do
+            tgz="superschematic-${name}-${VERSION}.tgz"
+            echo "==> $tgz"
+            npm publish "./$tgz" --access public --tag "$DIST_TAG"
+          done
+
+  publish-pypi:
+    name: publish PyPI
+    # Registration (pypi.org -> Your projects -> Publishing -> "Add a new
+    # pending publisher" for the project superschematic-schema-runtime):
+    #   owner: parable-work, repository name: superschematic,
+    #   workflow name: release.yml, environment name: pypi
+    # PyPI accepts a pending publisher for a project that does not exist yet;
+    # the first publish creates it. Pre-release versions (0.1.0a1 and the
+    # like) are ordinary uploads that pip skips unless asked for --pre.
+    needs: [preflight, github-release]
+    if: needs.preflight.outputs.dry_run == 'false' && vars.RELEASE_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Publish sdist + wheel with trusted publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: release-assets/python
+
+  publish-crates:
+    name: publish crates.io
+    # Registration (crates.io -> superschematic-http-runtime -> Settings ->
+    # Trusted Publishing):
+    #   repository owner: parable-work, repository: superschematic,
+    #   workflow filename: release.yml, environment: crates-io
+    # crates.io only accepts a trusted publisher for a crate that already
+    # exists, so the first version is published by hand with a personal
+    # token, then the publisher is registered and the variable is flipped.
+    needs: [preflight, github-release]
+    if: needs.preflight.outputs.dry_run == 'false' && vars.RELEASE_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Exchange the OIDC token for a crates.io token
+        id: auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
+      - name: Publish the http runtime crate at the tag version
+        working-directory: runtime/http/rust
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --locked
+
+  docs-deploy:
+    name: docs (Starlight) to GitHub Pages
+    # GitHub Pages is not available on a private repository on this plan
+    # without GitHub Enterprise Pages settings, so the deploy waits for the
+    # visibility flip; docs still build in ci. Enable Pages (Settings -> Pages,
+    # source: GitHub Actions) when the repository goes public.
+    needs: [preflight, github-release]
+    if: needs.preflight.outputs.dry_run == 'false' && github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Build the site
+        working-directory: docs
+        run: |
+          npm ci
+          npm run build
+
+      # Belt and braces: if the build produced no index.html, do not deploy.
+      - name: Upload Pages artifact
+        if: hashFiles('docs/dist/index.html') != ''
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: docs/dist
+
+      - name: Deploy to GitHub Pages
+        if: hashFiles('docs/dist/index.html') != ''
+        id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -1,0 +1,101 @@
+name: release-pr
+
+# Opens the release pull request for one version: runs
+# scripts/bump_version.py, which writes the version into versions.env, every
+# npm package, the PyPI distribution, the crate and the Go modules' sibling
+# requires, and cuts the CHANGELOG "Unreleased" section into a dated section,
+# then pushes a branch and opens the pull request. Review it, close and reopen
+# it once so ci-pass runs (a pull request opened with the workflow token does
+# not start ci.yml), merge it, then cut the tag with scripts/tag_release.sh.
+# See CONTRIBUTING.md, "Releases". Opening the pull request needs the
+# repository setting "Allow GitHub Actions to create and approve pull
+# requests" (Settings -> Actions -> General).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, without the leading v (X.Y.Z, X.Y.Z-alpha.N, -beta.N or -rc.N)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-pr
+  cancel-in-progress: false
+
+jobs:
+  release-pr:
+    name: bump every version site and open the pull request
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        # Only for `cargo metadata --locked`, which proves the edited lockfile
+        # still matches the manifest.
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Setup Go
+        # Only for `go mod verify` on the modules whose requires were edited.
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Set the version everywhere
+        env:
+          VERSION: ${{ inputs.version }}
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: |
+          set -euo pipefail
+          python3 scripts/bump_version.py set "$VERSION"
+          (cd runtime/http/rust && cargo metadata --locked --format-version 1 >/dev/null)
+          # The sibling requires now name the release version; the replace
+          # lines keep them on the checkout, so the graph must still resolve.
+          for m in . runtime/schema/go runtime/http/go; do
+            (cd "$m" && go list -m all >/dev/null)
+          done
+          git --no-pager diff --stat
+
+      - name: Push the branch and open the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          branch="release/v$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -A
+          git commit -s -m "chore(release): v$VERSION" \
+            -m "Set by scripts/bump_version.py; versions.env, every npm package, the PyPI distribution, the crate and the Go modules' sibling requires now carry v$VERSION, and CHANGELOG.md has its section."
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore(release): v$VERSION" \
+            --body "$(printf '%s\n' \
+              "## What and why" \
+              "" \
+              "Release v$VERSION: scripts/bump_version.py set the version in every site it owns and cut the CHANGELOG section. After merging, cut the tag from main with scripts/tag_release.sh; release.yml and go-module-tag.yml do the rest." \
+              "" \
+              "Opened by release-pr.yml with the workflow token, which does not start ci.yml: close and reopen this pull request once so ci-pass runs, then merge." \
+              "" \
+              "## Checklist" \
+              "" \
+              "- [x] Every commit is signed off" \
+              "- [ ] CHANGELOG section for v$VERSION reviewed (IR, naming, public package and generated-shape changes call out their bump)" \
+              "- [x] No generated files touched" \
+              "- [x] No behaviour or API change beyond the version")"

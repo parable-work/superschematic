@@ -70,6 +70,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: scripts/scrub-check.sh
+      - name: Version sites agree with versions.env
+        # release-pr.yml refuses to bump a tree whose sites disagree; catch
+        # drift (a hand-edited package.json) on the pull request instead.
+        run: python3 scripts/bump_version.py check
 
   go:
     name: go (build / vet / test / gofmt / lint / catalog / cli smoke)
