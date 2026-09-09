@@ -1,0 +1,223 @@
+{{/* acme "apikey" auth snippets: one {{ define }} per hook point in
+     registry.AuthSnippets. The data is the APIOutput unless the hook says
+     otherwise. Each non-empty snippet starts with the newline that separates
+     it from the line before. Generated code imports only the generic
+     http-runtime session package. */}}
+
+{{ define "contextImports" }}
+
+	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
+{{- end }}
+
+{{ define "contextAuth" }}
+
+// ===========================================================================
+// Auth Context (delegated to http-runtime/session)
+// ===========================================================================
+
+// ContextWithPrincipalID returns a new context with the authenticated principal's ID set.
+func ContextWithPrincipalID(ctx context.Context, principalID string) context.Context {
+	return runtimesession.ContextWithPrincipalID(ctx, principalID)
+}
+
+// GetPrincipalID extracts the authenticated principal's ID from context.
+func GetPrincipalID(ctx context.Context) string {
+	return runtimesession.GetPrincipalID(ctx)
+}
+
+// HasPrincipalID reports whether a principal ID is set on the context.
+func HasPrincipalID(ctx context.Context) bool {
+	return runtimesession.HasPrincipalID(ctx)
+}
+
+// GetRoles extracts the principal's roles from context. Returns nil when no
+// roles are set.
+func GetRoles(ctx context.Context) []runtimesession.Role {
+	return runtimesession.GetRoles(ctx)
+}
+{{- end }}
+
+{{ define "middlewareStdImports" }}
+{{- if or .Auth.Extra.HasKeyStore .Auth.HasPrincipalStore }}
+	"errors"
+{{- end }}
+{{- end }}
+
+{{ define "middlewareImports" }}
+	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
+{{- if .Auth.HasPrincipalStore }}
+	scalars "{{ $.Naming.ScalarGoModule }}"
+{{- end }}
+{{- end }}
+
+{{ define "middlewareAliases" }}
+
+// ===========================================================================
+// Type Aliases (delegated to http-runtime/session)
+// ===========================================================================
+
+// Role is the role projection (id + name + permissions) propagated through
+// request context.
+type Role = runtimesession.Role
+
+// Principal is the authenticated principal the PrincipalStore returns.
+type Principal = runtimesession.Principal
+
+// KeyStore resolves an API key to the id of the principal it belongs to.
+// ErrKeyNotFound (an alias of the runtime's ErrNotFound) means no such key.
+type KeyStore interface {
+	PrincipalIDForKey(ctx context.Context, key string) (string, error)
+}
+
+// ErrKeyNotFound is what a KeyStore returns for an unknown or revoked key.
+var ErrKeyNotFound = runtimesession.ErrNotFound
+{{- end }}
+
+{{ define "middlewareAuthz" }}
+
+// ===========================================================================
+// Authorization (delegated to http-runtime/session)
+// ===========================================================================
+
+var (
+	RequireAuth        = runtimesession.RequireAuth
+	RequirePermissions = runtimesession.RequirePermissions
+	HasAnyPermission   = runtimesession.HasAnyPermission
+)
+
+// APIKeyMiddleware reads the {{ "X-API-Key" }} header, resolves it through
+// the store and puts the principal id on the request context. A request
+// with no header or an unknown key passes through unauthenticated; the
+// protected group's RequireAuth turns that into a 401, so public routes stay
+// reachable without a key.
+func APIKeyMiddleware(keys KeyStore) func(gohttp.Handler) gohttp.Handler {
+	return func(next gohttp.Handler) gohttp.Handler {
+		return gohttp.HandlerFunc(func(w gohttp.ResponseWriter, r *gohttp.Request) {
+			key := r.Header.Get("X-API-Key")
+			if key == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			principalID, err := keys.PrincipalIDForKey(r.Context(), key)
+			if err != nil {
+				if !errors.Is(err, ErrKeyNotFound) {
+					LoggerFromContext(r.Context()).Warn("api key lookup failed", zap.Error(err))
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(runtimesession.ContextWithPrincipalID(r.Context(), principalID)))
+		})
+	}
+}
+{{- end }}
+
+{{ define "middlewareStores" }}
+
+// ===========================================================================
+// ORM Store Adapters
+// ===========================================================================
+// Each adapter is generated only when the upstream DB schema declares the
+// table shape it queries, so this file always compiles against the upstream
+// ORM regardless of which auth tables the schema defines.
+
+{{- if .Auth.Extra.HasKeyStore }}
+
+type ormKeyStore struct {
+	db orm.DatabaseInterface
+}
+
+func (s *ormKeyStore) PrincipalIDForKey(ctx context.Context, key string) (string, error) {
+	row, err := s.db.GetApiKeyRepository().FindOne(ctx, &orm.ApiKeyFilter{
+		Secret: &orm.StringFilter{Eq: &key},
+	}, nil)
+	if err != nil {
+		if errors.Is(err, orm.ErrNotFound) {
+			return "", ErrKeyNotFound
+		}
+		return "", err
+	}
+	return row.User.Id.String(), nil
+}
+
+// NewKeyStore creates a KeyStore backed by the generated ORM's ApiKey table.
+func NewKeyStore(db orm.DatabaseInterface) KeyStore {
+	return &ormKeyStore{db: db}
+}
+{{- end }}
+
+{{- if .Auth.HasPrincipalStore }}
+
+type ormPrincipalStore struct {
+	db orm.DatabaseInterface
+}
+
+func (s *ormPrincipalStore) GetByID(ctx context.Context, id string) (runtimesession.Principal, error) {
+	// The ORM filter takes the scalar UUID, not its string form.
+	idUUID, err := scalars.ParseUUID(id)
+	if err != nil {
+		return runtimesession.Principal{}, runtimesession.ErrNotFound
+	}
+	user, err := s.db.GetUserRepository().FindOne(ctx, &orm.UserFilter{
+		Id: &orm.UUIDFilter{Eq: &idUUID},
+	}, nil)
+	if err != nil {
+		if errors.Is(err, orm.ErrNotFound) {
+			return runtimesession.Principal{}, runtimesession.ErrNotFound
+		}
+		return runtimesession.Principal{}, err
+	}
+	return runtimesession.Principal{
+		ID:   user.Id.String(),
+		Name: string(user.Name),
+	}, nil
+}
+
+// NewPrincipalStore creates a PrincipalStore backed by the generated ORM.
+func NewPrincipalStore(db orm.DatabaseInterface) runtimesession.PrincipalStore {
+	return &ormPrincipalStore{db: db}
+}
+{{- end }}
+{{- end }}
+
+{{ define "routesImports" }}
+{{- if .HasPermissionEndpoints }}
+	runtimesession "{{ $.Naming.HTTPRuntimeGoModule }}/session"
+{{- end }}
+{{- end }}
+
+{{ define "routesConfigStores" }}
+
+	// APIKeys resolves the X-API-Key header to a principal. NewKeyStore
+	// wraps the generated ORM when the auth DB declares an ApiKey table.
+	APIKeys KeyStore
+{{- end }}
+
+{{ define "routesConfigMiddlewares" }}{{ end }}
+
+{{ define "routesConfigValidate" }}
+	if c.APIKeys == nil {
+		return fmt.Errorf("Config.APIKeys is required")
+	}
+{{- end }}
+
+{{ define "routesConfigExample" }}
+//		APIKeys:                     NewKeyStore(db),
+{{- end }}
+
+{{ define "routesSetupPre" }}{{ end }}
+
+{{ define "routesSetup" }}
+
+	// Resolve the caller's API key before any route runs.
+	r.Use(APIKeyMiddleware(cfg.APIKeys))
+{{- end }}
+
+{{ define "routesProtectedMiddleware" }}{{ end }}
+
+{{ define "routePermissions" }}
+				runtimesession.RequirePermissions({{- range $i, $perm := .RequiredPerms }}{{ if $i }}, {{ end }}"{{ $perm }}"{{- end }}),
+{{- end }}
+
+{{ define "moduleRequires" }}{{ end }}
+{{ define "moduleReplaces" }}{{ end }}

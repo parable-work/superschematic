@@ -1,0 +1,56 @@
+# Naming file for the acme-schematic example. The binary reads it from the
+# schemas root (this directory) and stamps every module path, npm scope,
+# Python prefix and crate prefix below into the generated packages. A key
+# left out keeps the core default (see superschematic.toml at the repository
+# root for the full list).
+
+# Coordinates of the generated packages: example.com/acme/types/go/shop-db,
+# @acme/shop-db-types, acme_types_shop_db, acme-shop-db-types.
+go_module_root = "example.com/acme"
+npm_scope = "@acme"
+python_types_module_prefix = "acme_types_"
+python_sdk_module_prefix = "acme_"
+python_sdk_module_suffix = "_sdk"
+rust_crate_prefix = "acme-"
+
+package_author = "acme"
+
+# The auth provider the api generator renders with. "apikey" is registered
+# by the acme extension (ext/auth); the core-only binary does not know it
+# and refuses this file, which is one of the smoke's assertions.
+auth_provider = "apikey"
+
+# The core-only binary would also refuse the Catalog kind; both checks come
+# from the registry the binary assembled, not from this file.
+
+# @acme/schema is registered as an authoring package by the @shelf decorator;
+# the core packages are authoring by default. The list is written out so a
+# reader sees every package a schema in this tree may import symbols from.
+authoring_packages = [
+  "@superschematic/api",
+  "@superschematic/db",
+  "@superschematic/schema",
+  "@superschematic/schema-config",
+  "@acme/schema",
+  "superscalar",
+]
+
+# Where the runtime modules live, relative to the repository root, which is
+# the parent of the schemas root: examples/acme-schematic. Generated
+# manifests point path dependencies (go.mod replace, Cargo path, npm file:)
+# at these so the smoke can compile the generated API against the checkout.
+# A deployment that consumes published modules leaves this table out.
+[paths]
+scalar_go = "../../third_party/superscalar/go"
+scalar_typescript = "../../third_party/superscalar/bindings/typescript"
+scalar_rust = "../../third_party/superscalar/crates/core"
+schema_ir = "../../ir"
+schema_runtime_go = "../../runtime/schema/go"
+http_runtime_go = "../../runtime/http/go"
+http_runtime_rust = "../../runtime/http/rust"
+
+# The extension's own table. Nothing in the core reads it;
+# Registry.ExtensionConfig("acme") hands it to the extension, which decodes
+# the keys it knows and rejects the rest.
+[extension.acme]
+region = "eu"

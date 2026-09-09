@@ -1,0 +1,110 @@
+diff --git a/ext/decorator.go b/ext/decorator.go
+index 1284b4c..3207937 100644
+--- a/ext/decorator.go
++++ b/ext/decorator.go
+@@ -14,11 +14,17 @@ type Shelf struct {
+ 	Bay   string `json:"bay,omitempty"`
+ }
+ 
++// Perishable is @perishable's argument: how long a field's values keep.
++type Perishable struct {
++	Days int `json:"days"`
++}
++
+ // fieldExt is the acme slot on a field: the codec both the decorator and
+ // the generators go through. Adding a second decorator on fields means
+ // adding a second member here and nothing outside this package.
+ type fieldExt struct {
+-	Shelf *Shelf `json:"shelf,omitempty"`
++	Shelf      *Shelf      `json:"shelf,omitempty"`
++	Perishable *Perishable `json:"perishable,omitempty"`
+ }
+ 
+ // ShelfArgs is @shelf's argument schema. Both frontends validate every use
+@@ -35,9 +41,34 @@ var ShelfArgs = json.RawMessage(`{
+ 	}
+ }`)
+ 
+-// registerDecorator adds @shelf: a field decorator from @acme/schema that
+-// only Catalog schemas may use.
++// PerishableArgs is @perishable's argument schema.
++var PerishableArgs = json.RawMessage(`{
++	"type": "object",
++	"required": ["days"],
++	"additionalProperties": false,
++	"properties": {"days": {"type": "integer", "minimum": 1}}
++}`)
++
++// registerDecorator adds @shelf and @perishable: field decorators from
++// @acme/schema that only Catalog schemas may use.
+ func registerDecorator(r *registry.Registry) error {
++	if err := r.RegisterDecorator(registry.DecoratorSpec{
++		Name:      "perishable",
++		Extension: Name,
++		Packages:  []string{Package},
++		Target:    registry.TargetField,
++		Kinds:     []string{Kind},
++		Args:      PerishableArgs,
++		Apply: func(n registry.Node, args []any, _ registry.Site) error {
++			var p Perishable
++			if err := registry.DecodeArgs(args, &p); err != nil {
++				return err
++			}
++			return ir.UpdateExtension(n.Field, Name, func(f *fieldExt) { f.Perishable = &p })
++		},
++	}); err != nil {
++		return err
++	}
+ 	return r.RegisterDecorator(registry.DecoratorSpec{
+ 		Name:      "shelf",
+ 		Extension: Name,
+@@ -63,3 +94,12 @@ func ShelfOf(fd *ir.FieldDef) (*Shelf, bool, error) {
+ 	}
+ 	return f.Shelf, true, nil
+ }
++
++// PerishableOf returns the shelf life declared on fd, if any.
++func PerishableOf(fd *ir.FieldDef) (*Perishable, bool, error) {
++	f, ok, err := ir.GetExtension[fieldExt](fd, Name)
++	if err != nil || !ok || f.Perishable == nil {
++		return nil, false, err
++	}
++	return f.Perishable, true, nil
++}
+diff --git a/packages/schema/src/index.ts b/packages/schema/src/index.ts
+index 17663ca..4e1c2d9 100644
+--- a/packages/schema/src/index.ts
++++ b/packages/schema/src/index.ts
+@@ -16,3 +16,13 @@ export interface ShelfArgs {
+ export function shelf(_args: ShelfArgs): PropertyDecorator {
+   return () => {};
+ }
++
++// PerishableArgs is @perishable's argument: how long a field's values keep.
++export interface PerishableArgs {
++  readonly days: number;
++}
++
++// perishable marks a field of a Catalog schema whose values expire.
++export function perishable(_args: PerishableArgs): PropertyDecorator {
++  return () => {};
++}
+diff --git a/schemas/services/shop-catalog/src/catalog.schema.ts b/schemas/services/shop-catalog/src/catalog.schema.ts
+index 6226480..e587779 100644
+--- a/schemas/services/shop-catalog/src/catalog.schema.ts
++++ b/schemas/services/shop-catalog/src/catalog.schema.ts
+@@ -1,5 +1,5 @@
+ import { Identity } from "superscalar";
+-import { shelf } from "@acme/schema";
++import { perishable, shelf } from "@acme/schema";
+ 
+ // A Catalog schema's classes are embedded structs (KindSpec.StructRole).
+ // @shelf comes from @acme/schema and is only allowed in Catalog schemas; it
+@@ -9,6 +9,7 @@ export abstract class Product {
+   sku: Identity.Slug;
+ 
+   @shelf({ aisle: 7 })
++  @perishable({ days: 30 })
+   barcode: string;
+ 
+   name: Identity.Name;
