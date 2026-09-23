@@ -28,6 +28,7 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 			return enumLookup(typeName)
 		},
 		"hasNonRequiredValidations": hasNonRequiredValidations,
+		"allowsExplicitNullRoot":    allowsExplicitNullRoot,
 		"pythonFieldDefault": func(field codegen.FieldInfo) string {
 			expr, ok := pythonFieldDefaultExpr(field, enumLookup)
 			if !ok {
@@ -65,6 +66,17 @@ func hasNonRequiredValidations(field codegen.FieldInfo) bool {
 		}
 	}
 	return false
+}
+
+// genericJSONScalar is the canonical name of the scalar library's any-JSON
+// scalar. Its value may be any JSON token, null included.
+const genericJSONScalar = "Generic.JSON"
+
+// allowsExplicitNullRoot reports whether the field is a direct Generic.JSON
+// value: there None is the JSON null token, a present value, not a missing
+// one. A list or map of Generic.JSON still uses None for a missing container.
+func allowsExplicitNullRoot(field codegen.FieldInfo) bool {
+	return field.IsScalar && field.Type == genericJSONScalar && !field.IsArray && !field.IsMap
 }
 
 // pythonString escapes a string for use inside a double-quoted Python string

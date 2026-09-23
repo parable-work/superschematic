@@ -11,6 +11,11 @@ export const jsonField: ClassDecorator & PropertyDecorator =
 // misspelled key silently disappearing is the failure, and breaks a payload
 // that has to survive a producer newer than its consumer.
 export const denyUnknownFields: ClassDecorator = () => {};
+// Make every generated decoder of the type (Go, TypeScript, Python, Rust)
+// reject a key the type does not declare and a required field that is absent
+// or null. Applies to this object only: a nested object type opts in on its
+// own.
+export const strictJSON: ClassDecorator = () => {};
 export const uiHidden: PropertyDecorator = noopPropertyDecorator;
 export function source(_target: unknown): ClassDecorator {
   return () => {};

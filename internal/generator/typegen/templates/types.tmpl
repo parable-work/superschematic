@@ -848,6 +848,33 @@ func (t *{{.Name}}) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON unmarshals {{.Name}} from JSON with validation
 func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
+{{- if .StrictJSON}}
+	// @strictJSON: reject an undeclared key before any field decoder can
+	// drop it, and a required field that is absent or null.
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("decode {{.Name}}: %w", err)
+	}
+	if fields == nil {
+		return fmt.Errorf("decode {{.Name}}: expected an object")
+	}
+	for key := range fields {
+		switch key {
+{{- range .Fields}}
+		case "{{.Name}}":
+{{- end}}
+		default:
+			return fmt.Errorf("decode {{.Name}}: unknown field %q", key)
+		}
+	}
+{{- range .Fields}}
+{{- if .Required}}
+	if raw, ok := fields["{{.Name}}"]; {{if .HasDefault}}ok &&{{else}}!ok ||{{end}} bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("{{.Name}} is required")
+	}
+{{- end}}
+{{- end}}
+{{- end}}
 {{- if .HasDefaults}}
 	// Apply @default values first; standard json decoding preserves these
 	// for any keys absent from the payload while overwriting them when
@@ -872,7 +899,14 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 		Alias: (*Alias)(t),
 	}
 
+{{- if .StrictJSON}}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(aux); err != nil {
+{{- else}}
+
 	if err := json.Unmarshal(data, aux); err != nil {
+{{- end}}
 		return err
 	}
 
@@ -905,7 +939,14 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 {{- else}}
 	aux := (*Alias)(t)
 
+{{- if .StrictJSON}}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(aux); err != nil {
+{{- else}}
+
 	if err := json.Unmarshal(data, aux); err != nil {
+{{- end}}
 		return err
 	}
 

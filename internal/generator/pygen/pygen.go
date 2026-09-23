@@ -76,6 +76,10 @@ type ModuleOutput struct {
 	// imports the datetime module for it.
 	HasDateTime bool
 
+	// HasGenericJSON is true when the module uses Generic.JSON; scalars.py
+	// imports json and math for its host-value validator.
+	HasGenericJSON bool
+
 	// Custom superscalar implementation flags (any scalar).
 	HasCustomNormalize bool
 	HasCustomValidate  bool
@@ -194,6 +198,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 
 	output.Scalars = codegen.ExtractScalars(schema, extraction)
 	for _, scalar := range output.Scalars {
+		if scalar.Name == genericJSONScalar {
+			output.HasGenericJSON = true
+		}
 		if scalar.Traits.IsDateTimeLike {
 			output.HasDateTime = true
 		}

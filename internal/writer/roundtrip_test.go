@@ -41,6 +41,9 @@ var corpus = []roundtripFixture{
 	{name: "fixture-relation-ondelete", dir: tsFixtures + "/fixture-relation-ondelete", native: FormatTS},
 	{name: "fixture-api", dir: tsFixtures + "/fixture-api", native: FormatTS},
 	{name: "fixture-general", dir: tsFixtures + "/fixture-general", native: FormatTS},
+	// Type-level decode decorators: the TS writer emits both.
+	{name: "fixture-deny-unknown-fields", dir: tsFixtures + "/fixture-deny-unknown-fields", native: FormatTS},
+	{name: "fixture-strict-json", dir: tsFixtures + "/fixture-strict-json", native: FormatTS},
 	{name: "fixture-db-json", dir: dataFixtures + "/fixture-db-json", native: FormatJSON},
 	{name: "fixture-db-yaml", dir: dataFixtures + "/fixture-db-yaml", native: FormatYAML},
 	{name: "fixture-general-json", dir: dataFixtures + "/fixture-general-json", native: FormatJSON},

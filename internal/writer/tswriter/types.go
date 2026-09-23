@@ -75,7 +75,8 @@ func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 	owner := "type " + def.Name
 	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil ||
-		len(def.Indexes) > 0 || def.JsonField || def.EnvVars {
+		len(def.Indexes) > 0 || def.JsonField || def.EnvVars ||
+		def.DenyUnknownFields || def.StrictJSON {
 		e.failf("%s: embedded structs in a DB schema render as type aliases and cannot carry heritage or decorators", owner)
 		return
 	}
@@ -150,6 +151,12 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	}
 	if def.JsonField {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("jsonField"))
+	}
+	if def.DenyUnknownFields {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("denyUnknownFields"))
+	}
+	if def.StrictJSON {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("strictJSON"))
 	}
 	if def.Versioned {
 		fmt.Fprintf(&e.body, "@%s%s\n", e.use("versioned"), versionedConfigArgs(def.VersionedConfig))

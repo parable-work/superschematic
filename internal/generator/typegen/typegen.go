@@ -105,6 +105,7 @@ type TypeInfo struct {
 	Fields      []FieldInfo
 	IsInput     bool
 	IsJsonField bool
+	StrictJSON  bool
 
 	// HasDefaults is true when at least one field on this type has a usable
 	// DefaultLiteral. Templates use this flag to decide whether to emit a
@@ -594,6 +595,7 @@ func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, isInput
 			Fields:      fields,
 			IsInput:     isInput,
 			IsJsonField: ct.JsonField,
+			StrictJSON:  ct.StrictJSON,
 			HasDefaults: hasDefaults,
 		}
 	}

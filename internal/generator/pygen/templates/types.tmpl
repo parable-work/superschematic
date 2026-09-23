@@ -144,7 +144,7 @@ class {{.Name}}(BaseModel):
     model_config = ConfigDict(
         strict=True,
         validate_assignment=True,
-        extra='ignore',
+        extra='{{if .StrictJSON}}forbid{{else}}ignore{{end}}',
         use_enum_values=True,
         populate_by_name=True,
     )
@@ -170,11 +170,23 @@ class {{.Name}}(BaseModel):
         {{range .Fields}}
         # Validate {{.Name}}
         {{- if and .Required (not .IsRelation)}}
+        {{- if allowsExplicitNullRoot .}}
+        # None is the JSON null root, a present value, not a missing field.
+        try:
+            TypeAdapter({{.TargetType}}).validate_python(self.{{.TargetName}})
+        except PydanticValidationError as e:
+            errors.add_field_error("{{snakeCase .Name}}", "invalid", str(e))
+        {{- if hasNonRequiredValidations .}}
+        if self.{{.TargetName}} is not None:
+{{template "ruleChecks" .}}
+        {{- end}}
+        {{- else}}
         if self.{{.TargetName}} is None:
             errors.add_field_error("{{snakeCase .Name}}", "required", "required field")
         {{- if hasNonRequiredValidations .}}
         else:
 {{template "ruleChecks" .}}
+        {{- end}}
         {{- end}}
         {{- else}}
         if self.{{.TargetName}} is not None:

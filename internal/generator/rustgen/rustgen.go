@@ -95,7 +95,8 @@ type TypeInfo struct {
 	// whether to emit a Default impl alongside the struct.
 	HasDefaults bool
 
-	// DenyUnknownFields emits #[serde(deny_unknown_fields)] on the struct.
+	// DenyUnknownFields emits #[serde(deny_unknown_fields)] on the struct,
+	// for @denyUnknownFields and for @strictJSON.
 	DenyUnknownFields bool
 }
 
@@ -449,12 +450,14 @@ func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enu
 	types := make([]TypeInfo, len(codegenTypes))
 	for i, t := range codegenTypes {
 		types[i] = TypeInfo{
-			Name:              t.Name,
-			Owner:             t.Owner,
-			Role:              t.Role,
-			Doc:               t.Doc(),
-			Fields:            make([]FieldInfo, len(t.Fields)),
-			DenyUnknownFields: t.DenyUnknownFields,
+			Name:   t.Name,
+			Owner:  t.Owner,
+			Role:   t.Role,
+			Doc:    t.Doc(),
+			Fields: make([]FieldInfo, len(t.Fields)),
+			// @strictJSON rejects undeclared keys in every language; in Rust
+			// that is the attribute @denyUnknownFields sets.
+			DenyUnknownFields: t.DenyUnknownFields || t.StrictJSON,
 		}
 
 		hasDefaults := false

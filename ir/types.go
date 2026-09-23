@@ -122,6 +122,12 @@ type TypeDef struct {
 	// contract and breaks a payload that must survive a newer producer.
 	DenyUnknownFields bool `json:"denyUnknownFields,omitempty" yaml:"denyUnknownFields,omitempty"`
 
+	// StrictJSON (@strictJSON) makes every generated decoder of this type,
+	// in Go, TypeScript, Python and Rust, reject a key the type does not
+	// declare and a required field that is absent or null. It applies to
+	// this object only; a nested object type opts in on its own.
+	StrictJSON bool `json:"strictJSON,omitempty" yaml:"strictJSON,omitempty"`
+
 	// Extensions holds extension decorator data keyed by extension name; see
 	// [Schema.Extensions].
 	Extensions map[string]json.RawMessage `json:"extensions,omitempty" yaml:"extensions,omitempty"`

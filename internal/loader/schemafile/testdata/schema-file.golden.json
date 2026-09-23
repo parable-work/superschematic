@@ -967,6 +967,9 @@
         "source": {
           "$ref": "#/$defs/SourceRef"
         },
+        "strictJSON": {
+          "type": "boolean"
+        },
         "traitConfig": {
           "$ref": "#/$defs/TraitConfigSchema"
         },

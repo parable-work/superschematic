@@ -90,6 +90,45 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 			t.Errorf("import smoke test failed for %s: %v\n%s", moduleName, err, out)
 		}
 	}
+
+	// fixture-db's Tenant.metadata is a required Generic.JSON field.
+	jsonProbe := exec.Command(pythonPath, "-c", buildGenericJSONProbeScript(importPaths, moduleNames[0]))
+	if out, err := jsonProbe.CombinedOutput(); err != nil {
+		t.Errorf("Generic.JSON runtime probe failed: %v\n%s", err, out)
+	}
+}
+
+// buildGenericJSONProbeScript checks the generated Generic.JSON field: every
+// JSON root, null included, is a valid value that validate_all accepts; an
+// absent required field is rejected; host values JSON cannot represent (a
+// set, a tuple, a non-string key, NaN, infinity, an arbitrary object) are
+// rejected.
+func buildGenericJSONProbeScript(importPaths []string, moduleName string) string {
+	var b strings.Builder
+	b.WriteString("import datetime\nimport sys\n")
+	b.WriteString("from pydantic import ValidationError\n")
+	for _, importPath := range importPaths {
+		fmt.Fprintf(&b, "sys.path.insert(0, %q)\n", importPath)
+	}
+	fmt.Fprintf(&b, "from %s.types import Tenant\n", moduleName)
+	b.WriteString("base = dict(createdAt=datetime.datetime(2026, 1, 2, tzinfo=datetime.timezone.utc), name='Acme', slug='acme', email='agent@example.com')\n")
+	b.WriteString("for root in [{'k': 1}, [1, 2], 'text', 42, 1.5, True, None]:\n")
+	b.WriteString("    model = Tenant(**base, metadata=root)\n")
+	b.WriteString("    assert 'metadata' not in model.validate_all().errors, root\n")
+	b.WriteString("try:\n")
+	b.WriteString("    Tenant(**base)\n")
+	b.WriteString("except ValidationError:\n")
+	b.WriteString("    pass\n")
+	b.WriteString("else:\n")
+	b.WriteString("    raise AssertionError('missing required Generic.JSON field was accepted')\n")
+	b.WriteString("for value in [{1, 2}, (1, 2), {1: 'value'}, float('nan'), float('inf'), object()]:\n")
+	b.WriteString("    try:\n")
+	b.WriteString("        Tenant(**base, metadata=value)\n")
+	b.WriteString("    except ValidationError:\n")
+	b.WriteString("        pass\n")
+	b.WriteString("    else:\n")
+	b.WriteString("        raise AssertionError(f'invalid Generic.JSON value was accepted: {type(value).__name__}')\n")
+	return b.String()
 }
 
 func buildImportSmokeScript(importPaths []string, moduleName string) string {

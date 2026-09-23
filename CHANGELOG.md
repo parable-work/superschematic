@@ -92,6 +92,15 @@ of a generated artifact is always listed here with the bump it requires.
   that depends on a sibling through `file:../<schema>`, and on the scalar
   library through a `file:` spec outside the tree, then installs from the
   root or from any package. The name comes from `npm_scope`. Minor.
+- `@strictJSON` (from `@superschematic/schema`) on a type makes every
+  generated decoder of that type reject a key the type does not declare and
+  a required field that is absent or null: Go `UnmarshalJSON`, the
+  TypeScript validator and `parse<Type>Json`/`Yaml`/`FromJSON`, the Python
+  model (`extra='forbid'`) and the Rust struct (`deny_unknown_fields`). It
+  applies to the decorated object only; a nested object type opts in on its
+  own. The IR `TypeDef` gains `strictJSON`; the schema-file JSON Schema
+  accepts it. The TypeScript writer now emits `@strictJSON` and
+  `@denyUnknownFields`, which it dropped before. Minor.
 
 ### Changed
 
@@ -126,6 +135,12 @@ of a generated artifact is always listed here with the bump it requires.
   service it builds, with or without `--cache`; before, only cached builds
   wrote stamps, so a step that keys on the stamp saw none after a plain
   build. `build --with-deps` still writes none. Patch.
+- Python types: a `Generic.JSON` scalar validates that its value stays in
+  the JSON domain (strings, finite numbers, booleans, null, lists, and
+  dicts with string keys, without cycles) and a required direct
+  `Generic.JSON` field accepts `None` as the JSON `null` value in
+  `validate_all` instead of reporting it missing. A set, a tuple, NaN or an
+  arbitrary object, which JSON cannot carry, now fails validation. Minor.
 
 ### Fixed
 

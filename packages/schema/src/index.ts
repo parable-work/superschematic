@@ -3,6 +3,7 @@ export {
   internalMetadata,
   jsonField,
   source,
+  strictJSON,
   temporalFormat,
   uiHidden,
   virtual,
