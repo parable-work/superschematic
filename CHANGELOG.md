@@ -42,6 +42,11 @@ of a generated artifact is always listed here with the bump it requires.
   Python and Rust, the extension guide, the deploy and platform extension
   guides, the `superschematic.toml` reference and the CLI reference.
 
+### Changed
+
+- Generated Go API modules require `github.com/go-chi/chi/v5` v5.3.2
+  (was v5.3.1), matching `runtime/http/go`. Patch.
+
 ### Fixed
 
 - `session` auth provider: the generated session and principal stores passed

@@ -18,7 +18,7 @@ module example.com/acme/schemas/api/fixture-api
 go 1.26.4
 
 require (
-	github.com/go-chi/chi/v5 v5.3.1
+	github.com/go-chi/chi/v5 v5.3.2
 	github.com/google/uuid v1.6.0
 	example.com/acme/schemas/orm/fixture-db v0.0.0-00010101000000-000000000000
 	example.com/acme/schemas/types/go/fixture-api v0.0.0-00010101000000-000000000000
