@@ -277,6 +277,12 @@ type FieldDef struct {
 	// (@validateMax). Nil means no maximum.
 	ValidateMax *float64 `json:"validateMax,omitempty" yaml:"validateMax,omitempty"`
 
+	// ValidateUploadMaxBytes is the largest multipart upload, in bytes, the
+	// generated API accepts for this field (Validate<T, { uploadMaxBytes }>).
+	// Only valid on a single file-upload scalar field. Nil keeps the
+	// scalar's own upload limit.
+	ValidateUploadMaxBytes *int64 `json:"validateUploadMaxBytes,omitempty" yaml:"validateUploadMaxBytes,omitempty"`
+
 	// ValidateMinLength is the minimum character length for string-like fields
 	// (@validateMinLength). Nil means no minimum.
 	ValidateMinLength *int `json:"validateMinLength,omitempty" yaml:"validateMinLength,omitempty"`

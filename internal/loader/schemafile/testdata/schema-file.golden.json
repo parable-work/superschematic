@@ -397,6 +397,9 @@
         "validatePattern": {
           "type": "string"
         },
+        "validateUploadMaxBytes": {
+          "type": "integer"
+        },
         "virtual": {
           "type": "boolean"
         },

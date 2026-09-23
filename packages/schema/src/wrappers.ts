@@ -1,6 +1,8 @@
 export type ValidateConfig = {
   readonly min?: number;
   readonly max?: number;
+  /** Largest multipart upload in bytes; only on a file-upload scalar field. */
+  readonly uploadMaxBytes?: number;
   readonly minLength?: number;
   readonly maxLength?: number;
   readonly listMin?: number;

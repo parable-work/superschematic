@@ -968,6 +968,9 @@ func (m *typeMapper) extractFileUploadFields(inputTypeName string) []FileUploadF
 				continue
 			}
 		}
+		if field.ValidateUploadMaxBytes != nil {
+			maxSize = *field.ValidateUploadMaxBytes
+		}
 		if maxSize <= 0 {
 			maxSize = 100 * 1024 * 1024
 		}

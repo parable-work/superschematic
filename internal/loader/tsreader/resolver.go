@@ -1,6 +1,7 @@
 package tsreader
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -22,8 +23,8 @@ type typeInfo struct {
 	// platformDefault is set by PlatformDefault<T>.
 	platformDefault bool
 
-	// validate holds the Validate<T, C> config keys (min, max, minLength,
-	// maxLength, listMin, listMax, pattern).
+	// validate holds the Validate<T, C> config keys (min, max,
+	// uploadMaxBytes, minLength, maxLength, listMin, listMax, pattern).
 	validate map[string]any
 
 	// Wrapper markers.
@@ -461,6 +462,12 @@ func (w *walker) validateConfigFromTypeNode(node *astNode) (map[string]any, *Sch
 			return nil, errorAtNode(node, "Validate config values must be literals (key %q)", prop.Name)
 		}
 		switch prop.Name {
+		case "uploadMaxBytes":
+			uploadMaxBytes, valid := uploadMaxBytesLiteral(v)
+			if !valid {
+				return nil, errorAtNode(node, "Validate uploadMaxBytes must be a finite JavaScript-safe integer literal")
+			}
+			cfg[prop.Name] = uploadMaxBytes
 		case "min", "max", "minLength", "maxLength", "listMin", "listMax", "pattern":
 			cfg[prop.Name] = v
 		default:
@@ -468,6 +475,21 @@ func (w *walker) validateConfigFromTypeNode(node *astNode) (map[string]any, *Sch
 		}
 	}
 	return cfg, nil
+}
+
+// maxJavaScriptSafeInteger is Number.MAX_SAFE_INTEGER: the largest integer a
+// TypeScript number literal carries exactly.
+const maxJavaScriptSafeInteger = float64(1<<53 - 1)
+
+// uploadMaxBytesLiteral accepts a number literal that is a finite integer a
+// TypeScript number represents exactly, and returns it as int64.
+func uploadMaxBytesLiteral(value any) (int64, bool) {
+	number, ok := value.(float64)
+	if !ok || math.IsNaN(number) || math.IsInf(number, 0) ||
+		math.Trunc(number) != number || math.Abs(number) > maxJavaScriptSafeInteger {
+		return 0, false
+	}
+	return int64(number), true
 }
 
 // relationConfigFromTypeNode reads the Relation<T, { onDelete }> config object

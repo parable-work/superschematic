@@ -101,6 +101,14 @@ of a generated artifact is always listed here with the bump it requires.
   own. The IR `TypeDef` gains `strictJSON`; the schema-file JSON Schema
   accepts it. The TypeScript writer now emits `@strictJSON` and
   `@denyUnknownFields`, which it dropped before. Minor.
+- `Validate<T, { uploadMaxBytes: N }>` on a file-upload scalar field sets
+  the largest multipart upload, in bytes, the generated Go API accepts for
+  that field, in place of the scalar's own limit; the OpenAPI field
+  description states it. The IR `FieldDef` gains `validateUploadMaxBytes`;
+  schema validation rejects a bound that is not positive or a field that is
+  not a single file-upload scalar (a scalar with `fileUpload` metadata), and
+  the TypeScript reader rejects a literal that is not an exact integer and
+  the key on an operation argument. Minor.
 
 ### Changed
 

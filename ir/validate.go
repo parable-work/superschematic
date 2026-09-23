@@ -135,6 +135,7 @@ func (s *Schema) validateTypeDef(cfg *validateConfig, td *TypeDef) []error {
 		if f.PlatformDefault != "" && f.PlatformDefault != f.TypeRef.Name {
 			errs = append(errs, fmt.Errorf("%s.%s platform default %q does not match field type %q", td.Name, f.Name, f.PlatformDefault, f.TypeRef.Name))
 		}
+		errs = append(errs, s.validateFieldUploadMaxBytes(td.Name, f)...)
 		if f.Relation != nil && f.Relation.OnDelete != "" {
 			switch f.Relation.OnDelete {
 			case "CASCADE", "RESTRICT", "NO ACTION":
@@ -157,6 +158,7 @@ func (s *Schema) validateOperationSet(cfg *validateConfig, set *OperationSet) []
 		if !s.isResolvable(cfg, op.TypeRef.Name) {
 			errs = append(errs, fmt.Errorf("%s.%s references unknown type %q", set.Name, op.Name, op.TypeRef.Name))
 		}
+		errs = append(errs, s.validateFieldUploadMaxBytes(set.Name, op)...)
 		for _, arg := range op.Arguments {
 			if !s.isResolvable(cfg, arg.TypeRef.Name) {
 				errs = append(errs, fmt.Errorf("%s.%s argument %q references unknown type %q", set.Name, op.Name, arg.Name, arg.TypeRef.Name))
@@ -164,6 +166,28 @@ func (s *Schema) validateOperationSet(cfg *validateConfig, set *OperationSet) []
 		}
 	}
 	return errs
+}
+
+// validateFieldUploadMaxBytes checks Validate<T, { uploadMaxBytes }>: the
+// bound is positive and the field is a single file-upload scalar, one whose
+// ScalarDef carries FileUpload metadata.
+func (s *Schema) validateFieldUploadMaxBytes(owner string, field *FieldDef) []error {
+	if field.ValidateUploadMaxBytes == nil {
+		return nil
+	}
+	var errs []error
+	if *field.ValidateUploadMaxBytes <= 0 {
+		errs = append(errs, fmt.Errorf("%s.%s uploadMaxBytes must be positive", owner, field.Name))
+	}
+	if field.TypeRef.IsArray || field.TypeRef.IsMap || !s.isUploadScalar(field.TypeRef.Name) {
+		errs = append(errs, fmt.Errorf("%s.%s uploadMaxBytes requires a file-upload scalar", owner, field.Name))
+	}
+	return errs
+}
+
+func (s *Schema) isUploadScalar(name string) bool {
+	scalar, ok := s.Scalars[name]
+	return ok && scalar != nil && scalar.FileUpload != nil
 }
 
 func (s *Schema) isResolvable(cfg *validateConfig, name string) bool {
