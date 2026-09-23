@@ -46,6 +46,8 @@ of a generated artifact is always listed here with the bump it requires.
 
 - Generated Go API modules require `github.com/go-chi/chi/v5` v5.3.2
   (was v5.3.1), matching `runtime/http/go`. Patch.
+- Generated Go ORM modules require `github.com/jackc/pgx/v5` v5.11.0 (was
+  v5.10.0). Patch.
 
 ### Fixed
 
