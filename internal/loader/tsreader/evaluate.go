@@ -119,9 +119,10 @@ func (w *walker) evaluateExpressionDepth(node *astNode, depth int) (any, *Schema
 		return out, nil
 
 	case kindAsExpression:
-		// A type assertion has no runtime value of its own; an extension
-		// config writes `kind: "Catalog" as SchemaKind` until the
-		// defineConfig type widens (extension-model.md, 6.3).
+		// A type assertion has no runtime value of its own, so the walk
+		// reads through it. SchemaKindName admits any kind string, and a
+		// config that still casts an extension kind (`kind: "Catalog" as
+		// SchemaKind`) loads the same way (extension-model.md, 6.3).
 		return w.evaluateExpressionDepth(node.AsAsExpression().Expression, depth+1)
 
 	case kindPropertyAccessExpression, kindIdentifier:
