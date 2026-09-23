@@ -141,6 +141,12 @@ of a generated artifact is always listed here with the bump it requires.
   `Generic.JSON` field accepts `None` as the JSON `null` value in
   `validate_all` instead of reporting it missing. A set, a tuple, NaN or an
   arbitrary object, which JSON cannot carry, now fails validation. Minor.
+- Go types: an optional field of an API input type (an `InputField[T]`
+  wrapper) is tagged `omitzero` instead of `omitempty`, and `InputField`
+  gains `IsZero`, so encoding leaves out only a field whose key was absent.
+  Before, an unset wrapper encoded as `null`, so re-encoding a decoded
+  input turned an omitted key into an explicit null. A present null, false,
+  zero, `""` or empty collection is still written. Minor.
 
 ### Fixed
 

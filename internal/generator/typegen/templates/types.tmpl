@@ -58,6 +58,13 @@ type HistoryRecord[T any] struct {
 		Value T    `json:"-"`
 	}
 
+	// IsZero lets encoding/json's omitzero leave out only a field whose key
+	// was absent. A present null, false, zero or empty collection is still
+	// written.
+	func (f InputField[T]) IsZero() bool {
+		return !f.Set
+	}
+
 	// IsSet reports whether the JSON key was present in the payload.
 	func (f InputField[T]) IsSet() bool {
 		return f.Set
@@ -98,7 +105,8 @@ type HistoryRecord[T any] struct {
 	}
 
 	// MarshalJSON serializes the inner value so InputField round-trips through JSON.
-	// Unset or null fields serialize as JSON null.
+	// A null field serializes as JSON null; omitzero on the owning struct field
+	// leaves an unset one out.
 	func (f InputField[T]) MarshalJSON() ([]byte, error) {
 		if !f.Set || f.Null {
 			return []byte("null"), nil
@@ -137,12 +145,12 @@ func normalizeNilSlices(v any) {
 	normalizeNilSlicesRec(rv.Elem())
 }
 
-func jsonTagHasOmitempty(sf reflect.StructField) bool {
+func jsonTagHasOption(sf reflect.StructField, name string) bool {
 	_, opts, _ := strings.Cut(sf.Tag.Get("json"), ",")
 	for opts != "" {
 		var opt string
 		opt, opts, _ = strings.Cut(opts, ",")
-		if opt == "omitempty" {
+		if opt == name {
 			return true
 		}
 	}
@@ -162,7 +170,11 @@ func normalizeNilSlicesRec(rv reflect.Value) {
 	case reflect.Struct:
 		for i := 0; i < rv.NumField(); i++ {
 			field := rv.Field(i)
-			if field.Kind() == reflect.Slice && field.IsNil() && jsonTagHasOmitempty(rv.Type().Field(i)) {
+			// An unset optional input field (omitzero InputField) stays absent.
+			if jsonTagHasOption(rv.Type().Field(i), "omitzero") && field.IsZero() {
+				continue
+			}
+			if field.Kind() == reflect.Slice && field.IsNil() && jsonTagHasOption(rv.Type().Field(i), "omitempty") {
 				continue
 			}
 			normalizeNilSlicesRec(field)
@@ -247,7 +259,7 @@ func mapFromYAMLValue(data []byte) (map[string]any, error) {
 {{formatComment .Name .Doc}}
 type {{.Name}} struct {
 	{{range .Fields}}
-	{{.GoName}} {{.GoType}} `json:"{{.Name}}{{if not .Required}},omitempty{{end}}"`
+	{{.GoName}} {{.GoType}} `json:"{{.Name}}{{if not .Required}}{{if .UsesWrapper}},omitzero{{else}},omitempty{{end}}{{end}}"`
 	{{end}}
 }
 
