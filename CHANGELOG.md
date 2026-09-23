@@ -52,6 +52,10 @@ of a generated artifact is always listed here with the bump it requires.
   it. Opt-in per type. Minor.
 - OpenAPI: an array field with `listMin` or `listMax` carries `minItems` or
   `maxItems`. Patch.
+- `superschematic build --with-deps <service-dir>` also builds every
+  service the target transitively depends on (declared dependencies plus
+  `authDb`), dependencies first, with `build-all`'s discovery, ordering and
+  schema catalog; siblings outside the closure are not built. Minor.
 
 ### Changed
 
@@ -69,6 +73,10 @@ of a generated artifact is always listed here with the bump it requires.
   `FromMapStrict`) keeps an absent or null list nil so the required check
   can see it; encoding still writes `[]` for a nil list. A schema that relied
   on required implying non-empty adds `listMin: 1`. Minor.
+- `build-all` orders a service after its `authDb`, in sequential and
+  `--parallel` builds, even when the config does not also list it under
+  `dependencies`. The generated API module imports the authDb's packages,
+  so it is a build-order edge. Patch.
 
 ### Fixed
 

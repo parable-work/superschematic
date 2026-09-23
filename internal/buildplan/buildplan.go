@@ -27,6 +27,27 @@ type Service struct {
 	OutputDirs []string
 }
 
+// dependencyNames lists the services that must be built before this one:
+// the declared dependencies plus the authDb. The API generator loads the
+// authDb as the upstream auth schema and the generated API module imports
+// its ORM and types packages, so the authDb is a build-order edge even when
+// the config does not also declare it as a dependency.
+func (s Service) dependencyNames() []string {
+	names := make([]string, 0, len(s.Config.Dependencies)+1)
+	for _, dep := range s.Config.Dependencies {
+		names = append(names, dep.Name)
+	}
+	if s.Config.AuthDB == "" {
+		return names
+	}
+	for _, name := range names {
+		if name == s.Config.AuthDB {
+			return names
+		}
+	}
+	return append(names, s.Config.AuthDB)
+}
+
 // Discover scans servicesRoot for schema services and returns them in
 // dependency order, with the output surface of the core registry.
 func Discover(servicesRoot string, outputRoot string) ([]Service, error) {
@@ -173,8 +194,8 @@ func TopologicalSort(services []Service) ([]Service, error) {
 		}
 		visiting[service.Name] = true
 		stack = append(stack, service.Name)
-		for _, dep := range service.Config.Dependencies {
-			depService, ok := byName[dep.Name]
+		for _, dep := range service.dependencyNames() {
+			depService, ok := byName[dep]
 			if !ok {
 				continue
 			}
@@ -197,6 +218,48 @@ func TopologicalSort(services []Service) ([]Service, error) {
 	return result, nil
 }
 
+// Closure returns root and every service it transitively depends on
+// (declared dependencies plus authDb), in the order services already
+// carries. It filters the Discover output rather than re-sorting it, so
+// `build --with-deps` and build-all share one ordering. Where
+// TopologicalSort tolerates a dependency on an undiscovered service so a
+// partial tree can still be ordered, Closure fails on one: a member that
+// is not there cannot be built.
+func Closure(services []Service, root string) ([]Service, error) {
+	byName := make(map[string]Service, len(services))
+	for _, service := range services {
+		byName[service.Name] = service
+	}
+	if _, ok := byName[root]; !ok {
+		return nil, fmt.Errorf("schema service %s not found among the discovered services", root)
+	}
+
+	reachable := map[string]bool{root: true}
+	pending := []string{root}
+	for len(pending) > 0 {
+		name := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		for _, dep := range byName[name].dependencyNames() {
+			if reachable[dep] {
+				continue
+			}
+			if _, ok := byName[dep]; !ok {
+				return nil, fmt.Errorf("%s depends on %s, which is not a discovered schema service", name, dep)
+			}
+			reachable[dep] = true
+			pending = append(pending, dep)
+		}
+	}
+
+	closure := make([]Service, 0, len(reachable))
+	for _, service := range services {
+		if reachable[service.Name] {
+			closure = append(closure, service)
+		}
+	}
+	return closure, nil
+}
+
 // GroupIntoPhases groups services into dependency-safe parallel phases.
 func GroupIntoPhases(services []Service, alreadyBuilt map[string]bool) ([][]Service, error) {
 	built := make(map[string]bool, len(alreadyBuilt)+len(services))
@@ -212,8 +275,8 @@ func GroupIntoPhases(services []Service, alreadyBuilt map[string]bool) ([][]Serv
 		var phase []Service
 		for _, service := range remaining {
 			ready := true
-			for _, dep := range service.Config.Dependencies {
-				if !built[dep.Name] {
+			for _, dep := range service.dependencyNames() {
+				if !built[dep] {
 					ready = false
 					break
 				}

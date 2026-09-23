@@ -126,6 +126,93 @@ func TestValidateDependencyKindsRejectsPackagelessDependency(t *testing.T) {
 	require.NoError(t, validateDependencyKinds(services))
 }
 
+func TestTopologicalSortOrdersAuthDBBeforeDependent(t *testing.T) {
+	// The API's config names the DB only through authDb; the sort must still
+	// put the DB first even though Dir order says otherwise.
+	services := []Service{
+		{Name: "api", Dir: "/services/api", Config: &schemaconfig.SchemaConfig{Name: "api", Kind: ir.SchemaKindAPI, AuthDB: "db"}},
+		{Name: "db", Dir: "/services/db", Config: &schemaconfig.SchemaConfig{Name: "db", Kind: ir.SchemaKindDB}},
+	}
+
+	sorted, err := TopologicalSort(services)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"db", "api"}, serviceNames(sorted))
+
+	phases, err := GroupIntoPhases(sorted, nil)
+	require.NoError(t, err)
+	require.Len(t, phases, 2)
+	assert.Equal(t, []string{"db"}, serviceNames(phases[0]))
+	assert.Equal(t, []string{"api"}, serviceNames(phases[1]))
+}
+
+func TestClosureKeepsDiscoverOrderAndDropsUnrelated(t *testing.T) {
+	general := func(name string, deps ...string) Service {
+		cfg := &schemaconfig.SchemaConfig{Name: name, Kind: ir.SchemaKindGeneral}
+		for _, dep := range deps {
+			cfg.Dependencies = append(cfg.Dependencies, schemaconfig.ServiceDependency{Name: dep, Kind: ir.SchemaKindGeneral})
+		}
+		return Service{Name: name, Dir: "/services/" + name, Config: cfg}
+	}
+	leaf := general("leaf", "mid")
+	leaf.Config.Kind = ir.SchemaKindAPI
+	leaf.Config.AuthDB = "auth"
+	auth := general("auth")
+	auth.Config.Kind = ir.SchemaKindDB
+	// Dir order deliberately puts dependents before their dependencies.
+	services := []Service{leaf, general("other", "base"), general("mid", "base"), general("base"), auth}
+
+	sorted, err := TopologicalSort(services)
+	require.NoError(t, err)
+	closure, err := Closure(sorted, "leaf")
+	require.NoError(t, err)
+
+	names := serviceNames(closure)
+	assert.ElementsMatch(t, []string{"base", "mid", "auth", "leaf"}, names, "closure is the transitive dependencies plus authDb, root included")
+	assert.NotContains(t, names, "other", "a sibling that shares a dependency is not in the closure")
+	assert.Less(t, indexOf(names, "base"), indexOf(names, "mid"))
+	assert.Less(t, indexOf(names, "mid"), indexOf(names, "leaf"))
+	assert.Less(t, indexOf(names, "auth"), indexOf(names, "leaf"))
+
+	var fromSorted []string
+	for _, name := range serviceNames(sorted) {
+		if name != "other" {
+			fromSorted = append(fromSorted, name)
+		}
+	}
+	assert.Equal(t, fromSorted, names, "closure preserves the order the resolver produced")
+}
+
+func TestClosureRejectsUnknownRootAndUndiscoveredDependency(t *testing.T) {
+	services := []Service{
+		{Name: "leaf", Config: &schemaconfig.SchemaConfig{Name: "leaf", Kind: ir.SchemaKindGeneral, Dependencies: []schemaconfig.ServiceDependency{{Name: "missing", Kind: ir.SchemaKindGeneral}}}},
+	}
+
+	_, err := Closure(services, "nope")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nope")
+
+	_, err = Closure(services, "leaf")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing")
+}
+
+func serviceNames(services []Service) []string {
+	names := make([]string, 0, len(services))
+	for _, service := range services {
+		names = append(names, service.Name)
+	}
+	return names
+}
+
+func indexOf(names []string, want string) int {
+	for i, name := range names {
+		if name == want {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestCheckConfigPurity(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "schema.config.ts")
