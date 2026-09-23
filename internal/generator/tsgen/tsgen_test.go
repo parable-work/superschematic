@@ -129,6 +129,74 @@ func TestGenerateTypedRecordObjectHelpers(t *testing.T) {
 	}
 }
 
+// TestWriteTypesValidatesImportedEnumFields pins that a field typed with an
+// enum from a dependency package is validated with that package's enum
+// validator, not only checked for presence.
+func TestWriteTypesValidatesImportedEnumFields(t *testing.T) {
+	names := naming.Default()
+	enumsPackage := names.NpmTypesPackage("fixture-enums")
+	output := &ModuleOutput{
+		PackageName: names.NpmTypesPackage("fixture-consumer"),
+		SchemaName:  "fixture-consumer",
+		Naming:      names,
+		Types: []TypeInfo{
+			{
+				Name: "FixtureConsumer",
+				Fields: []FieldInfo{
+					{
+						Name:     "status",
+						TSName:   "status",
+						Type:     "FixtureStatus",
+						TSType:   "FixtureStatus",
+						Required: true,
+					},
+				},
+			},
+		},
+		ImportedTypes: []ImportedTypeInfo{
+			{
+				Name:          "FixtureStatus",
+				ImportAlias:   "fixtureEnums",
+				ImportPackage: enumsPackage,
+				IsEnum:        true,
+			},
+		},
+		TypeImports: []TypeImport{
+			{
+				Alias:          "fixtureEnums",
+				Path:           enumsPackage + "/types",
+				DependencyName: "fixture-enums",
+			},
+		},
+		PackageDependencies: []PackageDependency{
+			{
+				Name: enumsPackage,
+				Spec: "file:../fixture-enums",
+			},
+		},
+	}
+
+	outDir := filepath.Join(t.TempDir(), "fixture-consumer")
+	if err := WriteTypes(output, outDir); err != nil {
+		t.Fatalf("write types: %v", err)
+	}
+
+	generated, err := os.ReadFile(filepath.Join(outDir, "validators", "types", "fixtureconsumer.ts"))
+	if err != nil {
+		t.Fatalf("read generated validator: %v", err)
+	}
+	source := string(generated)
+	if want := "from '" + enumsPackage + "/validators/enums';"; !strings.Contains(source, want) {
+		t.Fatalf("validator does not import the dependency's enum validators (%s):\n%s", want, source)
+	}
+	if strings.Contains(source, "validateFixtureStatus } from '../enums'") {
+		t.Fatalf("validator imports an imported enum from the local enums module:\n%s", source)
+	}
+	if !strings.Contains(source, "validateFixtureStatusRequired(value.status)") {
+		t.Fatalf("validator does not validate the imported enum field:\n%s", source)
+	}
+}
+
 // compareWithGolden compares every file in gotDir against goldenDir,
 // rewriting the goldens when -update is set.
 func compareWithGolden(t *testing.T, gotDir, goldenDir string) {

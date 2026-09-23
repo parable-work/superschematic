@@ -139,6 +139,29 @@ func typeEnumNames(t *TypeInfo, moduleEnums []codegen.EnumInfo) []string {
 	return names
 }
 
+// typeImportedEnumsUsed returns the imported enum definitions referenced by
+// the given type's fields. Imported enums are not emitted into the local
+// enums module, so per-type validators import their validators from the
+// owning package's validators/enums subpath.
+func typeImportedEnumsUsed(t *TypeInfo, importedTypes []ImportedTypeInfo) []ImportedTypeInfo {
+	fieldTypes := make(map[string]struct{}, len(t.Fields))
+	for _, field := range t.Fields {
+		fieldTypes[field.Type] = struct{}{}
+	}
+
+	var enums []ImportedTypeInfo
+	for _, imported := range importedTypes {
+		if !imported.IsEnum {
+			continue
+		}
+		if _, used := fieldTypes[imported.Name]; !used {
+			continue
+		}
+		enums = append(enums, imported)
+	}
+	return enums
+}
+
 // typeEnumDefaultsUsed returns unique enum type names referenced in @default
 // literals on the type's fields. The validator template imports these as
 // types so it can emit casts like `"OFF" as Phase` when seeding defaults.

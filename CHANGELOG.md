@@ -56,5 +56,9 @@ of a generated artifact is always listed here with the bump it requires.
   upstream DB with a `Session` or `User` table failed to compile the generated
   API. The stores now parse the id with `scalars.ParseUUID`. Found by the acme
   example.
+- TypeScript types: a per-type validator checked a field typed with an enum
+  from a dependency package for presence only, so a strict parser accepted
+  any string there. It now imports that package's enum validators from its
+  `validators/enums` subpath and validates the value. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main

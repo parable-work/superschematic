@@ -159,6 +159,8 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				Type              *TypeInfo
 				ScalarsUsed       []ScalarInfo
 				EnumsUsed         []string
+				LocalEnumsUsed    []string
+				ImportedEnumsUsed []ImportedTypeInfo
 				EnumDefaultsUsed  []string
 				ParserNestedTypes []string
 				ParserScalarsUsed []ScalarInfo
@@ -168,7 +170,9 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				Naming:            output.Naming,
 				Type:              t,
 				ScalarsUsed:       typeScalarsUsed(t),
-				EnumsUsed:         typeEnumNames(t, output.Enums),
+				EnumsUsed:         typeEnumNames(t, allEnums),
+				LocalEnumsUsed:    typeEnumNames(t, output.Enums),
+				ImportedEnumsUsed: typeImportedEnumsUsed(t, output.ImportedTypes),
 				EnumDefaultsUsed:  typeEnumDefaultsUsed(t, allEnums),
 				ParserNestedTypes: typeParserNestedTypes(t, generatedTypeNames),
 				ParserScalarsUsed: typeParserScalarsUsed(t),
