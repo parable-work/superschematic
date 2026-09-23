@@ -412,3 +412,45 @@ func TestRespond_PlainWriterIgnoresErrorCode(t *testing.T) {
 	}, "Respond should not panic when writer does not implement SetErrorCode")
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
+
+// ---------------------------------------------------------------------------
+// WithDetails tests
+// ---------------------------------------------------------------------------
+
+func TestWithDetails_ShallowCopy(t *testing.T) {
+	original := apperror.NewAppError(apperror.ErrCodeConflict, "Name taken", fmt.Errorf("unique violation"))
+	withDetails := original.WithDetails(map[string]any{"name": "acme"})
+
+	assert.Equal(t, map[string]any{"name": "acme"}, withDetails.Details)
+	assert.Nil(t, original.Details, "original Details should remain nil")
+	assert.NotSame(t, original, withDetails, "WithDetails must return a new object")
+}
+
+func TestRespond_AppError_WithDetails(t *testing.T) {
+	w := httptest.NewRecorder()
+
+	err := apperror.NewAppError(apperror.ErrCodeUnprocessable, "Upload too large", fmt.Errorf("limit")).
+		WithCode("UPLOAD_TOO_LARGE").
+		WithDetails(map[string]any{"field": "file", "maxBytes": 1024})
+	apperror.Respond(w, zap.NewNop(), err)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	assert.Equal(t, "application/problem+json", w.Header().Get("Content-Type"))
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
+	assert.Equal(t, "UPLOAD_TOO_LARGE", body["code"])
+	assert.Equal(t, "Upload too large", body["detail"])
+	assert.Equal(t, map[string]any{"field": "file", "maxBytes": float64(1024)}, body["details"])
+}
+
+func TestRespond_AppError_WithoutDetailsOmitsMember(t *testing.T) {
+	w := httptest.NewRecorder()
+
+	apperror.Respond(w, zap.NewNop(), apperror.NewAppError(apperror.ErrCodeConflict, "Conflict", fmt.Errorf("test")))
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
+	_, hasDetails := body["details"]
+	assert.False(t, hasDetails, "details must be absent when the AppError carries none")
+}

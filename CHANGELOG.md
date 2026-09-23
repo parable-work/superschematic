@@ -81,6 +81,11 @@ of a generated artifact is always listed here with the bump it requires.
   compiler's lib files. `loader.SchemaError` and `loader.SchemaErrorList`
   alias the located diagnostic types. The checker and AST types are the
   pinned compiler's shim types. Minor.
+- `runtime/http/go`: `AppError.WithDetails(details)` returns a copy that
+  carries structured, client-safe details, and `apperror.Respond` writes them
+  as the problem response's `details` member through the new
+  `response.ErrorWithDetails`. An `AppError` without details renders as
+  before. Minor.
 
 ### Changed
 

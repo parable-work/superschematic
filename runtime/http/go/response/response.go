@@ -22,6 +22,13 @@ type problemDetail struct {
 	RequestID string `json:"requestId,omitempty"`
 }
 
+// detailedProblemDetail extends problemDetail with a structured `details`
+// member that carries client-actionable context for the error.
+type detailedProblemDetail struct {
+	problemDetail
+	Details any `json:"details"`
+}
+
 // validationProblemDetail extends problemDetail with field-level validation errors.
 type validationProblemDetail struct {
 	problemDetail
@@ -60,6 +67,23 @@ func JSON(w http.ResponseWriter, status int, data any) {
 	w.WriteHeader(status)
 	_, _ = w.Write(payload)
 	_, _ = w.Write([]byte("\n"))
+}
+
+// ErrorWithDetails sends an RFC 9457 Problem Details error response with a
+// structured `details` member next to the error code. An empty errorCode
+// leaves the `code` member out.
+func ErrorWithDetails(w http.ResponseWriter, status int, message string, errorCode string, details any) {
+	d := detailedProblemDetail{
+		problemDetail: problemDetail{
+			Type:   "about:blank",
+			Title:  http.StatusText(status),
+			Status: status,
+			Detail: message,
+			Code:   errorCode,
+		},
+		Details: details,
+	}
+	writeProblemJSON(w, d, status)
 }
 
 // Error sends an RFC 9457 Problem Details error response.

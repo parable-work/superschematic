@@ -690,3 +690,29 @@ func TestError_WithEmptyCode(t *testing.T) {
 	_, hasCode := m["code"]
 	assert.False(t, hasCode, "code field should be absent when empty string")
 }
+
+func TestErrorWithDetails(t *testing.T) {
+	rec := httptest.NewRecorder()
+	ErrorWithDetails(rec, http.StatusConflict, "Name taken", "NAME_TAKEN", []string{"acme", "acme-2"})
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
+
+	m := parseBody(t, rec)
+	assert.Equal(t, "about:blank", m["type"])
+	assert.Equal(t, "Conflict", m["title"])
+	assert.Equal(t, float64(409), m["status"])
+	assert.Equal(t, "Name taken", m["detail"])
+	assert.Equal(t, "NAME_TAKEN", m["code"])
+	assert.Equal(t, []any{"acme", "acme-2"}, m["details"])
+}
+
+func TestErrorWithDetails_EmptyCode(t *testing.T) {
+	rec := httptest.NewRecorder()
+	ErrorWithDetails(rec, http.StatusBadRequest, "Bad request", "", map[string]any{"path": "/a"})
+
+	m := parseBody(t, rec)
+	_, hasCode := m["code"]
+	assert.False(t, hasCode, "code field should be absent when empty string")
+	assert.Equal(t, map[string]any{"path": "/a"}, m["details"])
+}
