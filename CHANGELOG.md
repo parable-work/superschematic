@@ -41,6 +41,10 @@ of a generated artifact is always listed here with the bump it requires.
 - Docs site (Starlight) under `docs/`: quickstarts for Go, TypeScript,
   Python and Rust, the extension guide, the deploy and platform extension
   guides, the `superschematic.toml` reference and the CLI reference.
+- Go ORM: every generated `<Type>Update` has `ApplyTo(*types.<Type>)`, which
+  writes each set and `SetNull` field onto a stored row (SetNull wins; a nil
+  receiver or row is a no-op), so a handler can check the post-update row
+  before calling `UpdateOne`. Minor.
 
 ### Changed
 

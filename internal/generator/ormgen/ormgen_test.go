@@ -227,6 +227,30 @@ func TestGenerateSnapshotUpdateBuilder(t *testing.T) {
 	}
 }
 
+func TestGenerateApplyTo(t *testing.T) {
+	output := generateFixtureDB(t)
+	outDir := t.TempDir()
+	if err := WriteORM(output, outDir); err != nil {
+		t.Fatalf("write orm: %v", err)
+	}
+
+	queryFile, err := os.ReadFile(filepath.Join(outDir, "query.go"))
+	if err != nil {
+		t.Fatalf("read query.go: %v", err)
+	}
+	generated := string(queryFile)
+	for _, expected := range []string{
+		"func (u *TenantUserUpdate) ApplyTo(row *types.TenantUser)",
+		"if u.DisplayNameSetNull {",
+		"row.Tenant.Id = u.TenantID",
+		"func (u *TenantUpdate) ApplyTo(row *types.Tenant)",
+	} {
+		if !strings.Contains(generated, expected) {
+			t.Errorf("query.go missing generated ApplyTo fragment %q", expected)
+		}
+	}
+}
+
 func TestGenerateVersionedChildHistoryAsOfMethod(t *testing.T) {
 	output := generateFixtureDB(t)
 

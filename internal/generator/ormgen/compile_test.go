@@ -136,6 +136,80 @@ func TestDecodeTenantHistoryDataSnakeCaseRoundTrip(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ormDir, "history_decoder_test.go"), []byte(historyDecoderTest), 0o644); err != nil {
 		t.Fatalf("write history decoder test: %v", err)
 	}
+	// ApplyTo covers the field shapes extendFixtureForCompileCoverage adds:
+	// an optional array, a nullable enum, a required relation and updatedBy.
+	applyToTest := `package orm
+
+import (
+	"testing"
+
+	types "example.com/schemas/types/go/fixture-db"
+)
+
+func applyToUUID(t *testing.T, raw string) types.IdentityUUID {
+	t.Helper()
+	id, err := types.ParseIdentityUUID(raw)
+	if err != nil {
+		t.Fatalf("parse uuid %q: %v", raw, err)
+	}
+	return id
+}
+
+func TestTenantUserUpdateApplyTo(t *testing.T) {
+	var nilUpdate *TenantUserUpdate
+	nilUpdate.ApplyTo(&types.TenantUser{})
+	(&TenantUserUpdate{}).ApplyTo(nil)
+
+	status := types.TenantStatus_Active
+	invitedBy := applyToUUID(t, "00000000-0000-0000-0000-000000000003")
+	row := types.TenantUser{
+		DisplayName: "Alice",
+		Roles:       []string{"admin"},
+		LastStatus:  &status,
+		InvitedBy:   &invitedBy,
+	}
+	name := "Alice Cooper"
+	tenantID := applyToUUID(t, "00000000-0000-0000-0000-000000000001")
+	actor := applyToUUID(t, "00000000-0000-0000-0000-000000000002")
+	ignored := []string{"ignored"}
+	update := &TenantUserUpdate{
+		DisplayName:       &name,
+		Roles:             &ignored,
+		RolesSetNull:      true,
+		LastStatusSetNull: true,
+		TenantID:          &tenantID,
+		UpdatedBy:         &actor,
+	}
+	update.ApplyTo(&row)
+
+	if row.DisplayName != name {
+		t.Fatalf("DisplayName = %q, want %q", row.DisplayName, name)
+	}
+	if row.Roles != nil {
+		t.Fatalf("Roles = %v, want nil: SetNull wins over a value", row.Roles)
+	}
+	if row.LastStatus != nil {
+		t.Fatalf("LastStatus = %v, want nil", *row.LastStatus)
+	}
+	if row.InvitedBy == nil || row.InvitedBy.ToUUID() != invitedBy.ToUUID() {
+		t.Fatalf("InvitedBy changed without being set: %v", row.InvitedBy)
+	}
+	if row.Tenant.Id == nil || row.Tenant.Id.ToUUID() != tenantID.ToUUID() {
+		t.Fatalf("Tenant.Id = %v, want %s", row.Tenant.Id, tenantID.ToUUID())
+	}
+	if row.UpdatedBy.ToUUID() != actor.ToUUID() {
+		t.Fatalf("UpdatedBy = %s, want %s", row.UpdatedBy.ToUUID(), actor.ToUUID())
+	}
+
+	(&TenantUserUpdate{DisplayNameSetNull: true}).ApplyTo(&row)
+	if row.DisplayName != "" {
+		t.Fatalf("DisplayName = %q after SetNull, want empty", row.DisplayName)
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(ormDir, "apply_to_test.go"), []byte(applyToTest), 0o644); err != nil {
+		t.Fatalf("write apply to test: %v", err)
+	}
 	strategyATest := `package orm
 
 import (

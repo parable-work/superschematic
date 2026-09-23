@@ -480,6 +480,35 @@ func NewTenantSnapshotUpdate(input *types.Tenant) *TenantUpdate {
 	return update
 }
 
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *TenantUpdate) ApplyTo(row *types.Tenant) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.Name != nil {
+		row.Name = *u.Name
+	}
+	if u.Slug != nil {
+		row.Slug = *u.Slug
+	}
+	if u.Email != nil {
+		row.Email = *u.Email
+	}
+	if u.Status != nil {
+		row.Status = *u.Status
+	}
+	if u.IsActive != nil {
+		row.IsActive = *u.IsActive
+	}
+	if u.SeatCount != nil {
+		row.SeatCount = *u.SeatCount
+	}
+	if u.Metadata != nil {
+		row.Metadata = *u.Metadata
+	}
+}
+
 // buildWhereClause builds a WHERE clause from a TenantFilter
 func (f *TenantFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
 	if f == nil {
@@ -830,6 +859,23 @@ func NewTenantUserSnapshotUpdate(input *types.TenantUser) *TenantUserUpdate {
 		update.DisplayName = &input.DisplayName
 	}
 	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *TenantUserUpdate) ApplyTo(row *types.TenantUser) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.DisplayNameSetNull {
+		var zeroDisplayName string
+		row.DisplayName = zeroDisplayName
+	} else if u.DisplayName != nil {
+		row.DisplayName = *u.DisplayName
+	}
+	if u.TenantID != nil {
+		row.Tenant.Id = u.TenantID
+	}
 }
 
 // buildWhereClause builds a WHERE clause from a TenantUserFilter
