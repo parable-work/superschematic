@@ -217,3 +217,16 @@ of a generated artifact is always listed here with the bump it requires.
   field typed with a union from a dependency is treated as a union. A
   module that re-exports an imported union also re-exports its
   `<Union>Wrapper`. Minor.
+- Go ORM: a JSONB column typed with a closed union (local or imported from
+  a dependency), alone, nullable, in a list or in a map, decodes through
+  the union's `<Union>Wrapper` in every read path and in the history
+  decoder; before, the generated code decoded into an interface, which
+  fails. A `Generic.JSON` column keeps the JSON `null` token as a value: a
+  required one reads `null` as `null`, and a nullable one reads a JSONB
+  `null` as a pointer to `null` and only SQL NULL as nil. A selected-field
+  read now returns a JSON decode error instead of dropping it. Minor.
+- Go ORM and Go types: the generated `go.mod` replaces every declared schema
+  dependency's types module, not only the ones this module imports
+  directly. Go does not inherit `replace` lines from a dependency's
+  `go.mod`, so a module that reached a sibling only through another
+  generated module did not resolve it. Patch.

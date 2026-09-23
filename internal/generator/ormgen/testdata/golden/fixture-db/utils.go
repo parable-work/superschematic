@@ -3,11 +3,14 @@
 package orm
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 )
@@ -253,6 +256,44 @@ func unmarshalJSONFieldValue(raw []byte, target any) error {
 		return nil
 	}
 	return json.Unmarshal(raw, target)
+}
+
+// unmarshalGenericJSONFieldValue stores a Generic.JSON column value and keeps
+// the JSON null token as a value: raw "null" is a present JSON null, while
+// SQL NULL never reaches this helper. target is *T for a required field and
+// **T for a nullable one, where T is the scalar's byte-slice type; a
+// nullable target gets a fresh T, so JSON null is not collapsed into a nil
+// pointer. A T that implements sql.Scanner decodes itself; otherwise the
+// compacted JSON text is stored.
+func unmarshalGenericJSONFieldValue(raw []byte, target any) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if scanner, ok := target.(sql.Scanner); ok {
+		return scanner.Scan(raw)
+	}
+	targetValue := reflect.ValueOf(target)
+	if targetValue.Kind() != reflect.Pointer || targetValue.IsNil() {
+		return fmt.Errorf("unsupported Generic.JSON decode target %T", target)
+	}
+	elem := targetValue.Elem()
+	if elem.Kind() == reflect.Pointer {
+		value := reflect.New(elem.Type().Elem())
+		if err := unmarshalGenericJSONFieldValue(raw, value.Interface()); err != nil {
+			return err
+		}
+		elem.Set(value)
+		return nil
+	}
+	if elem.Kind() != reflect.Slice || elem.Type().Elem().Kind() != reflect.Uint8 {
+		return fmt.Errorf("unsupported Generic.JSON decode target %T", target)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		return fmt.Errorf("decode Generic.JSON: %w", err)
+	}
+	elem.SetBytes(append([]byte(nil), compact.Bytes()...))
+	return nil
 }
 
 // validateFields checks if all requested fields are in the allowed list.

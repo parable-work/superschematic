@@ -115,6 +115,9 @@ func TestGenerateFixtureDBShape(t *testing.T) {
 	if !output.HasVersionedRepositories {
 		t.Error("fixture-db Tenant is @versioned; HasVersionedRepositories should be true")
 	}
+	if !output.HasGenericJSON {
+		t.Error("fixture-db Tenant.metadata uses Generic.JSON; HasGenericJSON should be true")
+	}
 
 	if len(output.Repositories) != 2 {
 		t.Fatalf("expected 2 repositories, got %d", len(output.Repositories))
@@ -153,6 +156,16 @@ func TestGenerateFixtureDBShape(t *testing.T) {
 	if len(tenant.OrderedMembers) == 0 || tenant.OrderedMembers[len(tenant.OrderedMembers)-1].Field == nil ||
 		tenant.OrderedMembers[len(tenant.OrderedMembers)-1].Field.DBName != "_version" {
 		t.Errorf("Tenant ordered members should end with _version: %+v", tenant.OrderedMembers)
+	}
+	var metadataField *Field
+	for i := range tenant.Fields {
+		if tenant.Fields[i].Name == "metadata" {
+			metadataField = &tenant.Fields[i]
+			break
+		}
+	}
+	if metadataField == nil || !metadataField.PreservesExplicitJSONNull {
+		t.Fatalf("Tenant.metadata must keep an explicit JSON null: %+v", metadataField)
 	}
 	if len(tenant.Relationships) != 1 || !tenant.Relationships[0].IsArray {
 		t.Fatalf("expected one hasMany relationship on Tenant, got %+v", tenant.Relationships)
@@ -791,5 +804,94 @@ func TestGenerateCreateManyPreservesExplicitPrimaryKey(t *testing.T) {
 	}
 	if !strings.Contains(createMany, "values = append(values, primaryKey.ToUUID())") {
 		t.Error("CreateMany must bind the explicit primary-key values")
+	}
+}
+
+// TestJSONUnionFieldsUseWrapperDispatch: a JSONB column typed with a closed
+// union imported from a dependency decodes through the union's Wrapper, the
+// nullable one stays a nil interface, and the ORM's go.mod replaces the
+// dependency's types module.
+func TestJSONUnionFieldsUseWrapperDispatch(t *testing.T) {
+	contracts := ir.NewSchema("contracts", ir.SchemaKindGeneral)
+	createdKind := "created"
+	contracts.Types["CreatedRevision"] = &ir.TypeDef{
+		Name: "CreatedRevision",
+		Role: ir.RoleEmbeddedStruct,
+		Fields: []*ir.FieldDef{
+			{Name: "kind", TypeRef: ir.TypeRef{Name: "string"}, Required: true, InternalMetadata: true, Default: &createdKind},
+		},
+	}
+	contracts.Unions["RevisionRef"] = &ir.UnionDef{Name: "RevisionRef", Types: []string{"CreatedRevision"}}
+
+	db := ir.NewSchema("union-db", ir.SchemaKindDB)
+	db.Imports = []ir.Import{{Package: "@schemas/contracts", Types: []string{"RevisionRef"}}}
+	db.Scalars["Identity.UUID"] = &ir.ScalarDef{Name: "Identity.UUID", LanguagePrimitive: ir.LanguageString}
+	db.Types["Event"] = &ir.TypeDef{
+		Name: "Event",
+		Role: ir.RoleDBTable,
+		Fields: []*ir.FieldDef{
+			{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, Key: true},
+			{Name: "createdAgainst", TypeRef: ir.TypeRef{Name: "RevisionRef"}, Required: true, JsonField: true},
+			{Name: "supersededBy", TypeRef: ir.TypeRef{Name: "RevisionRef"}, JsonField: true},
+		},
+	}
+
+	output, err := Generate(db, Options{
+		SchemaName:   "union-db",
+		ModulePath:   "example.com/schemas/orm/union-db",
+		TypesModule:  "example.com/schemas/types/go/union-db",
+		Dependencies: map[string]*ir.Schema{"contracts": contracts},
+		Clock:        codegen.FixedClock(time.Unix(0, 0).UTC()),
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(output.Repositories) != 1 {
+		t.Fatalf("repositories = %d, want 1", len(output.Repositories))
+	}
+	if len(output.ModuleDependencyReplaces) != 1 ||
+		output.ModuleDependencyReplaces[0].Module != "example.com/schemas/types/go/contracts" ||
+		output.ModuleDependencyReplaces[0].RelPath != "../../types/go/contracts" {
+		t.Fatalf("dependency replaces = %+v", output.ModuleDependencyReplaces)
+	}
+	fields := map[string]Field{}
+	for _, field := range output.Repositories[0].Fields {
+		fields[field.Name] = field
+	}
+	for _, name := range []string{"createdAgainst", "supersededBy"} {
+		field := fields[name]
+		if !field.IsJSONField || !field.IsUnion || field.JSONUnionDecoder == "" {
+			t.Fatalf("%s not classified as a JSON union: %+v", name, field)
+		}
+		if field.DerefValue {
+			t.Fatalf("%s must stay a nilable union interface, not a pointer: %+v", name, field)
+		}
+	}
+
+	outDir := t.TempDir()
+	if err := WriteORM(output, outDir); err != nil {
+		t.Fatalf("WriteORM: %v", err)
+	}
+	source, err := os.ReadFile(filepath.Join(outDir, "repository_event.go"))
+	if err != nil {
+		t.Fatalf("read repository: %v", err)
+	}
+	for _, want := range []string{
+		"var wrapper types.RevisionRefWrapper",
+		"decodeEventCreatedAgainstJSONUnion",
+		"decodeEventSupersededByJSONUnion",
+		"result.CreatedAgainst = decoded",
+		"result.SupersededBy = decoded",
+	} {
+		if !strings.Contains(string(source), want) {
+			t.Errorf("generated repository missing %q", want)
+		}
+	}
+	module, err := os.ReadFile(filepath.Join(outDir, "go.mod"))
+	if err != nil {
+		t.Fatalf("read go.mod: %v", err)
+	}
+	if !strings.Contains(string(module), "replace example.com/schemas/types/go/contracts => ../../types/go/contracts") {
+		t.Fatalf("go.mod lacks the dependency replace:\n%s", module)
 	}
 }

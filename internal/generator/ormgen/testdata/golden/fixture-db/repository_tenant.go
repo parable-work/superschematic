@@ -67,8 +67,8 @@ func decodeTenantHistoryData(raw []byte) (*types.Tenant, error) {
 			return nil, fmt.Errorf("failed to decode history field seat_count: %w", err)
 		}
 	}
-	if rawValue, ok := values["metadata"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
-		if err := unmarshalJSONFieldValue(rawValue, &result.Metadata); err != nil {
+	if rawValue, ok := values["metadata"]; ok && len(rawValue) > 0 {
+		if err := unmarshalGenericJSONFieldValue(rawValue, &result.Metadata); err != nil {
 			return nil, fmt.Errorf("failed to decode history field metadata: %w", err)
 		}
 	}
@@ -375,9 +375,15 @@ func (r *TenantRepository) GetOne(ctx context.Context, id types.IdentityUUID, op
 		err = row.Scan(scanDest...)
 		if err == nil {
 			// Copy nullable fields when present
+			var jsonFieldDecodeErr error
 
 			if len(tempMetadata) > 0 {
-				_ = unmarshalJSONFieldValue(tempMetadata, &result.Metadata)
+				if err := unmarshalGenericJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
+					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field metadata: %w", err)
+				}
+			}
+			if jsonFieldDecodeErr != nil {
+				return nil, jsonFieldDecodeErr
 			}
 		}
 	} else {
@@ -412,7 +418,7 @@ func (r *TenantRepository) GetOne(ctx context.Context, id types.IdentityUUID, op
 			// Copy nullable fields when present
 
 			if len(tempMetadata) > 0 {
-				if err := unmarshalJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
+				if err := unmarshalGenericJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
 					return nil, fmt.Errorf("failed to decode JSON field metadata: %w", err)
 				}
 			}
@@ -651,7 +657,7 @@ func (r *TenantRepository) GetManyByIDs(ctx context.Context, ids []types.Identit
 		// Copy nullable fields when present
 
 		if len(tempMetadata) > 0 {
-			if err := unmarshalJSONFieldValue(tempMetadata, &entity.Metadata); err != nil {
+			if err := unmarshalGenericJSONFieldValue(tempMetadata, &entity.Metadata); err != nil {
 				return nil, fmt.Errorf("failed to decode JSON field metadata: %w", err)
 			}
 		}
@@ -799,9 +805,15 @@ func (r *TenantRepository) FindOne(ctx context.Context, filter *TenantFilter, op
 		err = row.Scan(scanDest...)
 		if err == nil {
 			// Copy nullable fields when present
+			var jsonFieldDecodeErr error
 
 			if len(tempMetadata) > 0 {
-				_ = unmarshalJSONFieldValue(tempMetadata, &result.Metadata)
+				if err := unmarshalGenericJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
+					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field metadata: %w", err)
+				}
+			}
+			if jsonFieldDecodeErr != nil {
+				return nil, jsonFieldDecodeErr
 			}
 
 			// Set relationship IDs from scanned FK values
@@ -837,7 +849,7 @@ func (r *TenantRepository) FindOne(ctx context.Context, filter *TenantFilter, op
 			// Copy nullable fields when present
 
 			if len(tempMetadata) > 0 {
-				if err := unmarshalJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
+				if err := unmarshalGenericJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
 					return nil, fmt.Errorf("failed to decode JSON field metadata: %w", err)
 				}
 			}
@@ -1005,9 +1017,15 @@ func (r *TenantRepository) FindMany(ctx context.Context, filter *TenantFilter, o
 		}
 
 		// Copy nullable fields when present
+		var jsonFieldDecodeErr error
 
 		if len(tempMetadata) > 0 {
-			_ = unmarshalJSONFieldValue(tempMetadata, &result.Metadata)
+			if err := unmarshalGenericJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
+				jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field metadata: %w", err)
+			}
+		}
+		if jsonFieldDecodeErr != nil {
+			return nil, 0, jsonFieldDecodeErr
 		}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)
@@ -1303,7 +1321,7 @@ func (r *TenantRepository) CreateOne(ctx context.Context, input *types.Tenant) (
 	// Copy nullable fields when present
 
 	if len(tempMetadata) > 0 {
-		if err := unmarshalJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
+		if err := unmarshalGenericJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
 			return nil, fmt.Errorf("failed to decode JSON field metadata: %w", err)
 		}
 	}
@@ -1460,7 +1478,7 @@ func (r *TenantRepository) CreateMany(ctx context.Context, inputs []*types.Tenan
 		// Copy nullable fields when present
 
 		if len(tempMetadata) > 0 {
-			if err := unmarshalJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
+			if err := unmarshalGenericJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
 				return nil, fmt.Errorf("failed to decode JSON field metadata: %w", err)
 			}
 		}
@@ -1609,7 +1627,7 @@ func (r *TenantRepository) updateOne(ctx context.Context, id types.IdentityUUID,
 	// Copy nullable fields when present
 
 	if len(tempMetadata) > 0 {
-		if err := unmarshalJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
+		if err := unmarshalGenericJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
 			return nil, fmt.Errorf("failed to decode JSON field metadata: %w", err)
 		}
 	}

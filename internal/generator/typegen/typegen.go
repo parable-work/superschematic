@@ -309,7 +309,12 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	output.ImportedUnions = imported.unions
 	output.Imports = imported.imports
 	output.ModuleDependencies = imported.moduleDependencies(opts.ModulePath)
-	output.ModuleDependencyReplaces = moduleDependencyReplaces(output.ModuleDependencies)
+	// Go does not inherit replace directives from a dependency's go.mod.
+	// Replace every declared schema dependency, including one this module
+	// reaches only through another generated types module.
+	output.ModuleDependencyReplaces = moduleDependencyReplaces(
+		allDependencyModulePaths(opts.ModulePath, output.ModuleDependencies, opts.DependencyModules),
+	)
 
 	output.Enums = convertEnums(codegen.ExtractEnums(schema))
 
@@ -723,6 +728,29 @@ func buildScalarMap(scalars []ScalarInfo) map[string]*ScalarInfo {
 		m[scalars[i].Name] = &scalars[i]
 	}
 	return m
+}
+
+// allDependencyModulePaths returns the sorted, de-duplicated module paths of
+// the dependencies this module imports and of every declared dependency,
+// without the module itself.
+func allDependencyModulePaths(selfModulePath string, used []string, declared map[string]string) []string {
+	unique := make(map[string]struct{}, len(used)+len(declared))
+	for _, modulePath := range used {
+		if modulePath != "" && modulePath != selfModulePath {
+			unique[modulePath] = struct{}{}
+		}
+	}
+	for _, modulePath := range declared {
+		if modulePath != "" && modulePath != selfModulePath {
+			unique[modulePath] = struct{}{}
+		}
+	}
+	modules := make([]string, 0, len(unique))
+	for modulePath := range unique {
+		modules = append(modules, modulePath)
+	}
+	sort.Strings(modules)
+	return modules
 }
 
 // moduleDependencyReplaces builds go.mod replace directives for sibling type
