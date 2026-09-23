@@ -86,6 +86,12 @@ of a generated artifact is always listed here with the bump it requires.
   as the problem response's `details` member through the new
   `response.ErrorWithDetails`. An `AppError` without details renders as
   before. Minor.
+- TypeScript types: every build writes `<out>/types/typescript/package.json`,
+  a private Bun workspace root named `<npm_scope>/types-workspace` whose
+  workspaces are the generated types packages next to it. A types package
+  that depends on a sibling through `file:../<schema>`, and on the scalar
+  library through a `file:` spec outside the tree, then installs from the
+  root or from any package. The name comes from `npm_scope`. Minor.
 
 ### Changed
 

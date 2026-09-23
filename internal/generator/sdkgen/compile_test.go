@@ -88,6 +88,10 @@ func TestGeneratedSDKCompiles(t *testing.T) {
 		if err := tsgen.WriteTypes(tsOutput, typesDir); err != nil {
 			t.Fatalf("write types %s: %v", tc.name, err)
 		}
+		// Mirror the output layout: types/typescript is a Bun workspace root.
+		if err := tsgen.WriteWorkspaceRoot(filepath.Dir(typesDir), naming.Naming{}); err != nil {
+			t.Fatalf("write workspace root: %v", err)
+		}
 
 		install := exec.Command(bunPath, "install")
 		install.Dir = typesDir
