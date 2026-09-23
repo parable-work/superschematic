@@ -11,10 +11,15 @@ const openAPISpec = `{
         "properties": {
           "name": {
             "description": "An objects name",
+            "maxLength": 80,
+            "minLength": 2,
             "type": "string"
           },
           "slug": {
             "description": "A URL friendly version of a string",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
             "type": "string"
           }
         },
@@ -83,6 +88,7 @@ const openAPISpec = `{
         "properties": {
           "id": {
             "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
             "type": "string"
           },
           "internalDebugLabel": {
@@ -90,6 +96,8 @@ const openAPISpec = `{
           },
           "name": {
             "description": "An objects name",
+            "maxLength": 80,
+            "minLength": 2,
             "type": "string"
           },
           "userCount": {

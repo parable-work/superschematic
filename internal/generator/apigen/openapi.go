@@ -3,6 +3,7 @@ package apigen
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
@@ -54,10 +55,11 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 }
 
 // buildOpenAPIScalarMap maps every resolvable type name to a JSON-schema-ish
-// primitive token: "string", "number", "integer", "boolean", or "object".
-// Bare language primitives map directly; semantic scalars map through their
-// LanguagePrimitive (refined to "integer" by scalar traits) with a
-// json_schema type-mapping override.
+// primitive token: "string", "number", "integer", "boolean", "object", or
+// the internal sentinel "any" for a scalar whose value may be any JSON value
+// (an empty Schema Object). Bare language primitives map directly; semantic
+// scalars map through their LanguagePrimitive (refined to "integer" by
+// scalar traits), and a json_schema type mapping overrides both.
 func buildOpenAPIScalarMap(schema *ir.Schema, dependencies map[string]*ir.Schema) map[string]string {
 	scalarMap := map[string]string{
 		codegen.PrimitiveString:  "string",
@@ -74,8 +76,8 @@ func buildOpenAPIScalarMap(schema *ir.Schema, dependencies map[string]*ir.Schema
 					primitive = "integer"
 				}
 			}
-			if jsType, ok := scalarDef.TypeMappings["json_schema"]; ok && jsType == "object" {
-				primitive = "object"
+			if jsType, ok := scalarDef.TypeMappings["json_schema"]; ok && jsType != "" {
+				primitive = jsType
 			}
 			if primitive == "" {
 				primitive = "string"
@@ -619,15 +621,24 @@ func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, sche
 
 	for _, field := range typeDef.Fields {
 		fieldSchema := typeRefToOpenAPISchema(field.TypeRef, !field.Required, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
+		// A scalar's own constraints and the field's Validate<> bounds apply
+		// to each value: the items of an array, the values of a map.
+		valueSchema := openAPIConstraintTarget(fieldSchema, field.TypeRef)
+		applyOpenAPIScalarConstraints(valueSchema, field.TypeRef.Name, schema, dependencies)
+		applyOpenAPIValidationConstraints(
+			valueSchema,
+			field.ValidateMin,
+			field.ValidateMax,
+			field.ValidateMinLength,
+			field.ValidateMaxLength,
+			field.ValidatePattern,
+			nil,
+			nil,
+		)
 		// listMin/listMax bound the array itself. A required array without
 		// listMin may be empty; only listMin >= 1 forbids [].
 		if field.TypeRef.IsArray && !field.TypeRef.IsMap {
-			if field.ValidateListMin != nil {
-				fieldSchema["minItems"] = *field.ValidateListMin
-			}
-			if field.ValidateListMax != nil {
-				fieldSchema["maxItems"] = *field.ValidateListMax
-			}
+			applyOpenAPIValidationConstraints(fieldSchema, nil, nil, nil, nil, "", field.ValidateListMin, field.ValidateListMax)
 		}
 
 		if doc := codegen.DocText(field.Description, field.Comment); doc != "" {
@@ -655,6 +666,98 @@ func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, sche
 	}
 
 	return schemaObj
+}
+
+// applyOpenAPIScalarConstraints copies a scalar's format, pattern, length
+// and range bounds onto schemaObject. The scalar may be defined in the schema
+// or in a dependency; when several carry it, the definition with the most
+// constraints wins. A name that is not a scalar leaves schemaObject alone.
+func applyOpenAPIScalarConstraints(
+	schemaObject map[string]interface{},
+	typeName string,
+	schema *ir.Schema,
+	dependencies map[string]*ir.Schema,
+) {
+	var best ScalarJSONSchemaInfo
+	score := -1
+	candidates := make([]*ir.Schema, 0, len(dependencies)+1)
+	candidates = append(candidates, schema)
+	for _, name := range sortedSchemaNames(dependencies) {
+		candidates = append(candidates, dependencies[name])
+	}
+	for _, candidateSchema := range candidates {
+		if candidateSchema == nil {
+			continue
+		}
+		candidate, ok := extractScalarJSONSchemaInfo(candidateSchema)[typeName]
+		if !ok {
+			continue
+		}
+		candidateScore := 0
+		for _, set := range []bool{
+			candidate.Pattern != "", candidate.Format != "",
+			candidate.MinLength != nil, candidate.MaxLength != nil,
+			candidate.Minimum != nil, candidate.Maximum != nil,
+		} {
+			if set {
+				candidateScore++
+			}
+		}
+		if candidateScore > score {
+			best, score = candidate, candidateScore
+		}
+	}
+	if score < 0 {
+		return
+	}
+	if best.Format != "" {
+		schemaObject["format"] = best.Format
+	}
+	if best.Pattern != "" {
+		schemaObject["pattern"] = best.Pattern
+	}
+	if best.MinLength != nil {
+		schemaObject["minLength"] = *best.MinLength
+	}
+	if best.MaxLength != nil {
+		schemaObject["maxLength"] = *best.MaxLength
+	}
+	if best.Minimum != nil {
+		schemaObject["minimum"] = *best.Minimum
+	}
+	if best.Maximum != nil {
+		schemaObject["maximum"] = *best.Maximum
+	}
+}
+
+// sortedSchemaNames returns the dependency names in order, so a tie between
+// two definitions of one scalar resolves the same way on every run.
+func sortedSchemaNames(schemas map[string]*ir.Schema) []string {
+	names := make([]string, 0, len(schemas))
+	for name := range schemas {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// openAPIConstraintTarget returns the schema object that receives scalar
+// and field validation constraints: the value schema inside a map, then
+// inside an array. typeRefToOpenAPISchema wraps arrays first, then maps, so
+// this unwraps in reverse.
+func openAPIConstraintTarget(fieldSchema map[string]interface{}, typeRef ir.TypeRef) map[string]interface{} {
+	target := fieldSchema
+	if typeRef.IsMap {
+		if additional, ok := fieldSchema["additionalProperties"].(map[string]interface{}); ok {
+			target = additional
+		}
+	}
+	if typeRef.IsArray {
+		if items, ok := target["items"].(map[string]interface{}); ok {
+			target = items
+		}
+	}
+	return target
 }
 
 func openAPIEnumSchema(enumDef *ir.EnumDef) map[string]interface{} {
@@ -774,12 +877,14 @@ func typeToOpenAPISchema(typeName string, scalarExamples, scalarDescriptions, sc
 		schema["type"] = "boolean"
 	case "object":
 		schema["type"] = "object"
+	case "any":
+		// An empty Schema Object accepts every JSON value, null included.
 	default:
 		schema["type"] = "string"
 	}
 
 	if example, ok := scalarExamples[typeName]; ok {
-		if schemaType, ok := schema["type"].(string); ok && schemaType == "object" {
+		if schemaType, _ := schema["type"].(string); schemaType == "object" || primitive == "any" {
 			var parsedExample interface{}
 			if err := json.Unmarshal([]byte(example), &parsedExample); err == nil {
 				schema["example"] = parsedExample

@@ -155,6 +155,13 @@ of a generated artifact is always listed here with the bump it requires.
   Before, an unset wrapper encoded as `null`, so re-encoding a decoded
   input turned an omitted key into an explicit null. A present null, false,
   zero, `""` or empty collection is still written. Minor.
+- OpenAPI: a component property carries its scalar's `format`, `pattern`,
+  `minLength`/`maxLength` and `minimum`/`maximum`, and the field's
+  `Validate<>` bounds; on an array they go on `items` and on a map on the
+  map values, while `listMin`/`listMax` stay on the array. A scalar's
+  `json_schema` type mapping now decides its OpenAPI type for every value
+  (before, only `object` overrode the language primitive), and the value
+  `any` renders as an empty schema that accepts any JSON value. Minor.
 
 ### Fixed
 
