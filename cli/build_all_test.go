@@ -60,8 +60,8 @@ func TestBuildAllCommand_SkipFormatSuppressesFormatterProfiles(t *testing.T) {
 }
 
 // TestBuildAllCommand_CacheSkipsUpToDateService also pins that the
-// .deps.json graph is a build output, not a hook: the all-cached run builds
-// nothing and fires no hook, and still rewrites the graph from dist.
+// .deps.json graph is written from dist: the all-cached run builds nothing
+// and still rewrites it.
 func TestBuildAllCommand_CacheSkipsUpToDateService(t *testing.T) {
 	servicesRoot := prepareJSONServicesRoot(t)
 	outDir := t.TempDir()

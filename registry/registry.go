@@ -35,6 +35,7 @@ type (
 	GenerateContext = registry.GenerateContext
 	BuildAllHook    = registry.BuildAllHook
 	BuildAllContext = registry.BuildAllContext
+	BuildAllService = registry.BuildAllService
 	ScalarCatalog   = registry.ScalarCatalog
 	// SchemaCatalogEntry is one discovered service's identity facts, the
 	// value type of LoadContext.Catalog.

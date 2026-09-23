@@ -64,8 +64,10 @@ superschematic build --with-deps ./schemas/services/shop-api
 
 Discover every schema service under `<services-root>` and build them in
 one process, in dependency order. A service's `authDb` counts as a
-dependency for ordering. After every service has built, registered
-`BuildAllHook`s run (a chart merge, for example).
+dependency for ordering. Once every service's output is in place,
+whether this run built it, restored it from the cache or found it up to
+date, registered `BuildAllHook`s run (a chart merge, for example). They
+run on a `build-all` that built nothing too.
 
 When finished it writes the dependency graph of the generated packages
 to `<output-root>/.deps.json`, and the same bytes to `--deps-copy` or

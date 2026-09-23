@@ -14,6 +14,7 @@ The extension adds one of each registration surface:
 | Decorator | `@shelf` from `@acme/schema`, into the field's `extensions.acme` slot | `ext/decorator.go`, `packages/schema` |
 | Document | `catalog.config.yaml` next to a Catalog schema, with a generator | `ext/document.go` |
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
+| Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |
 | Auth provider | `apikey`, an `X-API-Key` header over the generic session runtime | `ext/auth/` |
 | Command | `describe`, through `cli.CommandProvider` | `ext/command.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
@@ -61,6 +62,7 @@ examples/acme-schematic/
     decorator.go              @shelf + the field codec
     document.go               catalog.config document + generator
     manifest.go               acmeManifest generator on every kind
+    inventory.go              acmeInventory build-all hook
     command.go                describe subcommand
     auth/                     apikey auth provider + its snippet templates
   packages/schema/            @acme/schema, the authoring package @shelf is imported from
@@ -273,6 +275,33 @@ r.RegisterDocument(registry.DocumentSpec{
   its own, then writes `config.json`.
 
 The `--emit-ir` output carries the document verbatim under `documents`.
+
+## A build-all hook
+
+Some output needs every service at once. `ext/inventory.go` registers a
+hook that `build-all` runs once every service's output is in place:
+
+```go
+r.RegisterBuildAllHook(registry.BuildAllHook{
+	Name:      "acmeInventory",
+	Extension: Name,
+	Run: func(_ context.Context, bc registry.BuildAllContext) error {
+		for _, service := range bc.Services {
+			// read manifest.json from ManifestDir(bc.OutputRoot, service.Name),
+			// one of service.OutputDirs
+		}
+		// write dist/acme/inventory.json
+	},
+})
+```
+
+The hook runs on every `build-all`, including one where every service was
+up to date or restored from the build cache and nothing was built. Then
+`bc.SchemaFor` has no IR for any service, so the hook reads each manifest
+from the service's `OutputDirs`, the directories the cache stores and
+restores. A manifest missing there fails the hook instead of leaving a
+service out of the inventory. The smoke deletes `dist`, restores all four
+services from the cache, and checks the inventory is the same.
 
 ## An auth provider
 

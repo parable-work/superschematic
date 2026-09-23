@@ -6,6 +6,8 @@
 //     extensions slot of a field (decorator.go);
 //   - a sidecar document, catalog.config.yaml, with a generator (document.go);
 //   - a generator on the core kinds, the acme manifest (manifest.go);
+//   - a build-all hook that merges every service's manifest into one
+//     inventory (inventory.go);
 //   - an auth provider, "apikey", that the api generator renders with when
 //     superschematic.toml selects it (auth/);
 //   - a subcommand, describe, through cli.CommandProvider (command.go).
@@ -63,6 +65,9 @@ func (Extension) Register(r *registry.Registry) error {
 		return err
 	}
 	if err := registerManifest(r, cfg); err != nil {
+		return err
+	}
+	if err := registerInventory(r); err != nil {
 		return err
 	}
 	return r.RegisterAuthProvider(auth.Provider{})

@@ -8,8 +8,8 @@ sidebar:
 An extension is a Go package that implements `registry.Extension` and,
 optionally, `cli.CommandProvider`. You pass it to `cli.New`. The core
 binary (`cmd/superschematic`) passes none. Everything project-specific
-registers here: kinds, decorators, documents, generators, auth providers
-and extra commands.
+registers here: kinds, decorators, documents, generators, build-all
+hooks, auth providers and extra commands.
 
 `examples/acme-schematic` is the acceptance test of this model. It adds one
 of each surface without editing a file under the core, and
@@ -186,6 +186,34 @@ r.RegisterDocument(registry.DocumentSpec{
 
 The [deploy](/superschematic/guides/deploy/) extension is a document with
 no new kind.
+
+## A build-all hook
+
+A hook is for output that needs every service at once, such as values
+merged across services into one file. `build-all` runs the hooks in
+registration order once every service's output is in place, and names
+the hook in any error it returns:
+
+```go
+r.RegisterBuildAllHook(registry.BuildAllHook{
+    Name:      "acmeInventory",
+    Extension: Name,
+    Run: func(ctx context.Context, bc registry.BuildAllContext) error {
+        for _, service := range bc.Services {
+            // service.Name, .Kind, .Dir, .OutputDirs
+        }
+        return nil
+    },
+})
+```
+
+Hooks run on every `build-all`, including one where every service was
+up to date or restored from the cache and nothing was built. `SchemaFor`
+returns the IR only of services this process loaded, so a hook that
+must see every service reads its files from `Services[i].OutputDirs`:
+the directories the service's documents and generators write, which
+the cache stores and restores. acme's `acmeInventory` merges every
+service's manifest that way. `build` of one service runs no hooks.
 
 ## An auth provider
 

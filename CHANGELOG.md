@@ -65,6 +65,11 @@ of a generated artifact is always listed here with the bump it requires.
   `schemadeps.SyncCopy` checks or refreshes that copy from a command that
   runs after the build, such as an extension's pin command. `[deps]` is not
   part of the build cache key. Minor.
+- `registry.BuildAllContext.Services`: every discovered service in build
+  order as a `registry.BuildAllService` (name, kind, service directory and
+  the output directories the build cache stores and restores), so a
+  build-all hook can read a service this run restored or found up to date
+  and did not load. Minor.
 
 ### Changed
 
@@ -86,6 +91,10 @@ of a generated artifact is always listed here with the bump it requires.
   `--parallel` builds, even when the config does not also list it under
   `dependencies`. The generated API module imports the authDb's packages,
   so it is a build-order edge. Patch.
+- `build-all` runs the registered `BuildAllHook`s on a run where every
+  service was up to date or restored from the cache and nothing was built.
+  Before, such a run skipped them, so a hook's merged output depended on
+  which services happened to rebuild. Minor.
 - `schemadeps.CollectFromDist(distRoot, producers)` and
   `schemadeps.EmitFromDist(distRoot, producers, copyPath)` take the map from
   output directory to producing service and, for `EmitFromDist`, the copy

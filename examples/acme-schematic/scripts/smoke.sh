@@ -17,7 +17,10 @@
 #   4. the catalog generator wrote catalog.json for the Catalog service;
 #   5. the @shelf payload reached the IR (--emit-ir + jq);
 #   6. the catalog.config document was loaded and its generator ran;
-#   7. the manifest generator ran on every kind, core and acme;
+#   7. the manifest generator ran on every kind, core and acme, and the
+#      acmeInventory build-all hook merged the manifests from every service's
+#      output directories, again when every service is restored from the
+#      build cache;
 #   8. the API service compiles against the acme auth provider (go build);
 #   9. the core-only binary rejects the Catalog service with the registered
 #      kinds named, and rejects the naming file that selects apikey;
@@ -102,6 +105,22 @@ for service in shop-db shop-api shop-config shop-catalog; do
 done
 jq -e '.kind == "DB"' "$DIST/acme/manifest/shop-db/manifest.json" >/dev/null
 jq -e '.kind == "Catalog"' "$DIST/acme/manifest/shop-catalog/manifest.json" >/dev/null
+
+echo "==> build-all hook merged every manifest, also when every service comes from the cache"
+jq -e '[.services[].service] | sort == ["shop-api", "shop-catalog", "shop-config", "shop-db"]' "$DIST/acme/inventory.json" >/dev/null
+cp "$DIST/acme/inventory.json" "$OUT/inventory.json"
+# The first cached run builds and stores every service. Removing dist drops
+# the outputs and the stamps, so the second restores all four from the cache
+# and builds none; the hook must still run and see the same manifests.
+"$OUT/acme-schematic" build-all "$SCHEMAS/services" --cache --cache-root "$OUT/cache" >/dev/null
+rm -rf "$DIST"
+"$OUT/acme-schematic" build-all "$SCHEMAS/services" --cache --cache-root "$OUT/cache" | tee "$OUT/restored.log"
+test "$(grep -c '(restored from cache)' "$OUT/restored.log")" -eq 4
+if grep -q '(built' "$OUT/restored.log"; then
+  echo "ERROR: the all-restored build-all built a service" >&2
+  exit 1
+fi
+cmp "$OUT/inventory.json" "$DIST/acme/inventory.json"
 
 echo "==> core outputs carry the acme names"
 test -s "$DIST/sql/shop-db/create.sql"

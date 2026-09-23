@@ -431,7 +431,10 @@ func (ctx GenerateContext) InstallTargetDir(relDir, kind string) (string, error)
 	return targetDir, nil
 }
 
-// BuildAllHook runs in `superschematic build-all` after every service has built.
+// BuildAllHook runs in `superschematic build-all` once every service's
+// output is in place: built by this run, restored from the build cache, or
+// already up to date. It runs on every build-all, including one that built
+// nothing.
 type BuildAllHook struct {
 	Name      string
 	Extension string
@@ -442,10 +445,31 @@ type BuildAllHook struct {
 type BuildAllContext struct {
 	// ServiceNames in build order.
 	ServiceNames []string
-	// SchemaFor returns the loaded IR of a service built in this process.
+	// Services are the discovered services in build order, each with the
+	// directories its output lives in.
+	Services []BuildAllService
+	// SchemaFor returns the IR of a service this process loaded: every
+	// service it built and every dependency it loaded for one. A service
+	// restored from the cache or already up to date is not loaded, so a
+	// hook that must see every service reads Services[i].OutputDirs.
 	SchemaFor  func(name string) (*ir.Schema, bool)
 	RepoRoot   string
 	OutputRoot string
 	Naming     Naming
 	Log        io.Writer
+}
+
+// BuildAllService is one discovered service as build-all hands it to a
+// hook.
+type BuildAllService struct {
+	Name string
+	Kind string
+	// Dir is the service directory, the one that holds schema.config.*.
+	Dir string
+	// OutputDirs are the absolute directories the service's present
+	// documents and enabled generators write, usually under OutputRoot.
+	// They are the set the build cache stores and restores, so they hold
+	// the service's output whether this run built it, restored it or found
+	// it up to date.
+	OutputDirs []string
 }

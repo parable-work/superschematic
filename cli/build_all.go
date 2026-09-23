@@ -211,15 +211,36 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 			}
 		}
 	}
-	if len(remaining) == 0 {
+	schemaCache := newSharedSchemaCache()
+	// finish runs once every service's output is in place, whether this run
+	// built it, restored it from the cache or found it up to date. The graph
+	// and the hooks read the output root, so they run on a build-all that
+	// built nothing too; a hook that skipped then would leave its merged
+	// output a function of which services happened to rebuild.
+	finish := func() error {
 		if flags.profile {
 			profileTotals.print(cmd.OutOrStdout())
 		}
 		if err := emitSchemaDeps(cmd, outputRoot, depsCopy, services); err != nil {
 			return err
 		}
+		hookContext := registry.BuildAllContext{
+			ServiceNames: names,
+			Services:     hookServices(services),
+			SchemaFor:    schemaCache.get,
+			RepoRoot:     repoRoot,
+			OutputRoot:   outputRoot,
+			Naming:       activeNaming,
+			Log:          cmd.OutOrStdout(),
+		}
+		if err := runBuildAllHooks(cmd.Context(), reg.BuildAllHooks(), hookContext); err != nil {
+			return err
+		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nAll %d schema services built successfully\n", len(services))
 		return nil
+	}
+	if len(remaining) == 0 {
+		return finish()
 	}
 
 	taskByName := make(map[string]buildAllTask, len(remaining))
@@ -227,7 +248,6 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		taskByName[task.service.Name] = task
 	}
 
-	schemaCache := newSharedSchemaCache()
 	serviceByName := make(map[string]buildplan.Service, len(services))
 	var tsProgramCache *tsreader.ProgramCache
 	for _, service := range services {
@@ -295,27 +315,23 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		}
 	}
 
-	if flags.profile {
-		profileTotals.print(cmd.OutOrStdout())
+	return finish()
+}
+
+// hookServices is the per-service view a BuildAllHook gets: every
+// discovered service in build order with the output directories the cache
+// stores and restores, so a hook can read a service this run did not load.
+func hookServices(services []buildplan.Service) []registry.BuildAllService {
+	out := make([]registry.BuildAllService, 0, len(services))
+	for _, service := range services {
+		out = append(out, registry.BuildAllService{
+			Name:       service.Name,
+			Kind:       string(service.Config.Kind),
+			Dir:        service.Dir,
+			OutputDirs: append([]string(nil), service.OutputDirs...),
+		})
 	}
-	if err := emitSchemaDeps(cmd, outputRoot, depsCopy, services); err != nil {
-		return err
-	}
-	// Every service has built, so hooks that need all of them at once (the
-	// chart's merged values) run from here.
-	hookContext := registry.BuildAllContext{
-		ServiceNames: names,
-		SchemaFor:    schemaCache.get,
-		RepoRoot:     repoRoot,
-		OutputRoot:   outputRoot,
-		Naming:       activeNaming,
-		Log:          cmd.OutOrStdout(),
-	}
-	if err := runBuildAllHooks(cmd.Context(), reg.BuildAllHooks(), hookContext); err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nAll %d schema services built successfully\n", len(services))
-	return nil
+	return out
 }
 
 // runBuildAllHooks runs the hooks in registration order and stops at the
