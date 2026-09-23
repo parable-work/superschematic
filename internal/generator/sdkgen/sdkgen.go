@@ -86,6 +86,7 @@ type QueryParam struct {
 	TSType   string // TypeScript type (e.g., "number")
 	IRType   string // Original IR type name (e.g., "number")
 	Required bool   // Whether parameter is required
+	IsArray  bool   // Whether the value is an array, sent as one comma-separated value
 
 	ValidateMin       *float64 // Minimum numeric value allowed
 	ValidateMax       *float64 // Maximum numeric value allowed
@@ -294,12 +295,17 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 
 	tsQueryParams := make([]QueryParam, len(ep.QueryParams))
 	for i, param := range ep.QueryParams {
+		tsType := IRTypeToTSType(param.Type)
+		if param.IsArray {
+			tsType += "[]"
+		}
 		tsQueryParams[i] = QueryParam{
 			Name:     param.Name,
 			TSName:   tsutil.ToCamelCase(param.Name),
-			TSType:   IRTypeToTSType(param.Type),
+			TSType:   tsType,
 			IRType:   param.Type,
 			Required: param.Required,
+			IsArray:  param.IsArray,
 
 			ValidateMin:       param.ValidateMin,
 			ValidateMax:       param.ValidateMax,

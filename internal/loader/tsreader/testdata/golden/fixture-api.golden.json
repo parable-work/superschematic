@@ -118,6 +118,23 @@
       ]
     }
   },
+  "enums": {
+    "TenantListStatus": {
+      "name": "TenantListStatus",
+      "owner": "fixture-api",
+      "comment": "Status filter for listTenants: an enum array query parameter.",
+      "values": [
+        {
+          "name": "Active",
+          "serializedAs": "active"
+        },
+        {
+          "name": "Suspended",
+          "serializedAs": "suspended"
+        }
+      ]
+    }
+  },
   "operationSets": [
     {
       "name": "TenantQueries",
@@ -158,11 +175,35 @@
         },
         {
           "name": "listTenants",
+          "comment": "Array query parameters: ?ids=a,b\u0026statuses=active,suspended.",
           "typeRef": {
             "name": "TenantView",
             "isArray": true
           },
           "required": true,
+          "arguments": [
+            {
+              "name": "ids",
+              "typeRef": {
+                "name": "Identity.UUID",
+                "isArray": true
+              },
+              "required": true,
+              "validateListMin": 1,
+              "validateListMax": 100,
+              "isQuery": true
+            },
+            {
+              "name": "statuses",
+              "typeRef": {
+                "name": "TenantListStatus",
+                "isArray": true
+              },
+              "validateListMin": 0,
+              "validateListMax": 10,
+              "isQuery": true
+            }
+          ],
           "auth": true,
           "permissions": [
             "tenants.read"

@@ -172,7 +172,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
   },
   [TENANT_LIST_TENANTS]: {
     name: 'tenant.listTenants',
-    description: `listTenants endpoint (Requires authentication)`,
+    description: `Array query parameters: ?ids=a,b&statuses=active,suspended. (Requires authentication)`,
     namespace: 'tenant',
     methodName: 'listTenants',
     requiresAuth: true,
@@ -311,7 +311,7 @@ export const openAIFunctions: OpenAIFunction[] = [
   },
   {
     name: 'tenant.listTenants',
-    description: `listTenants endpoint (Requires authentication)`,
+    description: `Array query parameters: ?ids=a,b&statuses=active,suspended. (Requires authentication)`,
     parameters: {
       type: 'object',
       properties: {
@@ -414,7 +414,7 @@ export const anthropicTools: AnthropicTool[] = [
   },
   {
     name: 'tenant.listTenants',
-    description: `listTenants endpoint (Requires authentication)`,
+    description: `Array query parameters: ?ids=a,b&statuses=active,suspended. (Requires authentication)`,
     input_schema: {
       type: 'object',
       properties: {

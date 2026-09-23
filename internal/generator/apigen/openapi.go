@@ -175,13 +175,27 @@ func buildQueryParamDefs(params []Param, scalarExamples, scalarDescriptions, sca
 	var result []map[string]interface{}
 	for _, param := range params {
 		paramSchema := typeToOpenAPISchema(param.Type, scalarExamples, scalarDescriptions, scalarMap)
-		applyOpenAPIValidationConstraints(paramSchema, param.ValidateMin, param.ValidateMax, param.ValidateMinLength, param.ValidateMaxLength, param.ValidatePattern, param.ValidateListMin, param.ValidateListMax)
-		result = append(result, map[string]interface{}{
+		applyOpenAPIValidationConstraints(paramSchema, param.ValidateMin, param.ValidateMax, param.ValidateMinLength, param.ValidateMaxLength, param.ValidatePattern, nil, nil)
+		definition := map[string]interface{}{
 			"name":     param.Name,
 			"in":       "query",
 			"required": param.Required,
 			"schema":   paramSchema,
-		})
+		}
+		if param.IsArray {
+			// The item constraints stay on items; the list bounds go on the
+			// array. form/explode=false is the ?name=a,b encoding the
+			// generated server and SDKs use.
+			arraySchema := map[string]interface{}{
+				"type":  "array",
+				"items": paramSchema,
+			}
+			applyOpenAPIValidationConstraints(arraySchema, nil, nil, nil, nil, "", param.ValidateListMin, param.ValidateListMax)
+			definition["schema"] = arraySchema
+			definition["style"] = "form"
+			definition["explode"] = false
+		}
+		result = append(result, definition)
 	}
 	return result
 }

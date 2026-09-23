@@ -70,6 +70,14 @@ const openAPISpec = `{
         ],
         "type": "object"
       },
+      "TenantListStatus": {
+        "description": "Status filter for listTenants: an enum array query parameter.",
+        "enum": [
+          "active",
+          "suspended"
+        ],
+        "type": "string"
+      },
       "TenantView": {
         "description": "Customer-facing projection of the Tenant table.",
         "properties": {
@@ -258,6 +266,7 @@ const openAPISpec = `{
     },
     "/api/tenants": {
       "get": {
+        "description": "Array query parameters: ?ids=a,b\u0026statuses=active,suspended.",
         "operationId": "TenantListTenantsHandler",
         "parameters": [
           {
@@ -270,6 +279,37 @@ const openAPISpec = `{
               "format": "uuid",
               "type": "string"
             }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "ids",
+            "required": true,
+            "schema": {
+              "items": {
+                "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "statuses",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/TenantListStatus"
+              },
+              "maxItems": 10,
+              "minItems": 0,
+              "type": "array"
+            },
+            "style": "form"
           }
         ],
         "responses": {

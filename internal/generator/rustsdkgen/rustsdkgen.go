@@ -109,6 +109,7 @@ type QueryParam struct {
 	RustName          string
 	RustType          string
 	Required          bool
+	IsArray           bool
 	ValidateMin       *float64
 	ValidateMax       *float64
 	ValidateMinLength *int
@@ -429,16 +430,21 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 	queryParams := make([]QueryParam, 0, len(ep.QueryParams))
 	hasRequiredQueryParams := false
 	for _, param := range ep.QueryParams {
+		rustType := mapURLParamToRust(param.Type)
+		if param.IsArray {
+			rustType = "Vec<" + rustType + ">"
+		}
 		queryParams = append(queryParams, QueryParam{
 			Name:              param.Name,
 			RustName:          toRustFieldName(param.Name),
-			RustType:          mapURLParamToRust(param.Type),
+			RustType:          rustType,
 			Required:          param.Required,
+			IsArray:           param.IsArray,
 			ValidateMin:       param.ValidateMin,
 			ValidateMax:       param.ValidateMax,
 			ValidateMinLength: param.ValidateMinLength,
 			ValidateMaxLength: param.ValidateMaxLength,
-			ValidateListMin:   param.ValidateListMin,
+			ValidateListMin:   runtimeListMinimum(param.ValidateListMin),
 			ValidateListMax:   param.ValidateListMax,
 			ValidatePattern:   param.ValidatePattern,
 		})
@@ -467,7 +473,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			ValidateMax:       arg.ValidateMax,
 			ValidateMinLength: arg.ValidateMinLength,
 			ValidateMaxLength: arg.ValidateMaxLength,
-			ValidateListMin:   arg.ValidateListMin,
+			ValidateListMin:   runtimeListMinimum(arg.ValidateListMin),
 			ValidateListMax:   arg.ValidateListMax,
 			ValidatePattern:   arg.ValidatePattern,
 		})
@@ -738,6 +744,16 @@ func generateFile(templateName, outputPath string, data interface{}, customFuncs
 	return codegen.GenerateFile(
 		codegen.NewFileConfig(templatesFS, templateName, outputPath, data, funcs),
 	)
+}
+
+// runtimeListMinimum drops a zero list minimum: a Rust collection length is
+// unsigned, so the check is always true and `len() < 0` draws a compiler
+// warning. A positive minimum is kept.
+func runtimeListMinimum(value *int) *int {
+	if value == nil || *value == 0 {
+		return nil
+	}
+	return value
 }
 
 func templateFuncs() template.FuncMap {

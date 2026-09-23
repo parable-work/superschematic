@@ -24,7 +24,7 @@
     },
     {
       "name": "tenant.listTenants",
-      "description": "listTenants endpoint (Requires authentication)",
+      "description": "Array query parameters: ?ids=a,b&statuses=active,suspended. (Requires authentication)",
       "parameters": {
         "type": "object",
         "properties": {

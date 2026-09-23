@@ -5,6 +5,8 @@ import { ValidationError } from '../types';
 import type { EncryptedRequestOptions } from '../types';
 import type {
   CreateTenantInput,
+  IdentityUUID,
+  TenantListStatus,
   TenantView,
   ValidationResult,
 } from '@schemas/fixture-api-types';
@@ -52,21 +54,58 @@ export class TenantNamespace {
   }
 
   /**
-   * listTenants endpoint
+   * Array query parameters: ?ids=a,b&statuses=active,suspended.
    * @requires Authentication
+   * @param params - Optional query parameters
   * @param signal - Optional AbortSignal for request cancellation
    * @returns Array of TenantView
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
    */
   public async listTenants(
+    params?: any,
     signal?: any,
     ...extraArgs: any[]
   ): Promise<TenantView[]> {
+    // Validate query parameters before sending request
+    const queryParamErrors = newValidationErrors();
+    {
+      const idsErrors: { validator: string; message: string }[] = [];
+      const idsValue = params?.ids;
+      if (idsValue === undefined || idsValue === null) {
+        idsErrors.push({ validator: 'required', message: 'ids is required' });
+      } else {
+      if (Array.isArray(idsValue) && idsValue.length < 1) {
+        idsErrors.push({ validator: 'listMin', message: 'ids must contain at least 1 items.' });
+      }
+      if (Array.isArray(idsValue) && idsValue.length > 100) {
+        idsErrors.push({ validator: 'listMax', message: 'ids must contain at most 100 items.' });
+      }
+      }
+      if (idsErrors.length > 0) {
+        setFieldErrors(queryParamErrors, "ids", idsErrors);
+      }
+    }
+    {
+      const statusesErrors: { validator: string; message: string }[] = [];
+      const statusesValue = params?.statuses;
+      if (Array.isArray(statusesValue) && statusesValue.length < 0) {
+        statusesErrors.push({ validator: 'listMin', message: 'statuses must contain at least 0 items.' });
+      }
+      if (Array.isArray(statusesValue) && statusesValue.length > 10) {
+        statusesErrors.push({ validator: 'listMax', message: 'statuses must contain at most 10 items.' });
+      }
+      if (statusesErrors.length > 0) {
+        setFieldErrors(queryParamErrors, "statuses", statusesErrors);
+      }
+    }
+    if (Object.keys(queryParamErrors).length > 0) {
+      throw new ValidationError(queryParamErrors);
+    }
     // Make GET request
     const result = await this.client.get<TenantView[]>(
       `/api/tenants`,
-      { signal }
+      { signal, params }
     );
     return Array.isArray(result) ? result.map(parseTenantViewFromJSON) : result;
   }

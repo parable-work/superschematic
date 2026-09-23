@@ -178,6 +178,7 @@ type APIOutput struct {
 	HasPermissionEndpoints   bool
 	HasFilterableEndpoints   bool
 	HasFileUpload            bool
+	HasArrayQueryParams      bool
 	HasArrayScalarArgsOnGET  bool
 	HasWebhookHMACEndpoints  bool
 	RequiredWebhookProviders []string
@@ -374,6 +375,12 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		}
 		if endpoint.HasFileUpload {
 			output.HasFileUpload = true
+		}
+		for _, param := range endpoint.QueryParams {
+			if param.IsArray {
+				output.HasArrayQueryParams = true
+				break
+			}
 		}
 		if endpoint.Method == "GET" {
 			for _, arg := range endpoint.ScalarArgs {

@@ -191,3 +191,14 @@ of a generated artifact is always listed here with the bump it requires.
   values and unrelated coercions still fail. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main
+- Array query parameters (`QueryParam<T[]>`) work end to end. The Go API
+  handler parses `?name=a,b` (and repeated keys) into a slice, parses and
+  validates each item with the element type's parser and validator, applies
+  `listMin`/`listMax` to the item count, rejects an empty item, and passes a
+  nil slice for an absent optional parameter; the implementation interface
+  takes `[]T` instead of a scalar. OpenAPI describes the parameter as an
+  array with `style: form`, `explode: false` and `minItems`/`maxItems`. The
+  TypeScript SDK types it `T[]`, and the Rust SDK takes `Vec<T>` and sends
+  one comma-separated value. Before, the handler parsed the parameter as a
+  single scalar. The Rust SDK also drops a zero `listMin` check, which
+  compared an unsigned length with zero. Minor.

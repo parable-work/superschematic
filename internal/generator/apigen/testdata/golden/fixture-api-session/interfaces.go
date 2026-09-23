@@ -27,7 +27,9 @@ type TenantImplementation interface {
 	// register it. Wire createTenantCustomHandlerHandler onto the router yourself.
 	CustomHandler(ctx context.Context) (*types.TenantView, error)
 	// ListTenants handles GET /api/tenants
-	ListTenants(ctx context.Context) ([]types.TenantView, error)
+	//
+	// Array query parameters: ?ids=a,b&statuses=active,suspended.
+	ListTenants(ctx context.Context, ids []types.IdentityUUID, statuses []types.TenantListStatus) ([]types.TenantView, error)
 	// CreateTenant handles POST /api/tenants
 	CreateTenant(ctx context.Context, input *types.CreateTenantInput) (*types.TenantView, error)
 	// GetTenant handles GET /api/tenants/{id}
