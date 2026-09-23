@@ -56,6 +56,15 @@ of a generated artifact is always listed here with the bump it requires.
   service the target transitively depends on (declared dependencies plus
   `authDb`), dependencies first, with `build-all`'s discovery, ordering and
   schema catalog; siblings outside the closure are not built. Minor.
+- `build-all` records on every package of the dependency graph the service
+  whose build produced it (`service` in `.deps.json`, from each service's
+  output directories), and fails when a package directory under the output
+  root belongs to no discovered service, naming the directory. `--deps-copy`
+  or `[deps] copy` in `superschematic.toml` also writes the graph, byte for
+  byte, to a path outside the output root that a repository can commit.
+  `schemadeps.SyncCopy` checks or refreshes that copy from a command that
+  runs after the build, such as an extension's pin command. `[deps]` is not
+  part of the build cache key. Minor.
 
 ### Changed
 
@@ -77,6 +86,11 @@ of a generated artifact is always listed here with the bump it requires.
   `--parallel` builds, even when the config does not also list it under
   `dependencies`. The generated API module imports the authDb's packages,
   so it is a build-order edge. Patch.
+- `schemadeps.CollectFromDist(distRoot, producers)` and
+  `schemadeps.EmitFromDist(distRoot, producers, copyPath)` take the map from
+  output directory to producing service and, for `EmitFromDist`, the copy
+  path. Callers of the old one-argument forms pass `nil` and `""` for the
+  old behavior. Minor.
 
 ### Fixed
 

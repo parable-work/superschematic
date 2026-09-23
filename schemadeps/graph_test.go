@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -21,7 +22,7 @@ func TestCollectFromDist_TypeScriptOmitsWebDBFromAPI(t *testing.T) {
 		"axios": "1.0.0",
 	})
 
-	g, err := CollectFromDist(dist)
+	g, err := CollectFromDist(dist, nil)
 	if err != nil {
 		t.Fatalf("CollectFromDist: %v", err)
 	}
@@ -45,6 +46,80 @@ func TestCollectFromDist_TypeScriptOmitsWebDBFromAPI(t *testing.T) {
 	}
 	if !foundTypes {
 		t.Fatalf("web-api-sdk should depend on web-api-types, deps=%v", sdk.Deps)
+	}
+}
+
+func TestCollectFromDist_AnnotatesProducingService(t *testing.T) {
+	dist := t.TempDir()
+	writeTSPackage(t, dist, "types/typescript/orders-api", "@schemas/orders-api-types", map[string]string{
+		"@schemas/enums-types": "file:../enums",
+	})
+	writeTSPackage(t, dist, "types/typescript/enums", "@schemas/enums-types", nil)
+
+	g, err := CollectFromDist(dist, map[string]string{
+		"types/typescript/orders-api": "orders-api",
+		"types/typescript/enums":      "enums",
+		// Output dirs that hold no package (SQL, extension output) are in
+		// the map too and must be ignored.
+		"sql/orders-api": "orders-api",
+	})
+	if err != nil {
+		t.Fatalf("CollectFromDist: %v", err)
+	}
+	if got := mustPkg(t, g, "typescript", "orders-api-types").Service; got != "orders-api" {
+		t.Fatalf("orders-api-types service = %q, want orders-api", got)
+	}
+	if got := mustPkg(t, g, "typescript", "enums-types").Service; got != "enums" {
+		t.Fatalf("enums-types service = %q, want enums", got)
+	}
+
+	path := filepath.Join(t.TempDir(), DepsFileName)
+	if err := Write(path, g); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"service": "orders-api"`) {
+		t.Fatalf("written graph lacks the service field:\n%s", data)
+	}
+}
+
+func TestCollectFromDist_NilProducersOmitService(t *testing.T) {
+	dist := t.TempDir()
+	writeTSPackage(t, dist, "types/typescript/enums", "@schemas/enums-types", nil)
+
+	g, err := CollectFromDist(dist, nil)
+	if err != nil {
+		t.Fatalf("CollectFromDist: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), DepsFileName)
+	if err := Write(path, g); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"service"`) {
+		t.Fatalf("service must be omitted when no producers are given:\n%s", data)
+	}
+}
+
+func TestCollectFromDist_PackageWithoutProducerIsAnError(t *testing.T) {
+	dist := t.TempDir()
+	writeTSPackage(t, dist, "types/typescript/enums", "@schemas/enums-types", nil)
+	writeTSPackage(t, dist, "types/typescript/removed", "@schemas/removed-types", nil)
+
+	_, err := CollectFromDist(dist, map[string]string{"types/typescript/enums": "enums"})
+	if err == nil {
+		t.Fatal("expected an error for a package no schema service produced")
+	}
+	for _, want := range []string{"1 package(s)", "typescript/removed-types at types/typescript/removed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error should contain %q, got: %v", want, err)
+		}
 	}
 }
 

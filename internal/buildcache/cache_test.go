@@ -194,6 +194,10 @@ func TestComputeInputHashesFollowNaming(t *testing.T) {
 	withExt, err := ComputeInputHashes(services, repo, naming.Naming{Extensions: map[string]map[string]any{"acme": {"k": "v"}}})
 	require.NoError(t, err)
 	assert.NotEqual(t, zero["svc"], withExt["svc"], "extension tables reach generators through the registry and must change the key")
+
+	withCopy, err := ComputeInputHashes(services, repo, naming.Naming{Deps: naming.DepsConfig{Copy: "schemas/deps.json"}})
+	require.NoError(t, err)
+	assert.Equal(t, zero["svc"], withCopy["svc"], "[deps] copy is written after the build and must not change the key")
 }
 
 // [cache] inputs are the only way a file outside the schema tree reaches the

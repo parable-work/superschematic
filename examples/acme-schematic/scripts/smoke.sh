@@ -26,7 +26,10 @@
 #      result compiles (the regression the example found);
 #  11. `build --with-deps shop-api` builds shop-db (its authDb) then shop-api
 #      through the acme registry, runs the acme generator on both, and
-#      builds nothing outside that closure.
+#      builds nothing outside that closure;
+#  12. build-all wrote the dependency graph's [deps] copy byte for byte, every
+#      package in it names the service that produced it, and the committed
+#      copy is current.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -144,5 +147,17 @@ test -s "$OUT/deps-dist/acme/manifest/shop-api/manifest.json"
 test -d "$OUT/deps-dist/orm/shop-db"
 test ! -e "$OUT/deps-dist/acme/manifest/shop-config"
 test ! -e "$OUT/deps-dist/acme/catalog/shop-catalog"
+
+echo "==> dependency graph: [deps] copy, producing services, committed copy current"
+cmp "$DIST/.deps.json" "$SCHEMAS/deps.json"
+jq -e '(.packages | length) > 0 and all(.packages[]; (.service // "") != "")' "$SCHEMAS/deps.json" >/dev/null
+jq -e '[.packages[] | select(.path == "orm/shop-db")][0].service == "shop-db"' "$SCHEMAS/deps.json" >/dev/null
+# Untracked shows as ??, stale as M: either way the committed copy is not
+# the graph this build produced.
+if [[ -n "$(git -C "$EXAMPLE_DIR" status --porcelain -- schemas/deps.json)" ]]; then
+  git -C "$EXAMPLE_DIR" diff -- schemas/deps.json | head -40 >&2
+  echo "ERROR: schemas/deps.json is not the committed copy of this build's graph; commit it" >&2
+  exit 1
+fi
 
 echo "acme smoke: ok"

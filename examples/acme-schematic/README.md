@@ -65,7 +65,8 @@ examples/acme-schematic/
     auth/                     apikey auth provider + its snippet templates
   packages/schema/            @acme/schema, the authoring package @shelf is imported from
   schemas/
-    superschematic.toml       naming, auth_provider = "apikey", [paths], [extension.acme]
+    superschematic.toml       naming, auth_provider = "apikey", [paths], [deps], [extension.acme]
+    deps.json                 the committed copy of the dependency graph ([deps] copy)
     tsconfig.base.json        path aliases for @superschematic/*, @acme/*, superscalar
     services/shop-db          DB: User, Session, ApiKey, Product tables
     services/shop-api         API: ProductQueries, ProductMutations over shop-db
@@ -360,6 +361,9 @@ extension.
 command. The acme file sets `go_module_root`, `npm_scope`,
 `python_types_module_prefix`, `python_sdk_module_prefix`,
 `python_sdk_module_suffix`, `rust_crate_prefix`, `package_author`,
-`auth_provider`, `authoring_packages`, the `[paths]` table and
-`[extension.acme]`. A key left out keeps the default from the naming file
+`auth_provider`, `authoring_packages`, the `[paths]` and `[deps]` tables
+and `[extension.acme]`. `[deps] copy` makes `build-all` also write the
+dependency graph of the generated packages to `schemas/deps.json`, which is
+committed; each package in it names the service that produced it, and the
+smoke fails when the committed copy is stale. A key left out keeps the default from the naming file
 at the repository root; the docs site's naming reference lists every key.

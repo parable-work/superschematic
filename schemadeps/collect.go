@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -16,7 +17,15 @@ var cargoPathRE = regexp.MustCompile(`(?m)^([a-zA-Z0-9_-]+)\s*=\s*\{\s*path\s*=\
 // CollectFromDist builds a Graph by scanning generated manifests under distRoot.
 // Only edges under the configured npm scope / Go module root are recorded;
 // superscalar, axios, js-yaml, and other third-party deps are ignored.
-func CollectFromDist(distRoot string) (*Graph, error) {
+//
+// producers maps an output directory, relative to distRoot in slash form
+// ("types/go/orders"), to the service whose build writes it; build-all
+// builds it from every service's output directories. Each package's Service
+// is its directory's producer. nil leaves Service empty. A non-nil map that
+// lacks a collected package's directory is an error: the graph would name a
+// package no service owns, which is what an output directory left behind by
+// a removed or renamed service looks like.
+func CollectFromDist(distRoot string, producers map[string]string) (*Graph, error) {
 	abs, err := filepath.Abs(distRoot)
 	if err != nil {
 		return nil, err
@@ -40,20 +49,41 @@ func CollectFromDist(distRoot string) (*Graph, error) {
 	// Ensure SDK -> types edges when both packages exist for a schema.
 	ensureSDKTypesEdges(index)
 
+	var orphans []string
 	for _, p := range index {
+		if producers != nil {
+			service, ok := producers[p.Path]
+			if !ok {
+				orphans = append(orphans, p.Language+"/"+p.ID+" at "+p.Path)
+			}
+			p.Service = service
+		}
 		g.Packages = append(g.Packages, *p)
+	}
+	if len(orphans) > 0 {
+		sort.Strings(orphans)
+		return nil, fmt.Errorf("schemadeps: %d package(s) under %s were not produced by any schema service (an output directory left from a removed service? delete it and rebuild):\n  %s",
+			len(orphans), abs, strings.Join(orphans, "\n  "))
 	}
 	g.normalize()
 	return g, nil
 }
 
-// EmitFromDist collects the graph and writes dist/.deps.json.
-func EmitFromDist(distRoot string) error {
-	g, err := CollectFromDist(distRoot)
+// EmitFromDist collects the graph with producers (see CollectFromDist) and
+// writes dist/.deps.json. When copyPath is not empty the same bytes are
+// written there too.
+func EmitFromDist(distRoot string, producers map[string]string, copyPath string) error {
+	g, err := CollectFromDist(distRoot, producers)
 	if err != nil {
 		return err
 	}
-	return Write(DepsPath(distRoot), g)
+	if err := Write(DepsPath(distRoot), g); err != nil {
+		return err
+	}
+	if copyPath == "" {
+		return nil
+	}
+	return Write(copyPath, g)
 }
 
 func upsert(index map[string]*Package, p Package) *Package {

@@ -195,6 +195,27 @@ inputs = ["the scalar package/permissions.yml", "docs/extra.yml"]
 	}
 }
 
+func TestParseReadsDepsTable(t *testing.T) {
+	n, err := Parse([]byte("[deps]\ncopy = \"schemas/deps.json\"\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if n.Deps.Copy != "schemas/deps.json" {
+		t.Fatalf("Deps.Copy = %q", n.Deps.Copy)
+	}
+	if want := filepath.Join("/repo", "schemas", "deps.json"); n.DepsCopyPath("/repo") != want {
+		t.Fatalf("DepsCopyPath = %q, want %q", n.DepsCopyPath("/repo"), want)
+	}
+	if got := Default().DepsCopyPath("/repo"); got != "" {
+		t.Fatalf("DepsCopyPath with no [deps] = %q, want empty", got)
+	}
+
+	_, err = Parse([]byte("[deps]\npath = \"x\"\n"), "superschematic.toml")
+	if err == nil || !strings.Contains(err.Error(), "deps.path") {
+		t.Fatalf("unknown [deps] key: err = %v, want deps.path rejected", err)
+	}
+}
+
 func TestParseRejectsUnknownTopLevelTable(t *testing.T) {
 	_, err := Parse([]byte("[extensions.acme]\nk = \"v\"\n"), "test.toml")
 	if err == nil {

@@ -122,6 +122,29 @@ type Naming struct {
 	// Paths is the [paths] table: in-tree locations generated modules point
 	// replace directives at.
 	Paths PathsConfig `toml:"paths"`
+
+	// Deps is the [deps] table: where build-all also writes the dependency
+	// graph of the generated packages.
+	Deps DepsConfig `toml:"deps"`
+}
+
+// DepsConfig is the [deps] table of superschematic.toml. The zero value
+// writes the graph only to <output root>/.deps.json.
+type DepsConfig struct {
+	// Copy is a repo-relative path (the repository root is the parent of
+	// the schemas root, as for [paths]) that build-all also writes the
+	// graph to, byte for byte. The output root is usually ignored by
+	// version control; a copy outside it can be committed, so a tool reads
+	// the graph without building. The --deps-copy flag overrides it.
+	Copy string `toml:"copy"`
+}
+
+// DepsCopyPath resolves [deps] copy against repoRoot, or "" when unset.
+func (n Naming) DepsCopyPath(repoRoot string) string {
+	if n.Deps.Copy == "" {
+		return ""
+	}
+	return filepath.Join(repoRoot, filepath.FromSlash(n.Deps.Copy))
 }
 
 // PathsConfig is the [paths] table of superschematic.toml: where the

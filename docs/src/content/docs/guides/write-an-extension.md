@@ -226,6 +226,15 @@ acme's `describe [<schemas-root>]` assembles the registry the way `build`
 does and prints every kind, document, output key and auth provider. Run it
 when a schema is rejected: it shows what the binary knows.
 
+A command that works on built output, such as one that pins consumers to
+generated packages, reads the dependency graph `build-all` wrote with the
+public `schemadeps` package: `Read` and `Closure` for a consumer's
+packages, `Package.Service` for the service that produced each one,
+`SyncCopy` to check or refresh the committed copy that `[deps] copy`
+names, and `WriteFileAtomic` for the files it rewrites.
+`Example_pinCommand` in `schemadeps/example_test.go` is such a command in
+miniature.
+
 ## Run the example
 
 From the repository root, after `make setup`:
