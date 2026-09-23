@@ -116,6 +116,10 @@ of a generated artifact is always listed here with the bump it requires.
   output directory to producing service and, for `EmitFromDist`, the copy
   path. Callers of the old one-argument forms pass `nil` and `""` for the
   old behavior. Minor.
+- `build-all` writes `<schemas-root>/dist/.build-stamps/<service>` for every
+  service it builds, with or without `--cache`; before, only cached builds
+  wrote stamps, so a step that keys on the stamp saw none after a plain
+  build. `build --with-deps` still writes none. Patch.
 
 ### Fixed
 

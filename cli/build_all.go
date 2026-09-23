@@ -373,12 +373,10 @@ func emitSchemaDeps(cmd *cobra.Command, outputRoot, copyPath string, services []
 }
 
 func makeBuildAllTasks(services []buildplan.Service, repoRoot string, cacheRoot string, names naming.Naming) ([]buildAllTask, *buildcache.InputHasher, map[string]string, error) {
-	hashes := map[string]string{}
-	var hasher *buildcache.InputHasher
-	if cacheRoot != "" {
-		hasher = buildcache.NewInputHasher(services, repoRoot, names)
-		hashes = hasher.HashAll(services)
-	}
+	// Every build writes a stamp, cached or not, so the input hashes are
+	// always computed.
+	hasher := buildcache.NewInputHasher(services, repoRoot, names)
+	hashes := hasher.HashAll(services)
 	tasks := make([]buildAllTask, 0, len(services))
 	for _, service := range services {
 		rels := make([]string, 0, len(service.OutputDirs))
@@ -532,24 +530,32 @@ func executeBuildAllTask(cmd *cobra.Command, task buildAllTask, ctx buildAllTask
 		return fmt.Errorf("%s: %w", service.Name, err)
 	}
 	ctx.schemaCache.set(service.Name, result.Schema)
+	// The build wrote the authoring-import depfile; the stored key and the
+	// stamp must include it (see buildcache/authoring.go). Storing under the
+	// pre-build hash would let a worktree with different import contents
+	// false-hit this entry. The stamp is written without --cache too: it is
+	// the key a later step (an image build, a CI cache) reads to tell whether
+	// the generated output is current.
+	inputHash := task.inputHash
+	if ctx.hasher != nil {
+		inputHash = ctx.hasher.Recompute(service, ctx.hashes)
+	}
 	if ctx.cacheRoot != "" {
-		// The build wrote the authoring-import depfile; the stored key and
-		// stamp must include it (see buildcache/authoring.go). Storing under
-		// the pre-build hash would let a worktree with different import
-		// contents false-hit this entry.
-		inputHash := task.inputHash
-		if ctx.hasher != nil {
-			inputHash = ctx.hasher.Recompute(service, ctx.hashes)
-		}
 		if err := buildcache.StoreEntry(ctx.cacheRoot, "schemas", service.Name, inputHash, ctx.repoRoot, task.outputRels); err != nil {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "    cache store failed for %s: %v\n", service.Name, err)
 		}
 		if err := buildcache.PruneEntries(ctx.cacheRoot, "schemas", service.Name, 5); err != nil {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "    cache prune failed for %s: %v\n", service.Name, err)
 		}
+	}
+	// build --with-deps runs this task without input hashes and writes no
+	// stamp.
+	if inputHash != "" {
 		if err := buildcache.WriteStamp(ctx.repoRoot, service.Name, inputHash); err != nil {
 			return fmt.Errorf("%s: write stamp: %w", service.Name, err)
 		}
+	}
+	if ctx.cacheRoot != "" {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  OK: %s (built, cached)\n", service.Name)
 		return nil
 	}

@@ -164,6 +164,31 @@ func TestBuildAllCommand_UnownedPackageFails(t *testing.T) {
 	assert.NoFileExists(t, schemadeps.DepsPath(outDir))
 }
 
+func TestBuildAllCommand_UncachedBuildWritesStamps(t *testing.T) {
+	servicesRoot := prepareJSONServicesRoot(t)
+	schemasRoot := filepath.Dir(servicesRoot)
+	stamp := filepath.Join(schemasRoot, "dist", ".build-stamps", "fixture-db")
+
+	root := New(Config{})
+	root.SetOut(new(bytes.Buffer))
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"build-all", servicesRoot})
+	require.NoError(t, root.Execute())
+
+	data, err := os.ReadFile(stamp)
+	require.NoError(t, err, "a build without --cache must still write the service stamp")
+	first := strings.TrimSpace(string(data))
+	assert.Regexp(t, `^[0-9a-f]{64}$`, first)
+
+	// The next uncached run clears the stamps and writes the same hash for
+	// the same inputs.
+	root.SetArgs([]string{"build-all", servicesRoot})
+	require.NoError(t, root.Execute())
+	data, err = os.ReadFile(stamp)
+	require.NoError(t, err)
+	assert.Equal(t, first, strings.TrimSpace(string(data)))
+}
+
 func TestBuildAllCommand_CacheRestoresEmptyStampedOutput(t *testing.T) {
 	servicesRoot := prepareJSONServicesRoot(t)
 	outDir := t.TempDir()

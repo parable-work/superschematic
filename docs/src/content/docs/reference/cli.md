@@ -95,10 +95,14 @@ superschematic build-all ./schemas/services --parallel --cache
 | `--naming` | `<services-root>/../superschematic.toml` | naming config file |
 | `--deps-copy` | `[deps] copy`, else none | also write the dependency graph to this path |
 
-Without `--cache`, `build-all` removes `<output-root>/.build-stamps` at
-the start. With `--cache`, a service whose input hash matches a stamp
-and whose outputs still exist is skipped; a miss restores from the cache
-or rebuilds.
+Every service `build-all` builds gets a stamp,
+`<schemas-root>/dist/.build-stamps/<service>`, holding the hash of the
+inputs it was built from; a later step can compare it to decide whether the
+generated output is current. Without `--cache`, `build-all` removes
+`<output-root>/.build-stamps` at the start and writes a fresh stamp per
+service. With `--cache`, a service whose input hash matches a stamp and
+whose outputs still exist is skipped; a miss restores from the cache or
+rebuilds.
 
 ## `json-schema`
 
