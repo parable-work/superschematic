@@ -493,12 +493,28 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 
 // scalarLibParseTarget returns the superscalar function name the generated
 // Parse<Symbol> alias binds to, or "" when no Parse alias applies.
+//
+// A custom-parse scalar binds to a function the superscalar Go binding
+// exports for it. The binding generates Parse<Symbol> for every non-object
+// scalar and returns the canonical string, which the template converts:
+// strconv for an integer, json for a JSON shape, a plain conversion
+// otherwise. A Go type with its own typed parser (UUID, DateTime,
+// Duration) binds to that parser instead. The binding exports no parser
+// named after the last identity segment (ParseSeconds, ParseUserID), so the
+// name must never be built from it.
 func scalarLibParseTarget(scalar ScalarInfo) string {
 	if scalar.HasCustomParse {
-		if scalar.Traits.IsJSONLike {
+		switch {
+		case scalar.Traits.IsJSONLike, scalar.Traits.IsIntegerLike:
 			return "Parse" + scalar.Tokens.Symbol
+		case scalar.Traits.IsUUIDLike:
+			return "ParseUUID"
+		case scalar.Traits.IsDateTimeLike:
+			return "ParseDateTime"
+		case scalar.Traits.IsDurationLike:
+			return "ParseDuration"
 		}
-		return "Parse" + scalar.Tokens.Leaf()
+		return "Parse" + scalar.Tokens.Symbol
 	}
 	if scalar.Primitive == ir.LanguageString && !scalar.Traits.IsObjectLike {
 		return "Parse" + scalar.Tokens.Symbol

@@ -95,6 +95,19 @@ of a generated artifact is always listed here with the bump it requires.
   `Parse<Symbol>` and decodes the canonical JSON into the alias. No scalar
   in the pinned superscalar catalog takes this path yet; `Generic.StringMap`
   does once superscalar marks it custom-parse. Patch.
+- Go types: `Parse<Scalar>` for `Finance.Money`, `Generic.Int64`,
+  `Identity.UserID` and the `Temporal` integer durations (`Milliseconds`,
+  `Seconds`, `Minutes`, `Hours`, `Days`) called a superscalar function named
+  after the scalar's last identity segment (`ParseSeconds`, `ParseUserID`).
+  The superscalar Go binding exports no such function, so a types module
+  using one of these scalars did not compile. An integer scalar now calls
+  `Parse<Symbol>` and parses the canonical string; `Identity.UserID` calls
+  `ParseUUID`, as `Identity.UUID` already did. A test builds a module that
+  uses every custom-parse scalar in the catalog. Patch.
+- Go types: the length and pattern checks on a `Temporal.Duration` field
+  converted the int64 duration with `string(value)`, which yields one rune,
+  so every non-zero duration failed its pattern check and `go vet` rejected
+  the module. They now format the value with `String()`. Patch.
 - Python types: generated enums accept their serialized value when a model
   is validated with `strict=True`, in direct, list and map fields. Unknown
   values and unrelated coercions still fail. Patch.
