@@ -209,3 +209,11 @@ of a generated artifact is always listed here with the bump it requires.
   one comma-separated value. Before, the handler parsed the parameter as a
   single scalar. The Rust SDK also drops a zero `listMin` check, which
   compared an unsigned length with zero. Minor.
+- Go types: union fields decode in every shape. A map or map-of-lists of a
+  union decodes each value through the union's wrapper (before, the
+  generated `UnmarshalJSON` did not compile); an optional union field is the
+  nilable union interface instead of a pointer to it; an optional input
+  union keeps absent, null and a value apart in its `InputField`; and a
+  field typed with a union from a dependency is treated as a union. A
+  module that re-exports an imported union also re-exports its
+  `<Union>Wrapper`. Minor.

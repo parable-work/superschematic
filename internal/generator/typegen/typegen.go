@@ -329,8 +329,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	inputTypes := codegen.ExtractTypes(schema, codegenScalars, extraction, ir.RoleAPIInput)
 
 	importAliases := importAliasReplacements(output.Imports)
-	output.Types = convertTypes(objectTypes, output.Scalars, false, enumLookup, importAliases)
-	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, true, enumLookup, importAliases)...)
+	unionNames := knownUnionNames(output.Unions, output.ImportedUnions)
+	output.Types = convertTypes(objectTypes, output.Scalars, false, enumLookup, importAliases, unionNames)
+	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, true, enumLookup, importAliases, unionNames)...)
 	output.TypePairs = buildTypePairs(output.Types, output.ImportedTypes)
 
 	for _, typeInfo := range output.Types {
@@ -575,11 +576,25 @@ func convertUnions(codegenUnions []codegen.UnionInfo) []UnionInfo {
 }
 
 // convertTypes converts codegen.TypeInfo to typegen.TypeInfo.
-func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, isInput bool, enumLookup codegen.EnumLookup, importAliases map[string]string) []TypeInfo {
+// knownUnionNames returns the local and imported union names. A field typed
+// with an imported union is a union field too, though codegen, which sees
+// only this schema, does not mark it.
+func knownUnionNames(local []UnionInfo, imported []ImportedUnionInfo) map[string]bool {
+	names := make(map[string]bool, len(local)+len(imported))
+	for _, union := range local {
+		names[union.Name] = true
+	}
+	for _, union := range imported {
+		names[union.Name] = true
+	}
+	return names
+}
+
+func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, isInput bool, enumLookup codegen.EnumLookup, importAliases map[string]string, unionNames map[string]bool) []TypeInfo {
 	scalarMap := buildScalarMap(scalars)
 	types := make([]TypeInfo, len(codegenTypes))
 	for i, ct := range codegenTypes {
-		fields := convertFields(ct.Fields, scalarMap, isInput, enumLookup, importAliases)
+		fields := convertFields(ct.Fields, scalarMap, isInput, enumLookup, importAliases, unionNames)
 		hasDefaults := false
 		for _, f := range fields {
 			if f.HasDefault && f.DefaultLiteral != "" {
@@ -619,9 +634,10 @@ func buildEnumLookup(localEnums []EnumInfo, importedEnums []ImportedEnumInfo) co
 }
 
 // convertFields converts codegen.FieldInfo to typegen.FieldInfo.
-func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*ScalarInfo, isInput bool, enumLookup codegen.EnumLookup, importAliases map[string]string) []FieldInfo {
+func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*ScalarInfo, isInput bool, enumLookup codegen.EnumLookup, importAliases map[string]string, unionNames map[string]bool) []FieldInfo {
 	fields := make([]FieldInfo, len(codegenFields))
 	for i, cf := range codegenFields {
+		isUnion := cf.IsUnion || unionNames[cf.Type]
 		var scalarInfo *ScalarInfo
 		if cf.IsScalar && cf.ScalarInfo != nil {
 			scalarInfo = scalarMap[cf.ScalarInfo.Name]
@@ -631,9 +647,19 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 		if !isInput && cf.IsScalar && !cf.Required && cf.ScalarInfo != nil && cf.ScalarInfo.Traits.IsIntegerLike {
 			goType = strings.TrimPrefix(goType, "*")
 		}
+		// A Go union is an interface and already nilable. A pointer to it is
+		// not idiomatic and cannot hold the union wrapper's Value.
+		if !isInput && isUnion && !cf.Required && !cf.IsArray && !cf.IsMap {
+			goType = strings.TrimPrefix(goType, "*")
+		}
 		if usesWrapper {
 			innerType := goType
-			if cf.IsScalar {
+			// A map of union values stores the interface values directly;
+			// the optional nested-type path would add a pointer per value.
+			if isUnion && cf.IsMap {
+				innerType = strings.Replace(innerType, "]*", "]", 1)
+			}
+			if cf.IsScalar || (isUnion && !cf.IsArray && !cf.IsMap) {
 				innerType = strings.TrimPrefix(innerType, "*")
 			}
 			goType = fmt.Sprintf("InputField[%s]", innerType)
@@ -652,7 +678,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			IsArray:          cf.IsArray,
 			IsMap:            cf.IsMap,
 			IsScalar:         cf.IsScalar,
-			IsUnion:          cf.IsUnion,
+			IsUnion:          isUnion,
 			Doc:              cf.Doc(),
 			ScalarInfo:       scalarInfo,
 			Validations:      cf.Validations,

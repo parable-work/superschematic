@@ -35,6 +35,11 @@ type {{.Name}} = {{.ImportAlias}}.{{.Name}}
 {{formatComment .Name .Doc}}
 type {{.Name}} = {{.ImportAlias}}.{{.Name}}
 
+// {{.Name}}Wrapper is re-exported so a module that depends on this one (the
+// ORM, for one) can decode {{.Name}} JSON without importing the declaring
+// package.
+type {{.Name}}Wrapper = {{.ImportAlias}}.{{.Name}}Wrapper
+
 {{- end}}
 
 {{- if .HasVersionedTypes}}
@@ -903,7 +908,7 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 	aux := &struct {
 {{- range .Fields}}
 {{- if .IsUnion}}
-		{{.GoName}} {{if .IsArray}}[]json.RawMessage{{else}}json.RawMessage{{end}} `json:"{{.Name}}{{if not .Required}},omitempty{{end}}"`
+		{{.GoName}} {{if .UsesWrapper}}json.RawMessage{{else if .IsMap}}map[string]{{if .IsArray}}[]{{end}}json.RawMessage{{else if .IsArray}}[]json.RawMessage{{else}}json.RawMessage{{end}} `json:"{{.Name}}{{if not .Required}},omitempty{{end}}"`
 {{- end}}
 {{- end}}
 		*Alias
@@ -924,7 +929,87 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 
 {{- range .Fields}}
 {{- if .IsUnion}}
-{{- if .IsArray}}
+{{- if .UsesWrapper}}
+	// Optional input union: an absent key stays unset, null is Set+Null.
+	if len(aux.{{.GoName}}) > 0 {
+		t.{{.GoName}}.Set = true
+		if string(aux.{{.GoName}}) == "null" {
+			t.{{.GoName}}.Null = true
+		} else {
+			t.{{.GoName}}.Null = false
+			{{- if .IsMap}}
+			var rawValues map[string]{{if .IsArray}}[]{{end}}json.RawMessage
+			if err := json.Unmarshal(aux.{{.GoName}}, &rawValues); err != nil {
+				return fmt.Errorf("decode {{.Name}}: %w", err)
+			}
+			values := make(map[string]{{if .IsArray}}[]{{end}}{{.Type}}, len(rawValues))
+			for key, rawValue := range rawValues {
+				{{- if .IsArray}}
+				items := make([]{{.Type}}, len(rawValue))
+				for i, raw := range rawValue {
+					var w {{unionWrapperType .Type $.ImportedUnions}}
+					if err := w.UnmarshalJSON(raw); err != nil {
+						return fmt.Errorf("decode {{.Name}}[%q][%d]: %w", key, i, err)
+					}
+					items[i] = w.Value
+				}
+				values[key] = items
+				{{- else}}
+				var w {{unionWrapperType .Type $.ImportedUnions}}
+				if err := w.UnmarshalJSON(rawValue); err != nil {
+					return fmt.Errorf("decode {{.Name}}[%q]: %w", key, err)
+				}
+				values[key] = w.Value
+				{{- end}}
+			}
+			t.{{.GoName}}.Value = values
+			{{- else if .IsArray}}
+			var rawValues []json.RawMessage
+			if err := json.Unmarshal(aux.{{.GoName}}, &rawValues); err != nil {
+				return fmt.Errorf("decode {{.Name}}: %w", err)
+			}
+			values := make([]{{.Type}}, len(rawValues))
+			for i, raw := range rawValues {
+				var w {{unionWrapperType .Type $.ImportedUnions}}
+				if err := w.UnmarshalJSON(raw); err != nil {
+					return fmt.Errorf("decode {{.Name}}[%d]: %w", i, err)
+				}
+				values[i] = w.Value
+			}
+			t.{{.GoName}}.Value = values
+			{{- else}}
+			var w {{unionWrapperType .Type $.ImportedUnions}}
+			if err := w.UnmarshalJSON(aux.{{.GoName}}); err != nil {
+				return fmt.Errorf("decode {{.Name}}: %w", err)
+			}
+			t.{{.GoName}}.Value = w.Value
+			{{- end}}
+		}
+	}
+{{- else if .IsMap}}
+	if aux.{{.GoName}} != nil {
+		t.{{.GoName}} = make(map[string]{{if .IsArray}}[]{{end}}{{.Type}}, len(aux.{{.GoName}}))
+		for key, rawValue := range aux.{{.GoName}} {
+			{{- if .IsArray}}
+			values := make([]{{.Type}}, len(rawValue))
+			for i, raw := range rawValue {
+				var w {{unionWrapperType .Type $.ImportedUnions}}
+				if err := w.UnmarshalJSON(raw); err != nil {
+					return fmt.Errorf("decode {{.Name}}[%q][%d]: %w", key, i, err)
+				}
+				values[i] = w.Value
+			}
+			t.{{.GoName}}[key] = values
+			{{- else}}
+			var w {{unionWrapperType .Type $.ImportedUnions}}
+			if err := w.UnmarshalJSON(rawValue); err != nil {
+				return fmt.Errorf("decode {{.Name}}[%q]: %w", key, err)
+			}
+			t.{{.GoName}}[key] = w.Value
+			{{- end}}
+		}
+	}
+{{- else if .IsArray}}
 	if aux.{{.GoName}} != nil {
 		t.{{.GoName}} = make([]{{.Type}}, len(aux.{{.GoName}}))
 		for i, raw := range aux.{{.GoName}} {
