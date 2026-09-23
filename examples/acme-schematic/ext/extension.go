@@ -10,11 +10,14 @@
 //     inventory (inventory.go);
 //   - an auth provider, "apikey", that the api generator renders with when
 //     superschematic.toml selects it (auth/);
-//   - a subcommand, describe, through cli.CommandProvider (command.go).
+//   - two subcommands through cli.CommandProvider: describe (command.go) and
+//     fields, which type-checks a declaration file with the loader's
+//     compiler (fields.go).
 //
 // A binary is cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})
 // (cmd/acme-schematic). Every file here imports only the public packages an
-// out-of-tree extension has: registry, cli and ir.
+// out-of-tree extension has: registry, loader, cli and ir, plus the pinned
+// TypeScript compiler's shim for the node kinds fields.go matches.
 package ext
 
 import (
@@ -75,7 +78,7 @@ func (Extension) Register(r *registry.Registry) error {
 
 // Commands implements cli.CommandProvider.
 func (Extension) Commands() []*cobra.Command {
-	return []*cobra.Command{describeCommand()}
+	return []*cobra.Command{describeCommand(), fieldsCommand()}
 }
 
 // decodeConfig reads the extension's table. The core keeps the table

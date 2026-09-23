@@ -3,6 +3,7 @@ module example.com/acme/schematic
 go 1.26.4
 
 require (
+	github.com/microsoft/typescript-go v0.0.0
 	github.com/parable-work/superschematic v0.0.0
 	github.com/parable-work/superschematic/ir v0.0.0
 	github.com/spf13/cobra v1.10.2
@@ -17,7 +18,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/microsoft/typescript-go v0.0.0 // indirect
 	github.com/parable-work/superscalar/go v0.0.0-20260908181317-c9da122f99b8 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect

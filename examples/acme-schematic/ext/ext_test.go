@@ -287,6 +287,38 @@ func readJSON(t *testing.T, path string, v any) {
 	}
 }
 
+// TestDeclaredFieldsChecksLabelDeclarations runs the fields command's
+// program over the example's labels: a relative import between declaration
+// files resolves, and each field carries the compiler's type.
+func TestDeclaredFieldsChecksLabelDeclarations(t *testing.T) {
+	fields, err := ext.DeclaredFields("../labels", "shelf-label.d.ts", "ShelfLabel")
+	if err != nil {
+		t.Fatalf("DeclaredFields: %v", err)
+	}
+	var got []string
+	for _, field := range fields {
+		got = append(got, field.Name+": "+field.Type)
+	}
+	want := "sku: string, price: number, currency: Currency, location: Location, promo: string | undefined"
+	if strings.Join(got, ", ") != want {
+		t.Fatalf("fields = %s, want %s", strings.Join(got, ", "), want)
+	}
+	if _, err := ext.DeclaredFields("../labels", "shelf-label.d.ts", "Shelf"); err == nil || !strings.Contains(err.Error(), "declares no interface or type alias Shelf") {
+		t.Fatalf("unknown type: err = %v", err)
+	}
+}
+
+func TestDeclaredFieldsReportsLocatedDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "bad.d.ts"), []byte("export interface Bad { price: Money; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ext.DeclaredFields(dir, "bad.d.ts", "Bad")
+	if err == nil || !strings.HasPrefix(err.Error(), "bad.d.ts:1:31: ") || !strings.Contains(err.Error(), "Money") {
+		t.Fatalf("err = %v, want the unknown name located at bad.d.ts:1:31", err)
+	}
+}
+
 func writeJSON(t *testing.T, path string, v any) {
 	t.Helper()
 	b, err := json.Marshal(v)

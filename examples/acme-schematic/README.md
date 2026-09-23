@@ -16,7 +16,7 @@ The extension adds one of each registration surface:
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
 | Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |
 | Auth provider | `apikey`, an `X-API-Key` header over the generic session runtime | `ext/auth/` |
-| Command | `describe`, through `cli.CommandProvider` | `ext/command.go` |
+| Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
 The schemas root under `schemas/` has one service per kind: `shop-db` (DB),
@@ -46,6 +46,7 @@ export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
 cd examples/acme-schematic
 go build -o /tmp/acme-schematic ./cmd/acme-schematic
 /tmp/acme-schematic describe schemas
+/tmp/acme-schematic fields labels/shelf-label.d.ts ShelfLabel
 /tmp/acme-schematic build-all schemas/services
 /tmp/acme-schematic build schemas/services/shop-catalog --emit-ir | jq .types.Product
 ```
@@ -64,6 +65,7 @@ examples/acme-schematic/
     manifest.go               acmeManifest generator on every kind
     inventory.go              acmeInventory build-all hook
     command.go                describe subcommand
+    fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
   packages/schema/            @acme/schema, the authoring package @shelf is imported from
   schemas/
@@ -74,6 +76,7 @@ examples/acme-schematic/
     services/shop-api         API: ProductQueries, ProductMutations over shop-db
     services/shop-config      General: ShopConfig with @envVars
     services/shop-catalog     Catalog: Product, Bundle with @shelf; catalog.config.yaml
+  labels/                     shelf-label.d.ts and location.d.ts, the declarations `fields` reads
   scripts/smoke.sh            the end-to-end assertions
   scripts/check_second_decorator.sh, second_decorator.patch
 ```
@@ -112,9 +115,11 @@ file undecoded. The core does not know the keys; `decodeConfig` in
 `extension.go` owns them and rejects the ones it does not recognize, so a
 typo in the toml fails the build instead of being ignored.
 
-Every file under `ext/` imports only `registry`, `cli` and `ir`. Those are the
-public packages; nothing under `internal/` is reachable from outside the core
-module, which is what makes "no core edits" checkable.
+Every file under `ext/` imports only the public packages `registry`,
+`loader`, `cli` and `ir`, and `fields.go` the pinned TypeScript compiler's
+shim for the node kinds it matches. Nothing under `internal/` is reachable
+from outside the core module, which is what makes "no core edits"
+checkable.
 
 ## A kind
 
@@ -360,7 +365,7 @@ keeps it fixed.
 
 ```go
 func (Extension) Commands() []*cobra.Command {
-	return []*cobra.Command{describeCommand()}
+	return []*cobra.Command{describeCommand(), fieldsCommand()}
 }
 ```
 
@@ -369,6 +374,23 @@ func (Extension) Commands() []*cobra.Command {
 Extension{})`) and prints every kind with its pipeline, every document,
 every output key and every auth provider. It is the first thing to run when
 a schema is rejected: it shows what the binary knows.
+
+`fields <file.d.ts> <type>` is a command on TypeScript the schema frontend
+does not walk. It hands the file, and the other `.d.ts` files next to it,
+to `loader.NewDeclarationProgram`, which type-checks them in memory with
+the compiler, lib files and module resolution the loader uses and reads
+nothing else from disk. It fails on any diagnostic, located as
+`file:line:col`, then prints each property of `<type>` with the type the
+checker gives it:
+
+```sh
+$ acme-schematic fields labels/shelf-label.d.ts ShelfLabel
+sku: string
+price: number
+currency: Currency
+location: Location
+promo: string | undefined
+```
 
 ## The binary
 

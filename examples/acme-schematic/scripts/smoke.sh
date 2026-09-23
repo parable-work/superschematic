@@ -32,7 +32,10 @@
 #      builds nothing outside that closure;
 #  12. build-all wrote the dependency graph's [deps] copy byte for byte, every
 #      package in it names the service that produced it, and the committed
-#      copy is current.
+#      copy is current;
+#  13. `fields` type-checks the label declarations with the loader's
+#      declaration program and prints each field's checked type; a bad
+#      declaration fails with a located diagnostic.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -178,5 +181,18 @@ if [[ -n "$(git -C "$EXAMPLE_DIR" status --porcelain -- schemas/deps.json)" ]]; 
   echo "ERROR: schemas/deps.json is not the committed copy of this build's graph; commit it" >&2
   exit 1
 fi
+
+echo "==> fields: an extension command on the loader's declaration program"
+"$OUT/acme-schematic" fields "$EXAMPLE_DIR/labels/shelf-label.d.ts" ShelfLabel | tee "$OUT/fields.txt"
+grep -qx 'currency: Currency' "$OUT/fields.txt"
+grep -qx 'location: Location' "$OUT/fields.txt"
+grep -qx 'promo: string | undefined' "$OUT/fields.txt"
+mkdir -p "$OUT/bad-labels"
+printf 'export interface Bad { price: Money; }\n' >"$OUT/bad-labels/bad.d.ts"
+if "$OUT/acme-schematic" fields "$OUT/bad-labels/bad.d.ts" Bad >"$OUT/fields-bad.log" 2>&1; then
+  echo "ERROR: fields accepted a declaration with an unknown type" >&2
+  exit 1
+fi
+grep -q 'bad.d.ts:1:31: ' "$OUT/fields-bad.log"
 
 echo "acme smoke: ok"

@@ -61,8 +61,9 @@ naming file undecoded. The core does not know the keys; the extension
 validates them. A typo in the toml fails the build instead of being
 ignored.
 
-Import `registry`, `cli` and `ir` only. Nothing under `internal/` is
-reachable from outside the core module.
+Import the public packages only: `registry`, `cli` and `ir`, plus
+`loader` and `schemadeps` when a command needs them. Nothing under
+`internal/` is reachable from outside the core module.
 
 ## A kind
 
@@ -246,7 +247,7 @@ extension that implements `cli.CommandProvider` contributes more:
 
 ```go
 func (Extension) Commands() []*cobra.Command {
-    return []*cobra.Command{describeCommand()}
+    return []*cobra.Command{describeCommand(), fieldsCommand()}
 }
 ```
 
@@ -262,6 +263,51 @@ packages, `Package.Service` for the service that produced each one,
 names, and `WriteFileAtomic` for the files it rewrites.
 `Example_pinCommand` in `schemadeps/example_test.go` is such a command in
 miniature.
+
+## TypeScript declarations outside a schema
+
+The schema frontend walks `.schema.ts` files into the IR. A command or
+tool that needs other TypeScript types checked, such as a value contract
+declared in a `.d.ts` file, uses `loader.NewDeclarationProgram`: the same
+compiler, bundled lib files and module resolution, over files it passes
+in memory.
+
+```go
+program, err := loader.NewDeclarationProgram(loader.DeclarationInput{
+    Files: map[string]string{
+        "label.d.ts":                    source,
+        "node_modules/money/index.d.ts": moneyTypes, // import "money"
+    },
+    Roots: []string{"label.d.ts"},
+    Lib:   []string{"ES2023"}, // the default
+})
+if err != nil {
+    return err
+}
+defer program.Close()
+if diags := program.Diagnostics(); len(diags) > 0 {
+    return diags // file:line:col: message, names as in Files
+}
+checker := program.Checker()
+file := program.SourceFile("label.d.ts")
+```
+
+- Nothing is read from disk but the compiler's lib files. A relative
+  import resolves between the files, and a bare import resolves under
+  `node_modules/` in them.
+- The compiler options are fixed: strict, `skipLibCheck` off, no emit,
+  bundler module resolution, no automatic `@types`. No `tsconfig.json`
+  is read.
+- `Diagnostics(names...)` reports only the named files. Leave out a file
+  whose declarations you trust; they still resolve.
+- `Checker()` and `SourceFile()` return the pinned compiler's types
+  (`github.com/microsoft/typescript-go/shim/checker` and `.../ast`); import
+  the shim to name a node kind. `ErrorAt(node, ...)` makes a located error
+  in the same form as the diagnostics.
+- A program is for one goroutine. `Close` releases the checker.
+
+acme's `fields <file.d.ts> <type>` type-checks a declaration file and
+prints the checked type of each field (`ext/fields.go`).
 
 ## Run the example
 

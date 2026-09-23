@@ -12,8 +12,11 @@ package tsreader
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"path"
 	"path/filepath"
+	"strings"
 
 	tsast "github.com/microsoft/typescript-go/shim/ast"
 	tsbundled "github.com/microsoft/typescript-go/shim/bundled"
@@ -21,6 +24,7 @@ import (
 	tscompiler "github.com/microsoft/typescript-go/shim/compiler"
 	tscore "github.com/microsoft/typescript-go/shim/core"
 	tsoptions "github.com/microsoft/typescript-go/shim/tsoptions"
+	tsvfs "github.com/microsoft/typescript-go/shim/vfs"
 	"github.com/microsoft/typescript-go/shim/vfs/osvfs"
 
 	"github.com/parable-work/superschematic/internal/profile"
@@ -271,6 +275,82 @@ func newWorkspaceCorsaProgram(serviceDirs []string, prof *profile.Profiler) (*co
 	return &corsaProgram{program: program, checker: checker, release: release}, nil, nil
 }
 
+// declarationFS serves only the files it was given. An import can never make
+// the compiler read the real file system: every existence check and read is
+// confined to the map, and the embedded file system answers only directory
+// enumeration, for which the virtual root has no entries on disk. The
+// compiler's lib files come from the bundle tsbundled.WrapFS adds around it.
+type declarationFS struct {
+	tsvfs.FS
+	files map[string]string
+}
+
+func (f declarationFS) FileExists(name string) bool {
+	_, ok := f.files[path.Clean(name)]
+	return ok
+}
+
+func (f declarationFS) ReadFile(name string) (string, bool) {
+	content, ok := f.files[path.Clean(name)]
+	return content, ok
+}
+
+func (f declarationFS) DirectoryExists(name string) bool {
+	prefix := strings.TrimSuffix(path.Clean(name), "/") + "/"
+	for file := range f.files {
+		if strings.HasPrefix(file, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f declarationFS) Realpath(name string) string     { return path.Clean(name) }
+func (f declarationFS) UseCaseSensitiveFileNames() bool { return true }
+
+// newDeclarationCorsaProgram builds a program over files, which are keyed by
+// absolute paths under dir, starting from roots. It writes its own
+// tsconfig.json into dir and never reads one from disk, so the checking
+// rules cannot be loosened by the caller's repository: strict, no
+// skipLibCheck, no emit, no automatic @types.
+func newDeclarationCorsaProgram(dir string, files map[string]string, roots []string, lib []string) (*corsaProgram, []*astDiagnostic, error) {
+	config, err := json.Marshal(map[string]any{
+		"compilerOptions": map[string]any{
+			"strict":           true,
+			"skipLibCheck":     false,
+			"noEmit":           true,
+			"target":           "ES2022",
+			"module":           "ESNext",
+			"moduleResolution": "Bundler",
+			"types":            []string{},
+			"lib":              lib,
+		},
+		"files": roots,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	configFileName := dir + "/tsconfig.json"
+	files[configFileName] = string(config)
+	fs := tsbundled.WrapFS(declarationFS{FS: osvfs.FS(), files: files})
+	host := tscompiler.NewCachedFSCompilerHost(dir, fs, tsbundled.LibPath(), nil, nil)
+	parsed, configDiags := tsoptions.GetParsedCommandLineOfConfigFile(configFileName, nil, nil, host, nil)
+	if len(configDiags) > 0 {
+		return nil, configDiags, nil
+	}
+	if parsed == nil {
+		return nil, nil, fmt.Errorf("failed to parse the declaration program's compiler options")
+	}
+	// An option value the compiler rejects, such as an unknown lib name, is
+	// reported on the parsed config rather than returned above.
+	if optionDiags := parsed.GetConfigFileParsingDiagnostics(); len(optionDiags) > 0 {
+		return nil, optionDiags, nil
+	}
+	program := tscompiler.NewProgram(tscompiler.ProgramOptions{Host: host, Config: parsed, SingleThreaded: tscore.TSTrue})
+	checker, release := program.GetTypeChecker(context.Background())
+	return &corsaProgram{program: program, checker: checker, release: release}, nil, nil
+}
+
 // close releases the type checker.
 func (p *corsaProgram) close() {
 	if p.release != nil {
@@ -293,4 +373,9 @@ func (p *corsaProgram) semanticDiagnostics(file *astSourceFile) []*astDiagnostic
 // syntacticDiagnostics returns the parse diagnostics for one file.
 func (p *corsaProgram) syntacticDiagnostics(file *astSourceFile) []*astDiagnostic {
 	return p.program.GetSyntacticDiagnostics(context.Background(), file)
+}
+
+// sourceFile returns the program's file at fileName, or nil.
+func (p *corsaProgram) sourceFile(fileName string) *astSourceFile {
+	return p.program.GetSourceFile(fileName)
 }

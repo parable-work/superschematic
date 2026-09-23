@@ -70,6 +70,17 @@ of a generated artifact is always listed here with the bump it requires.
   the output directories the build cache stores and restores), so a
   build-all hook can read a service this run restored or found up to date
   and did not load. Minor.
+- `loader.NewDeclarationProgram`: a type-checked TypeScript program over
+  in-memory files, built with the compiler, bundled lib files and module
+  resolution the schema loader uses, for an extension or tool that
+  evaluates types the schema frontend does not walk. `DeclarationProgram`
+  has `Checker`, `SourceFile`, `Diagnostics` (optionally limited to named
+  files, located as `file:line:col` with the caller's file names), `ErrorAt`
+  and `Close`. The compiler options are fixed (strict, no `skipLibCheck`),
+  no `tsconfig.json` is read, and nothing is read from disk but the
+  compiler's lib files. `loader.SchemaError` and `loader.SchemaErrorList`
+  alias the located diagnostic types. The checker and AST types are the
+  pinned compiler's shim types. Minor.
 
 ### Changed
 
