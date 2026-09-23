@@ -9,7 +9,7 @@ setup(
     author="superschematic",
     packages=find_packages(),
     package_data={
-        "schemas_types_fixture_api": ["py.typed"],
+        "schemas_types_fixture_api": ["py.typed", "*.schema.json"],
     },
     install_requires=[
         "pydantic>=2.12.0,<3.0.0",

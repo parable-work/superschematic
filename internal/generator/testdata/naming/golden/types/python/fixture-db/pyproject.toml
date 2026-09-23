@@ -40,7 +40,7 @@ dev = [
 packages = ["acme_types_fixture_db"]
 
 [tool.setuptools.package-data]
-"acme_types_fixture_db" = ["py.typed"]
+"acme_types_fixture_db" = ["py.typed", "*.schema.json"]
 
 [tool.mypy]
 python_version = "3.12"

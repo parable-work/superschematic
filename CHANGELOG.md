@@ -52,6 +52,9 @@ of a generated artifact is always listed here with the bump it requires.
   (was v5.3.1), matching `runtime/http/go`. Patch.
 - Generated Go ORM modules require `github.com/jackc/pgx/v5` v5.11.0 (was
   v5.10.0). Patch.
+- Generated Python types packages declare `*.schema.json` as package data
+  next to `py.typed`, so a JSON Schema document a build step writes into the
+  package directory ships in the wheel and sdist. Patch.
 
 ### Fixed
 
