@@ -75,6 +75,55 @@ func TestOptionalListDecodeValidate(t *testing.T) {
 		})
 	}
 }
+
+// A required list without listMin: absent and null stay nil and fail
+// required, an explicit [] stays non-nil and is valid, through every decoder.
+func TestRequiredReplacementDecodeValidate(t *testing.T) {
+	cases := []struct {
+		payload string
+		wantNil bool
+	}{
+		{payload: ` + "`" + `{"expectedAggregateRevision": 1}` + "`" + `, wantNil: true},
+		{payload: ` + "`" + `{"expectedAggregateRevision": 1, "assignments": null}` + "`" + `, wantNil: true},
+		{payload: ` + "`" + `{"expectedAggregateRevision": 1, "assignments": []}` + "`" + `, wantNil: false},
+		{payload: ` + "`" + `{"expectedAggregateRevision": 1, "assignments": [{"kind": "owner"}]}` + "`" + `, wantNil: false},
+	}
+	for _, decoder := range []string{"json", "map", "strict-map"} {
+		for _, tc := range cases {
+			t.Run(decoder+tc.payload, func(t *testing.T) {
+				var input RequiredReplacement
+				var err error
+				if decoder == "json" {
+					err = json.Unmarshal([]byte(tc.payload), &input)
+				} else {
+					var value map[string]any
+					if err := json.Unmarshal([]byte(tc.payload), &value); err != nil {
+						t.Fatal(err)
+					}
+					if decoder == "map" {
+						err = input.FromMap(value)
+					} else {
+						err = input.FromMapStrict(value)
+					}
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if (input.Assignments == nil) != tc.wantNil {
+					t.Fatalf("assignments presence lost: %#v", input.Assignments)
+				}
+				errs := input.Validate().GetFieldErrors("assignments")
+				if tc.wantNil {
+					if len(errs) != 1 || errs[0].Validator != "required" {
+						t.Fatalf("want required, got %v", errs)
+					}
+				} else if len(errs) != 0 {
+					t.Fatalf("explicit replacement rejected: %v", errs)
+				}
+			})
+		}
+	}
+}
 `
 
 // TestOptionalListRuntimeBehavior generates the fixture-general module, drops
@@ -90,6 +139,18 @@ func TestOptionalListRuntimeBehavior(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-general"))
 	if err != nil {
 		t.Fatalf("load fixture-general: %v", err)
+	}
+
+	required, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-required-arrays"))
+	if err != nil {
+		t.Fatalf("load fixture-required-arrays: %v", err)
+	}
+	for name, definition := range required.Types {
+		schema.Types[name] = definition
+	}
+	assignments := schema.Types["RequiredReplacement"].Fields[1]
+	if assignments.Name != "assignments" || !assignments.Required || !assignments.TypeRef.IsArray || assignments.ValidateListMin != nil {
+		t.Fatalf("loader lost the plain required-array contract: %+v", assignments)
 	}
 
 	output, err := Generate(schema, Options{

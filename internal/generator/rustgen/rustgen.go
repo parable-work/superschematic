@@ -94,6 +94,9 @@ type TypeInfo struct {
 	// type known to implement Default. The template uses this to decide
 	// whether to emit a Default impl alongside the struct.
 	HasDefaults bool
+
+	// DenyUnknownFields emits #[serde(deny_unknown_fields)] on the struct.
+	DenyUnknownFields bool
 }
 
 // UnionInfo holds information about a union type for Rust generation.
@@ -446,11 +449,12 @@ func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enu
 	types := make([]TypeInfo, len(codegenTypes))
 	for i, t := range codegenTypes {
 		types[i] = TypeInfo{
-			Name:   t.Name,
-			Owner:  t.Owner,
-			Role:   t.Role,
-			Doc:    t.Doc(),
-			Fields: make([]FieldInfo, len(t.Fields)),
+			Name:              t.Name,
+			Owner:             t.Owner,
+			Role:              t.Role,
+			Doc:               t.Doc(),
+			Fields:            make([]FieldInfo, len(t.Fields)),
+			DenyUnknownFields: t.DenyUnknownFields,
 		}
 
 		hasDefaults := false

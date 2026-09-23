@@ -103,6 +103,11 @@ const parityMatrixSchemaJSON = `{
           "validateListMax": 3
         },
         {
+          "name": "reqScalarList",
+          "typeRef": { "name": "Network.Url", "isArray": true },
+          "required": true
+        },
+        {
           "name": "optNum",
           "typeRef": { "name": "number" },
           "validateMin": 1,
@@ -123,56 +128,76 @@ var vectors = []struct {
 }{
 	{
 		name:    "valid_full",
-		payload: `{"reqStr": "ok", "optStr": "ok", "reqList": ["a"], "optList": ["b"], "optNum": 5.5}`,
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "optStr": "ok", "reqList": ["a"], "optList": ["b"], "optNum": 5.5}`,
 		want:    map[string][]string{},
 	},
 	{
 		// The regression shape: omitted optional list must not
 		// trip listMin.
 		name:    "optional_fields_absent",
-		payload: `{"reqStr": "ok", "reqList": ["a"]}`,
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"]}`,
 		want:    map[string][]string{},
 	},
 	{
 		name:    "optional_fields_null",
-		payload: `{"reqStr": "ok", "reqList": ["a"], "optStr": null, "optList": null, "optNum": null}`,
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optStr": null, "optList": null, "optNum": null}`,
 		want:    map[string][]string{},
 	},
 	{
 		name:    "opt_list_explicit_empty",
-		payload: `{"reqStr": "ok", "reqList": ["a"], "optList": []}`,
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optList": []}`,
 		want:    map[string][]string{"optList": {"listMin"}},
 	},
 	{
 		name:    "opt_list_over_listmax",
-		payload: `{"reqStr": "ok", "reqList": ["a"], "optList": ["a", "b", "c", "d"]}`,
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optList": ["a", "b", "c", "d"]}`,
 		want:    map[string][]string{"optList": {"listMax"}},
 	},
 	{
 		name:    "opt_list_item_too_long",
-		payload: `{"reqStr": "ok", "reqList": ["a"], "optList": ["toolong"]}`,
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optList": ["toolong"]}`,
 		want:    map[string][]string{"optList[0]": {"maxLength"}},
 	},
 	{
 		name:    "req_str_too_long",
-		payload: `{"reqStr": "toolong", "reqList": ["a"]}`,
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "toolong", "reqList": ["a"]}`,
 		want:    map[string][]string{"reqStr": {"maxLength"}},
 	},
 	{
 		// All three languages report listMin (not required) for an
 		// explicitly empty required list that carries a listMin constraint.
 		name:    "req_list_explicit_empty",
-		payload: `{"reqStr": "ok", "reqList": []}`,
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": []}`,
 		want:    map[string][]string{"reqList": {"listMin"}},
 	},
 	{
 		name:    "opt_str_too_long",
-		payload: `{"reqStr": "ok", "reqList": ["a"], "optStr": "toolong"}`,
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optStr": "toolong"}`,
 		want:    map[string][]string{"optStr": {"maxLength"}},
 	},
 	{
+		// A required list means present, not non-empty. Go used to reject []
+		// here as a missing required field while TypeScript checked null only
+		// and Rust validated nothing, so one payload was invalid in one
+		// language and valid in the others. Non-emptiness is declared with
+		// listMin, which reqList above still carries.
+		name:    "req_scalar_list_explicit_empty",
+		payload: `{"reqScalarList": [], "reqStr": "ok", "reqList": ["a"]}`,
+		want:    map[string][]string{},
+	},
+	{
+		name:    "req_scalar_list_absent",
+		payload: `{"reqStr": "ok", "reqList": ["a"]}`,
+		want:    map[string][]string{"reqScalarList": {"required"}},
+	},
+	{
+		name:    "req_scalar_list_null",
+		payload: `{"reqScalarList": null, "reqStr": "ok", "reqList": ["a"]}`,
+		want:    map[string][]string{"reqScalarList": {"required"}},
+	},
+	{
 		name:    "opt_num_below_min",
-		payload: `{"reqStr": "ok", "reqList": ["a"], "optNum": 0.5}`,
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optNum": 0.5}`,
 		want:    map[string][]string{"optNum": {"min"}},
 	},
 }
@@ -380,6 +405,10 @@ for name, payload in payloads.items():
         key = field.alias or attr
         if key in payload:
             data[attr] = payload[key]
+        elif field.is_required():
+            # model_construct bypasses Pydantic presence validation. Supply
+            # its missing value explicitly so validate_all can report required.
+            data[attr] = None
     m = Model.model_construct(**data)
     errs = m.validate_all()
     fields = {}

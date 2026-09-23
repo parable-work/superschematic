@@ -45,6 +45,13 @@ of a generated artifact is always listed here with the bump it requires.
   writes each set and `SetNull` field onto a stored row (SetNull wins; a nil
   receiver or row is a no-op), so a handler can check the post-update row
   before calling `UpdateOne`. Minor.
+- `@denyUnknownFields` (from `@superschematic/schema`) on a type makes the
+  generated Rust struct `#[serde(deny_unknown_fields)]`, so a payload key the
+  type does not declare fails to decode instead of being dropped. The IR
+  `TypeDef` gains `denyUnknownFields`; the schema-file JSON Schema accepts
+  it. Opt-in per type. Minor.
+- OpenAPI: an array field with `listMin` or `listMax` carries `minItems` or
+  `maxItems`. Patch.
 
 ### Changed
 
@@ -55,6 +62,13 @@ of a generated artifact is always listed here with the bump it requires.
 - Generated Python types packages declare `*.schema.json` as package data
   next to `py.typed`, so a JSON Schema document a build step writes into the
   package directory ships in the wheel and sdist. Patch.
+- Go types: a required array means present, not non-empty, as it already
+  did in TypeScript and Rust. `Validate` reports `required` for a nil list
+  only; an explicit `[]` is valid unless the field declares `listMin` of 1 or
+  more, which reports `listMin`. Decoding (`UnmarshalJSON`, `FromMap`,
+  `FromMapStrict`) keeps an absent or null list nil so the required check
+  can see it; encoding still writes `[]` for a nil list. A schema that relied
+  on required implying non-empty adds `listMin: 1`. Minor.
 
 ### Fixed
 

@@ -237,6 +237,10 @@ type TypeInfo struct {
 	// JSONB rather than a relational table.
 	JsonField bool
 
+	// DenyUnknownFields indicates the type carries @denyUnknownFields: its
+	// generated Rust deserializer rejects a key the type does not declare.
+	DenyUnknownFields bool
+
 	// EnvVars indicates the type declares the service's environment-variable
 	// configuration surface.
 	EnvVars bool

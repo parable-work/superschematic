@@ -116,6 +116,12 @@ type TypeDef struct {
 	// EnvVars indicates this type provides environment variable configuration.
 	EnvVars bool `json:"envVars,omitempty" yaml:"envVars,omitempty"`
 
+	// DenyUnknownFields (@denyUnknownFields) makes the generated Rust serde
+	// deserializer reject a payload key the type does not declare instead of
+	// dropping it. Opt-in per type: a strict decoder suits a closed wire
+	// contract and breaks a payload that must survive a newer producer.
+	DenyUnknownFields bool `json:"denyUnknownFields,omitempty" yaml:"denyUnknownFields,omitempty"`
+
 	// Extensions holds extension decorator data keyed by extension name; see
 	// [Schema.Extensions].
 	Extensions map[string]json.RawMessage `json:"extensions,omitempty" yaml:"extensions,omitempty"`

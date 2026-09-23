@@ -38,6 +38,9 @@ fn {{.DefaultFnName}}() -> {{.RustType}} {
 {{.}}
 {{- end}}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+{{- if .DenyUnknownFields}}
+#[serde(deny_unknown_fields)]
+{{- end}}
 pub struct {{.Name}} {
 {{- range .Fields}}
 {{- with rustDoc .Doc 1}}

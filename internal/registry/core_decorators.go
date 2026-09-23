@@ -54,6 +54,7 @@ func coreDecorators() []DecoratorSpec {
 	marker(TargetType, "envVars", []string{pkgSchemaConfig})
 	marker(TargetType, "versioned", []string{pkgDB})
 	flag(TargetType, "jsonField", []string{pkgDB, pkgSchema}, func(n Node) { n.Type.JsonField = true })
+	flag(TargetType, "denyUnknownFields", []string{pkgSchema}, func(n Node) { n.Type.DenyUnknownFields = true })
 	specs = append(specs, DecoratorSpec{
 		Name: "index", Packages: []string{pkgDB}, Target: TargetType,
 		Apply: func(n Node, args []any, _ Site) error {

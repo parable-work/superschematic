@@ -28,6 +28,7 @@ func toMapValue(value any) (map[string]any, error) {
 
 // normalizeNilSlices sets nil slices to empty non-nil slices so encoding/json
 // emits [] instead of null for list fields (Go nil slices marshal to JSON null).
+// Only call during serialization: decoding must preserve required-list presence.
 // []byte is skipped so nil and empty stay distinct for RawMessage-style payloads.
 // Optional (omitempty) list fields are skipped so nil keeps meaning "absent":
 // omitempty omits nil and empty identically on marshal, and Validate gates
@@ -104,8 +105,6 @@ func fromMapValue(target any, value map[string]any) error {
 		return err
 	}
 
-	normalizeNilSlices(target)
-
 	return nil
 }
 
@@ -120,8 +119,6 @@ func fromMapValueStrict(target any, value map[string]any) error {
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
-
-	normalizeNilSlices(target)
 
 	return nil
 }
@@ -233,8 +230,7 @@ func (t *TenantView) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	normalizeNilSlices(t)
-
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
 	return nil
 }
 
@@ -499,8 +495,7 @@ func (t *CreateTenantInput) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	normalizeNilSlices(t)
-
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
 	return nil
 }
 
