@@ -67,5 +67,14 @@ of a generated artifact is always listed here with the bump it requires.
   from a dependency package for presence only, so a strict parser accepted
   any string there. It now imports that package's enum validators from its
   `validators/enums` subpath and validates the value. Patch.
+- Go types: `Parse<Scalar>` for a custom-parse scalar with a JSON-shaped Go
+  type (a map) called a superscalar function by its leaf name and converted
+  the returned string to the map type, which does not compile. It now calls
+  `Parse<Symbol>` and decodes the canonical JSON into the alias. No scalar
+  in the pinned superscalar catalog takes this path yet; `Generic.StringMap`
+  does once superscalar marks it custom-parse. Patch.
+- Python types: generated enums accept their serialized value when a model
+  is validated with `strict=True`, in direct, list and map fields. Unknown
+  values and unrelated coercions still fail. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main

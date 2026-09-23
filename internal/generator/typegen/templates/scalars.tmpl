@@ -2,9 +2,14 @@
 
 package {{.PackageName}}
 
-{{- if .HasInt64ScalarParsers}}
+{{- if or .HasInt64ScalarParsers .HasJSONScalarParsers}}
 import (
+{{- if .HasJSONScalarParsers}}
+	"encoding/json"
+{{- end}}
+{{- if .HasInt64ScalarParsers}}
 	"strconv"
+{{- end}}
 
 	scalars "{{.Naming.ScalarGoModule}}"
 )
@@ -40,6 +45,18 @@ func Parse{{.Tokens.Symbol}}(s string) ({{.Tokens.Symbol}}, error) {
 		return zero, err
 	}
 	return {{.Tokens.Symbol}}(parsed), nil
+{{- else if .ParseAsJSON}}
+	canonical, err := scalars.{{.ParseTarget}}(s)
+	if err != nil {
+		var zero {{.Tokens.Symbol}}
+		return zero, err
+	}
+	var parsed {{.Tokens.Symbol}}
+	if err := json.Unmarshal([]byte(canonical), &parsed); err != nil {
+		var zero {{.Tokens.Symbol}}
+		return zero, err
+	}
+	return parsed, nil
 {{- else}}
 	parsed, err := scalars.{{.ParseTarget}}(s)
 	if err != nil {

@@ -60,6 +60,11 @@ type ScalarInfo struct {
 	// ParseAsInt64 means the superscalar parse target returns a canonical string
 	// that must be parsed into this module's int64-backed scalar alias.
 	ParseAsInt64 bool
+
+	// ParseAsJSON means the superscalar parse target returns canonical JSON
+	// text that must be decoded into this module's scalar alias (a map or
+	// other JSON-like Go type).
+	ParseAsJSON bool
 }
 
 // FieldInfo holds information about a struct field (Go-specific wrapper).
@@ -214,6 +219,7 @@ type ModuleOutput struct {
 	HasInputFieldWrappers    bool
 	HasVersionedTypes        bool
 	HasInt64ScalarParsers    bool
+	HasJSONScalarParsers     bool
 
 	// Naming supplies the scalar and schema-ir module paths the templates
 	// import and require.
@@ -287,7 +293,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	for _, scalar := range output.Scalars {
 		if scalar.ParseAsInt64 {
 			output.HasInt64ScalarParsers = true
-			break
+		}
+		if scalar.ParseAsJSON {
+			output.HasJSONScalarParsers = true
 		}
 	}
 
@@ -477,6 +485,7 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 		}
 		scalar.ParseTarget = scalarLibParseTarget(scalar)
 		scalar.ParseAsInt64 = scalar.ParseTarget != "" && scalar.Traits.IsIntegerLike
+		scalar.ParseAsJSON = scalar.HasCustomParse && scalar.Traits.IsJSONLike
 		scalars[i] = scalar
 	}
 	return scalars
@@ -486,6 +495,9 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 // Parse<Symbol> alias binds to, or "" when no Parse alias applies.
 func scalarLibParseTarget(scalar ScalarInfo) string {
 	if scalar.HasCustomParse {
+		if scalar.Traits.IsJSONLike {
+			return "Parse" + scalar.Tokens.Symbol
+		}
 		return "Parse" + scalar.Tokens.Leaf()
 	}
 	if scalar.Primitive == ir.LanguageString && !scalar.Traits.IsObjectLike {
