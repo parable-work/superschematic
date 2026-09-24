@@ -348,10 +348,13 @@ rendered `T[][]` it refused the schema with an error naming itself. Each
 change that taught a generator nested lists removed its own refusal and
 added its output for the `fixture-nested-arrays` services; the shared check
 went with the last one. The TypeScript API server generator (`tsrestgen`)
-arrived after the refusals and never had one: it still types a
-list-of-lists body argument or response as `T[]`. Every other generator
-renders `T[][]`, and the docs site's arrays-of-arrays reference describes
-the result.
+arrived after the refusals and never had one, so for a short time it typed
+a list-of-lists body argument or response as `T[]`; it now renders `T[][]`
+and applies the list rules when it decodes a body. It refuses a
+list-of-lists body argument whose element type is a union, because it has
+no parser for one.
+Every generator renders `T[][]`, and the docs site's arrays-of-arrays
+reference describes the result.
 
 ### D12, amended: one set of list rules for every validator
 
