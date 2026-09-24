@@ -469,21 +469,21 @@ func inferTSType(primitive ir.LanguagePrimitive, scalarName string) string {
 }
 
 // fieldTypeMapperTS maps IR type references to TypeScript types.
-func fieldTypeMapperTS(typeName string, isArray bool, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	valueType := fieldValueTypeMapperTS(typeName, isArray, isMap, isRequired, scalarMap)
+func fieldTypeMapperTS(typeName string, arrayDepth int, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	valueType := fieldValueTypeMapperTS(typeName, arrayDepth, isMap, isRequired, scalarMap)
 	if !isMap {
 		return valueType
 	}
 	return "Record<string, " + valueType + ">"
 }
 
-func fieldValueTypeMapperTS(typeName string, isArray bool, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	if isArray {
-		elemType := fieldValueTypeMapperTS(typeName, false, false, true, scalarMap)
+func fieldValueTypeMapperTS(typeName string, arrayDepth int, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	if arrayDepth > 0 {
+		elemType := fieldValueTypeMapperTS(typeName, 0, false, true, scalarMap)
 		if inMap && !isRequired {
 			elemType = "(" + elemType + " | null)"
 		}
-		return elemType + "[]"
+		return codegen.WrapArray(elemType, arrayDepth, func(elem string) string { return elem + "[]" })
 	}
 
 	var resolvedType string
