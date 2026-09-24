@@ -17,7 +17,10 @@
 #   4. the catalog generator wrote catalog.json for the Catalog service;
 #   5. the @shelf payload reached the IR (--emit-ir + jq);
 #   6. the catalog.config document was loaded and its generator ran;
-#   7. the manifest generator ran on every kind, core and acme;
+#   7. the manifest generator ran on every kind, core and acme, and the
+#      acmeInventory build-all hook merged the manifests from every service's
+#      output directories, again when every service is restored from the
+#      build cache;
 #   8. the API service compiles against the acme auth provider (go build);
 #   9. the core-only binary rejects the Catalog service with the registered
 #      kinds named, and rejects the naming file that selects apikey;
@@ -26,7 +29,13 @@
 #      result compiles (the regression the example found);
 #  11. `build --with-deps shop-api` builds shop-db (its authDb) then shop-api
 #      through the acme registry, runs the acme generator on both, and
-#      builds nothing outside that closure.
+#      builds nothing outside that closure;
+#  12. build-all wrote the dependency graph's [deps] copy byte for byte, every
+#      package in it names the service that produced it, and the committed
+#      copy is current;
+#  13. `fields` type-checks the label declarations with the loader's
+#      declaration program and prints each field's checked type; a bad
+#      declaration fails with a located diagnostic.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -100,6 +109,22 @@ done
 jq -e '.kind == "DB"' "$DIST/acme/manifest/shop-db/manifest.json" >/dev/null
 jq -e '.kind == "Catalog"' "$DIST/acme/manifest/shop-catalog/manifest.json" >/dev/null
 
+echo "==> build-all hook merged every manifest, also when every service comes from the cache"
+jq -e '[.services[].service] | sort == ["shop-api", "shop-catalog", "shop-config", "shop-db"]' "$DIST/acme/inventory.json" >/dev/null
+cp "$DIST/acme/inventory.json" "$OUT/inventory.json"
+# The first cached run builds and stores every service. Removing dist drops
+# the outputs and the stamps, so the second restores all four from the cache
+# and builds none; the hook must still run and see the same manifests.
+"$OUT/acme-schematic" build-all "$SCHEMAS/services" --cache --cache-root "$OUT/cache" >/dev/null
+rm -rf "$DIST"
+"$OUT/acme-schematic" build-all "$SCHEMAS/services" --cache --cache-root "$OUT/cache" | tee "$OUT/restored.log"
+test "$(grep -c '(restored from cache)' "$OUT/restored.log")" -eq 4
+if grep -q '(built' "$OUT/restored.log"; then
+  echo "ERROR: the all-restored build-all built a service" >&2
+  exit 1
+fi
+cmp "$OUT/inventory.json" "$DIST/acme/inventory.json"
+
 echo "==> core outputs carry the acme names"
 test -s "$DIST/sql/shop-db/create.sql"
 grep -q '^module example.com/acme/types/go/shop-db$' "$DIST/types/go/shop-db/go.mod"
@@ -144,5 +169,30 @@ test -s "$OUT/deps-dist/acme/manifest/shop-api/manifest.json"
 test -d "$OUT/deps-dist/orm/shop-db"
 test ! -e "$OUT/deps-dist/acme/manifest/shop-config"
 test ! -e "$OUT/deps-dist/acme/catalog/shop-catalog"
+
+echo "==> dependency graph: [deps] copy, producing services, committed copy current"
+cmp "$DIST/.deps.json" "$SCHEMAS/deps.json"
+jq -e '(.packages | length) > 0 and all(.packages[]; (.service // "") != "")' "$SCHEMAS/deps.json" >/dev/null
+jq -e '[.packages[] | select(.path == "orm/shop-db")][0].service == "shop-db"' "$SCHEMAS/deps.json" >/dev/null
+# Untracked shows as ??, stale as M: either way the committed copy is not
+# the graph this build produced.
+if [[ -n "$(git -C "$EXAMPLE_DIR" status --porcelain -- schemas/deps.json)" ]]; then
+  git -C "$EXAMPLE_DIR" diff -- schemas/deps.json | head -40 >&2
+  echo "ERROR: schemas/deps.json is not the committed copy of this build's graph; commit it" >&2
+  exit 1
+fi
+
+echo "==> fields: an extension command on the loader's declaration program"
+"$OUT/acme-schematic" fields "$EXAMPLE_DIR/labels/shelf-label.d.ts" ShelfLabel | tee "$OUT/fields.txt"
+grep -qx 'currency: Currency' "$OUT/fields.txt"
+grep -qx 'location: Location' "$OUT/fields.txt"
+grep -qx 'promo: string | undefined' "$OUT/fields.txt"
+mkdir -p "$OUT/bad-labels"
+printf 'export interface Bad { price: Money; }\n' >"$OUT/bad-labels/bad.d.ts"
+if "$OUT/acme-schematic" fields "$OUT/bad-labels/bad.d.ts" Bad >"$OUT/fields-bad.log" 2>&1; then
+  echo "ERROR: fields accepted a declaration with an unknown type" >&2
+  exit 1
+fi
+grep -q 'bad.d.ts:1:31: ' "$OUT/fields-bad.log"
 
 echo "acme smoke: ok"

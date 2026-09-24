@@ -1,9 +1,12 @@
 // Package loader is the public face of superschematic's frontend: it loads one
 // service directory (TypeScript or data form) into an ir.Schema through a
 // registry the caller assembled. Extension modules use it to test their
-// kinds and decorators against real fixtures; the engine keeps the
-// implementation in internal/loader. Every identifier here is an alias or a
-// forwarding function, so the two packages cannot drift.
+// kinds and decorators against real fixtures. NewDeclarationProgram gives an
+// extension or tool the TypeScript compiler the frontend uses, over
+// in-memory declaration files, to evaluate types the schema walker does not.
+// The engine keeps the implementation in internal/loader. Every identifier
+// here is an alias or a forwarding function, so the two packages cannot
+// drift.
 //
 // Design: docs/extension-model.md sections 6 and 10.
 package loader

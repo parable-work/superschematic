@@ -220,9 +220,12 @@ type InputHasher struct {
 // override cannot reuse entries built under different names. Its [cache]
 // inputs (repo-relative files generation reads from outside the schema
 // tree, such as a permissions file) are hashed by path in the order
-// declared.
+// declared. [deps] is left out: it says where build-all copies the
+// dependency graph after every service has built, not what a service
+// generates.
 func NewInputHasher(services []buildplan.Service, repoRoot string, names naming.Naming) *InputHasher {
 	names = names.OrDefault()
+	names.Deps = naming.DepsConfig{}
 	tool := ToolDigest()
 	var extra strings.Builder
 	for _, rel := range names.Cache.Inputs {

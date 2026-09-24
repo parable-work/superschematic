@@ -2,6 +2,7 @@ package ext_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -68,6 +69,63 @@ func TestExtensionRegistersEverySurface(t *testing.T) {
 	}
 	if names.AuthProvider != "apikey" {
 		t.Fatalf("naming selects %q, want apikey", names.AuthProvider)
+	}
+	var hooks []string
+	for _, hook := range reg.BuildAllHooks() {
+		hooks = append(hooks, hook.Name)
+	}
+	if strings.Join(hooks, ",") != "acmeInventory" {
+		t.Fatalf("BuildAllHooks = %v, want acmeInventory", hooks)
+	}
+}
+
+// TestInventoryHookReadsOutputDirs runs the hook the way build-all does after
+// every service came from the cache: no IR for any service, only their
+// output directories.
+func TestInventoryHookReadsOutputDirs(t *testing.T) {
+	reg, names := assemble(t)
+	hooks := reg.BuildAllHooks()
+	if len(hooks) != 1 {
+		t.Fatalf("BuildAllHooks = %v, want one", hooks)
+	}
+	out := t.TempDir()
+	var services []registry.BuildAllService
+	for _, m := range []ext.Manifest{
+		{Service: "shop-db", Kind: "DB", Region: "eu", Types: []string{"Product"}},
+		{Service: "shop-catalog", Kind: ext.Kind, Region: "eu", Types: []string{"Bundle", "Product"}},
+	} {
+		dir := ext.ManifestDir(out, m.Service)
+		writeJSON(t, filepath.Join(dir, "manifest.json"), m)
+		services = append(services, registry.BuildAllService{
+			Name:       m.Service,
+			Kind:       m.Kind,
+			OutputDirs: []string{filepath.Join(out, "types", "go", m.Service), dir},
+		})
+	}
+	bc := registry.BuildAllContext{
+		Services:   services,
+		SchemaFor:  func(string) (*ir.Schema, bool) { return nil, false },
+		OutputRoot: out,
+		Naming:     names,
+		Log:        new(bytes.Buffer),
+	}
+	if err := hooks[0].Run(context.Background(), bc); err != nil {
+		t.Fatalf("acmeInventory: %v", err)
+	}
+	var inventory ext.Inventory
+	readJSON(t, ext.InventoryPath(out), &inventory)
+	if len(inventory.Services) != 2 || inventory.Services[0].Service != "shop-db" || inventory.Services[1].Kind != ext.Kind {
+		t.Fatalf("inventory = %+v, want shop-db then shop-catalog", inventory)
+	}
+
+	// A service whose manifest is missing from its output fails the hook
+	// instead of dropping out of the inventory.
+	if err := os.Remove(filepath.Join(ext.ManifestDir(out, "shop-catalog"), "manifest.json")); err != nil {
+		t.Fatal(err)
+	}
+	err := hooks[0].Run(context.Background(), bc)
+	if err == nil || !strings.Contains(err.Error(), "shop-catalog") {
+		t.Fatalf("acmeInventory with a missing manifest: err = %v, want shop-catalog named", err)
 	}
 }
 
@@ -226,5 +284,51 @@ func readJSON(t *testing.T, path string, v any) {
 	}
 	if err := json.Unmarshal(b, v); err != nil {
 		t.Fatalf("decode %s: %v", path, err)
+	}
+}
+
+// TestDeclaredFieldsChecksLabelDeclarations runs the fields command's
+// program over the example's labels: a relative import between declaration
+// files resolves, and each field carries the compiler's type.
+func TestDeclaredFieldsChecksLabelDeclarations(t *testing.T) {
+	fields, err := ext.DeclaredFields("../labels", "shelf-label.d.ts", "ShelfLabel")
+	if err != nil {
+		t.Fatalf("DeclaredFields: %v", err)
+	}
+	var got []string
+	for _, field := range fields {
+		got = append(got, field.Name+": "+field.Type)
+	}
+	want := "sku: string, price: number, currency: Currency, location: Location, promo: string | undefined"
+	if strings.Join(got, ", ") != want {
+		t.Fatalf("fields = %s, want %s", strings.Join(got, ", "), want)
+	}
+	if _, err := ext.DeclaredFields("../labels", "shelf-label.d.ts", "Shelf"); err == nil || !strings.Contains(err.Error(), "declares no interface or type alias Shelf") {
+		t.Fatalf("unknown type: err = %v", err)
+	}
+}
+
+func TestDeclaredFieldsReportsLocatedDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "bad.d.ts"), []byte("export interface Bad { price: Money; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ext.DeclaredFields(dir, "bad.d.ts", "Bad")
+	if err == nil || !strings.HasPrefix(err.Error(), "bad.d.ts:1:31: ") || !strings.Contains(err.Error(), "Money") {
+		t.Fatalf("err = %v, want the unknown name located at bad.d.ts:1:31", err)
+	}
+}
+
+func writeJSON(t *testing.T, path string, v any) {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

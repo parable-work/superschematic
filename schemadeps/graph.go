@@ -1,9 +1,14 @@
 // Package schemadeps is the dependency graph of the generated packages:
 // build-all scans the manifests under the output root (package.json, go.mod,
-// pyproject.toml, Cargo.toml) for packages under the naming's scopes and
-// writes <dist>/.deps.json. Tooling that pins consumers to a closure of
-// generated packages reads it back with Read and Closure; an extension's
-// pin subcommand is one such consumer.
+// pyproject.toml, Cargo.toml) for packages under the naming's scopes, records
+// which service produced each one, and writes <dist>/.deps.json, plus a copy
+// at the path [deps] copy or --deps-copy names.
+//
+// Tooling that pins consumers to a closure of generated packages reads the
+// graph back with Read, ByLanguage and Closure, maps a package to its source
+// service with Package.Service, keeps a committed copy current with SyncCopy
+// and rewrites consumer files with WriteFileAtomic. An extension's pin
+// subcommand is one such consumer; the core ships none.
 package schemadeps
 
 import (
@@ -31,12 +36,18 @@ type Graph struct {
 
 // Package is one generated publishable artifact.
 type Package struct {
-	ID       string   `json:"id"`
-	Language string   `json:"language"`
-	Kind     string   `json:"kind"`
-	Name     string   `json:"name"`
-	Path     string   `json:"path"`
-	Deps     []string `json:"deps"`
+	ID       string `json:"id"`
+	Language string `json:"language"`
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
+	// Path is the package directory relative to the output root, in slash
+	// form ("types/go/orders").
+	Path string `json:"path"`
+	// Service is the name of the schema service whose build produced the
+	// package. build-all sets it from each service's output directories;
+	// it is empty in a graph collected without them.
+	Service string   `json:"service,omitempty"`
+	Deps    []string `json:"deps"`
 }
 
 // Key returns language/id for map lookups.

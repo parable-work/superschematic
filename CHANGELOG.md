@@ -56,6 +56,31 @@ of a generated artifact is always listed here with the bump it requires.
   service the target transitively depends on (declared dependencies plus
   `authDb`), dependencies first, with `build-all`'s discovery, ordering and
   schema catalog; siblings outside the closure are not built. Minor.
+- `build-all` records on every package of the dependency graph the service
+  whose build produced it (`service` in `.deps.json`, from each service's
+  output directories), and fails when a package directory under the output
+  root belongs to no discovered service, naming the directory. `--deps-copy`
+  or `[deps] copy` in `superschematic.toml` also writes the graph, byte for
+  byte, to a path outside the output root that a repository can commit.
+  `schemadeps.SyncCopy` checks or refreshes that copy from a command that
+  runs after the build, such as an extension's pin command. `[deps]` is not
+  part of the build cache key. Minor.
+- `registry.BuildAllContext.Services`: every discovered service in build
+  order as a `registry.BuildAllService` (name, kind, service directory and
+  the output directories the build cache stores and restores), so a
+  build-all hook can read a service this run restored or found up to date
+  and did not load. Minor.
+- `loader.NewDeclarationProgram`: a type-checked TypeScript program over
+  in-memory files, built with the compiler, bundled lib files and module
+  resolution the schema loader uses, for an extension or tool that
+  evaluates types the schema frontend does not walk. `DeclarationProgram`
+  has `Checker`, `SourceFile`, `Diagnostics` (optionally limited to named
+  files, located as `file:line:col` with the caller's file names), `ErrorAt`
+  and `Close`. The compiler options are fixed (strict, no `skipLibCheck`),
+  no `tsconfig.json` is read, and nothing is read from disk but the
+  compiler's lib files. `loader.SchemaError` and `loader.SchemaErrorList`
+  alias the located diagnostic types. The checker and AST types are the
+  pinned compiler's shim types. Minor.
 
 ### Changed
 
@@ -77,6 +102,15 @@ of a generated artifact is always listed here with the bump it requires.
   `--parallel` builds, even when the config does not also list it under
   `dependencies`. The generated API module imports the authDb's packages,
   so it is a build-order edge. Patch.
+- `build-all` runs the registered `BuildAllHook`s on a run where every
+  service was up to date or restored from the cache and nothing was built.
+  Before, such a run skipped them, so a hook's merged output depended on
+  which services happened to rebuild. Minor.
+- `schemadeps.CollectFromDist(distRoot, producers)` and
+  `schemadeps.EmitFromDist(distRoot, producers, copyPath)` take the map from
+  output directory to producing service and, for `EmitFromDist`, the copy
+  path. Callers of the old one-argument forms pass `nil` and `""` for the
+  old behavior. Minor.
 
 ### Fixed
 

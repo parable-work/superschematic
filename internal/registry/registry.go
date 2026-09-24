@@ -325,8 +325,9 @@ func (r *Registry) SelectedAuthProvider() (AuthProvider, error) {
 	return p, nil
 }
 
-// RegisterBuildAllHook adds a hook `superschematic build-all` runs after every
-// service has built. Hooks run in registration order. Like every other
+// RegisterBuildAllHook adds a hook `superschematic build-all` runs once every
+// service's output is in place, whether built, restored from the cache or
+// up to date. Hooks run in registration order. Like every other
 // Register*, it refuses registrations after Finalize: a hook added later
 // would run in some builds and not others depending on when the registering
 // code ran, and Finalize is the point after which the registry's contents

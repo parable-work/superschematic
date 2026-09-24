@@ -8,8 +8,8 @@ sidebar:
 An extension is a Go package that implements `registry.Extension` and,
 optionally, `cli.CommandProvider`. You pass it to `cli.New`. The core
 binary (`cmd/superschematic`) passes none. Everything project-specific
-registers here: kinds, decorators, documents, generators, auth providers
-and extra commands.
+registers here: kinds, decorators, documents, generators, build-all
+hooks, auth providers and extra commands.
 
 `examples/acme-schematic` is the acceptance test of this model. It adds one
 of each surface without editing a file under the core, and
@@ -61,8 +61,9 @@ naming file undecoded. The core does not know the keys; the extension
 validates them. A typo in the toml fails the build instead of being
 ignored.
 
-Import `registry`, `cli` and `ir` only. Nothing under `internal/` is
-reachable from outside the core module.
+Import the public packages only: `registry`, `cli` and `ir`, plus
+`loader` and `schemadeps` when a command needs them. Nothing under
+`internal/` is reachable from outside the core module.
 
 ## A kind
 
@@ -187,6 +188,34 @@ r.RegisterDocument(registry.DocumentSpec{
 The [deploy](/superschematic/guides/deploy/) extension is a document with
 no new kind.
 
+## A build-all hook
+
+A hook is for output that needs every service at once, such as values
+merged across services into one file. `build-all` runs the hooks in
+registration order once every service's output is in place, and names
+the hook in any error it returns:
+
+```go
+r.RegisterBuildAllHook(registry.BuildAllHook{
+    Name:      "acmeInventory",
+    Extension: Name,
+    Run: func(ctx context.Context, bc registry.BuildAllContext) error {
+        for _, service := range bc.Services {
+            // service.Name, .Kind, .Dir, .OutputDirs
+        }
+        return nil
+    },
+})
+```
+
+Hooks run on every `build-all`, including one where every service was
+up to date or restored from the cache and nothing was built. `SchemaFor`
+returns the IR only of services this process loaded, so a hook that
+must see every service reads its files from `Services[i].OutputDirs`:
+the directories the service's documents and generators write, which
+the cache stores and restores. acme's `acmeInventory` merges every
+service's manifest that way. `build` of one service runs no hooks.
+
 ## An auth provider
 
 The `api` generator renders middleware and routes through named template
@@ -218,13 +247,67 @@ extension that implements `cli.CommandProvider` contributes more:
 
 ```go
 func (Extension) Commands() []*cobra.Command {
-    return []*cobra.Command{describeCommand()}
+    return []*cobra.Command{describeCommand(), fieldsCommand()}
 }
 ```
 
 acme's `describe [<schemas-root>]` assembles the registry the way `build`
 does and prints every kind, document, output key and auth provider. Run it
 when a schema is rejected: it shows what the binary knows.
+
+A command that works on built output, such as one that pins consumers to
+generated packages, reads the dependency graph `build-all` wrote with the
+public `schemadeps` package: `Read` and `Closure` for a consumer's
+packages, `Package.Service` for the service that produced each one,
+`SyncCopy` to check or refresh the committed copy that `[deps] copy`
+names, and `WriteFileAtomic` for the files it rewrites.
+`Example_pinCommand` in `schemadeps/example_test.go` is such a command in
+miniature.
+
+## TypeScript declarations outside a schema
+
+The schema frontend walks `.schema.ts` files into the IR. A command or
+tool that needs other TypeScript types checked, such as a value contract
+declared in a `.d.ts` file, uses `loader.NewDeclarationProgram`: the same
+compiler, bundled lib files and module resolution, over files it passes
+in memory.
+
+```go
+program, err := loader.NewDeclarationProgram(loader.DeclarationInput{
+    Files: map[string]string{
+        "label.d.ts":                    source,
+        "node_modules/money/index.d.ts": moneyTypes, // import "money"
+    },
+    Roots: []string{"label.d.ts"},
+    Lib:   []string{"ES2023"}, // the default
+})
+if err != nil {
+    return err
+}
+defer program.Close()
+if diags := program.Diagnostics(); len(diags) > 0 {
+    return diags // file:line:col: message, names as in Files
+}
+checker := program.Checker()
+file := program.SourceFile("label.d.ts")
+```
+
+- Nothing is read from disk but the compiler's lib files. A relative
+  import resolves between the files, and a bare import resolves under
+  `node_modules/` in them.
+- The compiler options are fixed: strict, `skipLibCheck` off, no emit,
+  bundler module resolution, no automatic `@types`. No `tsconfig.json`
+  is read.
+- `Diagnostics(names...)` reports only the named files. Leave out a file
+  whose declarations you trust; they still resolve.
+- `Checker()` and `SourceFile()` return the pinned compiler's types
+  (`github.com/microsoft/typescript-go/shim/checker` and `.../ast`); import
+  the shim to name a node kind. `ErrorAt(node, ...)` makes a located error
+  in the same form as the diagnostics.
+- A program is for one goroutine. `Close` releases the checker.
+
+acme's `fields <file.d.ts> <type>` type-checks a declaration file and
+prints the checked type of each field (`ext/fields.go`).
 
 ## Run the example
 

@@ -49,6 +49,14 @@ schema_runtime_go = "../../runtime/schema/go"
 http_runtime_go = "../../runtime/http/go"
 http_runtime_rust = "../../runtime/http/rust"
 
+# build-all writes the dependency graph of the generated packages to
+# dist/.deps.json and, with this key, a copy at this path, relative to the
+# repository root as in [paths]. dist is gitignored; the copy is committed
+# so a reader sees which service produces which package without building.
+# The smoke fails when the committed copy is stale.
+[deps]
+copy = "schemas/deps.json"
+
 # The extension's own table. Nothing in the core reads it;
 # Registry.ExtensionConfig("acme") hands it to the extension, which decodes
 # the keys it knows and rejects the rest.

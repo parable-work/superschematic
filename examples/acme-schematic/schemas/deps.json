@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "packages": [
+    {
+      "id": "shop-api-api",
+      "language": "go",
+      "kind": "api",
+      "name": "example.com/acme/api/shop-api",
+      "path": "api/shop-api",
+      "service": "shop-api",
+      "deps": [
+        "shop-api-types",
+        "shop-db-orm"
+      ]
+    },
+    {
+      "id": "shop-api-types",
+      "language": "go",
+      "kind": "types",
+      "name": "example.com/acme/types/go/shop-api",
+      "path": "types/go/shop-api",
+      "service": "shop-api",
+      "deps": null
+    },
+    {
+      "id": "shop-config-api",
+      "language": "go",
+      "kind": "api",
+      "name": "example.com/acme/api/shop-config",
+      "path": "api/shop-config",
+      "service": "shop-config",
+      "deps": [
+        "shop-config-types"
+      ]
+    },
+    {
+      "id": "shop-db-orm",
+      "language": "go",
+      "kind": "orm",
+      "name": "example.com/acme/orm/shop-db",
+      "path": "orm/shop-db",
+      "service": "shop-db",
+      "deps": [
+        "shop-db-types"
+      ]
+    },
+    {
+      "id": "shop-db-types",
+      "language": "go",
+      "kind": "types",
+      "name": "example.com/acme/types/go/shop-db",
+      "path": "types/go/shop-db",
+      "service": "shop-db",
+      "deps": null
+    },
+    {
+      "id": "shop-config-types",
+      "language": "python",
+      "kind": "types",
+      "name": "acme_types_shop_config",
+      "path": "types/python/shop-config",
+      "service": "shop-config",
+      "deps": null
+    },
+    {
+      "id": "shop-api-sdk",
+      "language": "typescript",
+      "kind": "sdk",
+      "name": "@acme/shop-api-sdk",
+      "path": "sdk/typescript/shop-api",
+      "service": "shop-api",
+      "deps": [
+        "shop-api-types"
+      ]
+    },
+    {
+      "id": "shop-api-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-api-types",
+      "path": "types/typescript/shop-api",
+      "service": "shop-api",
+      "deps": null
+    },
+    {
+      "id": "shop-config-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-config-types",
+      "path": "types/typescript/shop-config",
+      "service": "shop-config",
+      "deps": null
+    },
+    {
+      "id": "shop-db-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-db-types",
+      "path": "types/typescript/shop-db",
+      "service": "shop-db",
+      "deps": null
+    }
+  ]
+}

@@ -60,8 +60,8 @@ func TestBuildAllCommand_SkipFormatSuppressesFormatterProfiles(t *testing.T) {
 }
 
 // TestBuildAllCommand_CacheSkipsUpToDateService also pins that the
-// .deps.json graph is a build output, not a hook: the all-cached run builds
-// nothing and fires no hook, and still rewrites the graph from dist.
+// .deps.json graph is written from dist: the all-cached run builds nothing
+// and still rewrites it.
 func TestBuildAllCommand_CacheSkipsUpToDateService(t *testing.T) {
 	servicesRoot := prepareJSONServicesRoot(t)
 	outDir := t.TempDir()
@@ -91,6 +91,77 @@ func TestBuildAllCommand_CacheSkipsUpToDateService(t *testing.T) {
 	secondDeps, err := os.ReadFile(depsPath)
 	require.NoError(t, err, "all-cached build-all did not rewrite %s", schemadeps.DepsFileName)
 	assert.Equal(t, string(firstDeps), string(secondDeps))
+}
+
+// TestBuildAllCommand_DepsCopyFlag: --deps-copy writes the graph a second
+// time, byte for byte, and every package in it names the service that
+// produced it.
+func TestBuildAllCommand_DepsCopyFlag(t *testing.T) {
+	servicesRoot := prepareJSONServicesRoot(t)
+	outDir := t.TempDir()
+	copyPath := filepath.Join(t.TempDir(), "graph", "deps.json")
+	out := new(bytes.Buffer)
+	root := New(Config{})
+	root.SetOut(out)
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--deps-copy", copyPath})
+
+	require.NoError(t, root.Execute())
+	assert.Contains(t, out.String(), "Wrote "+copyPath)
+	distBytes, err := os.ReadFile(schemadeps.DepsPath(outDir))
+	require.NoError(t, err)
+	copyBytes, err := os.ReadFile(copyPath)
+	require.NoError(t, err)
+	assert.Equal(t, string(distBytes), string(copyBytes))
+
+	graph, err := schemadeps.Read(copyPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, graph.Packages)
+	for _, pkg := range graph.Packages {
+		assert.Equal(t, "fixture-db", pkg.Service, "%s/%s at %s", pkg.Language, pkg.ID, pkg.Path)
+	}
+}
+
+// TestBuildAllCommand_DepsCopyFromNaming: [deps] copy is relative to the
+// repository root, the parent of the schemas root.
+func TestBuildAllCommand_DepsCopyFromNaming(t *testing.T) {
+	servicesRoot := prepareJSONServicesRoot(t)
+	schemasRoot := filepath.Dir(servicesRoot)
+	require.NoError(t, os.WriteFile(filepath.Join(schemasRoot, "superschematic.toml"), []byte("[deps]\ncopy = \"schemas/deps.json\"\n"), 0o644))
+	outDir := t.TempDir()
+	root := New(Config{})
+	root.SetOut(new(bytes.Buffer))
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir})
+
+	require.NoError(t, root.Execute())
+	distBytes, err := os.ReadFile(schemadeps.DepsPath(outDir))
+	require.NoError(t, err)
+	copyBytes, err := os.ReadFile(filepath.Join(schemasRoot, "deps.json"))
+	require.NoError(t, err, "[deps] copy was not written")
+	assert.Equal(t, string(distBytes), string(copyBytes))
+	assert.Contains(t, string(copyBytes), `"service": "fixture-db"`)
+}
+
+// TestBuildAllCommand_UnownedPackageFails: a package directory under the
+// output root that no discovered service writes, such as one left by a
+// removed service, fails the build and is named; the graph is not written.
+func TestBuildAllCommand_UnownedPackageFails(t *testing.T) {
+	servicesRoot := prepareJSONServicesRoot(t)
+	outDir := t.TempDir()
+	stale := filepath.Join(outDir, "types", "typescript", "removed")
+	require.NoError(t, os.MkdirAll(stale, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(stale, "package.json"), []byte(`{"name": "@schemas/removed-types"}`), 0o644))
+	root := New(Config{})
+	root.SetOut(new(bytes.Buffer))
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir})
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not produced by any schema service")
+	assert.Contains(t, err.Error(), "typescript/removed-types at types/typescript/removed")
+	assert.NoFileExists(t, schemadeps.DepsPath(outDir))
 }
 
 func TestBuildAllCommand_CacheRestoresEmptyStampedOutput(t *testing.T) {

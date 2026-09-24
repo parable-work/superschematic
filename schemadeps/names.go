@@ -7,11 +7,11 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 )
 
-// schemadeps scans manifests superschematic already wrote and pins consumer go.mod /
-// tsconfig files; it has no generator.Options to thread naming through, so
-// every name it matches comes from the process-wide value the CLI set
-// (naming.Active). The regexes are rebuilt per call because the active
-// naming can change between tests.
+// schemadeps scans manifests superschematic already wrote; it has no
+// generator.Options to thread naming through, so every name it matches
+// comes from the process-wide value the CLI set (naming.Active). The
+// regexes are rebuilt per call because the active naming can change between
+// tests.
 
 func goModulePrefix() string {
 	return naming.Active().GoModulePrefix()

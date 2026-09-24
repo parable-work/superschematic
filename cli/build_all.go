@@ -36,6 +36,7 @@ type buildAllFlags struct {
 	isolatedTS bool
 	skipFormat bool
 	namingPath string
+	depsCopy   string
 }
 
 func newBuildAllCmd(a *app) *cobra.Command {
@@ -56,6 +57,7 @@ func newBuildAllCmd(a *app) *cobra.Command {
 	cmd.Flags().BoolVar(&flags.isolatedTS, "isolated-ts-programs", false, "use one TypeScript compiler program per schema service instead of the build-all shared program")
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <services-root>/../superschematic.toml)")
+	cmd.Flags().StringVar(&flags.depsCopy, "deps-copy", "", "also write the dependency graph to this path (default: [deps] copy in the naming file, relative to the repository root)")
 	return cmd
 }
 
@@ -116,6 +118,12 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 	reg, err := a.resolveRegistry(activeNaming)
 	if err != nil {
 		return err
+	}
+	depsCopy := activeNaming.DepsCopyPath(repoRoot)
+	if flags.depsCopy != "" {
+		if depsCopy, err = filepath.Abs(flags.depsCopy); err != nil {
+			return fmt.Errorf("resolving --deps-copy: %w", err)
+		}
 	}
 
 	services, err := buildplan.DiscoverWith(servicesRoot, outputRoot, reg)
@@ -203,15 +211,36 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 			}
 		}
 	}
-	if len(remaining) == 0 {
+	schemaCache := newSharedSchemaCache()
+	// finish runs once every service's output is in place, whether this run
+	// built it, restored it from the cache or found it up to date. The graph
+	// and the hooks read the output root, so they run on a build-all that
+	// built nothing too; a hook that skipped then would leave its merged
+	// output a function of which services happened to rebuild.
+	finish := func() error {
 		if flags.profile {
 			profileTotals.print(cmd.OutOrStdout())
 		}
-		if err := emitSchemaDeps(cmd, outputRoot); err != nil {
+		if err := emitSchemaDeps(cmd, outputRoot, depsCopy, services); err != nil {
+			return err
+		}
+		hookContext := registry.BuildAllContext{
+			ServiceNames: names,
+			Services:     hookServices(services),
+			SchemaFor:    schemaCache.get,
+			RepoRoot:     repoRoot,
+			OutputRoot:   outputRoot,
+			Naming:       activeNaming,
+			Log:          cmd.OutOrStdout(),
+		}
+		if err := runBuildAllHooks(cmd.Context(), reg.BuildAllHooks(), hookContext); err != nil {
 			return err
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nAll %d schema services built successfully\n", len(services))
 		return nil
+	}
+	if len(remaining) == 0 {
+		return finish()
 	}
 
 	taskByName := make(map[string]buildAllTask, len(remaining))
@@ -219,7 +248,6 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		taskByName[task.service.Name] = task
 	}
 
-	schemaCache := newSharedSchemaCache()
 	serviceByName := make(map[string]buildplan.Service, len(services))
 	var tsProgramCache *tsreader.ProgramCache
 	for _, service := range services {
@@ -287,27 +315,23 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		}
 	}
 
-	if flags.profile {
-		profileTotals.print(cmd.OutOrStdout())
+	return finish()
+}
+
+// hookServices is the per-service view a BuildAllHook gets: every
+// discovered service in build order with the output directories the cache
+// stores and restores, so a hook can read a service this run did not load.
+func hookServices(services []buildplan.Service) []registry.BuildAllService {
+	out := make([]registry.BuildAllService, 0, len(services))
+	for _, service := range services {
+		out = append(out, registry.BuildAllService{
+			Name:       service.Name,
+			Kind:       string(service.Config.Kind),
+			Dir:        service.Dir,
+			OutputDirs: append([]string(nil), service.OutputDirs...),
+		})
 	}
-	if err := emitSchemaDeps(cmd, outputRoot); err != nil {
-		return err
-	}
-	// Every service has built, so hooks that need all of them at once (the
-	// chart's merged values) run from here.
-	hookContext := registry.BuildAllContext{
-		ServiceNames: names,
-		SchemaFor:    schemaCache.get,
-		RepoRoot:     repoRoot,
-		OutputRoot:   outputRoot,
-		Naming:       activeNaming,
-		Log:          cmd.OutOrStdout(),
-	}
-	if err := runBuildAllHooks(cmd.Context(), reg.BuildAllHooks(), hookContext); err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nAll %d schema services built successfully\n", len(services))
-	return nil
+	return out
 }
 
 // runBuildAllHooks runs the hooks in registration order and stops at the
@@ -322,11 +346,29 @@ func runBuildAllHooks(ctx context.Context, hooks []registry.BuildAllHook, bc reg
 	return nil
 }
 
-func emitSchemaDeps(cmd *cobra.Command, outputRoot string) error {
-	if err := schemadeps.EmitFromDist(outputRoot); err != nil {
+// emitSchemaDeps writes the package graph to <out>/.deps.json and, when
+// copyPath is set, to that copy. Every discovered service's expected output
+// directories say which service produced which package: that is each
+// package's service field, and a package under no service's directory fails
+// the build rather than entering the graph unowned.
+func emitSchemaDeps(cmd *cobra.Command, outputRoot, copyPath string, services []buildplan.Service) error {
+	producers := make(map[string]string)
+	for _, service := range services {
+		for _, dir := range service.OutputDirs {
+			rel, err := filepath.Rel(outputRoot, dir)
+			if err != nil {
+				return err
+			}
+			producers[filepath.ToSlash(rel)] = service.Name
+		}
+	}
+	if err := schemadeps.EmitFromDist(outputRoot, producers, copyPath); err != nil {
 		return fmt.Errorf("emitting %s: %w", schemadeps.DepsFileName, err)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Wrote %s\n", schemadeps.DepsPath(outputRoot))
+	if copyPath != "" {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Wrote %s\n", copyPath)
+	}
 	return nil
 }
 

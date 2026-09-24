@@ -42,7 +42,7 @@ on (declared `dependencies` plus `authDb`), dependencies first. The
 closure is resolved from the sibling services under the target's parent
 directory with the discovery, ordering and schema catalog `build-all`
 uses; siblings outside the closure are not built. It writes no
-`schema.deps` and runs no `BuildAllHook`s, since both describe the whole
+`.deps.json` and runs no `BuildAllHook`s, since both describe the whole
 services root. It cannot be combined with `--emit-ir`.
 
 ```
@@ -64,9 +64,19 @@ superschematic build --with-deps ./schemas/services/shop-api
 
 Discover every schema service under `<services-root>` and build them in
 one process, in dependency order. A service's `authDb` counts as a
-dependency for ordering. Writes `schema.deps` under the output
-root when finished. After every service has built, registered
-`BuildAllHook`s run (a chart merge, for example).
+dependency for ordering. Once every service's output is in place,
+whether this run built it, restored it from the cache or found it up to
+date, registered `BuildAllHook`s run (a chart merge, for example). They
+run on a `build-all` that built nothing too.
+
+When finished it writes the dependency graph of the generated packages
+to `<output-root>/.deps.json`, and the same bytes to `--deps-copy` or
+`[deps] copy` when one is set. The output root is usually ignored by
+version control; the copy can be committed so a tool reads the graph
+without building. Each package in the graph carries `service`, the
+service whose build produced it. A package directory under the output
+root that no discovered service writes, such as one a removed service
+left behind, fails the build with its path named; delete it and rebuild.
 
 ```
 superschematic build-all ./schemas/services
@@ -83,6 +93,7 @@ superschematic build-all ./schemas/services --parallel --cache
 | `--isolated-ts-programs` | false | one TypeScript compiler program per service instead of the shared program |
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<services-root>/../superschematic.toml` | naming config file |
+| `--deps-copy` | `[deps] copy`, else none | also write the dependency graph to this path |
 
 Without `--cache`, `build-all` removes `<output-root>/.build-stamps` at
 the start. With `--cache`, a service whose input hash matches a stamp
