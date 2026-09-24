@@ -133,21 +133,21 @@ schema language name and package author from `Naming`.
 
 ## D8. What a downstream naming file can and cannot reproduce
 
-Recorded by the R15 review of the bootstrap import. A distribution that
-consumed the source tree's generator wants its generated output to stay
-byte-identical after it switches to this core plus its own extension. The
-review rendered three DB/General services from that tree and the API fixture
-with both binaries under one extended naming file, normalized the header
+Recorded when the core was imported. A distribution that consumed the
+source tree's generator wants its generated output to stay byte-identical
+after it switches to this core plus its own extension. The import check
+rendered three DB/General services from that tree and the API fixture with
+both binaries under one extended naming file, normalized the header
 timestamps, and diffed. Every difference falls into one of three buckets.
 
 Bucket (a): reproduced by the naming file. Bucket (b): reproduced after a
-code change made during the review. Bucket (c): unconditional; the consumer
+code change made during the import. Bucket (c): unconditional; the consumer
 accepts the change and updates its readers.
 
 | # | Change | Bucket | Key or reason |
 |---|--------|--------|---------------|
 | 1 | Generated-header tool name | (c) | A literal in 38 templates and 61 generator files; `cli.Config.Name` only names the binary in usage text. The header says which program wrote the file, and that is this one. Threading a display name through every template so a fork can sign its output with another name is config in the wrong place. |
-| 2 | `x-psgen` -> `x-superschematic` in `values-schema.json` | (c) | A JSON struct tag (`envgen/values_schema.go`); the vendor-extension key names the tool that owns the schema. Readers of the old key update. |
+| 2 | The vendor-extension key in `values-schema.json` is `x-superschematic` | (c) | A JSON struct tag (`envgen/values_schema.go`); the vendor-extension key names the tool that owns the schema. Readers of the source tree's key update. |
 | 3 | Legacy alias blocks removed (`type UUID = scalars.UUID` and the Go `scalars.go` alias table; TS `Permission`) | (c) | The blocks re-exported one scalar library's whole symbol table under generated package names. The generated code never used them; downstream callers that wrote `dbtypes.UUID` migrate to the scalar package directly. A `[legacy_aliases]` table would keep a per-distribution list of symbols alive in the core. |
 | 4 | `isTenantScoped` -> `isScoped` (tools index, MCP binding), Rust SDK `tenant_scoped` -> `with_header`, `IsScopedEndpoint` in templates | (c) | The identifiers are the core's own vocabulary for a hoisted path parameter; tenancy is what the extraction removed. The emitted scope parameter name itself (`tenantId`) still comes from the auth provider, so the SDK method signatures are unchanged when the provider sets it. |
 | 5 | Python runtime import, Rust http runtime crate | (a) | `http_runtime_rust_crate` plus `[paths] http_runtime_rust` render the crate name and `use` ident; the Python schema runtime is never imported from generated packages, so its rename does not reach dist. |
@@ -164,7 +164,7 @@ decision-record ids removed from `create.tmpl`, `response.tmpl`,
 package" in the SDK readme. The `scripts/scrub-check.sh` gate is what keeps
 those out; the consumer regenerates once and reviews the comment diff.
 
-Key names the review added to the source tree's naming file to reach this
+Key names the import added to the source tree's naming file to reach this
 result: `schema_language`, `package_author`, `meta_schema_url_prefix`,
 `[paths] scalar_go / scalar_typescript / scalar_rust / schema_ir /
 schema_runtime_go / http_runtime_go / http_runtime_rust / ptr`, and a
@@ -180,14 +180,14 @@ internal link or a missing sidebar page fails the pull request instead of
 waiting for the first tag. The release job still deploys to GitHub Pages
 once the repository is public; the CI job does not deploy.
 
-## D10. Mechanisms in the core, a distribution's policy in its extension
+## D10. Mechanisms in the core; a distribution's names in its naming file, its policy in its extension
 
 Three features are expected to be ported from a distribution that built
 them on the source tree: SQL projection views, MCP tool manifests generated
 from operations, and documentation decorators on operations and fields.
 All three are now in the core; the status paragraph at the end of this
-entry records how each policy is registered. This entry is the rule each
-port follows.
+entry records how each distribution-specific piece is expressed. This
+entry is the rule each port follows.
 
 The generic mechanism goes into the core:
 
@@ -200,41 +200,55 @@ The generic mechanism goes into the core:
   write typed IR fields, which OpenAPI, the SDKs and the tool manifests
   read.
 
-A distribution's policy on top of a mechanism is registered by its
-extension, never built into the core:
+What a distribution adds on top of a mechanism is one of two things, and
+each has its own place.
+
+A name belongs in the naming file. A name is a string the core writes into
+generated output where a distribution needs its own: it has no rule to run
+and no schema to inspect, so it is a naming-file key with the core's value
+as the default, next to the package, module and meta-schema names the
+naming file already carries (D7, D8). The ports met two:
+
+- the prefix of metadata keys: `metadata_key_prefix` (default
+  `superschematic.`) prefixes every key of the projection Arrow schemas'
+  metadata;
+- the prefix of vendor-extension keys in emitted documents (the core's own
+  is `x-superschematic`, D8). It has no naming key yet. Until it does, a
+  distribution renames the core's vendor keys with an OpenAPI or tool hook,
+  as acme does (`docs/extension-model.md`, section 11).
+
+A rule belongs in the extension. A rule inspects schemas or edits output
+by the distribution's policy, and the core gets no switch or literal for
+it:
 
 - row predicates every view must carry;
-- prefixes required on metadata keys;
-- prefixes of vendor-extension keys in emitted documents (the core's own
-  key is `x-superschematic`, D8);
 - which schemas must declare tools;
 - validation of icons against an icon set.
 
-The core gets no switch, naming-file key or literal for any of these. A
-policy's settings go in the extension's `[extension.<name>]` table. The
+A rule's settings go in the extension's `[extension.<name>]` table. The
 existing seams carry most of it: `KindSpec.Verify` on a kind the extension
 registers, a decorator from the extension's own package that writes its
 `extensions.<name>` slot, and a generator appended to the core kinds.
 Where no seam reaches, the port adds a generic registry seam rather than a
-policy option. A rule over core-kind schemas is the known case: an
-extension cannot attach `Verify` to a kind it did not register
-(`docs/extension-model.md`, section 11).
+policy option.
+
+D11 is the one name registered with a policy instead of set in the naming
+file: the MCP invocation policy key travels with its values and default,
+because the loader needs all three to accept and fill in a tool's policy.
 
 A port is done when the mechanism works and is tested with no extension
-linked, and the policy that shipped with the source implementation is
-expressed as registrations in an extension, with a test that adds one
-policy without a core edit.
+linked, and what shipped with the source implementation is expressed as
+naming keys and extension registrations, with a test that adds one rule
+without a core edit.
 
 Status: the ports added three generic seams, `RegisterCheck` for a rule
 over core-kind schemas and `RegisterOpenAPIHook` and `RegisterToolHook` for
-vendor keys in emitted documents (`docs/extension-model.md`, sections 3.12
-to 3.14). The acme example registers a policy over each mechanism:
-`acmeProjectionScope` requires a scoped row rule on every view,
-`acmeToolsClassified` requires `@mcp` on its API, `acmeIcons` checks icons
-against its set, and `acmeDocsKey` and `acmeTools` write its own vendor
-keys. One item departs from the rule above: the prefix of the metadata keys
-in the projection Arrow schemas is the naming key `metadata_key_prefix`
-(default `superschematic.`), not an extension registration.
+edits to emitted documents (`docs/extension-model.md`, sections 3.12 to
+3.14), and one naming key, `metadata_key_prefix`. The acme example
+expresses each piece: `acmeProjectionScope` requires a scoped row rule on
+every view, `acmeToolsClassified` requires `@mcp` on its API, `acmeIcons`
+checks icons against its set, `acmeDocsKey` and `acmeTools` write its own
+vendor keys, and its naming file sets `metadata_key_prefix`.
 
 ## D11. The MCP invocation policy is core, with a key an extension renames
 

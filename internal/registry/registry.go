@@ -140,8 +140,9 @@ func (r *Registry) noteExtension(name string) {
 
 // Finalize checks cross-references once everything is registered: every
 // KindSpec.Pipeline entry names a registered generator that accepts the kind,
-// every OutputKey is unique, and Naming.AuthProvider names a registered
-// auth provider. Registration after Finalize is an error.
+// every Kinds list of a generator, decorator, document or check names
+// registered kinds, every OutputKey is unique, and Naming.AuthProvider names
+// a registered auth provider. Registration after Finalize is an error.
 func (r *Registry) Finalize() error {
 	if r.failed != nil {
 		return r.failed
@@ -160,6 +161,9 @@ func (r *Registry) Finalize() error {
 			}
 		}
 	}
+	if err := r.checkKindLists(); err != nil {
+		return err
+	}
 	owners := map[string]string{}
 	for _, name := range r.generatorOrder {
 		key := r.generators[name].OutputKey
@@ -172,6 +176,41 @@ func (r *Registry) Finalize() error {
 		owners[key] = name
 	}
 	r.finalized = true
+	return nil
+}
+
+// checkKindLists rejects a spec whose Kinds names a kind no one registered.
+// Such a spec would be inert for that name instead of failing assembly, and
+// a misspelt kind would switch a decorator or check off without a word.
+func (r *Registry) checkKindLists() error {
+	unknown := func(what string, kinds []string) error {
+		for _, kind := range kinds {
+			if _, ok := r.kinds[kind]; !ok {
+				return fmt.Errorf("registry: %s lists kind %q, which is not registered (registered kinds: %v)", what, kind, r.Kinds())
+			}
+		}
+		return nil
+	}
+	for _, name := range r.generatorOrder {
+		if err := unknown(fmt.Sprintf("generator %q", name), r.generators[name].Kinds); err != nil {
+			return err
+		}
+	}
+	for _, spec := range r.Decorators() {
+		if err := unknown("decorator @"+spec.Name, spec.Kinds); err != nil {
+			return err
+		}
+	}
+	for _, spec := range r.Documents() {
+		if err := unknown(fmt.Sprintf("document %q", spec.Name), spec.Kinds); err != nil {
+			return err
+		}
+	}
+	for _, spec := range r.checks {
+		if err := unknown(fmt.Sprintf("check %q", spec.Name), spec.Kinds); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -234,20 +273,24 @@ func (r *Registry) RegisterDecorator(spec DecoratorSpec) error {
 }
 
 func compileArgs(spec DecoratorSpec) (*validator.Schema, error) {
-	resource, err := validator.UnmarshalJSON(bytes.NewReader(spec.Args))
-	if err != nil {
-		return nil, fmt.Errorf("registry: decorator @%s Args: %w", spec.Name, err)
-	}
-	compiler := validator.NewCompiler()
-	url := fmt.Sprintf("superschematic://decorators/%s/%d.json", spec.Name, spec.Target)
-	if err := compiler.AddResource(url, resource); err != nil {
-		return nil, fmt.Errorf("registry: decorator @%s Args: %w", spec.Name, err)
-	}
-	compiled, err := compiler.Compile(url)
+	compiled, err := compileSchema(spec.Args, fmt.Sprintf("superschematic://decorators/%s/%d.json", spec.Name, spec.Target))
 	if err != nil {
 		return nil, fmt.Errorf("registry: decorator @%s Args: %w", spec.Name, err)
 	}
 	return compiled, nil
+}
+
+// compileSchema compiles one JSON Schema document registered under url.
+func compileSchema(schema []byte, url string) (*validator.Schema, error) {
+	resource, err := validator.UnmarshalJSON(bytes.NewReader(schema))
+	if err != nil {
+		return nil, err
+	}
+	compiler := validator.NewCompiler()
+	if err := compiler.AddResource(url, resource); err != nil {
+		return nil, err
+	}
+	return compiler.Compile(url)
 }
 
 // RegisterDocument adds a sidecar document. Duplicate names are an error.
@@ -280,6 +323,16 @@ func (r *Registry) RegisterGenerator(spec GeneratorSpec) error {
 	}
 	if _, dup := r.generators[spec.Name]; dup {
 		return fmt.Errorf("registry: generator %q is already registered", spec.Name)
+	}
+	if len(spec.OutputSchema) > 0 {
+		if spec.OutputKey == "" {
+			return fmt.Errorf("registry: generator %q has an OutputSchema but no OutputKey", spec.Name)
+		}
+		compiled, err := compileSchema(spec.OutputSchema, "superschematic://outputs/"+spec.OutputKey+".json")
+		if err != nil {
+			return fmt.Errorf("registry: generator %q OutputSchema: %w", spec.Name, err)
+		}
+		spec.compiledOutput = compiled
 	}
 	r.generators[spec.Name] = spec
 	r.generatorOrder = append(r.generatorOrder, spec.Name)

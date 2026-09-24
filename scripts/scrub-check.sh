@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # The extraction scrub gate. Fails when the tree mentions the company that
 # maintains this repository anywhere but the license, the GitHub org in
-# module paths and import specifiers, and the maintainer lines in the
-# contributor docs. Everything else is a leftover from the source tree.
+# module paths, import specifiers and publisher registrations, and the
+# maintainer lines in the contributor docs; when it carries an identifier
+# or id shape from the source tree's planning; or when core source uses
+# tenancy vocabulary. Everything else is a leftover from the source tree.
 #
 # The search runs with ripgrep when it is installed and with git grep
 # otherwise; the CI runners do not ship ripgrep. SCRUB_ENGINE=rg or
 # SCRUB_ENGINE=git forces one. Both engines search the same files: tracked
-# files and untracked files .gitignore does not exclude, minus hidden paths
-# and binary files (ripgrep's defaults), minus the globs each check lists.
-# A search that errors fails the gate; it never reads as clean.
+# files and untracked files .gitignore does not exclude, hidden paths such
+# as .github/ included, minus .git, binary files and the globs each check
+# lists. A search that errors fails the gate; it never reads as clean.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -66,15 +68,16 @@ scan() {
 
   local out status=0 glob root
   if [ "$engine" = rg ]; then
-    local args=()
+    # ripgrep skips hidden paths unless told otherwise; git grep never
+    # lists .git.
+    local args=(--hidden --glob '!.git')
     for glob in "$@"; do
       args+=(--glob "!$glob")
     done
     out="$(rg "${flags[@]}" "${args[@]}" -e "$pattern" "${roots[@]}")" || status=$?
   else
     # git grep takes pathspecs, not globs: each glob becomes an exclude for
-    # the matching path and for everything under it, and two more excludes
-    # drop hidden paths, which ripgrep skips by default.
+    # the matching path and for everything under it.
     local specs=()
     for root in "${roots[@]}"; do
       if [ "$root" != . ]; then
@@ -87,7 +90,6 @@ scan() {
         *) specs+=(":(exclude,glob)**/$glob" ":(exclude,glob)**/$glob/**") ;;
       esac
     done
-    specs+=(":(exclude,glob)**/.*" ":(exclude,glob)**/.*/**")
     out="$(git --no-pager grep --untracked -I -E --no-color "${flags[@]}" -e "$pattern" -- "${specs[@]}")" || status=$?
     if [ "$status" -eq 0 ] && [ "${roots[*]}" = . ]; then
       out="$(printf '%s\n' "$out" | sed 's|^|./|')"
@@ -115,6 +117,7 @@ hits="$(scan -i 'parable' . -- third_party node_modules target '*.lock' LICENSE 
   | drop 'github.com/parable-work/|parable-work/superschematic|parable-work/superscalar|parable-work.github.io' \
   | drop '^\./(README|CONTRIBUTING|SECURITY|CODE_OF_CONDUCT)\.md:[0-9]+:.*(Parable Work|maintained by Parable|Parable maintains)' \
   | drop 'authors = \["Parable Work, Inc\."\]' \
+  | drop '^\./\.github/workflows/[^:]+:[0-9]+:.*(user|owner): parable-work, repository( name)?: superschematic' \
   | drop 'comparable|incomparable|separable|inseparable|reparable')"
 
 if [ -n "$hits" ]; then
@@ -131,6 +134,48 @@ ids="$(scan 'PARABLE-[0-9]|PAR-[0-9]|EDR-[0-9]|PLG-[0-9]|platform-schemas|parabl
 if [ -n "$ids" ]; then
   echo "scrub: monorepo identifiers:" >&2
   echo "$ids" >&2
+  exit 1
+fi
+
+# Id shapes from the source tree's planning: wave and task ids (W5, W11a),
+# review ids ("R15 review") and phase numbers ("Phase 1"; build-all's
+# "Phase 1/3" progress line is not one), and the source tree's generator
+# name in any case (a placeholder token, a vendor key). Lockfiles and go.sum
+# are skipped: a base64 hash can spell a wave id by chance.
+hashes=(third_party node_modules target '*.lock' package-lock.json go.sum bin scripts/scrub-check.sh)
+shapes="$(scan '(^|[^A-Za-z0-9_])(W[0-9]+[a-z]?([^A-Za-z0-9_]|$)|R[0-9]+ review|Phase [0-9]+([^0-9/]|$))' \
+  . -- "${hashes[@]}")"
+generator="$(scan -i 'psgen' . -- "${hashes[@]}")"
+
+if [ -n "$shapes$generator" ]; then
+  echo "scrub: source-tree id shapes:" >&2
+  printf '%s\n' "$shapes" "$generator" | drop '^$' >&2
+  exit 1
+fi
+
+# Per-field transform* directives are a distribution's, not the core's; a
+# distribution keeps its field directives in the IR Extensions slot. The
+# core IR still carries ten of them in the files below. This allowlist
+# exists only until they are removed from the core IR; the change that
+# removes them deletes it, and any transform* identifier then fails here.
+core_ir_transform_allowlist_files='^\./(ir/types\.go|ir/typescript/index\.d\.ts|internal/loader/schemafile/testdata/schema-file\.golden\.json|runtime/schema/typescript/src/runtime/(ir/reader|json/reader|json/writer)\.ts):[0-9]+:'
+core_ir_transform_allowlist_names='^transform(DedupKey|Ordering|FingerprintInput|PartitionDate|Structural|PersonEmail|PersonName|AccountId|ExternalUserId|ForeignKey)$'
+transform_lines="$(scan 'transform[A-Z]' . -- "${hashes[@]}")"
+transforms=""
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  if [[ $line =~ $core_ir_transform_allowlist_files ]]; then
+    unlisted="$(printf '%s\n' "$line" | grep -oE 'transform[A-Z][A-Za-z0-9_]*' | drop "$core_ir_transform_allowlist_names")"
+    if [ -z "$unlisted" ]; then
+      continue
+    fi
+  fi
+  transforms+="$line"$'\n'
+done <<<"$transform_lines"
+
+if [ -n "$transforms" ]; then
+  echo "scrub: transform* identifiers outside the core IR allowlist:" >&2
+  printf '%s' "$transforms" >&2
   exit 1
 fi
 

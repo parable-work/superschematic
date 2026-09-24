@@ -303,8 +303,9 @@ func ExtractFieldInfo(field *ir.FieldDef, scalarMap ScalarMap, schema *ir.Schema
 }
 
 // AddVersionFields appends superschematic's readable _version metadata field to
-// versioned DB table type models. Generators opt in explicitly so Phase 2 can
-// scope the new type surface to the languages it supports.
+// versioned DB table type models. Generators opt in explicitly, so a language
+// gets the field only once its generator supports it (Go and TypeScript
+// today).
 func AddVersionFields(types []TypeInfo, config ExtractionConfig) []TypeInfo {
 	for i := range types {
 		if types[i].Role != ir.RoleDBTable || !types[i].Versioned {

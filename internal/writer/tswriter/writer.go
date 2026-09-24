@@ -182,6 +182,9 @@ func (e *emitter) emitDocument() {
 	if e.doc.Comment != "" || e.doc.Description != "" {
 		e.failf("schema-level comments and descriptions have no TypeScript form; they are document metadata in JSON and YAML only")
 	}
+	if len(e.doc.Extensions) > 0 || len(e.doc.Documents) > 0 {
+		e.failf("schema-level extension data and documents have no TypeScript form; they are document metadata in JSON and YAML only")
+	}
 	for _, name := range sortedKeys(e.doc.Unions) {
 		e.failf("union %s: unions have no TypeScript authoring form", name)
 	}

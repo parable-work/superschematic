@@ -194,3 +194,18 @@ func mapKeys(m map[string]any) []string {
 	}
 	return keys
 }
+
+// TestTypeDefFlagKeyOrder pins where the type-level flags sit in the IR JSON:
+// strictJSON follows jsonField, and denyUnknownFields follows envVars. A
+// persisted schema compared byte for byte depends on the order.
+func TestTypeDefFlagKeyOrder(t *testing.T) {
+	td := TypeDef{Name: "Payload", Role: RoleEmbeddedStruct, JsonField: true, StrictJSON: true, Versioned: true, EnvVars: true, DenyUnknownFields: true}
+	got, err := json.Marshal(td)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"name":"Payload","role":"EmbeddedStruct","jsonField":true,"strictJSON":true,"versioned":true,"envVars":true,"denyUnknownFields":true}`
+	if string(got) != want {
+		t.Errorf("TypeDef JSON =\n%s\nwant\n%s", got, want)
+	}
+}

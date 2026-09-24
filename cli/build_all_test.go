@@ -93,6 +93,47 @@ func TestBuildAllCommand_CacheSkipsUpToDateService(t *testing.T) {
 	assert.Equal(t, string(firstDeps), string(secondDeps))
 }
 
+// TestBuildAllCommand_CachedRunWritesTypeScriptWorkspaceRoot: the manifest
+// that makes the generated TypeScript types packages one Bun workspace
+// belongs to no single service, so a restore from the cache does not bring
+// it back. A run that builds nothing writes it anyway.
+func TestBuildAllCommand_CachedRunWritesTypeScriptWorkspaceRoot(t *testing.T) {
+	servicesRoot := prepareJSONServicesRoot(t)
+	outDir := t.TempDir()
+	cacheRoot := t.TempDir()
+	typesRoot := filepath.Join(outDir, "types", "typescript")
+	manifest := filepath.Join(typesRoot, "package.json")
+	run := func() string {
+		t.Helper()
+		out := new(bytes.Buffer)
+		root := New(Config{})
+		root.SetOut(out)
+		root.SetErr(new(bytes.Buffer))
+		root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir, "--cache", "--cache-root", cacheRoot})
+		require.NoError(t, root.Execute())
+		return out.String()
+	}
+
+	run()
+	want, err := os.ReadFile(manifest)
+	require.NoError(t, err, "the first build-all wrote no workspace manifest")
+
+	require.NoError(t, os.Remove(manifest))
+	out := run()
+	assert.Contains(t, out, "OK: fixture-db (up to date")
+	got, err := os.ReadFile(manifest)
+	require.NoError(t, err, "an up-to-date build-all did not write the workspace manifest")
+	assert.Equal(t, string(want), string(got))
+
+	require.NoError(t, os.RemoveAll(filepath.Join(outDir, "types")))
+	out = run()
+	assert.Contains(t, out, "OK: fixture-db (restored from cache")
+	assert.NotContains(t, out, "(built")
+	got, err = os.ReadFile(manifest)
+	require.NoError(t, err, "a build-all that restored every service did not write the workspace manifest")
+	assert.Equal(t, string(want), string(got))
+}
+
 // TestBuildAllCommand_DepsCopyFlag: --deps-copy writes the graph a second
 // time, byte for byte, and every package in it names the service that
 // produced it.

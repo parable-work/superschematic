@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	validator "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // Target languages accepted in the outputs block (the TargetLanguage enum in
@@ -89,8 +91,8 @@ type Outputs struct {
 }
 
 // ParseOutputs decodes the raw outputs block from schema.config into its
-// typed form, rejecting keys no registered generator claims and unknown
-// target languages.
+// typed form, rejecting keys no registered generator claims, sections that
+// fail their generator's OutputSchema, and unknown target languages.
 func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 	if raw == nil {
 		return &Outputs{}, nil
@@ -109,10 +111,13 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 	}
 
 	outputs := &Outputs{}
-	if err := json.Unmarshal(data, outputs); err != nil {
+	if err := json.Unmarshal(data, &outputs.Raw); err != nil {
 		return nil, fmt.Errorf("decoding outputs block: %w", err)
 	}
-	if err := json.Unmarshal(data, &outputs.Raw); err != nil {
+	if err := reg.validateOutputSections(outputs.Raw); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(data, outputs); err != nil {
 		return nil, fmt.Errorf("decoding outputs block: %w", err)
 	}
 
@@ -142,6 +147,27 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 	outputs.applyAPIDefaults()
 
 	return outputs, nil
+}
+
+// validateOutputSections checks each section of the outputs block against
+// the OutputSchema of the generator that claims its key, in registration
+// order so the first error is stable.
+func (r *Registry) validateOutputSections(sections map[string]json.RawMessage) error {
+	for _, name := range r.generatorOrder {
+		spec := r.generators[name]
+		section, ok := sections[spec.OutputKey]
+		if !ok || spec.compiledOutput == nil {
+			continue
+		}
+		instance, err := validator.UnmarshalJSON(bytes.NewReader(section))
+		if err != nil {
+			return fmt.Errorf("outputs.%s: %w", spec.OutputKey, err)
+		}
+		if err := spec.compiledOutput.Validate(instance); err != nil {
+			return fmt.Errorf("outputs.%s: %w", spec.OutputKey, err)
+		}
+	}
+	return nil
 }
 
 // DecodeOutput decodes outputs.<key> into v. A missing key leaves v

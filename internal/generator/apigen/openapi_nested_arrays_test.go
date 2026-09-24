@@ -146,7 +146,7 @@ func TestArraysOfArraysOutsideRequestBodies(t *testing.T) {
 	// A multipart request has no list of lists of files.
 	uploads := newSchema(&ir.FieldDef{Name: "upload", HTTPMethod: "POST", RestPath: "uploads", TypeRef: ir.TypeRef{Name: "string"},
 		Arguments: []*ir.ArgumentDef{{Name: "input", TypeRef: ir.TypeRef{Name: "UploadInput"}, Required: true}}})
-	uploads.Scalars["Asset.File"] = &ir.ScalarDef{Name: "Asset.File", LanguagePrimitive: ir.LanguageString}
+	uploads.Scalars["Asset.File"] = &ir.ScalarDef{Name: "Asset.File", LanguagePrimitive: ir.LanguageString, FileUpload: &ir.FileUploadConfig{Category: "file"}}
 	uploads.Types["UploadInput"] = &ir.TypeDef{Name: "UploadInput", Role: ir.RoleAPIInput, Fields: []*ir.FieldDef{
 		{Name: "attachments", TypeRef: nested("Asset.File"), Required: true},
 	}}

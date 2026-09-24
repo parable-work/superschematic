@@ -1108,9 +1108,10 @@ func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 	return fields
 }
 
-// extractFileUploadFields extracts file upload fields from an input type.
-// A multipart request carries files as flat form parts, so a file upload
-// field that is an array of arrays is refused.
+// extractFileUploadFields extracts file upload fields from an input type. A
+// field is an upload when its scalar carries fileUpload metadata; the
+// scalar's name plays no part. A multipart request carries files as flat
+// form parts, so a file upload field that is an array of arrays is refused.
 func (m *typeMapper) extractFileUploadFields(inputTypeName string) ([]FileUploadField, error) {
 	typeDef, ok := m.findTypeDef(inputTypeName)
 	if !ok {
@@ -1120,38 +1121,16 @@ func (m *typeMapper) extractFileUploadFields(inputTypeName string) ([]FileUpload
 	var fields []FileUploadField
 	for _, field := range typeDef.Fields {
 		scalarDef, ok := m.findScalarDef(field.TypeRef.Name)
-		if !ok {
+		if !ok || scalarDef.FileUpload == nil {
 			continue
 		}
 
-		var maxSize int64
-		var allowedTypes []string
-		var category string
-		imageConstraints := scalarDef.ImageConstraints
-		if scalarDef.FileUpload != nil {
-			fu := scalarDef.FileUpload
-			maxSize = int64(fu.MaxSize)
-			allowedTypes = fu.AllowedTypes
-			category = fu.Category
-		}
-		if scalarDef.FileUpload == nil {
-			switch field.TypeRef.Name {
-			case "Artifact.File", "Asset.File":
-				category = "file"
-			case "Asset.Image":
-				category = "image"
-			case "Asset.LogoImage":
-				category = "image"
-				if imageConstraints == nil {
-					imageConstraints = &ir.ImageConstraints{RequireTransparency: true}
-				}
-			default:
-				continue
-			}
-		}
 		if field.TypeRef.IsArrayOfArrays {
 			return nil, fmt.Errorf("input field %s.%s: a file upload cannot be an array of arrays", inputTypeName, field.Name)
 		}
+		fu := scalarDef.FileUpload
+		maxSize := int64(fu.MaxSize)
+		allowedTypes := fu.AllowedTypes
 		if field.ValidateUploadMaxBytes != nil {
 			maxSize = *field.ValidateUploadMaxBytes
 		}
@@ -1168,9 +1147,9 @@ func (m *typeMapper) extractFileUploadFields(inputTypeName string) ([]FileUpload
 			ScalarType:       field.TypeRef.Name,
 			MaxSize:          maxSize,
 			AllowedTypes:     allowedTypes,
-			Category:         category,
+			Category:         fu.Category,
 			Required:         field.Required,
-			ImageConstraints: imageConstraints,
+			ImageConstraints: scalarDef.ImageConstraints,
 		})
 	}
 	return fields, nil

@@ -154,8 +154,8 @@ err = reg.Use(exts...)            // each extension's Register, in order
 err = reg.Finalize()              // cross-reference checks; now fixed
 ```
 
-`registry.Assemble(naming, exts...)` runs all four; `build`, `build-all`
-and `json-schema` call it once per invocation.
+`registry.Assemble(naming, exts...)` runs all four; `build`, `build-all`,
+`json-schema` and `format` call it once per invocation.
 `generator.CoreRegistry(naming)` runs them with no extension and panics on
 error. `generator.Run` falls back to a core-only registry when
 `Options.Registry` is nil and returns an error when the naming selects an
@@ -172,7 +172,7 @@ Each `Register*` method checks its own spec:
 | `RegisterKind` | an empty name, a duplicate name |
 | `RegisterDecorator` | an empty name or target, no `Packages`, an extension decorator without `Apply`, a duplicate `(Name, Target)`, an `Args` schema that does not compile |
 | `RegisterDocument` | an empty name, a duplicate name |
-| `RegisterGenerator` | an empty name, no `Generate`, a duplicate name |
+| `RegisterGenerator` | an empty name, no `Generate`, a duplicate name, an `OutputSchema` without an `OutputKey` or one that does not compile |
 | `RegisterAuthProvider` | a nil provider, an empty name, a duplicate name |
 | `RegisterBuildAllHook` | an empty name, no `Run`, a duplicate name |
 | `RegisterCheck` | an empty name, no `Verify`, a duplicate name |
@@ -189,6 +189,9 @@ Every one of them fails after `Finalize`.
   error lists the registered ones.
 - Every `KindSpec.Pipeline` entry names a registered generator, and that
   generator's `Kinds`, when set, include the kind.
+- Every `Kinds` list on a generator, decorator, document or check names
+  registered kinds. A misspelt or missing kind fails assembly instead of
+  leaving the spec inert for it.
 - No two generators claim the same `OutputKey`.
 
 `Registry.Extensions()` is the set of names passed to `Use` or set on a
@@ -325,7 +328,7 @@ Document generators are driven by presence, not by the kind's pipeline
 | `Extension` | the registering extension |
 | `Kinds` | kinds whose pipelines may name the generator; it is appended to those it is not named in. nil means any kind and appended to none |
 | `OutputKey` | the `outputs.<key>` of `schema.config` the generator claims |
-| `OutputSchema` | the JSON Schema of `outputs.<key>` (see section 11) |
+| `OutputSchema` | the JSON Schema of `outputs.<key>`, compiled at registration. `ParseOutputs` validates the section against it before any generator runs, whichever form the config is in. nil leaves the section to the generator |
 | `Dirs` | the directories the generator writes for this run |
 | `Enabled` | whether it runs; a non-empty reason is recorded in `Result.Skipped`. nil means enabled |
 | `Generate` | writes the outputs |
@@ -410,10 +413,10 @@ type CommandProvider interface {
 }
 ```
 
-`build`, `build-all` and `json-schema` each resolve their naming file
-first (`--naming`, or `superschematic.toml` at the schemas root; the
-defaults for `json-schema`) and then assemble a fresh registry with
-`registry.Assemble(naming, exts...)`. The registry therefore cannot exist
+`build`, `build-all`, `json-schema` and `format` each resolve their
+naming file first (`--naming`, or `superschematic.toml` at the schemas
+root; the defaults for `json-schema`) and then assemble a fresh registry
+with `registry.Assemble(naming, exts...)`. The registry therefore cannot exist
 when `cli.New` runs, which is why subcommands hang off the extension value
 rather than the registry. An extension command that needs a
 registry assembles one the same way; acme's `describe` does.
@@ -423,8 +426,11 @@ root descriptions (`Short`, `Long`). A binary is its `main` calling
 `cli.New(...).Execute()`; `cmd/superschematic` passes no extension.
 
 `json-schema` emits the data-form schema for the binary's registry
-(section 5). `format` does not assemble a registry with the binary's
-extensions (section 11).
+(section 5). `format` reads the file with the binary's registry, so a file
+that uses an extension's kind, decorators, documents or tool invocation
+policy key converts between JSON and YAML in a binary that links the
+extension. The TypeScript writer cannot render an extension's slots or
+documents and fails with the slot's name instead of dropping it.
 
 ### 3.10 Scalar catalog
 
@@ -688,7 +694,10 @@ separate schema, generated from the `@superschematic/schema-config` types
 and embedded in `internal/loader/schemaconfig`. Its `kind` admits any
 string (`SchemaKindName`, section 6.3), and the loader then checks the kind
 against the registry with an error that lists the registered kinds. Its
-`outputs` object admits only the core keys (section 11).
+`outputs` object checks the core sections and admits any other key
+(`SchemaOutputsDocument`): `ParseOutputs` rejects a key no registered
+generator claims and validates each section against its generator's
+`OutputSchema` (section 3.6).
 `superschematic json-schema --config` prints the embedded schema as is.
 
 ## 6. The frontend
@@ -765,7 +774,9 @@ extension kind (`kind: "Catalog" as SchemaKind`) also loads.
 
 The `outputs` type in the same package lists only the core keys, so an
 extension's output key needs the `@ts-expect-error` shown above; the
-registry, not `tsc`, decides which keys are valid (section 7.2).
+registry, not `tsc`, decides which keys are valid (section 7.2). The data
+forms need no such escape: `schema.config.json` and `schema.config.yaml`
+carry the key as it is (section 5).
 
 `build` decides before loading whether a target's kind sets
 `ImportsSiblingSentinels`. For a TypeScript config it scans the file for
@@ -797,12 +808,14 @@ program.
 
 `ParseOutputs(raw, reg)` accepts only keys that some generator claims as
 its `OutputKey`. The error lists the core keys in registration order
-(`types`, `sql`, `api`, `sdk`), then the extension keys sorted. It decodes
-the core sections into typed fields, checks their target languages, rejects
-an unknown key in `outputs.sql`, fills the API defaults, and keeps every
-section raw in `Outputs.Raw`. An extension
+(`types`, `sql`, `api`, `sdk`), then the extension keys sorted. It
+validates each section against the `OutputSchema` of the generator that
+claims its key, decodes the core sections into typed fields, checks their
+target languages, rejects an unknown key in `outputs.sql`, fills the API
+defaults, and keeps every section raw in `Outputs.Raw`. An extension
 generator reads its own section with `registry.DecodeOutput(outputs, key,
-&v)`, usually in `Enabled`.
+&v)`, usually in `Enabled`; the section has already passed its
+`OutputSchema`.
 
 ### 7.3 build-all
 
@@ -932,7 +945,8 @@ its provider, which supplies those two functions. D12 in
 The core stays provider-neutral (`CONTRIBUTING.md`, "The core stays
 provider-neutral"). A surface that only one deployment needs belongs in an
 extension. D10 in `docs/DECISIONS.md` applies that rule to features that
-have a generic mechanism and a distribution-specific policy.
+have a generic mechanism and distribution-specific names or policy: names
+go in the naming file, rules in the extension.
 
 ## 10. Worked example and acceptance
 
@@ -954,9 +968,6 @@ surface:
 | Check on a core kind | `acmeProjectionScope`: every projection view in a DB schema binds the scope setting first | `ext/projection_policy.go` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Configuration | `[extension.acme] region` and `projection_scope_setting`; `metadata_key_prefix`, `scalar_jsdoc_tag` and `[deps] copy` | `ext/extension.go`, `schemas/superschematic.toml` |
-| Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
-| Command | `describe`, through `cli.CommandProvider` | `ext/command.go` |
-| Configuration | `[extension.acme] region` | `ext/extension.go`, `schemas/superschematic.toml` |
 | Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Binary | `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
@@ -1010,24 +1021,43 @@ loader and generators:
 These are places where the code does less than the model implies. Each is
 a candidate for a change with its own test.
 
-1. `GeneratorSpec.OutputSchema` is not read. `ParseOutputs` checks only
-   that a generator claims the key. An extension generator must validate its
-   own section, in `Enabled` or `Generate`. The fix is for `ParseOutputs` to
-   validate each claimed section against its `OutputSchema`.
-2. A data-form config (`schema.config.json` or `.yaml`) cannot carry an
-   extension output key: the embedded config schema closes `outputs` to
-   `types`, `sql`, `api` and `sdk`. Only a TypeScript config can switch an
-   extension generator on. The fix is to compose the config schema per
-   registry, the way section 5 composes the schema-file schema.
-3. `Finalize` does not check that the `Kinds` of a generator, decorator or
-   document name registered kinds. A spec that lists an unregistered kind
-   is inert for it instead of failing assembly.
+1. Closed. `GeneratorSpec.OutputSchema` was not read, so an extension
+   generator had to validate its own section. It is compiled at
+   registration, and `ParseOutputs` validates each claimed section against
+   it before any generator runs (section 3.6).
+2. Closed. A data-form config (`schema.config.json` or `.yaml`) could not
+   carry an extension output key, because the embedded config schema
+   closed `outputs` to the core keys. The config schema now checks the core
+   sections and admits any other key; `ParseOutputs` rejects a key no
+   generator claims and validates the section against its `OutputSchema`
+   (section 5). The YAML twin of the in-tree fixture extension
+   (`internal/registry/registrytest/testdata/shop-yaml`) switches its
+   generator on this way.
+3. Closed. `Finalize` did not check that the `Kinds` of a generator,
+   decorator, document or check name registered kinds, so a spec that
+   listed an unregistered kind was inert for it. `Finalize` now fails
+   (section 3.2).
 4. Closed. An extension could not attach a `Verify` rule to a kind it did
    not register, so a policy check over core-kind schemas had no seam.
    `RegisterCheck` (section 3.12) is that seam.
-5. `format` reads schema files with the core registry only, not the
-   binary's extensions. A file that uses an extension kind, decorator,
-   document or tool invocation policy key does not convert.
+5. Closed. `format` read schema files with the core registry only, so a
+   file that used an extension kind, decorator, document or tool
+   invocation policy key did not convert. It reads with the binary's
+   registry (section 3.9).
+6. The TypeScript writer cannot render an extension's decorators or
+   documents. `format --to=ts` fails on a file with extension data and
+   names the slot; JSON and YAML carry it.
+7. The config schema is not composed per registry the way the schema-file
+   schema is (section 5). `json-schema --config` admits any extension
+   output key and does not carry its `OutputSchema`, so an editor that
+   validates against it does not catch a misspelt extension key or a bad
+   section. The build does.
+8. D10 puts a distribution's names in the naming file, but the prefix of
+   the core's vendor-extension keys has no naming key. A distribution
+   renames the OpenAPI and tool document keys (`x-superschematic-docs`,
+   `x-superschematic-scalar` and the tool `_meta` keys) with
+   `RegisterOpenAPIHook` and `RegisterToolHook` (sections 3.13 and 3.14);
+   the `x-superschematic` key of `values-schema.json` has no seam.
 
 ## 12. References
 
@@ -1046,7 +1076,6 @@ a candidate for a change with its own test.
 | `internal/loader/schemafile/schema.go`, `slots.go` | the data-form JSON Schema composition and slot checks |
 | `internal/loader/verify/` | import rules and `KindSpec.Verify` |
 | `ir/extensions.go` | the codecs |
-| `ir/mcp_invocation.go`, `internal/generator/apigen/tool_invocation.go` | the IR's invocation policy and its encoding, `ToolInvocationPolicy` |
 | `ir/mcp_invocation.go`, `internal/generator/apigen/tool_invocation.go` | the IR's invocation policy and its encoding, `ToolInvocationPolicy` |
 | `cli/cli.go` | `cli.New`, `CommandProvider` |
 | `loader/loader.go` | the public loader package |

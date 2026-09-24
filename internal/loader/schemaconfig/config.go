@@ -134,7 +134,9 @@ func ReadFile(servicePath string, known KindSet) (*SchemaConfig, error) {
 }
 
 // decodeJSON validates a config payload against the generated JSON Schema,
-// then strict-decodes it.
+// then strict-decodes it. The schema checks the core output sections and
+// admits any other outputs key; registry.ParseOutputs checks those against
+// the registered generators and their OutputSchema.
 func decodeJSON(data []byte, source string, known KindSet) (*SchemaConfig, error) {
 	sch, err := compiledSchema()
 	if err != nil {

@@ -112,7 +112,7 @@ of them; run them locally before pushing.
 | `make python`         | `runtime/schema/python` pytest                                       |
 | `make rust`           | `runtime/http/rust` fmt, clippy `-D warnings`, test                  |
 | `make docs`           | Starlight site in `docs/` (`npm ci && npm run build`)                |
-| `make scrub`          | No leftover mentions of the source tree this repository was extracted from |
+| `make scrub`          | No leftover mentions, identifiers or planning ids from the source tree this repository was extracted from, dot-paths such as `.github/` included |
 | `make all`            | build, test and lint: everything above except `docs`                 |
 
 ## Rules
