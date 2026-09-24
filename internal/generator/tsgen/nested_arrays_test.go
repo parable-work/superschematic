@@ -411,14 +411,14 @@ func TestNestedArraysValidatorBehavior(t *testing.T) {
 		t.Fatalf("load fixture-nested-arrays: %v", err)
 	}
 	cases := append([]tsPackageCase{{name: "fixture-nested-arrays", schema: drawing}}, loadNestedArraysEdges(t)...)
-	tempRoot, bunPath := buildTSPackages(t, cases)
+	typesRoot, bunPath := buildTSPackages(t, cases)
 	if t.Failed() {
 		return
 	}
 
 	run := func(pkg string, vectors []nestedVector) (map[string]map[string][]string, map[string]json.RawMessage) {
 		t.Helper()
-		dir := filepath.Join(tempRoot, pkg)
+		dir := filepath.Join(typesRoot, pkg)
 		payloads := map[string]any{}
 		for _, v := range vectors {
 			payloads[v.name] = map[string]any{"type": v.typ, "payload": json.RawMessage(v.payload)}

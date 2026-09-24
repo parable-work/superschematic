@@ -35,13 +35,21 @@ type tsPackageCase struct {
 	deps   map[string]*ir.Schema
 }
 
-// buildTSPackages generates each case's TypeScript types package into one
-// temp tree wired against the real superscalar runtime, then installs and
-// type-checks (tsc) each package in order, so list a dependency before its
-// consumer. It returns the tree's root and the bun binary. It skips (or
-// fails under SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1) when bun is missing or an
-// install fails.
-func buildTSPackages(t *testing.T, cases []tsPackageCase) (tempRoot, bunPath string) {
+// buildTSPackages writes each case's TypeScript types package, wired
+// against the real superscalar runtime, into <temp>/types/typescript/<name>
+// under a Bun workspace root, as a build lays them out. It installs once at
+// the workspace root and then type-checks (tsc) each package in order, so
+// list a dependency before its consumer. It returns the directory holding
+// the packages and the bun binary, and skips (or fails under
+// SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1) when bun is missing or the install
+// fails.
+//
+// The one install runs at the root on purpose. With bun 1.4.0, a
+// `bun install` inside a member after another install wrote the root
+// lockfile resolves the lockfile's root-relative superscalar file: path
+// from the member directory and fails; with 1.4.2 an install inside a
+// member that has a sibling file: dependency fails the same way.
+func buildTSPackages(t *testing.T, cases []tsPackageCase) (typesRoot, bunPath string) {
 	t.Helper()
 	bunPath, err := exec.LookPath("bun")
 	if err != nil {
@@ -52,10 +60,11 @@ func buildTSPackages(t *testing.T, cases []tsPackageCase) (tempRoot, bunPath str
 
 	// Resolve symlinks (macOS /var -> /private/var) so the relative file:
 	// spec computed against the temp dir resolves correctly at install time.
-	tempRoot, err = filepath.EvalSymlinks(t.TempDir())
+	tempRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("resolve temp dir: %v", err)
 	}
+	typesRoot = filepath.Join(tempRoot, "types", "typescript")
 	fixedClock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 
 	for _, tc := range cases {
@@ -68,7 +77,7 @@ func buildTSPackages(t *testing.T, cases []tsPackageCase) (tempRoot, bunPath str
 			t.Fatalf("generate %s: %v", tc.name, err)
 		}
 
-		outDir := filepath.Join(tempRoot, tc.name)
+		outDir := filepath.Join(typesRoot, tc.name)
 		if err := SetScalarLibSpec(output, paths, outDir); err != nil {
 			t.Fatalf("set superscalar spec for %s: %v", tc.name, err)
 		}
@@ -76,31 +85,27 @@ func buildTSPackages(t *testing.T, cases []tsPackageCase) (tempRoot, bunPath str
 			t.Fatalf("write %s: %v", tc.name, err)
 		}
 	}
-	// Mirror the output layout: the directory holding the packages is a Bun
-	// workspace root, so fixture-api's file:../fixture-db dependency and
-	// fixture-db's file: superscalar spec resolve from either package.
-	if err := WriteWorkspaceRoot(tempRoot, naming.Naming{}); err != nil {
+	// The directory holding the packages is a Bun workspace root, so a
+	// sibling file:../<name> dependency and the file: superscalar spec
+	// resolve for every package.
+	if err := WriteWorkspaceRoot(typesRoot, naming.Naming{}); err != nil {
 		t.Fatalf("write workspace root: %v", err)
 	}
 
-	// Install and build in dependency order: fixture-api resolves the
-	// file:../fixture-db package through its compiled dist/ declarations.
+	install := exec.Command(bunPath, "install")
+	install.Dir = typesRoot
+	if out, err := install.CombinedOutput(); err != nil {
+		requireOrSkipTSTooling(t, fmt.Sprintf("bun install failed (likely offline): %v\n%s", err, out))
+	}
+
 	for _, tc := range cases {
-		outDir := filepath.Join(tempRoot, tc.name)
-
-		install := exec.Command(bunPath, "install")
-		install.Dir = outDir
-		if out, err := install.CombinedOutput(); err != nil {
-			requireOrSkipTSTooling(t, fmt.Sprintf("bun install failed for %s (likely offline): %v\n%s", tc.name, err, out))
-		}
-
 		build := exec.Command(bunPath, "x", "tsc")
-		build.Dir = outDir
+		build.Dir = filepath.Join(typesRoot, tc.name)
 		if out, err := build.CombinedOutput(); err != nil {
 			t.Errorf("generated package %s does not type-check: %v\n%s", tc.name, err, out)
 		}
 	}
-	return tempRoot, bunPath
+	return typesRoot, bunPath
 }
 
 // TestGeneratedPackagesCompile generates the TypeScript type packages for
