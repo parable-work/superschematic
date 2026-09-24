@@ -48,6 +48,9 @@ links is active for every command it runs.
 | Subcommand | `cli.CommandProvider` on the extension value | 3.9 |
 | Scalar catalog | `RegisterScalars(owner, ScalarCatalog)` | 3.10 |
 | Configuration | `[extension.<name>]` in `superschematic.toml` | 3.11 |
+| Check | `RegisterCheck(CheckSpec)` | 3.12 |
+| OpenAPI hook | `RegisterOpenAPIHook(OpenAPIHook)` | 3.13 |
+| Tool hook | `RegisterToolHook(ToolHook)` | 3.14 |
 
 `Name()` is the key of everything the extension owns: the `Extension` field
 of each spec it registers, the `extensions.<name>` slot on IR nodes
@@ -60,11 +63,13 @@ An extension cannot:
   (section 6.2);
 - replace a core kind, decorator, generator or provider. Every `Register*`
   call rejects a duplicate key;
-- add a `Verify` rule, a pipeline entry or an import rule to a kind it did
-  not register. A generator it registers can still run on that kind
-  (section 3.6);
+- change the `KindSpec` of a kind it did not register: its `Verify`, its
+  pipeline or its import rules. A generator it registers can still run on
+  that kind (section 3.6), and a check it registers can still verify it
+  (section 3.12);
 - change the content of a core template, except through the auth snippet
-  hook points (section 8.1).
+  hook points (section 8.1). The OpenAPI and tool hooks (sections 3.13
+  and 3.14) edit documents the core has built, not its templates.
 
 ## 2. Goals and limits
 
@@ -93,7 +98,8 @@ Limits:
 ## 3. The Extension interface and the Registry
 
 `registry.Registry` holds every kind, decorator, document, generator, auth
-provider, build-all hook and the scalar catalog a run knows about. It is
+provider, build-all hook, check, OpenAPI hook, tool hook and the scalar
+catalog a run knows about. It is
 built per command (or per test) and threaded through the loader
 (`loader.WithRegistry`) and the generators (`Options.Registry`). There is no
 package-level registry.
@@ -113,6 +119,8 @@ Two consequences:
 - `AuthProvider` and `AuthModel` are declared in `apigen`, which consumes
   them, and aliased in `internal/registry`. `apigen` cannot import the
   registry, because the registry imports `apigen` for `APIOutput`.
+  `OpenAPIHook` and `ToolHook` are declared there for the same reason:
+  the `api` generator runs them.
 - Core registration is split by owner. `internal/registry` registers the
   core kinds, the core decorators and the `session` auth provider in `New`.
   The core generators are registered by `generator.RegisterCore` in
@@ -124,11 +132,11 @@ public packages at the module root:
 
 | Package | What it is |
 | --- | --- |
-| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `LoadNaming` |
-| `loader` | `LoadService` and `LoadServiceWithConfig` with `WithRegistry`, `WithNaming` and `WithSchemaCatalog`, for extension tests against real fixtures |
+| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`) and the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) are aliased here too |
+| `loader` | `LoadService` and `LoadServiceWithConfig` with `WithRegistry`, `WithNaming` and `WithSchemaCatalog`, for extension tests against real fixtures; `NewDeclarationProgram`, a type-checked TypeScript program over in-memory files with the loader's compiler, lib files and module resolution, for an extension that checks declarations the schema frontend does not walk; `SchemaError` and `SchemaErrorList`, its located diagnostics |
 | `cli` | `cli.New`, `cli.Config`, `cli.CommandProvider` |
 | `ir` | The IR, its own Go module, with the extension codecs (section 4.2) |
-| `schemadeps` | The dependency graph of the generated packages, which `build-all` writes to `<dist>/.deps.json` |
+| `schemadeps` | The dependency graph of the generated packages, which `build-all` writes to `<dist>/.deps.json` and, with `[deps] copy`, to a path a repository commits. Every package names the service that produced it. `Read`, `Closure`, `WriteFileAtomic` and `SyncCopy` (check or refresh the committed copy) are what an extension's command over the graph needs (section 3.8) |
 
 `registry` and `loader` are alias packages rather than the implementation;
 D2 in `docs/DECISIONS.md` records why. Every identifier in them is an alias
@@ -166,6 +174,9 @@ Each `Register*` method checks its own spec:
 | `RegisterGenerator` | an empty name, no `Generate`, a duplicate name |
 | `RegisterAuthProvider` | a nil provider, an empty name, a duplicate name |
 | `RegisterBuildAllHook` | an empty name, no `Run`, a duplicate name |
+| `RegisterCheck` | an empty name, no `Verify`, a duplicate name |
+| `RegisterOpenAPIHook` | an empty name, no `Edit`, a duplicate name |
+| `RegisterToolHook` | an empty name, no `Edit`, a duplicate name |
 | `RegisterScalars` | an empty owner, a nil catalog, a second catalog |
 
 Every one of them fails after `Finalize`.
@@ -219,8 +230,8 @@ Any registered name is a valid value.
 ### 3.4 DecoratorSpec
 
 A decorator spec is keyed by `(Name, Target)`. The same name may be
-registered for several targets; the core does this for `jsonField` and for
-the middleware trio.
+registered for several targets; the core does this for `jsonField`,
+`docs`, `icon` and the middleware trio.
 
 | Field | Meaning |
 | --- | --- |
@@ -237,6 +248,14 @@ the middleware trio.
 frontends have validated them against `Args`. `registry.DecodeArgs` decodes
 the argument into a Go struct. An `ArgError` (`registry.ArgErrorf`) points
 the TypeScript diagnostic at one argument instead of the decorator.
+
+A core spec can also take class type arguments. `DecoratorSpec.TypeArgs()`
+is their number; `@projection<Source>` and `@join<Table>` take one each.
+The TypeScript frontend resolves each type argument to the name of the
+schema class it references and passes the names to `Apply` ahead of the
+value arguments, and an `ArgError` index counts them first. Only the core
+sets it: the data forms write core decorators as typed IR fields and have
+no place for a type argument in an extension slot.
 
 `Node` holds the schema and the target holder: `Type`, `Field` or
 `OperationSet`. Operations are `FieldDef`s with an HTTP method, so
@@ -329,7 +348,7 @@ The core generators:
 | Name | Output key | Writes |
 | --- | --- | --- |
 | `types` | `types` | Go, TypeScript, Python and Rust types, one switch per language |
-| `sql` | none | Postgres DDL; implied by the DB kind |
+| `sql` | `sql` | Postgres DDL, projection views with their migrations and Arrow schemas; implied by the DB kind, and `outputs.sql` places the view migrations (`migrationsDir`) and sets their role (`viewOwner`) |
 | `orm` | none | the Go ORM; implied by the DB kind |
 | `api` | `api` | the Go chi server or the Rust axum crate, and OpenAPI |
 | `sdks` | `sdk` | TypeScript, Go, Python and Rust clients, one switch per language |
@@ -353,17 +372,29 @@ type BuildAllHook struct {
 ```
 
 `build-all` runs the hooks once, in registration order, after every
-service has built and the dependency graph (`.deps.json`) is written. The
+service's output is in place and the dependency graph (`.deps.json`) is
+written. They run on every `build-all`, including one where every service
+was up to date or restored from the build cache and nothing was built. The
 first error stops the run and is wrapped as `build-all hook <name>: ...`
 so the failing hook is named. `BuildAllContext` carries the service names
-in build order, `SchemaFor` (the loaded IR of any service built in the
-process), the repository root, the output root, the naming and the log.
+in build order, `Services` (every discovered service in build order as a
+`BuildAllService`: name, kind, service directory and the output
+directories the build cache stores and restores), `SchemaFor` (the loaded
+IR of a service this process loaded, so not one it restored or found up to
+date), the repository root, the output root, the naming and the log.
 `build` of a single service runs no hooks.
 
 A hook is for output that needs every service at once, such as values
-merged across services into one chart. The core registers none and neither
-does acme; `cli/build_all_hooks_test.go` covers ordering and error
-attribution.
+merged across services into one chart. It reads what it merges from
+`Services[i].OutputDirs`, which a cached run fills as well as a full one.
+The core registers none. acme's `acmeInventory` merges every service's
+manifest (section 10); `cli/build_all_hooks_test.go` covers ordering, error
+attribution and a hook across built, up-to-date and cache-restored runs.
+
+A command that works on the dependency graph after the build, such as a
+pin command, reads the committed copy `[deps] copy` names and keeps it
+current with `schemadeps.SyncCopy`. The core ships none;
+`Example_pinCommand` in `schemadeps/example_test.go` is one in miniature.
 
 ### 3.9 The CLI
 
@@ -429,6 +460,80 @@ Three core keys exist for extensions: `auth_provider` selects a provider,
 `authoring_packages` lists npm packages whose exports the TypeScript
 frontend accepts, and `[package_aliases]` maps a distribution's
 republished package names onto the core packages that declare the symbols.
+A distribution also sets `metadata_key_prefix` (default `superschematic.`),
+the namespace of every metadata key in the Arrow schemas the `sql`
+generator writes for projection views, and `[deps] copy`, the committed
+path of the dependency graph (section 3.8).
+
+### 3.12 CheckSpec
+
+```go
+type CheckSpec struct {
+    Name      string
+    Extension string
+    Kinds     []string
+    Verify    func(schema *ir.Schema, r VerifyReporter)
+}
+```
+
+A check is a verification rule over schemas of any kind, the core kinds
+included. It is how an extension enforces its policy on what the core
+decorators write, which `KindSpec.Verify` cannot do for a kind the
+extension did not register. `Kinds` limits the kinds it runs on; nil means
+every kind. Verify (`internal/loader/verify`) runs the core checks, then
+the kind's own `KindSpec.Verify`, then every check for the kind in
+registration order, once per load and in every frontend. An error the check
+reports fails the load.
+
+The core registers none. acme registers four (section 10): the `@icon` set,
+the `@docs` audiences, `@mcp` on every `shop-api` operation, and a first
+row rule on every projection view. `internal/registry/checks_test.go`
+covers registration and ordering.
+
+### 3.13 OpenAPIHook
+
+```go
+type OpenAPIHook struct {
+    Name      string
+    Extension string
+    Edit      func(schema *ir.Schema, doc map[string]any) error
+}
+```
+
+The `api` generator builds the OpenAPI document, then runs every hook in
+registration order before it writes the file. A hook gets the API schema
+and the document as decoded JSON (objects `map[string]any`, arrays `[]any`,
+numbers `json.Number`, so no literal changes on the way back out) and edits
+it in place. An error fails the generator and names the hook. With no hook
+the document is written as built.
+
+The core registers none. The core writes an operation's `@docs` record
+under `registry.OpenAPIDocsKey` (`x-superschematic-docs`); acme's
+`acmeDocsKey` moves it to `x-acme-docs`.
+
+### 3.14 ToolHook
+
+```go
+type ToolHook struct {
+    Name      string
+    Extension string
+    Edit      func(schema *ir.Schema, tools *ToolSet) error
+}
+```
+
+A tool hook edits what the SDK generators publish about an API's MCP tools.
+The `ToolSet` holds the vendor keys of the tool documents (`ToolKeys`: the
+key a scalar argument names its scalar under, the `_meta` key of a visible
+tool's `@docs` guidance, and extra keys written at the root of every
+argument schema) and one `Tool` per operation, whose `MCP` field is a copy
+of the resolved `@mcp` record the hook may edit. Hooks run in registration
+order in the `api` generator, before the tool collision checks; the SDK
+generators publish what they leave. An error fails the generator and names
+the hook. With no hook the keys are `DefaultToolScalarKey`
+(`x-superschematic-scalar`), `DefaultToolGuidanceKey` and no extra keys.
+
+The core registers none. acme's `acmeTools` writes its own keys and fills
+in each tool icon's family and style.
 
 ## 4. The open IR
 
@@ -562,17 +667,19 @@ For each decorator on a node the walker calls `applyDecorator`
    declare decorators with the same name.
 2. Check `Kinds`. A decorator outside them fails with
    `@x is only allowed in A or B schemas (this service is kind C)`.
-3. Evaluate the arguments statically: literals, object and array
-   literals, enum members, `const` variables with an initializer,
-   `service({...})` sentinel calls and `as` expressions. Anything computed
-   is an error.
+3. Resolve the spec's class type arguments, if it takes any (section
+   3.4), to class names. Evaluate the arguments statically: literals,
+   object and array literals, enum members, `const` variables with an
+   initializer, `service({...})` sentinel calls and `as` expressions.
+   Anything computed is an error.
 4. Validate against `Args`, then call `Apply`.
 
 The walker, not the registry, decides the shape of a class: a table, an
 embedded struct, a projection, an operation set or a trait. `KindSpec`
 supplies the roles and whether operation sets are allowed. After the walk,
-verify runs the core checks and then the kind's `KindSpec.Verify`, the
-same way for all three forms.
+verify runs the core checks, the kind's `KindSpec.Verify` and the
+registered checks for the kind (section 3.12), the same way for all three
+forms.
 
 ### 6.3 Schema config kinds
 
@@ -630,10 +737,11 @@ program.
 ### 7.2 Outputs
 
 `ParseOutputs(raw, reg)` accepts only keys that some generator claims as
-its `OutputKey`. The error lists the core keys in registration order, then
-the extension keys sorted. It decodes the core sections (`types`, `api`,
-`sdk`) into typed fields, checks their target languages, fills the API
-defaults, and keeps every section raw in `Outputs.Raw`. An extension
+its `OutputKey`. The error lists the core keys in registration order
+(`types`, `sql`, `api`, `sdk`), then the extension keys sorted. It decodes
+the core sections into typed fields, checks their target languages, rejects
+an unknown key in `outputs.sql`, fills the API defaults, and keeps every
+section raw in `Outputs.Raw`. An extension
 generator reads its own section with `registry.DecodeOutput(outputs, key,
 &v)`, usually in `Enabled`.
 
@@ -645,7 +753,9 @@ sibling config is known at discovery. Each service's expected output
 directories come from the `Dirs` of its present documents and of the
 enabled generators in its pipeline; the `--cache` layer stores and restores
 those. Services build in dependency order, each with the discovered schema
-set as the document loaders' `Catalog`. The hooks run last (section 3.8).
+set as the document loaders' `Catalog`. The dependency graph is written
+next, and its `[deps] copy` when the naming file sets one. The hooks run
+last, whether or not any service was built (section 3.8).
 
 ## 8. Auth providers
 
@@ -734,12 +844,13 @@ is given.
 | Surface | Core registration |
 | --- | --- |
 | Kinds | `DB`, `API`, `General` (section 3.3) |
-| Decorators | 30 specs over the four targets in `internal/registry/core_decorators.go`, declared in `@superschematic/{schema,db,api,schema-config}` |
+| Decorators | 41 specs over the four targets in `internal/registry/core_decorators.go`, `core_projection.go` and `docs_decorators.go`, declared in `@superschematic/{schema,db,api,schema-config}` |
 | Generators | `types`, `sql`, `orm`, `api`, `sdks`, `envConfig` (section 3.6) |
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Documents | none |
 | Build-all hooks | none |
+| Checks, OpenAPI hooks, tool hooks | none |
 | Commands | `build`, `build-all`, `json-schema`, `format` |
 
 The core stays provider-neutral (`CONTRIBUTING.md`, "The core stays
@@ -760,13 +871,17 @@ surface:
 | Decorator | `@shelf` from `@acme/schema`, on Catalog fields | `ext/decorator.go`, `packages/schema` |
 | Document | `catalog.config.yaml` on Catalog services, with a generator | `ext/document.go` |
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
+| Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |
 | Auth provider | `apikey` | `ext/auth/` |
-| Command | `describe`, through `cli.CommandProvider` | `ext/command.go` |
-| Configuration | `[extension.acme] region` | `ext/extension.go`, `schemas/superschematic.toml` |
+| Checks and an OpenAPI hook | `acmeIcons` and `acmeDocsAudience` over the core `@icon` and `@docs`; `acmeDocsKey` moves the `@docs` record to `x-acme-docs` | `ext/docs.go` |
+| Check and a tool hook | `acmeToolsClassified` requires `@mcp` on every `shop-api` operation; `acmeTools` writes acme's tool keys and icon variant | `ext/mcp.go` |
+| Check on a core kind | `acmeProjectionScope`: every projection view in a DB schema binds the scope setting first | `ext/projection_policy.go` |
+| Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
+| Configuration | `[extension.acme] region` and `projection_scope_setting`; `metadata_key_prefix` and `[deps] copy` | `ext/extension.go`, `schemas/superschematic.toml` |
 | Binary | `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
-It does not register a build-all hook or a scalar catalog; the tests in
-sections 3.8 and 3.10 cover those.
+It does not register a scalar catalog; the test in section 3.10 covers
+that.
 
 The acceptance criterion: an extension adds every surface above without
 editing a file outside its own module, and adding one more decorator stays
@@ -775,13 +890,20 @@ that way. Two scripts check it, and the `acme` job in
 
 - `scripts/smoke.sh` builds the core binary and the acme binary, runs the
   module's tests, runs `build-all` over the example schemas, and asserts
-  each surface did its work: `describe` lists the kind, document and
-  provider; `catalog.json`, the document's output and a manifest per
-  service exist; the `@shelf` payload is in the IR; the generated API
-  compiles against `apikey`. It also asserts that the core-only binary
+  each surface did its work: `describe` lists the kind, document,
+  provider and checks; `catalog.json`, the document's output and a
+  manifest per service exist, and the inventory hook merges them again
+  when every service is restored from the cache; the `@shelf` payload and
+  the scoped projection view are in the IR, and the view, its migration and
+  its Arrow schema are written under acme's metadata key prefix; the
+  generated API compiles against `apikey`; the committed graph copy is
+  current; `fields` type-checks the label declarations; the `@docs`
+  records reach the OpenAPI document under `x-acme-docs` and the tool
+  documents carry acme's keys. It also asserts that the core-only binary
   rejects the Catalog service and the naming file that selects `apikey`,
-  and that it builds the DB and API services with `session` and the result
-  compiles.
+  that it builds the DB and API services with `session` and the result
+  compiles, and that it writes the core keys where acme's hooks write its
+  own.
 - `scripts/check_second_decorator.sh` applies
   `scripts/second_decorator.patch` (a `@perishable` decorator), reruns the
   smoke, checks the new payload reached the IR, and fails if any path
@@ -814,15 +936,15 @@ a candidate for a change with its own test.
    validate each claimed section against its `OutputSchema`.
 2. A data-form config (`schema.config.json` or `.yaml`) cannot carry an
    extension output key: the embedded config schema closes `outputs` to
-   `types`, `api` and `sdk`. Only a TypeScript config can switch an
+   `types`, `sql`, `api` and `sdk`. Only a TypeScript config can switch an
    extension generator on. The fix is to compose the config schema per
    registry, the way section 5 composes the schema-file schema.
 3. `Finalize` does not check that the `Kinds` of a generator, decorator or
    document name registered kinds. A spec that lists an unregistered kind
    is inert for it instead of failing assembly.
-4. An extension cannot attach a `Verify` rule to a kind it did not
-   register, so a policy check over core-kind schemas has no seam. D10
-   records how the incoming ports should add one.
+4. Closed. An extension could not attach a `Verify` rule to a kind it did
+   not register, so a policy check over core-kind schemas had no seam.
+   `RegisterCheck` (section 3.12) is that seam.
 5. `format` reads schema files with the core registry only, not the
    binary's extensions. A file that uses an extension kind, decorator or
    document does not convert.
@@ -834,16 +956,18 @@ a candidate for a change with its own test.
 | `registry/registry.go`, `registry/generate.go` | the public registry package |
 | `internal/registry/registry.go` | `Registry`, `Use`, `Finalize`, the `Register*` methods |
 | `internal/registry/spec.go` | `KindSpec`, `DecoratorSpec`, `DocumentSpec`, `GeneratorSpec`, the contexts, `BuildAllHook` |
-| `internal/registry/core.go`, `core_decorators.go` | the core kinds and decorators |
+| `internal/registry/core.go`, `core_decorators.go`, `core_projection.go`, `docs_decorators.go` | the core kinds and decorators |
 | `internal/registry/scalars.go`, `outputs.go` | the scalar catalog seam, `ParseOutputs` |
 | `internal/generator/core.go`, `generator.go` | the core generators, `Run` |
 | `internal/generator/apigen/auth.go`, `apigen/sessionauth` | the provider interface, the snippet hooks, the core provider |
+| `internal/generator/apigen/openapi_hooks.go`, `apigen/tools.go` | `OpenAPIHook`, `ToolHook` and where the `api` generator runs them |
 | `internal/loader/documents.go` | document loading |
 | `internal/loader/tsreader/walker.go`, `evaluate.go` | decorator origin, dispatch, static evaluation |
 | `internal/loader/schemafile/schema.go`, `slots.go` | the data-form JSON Schema composition and slot checks |
 | `internal/loader/verify/` | import rules and `KindSpec.Verify` |
 | `ir/extensions.go` | the codecs |
-| `cli/cli.go` | `cli.New`, `CommandProvider` |
-| `loader/loader.go` | the public loader package |
+| `cli/cli.go`, `cli/build_all.go` | `cli.New`, `CommandProvider`; `build-all`, the graph copy and the hooks |
+| `loader/loader.go`, `loader/declarations.go` | the public loader package, `NewDeclarationProgram` |
+| `schemadeps/` | the dependency graph, its committed copy, `SyncCopy` |
 | `examples/acme-schematic/` | the worked example and its acceptance scripts |
 | `docs/DECISIONS.md` | the decisions this design rests on (D1, D2, D3, D4, D6, D10) |

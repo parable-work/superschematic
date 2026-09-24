@@ -9,7 +9,8 @@ An extension is a Go package that implements `registry.Extension` and,
 optionally, `cli.CommandProvider`. You pass it to `cli.New`. The core
 binary (`cmd/superschematic`) passes none. Everything project-specific
 registers here: kinds, decorators, documents, generators, build-all
-hooks, auth providers, checks, OpenAPI hooks and extra commands.
+hooks, auth providers, checks, OpenAPI hooks, tool hooks and extra
+commands.
 
 `examples/acme-schematic` is the acceptance test of this model. It adds one
 of each surface without editing a file under the core, and

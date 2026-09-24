@@ -185,7 +185,8 @@ once the repository is public; the CI job does not deploy.
 Three features are expected to be ported from a distribution that built
 them on the source tree: SQL projection views, MCP tool manifests generated
 from operations, and documentation decorators on operations and fields.
-None is implemented in this repository yet. This entry is the rule each
+All three are now in the core; the status paragraph at the end of this
+entry records how each policy is registered. This entry is the rule each
 port follows.
 
 The generic mechanism goes into the core:
@@ -223,3 +224,14 @@ A port is done when the mechanism works and is tested with no extension
 linked, and the policy that shipped with the source implementation is
 expressed as registrations in an extension, with a test that adds one
 policy without a core edit.
+
+Status: the ports added three generic seams, `RegisterCheck` for a rule
+over core-kind schemas and `RegisterOpenAPIHook` and `RegisterToolHook` for
+vendor keys in emitted documents (`docs/extension-model.md`, sections 3.12
+to 3.14). The acme example registers a policy over each mechanism:
+`acmeProjectionScope` requires a scoped row rule on every view,
+`acmeToolsClassified` requires `@mcp` on its API, `acmeIcons` checks icons
+against its set, and `acmeDocsKey` and `acmeTools` write its own vendor
+keys. One item departs from the rule above: the prefix of the metadata keys
+in the projection Arrow schemas is the naming key `metadata_key_prefix`
+(default `superschematic.`), not an extension registration.
