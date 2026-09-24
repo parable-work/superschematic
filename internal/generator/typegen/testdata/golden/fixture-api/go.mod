@@ -12,3 +12,5 @@ require (
 replace github.com/parable-work/superscalar/go => ../scalars/go
 
 replace github.com/parable-work/superschematic/ir => ../ir
+
+replace example.com/schemas/types/go/fixture-db => ../fixture-db

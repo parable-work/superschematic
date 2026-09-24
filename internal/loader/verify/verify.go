@@ -178,15 +178,20 @@ func (r *Result) warnf(file string, format string, args ...any) {
 // Run executes the full verification pass on an assembled schema. The pass
 // canonicalizes derived @source metadata (Virtual, OmittedFromSource) as it
 // verifies, so the IR a generator sees is exactly what verification proved.
-// The kind's own KindSpec.Verify, when it has one, runs last.
+// The kind's own KindSpec.Verify, when it has one, runs after the core
+// checks, then every registered CheckSpec for the kind.
 func Run(schema *ir.Schema, in Input) *Result {
 	r := &Result{}
 	checkImports(schema, in, r)
 	checkSourceProjections(schema, in, r)
 	checkTraits(schema, r)
 	checkVersioned(schema, r)
-	if kind, ok := in.registry().Kind(string(schema.Kind)); ok && kind.Verify != nil {
+	reg := in.registry()
+	if kind, ok := reg.Kind(string(schema.Kind)); ok && kind.Verify != nil {
 		kind.Verify(schema, r)
+	}
+	for _, check := range reg.Checks(string(schema.Kind)) {
+		check.Verify(schema, r)
 	}
 	return r
 }

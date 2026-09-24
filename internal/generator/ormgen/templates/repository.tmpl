@@ -4,7 +4,7 @@ package orm
 
 import (
 	"context"
-{{- if .Versioned }}
+{{- if or .Versioned .HasJSONUnionCollections }}
 	"encoding/json"
 {{- end }}
 	"fmt"
@@ -27,6 +27,63 @@ import (
 	types "{{ .TypesModule }}"
 )
 
+{{- range .Fields }}
+{{- if and .IsJSONField .IsUnion }}
+func {{ .JSONUnionDecoder }}(raw []byte) ({{ if .IsMap }}map[string]{{ if .IsArray }}[]{{ end }}types.{{ .IRType }}{{ else if .IsArray }}[]types.{{ .IRType }}{{ else }}types.{{ .IRType }}{{ end }}, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	{{- if .IsMap }}
+	var encoded map[string]{{ if .IsArray }}[]{{ end }}json.RawMessage
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		return nil, err
+	}
+	decoded := make(map[string]{{ if .IsArray }}[]{{ end }}types.{{ .IRType }}, len(encoded))
+	for key, encodedValue := range encoded {
+		{{- if .IsArray }}
+		values := make([]types.{{ .IRType }}, len(encodedValue))
+		for index, item := range encodedValue {
+			var wrapper types.{{ .IRType }}Wrapper
+			if err := wrapper.UnmarshalJSON(item); err != nil {
+				return nil, fmt.Errorf("decode key %q item %d: %w", key, index, err)
+			}
+			values[index] = wrapper.Value
+		}
+		decoded[key] = values
+		{{- else }}
+		var wrapper types.{{ .IRType }}Wrapper
+		if err := wrapper.UnmarshalJSON(encodedValue); err != nil {
+			return nil, fmt.Errorf("decode key %q: %w", key, err)
+		}
+		decoded[key] = wrapper.Value
+		{{- end }}
+	}
+	return decoded, nil
+	{{- else if .IsArray }}
+	var encoded []json.RawMessage
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		return nil, err
+	}
+	decoded := make([]types.{{ .IRType }}, len(encoded))
+	for index, item := range encoded {
+		var wrapper types.{{ .IRType }}Wrapper
+		if err := wrapper.UnmarshalJSON(item); err != nil {
+			return nil, fmt.Errorf("decode item %d: %w", index, err)
+		}
+		decoded[index] = wrapper.Value
+	}
+	return decoded, nil
+	{{- else }}
+	var wrapper types.{{ .IRType }}Wrapper
+	if err := wrapper.UnmarshalJSON(raw); err != nil {
+		return nil, err
+	}
+	return wrapper.Value, nil
+	{{- end }}
+}
+{{- end }}
+{{- end }}
+
 {{- if .Versioned }}
 
 func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error) {
@@ -37,9 +94,15 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 
 	result := &types.{{ .TypeName }}{}
 	{{- range .Fields }}
-	if rawValue, ok := values["{{ .DBName }}"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
-		{{- if .IsJSONField }}
-		if err := unmarshalJSONFieldValue(rawValue, &result.{{ toGoName .Name }}); err != nil {
+	if rawValue, ok := values["{{ .DBName }}"]; ok && len(rawValue) > 0{{ if not (and .PreservesExplicitJSONNull .IsRequired) }} && string(rawValue) != "null"{{ end }} {
+		{{- if and .IsJSONField .IsUnion }}
+		decoded, err := {{ .JSONUnionDecoder }}(rawValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		result.{{ toGoName .Name }} = decoded
+		{{- else if .IsJSONField }}
+		if err := {{ if .PreservesExplicitJSONNull }}unmarshalGenericJSONFieldValue{{ else }}unmarshalJSONFieldValue{{ end }}(rawValue, &result.{{ toGoName .Name }}); err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
 		}
 		{{- else }}
@@ -87,9 +150,17 @@ var temp{{ toGoName $member.Field.Name }} *{{ $member.Field.GoType }}
 {{- define "nullablePostCopyMembers" -}}
 {{- range $member := . }}
 {{- if $member.IsRelationship }}
+{{- else if and $member.Field.IsJSONField $member.Field.IsUnion }}
+if len(temp{{ toGoName $member.Field.Name }}) > 0 {
+	decoded, err := {{ $member.Field.JSONUnionDecoder }}(temp{{ toGoName $member.Field.Name }})
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JSON field {{ $member.Field.Name }}: %w", err)
+	}
+	result.{{ toGoName $member.Field.Name }} = decoded
+}
 {{- else if $member.Field.IsJSONField }}
 if len(temp{{ toGoName $member.Field.Name }}) > 0 {
-	if err := unmarshalJSONFieldValue(temp{{ toGoName $member.Field.Name }}, &result.{{ toGoName $member.Field.Name }}); err != nil {
+	if err := {{ if $member.Field.PreservesExplicitJSONNull }}unmarshalGenericJSONFieldValue{{ else }}unmarshalJSONFieldValue{{ end }}(temp{{ toGoName $member.Field.Name }}, &result.{{ toGoName $member.Field.Name }}); err != nil {
 		return nil, fmt.Errorf("failed to decode JSON field {{ $member.Field.Name }}: %w", err)
 	}
 }
@@ -127,9 +198,17 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 {{- define "nullablePostCopyMembersForEntity" -}}
 {{- range $member := . }}
 {{- if $member.IsRelationship }}
+{{- else if and $member.Field.IsJSONField $member.Field.IsUnion }}
+if len(temp{{ toGoName $member.Field.Name }}) > 0 {
+	decoded, err := {{ $member.Field.JSONUnionDecoder }}(temp{{ toGoName $member.Field.Name }})
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JSON field {{ $member.Field.Name }}: %w", err)
+	}
+	entity.{{ toGoName $member.Field.Name }} = decoded
+}
 {{- else if $member.Field.IsJSONField }}
 if len(temp{{ toGoName $member.Field.Name }}) > 0 {
-	if err := unmarshalJSONFieldValue(temp{{ toGoName $member.Field.Name }}, &entity.{{ toGoName $member.Field.Name }}); err != nil {
+	if err := {{ if $member.Field.PreservesExplicitJSONNull }}unmarshalGenericJSONFieldValue{{ else }}unmarshalJSONFieldValue{{ end }}(temp{{ toGoName $member.Field.Name }}, &entity.{{ toGoName $member.Field.Name }}); err != nil {
 		return nil, fmt.Errorf("failed to decode JSON field {{ $member.Field.Name }}: %w", err)
 	}
 }
@@ -233,9 +312,20 @@ case "{{ $field.DBName }}":
 
 {{- define "nullablePostCopyFields" -}}
 {{- range $field := . }}
-{{- if $field.IsJSONField }}
+{{- if and $field.IsJSONField $field.IsUnion }}
 if len(temp{{ toGoName $field.Name }}) > 0 {
-	_ = unmarshalJSONFieldValue(temp{{ toGoName $field.Name }}, &result.{{ toGoName $field.Name }})
+	decoded, err := {{ $field.JSONUnionDecoder }}(temp{{ toGoName $field.Name }})
+	if err != nil {
+		jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field {{ $field.Name }}: %w", err)
+	} else {
+		result.{{ toGoName $field.Name }} = decoded
+	}
+}
+{{- else if $field.IsJSONField }}
+if len(temp{{ toGoName $field.Name }}) > 0 {
+	if err := {{ if $field.PreservesExplicitJSONNull }}unmarshalGenericJSONFieldValue{{ else }}unmarshalJSONFieldValue{{ end }}(temp{{ toGoName $field.Name }}, &result.{{ toGoName $field.Name }}); err != nil {
+		jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field {{ $field.Name }}: %w", err)
+	}
 }
 {{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
 if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }}.Valid {
@@ -741,7 +831,11 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 		err = row.Scan(scanDest...)
 		if err == nil {
 			// Copy nullable fields when present
+			var jsonFieldDecodeErr error
 			{{ template "nullablePostCopyFields" .Fields }}
+			if jsonFieldDecodeErr != nil {
+				return nil, jsonFieldDecodeErr
+			}
 		}
 	} else {
 		{{- range $i, $rel := .Relationships }}
@@ -1206,7 +1300,11 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 		err = row.Scan(scanDest...)
 		if err == nil {
 			// Copy nullable fields when present
+			var jsonFieldDecodeErr error
 			{{ template "nullablePostCopyFields" .Fields }}
+			if jsonFieldDecodeErr != nil {
+				return nil, jsonFieldDecodeErr
+			}
 
 			// Set relationship IDs from scanned FK values
 			{{- range $i, $rel := .Relationships }}
@@ -1446,7 +1544,11 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 		}
 
 		// Copy nullable fields when present
+		var jsonFieldDecodeErr error
 		{{ template "nullablePostCopyFields" .Fields }}
+		if jsonFieldDecodeErr != nil {
+			return nil, 0, jsonFieldDecodeErr
+		}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)
 		{{- range $i, $rel := .Relationships }}

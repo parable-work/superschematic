@@ -469,9 +469,13 @@ func (r *TenantUserRepository) GetOne(ctx context.Context, id types.IdentityUUID
 		err = row.Scan(scanDest...)
 		if err == nil {
 			// Copy nullable fields when present
+			var jsonFieldDecodeErr error
 
 			if selectedDisplayName && tempDisplayName.Valid {
 				result.DisplayName = tempDisplayName.String
+			}
+			if jsonFieldDecodeErr != nil {
+				return nil, jsonFieldDecodeErr
 			}
 		}
 	} else {
@@ -765,9 +769,13 @@ func (r *TenantUserRepository) FindOne(ctx context.Context, filter *TenantUserFi
 		err = row.Scan(scanDest...)
 		if err == nil {
 			// Copy nullable fields when present
+			var jsonFieldDecodeErr error
 
 			if selectedDisplayName && tempDisplayName.Valid {
 				result.DisplayName = tempDisplayName.String
+			}
+			if jsonFieldDecodeErr != nil {
+				return nil, jsonFieldDecodeErr
 			}
 
 			// Set relationship IDs from scanned FK values
@@ -985,9 +993,13 @@ func (r *TenantUserRepository) FindMany(ctx context.Context, filter *TenantUserF
 		}
 
 		// Copy nullable fields when present
+		var jsonFieldDecodeErr error
 
 		if selectedDisplayName && tempDisplayName.Valid {
 			result.DisplayName = tempDisplayName.String
+		}
+		if jsonFieldDecodeErr != nil {
+			return nil, 0, jsonFieldDecodeErr
 		}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)

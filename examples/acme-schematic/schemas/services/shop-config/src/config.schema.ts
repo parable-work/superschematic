@@ -1,5 +1,5 @@
 import { Network } from "superscalar";
-import { Default, Secret } from "@superschematic/schema";
+import { Default, Secret, docs, icon, purpose } from "@superschematic/schema";
 import { envVars } from "@superschematic/schema-config";
 
 export enum ShopEnvironment {
@@ -10,7 +10,16 @@ export enum ShopEnvironment {
 // The environment variables the shop API reads at start-up.
 @envVars
 export abstract class ShopConfig {
+  // Field presentation for a settings UI. The acme extension accepts only
+  // icons from its own set.
+  @docs({ title: "Database URL" })
+  @purpose("Connection string of the **shop database**.")
+  @icon("globe")
   DATABASE_URL: Network.Url;
+
+  @docs({ title: "API key pepper" })
+  @purpose("Secret mixed into every stored API key hash.")
+  @icon("key")
   API_KEY_PEPPER: Secret<string>;
   PORT: Default<number, 8080>;
   ENVIRONMENT: Default<ShopEnvironment, ShopEnvironment.Development>;

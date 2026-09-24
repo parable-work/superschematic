@@ -20,6 +20,8 @@ func TestLoadServiceGolden(t *testing.T) {
 		"fixture-authdb-import",
 		"fixture-json-config",
 		"fixture-traits",
+		"fixture-docs",
+		"fixture-mcp",
 	}
 	for _, svc := range services {
 		t.Run(svc, func(t *testing.T) {
@@ -141,6 +143,8 @@ func TestProgramCacheMatchesPerServiceLoads(t *testing.T) {
 		"fixture-authdb-import",
 		"fixture-json-config",
 		"fixture-traits",
+		"fixture-docs",
+		"fixture-mcp",
 	}
 	serviceDirs := make([]string, 0, len(services))
 	for _, svc := range services {

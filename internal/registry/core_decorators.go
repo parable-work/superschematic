@@ -160,6 +160,7 @@ func coreDecorators() []DecoratorSpec {
 			return nil
 		},
 	})
+	specs = append(specs, docsDecorators()...)
 	return specs
 }
 

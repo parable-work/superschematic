@@ -336,15 +336,22 @@ func (r run) generateSQL() error {
 
 // generateORM emits the Go ORM for DB schemas.
 func (r run) generateORM() error {
+	// Dependencies name the imported unions a JSONB field decodes through,
+	// and their types modules get replace lines in the ORM's go.mod.
+	deps, err := r.loadDependencySchemas()
+	if err != nil {
+		return fmt.Errorf("generator: load ORM dependencies for %s: %w", r.Config.Name, err)
+	}
 	var output *ormgen.ORMOutput
 	if err := r.measure("output.orm.generate", func() error {
 		var err error
 		output, err = ormgen.Generate(r.Schema, ormgen.Options{
-			SchemaName:  r.Config.Name,
-			ModulePath:  r.Options.Naming.GoORMModule(r.Config.Name),
-			TypesModule: r.Options.Naming.GoTypesModule(r.Config.Name),
-			Naming:      r.Options.Naming,
-			Clock:       r.Options.Clock,
+			SchemaName:   r.Config.Name,
+			ModulePath:   r.Options.Naming.GoORMModule(r.Config.Name),
+			TypesModule:  r.Options.Naming.GoTypesModule(r.Config.Name),
+			Naming:       r.Options.Naming,
+			Dependencies: deps,
+			Clock:        r.Options.Clock,
 		})
 		return err
 	}); err != nil {
@@ -459,6 +466,8 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 		Naming:             r.Options.Naming,
 		Provider:           provider,
 		Clock:              r.Options.Clock,
+		OpenAPIHooks:       r.Registry.OpenAPIHooks(),
+		ToolHooks:          r.Registry.ToolHooks(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generator: api for %s: %w", r.Config.Name, err)

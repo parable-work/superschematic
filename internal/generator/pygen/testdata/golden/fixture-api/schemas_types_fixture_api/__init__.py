@@ -8,6 +8,7 @@ definitions. All models use Pydantic v2 for validation and serialization.
 
 Modules:
     - scalars: Custom scalar types with validation
+    - enums: Enumeration types
     - types: Complex object types
     - validation_errors: Validation error classes
 
@@ -35,6 +36,10 @@ from .scalars import (
     TemporalDateTime
 )
 
+from .enums import (
+    TenantListStatus
+)
+
 from .types import (
     CreateTenantInput,
     TenantView
@@ -52,6 +57,9 @@ __all__ = [
     "IdentitySlug",
     "IdentityUUID",
     "TemporalDateTime",
+
+    # Enums
+    "TenantListStatus",
 
     # Types
     "CreateTenantInput",

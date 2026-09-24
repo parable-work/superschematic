@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use crate::scalars::*;
+use crate::enums::*;
 
 /// Customer-facing projection of the Tenant table.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

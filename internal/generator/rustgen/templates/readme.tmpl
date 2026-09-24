@@ -10,6 +10,9 @@ This crate contains Rust types generated from the `{{.SchemaName}}` schema.
 {{if gt (len .Enums) 0}}- `src/enums.rs` - enum definitions{{end}}
 {{if or (gt (len .Types) 0) (gt (len .ImportedTypes) 0)}}- `src/types.rs` - object/input structs and imported type aliases{{end}}
 {{if gt (len .Unions) 0}}- `src/unions.rs` - union enums{{end}}
+{{- if gt (len .RuntimeSchemas) 0}}
+- `schemas/<Type>.json` - the schema IR of each `@jsonField` payload type and the definitions it reaches
+{{- end}}
 
 ## Notes
 

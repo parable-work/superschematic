@@ -38,6 +38,7 @@ if errors.HasErrors() {
 | File | Contents |
 |------|----------|
 | `scalars.go` | Scalar type aliases onto the scalar library |
+| `enums.go` | Enum types with validation |
 | `types.go` | Object/input structs with validators and codecs |
 
 Generated at 2026-01-02T03:04:05Z.

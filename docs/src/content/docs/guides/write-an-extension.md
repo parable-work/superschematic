@@ -9,7 +9,7 @@ An extension is a Go package that implements `registry.Extension` and,
 optionally, `cli.CommandProvider`. You pass it to `cli.New`. The core
 binary (`cmd/superschematic`) passes none. Everything project-specific
 registers here: kinds, decorators, documents, generators, build-all
-hooks, auth providers and extra commands.
+hooks, auth providers, checks, OpenAPI hooks and extra commands.
 
 `examples/acme-schematic` is the acceptance test of this model. It adds one
 of each surface without editing a file under the core, and
@@ -239,6 +239,83 @@ the model so the generated code compiles against the ORM it is given.
 `registry.AuthSnippetFunc(provider)` in a provider test catches a missing
 snippet at `go test`. The api generator checks the set is complete when it
 parses the templates.
+
+## Policy on what the core writes
+
+Some features are core mechanism with a distribution-specific rule on top:
+a core decorator writes a typed IR field, and the extension decides which
+values it accepts, or how an emitted document names its vendor keys. The
+core has no option for such a rule; the extension registers it.
+
+A check runs on every loaded schema of the kinds it lists, core kinds
+included, after the core checks and the kind's own `Verify`, in every
+frontend:
+
+```go
+r.RegisterCheck(registry.CheckSpec{
+    Name:      "permissions",
+    Extension: Name,
+    Kinds:     []string{"API"}, // nil: every kind
+    Verify: func(schema *ir.Schema, rep registry.VerifyReporter) {
+        for _, set := range schema.OperationSets {
+            for _, op := range set.Operations {
+                if len(op.Permissions) == 0 && !op.Public {
+                    rep.Errorf("", "%s.%s needs @requirePermission", set.Name, op.Name)
+                }
+            }
+        }
+    },
+})
+```
+
+An OpenAPI hook edits the document the `api` generator builds, before it is
+written to `openapi.json` and embedded in `openapi.go`. It gets the document
+as decoded JSON (`map[string]any`, `[]any`, `json.Number`). Hooks run in
+registration order:
+
+```go
+r.RegisterOpenAPIHook(registry.OpenAPIHook{
+    Name:      "owner",
+    Extension: Name,
+    Edit: func(schema *ir.Schema, doc map[string]any) error {
+        doc["x-acme-owner"] = schema.Name
+        return nil
+    },
+})
+```
+
+acme uses both on the core documentation decorators (`ext/docs.go`):
+checks that accept only its own `@docs` audiences and `@icon` names, and a
+hook that moves each operation's `@docs` record from
+`registry.OpenAPIDocsKey` to `x-acme-docs`. See
+[Documentation decorators](/superschematic/reference/documentation/). A
+check also carries the rule of which APIs must classify every operation
+for MCP: acme's `acmeToolsClassified` (`ext/mcp.go`) requires `@mcp` on
+each operation of `shop-api`.
+
+A tool hook edits what the SDK generators publish about an API's MCP
+tools: the vendor keys of the tool documents and each operation's
+resolved `@mcp` record. Hooks run in registration order, once per API
+build, and every SDK language reads what they leave:
+
+```go
+r.RegisterToolHook(registry.ToolHook{
+    Name:      "tools",
+    Extension: Name,
+    Edit: func(schema *ir.Schema, tools *registry.ToolSet) error {
+        tools.Keys.Scalar = "x-acme-scalar"
+        tools.Keys.Parameters = append(tools.Keys.Parameters, registry.ToolKeyValue{Key: "x-acme-arguments", Value: 1})
+        for _, tool := range tools.Tools {
+            if tool.MCP != nil && tool.MCP.Icon != nil {
+                tool.MCP.Icon.Family = "acme"
+            }
+        }
+        return nil
+    },
+})
+```
+
+See [MCP tools](/superschematic/reference/mcp-tools/).
 
 ## A command
 

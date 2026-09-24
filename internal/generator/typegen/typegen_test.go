@@ -419,6 +419,9 @@ func TestGenerateUnionsAndDefaults(t *testing.T) {
 	if payment == nil || !payment.IsUnion {
 		t.Fatalf("expected payment field flagged as union, got %+v", payment)
 	}
+	if payment.GoType != "Payment" {
+		t.Fatalf("an optional union stays a nilable interface, got Go type %q", payment.GoType)
+	}
 
 	outDir := t.TempDir()
 	if err := WriteTypes(output, outDir); err != nil {

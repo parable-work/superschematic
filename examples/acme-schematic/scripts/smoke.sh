@@ -35,7 +35,15 @@
 #      copy is current;
 #  13. `fields` type-checks the label declarations with the loader's
 #      declaration program and prints each field's checked type; a bad
-#      declaration fails with a located diagnostic.
+#      declaration fails with a located diagnostic;
+#  14. the @docs records of shop-api reach its OpenAPI document under acme's
+#      x-acme-docs key through the acme OpenAPI hook, and under the core key
+#      when the core-only binary builds the same service; the shop-config
+#      field presentation (@docs title, @purpose, @icon) is in the IR;
+#  13. every shop-api operation carries its @mcp classification in the IR;
+#      its TypeScript SDK tool documents carry acme's vendor keys and icon
+#      variant through the acme tool hook, and the core keys when the
+#      core-only binary builds the same service.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -194,5 +202,34 @@ if "$OUT/acme-schematic" fields "$OUT/bad-labels/bad.d.ts" Bad >"$OUT/fields-bad
   exit 1
 fi
 grep -q 'bad.d.ts:1:31: ' "$OUT/fields-bad.log"
+
+echo "==> documentation decorators: acme's vendor key and field presentation"
+OPENAPI="$DIST/api/shop-api/openapi.json"
+jq -e '.paths["/api/products/{id}"].get.summary == "Get a product"' "$OPENAPI" >/dev/null
+jq -e '.paths["/api/products/{id}"].get["x-acme-docs"].audience == "shoppers"' "$OPENAPI" >/dev/null
+jq -e '[.. | objects | has("x-superschematic-docs")] | any | not' "$OPENAPI" >/dev/null
+jq -e '.paths["/api/products/{id}"].get["x-superschematic-docs"].audience == "shoppers"' \
+  "$OUT/session-dist/api/shop-api/openapi.json" >/dev/null
+"$OUT/acme-schematic" build "$SCHEMAS/services/shop-config" --emit-ir --out "$OUT/ir-dist" >"$OUT/config-ir.json"
+jq -e '.types.ShopConfig.fields[] | select(.name == "DATABASE_URL") | .title == "Database URL" and .icon == "globe" and (.purpose | length) > 0' \
+  "$OUT/config-ir.json" >/dev/null
+
+echo "==> MCP classification: every shop-api operation declares @mcp"
+"$OUT/acme-schematic" build "$SCHEMAS/services/shop-api" --emit-ir --out "$OUT/api-ir-dist" >"$OUT/api-ir.json"
+jq -e '[.operationSets[].operations[] | .mcp != null] | all' "$OUT/api-ir.json" >/dev/null
+jq -e '.operationSets[].operations[] | select(.name == "getProduct") | .mcp.handle == "get_product" and .icon == "tag"' \
+  "$OUT/api-ir.json" >/dev/null
+jq -e '.operationSets[].operations[] | select(.name == "listProducts") | .mcp.hidden' "$OUT/api-ir.json" >/dev/null
+TOOLS="$DIST/sdk/typescript/shop-api/tools"
+jq -e '.tools[] | select(.name == "product.getProduct") | .mcp.handle == "get_product" and .mcp.icon.family == "acme"' \
+  "$TOOLS/schema.json" >/dev/null
+jq -e '.tools[] | select(.name == "product.getProduct") | .parameters.properties.id["x-acme-scalar"] == "Identity.UUID"' \
+  "$TOOLS/schema.json" >/dev/null
+jq -e '[.. | objects | has("x-superschematic-scalar")] | any | not' "$TOOLS/schema.json" >/dev/null
+jq -e '[.registryDigestInputs[] | select(.hidden | not) | .handle] | sort == ["create_product", "get_product"]' \
+  "$TOOLS/mcp-audit.json" >/dev/null
+jq -e '[.tools[].name] | sort == ["product.createProduct", "product.getProduct"]' "$TOOLS/anthropic.json" >/dev/null
+jq -e '.tools[] | select(.name == "product.getProduct") | .parameters.properties.id["x-superschematic-scalar"] == "Identity.UUID"' \
+  "$OUT/session-dist/sdk/typescript/shop-api/tools/schema.json" >/dev/null
 
 echo "acme smoke: ok"

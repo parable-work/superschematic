@@ -47,6 +47,7 @@ type Param struct {
 
 	Required     bool
 	IsArray      bool
+	IsMap        bool
 	DefaultValue *string
 
 	ValidateMin       *float64
@@ -81,6 +82,7 @@ type FileUploadField struct {
 // EndpointInfo represents one REST API endpoint extracted from an operation.
 type EndpointInfo struct {
 	Name          string // operation name as declared in the schema
+	Title         string // short reader-facing title from @docs; "" without it
 	Path          string // full route path including the /api prefix
 	RoutePath     string // route path relative to the /api mount point
 	Method        string // upper-case HTTP method ("GET", "POST", ...)
@@ -104,6 +106,15 @@ type EndpointInfo struct {
 	ScalarArgs  []Param
 
 	Description string
+	// Operation is the schema operation the endpoint is generated from.
+	Operation *ir.FieldDef `json:"-"`
+
+	// Docs is the operation's @docs record; nil without it.
+	Docs *ir.OperationDocs
+	// MCP is the operation's resolved @mcp record: for a visible tool, Name
+	// and Description come from @docs and Icon from @icon. Nil without
+	// @mcp. It is a copy; the schema's record is unchanged.
+	MCP *ir.OperationMCP
 
 	RequiresAuth     bool
 	RequiredPerms    []string
@@ -178,6 +189,7 @@ type APIOutput struct {
 	HasPermissionEndpoints   bool
 	HasFilterableEndpoints   bool
 	HasFileUpload            bool
+	HasArrayQueryParams      bool
 	HasArrayScalarArgsOnGET  bool
 	HasWebhookHMACEndpoints  bool
 	RequiredWebhookProviders []string
@@ -194,6 +206,17 @@ type APIOutput struct {
 
 	// Scalars carries JSON Schema metadata for tool-calling bindings.
 	Scalars map[string]ScalarJSONSchemaInfo
+
+	// TypeFields holds the fields of every object type a tool argument can
+	// reach, in the schema and its dependencies, so the tool schemas expand
+	// nested objects.
+	TypeFields map[string][]Param
+	// TypeUnions holds every union a tool argument can reach; the tool
+	// schemas render them as oneOf.
+	TypeUnions map[string]ToolUnionInfo
+	// ToolKeys are the vendor-extension keys the SDK tool documents are
+	// written with: DefaultToolKeys, as the tool hooks left them.
+	ToolKeys ToolKeys
 
 	// EnvConfig holds environment-variable loader output when populated by
 	// the dispatch layer before WriteAPI.
@@ -293,6 +316,15 @@ type Options struct {
 
 	// Clock stamps generated file headers.
 	Clock codegen.Clock
+
+	// OpenAPIHooks edit the OpenAPI document before it is written, in
+	// order. The registry's OpenAPIHooks supplies them.
+	OpenAPIHooks []OpenAPIHook
+
+	// ToolHooks edit the tool vendor keys and the resolved @mcp records,
+	// in order, before the SDK generators read them. The registry's
+	// ToolHooks supplies them.
+	ToolHooks []ToolHook
 }
 
 // Generate extracts REST endpoints from the schema's operation sets and
@@ -347,6 +379,8 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	output.Auth = auth
 
 	types := newTypeMapper(schema, opts.Dependencies)
+	output.TypeFields = types.allTypeFields()
+	output.TypeUnions = types.allTypeUnions()
 
 	for _, set := range schema.OperationSets {
 		namespace := extractNamespace(set.Name)
@@ -374,6 +408,12 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		}
 		if endpoint.HasFileUpload {
 			output.HasFileUpload = true
+		}
+		for _, param := range endpoint.QueryParams {
+			if param.IsArray {
+				output.HasArrayQueryParams = true
+				break
+			}
 		}
 		if endpoint.Method == "GET" {
 			for _, arg := range endpoint.ScalarArgs {
@@ -440,8 +480,16 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	if err := validateHandlerNameCollisions(output.Endpoints); err != nil {
 		return nil, err
 	}
+	keys, err := applyToolHooks(schema, output.Endpoints, opts.ToolHooks)
+	if err != nil {
+		return nil, err
+	}
+	output.ToolKeys = keys
+	if err := validateMCPCollisions(output.Endpoints); err != nil {
+		return nil, err
+	}
 
-	rawSpec, escapedSpec, err := generateOpenAPISpec(output, schema, opts.Dependencies)
+	rawSpec, escapedSpec, err := generateOpenAPISpec(output, schema, opts.Dependencies, opts.OpenAPIHooks)
 	if err != nil {
 		return nil, fmt.Errorf("apigen: openapi spec: %w", err)
 	}
@@ -479,6 +527,13 @@ func defaultMethodForSet(setName string) string {
 
 // operationToEndpoint converts an operation FieldDef into an endpoint.
 func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *ir.OperationSet, types *typeMapper, schema *ir.Schema, provider AuthProvider) (*EndpointInfo, error) {
+	if err := ir.ValidateOperationDocs(op.Docs); err != nil {
+		return nil, fmt.Errorf("apigen: operation %s.%s has invalid docs: %w", namespace, op.Name, err)
+	}
+	mcp, err := resolveOperationMCP(op, namespace)
+	if err != nil {
+		return nil, err
+	}
 	method := strings.ToUpper(op.HTTPMethod)
 	if method == "" {
 		method = defaultMethod
@@ -559,8 +614,14 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		webhookHMACTypesExpr = fmt.Sprintf("%q", op.HMACVerifiedProvider)
 	}
 
+	title := ""
+	if op.Docs != nil {
+		title = op.Docs.Title
+	}
+
 	endpoint := &EndpointInfo{
 		Name:                         op.Name,
+		Title:                        title,
 		Path:                         path,
 		RoutePath:                    strings.TrimPrefix(path, "/api"),
 		Method:                       method,
@@ -579,6 +640,9 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		QueryParams:                  queryParams,
 		ScalarArgs:                   scalarArgs,
 		Description:                  codegen.DocText(op.Description, op.Comment),
+		Operation:                    op,
+		Docs:                         op.Docs,
+		MCP:                          mcp,
 		RequiresAuth:                 requiresAuth,
 		RequiredPerms:                op.Permissions,
 		RequireOwnership:             op.RequireOwnership,
@@ -829,6 +893,7 @@ func (m *typeMapper) mapArgument(arg *ir.ArgumentDef) (Param, error) {
 		Type:              arg.TypeRef.Name,
 		Required:          arg.Required,
 		IsArray:           arg.TypeRef.IsArray,
+		IsMap:             arg.TypeRef.IsMap,
 		DefaultValue:      arg.Default,
 		ValidateMin:       arg.ValidateMin,
 		ValidateMax:       arg.ValidateMax,
@@ -913,15 +978,28 @@ func (m *typeMapper) inputTypeFields(inputTypeName string) []Param {
 	if !ok {
 		return nil
 	}
+	return m.fieldsFromTypeDef(typeDef)
+}
 
+// fieldsFromTypeDef maps a type's fields to Params, with their shape and
+// Validate<> bounds.
+func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 	var fields []Param
 	for _, field := range typeDef.Fields {
 		param := Param{
-			Name:     field.Name,
-			GoName:   codegen.ToPascalCase(field.Name),
-			Type:     field.TypeRef.Name,
-			Required: field.Required,
-			IsArray:  field.TypeRef.IsArray,
+			Name:              field.Name,
+			GoName:            codegen.ToPascalCase(field.Name),
+			Type:              field.TypeRef.Name,
+			Required:          field.Required,
+			IsArray:           field.TypeRef.IsArray,
+			IsMap:             field.TypeRef.IsMap,
+			ValidateMin:       field.ValidateMin,
+			ValidateMax:       field.ValidateMax,
+			ValidateMinLength: field.ValidateMinLength,
+			ValidateMaxLength: field.ValidateMaxLength,
+			ValidateListMin:   field.ValidateListMin,
+			ValidateListMax:   field.ValidateListMax,
+			ValidatePattern:   field.ValidatePattern,
 		}
 		m.applyGoMapping(&param, field.TypeRef.Name)
 		fields = append(fields, param)

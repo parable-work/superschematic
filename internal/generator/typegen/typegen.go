@@ -11,6 +11,7 @@ package typegen
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	ir "github.com/parable-work/superschematic/ir"
@@ -106,6 +108,10 @@ type TypeInfo struct {
 	IsInput     bool
 	IsJsonField bool
 	StrictJSON  bool
+	// OpenAPISchemaJSON is the quoted standalone OpenAPI schema of a
+	// @strictJSON type in a General schema; the template emits a
+	// <Type>OpenAPISchema() accessor for it. Empty emits none.
+	OpenAPISchemaJSON string
 
 	// HasDefaults is true when at least one field on this type has a usable
 	// DefaultLiteral. Templates use this flag to decide whether to emit a
@@ -309,7 +315,12 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	output.ImportedUnions = imported.unions
 	output.Imports = imported.imports
 	output.ModuleDependencies = imported.moduleDependencies(opts.ModulePath)
-	output.ModuleDependencyReplaces = moduleDependencyReplaces(output.ModuleDependencies)
+	// Go does not inherit replace directives from a dependency's go.mod.
+	// Replace every declared schema dependency, including one this module
+	// reaches only through another generated types module.
+	output.ModuleDependencyReplaces = moduleDependencyReplaces(
+		allDependencyModulePaths(opts.ModulePath, output.ModuleDependencies, opts.DependencyModules),
+	)
 
 	output.Enums = convertEnums(codegen.ExtractEnums(schema))
 
@@ -329,8 +340,28 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	inputTypes := codegen.ExtractTypes(schema, codegenScalars, extraction, ir.RoleAPIInput)
 
 	importAliases := importAliasReplacements(output.Imports)
-	output.Types = convertTypes(objectTypes, output.Scalars, false, enumLookup, importAliases)
-	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, true, enumLookup, importAliases)...)
+	unionNames := knownUnionNames(output.Unions, output.ImportedUnions)
+	output.Types = convertTypes(objectTypes, output.Scalars, false, enumLookup, importAliases, unionNames)
+	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, true, enumLookup, importAliases, unionNames)...)
+	// A strict General type is a closed payload contract; give it its
+	// standalone OpenAPI schema so a Go program can hand the contract to a
+	// consumer that validates or documents it.
+	if schema.Kind == ir.SchemaKindGeneral {
+		for i := range output.Types {
+			if !output.Types[i].StrictJSON {
+				continue
+			}
+			openAPISchema, err := apigen.TypeOpenAPISchema(output.Types[i].Name, schema, opts.Dependencies)
+			if err != nil {
+				return nil, err
+			}
+			encoded, err := json.Marshal(openAPISchema)
+			if err != nil {
+				return nil, fmt.Errorf("encode OpenAPI schema for %s: %w", output.Types[i].Name, err)
+			}
+			output.Types[i].OpenAPISchemaJSON = strconv.Quote(string(encoded))
+		}
+	}
 	output.TypePairs = buildTypePairs(output.Types, output.ImportedTypes)
 
 	for _, typeInfo := range output.Types {
@@ -575,11 +606,25 @@ func convertUnions(codegenUnions []codegen.UnionInfo) []UnionInfo {
 }
 
 // convertTypes converts codegen.TypeInfo to typegen.TypeInfo.
-func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, isInput bool, enumLookup codegen.EnumLookup, importAliases map[string]string) []TypeInfo {
+// knownUnionNames returns the local and imported union names. A field typed
+// with an imported union is a union field too, though codegen, which sees
+// only this schema, does not mark it.
+func knownUnionNames(local []UnionInfo, imported []ImportedUnionInfo) map[string]bool {
+	names := make(map[string]bool, len(local)+len(imported))
+	for _, union := range local {
+		names[union.Name] = true
+	}
+	for _, union := range imported {
+		names[union.Name] = true
+	}
+	return names
+}
+
+func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, isInput bool, enumLookup codegen.EnumLookup, importAliases map[string]string, unionNames map[string]bool) []TypeInfo {
 	scalarMap := buildScalarMap(scalars)
 	types := make([]TypeInfo, len(codegenTypes))
 	for i, ct := range codegenTypes {
-		fields := convertFields(ct.Fields, scalarMap, isInput, enumLookup, importAliases)
+		fields := convertFields(ct.Fields, scalarMap, isInput, enumLookup, importAliases, unionNames)
 		hasDefaults := false
 		for _, f := range fields {
 			if f.HasDefault && f.DefaultLiteral != "" {
@@ -619,9 +664,10 @@ func buildEnumLookup(localEnums []EnumInfo, importedEnums []ImportedEnumInfo) co
 }
 
 // convertFields converts codegen.FieldInfo to typegen.FieldInfo.
-func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*ScalarInfo, isInput bool, enumLookup codegen.EnumLookup, importAliases map[string]string) []FieldInfo {
+func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*ScalarInfo, isInput bool, enumLookup codegen.EnumLookup, importAliases map[string]string, unionNames map[string]bool) []FieldInfo {
 	fields := make([]FieldInfo, len(codegenFields))
 	for i, cf := range codegenFields {
+		isUnion := cf.IsUnion || unionNames[cf.Type]
 		var scalarInfo *ScalarInfo
 		if cf.IsScalar && cf.ScalarInfo != nil {
 			scalarInfo = scalarMap[cf.ScalarInfo.Name]
@@ -631,9 +677,19 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 		if !isInput && cf.IsScalar && !cf.Required && cf.ScalarInfo != nil && cf.ScalarInfo.Traits.IsIntegerLike {
 			goType = strings.TrimPrefix(goType, "*")
 		}
+		// A Go union is an interface and already nilable. A pointer to it is
+		// not idiomatic and cannot hold the union wrapper's Value.
+		if !isInput && isUnion && !cf.Required && !cf.IsArray && !cf.IsMap {
+			goType = strings.TrimPrefix(goType, "*")
+		}
 		if usesWrapper {
 			innerType := goType
-			if cf.IsScalar {
+			// A map of union values stores the interface values directly;
+			// the optional nested-type path would add a pointer per value.
+			if isUnion && cf.IsMap {
+				innerType = strings.Replace(innerType, "]*", "]", 1)
+			}
+			if cf.IsScalar || (isUnion && !cf.IsArray && !cf.IsMap) {
 				innerType = strings.TrimPrefix(innerType, "*")
 			}
 			goType = fmt.Sprintf("InputField[%s]", innerType)
@@ -652,7 +708,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			IsArray:          cf.IsArray,
 			IsMap:            cf.IsMap,
 			IsScalar:         cf.IsScalar,
-			IsUnion:          cf.IsUnion,
+			IsUnion:          isUnion,
 			Doc:              cf.Doc(),
 			ScalarInfo:       scalarInfo,
 			Validations:      cf.Validations,
@@ -697,6 +753,29 @@ func buildScalarMap(scalars []ScalarInfo) map[string]*ScalarInfo {
 		m[scalars[i].Name] = &scalars[i]
 	}
 	return m
+}
+
+// allDependencyModulePaths returns the sorted, de-duplicated module paths of
+// the dependencies this module imports and of every declared dependency,
+// without the module itself.
+func allDependencyModulePaths(selfModulePath string, used []string, declared map[string]string) []string {
+	unique := make(map[string]struct{}, len(used)+len(declared))
+	for _, modulePath := range used {
+		if modulePath != "" && modulePath != selfModulePath {
+			unique[modulePath] = struct{}{}
+		}
+	}
+	for _, modulePath := range declared {
+		if modulePath != "" && modulePath != selfModulePath {
+			unique[modulePath] = struct{}{}
+		}
+	}
+	modules := make([]string, 0, len(unique))
+	for modulePath := range unique {
+		modules = append(modules, modulePath)
+	}
+	sort.Strings(modules)
+	return modules
 }
 
 // moduleDependencyReplaces builds go.mod replace directives for sibling type

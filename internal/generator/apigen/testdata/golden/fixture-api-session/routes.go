@@ -10,6 +10,7 @@ import (
 	"fmt"
 	gohttp "net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	orm "example.com/schemas/orm/fixture-db"
@@ -155,6 +156,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/me",
 			Handler: createSessionCurrentTenantHandler(cfg.Implementations.Session),
 		},
+		// Array query parameters: ?ids=a,b&statuses=active,suspended.
 		{
 			Method:  "GET",
 			Path:    "/tenants",
@@ -276,8 +278,112 @@ func createTenantCustomHandlerHandler(impl TenantImplementation) gohttp.HandlerF
 }
 
 // createTenantListTenantsHandler creates a handler for GET /api/tenants
+//
+// Array query parameters: ?ids=a,b&statuses=active,suspended.
 func createTenantListTenantsHandler(impl TenantImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract query parameters
+		// An array uses the form/explode=false wire format: ?ids=a,b.
+		// A nil slice means the optional parameter was absent; a present empty value is invalid.
+		var Ids []types.IdentityUUID
+		IdsValues, IdsPresent, err := parseArrayQueryParam(r, "ids")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, err.Error())
+			return
+		}
+		if !IdsPresent {
+			RespondError(w, r, gohttp.StatusBadRequest, "ids is required")
+			return
+		}
+		if IdsPresent {
+			Ids = make([]types.IdentityUUID, 0, len(IdsValues))
+			for _, rawValue := range IdsValues {
+				parsed, err := types.ParseIdentityUUID(rawValue)
+				if err != nil {
+					RespondError(w, r, gohttp.StatusBadRequest, "ids must contain valid UUIDs")
+					return
+				}
+				elem := parsed
+				if validator, ok := interface{}(elem).(interface {
+					ValidateRequired() (bool, []types.ValidationError)
+				}); ok {
+					if valid, fieldErrs := validator.ValidateRequired(); !valid {
+						validationErrors := types.NewValidationErrors()
+						validationErrors.SetFieldErrors("ids", fieldErrs)
+						RespondValidationErrors(w, r, validationErrors)
+						return
+					}
+				} else if validator, ok := interface{}(elem).(interface {
+					Validate() (bool, []types.ValidationError)
+				}); ok {
+					if valid, fieldErrs := validator.Validate(); !valid {
+						validationErrors := types.NewValidationErrors()
+						validationErrors.SetFieldErrors("ids", fieldErrs)
+						RespondValidationErrors(w, r, validationErrors)
+						return
+					}
+				}
+				Ids = append(Ids, elem)
+			}
+		}
+		if IdsPresent && len(Ids) < 1 {
+			validationErrors := types.NewValidationErrors()
+			validationErrors.SetFieldErrors("ids", []types.ValidationError{{Validator: "list_min", Message: "must contain at least 1 items"}})
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+		if IdsPresent && len(Ids) > 100 {
+			validationErrors := types.NewValidationErrors()
+			validationErrors.SetFieldErrors("ids", []types.ValidationError{{Validator: "list_max", Message: "must contain at most 100 items"}})
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+		// An array uses the form/explode=false wire format: ?statuses=a,b.
+		// A nil slice means the optional parameter was absent; a present empty value is invalid.
+		var Statuses []types.TenantListStatus
+		StatusesValues, StatusesPresent, err := parseArrayQueryParam(r, "statuses")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, err.Error())
+			return
+		}
+		if StatusesPresent {
+			Statuses = make([]types.TenantListStatus, 0, len(StatusesValues))
+			for _, rawValue := range StatusesValues {
+				elem := types.TenantListStatus(rawValue)
+				if validator, ok := interface{}(elem).(interface {
+					ValidateRequired() (bool, []types.ValidationError)
+				}); ok {
+					if valid, fieldErrs := validator.ValidateRequired(); !valid {
+						validationErrors := types.NewValidationErrors()
+						validationErrors.SetFieldErrors("statuses", fieldErrs)
+						RespondValidationErrors(w, r, validationErrors)
+						return
+					}
+				} else if validator, ok := interface{}(elem).(interface {
+					Validate() (bool, []types.ValidationError)
+				}); ok {
+					if valid, fieldErrs := validator.Validate(); !valid {
+						validationErrors := types.NewValidationErrors()
+						validationErrors.SetFieldErrors("statuses", fieldErrs)
+						RespondValidationErrors(w, r, validationErrors)
+						return
+					}
+				}
+				Statuses = append(Statuses, elem)
+			}
+		}
+		if StatusesPresent && len(Statuses) < 0 {
+			validationErrors := types.NewValidationErrors()
+			validationErrors.SetFieldErrors("statuses", []types.ValidationError{{Validator: "list_min", Message: "must contain at least 0 items"}})
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+		if StatusesPresent && len(Statuses) > 10 {
+			validationErrors := types.NewValidationErrors()
+			validationErrors.SetFieldErrors("statuses", []types.ValidationError{{Validator: "list_max", Message: "must contain at most 10 items"}})
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
 
 		// Ensure request context is still valid before entering implementation logic.
 		if err := CheckContext(r.Context()); err != nil {
@@ -287,7 +393,7 @@ func createTenantListTenantsHandler(impl TenantImplementation) gohttp.HandlerFun
 		}
 
 		// Call implementation
-		result, err := impl.ListTenants(r.Context())
+		result, err := impl.ListTenants(r.Context(), Ids, Statuses)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -485,6 +591,32 @@ func createTenantUpdateSecretHandler(impl TenantImplementation) gohttp.HandlerFu
 // =============================================================================
 // These functions parse query parameters from the URL and convert them to Go types.
 // They handle missing values gracefully by returning defaults or nil for pointer types.
+
+// parseArrayQueryParam parses an array query parameter in the OpenAPI
+// form/explode=false representation (?name=a,b). It also accepts repeated
+// keys (?name=a&name=b); each value is still split on commas. present
+// distinguishes an omitted optional parameter (nil slice) from input.
+func parseArrayQueryParam(r *gohttp.Request, name string) (values []string, present bool, err error) {
+	rawValues, present := r.URL.Query()[name]
+	if !present {
+		return nil, false, nil
+	}
+
+	values = make([]string, 0)
+	for _, rawValue := range rawValues {
+		for _, candidate := range strings.Split(rawValue, ",") {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				return nil, true, fmt.Errorf("%s cannot contain empty values", name)
+			}
+			values = append(values, candidate)
+		}
+	}
+	if len(values) == 0 {
+		return nil, true, fmt.Errorf("%s cannot be empty", name)
+	}
+	return values, true, nil
+}
 
 // parseIntQueryParam parses an integer query parameter with a default value.
 // Returns the default if the parameter is missing or cannot be parsed.

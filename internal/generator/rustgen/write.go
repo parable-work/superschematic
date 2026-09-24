@@ -31,6 +31,9 @@ func WriteTypes(output *ModuleOutput, outputDir string) error {
 	}); err != nil {
 		return err
 	}
+	if err := writeRuntimeSchemas(output.RuntimeSchemas, outputDir); err != nil {
+		return err
+	}
 
 	srcFiles := []codegen.ConditionalFile{
 		{Condition: true, Template: "lib.tmpl", Filename: "lib.rs"},
