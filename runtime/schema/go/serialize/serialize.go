@@ -177,6 +177,10 @@ func (s *Serializer) walkField(field *ir.FieldDef, value any, errs ValidationErr
 		out := make([]any, len(arr))
 		for i, elem := range arr {
 			elemPath := fmt.Sprintf("%s[%d]", path, i)
+			if field.TypeRef.IsArrayOfArrays {
+				out[i] = s.walkInnerList(field, kind, elem, errs, elemPath)
+				continue
+			}
 			out[i] = s.walkElem(field, kind, elem, errs, elemPath)
 		}
 		return out
@@ -211,6 +215,24 @@ func (s *Serializer) walkField(field *ir.FieldDef, value any, errs ValidationErr
 	}
 
 	return value
+}
+
+// walkInnerList walks one inner list of an array of arrays (T[][]). A nil
+// inner list becomes an empty list, as generated MarshalJSON writes it; a
+// value that is not a list passes through.
+func (s *Serializer) walkInnerList(field *ir.FieldDef, kind string, value any, errs ValidationErrors, path string) any {
+	if value == nil {
+		return []any{}
+	}
+	inner, ok := value.([]any)
+	if !ok {
+		return value
+	}
+	out := make([]any, len(inner))
+	for j, elem := range inner {
+		out[j] = s.walkElem(field, kind, elem, errs, fmt.Sprintf("%s[%d]", path, j))
+	}
+	return out
 }
 
 func (s *Serializer) walkElem(field *ir.FieldDef, kind string, elem any, errs ValidationErrors, path string) any {

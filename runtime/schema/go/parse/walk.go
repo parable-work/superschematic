@@ -144,6 +144,9 @@ func (p *Parser) walkSingleField(field *ir.FieldDef, key, kind string, value any
 	}
 }
 
+// walkArrayField walks each element of an array field at key[i]. For an
+// array of arrays (T[][]) each element must be a list and each inner element
+// is walked at key[i][j]; a null inner list is kept for validate to reject.
 func (p *Parser) walkArrayField(field *ir.FieldDef, key, kind string, value any, result map[string]any, errs ValidationErrors, strict bool) {
 	arr, ok := value.([]any)
 	if !ok {
@@ -155,77 +158,82 @@ func (p *Parser) walkArrayField(field *ir.FieldDef, key, kind string, value any,
 	out := make([]any, len(arr))
 	for i, elem := range arr {
 		elemKey := fmt.Sprintf("%s[%d]", key, i)
-		if elem == nil {
+		if !field.TypeRef.IsArrayOfArrays {
+			out[i] = p.walkArrayElem(field, elemKey, kind, elem, errs, strict)
+			continue
+		}
+		inner, isList := elem.([]any)
+		if elem == nil || (isList && inner == nil) {
 			out[i] = nil
 			continue
 		}
-
-		switch kind {
-		case "scalar":
-			scalar := p.schema.Scalars[field.TypeRef.Name]
-			v, ok := p.applyScalar(scalar, elem, strict)
-			if !ok {
-				errs.AddFieldError(elemKey, "type", typeMismatchMessage(scalar))
-				out[i] = elem
-				continue
-			}
-			v, parseErrs := p.applyCustomParse(scalar, v)
-			if len(parseErrs) > 0 {
-				errs.SetFieldErrors(elemKey, parseErrs)
-				out[i] = v
-				continue
-			}
-			out[i] = v
-
-		case "enum":
+		if !isList {
+			errs.AddFieldError(elemKey, "type", "expected array value")
 			out[i] = elem
-
-		case "builtin":
-			v, ok := p.applyBuiltin(field.TypeRef.Name, elem, strict)
-			if !ok {
-				errs.AddFieldError(elemKey, "type", "expected "+field.TypeRef.Name+" value")
-				out[i] = elem
-				continue
-			}
-			out[i] = v
-
-		case "type":
-			td := p.schema.Types[field.TypeRef.Name]
-			m, ok := elem.(map[string]any)
-			if !ok {
-				errs.AddFieldError(elemKey, "type", "expected object value")
-				out[i] = elem
-				continue
-			}
-			nestedResult := make(map[string]any, len(m))
-			nestedErrs := NewValidationErrors()
-			p.walkTypeDef(td, m, nestedResult, nestedErrs, strict)
-			if nestedErrs.HasErrors() {
-				errs.AddNestedError(elemKey, nestedErrs)
-			}
-			out[i] = nestedResult
-
-		case "input":
-			td := p.schema.Inputs[field.TypeRef.Name]
-			m, ok := elem.(map[string]any)
-			if !ok {
-				errs.AddFieldError(elemKey, "type", "expected object value")
-				out[i] = elem
-				continue
-			}
-			nestedResult := make(map[string]any, len(m))
-			nestedErrs := NewValidationErrors()
-			p.walkTypeDef(td, m, nestedResult, nestedErrs, strict)
-			if nestedErrs.HasErrors() {
-				errs.AddNestedError(elemKey, nestedErrs)
-			}
-			out[i] = nestedResult
-
-		default:
-			out[i] = elem
+			continue
 		}
+		innerOut := make([]any, len(inner))
+		for j, innerElem := range inner {
+			innerOut[j] = p.walkArrayElem(field, fmt.Sprintf("%s[%d]", elemKey, j), kind, innerElem, errs, strict)
+		}
+		out[i] = innerOut
 	}
 	result[key] = out
+}
+
+// walkArrayElem coerces, normalizes and parses one array element, reporting
+// errors at elemKey, and returns the element to store.
+func (p *Parser) walkArrayElem(field *ir.FieldDef, elemKey, kind string, elem any, errs ValidationErrors, strict bool) any {
+	if elem == nil {
+		return nil
+	}
+
+	switch kind {
+	case "scalar":
+		scalar := p.schema.Scalars[field.TypeRef.Name]
+		v, ok := p.applyScalar(scalar, elem, strict)
+		if !ok {
+			errs.AddFieldError(elemKey, "type", typeMismatchMessage(scalar))
+			return elem
+		}
+		v, parseErrs := p.applyCustomParse(scalar, v)
+		if len(parseErrs) > 0 {
+			errs.SetFieldErrors(elemKey, parseErrs)
+		}
+		return v
+
+	case "enum":
+		return elem
+
+	case "builtin":
+		v, ok := p.applyBuiltin(field.TypeRef.Name, elem, strict)
+		if !ok {
+			errs.AddFieldError(elemKey, "type", "expected "+field.TypeRef.Name+" value")
+			return elem
+		}
+		return v
+
+	case "type", "input":
+		td := p.schema.Types[field.TypeRef.Name]
+		if kind == "input" {
+			td = p.schema.Inputs[field.TypeRef.Name]
+		}
+		m, ok := elem.(map[string]any)
+		if !ok {
+			errs.AddFieldError(elemKey, "type", "expected object value")
+			return elem
+		}
+		nestedResult := make(map[string]any, len(m))
+		nestedErrs := NewValidationErrors()
+		p.walkTypeDef(td, m, nestedResult, nestedErrs, strict)
+		if nestedErrs.HasErrors() {
+			errs.AddNestedError(elemKey, nestedErrs)
+		}
+		return nestedResult
+
+	default:
+		return elem
+	}
 }
 
 func (p *Parser) applyCustomParse(scalar *ir.ScalarDef, value any) (any, []ValidationError) {

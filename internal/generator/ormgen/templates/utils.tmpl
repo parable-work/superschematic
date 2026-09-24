@@ -255,6 +255,26 @@ func marshalJSONFieldValue(value any) (any, error) {
 	}
 	return payload, nil
 }
+{{- if .HasArraysOfArrays }}
+
+// marshalArrayOfArraysFieldValue converts an array of arrays (T[][]) into
+// the form pgx sends to its JSONB column. A nil outer list is JSON null, as
+// every other nil JSON field value is. A nil inner list is written as [],
+// because inner lists are never null.
+func marshalArrayOfArraysFieldValue[T any](value [][]T) (any, error) {
+	if value == nil {
+		return marshalJSONFieldValue(value)
+	}
+	lists := make([][]T, len(value))
+	for i, list := range value {
+		if list == nil {
+			list = []T{}
+		}
+		lists[i] = list
+	}
+	return marshalJSONFieldValue(lists)
+}
+{{- end }}
 
 // unmarshalJSONFieldValue decodes a JSONB column payload into target.
 func unmarshalJSONFieldValue(raw []byte, target any) error {

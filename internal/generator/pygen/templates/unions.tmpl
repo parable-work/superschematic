@@ -26,7 +26,7 @@ from .types import (
         {{range $i, $type := .Types}}{{if $i}},
         {{end}}{{$type}}{{end}}
     ],
-    Field(discriminator={{printf "%q" .Discriminator}}),
+    Field(discriminator={{printf "%q" (pythonFieldName .Discriminator)}}),
 ]
 """
 {{if .Doc}}{{pythonComment .Doc}}{{else}}{{.Name}} discriminated union type{{end}}

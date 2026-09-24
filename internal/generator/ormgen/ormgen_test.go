@@ -19,81 +19,96 @@ const fixturesDir = "../../loader/tsreader/testdata/services"
 
 func generateFixtureDB(t *testing.T) *ORMOutput {
 	t.Helper()
+	return generateFixture(t, "fixture-db")
+}
 
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
+func generateFixture(t *testing.T, svc string) *ORMOutput {
+	t.Helper()
+
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, svc))
 	if err != nil {
-		t.Fatalf("load fixture-db: %v", err)
+		t.Fatalf("load %s: %v", svc, err)
 	}
 
 	output, err := Generate(schema, Options{
-		SchemaName:  "fixture-db",
-		ModulePath:  "example.com/schemas/orm/fixture-db",
-		TypesModule: "example.com/schemas/types/go/fixture-db",
+		SchemaName:  svc,
+		ModulePath:  "example.com/schemas/orm/" + svc,
+		TypesModule: "example.com/schemas/types/go/" + svc,
 		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 	if output == nil {
-		t.Fatal("expected ORM output for fixture-db")
+		t.Fatalf("expected ORM output for %s", svc)
 	}
 	return output
 }
 
-// TestWriteORMGolden generates the ORM module for the fixture-db service and
-// compares every emitted file against its golden copy. Regenerate with:
+// TestWriteORMGolden generates the ORM module for the fixture-db and
+// fixture-nested-arrays-db services and compares every emitted file against
+// its golden copy. Regenerate with:
 // go test ./internal/generator/ormgen -run TestWriteORMGolden -update
 func TestWriteORMGolden(t *testing.T) {
-	output := generateFixtureDB(t)
-
-	outDir := t.TempDir()
-	if err := WriteORM(output, outDir); err != nil {
-		t.Fatalf("write orm: %v", err)
-	}
-
-	files := []string{
+	common := []string{
 		"database.go", "interfaces.go", "query.go", "utils.go",
 		"go.mod", "README.md", "Makefile",
-		"repository_tenant.go", "repository_tenant_user.go",
 	}
+	for _, tc := range []struct {
+		svc          string
+		repositories []string
+	}{
+		{"fixture-db", []string{"repository_tenant.go", "repository_tenant_user.go"}},
+		{"fixture-nested-arrays-db", []string{"repository_board.go"}},
+	} {
+		t.Run(tc.svc, func(t *testing.T) {
+			output := generateFixture(t, tc.svc)
 
-	entries, err := os.ReadDir(outDir)
-	if err != nil {
-		t.Fatalf("read output dir: %v", err)
-	}
-	if len(entries) != len(files) {
-		var names []string
-		for _, e := range entries {
-			names = append(names, e.Name())
-		}
-		t.Errorf("expected %d output files, got %d: %v", len(files), len(entries), names)
-	}
-
-	goldenDir := filepath.Join("testdata", "golden", "fixture-db")
-	for _, name := range files {
-		got, err := os.ReadFile(filepath.Join(outDir, name))
-		if err != nil {
-			t.Fatalf("read generated %s: %v", name, err)
-		}
-
-		goldenPath := filepath.Join(goldenDir, name)
-		if *update {
-			if err := os.MkdirAll(goldenDir, 0o755); err != nil {
-				t.Fatalf("create golden dir: %v", err)
+			outDir := t.TempDir()
+			if err := WriteORM(output, outDir); err != nil {
+				t.Fatalf("write orm: %v", err)
 			}
-			if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
-				t.Fatalf("write golden %s: %v", name, err)
-			}
-			continue
-		}
 
-		want, err := os.ReadFile(goldenPath)
-		if err != nil {
-			t.Fatalf("read golden %s: %v", name, err)
-		}
-		if string(got) != string(want) {
-			t.Errorf("%s differs from golden (run with -update to accept)", name)
-		}
+			files := append(append([]string{}, common...), tc.repositories...)
+			entries, err := os.ReadDir(outDir)
+			if err != nil {
+				t.Fatalf("read output dir: %v", err)
+			}
+			if len(entries) != len(files) {
+				var names []string
+				for _, e := range entries {
+					names = append(names, e.Name())
+				}
+				t.Errorf("expected %d output files, got %d: %v", len(files), len(entries), names)
+			}
+
+			goldenDir := filepath.Join("testdata", "golden", tc.svc)
+			for _, name := range files {
+				got, err := os.ReadFile(filepath.Join(outDir, name))
+				if err != nil {
+					t.Fatalf("read generated %s: %v", name, err)
+				}
+
+				goldenPath := filepath.Join(goldenDir, name)
+				if *update {
+					if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+						t.Fatalf("create golden dir: %v", err)
+					}
+					if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
+						t.Fatalf("write golden %s: %v", name, err)
+					}
+					continue
+				}
+
+				want, err := os.ReadFile(goldenPath)
+				if err != nil {
+					t.Fatalf("read golden %s: %v", name, err)
+				}
+				if string(got) != string(want) {
+					t.Errorf("%s differs from golden (run with -update to accept)", name)
+				}
+			}
+		})
 	}
 }
 

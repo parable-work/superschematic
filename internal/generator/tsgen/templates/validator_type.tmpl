@@ -67,12 +67,26 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
         {{end}}
       }
     }
+    {{else if .IsArrayOfArrays}}
+    if (!Array.isArray(value.{{.TSName}})) addFieldError(errors, "{{.TSName}}", "array", "expected an array");
+    else value.{{.TSName}}.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) row.forEach((item, index) => validateNested(item, `{{.TSName}}[${rowIndex}][${index}]`));
+    });
     {{else if .IsArray}}
     if (!Array.isArray(value.{{.TSName}})) addFieldError(errors, "{{.TSName}}", "array", "expected an array");
     else value.{{.TSName}}.forEach((item, index) => validateNested(item, `{{.TSName}}[${index}]`));
     {{else}}
     validateNested(value.{{.TSName}}, "{{.TSName}}");
     {{end}}
+  }
+  {{end}}
+  {{if and .IsArrayOfArrays (not .IsScalar) (not (containsString $.EnumsUsed .Type))}}
+  if (Array.isArray(value.{{.TSName}})) {
+    value.{{.TSName}}.forEach((row, rowIndex) => {
+      if (!Array.isArray(row)) {
+        addFieldError(errors, `{{.TSName}}[${rowIndex}]`, "required", "inner list must be an array");
+      }
+    });
   }
   {{end}}
   {{if .IsScalar}}
@@ -95,6 +109,23 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
       }
       {{end}}
     }
+  }{{if .Required}} else {
+    addFieldError(errors, "{{.TSName}}", "required", "required field");
+  }{{end}}
+  {{else if .IsArrayOfArrays}}
+  if (Array.isArray(value.{{.TSName}})) {
+    value.{{.TSName}}.forEach((row, rowIndex) => {
+      if (!Array.isArray(row)) {
+        addFieldError(errors, `{{.TSName}}[${rowIndex}]`, "required", "inner list must be an array");
+        return;
+      }
+      row.forEach((item, index) => {
+        const [valid, fieldErrors] = validate{{.ScalarInfo.Symbol}}{{if .Required}}Required{{end}}(item);
+        if (!valid && fieldErrors) {
+          setFieldErrors(errors, `{{.TSName}}[${rowIndex}][${index}]`, fieldErrors);
+        }
+      });
+    });
   }{{if .Required}} else {
     addFieldError(errors, "{{.TSName}}", "required", "required field");
   }{{end}}
@@ -150,6 +181,23 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   }{{if .Required}} else {
     addFieldError(errors, "{{.TSName}}", "required", "required field");
   }{{end}}
+  {{else if .IsArrayOfArrays}}
+  if (Array.isArray(value.{{.TSName}})) {
+    value.{{.TSName}}.forEach((row, rowIndex) => {
+      if (!Array.isArray(row)) {
+        addFieldError(errors, `{{.TSName}}[${rowIndex}]`, "required", "inner list must be an array");
+        return;
+      }
+      row.forEach((item, index) => {
+        const [valid, fieldErrors] = validate{{.Type}}{{if .Required}}Required{{end}}(item);
+        if (!valid && fieldErrors) {
+          setFieldErrors(errors, `{{.TSName}}[${rowIndex}][${index}]`, fieldErrors);
+        }
+      });
+    });
+  }{{if .Required}} else {
+    addFieldError(errors, "{{.TSName}}", "required", "required field");
+  }{{end}}
   {{else if .IsArray}}
   if (Array.isArray(value.{{.TSName}})) {
     value.{{.TSName}}.forEach((item, index) => {
@@ -188,7 +236,61 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   {{end}}
   {{$field := .}}
   {{if hasFieldLevelValidations .}}
-  {{if .IsMap}}
+  {{if .IsArrayOfArrays}}
+  if (Array.isArray(value.{{.TSName}})) {
+    const fieldValue = value.{{.TSName}};
+    {{range listValidations .}}
+    {{if eq .Validator "listMin"}}
+    if (fieldValue.length < {{.Value}}) {
+      addFieldError(errors, "{{$field.TSName}}", "listMin", "{{escapeString .Message}}");
+    }
+    {{else}}
+    if (fieldValue.length > {{.Value}}) {
+      addFieldError(errors, "{{$field.TSName}}", "listMax", "{{escapeString .Message}}");
+    }
+    {{end}}
+    {{end}}
+    {{with elementValidations .}}
+    fieldValue.forEach((row, rowIndex) => {
+      if (!Array.isArray(row)) {
+        return;
+      }
+      row.forEach((item, index) => {
+        const path = `{{$field.TSName}}[${rowIndex}][${index}]`;
+        {{range .}}
+        {{if eq .Validator "minLength"}}
+        if (String(item).length < {{.Value}}) {
+          addFieldError(errors, path, "minLength", "{{escapeString .Message}}");
+        }
+        {{else if eq .Validator "maxLength"}}
+        if (String(item).length > {{.Value}}) {
+          addFieldError(errors, path, "maxLength", "{{escapeString .Message}}");
+        }
+        {{else if eq .Validator "pattern"}}
+        if (!(new RegExp({{jsonString .Value}})).test(String(item))) {
+          addFieldError(errors, path, "pattern", "{{escapeString .Message}}");
+        }
+        {{else if eq .Validator "min"}}
+        {
+          const numericValue = Number(item);
+          if (!Number.isNaN(numericValue) && numericValue < {{.Value}}) {
+            addFieldError(errors, path, "min", "{{escapeString .Message}}");
+          }
+        }
+        {{else if eq .Validator "max"}}
+        {
+          const numericValue = Number(item);
+          if (!Number.isNaN(numericValue) && numericValue > {{.Value}}) {
+            addFieldError(errors, path, "max", "{{escapeString .Message}}");
+          }
+        }
+        {{end}}
+        {{end}}
+      });
+    });
+    {{end}}
+  }
+  {{else if .IsMap}}
   if (value.{{.TSName}} !== null && value.{{.TSName}} !== undefined && typeof value.{{.TSName}} === 'object' && !Array.isArray(value.{{.TSName}})) {
     const fieldValue = value.{{.TSName}};
     {{range .Validations}}
@@ -609,6 +711,12 @@ export function parse{{.Type.Name}}FromJSON(input: unknown): {{.Type.Name}} {
         )
       : (obj.{{.TSName}} as unknown as Record<string, JSDate>{{if not .Required}} | null{{end}}),
     {{end}}
+    {{else if .IsArrayOfArrays}}
+    {{.TSName}}: Array.isArray(obj.{{.TSName}})
+      ? (obj.{{.TSName}} as unknown[]).map((row) =>
+          Array.isArray(row) ? row.map((item) => parse{{.ScalarInfo.Symbol}}FromLib(item as string) as JSDate) : (row as JSDate[])
+        )
+      : (obj.{{.TSName}} as JSDate[][]{{if not .Required}} | null{{end}}),
     {{else if .IsArray}}
     {{.TSName}}: Array.isArray(obj.{{.TSName}})
       ? (obj.{{.TSName}} as unknown[]).map((item) => parse{{.ScalarInfo.Symbol}}FromLib(item as string) as JSDate)
@@ -632,11 +740,17 @@ export function parse{{.Type.Name}}FromJSON(input: unknown): {{.Type.Name}} {
     {{.TSName}}: obj.{{.TSName}} != null
       ? Object.fromEntries(
           Object.entries(obj.{{.TSName}} as Record<string, unknown>).map(([k, v]) =>
-            [k, {{if .Required}}parse{{.Type}}FromJSON(v){{else}}v != null ? parse{{.Type}}FromJSON(v) : v{{end}}]
+            [k, {{if .Required}}parse{{.Type}}FromJSON(v){{else}}v != null ? parse{{.Type}}FromJSON(v) : null{{end}}]
           )
         )
       : (obj.{{.TSName}} as unknown as Record<string, {{.Type}}>{{if not .Required}} | null{{end}}),
     {{end}}
+    {{else if .IsArrayOfArrays}}
+    {{.TSName}}: Array.isArray(obj.{{.TSName}})
+      ? (obj.{{.TSName}} as unknown[]).map((row) =>
+          Array.isArray(row) ? row.map((item) => parse{{.Type}}FromJSON(item)) : (row as {{.Type}}[])
+        )
+      : (obj.{{.TSName}} as {{.Type}}[][]{{if not .Required}} | null{{end}}),
     {{else if .IsArray}}
     {{.TSName}}: Array.isArray(obj.{{.TSName}})
       ? (obj.{{.TSName}} as unknown[]).map((item) => parse{{.Type}}FromJSON(item))

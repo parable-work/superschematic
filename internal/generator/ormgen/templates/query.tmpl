@@ -326,7 +326,7 @@ type {{ .TypeName }}Filter struct {
 type {{ .TypeName }}Update struct {
 	{{- range .Fields }}
 	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) }}
-	{{ toGoName .Name }} *{{ if .IsMap }}map[string]{{ if .IsArray }}[]{{ end }}{{ if .NullableMapValues }}*{{ end }}{{ else if .IsArray }}[]{{ end }}{{ .GoType }}
+	{{ toGoName .Name }} *{{ .ValueGoType }}
 	{{- if not .IsRequired }}
 	{{ toGoName .Name }}SetNull bool
 	{{- end }}
