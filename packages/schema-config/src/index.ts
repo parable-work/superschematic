@@ -47,10 +47,25 @@ export type ApiOutputConfig = {
 
 export type SdkOutputConfig = Partial<Record<TargetLanguage, TargetOutputConfig>>;
 
+/**
+ * The DB kind's sql output. The DDL and the ORM are implied by the kind; this block places and owns the generated projection view migrations.
+ */
+export type SqlOutputConfig = {
+  /**
+   * Where the projection view migrations are written, relative to the service directory. Unset keeps them under <out>/sql/<service>/projections/migrations.
+   */
+  readonly migrationsDir?: string;
+  /**
+   * The Postgres role the migrations create the views as: SET ROLE around the view DDL and RESET ROLE after it, so the schema's default privileges for that role apply. The migration runner must be a member of the role. Unset creates the views as the runner.
+   */
+  readonly viewOwner?: string;
+};
+
 export type SchemaOutputs = {
   readonly types?: TypesOutputConfig;
   readonly api?: ApiOutputConfig;
   readonly sdk?: SdkOutputConfig;
+  readonly sql?: SqlOutputConfig;
 };
 
 export type SchemaConfig = {

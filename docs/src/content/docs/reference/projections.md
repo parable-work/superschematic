@@ -1,14 +1,16 @@
 ---
 title: Projection views
-description: Declare a read-only SQL view over DB tables with @projection, @join and @column, and what verification refuses.
+description: Declare a read-only SQL view over DB tables with @projection, @join and @column; what the sql generator writes for it, outputs.sql, and what verification refuses.
 sidebar:
   order: 3
 ---
 
 A projection is a read-only relation over tables of the same DB schema,
-declared once as a class and meant to be served as a Postgres view. A
-projection is never a table and never a language type: the table DDL, the
-ORM and the type generators do not emit it.
+declared once as a class. The `sql` generator writes the Postgres view,
+the migration that creates it, and an Arrow schema and docs file for its
+readers, all from that declaration. A projection is never a table and
+never a language type: the table DDL, the ORM and the type generators do
+not emit it.
 
 The three decorators come from `@superschematic/db` and are only allowed
 in DB schemas.
@@ -108,6 +110,83 @@ generator does not read the function's signature.
 A projection column carries only a name, a type, nullability and
 `@column`. Table decorators and wrappers (`@key`, `@unique`,
 `Relation<...>`, `Default<...>`, ...) are refused, and so is a map column.
+
+## What the sql generator writes
+
+For a DB service with projections, `superschematic build` writes, next to
+the table DDL in `<out>/sql/<service>/`:
+
+| File | What it is |
+| --- | --- |
+| `create.sql`, `drop.sql` | The view is created after the tables, in `CREATE SCHEMA IF NOT EXISTS "pool"`, and dropped before them. |
+| `<migrationsDir>/<stamp>_<pool>_<name>_projection.up.sql` | Creates the schema, drops the view if it exists and creates it. Re-runnable. |
+| `<migrationsDir>/<stamp>_<pool>_<name>_projection.down.sql` | Drops the view. |
+| `projections/<pool>.<name>.arrow.json` | The view's Arrow schema in arrow-rs serde form: one field per column with its Arrow type, nullability and metadata, and schema metadata naming the view and its settings. |
+| `projections/<pool>.<name>.docs.json` | The view's address, description, settings, collapse key and columns (source, scalar or enum, SQL and Arrow type, nullability, description), for a catalog page. |
+
+The view is created `WITH (security_barrier = true)`, so a function in a
+reader's query cannot observe rows the rules exclude. The view's comment
+and each column's comment come from the class and field comments. Column
+order is the declaration's and is the Arrow contract.
+
+A column's SQL type maps to Arrow as follows; any other type fails the
+build rather than being guessed:
+
+| SQL | Arrow |
+| --- | --- |
+| `UUID`, `TEXT`, `CITEXT`, `VARCHAR(n)`, `CHAR(n)`, `JSONB`, `JSON`, `LTREE` | `Utf8` |
+| `BIGINT` / `INTEGER` / `SMALLINT` | `Int64` / `Int32` / `Int16` |
+| `DOUBLE PRECISION`, `NUMERIC` / `REAL` | `Float64` / `Float32` |
+| `BOOLEAN` | `Boolean` |
+| `TIMESTAMPTZ` / `TIMESTAMP` | `Timestamp(Microsecond, "UTC")` / `Timestamp(Microsecond, None)` |
+| `DATE` / `TIME` / `BYTEA` | `Date32` / `Time64(Microsecond)` / `Binary` |
+| `T[]` | `List<item: T>` |
+
+### Arrow metadata
+
+Every key starts with the naming file's
+[`metadata_key_prefix`](/superschematic/reference/naming/#metadata_key_prefix)
+(`superschematic.` by default); the rest is fixed.
+
+| Key | On | Value |
+| --- | --- | --- |
+| `<prefix>projection.source` | every field | the `alias.field` the column reads, or `schema.function(args)` |
+| `<prefix>scalar.canonical_name`, `.flat_name`, `.primitive`, `.sql_type`, `.json_schema_type`, `.format`, `.max_length`, `.min_length`, `.pattern` | scalar fields | the scalar's identity and constraints; the last five only when set |
+| `<prefix>enum.name`, `<prefix>enum.values` | enum fields | the enum and its serialized members, comma-separated, resolved in dependency schemas too |
+| `<prefix>projection.pool`, `.name`, `.relation`, `.view`, `.schema`, `.type`, `.migration` | schema | where the view lives and which declaration it came from |
+| `<prefix>projection.settings` | schema | every setting the view reads, comma-separated, in first-use order |
+| `<prefix>projection.optional_settings` | schema | the subset a reader may leave unset |
+| `<prefix>projection.rows` | schema | `one` when the view collapses, `all` otherwise |
+
+A reader sets every required setting (`SET LOCAL` or `set_config(name,
+value, true)` in the scan's transaction) before it reads the view.
+
+## `outputs.sql`
+
+The DB kind's `sql` output has no switch; the DDL is implied by the kind.
+Its `outputs.sql` block places and owns the projection migrations:
+
+```ts
+export default defineConfig({
+  name: "shop-db",
+  kind: SchemaKind.DB,
+  outputs: {
+    sql: { migrationsDir: "migrations", viewOwner: "shop_view_owner" }
+  }
+});
+```
+
+| Key | Meaning |
+| --- | --- |
+| `migrationsDir` | Where the migration pairs are written, relative to the service directory, so they land next to the service's hand-written migrations. Unset keeps them under `<out>/sql/<service>/projections/migrations`. The directory is not build-cache output: commit what the build writes there. |
+| `viewOwner` | The Postgres role the up migration creates the view as: `SET ROLE <viewOwner>` before the view DDL and `RESET ROLE` after it, so the schema's default privileges for that role grant readers their access. The migration runner must be a member of the role, and the role needs `CREATE` on the pool schema and `SELECT` on the tables the view reads. A lowercase identifier. Unset creates the view as the runner. `create.sql` and the down migration never switch roles. |
+
+An unknown key in the block fails the build.
+
+Replacing a view drops the grants on it. Roles, grants on the pool schema,
+default privileges and row-level security on the source tables stay with
+the service's hand-written migrations; the generator writes the view and
+its rules only.
 
 ## What verification refuses
 

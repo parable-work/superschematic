@@ -1,0 +1,116 @@
+{
+  "pool": "app",
+  "name": "preferences",
+  "relation": "app.preferences",
+  "type": "AppPreference",
+  "schema": "fixture-projection",
+  "owner": "src/app-preference.projection.schema.ts",
+  "description": "Preference values visible to the current account, channel and user: app and team rows for the selected channel, and user rows only for the user whose session runs the query. App rows resolve by the branch or the released commit the caller names (either setting may be left unset), and one row per slot survives: user over team over app, and a branch row before the released commit's.",
+  "view": "app.preferences",
+  "migration": "20260902120000",
+  "settings": [
+    "app.account_id",
+    "app.channel_id",
+    "app.user_id",
+    "app.branch_id",
+    "app.commit_id"
+  ],
+  "optionalSettings": [
+    "app.branch_id",
+    "app.commit_id"
+  ],
+  "collapseBy": [
+    "base.slotKey"
+  ],
+  "columns": [
+    {
+      "name": "slot_key",
+      "source": "base.slotKey",
+      "scalar": "Identity.UUID",
+      "sqlType": "UUID",
+      "arrowType": "Utf8",
+      "nullable": false,
+      "description": "Stable identity of the slot the value belongs to."
+    },
+    {
+      "name": "handle",
+      "source": "base.handle",
+      "scalar": "Identity.Slug",
+      "sqlType": "CITEXT",
+      "arrowType": "Utf8",
+      "nullable": false
+    },
+    {
+      "name": "scope",
+      "source": "base.scope",
+      "enum": "PreferenceScope",
+      "sqlType": "TEXT",
+      "arrowType": "Utf8",
+      "nullable": false
+    },
+    {
+      "name": "user_id",
+      "source": "base.userId",
+      "scalar": "Identity.UUID",
+      "sqlType": "UUID",
+      "arrowType": "Utf8",
+      "nullable": true
+    },
+    {
+      "name": "channel_id",
+      "source": "base.channel",
+      "scalar": "Identity.UUID",
+      "sqlType": "UUID",
+      "arrowType": "Utf8",
+      "nullable": false
+    },
+    {
+      "name": "channel_handle",
+      "source": "channel.handle",
+      "scalar": "Identity.Slug",
+      "sqlType": "CITEXT",
+      "arrowType": "Utf8",
+      "nullable": false
+    },
+    {
+      "name": "branch_name",
+      "source": "branch.name",
+      "scalar": "Identity.Name",
+      "sqlType": "VARCHAR(80)",
+      "arrowType": "Utf8",
+      "nullable": true
+    },
+    {
+      "name": "value",
+      "source": "base.value",
+      "scalar": "Generic.JSON",
+      "sqlType": "JSONB",
+      "arrowType": "Utf8",
+      "nullable": false
+    },
+    {
+      "name": "revision",
+      "source": "base.revision",
+      "scalar": "Generic.Int64",
+      "sqlType": "BIGINT",
+      "arrowType": "Int64",
+      "nullable": false
+    },
+    {
+      "name": "tags",
+      "source": "base.tags",
+      "scalar": "Identity.Slug",
+      "sqlType": "CITEXT[]",
+      "arrowType": "{\"List\":{\"data_type\":\"Utf8\",\"dict_id\":0,\"dict_is_ordered\":false,\"metadata\":{},\"name\":\"item\",\"nullable\":true}}",
+      "nullable": false
+    },
+    {
+      "name": "updated_at",
+      "source": "base.updatedAt",
+      "scalar": "Temporal.DateTime",
+      "sqlType": "TIMESTAMPTZ",
+      "arrowType": "{\"Timestamp\":[\"Microsecond\",\"UTC\"]}",
+      "nullable": true
+    }
+  ]
+}
