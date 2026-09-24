@@ -147,6 +147,23 @@ of a generated artifact is always listed here with the bump it requires.
   (`registry.OpenAPIDocsKey`), which an OpenAPI hook can rename. Operations
   without `@docs` are unchanged. The TypeScript writer emits the decorator.
   The acme example restricts audiences and writes `x-acme-docs`. Minor.
+- Projection views: `@projection<Source>({ pool, name, migration, where?,
+  collapse? })` and `@join<Table>(alias, on, kind?)` on a class and
+  `@column("alias.field" | { function, args })` on its fields, from
+  `@superschematic/db`, declare a read-only relation over tables of the same
+  DB schema. `where` takes setting bindings (optional ones too), `anyOf`
+  alternatives, `isNull`/`notNull`/`equals` literal rules and function
+  rules, each with an optional `when` guard; `collapse` keeps one row per
+  key. The IR gains the `Projection` role, `TypeDef.projection`,
+  `FieldDef.projectedFrom` and `FieldDef.projectedFunction`
+  (`ir/projection.go`) and `Schema.Projections()`; the schema-file JSON
+  Schema accepts them and the TypeScript writer emits them. Verification
+  checks every reference, column type, rule shape and name for every
+  frontend; it requires no particular rule, which a deployment adds with
+  `RegisterCheck`. The type, ORM and table DDL generators skip projections. A
+  core `DecoratorSpec` can now take class type arguments, which the
+  TypeScript frontend resolves to class names and passes to `Apply` ahead of
+  the value arguments (`DecoratorSpec.TypeArgs`). Minor.
 
 ### Changed
 

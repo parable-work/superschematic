@@ -13,8 +13,8 @@ import (
 func TestNewRegistersCoreDecoratorsForEveryWalkerCase(t *testing.T) {
 	reg := New(naming.Naming{})
 	want := map[DecoratorTarget][]string{
-		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "versioned", "index"},
-		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "virtual", "sourceMustProject"},
+		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "versioned", "index", "projection", "join"},
+		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "virtual", "sourceMustProject", "column"},
 		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout"},
 		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "docs"},
 	}
