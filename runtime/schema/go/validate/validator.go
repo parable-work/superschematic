@@ -222,7 +222,10 @@ func (v *Validator) validateSingleField(field *ir.FieldDef, key, kind string, re
 	}
 }
 
-// validateArrayField validates an array field, applying per-element validation.
+// validateArrayField validates an array field, applying per-element
+// validation at key[i]. For an array of arrays (T[][]) each element must be
+// a list, never null, reported at key[i], and each inner element is
+// validated at key[i][j].
 func (v *Validator) validateArrayField(field *ir.FieldDef, key, kind string, required bool, value any, errs ValidationErrors) {
 	arr, ok := value.([]any)
 	if !ok {
@@ -231,57 +234,76 @@ func (v *Validator) validateArrayField(field *ir.FieldDef, key, kind string, req
 
 	for i, elem := range arr {
 		elemKey := fmt.Sprintf("%s[%d]", key, i)
-
-		if elem == nil {
-			if field.TypeRef.ElemNonNull {
-				errs.AddFieldError(elemKey, "required", "required field")
-			}
+		if !field.TypeRef.IsArrayOfArrays {
+			v.validateArrayElem(field, elemKey, kind, required, elem, errs)
 			continue
 		}
+		inner, isList := elem.([]any)
+		if elem == nil || (isList && inner == nil) {
+			errs.AddFieldError(elemKey, "required", "required field")
+			continue
+		}
+		if !isList {
+			errs.AddFieldError(elemKey, "type", "expected array value")
+			continue
+		}
+		for j, innerElem := range inner {
+			v.validateArrayElem(field, fmt.Sprintf("%s[%d]", elemKey, j), kind, required, innerElem, errs)
+		}
+	}
+}
 
-		switch kind {
-		case "scalar":
-			scalar := v.schema.Scalars[field.TypeRef.Name]
-			var elemErrs []ValidationError
-			if required {
-				elemErrs = v.validateScalarRequired(scalar, elem)
-			} else {
-				elemErrs = v.validateScalarValue(scalar, elem)
-			}
-			elemErrs = append(elemErrs, validateFieldNumericConstraints(field, elem)...)
-			elemErrs = append(elemErrs, v.validateFieldStringConstraints(field, elem)...)
-			errs.SetFieldErrors(elemKey, elemErrs)
+// validateArrayElem validates one element of an array field at elemKey.
+func (v *Validator) validateArrayElem(field *ir.FieldDef, elemKey, kind string, required bool, elem any, errs ValidationErrors) {
+	if elem == nil {
+		if field.TypeRef.ElemNonNull {
+			errs.AddFieldError(elemKey, "required", "required field")
+		}
+		return
+	}
 
-		case "enum":
-			enum := v.schema.Enums[field.TypeRef.Name]
-			elemErrs := v.validateEnumValue(enum, elem)
-			errs.SetFieldErrors(elemKey, elemErrs)
+	switch kind {
+	case "scalar":
+		scalar := v.schema.Scalars[field.TypeRef.Name]
+		var elemErrs []ValidationError
+		if required {
+			elemErrs = v.validateScalarRequired(scalar, elem)
+		} else {
+			elemErrs = v.validateScalarValue(scalar, elem)
+		}
+		elemErrs = append(elemErrs, validateFieldNumericConstraints(field, elem)...)
+		elemErrs = append(elemErrs, v.validateFieldStringConstraints(field, elem)...)
+		errs.SetFieldErrors(elemKey, elemErrs)
 
-		case "type":
-			td := v.schema.Types[field.TypeRef.Name]
-			if m, ok := elem.(map[string]any); ok {
-				nested := v.validateTypeDef(td, m)
-				if nested.HasErrors() {
-					errs.AddNestedError(elemKey, nested)
-				}
-			}
+	case "enum":
+		enum := v.schema.Enums[field.TypeRef.Name]
+		elemErrs := v.validateEnumValue(enum, elem)
+		errs.SetFieldErrors(elemKey, elemErrs)
 
-		case "input":
-			td := v.schema.Inputs[field.TypeRef.Name]
-			if m, ok := elem.(map[string]any); ok {
-				nested := v.validateTypeDef(td, m)
-				if nested.HasErrors() {
-					errs.AddNestedError(elemKey, nested)
-				}
+	case "type":
+		td := v.schema.Types[field.TypeRef.Name]
+		if m, ok := elem.(map[string]any); ok {
+			nested := v.validateTypeDef(td, m)
+			if nested.HasErrors() {
+				errs.AddNestedError(elemKey, nested)
 			}
+		}
 
-		case "builtin":
-			for _, elemErr := range validateFieldNumericConstraints(field, elem) {
-				errs.AddFieldError(elemKey, elemErr.Validator, elemErr.Message)
+	case "input":
+		td := v.schema.Inputs[field.TypeRef.Name]
+		if m, ok := elem.(map[string]any); ok {
+			nested := v.validateTypeDef(td, m)
+			if nested.HasErrors() {
+				errs.AddNestedError(elemKey, nested)
 			}
-			for _, elemErr := range v.validateFieldStringConstraints(field, elem) {
-				errs.AddFieldError(elemKey, elemErr.Validator, elemErr.Message)
-			}
+		}
+
+	case "builtin":
+		for _, elemErr := range validateFieldNumericConstraints(field, elem) {
+			errs.AddFieldError(elemKey, elemErr.Validator, elemErr.Message)
+		}
+		for _, elemErr := range v.validateFieldStringConstraints(field, elem) {
+			errs.AddFieldError(elemKey, elemErr.Validator, elemErr.Message)
 		}
 	}
 }

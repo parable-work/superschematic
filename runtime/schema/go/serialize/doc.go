@@ -8,7 +8,8 @@
 //   - Looks up declared fields by JSONTag, falling back to Name.
 //   - Recurses into nested types and arrays.
 //   - Normalizes nil slices to empty slices so JSON renders `[]` instead of
-//     `null` for list-typed fields (matching generated MarshalJSON).
+//     `null` for list-typed fields and for the inner lists of an array of
+//     arrays (matching generated MarshalJSON).
 //   - Optionally zeroes @secret fields via [WithMaskSecrets].
 //
 // Errors are returned in the same [scalarlib.ValidationErrors] shape that
