@@ -3,20 +3,11 @@
 package orm
 
 import (
-{{- if .HasGenericJSON }}
-	"bytes"
-{{- end }}
 	"context"
-{{- if .HasGenericJSON }}
-	"database/sql"
-{{- end }}
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-{{- if .HasGenericJSON }}
-	"reflect"
-{{- end }}
 	"strings"
 	"sync"
 )
@@ -255,7 +246,6 @@ func marshalJSONFieldValue(value any) (any, error) {
 	}
 	return payload, nil
 }
-{{- if .HasArraysOfArrays }}
 
 // marshalArrayOfArraysFieldValue converts an array of arrays (T[][]) into
 // the form pgx sends to its JSONB column. A nil outer list is JSON null, as
@@ -274,7 +264,6 @@ func marshalArrayOfArraysFieldValue[T any](value [][]T) (any, error) {
 	}
 	return marshalJSONFieldValue(lists)
 }
-{{- end }}
 
 // unmarshalJSONFieldValue decodes a JSONB column payload into target.
 func unmarshalJSONFieldValue(raw []byte, target any) error {
@@ -283,46 +272,6 @@ func unmarshalJSONFieldValue(raw []byte, target any) error {
 	}
 	return json.Unmarshal(raw, target)
 }
-
-{{- if .HasGenericJSON }}
-// unmarshalGenericJSONFieldValue stores a Generic.JSON column value and keeps
-// the JSON null token as a value: raw "null" is a present JSON null, while
-// SQL NULL never reaches this helper. target is *T for a required field and
-// **T for a nullable one, where T is the scalar's byte-slice type; a
-// nullable target gets a fresh T, so JSON null is not collapsed into a nil
-// pointer. A T that implements sql.Scanner decodes itself; otherwise the
-// compacted JSON text is stored.
-func unmarshalGenericJSONFieldValue(raw []byte, target any) error {
-	if len(raw) == 0 {
-		return nil
-	}
-	if scanner, ok := target.(sql.Scanner); ok {
-		return scanner.Scan(raw)
-	}
-	targetValue := reflect.ValueOf(target)
-	if targetValue.Kind() != reflect.Pointer || targetValue.IsNil() {
-		return fmt.Errorf("unsupported Generic.JSON decode target %T", target)
-	}
-	elem := targetValue.Elem()
-	if elem.Kind() == reflect.Pointer {
-		value := reflect.New(elem.Type().Elem())
-		if err := unmarshalGenericJSONFieldValue(raw, value.Interface()); err != nil {
-			return err
-		}
-		elem.Set(value)
-		return nil
-	}
-	if elem.Kind() != reflect.Slice || elem.Type().Elem().Kind() != reflect.Uint8 {
-		return fmt.Errorf("unsupported Generic.JSON decode target %T", target)
-	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, raw); err != nil {
-		return fmt.Errorf("decode Generic.JSON: %w", err)
-	}
-	elem.SetBytes(append([]byte(nil), compact.Bytes()...))
-	return nil
-}
-{{- end }}
 
 // validateFields checks if all requested fields are in the allowed list.
 func validateFields(fields []string, allowedFields map[string]bool) error {

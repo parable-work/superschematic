@@ -351,6 +351,9 @@ of a generated artifact is always listed here with the bump it requires.
 - Rust types render a list of lists as `Vec<Vec<T>>` (`Option<Vec<Vec<T>>>`
   when optional) with the serde attributes of `Vec<T>`; a null inner list
   fails to decode. Minor.
+- Arrays of arrays in SQL and the Go ORM: a `T[][]` column is `JSONB`,
+  never a native array, and the ORM writes it through its JSON codec with
+  nil inner lists stored as `[]`. Minor.
 
 ### Changed
 
