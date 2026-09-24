@@ -180,14 +180,14 @@ internal link or a missing sidebar page fails the pull request instead of
 waiting for the first tag. The release job still deploys to GitHub Pages
 once the repository is public; the CI job does not deploy.
 
-## D10. Mechanisms in the core, a distribution's policy in its extension
+## D10. Mechanisms in the core; a distribution's names in its naming file, its policy in its extension
 
 Three features are expected to be ported from a distribution that built
 them on the source tree: SQL projection views, MCP tool manifests generated
 from operations, and documentation decorators on operations and fields.
 All three are now in the core; the status paragraph at the end of this
-entry records how each policy is registered. This entry is the rule each
-port follows.
+entry records how each distribution-specific piece is expressed. This
+entry is the rule each port follows.
 
 The generic mechanism goes into the core:
 
@@ -200,41 +200,55 @@ The generic mechanism goes into the core:
   write typed IR fields, which OpenAPI, the SDKs and the tool manifests
   read.
 
-A distribution's policy on top of a mechanism is registered by its
-extension, never built into the core:
+What a distribution adds on top of a mechanism is one of two things, and
+each has its own place.
+
+A name belongs in the naming file. A name is a string the core writes into
+generated output where a distribution needs its own: it has no rule to run
+and no schema to inspect, so it is a naming-file key with the core's value
+as the default, next to the package, module and meta-schema names the
+naming file already carries (D7, D8). The ports met two:
+
+- the prefix of metadata keys: `metadata_key_prefix` (default
+  `superschematic.`) prefixes every key of the projection Arrow schemas'
+  metadata;
+- the prefix of vendor-extension keys in emitted documents (the core's own
+  is `x-superschematic`, D8). It has no naming key yet. Until it does, a
+  distribution renames the core's vendor keys with an OpenAPI or tool hook,
+  as acme does (`docs/extension-model.md`, section 11).
+
+A rule belongs in the extension. A rule inspects schemas or edits output
+by the distribution's policy, and the core gets no switch or literal for
+it:
 
 - row predicates every view must carry;
-- prefixes required on metadata keys;
-- prefixes of vendor-extension keys in emitted documents (the core's own
-  key is `x-superschematic`, D8);
 - which schemas must declare tools;
 - validation of icons against an icon set.
 
-The core gets no switch, naming-file key or literal for any of these. A
-policy's settings go in the extension's `[extension.<name>]` table. The
+A rule's settings go in the extension's `[extension.<name>]` table. The
 existing seams carry most of it: `KindSpec.Verify` on a kind the extension
 registers, a decorator from the extension's own package that writes its
 `extensions.<name>` slot, and a generator appended to the core kinds.
 Where no seam reaches, the port adds a generic registry seam rather than a
-policy option. A rule over core-kind schemas is the known case: an
-extension cannot attach `Verify` to a kind it did not register
-(`docs/extension-model.md`, section 11).
+policy option.
+
+D11 is the one name registered with a policy instead of set in the naming
+file: the MCP invocation policy key travels with its values and default,
+because the loader needs all three to accept and fill in a tool's policy.
 
 A port is done when the mechanism works and is tested with no extension
-linked, and the policy that shipped with the source implementation is
-expressed as registrations in an extension, with a test that adds one
-policy without a core edit.
+linked, and what shipped with the source implementation is expressed as
+naming keys and extension registrations, with a test that adds one rule
+without a core edit.
 
 Status: the ports added three generic seams, `RegisterCheck` for a rule
 over core-kind schemas and `RegisterOpenAPIHook` and `RegisterToolHook` for
-vendor keys in emitted documents (`docs/extension-model.md`, sections 3.12
-to 3.14). The acme example registers a policy over each mechanism:
-`acmeProjectionScope` requires a scoped row rule on every view,
-`acmeToolsClassified` requires `@mcp` on its API, `acmeIcons` checks icons
-against its set, and `acmeDocsKey` and `acmeTools` write its own vendor
-keys. One item departs from the rule above: the prefix of the metadata keys
-in the projection Arrow schemas is the naming key `metadata_key_prefix`
-(default `superschematic.`), not an extension registration.
+edits to emitted documents (`docs/extension-model.md`, sections 3.12 to
+3.14), and one naming key, `metadata_key_prefix`. The acme example
+expresses each piece: `acmeProjectionScope` requires a scoped row rule on
+every view, `acmeToolsClassified` requires `@mcp` on its API, `acmeIcons`
+checks icons against its set, `acmeDocsKey` and `acmeTools` write its own
+vendor keys, and its naming file sets `metadata_key_prefix`.
 
 ## D11. The MCP invocation policy is core, with a key an extension renames
 

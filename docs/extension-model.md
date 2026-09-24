@@ -920,7 +920,8 @@ is given.
 The core stays provider-neutral (`CONTRIBUTING.md`, "The core stays
 provider-neutral"). A surface that only one deployment needs belongs in an
 extension. D10 in `docs/DECISIONS.md` applies that rule to features that
-have a generic mechanism and a distribution-specific policy.
+have a generic mechanism and distribution-specific names or policy: names
+go in the naming file, rules in the extension.
 
 ## 10. Worked example and acceptance
 
@@ -1026,6 +1027,12 @@ a candidate for a change with its own test.
    output key and does not carry its `OutputSchema`, so an editor that
    validates against it does not catch a misspelt extension key or a bad
    section. The build does.
+8. D10 puts a distribution's names in the naming file, but the prefix of
+   the core's vendor-extension keys has no naming key. A distribution
+   renames the OpenAPI and tool document keys (`x-superschematic-docs`,
+   `x-superschematic-scalar` and the tool `_meta` keys) with
+   `RegisterOpenAPIHook` and `RegisterToolHook` (sections 3.13 and 3.14);
+   the `x-superschematic` key of `values-schema.json` has no seam.
 
 ## 12. References
 
