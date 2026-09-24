@@ -320,6 +320,9 @@ of a generated artifact is always listed here with the bump it requires.
   arrays of arrays yet", and `apigen.Param` and `apigen.EndpointInfo`
   carry `IsArrayOfArrays` / `OutputIsArrayOfArrays` for the SDK
   generators. Minor.
+- Rust types render a list of lists as `Vec<Vec<T>>` (`Option<Vec<Vec<T>>>`
+  when optional) with the serde attributes of `Vec<T>`; a null inner list
+  fails to decode. Minor.
 
 ### Changed
 
