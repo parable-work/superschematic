@@ -472,5 +472,10 @@ of a generated artifact is always listed here with the bump it requires.
   of a nested type returned a null or absent entry as is, typed `unknown`,
   so the package did not type-check against the map's `T | null` values.
   It now maps such an entry to `null`. Patch.
+- Python types: a discriminated union whose discriminator is not already
+  snake_case (`eventKind`) named it as written in
+  `Field(discriminator=...)`. Pydantic resolves that name against the
+  members' Python field names (`event_kind`), so importing the package
+  failed. The union now names the Python field. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main
