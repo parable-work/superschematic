@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
@@ -118,6 +119,92 @@ func TestGeneratedSDKCompiles(t *testing.T) {
 	}
 
 	if err := CompileSDK(sdkDir, filepath.Join(tempRoot, "types", "typescript", "fixture-api")); err != nil {
-		t.Errorf("generated SDK does not type-check: %v", err)
+		t.Fatalf("generated SDK does not type-check: %v", err)
+	}
+	typecheckTools(t, bunPath, sdkDir)
+}
+
+// typecheckTools runs tsc over tools/index.ts, which the SDK package's own
+// build leaves out.
+func typecheckTools(t *testing.T, bunPath, sdkDir string) {
+	t.Helper()
+	tools := exec.Command(bunPath, "x", "tsc", "--noEmit", "--strict", "--skipLibCheck",
+		"--target", "ES2020", "--module", "ESNext", "--moduleResolution", "bundler",
+		filepath.Join("tools", "index.ts"))
+	tools.Dir = sdkDir
+	if out, err := tools.CombinedOutput(); err != nil {
+		t.Errorf("tools/index.ts does not type-check: %v\n%s", err, out)
+	}
+}
+
+// TestGeneratedMCPToolsCompile type-checks the fixture-mcp SDK, whose
+// tools/index.ts carries visible, hidden and unclassified MCP records and
+// replay contracts, as the core writes it and as a tool hook with its own
+// keys leaves it.
+func TestGeneratedMCPToolsCompile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	bunPath, err := exec.LookPath("bun")
+	if err != nil {
+		requireOrSkipTSTooling(t, fmt.Sprintf("bun not available: %v", err))
+	}
+	paths := testpaths.Local(t)
+
+	for _, tc := range []struct {
+		name  string
+		hooks []apigen.ToolHook
+	}{
+		{name: "core keys"},
+		{name: "hook keys", hooks: []apigen.ToolHook{acmeStyleHook}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tempRoot, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatalf("resolve temp dir: %v", err)
+			}
+			schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-mcp"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tsOutput, err := tsgen.Generate(schema, tsgen.Options{SchemaName: "fixture-mcp", Clock: mcpClock})
+			if err != nil {
+				t.Fatalf("tsgen.Generate: %v", err)
+			}
+			typesDir := filepath.Join(tempRoot, "types", "typescript", "fixture-mcp")
+			if err := tsgen.SetScalarLibSpec(tsOutput, paths, typesDir); err != nil {
+				t.Fatal(err)
+			}
+			if err := tsgen.WriteTypes(tsOutput, typesDir); err != nil {
+				t.Fatal(err)
+			}
+			if err := tsgen.WriteWorkspaceRoot(filepath.Dir(typesDir), naming.Naming{}); err != nil {
+				t.Fatal(err)
+			}
+			install := exec.Command(bunPath, "install")
+			install.Dir = typesDir
+			if out, err := install.CombinedOutput(); err != nil {
+				requireOrSkipTSTooling(t, fmt.Sprintf("bun install failed for types fixture-mcp (likely offline): %v\n%s", err, out))
+			}
+			build := exec.Command(bunPath, "x", "tsc")
+			build.Dir = typesDir
+			if out, err := build.CombinedOutput(); err != nil {
+				t.Fatalf("types package fixture-mcp does not type-check: %v\n%s", err, out)
+			}
+
+			apiOutput, parseable := loadMCPFixture(t, tc.hooks...)
+			sdkOutput, err := Generate(apiOutput, parseable, mcpClock)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			sdkDir := filepath.Join(tempRoot, "sdk", "typescript", "fixture-mcp")
+			if err := WriteSDKWithTools(sdkOutput, apiOutput, sdkDir, mcpClock); err != nil {
+				t.Fatalf("WriteSDKWithTools: %v", err)
+			}
+			if err := CompileSDK(sdkDir, typesDir); err != nil {
+				t.Fatalf("generated SDK does not type-check: %v", err)
+			}
+			typecheckTools(t, bunPath, sdkDir)
+		})
 	}
 }

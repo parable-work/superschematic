@@ -106,6 +106,7 @@ var symbolPackages = map[string]string{
 	"Validate": "@superschematic/schema", "Secret": "@superschematic/schema", "trait": "@superschematic/schema",
 	"source": "@superschematic/schema", "temporalFormat": "@superschematic/schema", "virtual": "@superschematic/schema",
 	"denyUnknownFields": "@superschematic/schema", "strictJSON": "@superschematic/schema",
+	"purpose": "@superschematic/schema",
 	// jsonField is exported by both @superschematic/schema and @superschematic/db; emit the
 	// @superschematic/schema import so General schemas (which do not stage @superschematic/db)
 	// round-trip.
@@ -123,6 +124,7 @@ var symbolPackages = map[string]string{
 	"requirePermission": "@superschematic/api", "rest": "@superschematic/api",
 	"timeout": "@superschematic/api", "uiHidden": "@superschematic/api",
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
+	"mcp": "@superschematic/api",
 	// @superschematic/schema-config
 	"envVars": "@superschematic/schema-config",
 }
@@ -139,8 +141,9 @@ func (e *emitter) use(symbol string) string {
 }
 
 // useAs records an aliased import of symbol from the declaring package pkg
-// and returns the alias. @superschematic/api and @superschematic/schema both
-// export docs; the aliases keep one file that uses both unambiguous.
+// and returns the alias. @superschematic/api (operations) and
+// @superschematic/schema (fields) both export docs and icon; the aliases
+// keep a file that uses both unambiguous.
 func (e *emitter) useAs(pkg, symbol, alias string) string {
 	e.importSymbol(naming.Active().Specifier(pkg), symbol+" as "+alias)
 	return alias

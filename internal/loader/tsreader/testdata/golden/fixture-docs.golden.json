@@ -25,6 +25,9 @@
         },
         {
           "name": "totalCents",
+          "title": "Total",
+          "purpose": "The order total in **cents**, tax included.",
+          "icon": "receipt",
           "typeRef": {
             "name": "number"
           },
@@ -68,7 +71,17 @@
             "lifecycle": "active",
             "visibility": "public",
             "audience": "shoppers",
-            "mappingStatus": "mapped"
+            "mappingStatus": "mapped",
+            "useWhen": "Use when you have an order identifier.",
+            "doNotUseWhen": "Do not use to list orders; call listOrders.",
+            "success": "Returns the order with its total.",
+            "errors": [
+              {
+                "code": "order_not_found",
+                "description": "No order has that identifier.",
+                "commonCorrection": "Take the identifier from a listOrders result."
+              }
+            ]
           },
           "typeRef": {
             "name": "Order"

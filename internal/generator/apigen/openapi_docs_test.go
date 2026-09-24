@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,20 +12,22 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
-func generateDocsFixtureAPI(t *testing.T) *apigen.APIOutput {
+func generateDocsFixtureAPI(t *testing.T, hooks ...apigen.OpenAPIHook) *apigen.APIOutput {
 	t.Helper()
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-docs"))
 	if err != nil {
 		t.Fatalf("load fixture-docs: %v", err)
 	}
 	output, err := apigen.Generate(schema, apigen.Options{
-		Provider:    sessionauth.Provider{},
-		SchemaName:  "fixture-docs",
-		ModulePath:  "example.com/schemas/api/fixture-docs",
-		TypesModule: "example.com/schemas/types/go/fixture-docs",
-		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		Provider:     sessionauth.Provider{},
+		SchemaName:   "fixture-docs",
+		ModulePath:   "example.com/schemas/api/fixture-docs",
+		TypesModule:  "example.com/schemas/types/go/fixture-docs",
+		Clock:        codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		OpenAPIHooks: hooks,
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -71,14 +74,17 @@ func TestOpenAPIUsesOperationDocs(t *testing.T) {
 		"title": "Get an order", "description": "Returns one order by its identifier.",
 		"capability": "orders.get", "lifecycle": "active", "visibility": "public",
 		"audience": "shoppers", "mappingStatus": "mapped",
+		"useWhen":      "Use when you have an order identifier.",
+		"doNotUseWhen": "Do not use to list orders; call listOrders.",
+		"success":      "Returns the order with its total.",
+		"errors": []any{map[string]any{
+			"code":             "order_not_found",
+			"description":      "No order has that identifier.",
+			"commonCorrection": "Take the identifier from a listOrders result.",
+		}},
 	}
-	if len(docs) != len(want) {
-		t.Errorf("getOrder docs = %v, want %v", docs, want)
-	}
-	for key, value := range want {
-		if docs[key] != value {
-			t.Errorf("getOrder docs %s = %v, want %v", key, docs[key], value)
-		}
+	if !reflect.DeepEqual(docs, want) {
+		t.Errorf("getOrder docs = %#v\nwant %#v", docs, want)
 	}
 
 	list := openAPIOperation(t, spec, "/api/orders", "get")
@@ -122,5 +128,19 @@ func TestOpenAPIDocsGolden(t *testing.T) {
 	}
 	if string(want) != output.OpenAPISpecRaw {
 		t.Fatalf("OpenAPI document changed; run with -update and review the diff\ngot:\n%s", output.OpenAPISpecRaw)
+	}
+}
+
+// TestOpenAPIDocsSurviveAHookByteForByte: the docs record, errors list
+// included, is built from maps, so a hook that edits nothing gives the same
+// document a run without hooks does.
+func TestOpenAPIDocsSurviveAHookByteForByte(t *testing.T) {
+	plain := generateDocsFixtureAPI(t)
+	hooked := generateDocsFixtureAPI(t, apigen.OpenAPIHook{
+		Name: "noop",
+		Edit: func(*ir.Schema, map[string]any) error { return nil },
+	})
+	if hooked.OpenAPISpecRaw != plain.OpenAPISpecRaw {
+		t.Fatalf("a hook that edits nothing changed the document:\n%s", hooked.OpenAPISpecRaw)
 	}
 }

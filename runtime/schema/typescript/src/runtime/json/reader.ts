@@ -314,6 +314,8 @@ function parseFieldDef(
     );
   }
   const title = asString(field.title);
+  const purpose = asString(field["x-purpose"]);
+  const icon = asString(field["x-icon"]);
   const placeholder = asString(field["x-placeholder"]);
   const fieldDef: FieldDef = {
     name: fieldName,
@@ -364,6 +366,12 @@ function parseFieldDef(
   // Set only when non-empty so round-trip output stays free of noise keys.
   if (title) {
     fieldDef.title = title;
+  }
+  if (purpose) {
+    fieldDef.purpose = purpose;
+  }
+  if (icon) {
+    fieldDef.icon = icon;
   }
   if (placeholder) {
     fieldDef.placeholder = placeholder;

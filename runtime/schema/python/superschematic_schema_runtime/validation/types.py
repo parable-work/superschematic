@@ -91,6 +91,10 @@ class FieldDef:
     description: str = ""
     # Human-facing label (JSON Schema `title` key); empty = derive from name.
     title: str = ""
+    # Longer-form Markdown explaining what the field is for (`x-purpose`).
+    purpose: str = ""
+    # Name of the glyph a UI shows for the field (`x-icon`).
+    icon: str = ""
     # Input placeholder hint (`x-placeholder` in the legacy form).
     placeholder: str = ""
     json_key: str = ""

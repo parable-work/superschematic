@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"maps"
 	"slices"
 	"strings"
 
@@ -12,14 +13,41 @@ import (
 // audience; acme requires one of these on every documented operation.
 var Audiences = []string{"shoppers", "staff"}
 
+// Icons is acme's icon set for the core @icon decorators, on fields and on
+// operations. The core accepts any name; acme's UI draws only these.
+var Icons = []string{"box", "globe", "key", "receipt", "tag"}
+
 // DocsKey is the vendor-extension key acme's OpenAPI documents carry an
 // operation's @docs record under, in place of the core's key.
 const DocsKey = "x-acme-docs"
 
-// registerDocsPolicy lays acme's policy over the core @docs decorator: a
-// check that restricts the audience, and an OpenAPI hook that moves the
-// record to acme's vendor key. Neither needs a core option.
+// registerDocsPolicy lays acme's policy over the core documentation
+// decorators: checks that restrict @docs audiences and @icon names, and an
+// OpenAPI hook that moves the @docs record to acme's vendor key. None needs
+// a core option.
 func registerDocsPolicy(r *registry.Registry) error {
+	if err := r.RegisterCheck(registry.CheckSpec{
+		Name:      "acmeIcons",
+		Extension: Name,
+		Verify: func(schema *ir.Schema, rep registry.VerifyReporter) {
+			check := func(typeName string, fields []*ir.FieldDef) {
+				for _, f := range fields {
+					if f.Icon != "" && !slices.Contains(Icons, f.Icon) {
+						rep.Errorf("", "%s.%s: @icon %q is not in the acme icon set (%s)",
+							typeName, f.Name, f.Icon, strings.Join(Icons, ", "))
+					}
+				}
+			}
+			for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
+				check(name, schema.Types[name].Fields)
+			}
+			for _, set := range schema.OperationSets {
+				check(set.Name, set.Operations)
+			}
+		},
+	}); err != nil {
+		return err
+	}
 	if err := r.RegisterCheck(registry.CheckSpec{
 		Name:      "acmeDocsAudience",
 		Extension: Name,

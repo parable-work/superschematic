@@ -229,9 +229,19 @@
           "audience": "shoppers",
           "capability": "orders.get",
           "description": "Returns one order by its identifier.",
+          "doNotUseWhen": "Do not use to list orders; call listOrders.",
+          "errors": [
+            {
+              "code": "order_not_found",
+              "commonCorrection": "Take the identifier from a listOrders result.",
+              "description": "No order has that identifier."
+            }
+          ],
           "lifecycle": "active",
           "mappingStatus": "mapped",
+          "success": "Returns the order with its total.",
           "title": "Get an order",
+          "useWhen": "Use when you have an order identifier.",
           "visibility": "public"
         }
       }

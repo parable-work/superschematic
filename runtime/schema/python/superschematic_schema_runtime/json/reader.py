@@ -293,6 +293,8 @@ def _parse_field_def(
         name=field_name,
         description=_as_string(field_obj.get("description")),
         title=_as_string(field_obj.get("title")),
+        purpose=_as_string(field_obj.get("x-purpose")),
+        icon=_as_string(field_obj.get("x-icon")),
         placeholder=_as_string(field_obj.get("x-placeholder")),
         json_key=json_tag or field_name,
         required=required,

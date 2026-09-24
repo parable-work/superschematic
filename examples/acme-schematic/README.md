@@ -16,7 +16,8 @@ The extension adds one of each registration surface:
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
 | Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |
 | Auth provider | `apikey`, an `X-API-Key` header over the generic session runtime | `ext/auth/` |
-| Check and OpenAPI hook | policy over the core `@docs` decorator: acme's audiences only, and the `x-acme-docs` vendor key | `ext/docs.go` |
+| Checks and an OpenAPI hook | policy over the core documentation decorators: acme's `@docs` audiences and `@icon` names only, and the `x-acme-docs` vendor key | `ext/docs.go` |
+| Check and a tool hook on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden; the SDK tool documents carry acme's vendor keys and icon variant | `ext/mcp.go` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
@@ -65,7 +66,8 @@ examples/acme-schematic/
     document.go               catalog.config document + generator
     manifest.go               acmeManifest generator on every kind
     inventory.go              acmeInventory build-all hook
-    docs.go                   @docs policy: audience check, x-acme-docs OpenAPI hook
+    docs.go                   audience and icon checks, x-acme-docs OpenAPI hook
+    mcp.go                    every shop-api operation declares @mcp; acme tool keys and icon variant
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
@@ -75,8 +77,8 @@ examples/acme-schematic/
     deps.json                 the committed copy of the dependency graph ([deps] copy)
     tsconfig.base.json        path aliases for @superschematic/*, @acme/*, superscalar
     services/shop-db          DB: User, Session, ApiKey, Product tables
-    services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs
-    services/shop-config      General: ShopConfig with @envVars
+    services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs, @mcp, @icon
+    services/shop-config      General: ShopConfig with @envVars and field @docs/@purpose/@icon
     services/shop-catalog     Catalog: Product, Bundle with @shelf; catalog.config.yaml
   labels/                     shelf-label.d.ts and location.d.ts, the declarations `fields` reads
   scripts/smoke.sh            the end-to-end assertions
@@ -359,11 +361,13 @@ is how the session provider's stores were found not to compile against a
 DB with a `User` table; the fix is in the core with a test, and the smoke
 keeps it fixed.
 
-## Policy on a core decorator
+## Policy on core decorators
 
-`@docs` is a core decorator: the core checks the record's shape, writes it
-to the IR and puts it in the OpenAPI document under `x-superschematic-docs`.
-acme adds two rules in `ext/docs.go` without a core option:
+`@docs` on an operation and `@icon` on a field are core decorators: the
+core checks their shape, writes them to the IR, and puts an operation's
+record in the OpenAPI document under `x-superschematic-docs`. acme adds its
+rules in `ext/docs.go` without a core option; `acmeIcons` is a second check
+like the one below, over every type's fields:
 
 ```go
 r.RegisterCheck(registry.CheckSpec{
@@ -386,10 +390,57 @@ r.RegisterOpenAPIHook(registry.OpenAPIHook{
 The check runs after the core checks on every schema the binary loads,
 core kinds included, in every authoring form. The hook edits the OpenAPI
 document the api generator builds before it is written. `shop-api` declares
-`@docs` on two operations; `ext/docs_test.go` checks the record lands under
-`x-acme-docs` and that an audience outside acme's set fails the load while
-the core registry accepts it. The smoke checks the generated
-`openapi.json` from both binaries.
+`@docs` on two operations and `shop-config` declares field `@docs`,
+`@purpose` and `@icon`; `ext/docs_test.go` checks the record lands under
+`x-acme-docs` and that an audience or icon outside acme's sets fails the
+load while the core registry accepts it. The smoke checks the generated
+`openapi.json` from both binaries and the field presentation in the IR.
+
+`@mcp` is a core decorator too: an operation opts in as a visible MCP tool
+with a handle, or says why it is hidden, and the core publishes only the
+visible ones. Which APIs must classify every operation is acme's rule, a
+check in `ext/mcp.go` over API schemas:
+
+```go
+r.RegisterCheck(registry.CheckSpec{
+	Name:      "acmeToolsClassified",
+	Extension: Name,
+	Kinds:     []string{string(ir.SchemaKindAPI)},
+	Verify: func(schema *ir.Schema, rep registry.VerifyReporter) {
+		// in shop-api, report an operation without @mcp
+	},
+})
+```
+
+`shop-api` classifies its three operations: `getProduct` and
+`createProduct` are visible tools with an `@icon` from acme's set,
+`listProducts` is hidden with a reason. `acmeIcons` covers operation
+icons as well as field icons.
+
+The SDK generators write the tools of `shop-api` to `tools/schema.json`,
+`tools/mcp-audit.json` and the provider lists. How those documents spell
+their vendor keys, and which variant of acme's icon set a tool's icon is
+drawn from, is a tool hook in the same file:
+
+```go
+r.RegisterToolHook(registry.ToolHook{
+	Name:      "acmeTools",
+	Extension: Name,
+	Edit: func(_ *ir.Schema, tools *registry.ToolSet) error {
+		tools.Keys.Scalar = "x-acme-scalar"
+		tools.Keys.Guidance = "acme/operation-guidance"
+		tools.Keys.Parameters = append(tools.Keys.Parameters, registry.ToolKeyValue{Key: "x-acme-arguments", Value: 1})
+		// set Icon.Family and Icon.Style on every tool icon
+		return nil
+	},
+})
+```
+
+`ext/mcp_test.go` checks that an unclassified `shop-api` operation fails
+the load while another API and the core registry accept it, and that the
+tool documents carry acme's keys and icon variant while the core registry
+writes the core's. The smoke checks the classification in the IR and the
+tool documents from both binaries.
 
 ## A command
 

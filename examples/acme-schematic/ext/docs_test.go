@@ -119,3 +119,65 @@ func TestDocsAudienceOutsideTheAcmeSetFailsTheLoad(t *testing.T) {
 		t.Fatalf("the core registry applied an audience rule: %v", err)
 	}
 }
+
+// writeIconService writes a General service in the JSON data form with one
+// field whose icon is the given name.
+func writeIconService(t *testing.T, icon string) string {
+	t.Helper()
+	service := filepath.Join(t.TempDir(), "services", "settings")
+	if err := os.MkdirAll(filepath.Join(service, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"schema.config.json": `{"name": "settings", "kind": "General", "outputs": {}}`,
+		"src/settings.schema.json": `{
+			"name": "settings",
+			"kind": "General",
+			"types": {
+				"Settings": {"name": "Settings", "role": "EmbeddedStruct", "fields": [
+					{"name": "region", "title": "Region", "icon": "` + icon + `", "typeRef": {"name": "string"}, "required": true}
+				]}
+			}
+		}`,
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(service, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return service
+}
+
+// TestIconOutsideTheAcmeSetFailsTheLoad: the icon set is acme's check on
+// the core @icon field; the core registry accepts any name.
+func TestIconOutsideTheAcmeSetFailsTheLoad(t *testing.T) {
+	reg, names := assemble(t)
+	_, err := loader.LoadService(writeIconService(t, "rocket"), loader.WithRegistry(reg), loader.WithNaming(names))
+	if err == nil || !strings.Contains(err.Error(), `Settings.region: @icon "rocket" is not in the acme icon set (box, globe, key, receipt, tag)`) {
+		t.Fatalf("err = %v, want the acme icon check", err)
+	}
+	if _, err := loader.LoadService(writeIconService(t, "globe"), loader.WithRegistry(reg), loader.WithNaming(names)); err != nil {
+		t.Fatalf("an acme icon failed to load: %v", err)
+	}
+	core, err := registry.Assemble(registry.DefaultNaming())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loader.LoadService(writeIconService(t, "rocket"), loader.WithRegistry(core)); err != nil {
+		t.Fatalf("the core registry applied an icon set: %v", err)
+	}
+}
+
+// TestShopConfigFieldPresentationLoads: the shop-config fields carry the
+// core field presentation decorators, within acme's icon set.
+func TestShopConfigFieldPresentationLoads(t *testing.T) {
+	reg, names := assemble(t)
+	schema, err := loader.LoadService(filepath.Join(schemasRoot, "services", "shop-config"), loader.WithRegistry(reg), loader.WithNaming(names))
+	if err != nil {
+		t.Fatalf("LoadService: %v", err)
+	}
+	f := field(t, schema, "ShopConfig", "DATABASE_URL")
+	if f.Title != "Database URL" || f.Purpose != "Connection string of the **shop database**." || f.Icon != "globe" {
+		t.Fatalf("ShopConfig.DATABASE_URL = %+v", f)
+	}
+}

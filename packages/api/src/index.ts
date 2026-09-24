@@ -5,7 +5,9 @@ export {
   docs,
   encrypted,
   hmacVerified,
+  icon,
   manualRouteRegistration,
+  mcp,
   publicRoute,
   rateLimit,
   requireOwnership,
@@ -20,10 +22,13 @@ export {
 export type {
   BodyLimitConfig,
   DocsConfig,
+  DocsError,
   DocsLifecycle,
   DocsMappingStatus,
+  DocsReplayMode,
   DocsVisibility,
   HmacVerifiedConfig,
+  MCPConfig,
   RateLimitConfig,
   TimeoutConfig
 } from "./decorators";
