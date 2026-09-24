@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "apiId": "fixture-nested-arrays-api",
+  "sdkClassName": "FixtureNestedArraysApiSDK",
+  "tools": [
+    {
+      "toolName": "grid.saveGrid",
+      "apiId": "fixture-nested-arrays-api",
+      "namespace": "grid",
+      "methodName": "saveGrid",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "labels",
+          "required": true,
+          "kind": "input",
+          "target": "input.labels"
+        },
+        {
+          "toolParameter": "shades",
+          "required": true,
+          "kind": "input",
+          "target": "input.shades"
+        },
+        {
+          "toolParameter": "polygons",
+          "required": true,
+          "kind": "input",
+          "target": "input.polygons"
+        },
+        {
+          "toolParameter": "weights",
+          "required": false,
+          "kind": "input",
+          "target": "input.weights"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["labels", "shades", "polygons", "weights"]
+        }
+      ]
+    },
+    {
+      "toolName": "grid.getGrid",
+      "apiId": "fixture-nested-arrays-api",
+      "namespace": "grid",
+      "methodName": "getGrid",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "grid.gridLabels",
+      "apiId": "fixture-nested-arrays-api",
+      "namespace": "grid",
+      "methodName": "gridLabels",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "limit",
+          "required": false,
+          "kind": "query",
+          "target": "query.limit"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "query",
+          "target": "query",
+          "sources": ["limit"]
+        }
+      ]
+    },
+    {
+      "toolName": "grid.replaceLabels",
+      "apiId": "fixture-nested-arrays-api",
+      "namespace": "grid",
+      "methodName": "replaceLabels",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "labels",
+          "required": true,
+          "kind": "scalar",
+          "target": "input.labels"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "scalar",
+          "target": "input",
+          "sources": ["labels"]
+        }
+      ]
+    }
+  ]
+}
