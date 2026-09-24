@@ -143,6 +143,16 @@ def _walk_field(
     if field.type_ref.is_array:
         if not isinstance(value, list):
             return value
+        if field.type_ref.is_array_of_arrays:
+            return [
+                [
+                    _walk_elem(ctx, field, kind, elem, errors, f"{path}[{i}][{j}]")
+                    for j, elem in enumerate(row)
+                ]
+                if isinstance(row, list)
+                else row
+                for i, row in enumerate(value)
+            ]
         return [_walk_elem(ctx, field, kind, value[i], errors, f"{path}[{i}]") for i in range(len(value))]
     if kind == "type":
         nested = ctx.schema.types.get(field.type_ref.name)
@@ -219,6 +229,13 @@ def _write_field_value(ctx: _Ctx, field: FieldDef, value: Any) -> Any:
     if field.type_ref.is_array:
         if not isinstance(value, list):
             return value
+        if field.type_ref.is_array_of_arrays:
+            return [
+                [_write_elem_value(ctx, field, kind, elem) for elem in row]
+                if isinstance(row, list)
+                else row
+                for row in value
+            ]
         return [_write_elem_value(ctx, field, kind, elem) for elem in value]
     if kind == "type":
         nested = ctx.schema.types.get(field.type_ref.name)

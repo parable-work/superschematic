@@ -160,6 +160,18 @@ func pythonMaskFieldExpr(field codegen.FieldInfo, enumLookup codegen.EnumLookup)
 		return fieldRef + ".__class__.model_construct()"
 	}
 
+	if field.IsArrayOfArrays {
+		if field.IsScalar || isPythonScalarTargetType(pythonNestedListElemType(field.TargetType)) || enumLookup(field.Type) {
+			return ""
+		}
+
+		maskedRows := fmt.Sprintf("[[item.mask_secrets() for item in row] for row in %s]", fieldRef)
+		if renderedRequired {
+			return maskedRows
+		}
+		return fmt.Sprintf("%s if %s is not None else None", maskedRows, fieldRef)
+	}
+
 	if field.IsArray {
 		if field.IsScalar || isPythonScalarArrayTargetType(field.TargetType) || enumLookup(field.Type) {
 			return ""
@@ -197,6 +209,19 @@ func isPythonScalarArrayTargetType(targetType string) bool {
 	}
 	elemType := strings.TrimSuffix(strings.TrimPrefix(targetType, "List["), "]")
 	return isPythonScalarTargetType(elemType)
+}
+
+// pythonNestedListElemType returns T for a List[List[T]] target type, and ""
+// for any other shape.
+func pythonNestedListElemType(targetType string) string {
+	elemType := targetType
+	for range 2 {
+		if !strings.HasPrefix(elemType, "List[") || !strings.HasSuffix(elemType, "]") {
+			return ""
+		}
+		elemType = strings.TrimSuffix(strings.TrimPrefix(elemType, "List["), "]")
+	}
+	return elemType
 }
 
 func pythonScalarZeroValue(targetType string) string {

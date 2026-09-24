@@ -18,6 +18,8 @@ yaml = [
 dev = [
     "pytest>=8.0.0",
     "PyYAML>=6.0",
+    # tests/test_generated_nested_arrays.py imports a pygen golden package.
+    "pydantic>=2.12.0,<3.0.0",
 ]
 
 [tool.uv.sources]
