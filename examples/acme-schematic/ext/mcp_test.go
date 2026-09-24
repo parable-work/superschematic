@@ -70,7 +70,8 @@ func TestShopAPIOperationsAreClassified(t *testing.T) {
 			}
 		}
 	}
-	if handles["getProduct"] != "get_product/tag" || handles["createProduct"] != "create_product/box" || len(handles) != 2 {
+	if handles["getProduct"] != "get_product/tag" || handles["createProduct"] != "create_product/box" ||
+		handles["replaceVariants"] != "replace_variants/tag" || len(handles) != 3 {
 		t.Fatalf("visible tools = %v", handles)
 	}
 }
@@ -178,7 +179,7 @@ func TestShopAPIToolsCarryAcmeKeys(t *testing.T) {
 			}
 		}
 	}
-	if visible != 2 || len(audit.RegistryDigestInputs) != 3 {
+	if visible != 3 || len(audit.RegistryDigestInputs) != 4 {
 		t.Fatalf("audit = %+v", audit)
 	}
 }

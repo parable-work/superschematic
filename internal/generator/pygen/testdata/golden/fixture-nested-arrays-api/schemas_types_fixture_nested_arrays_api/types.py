@@ -92,6 +92,12 @@ class GridView(BaseModel):
                 for index, row in enumerate(self.labels):
                     if row is None:
                         errors.add_field_error(f"labels[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"labels[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"labels[{index}][{inner_index}]", "required", "required field")
 
         # Validate shades
         if self.shades is None:
@@ -102,6 +108,12 @@ class GridView(BaseModel):
                 for index, row in enumerate(self.shades):
                     if row is None:
                         errors.add_field_error(f"shades[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"shades[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"shades[{index}][{inner_index}]", "required", "required field")
 
         # Validate polygons
         if self.polygons is None:
@@ -112,18 +124,33 @@ class GridView(BaseModel):
                 for index, row in enumerate(self.polygons):
                     if row is None:
                         errors.add_field_error(f"polygons[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"polygons[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"polygons[{index}][{inner_index}]", "required", "required field")
 
         # Validate weights
         if self.weights is not None:
-            try:
-                TypeAdapter(List[List[float]]).validate_python(self.weights)
-            except PydanticValidationError as e:
-                errors.add_field_error("weights", "invalid", str(e))
+            # A None entry is reported at its own index below; the whole-value
+            # check would repeat it at the field.
+            if not (isinstance(self.weights, list) and any(row is None or not isinstance(row, list) or None in row for row in self.weights)):
+                try:
+                    TypeAdapter(List[List[float]]).validate_python(self.weights)
+                except PydanticValidationError as e:
+                    errors.add_field_error("weights", "invalid", str(e))
 
             if isinstance(self.weights, list):
                 for index, row in enumerate(self.weights):
                     if row is None:
                         errors.add_field_error(f"weights[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"weights[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"weights[{index}][{inner_index}]", "required", "required field")
 
         return errors
 
@@ -449,6 +476,12 @@ class SaveGridInput(BaseModel):
                 for index, row in enumerate(self.labels):
                     if row is None:
                         errors.add_field_error(f"labels[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"labels[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"labels[{index}][{inner_index}]", "required", "required field")
 
         # Validate shades
         if self.shades is None:
@@ -459,6 +492,12 @@ class SaveGridInput(BaseModel):
                 for index, row in enumerate(self.shades):
                     if row is None:
                         errors.add_field_error(f"shades[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"shades[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"shades[{index}][{inner_index}]", "required", "required field")
 
         # Validate polygons
         if self.polygons is None:
@@ -469,18 +508,33 @@ class SaveGridInput(BaseModel):
                 for index, row in enumerate(self.polygons):
                     if row is None:
                         errors.add_field_error(f"polygons[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"polygons[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"polygons[{index}][{inner_index}]", "required", "required field")
 
         # Validate weights
         if self.weights is not None:
-            try:
-                TypeAdapter(List[List[float]]).validate_python(self.weights)
-            except PydanticValidationError as e:
-                errors.add_field_error("weights", "invalid", str(e))
+            # A None entry is reported at its own index below; the whole-value
+            # check would repeat it at the field.
+            if not (isinstance(self.weights, list) and any(row is None or not isinstance(row, list) or None in row for row in self.weights)):
+                try:
+                    TypeAdapter(List[List[float]]).validate_python(self.weights)
+                except PydanticValidationError as e:
+                    errors.add_field_error("weights", "invalid", str(e))
 
             if isinstance(self.weights, list):
                 for index, row in enumerate(self.weights):
                     if row is None:
                         errors.add_field_error(f"weights[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"weights[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"weights[{index}][{inner_index}]", "required", "required field")
 
         return errors
 

@@ -144,14 +144,15 @@ test('ragged, empty outer and empty inner lists are valid', () => {
   assert.deepStrictEqual(verdicts({ counts: [[], []], shades: [[]], polygons: [[]] }), {});
 });
 
-test('a null or non-list inner list is rejected at field[i]', () => {
+test('a null inner list is required and a non-list one a type error, at field[i]', () => {
   assert.deepStrictEqual(verdicts({ counts: [[1], null], shades: ['light'], polygons: [undefined] }), {
     'counts[1]': ['required'],
-    'shades[0]': ['required'],
+    'shades[0]': ['type'],
     'polygons[0]': ['required'],
   });
-  const result = validateSchemaType(schema, 'Grid', { counts: [null] });
-  assert.strictEqual(result['counts[0]'][0].message, 'counts inner list must be an array.');
+  const result = validateSchemaType(schema, 'Grid', { counts: [null, 7] });
+  assert.strictEqual(result['counts[0]'][0].message, 'required field');
+  assert.strictEqual(result['counts[1]'][0].message, 'expected an array');
 });
 
 test('a bad element is reported at field[i][j]', () => {

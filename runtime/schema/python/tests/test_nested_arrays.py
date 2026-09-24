@@ -108,15 +108,17 @@ def test_ragged_and_empty_lists_load(schema):
 
 
 def test_required_list_of_lists_follows_the_list_rule(schema):
-    errors = load_type(schema, "Drawing", {"labels": []}).errors
-    assert _validators(errors, "labels") == ["required"]
+    # A required list means present, not non-empty.
+    assert load_type(schema, "Drawing", {"labels": []}).errors == {}
     assert load_type(schema, "Drawing", {"labels": [[]]}).errors == {}
+    errors = load_type(schema, "Drawing", {}).errors
+    assert _validators(errors, "labels") == ["required"]
 
 
 def test_null_inner_list_is_rejected(schema):
     result = load_type(schema, "Drawing", {"labels": [["a"], None], "polygons": [None]})
     assert _validators(result.errors, "labels[1]") == ["required"]
-    assert result.errors["labels[1]"][0].message == "String[] is required."
+    assert result.errors["labels[1]"][0].message == "required field"
     assert _validators(result.errors, "polygons[0]") == ["required"]
     # Parse alone passes the null through; validation rejects it.
     assert parse_type(schema, "Drawing", {"labels": [None]}).errors == {}
@@ -128,7 +130,11 @@ def test_null_inner_list_is_rejected(schema):
 def test_inner_value_that_is_not_a_list_is_a_type_error(schema):
     errors = load_type(schema, "Drawing", {"labels": [["a"], "b"]}).errors
     assert _validators(errors, "labels[1]") == ["type"]
-    assert errors["labels[1]"][0].message == "expected array value"
+    assert errors["labels[1]"][0].message == "expected an array"
+    # Validation alone reports the same, as the Go and TypeScript runtimes do.
+    errors = validate_type(schema, "Drawing", {"labels": [["a"], "b"]})
+    assert _validators(errors, "labels[1]") == ["type"]
+    assert errors["labels[1]"][0].message == "expected an array"
 
 
 def test_elements_that_do_not_parse_are_reported_at_both_indexes(schema):

@@ -123,6 +123,22 @@ jobs:
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
 
+      - name: Setup Python
+        # The Go tests that import the generated Python packages (pygen's
+        # import, enum and arrays-of-arrays checks, the Python SDK probe)
+        # need pydantic and skip without it.
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install pydantic
+        # The version runtime/schema/python/uv.lock resolves, so these tests
+        # and the Python runtime suite import the same one.
+        run: |
+          version="$(grep -A1 '^name = "pydantic"$' runtime/schema/python/uv.lock | sed -n 's/^version = "\(.*\)"$/\1/p')"
+          test -n "$version"
+          python -m pip install "pydantic==$version"
+
       - name: Build, vet, test every module
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}

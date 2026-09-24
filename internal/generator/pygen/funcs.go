@@ -31,6 +31,8 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 		},
 		"hasNonRequiredValidations": hasNonRequiredValidations,
 		"allowsExplicitNullRoot":    allowsExplicitNullRoot,
+		"isList":                    isList,
+		"nullEntryCheck":            nullEntryCheck,
 		"pythonFieldDefault": func(field codegen.FieldInfo) string {
 			expr, ok := pythonFieldDefaultExpr(field, enumLookup)
 			if !ok {
@@ -76,6 +78,23 @@ func hasNonRequiredValidations(field codegen.FieldInfo) bool {
 		}
 	}
 	return false
+}
+
+// isList reports whether the field is a list (T[] or T[][]) and not a map.
+func isList(field codegen.FieldInfo) bool {
+	return field.IsArray && !field.IsMap
+}
+
+// nullEntryCheck renders the Python condition that is true when a list
+// field holds a None element, or for T[][] a None or non-list inner list
+// or a None innermost element. validate_all reports each at its own index,
+// so the whole-value TypeAdapter check is skipped to avoid repeating it.
+func nullEntryCheck(field codegen.FieldInfo) string {
+	ref := "self." + field.TargetName
+	if field.IsArrayOfArrays {
+		return fmt.Sprintf("isinstance(%s, list) and any(row is None or not isinstance(row, list) or None in row for row in %s)", ref, ref)
+	}
+	return fmt.Sprintf("isinstance(%s, list) and None in %s", ref, ref)
 }
 
 // genericJSONScalar is the canonical name of the scalar library's any-JSON

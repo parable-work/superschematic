@@ -87,6 +87,14 @@
 {{- if $tool.Returns.Items.Description}},
           "description": "{{escapeJSON $tool.Returns.Items.Description}}"
 {{- end}}
+{{- if $tool.Returns.Items.Items}},
+          "items": {
+            "type": {{if eq $tool.Returns.Items.Items.Type "any"}}["object", "array", "string", "number", "boolean", "null"]{{else}}"{{$tool.Returns.Items.Items.Type}}"{{end}}
+{{- if $tool.Returns.Items.Items.Description}},
+            "description": "{{escapeJSON $tool.Returns.Items.Items.Description}}"
+{{- end}}
+          }
+{{- end}}
         }
 {{- end}}
       }

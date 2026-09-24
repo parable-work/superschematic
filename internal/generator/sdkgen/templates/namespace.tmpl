@@ -78,7 +78,7 @@ export class {{.Namespace.ClassName}} {
    * @param params - Optional query parameters
    {{- end}}
    * @param signal - Optional AbortSignal for request cancellation
-   * @returns {{if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
+   * @returns {{if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
    */
@@ -94,7 +94,7 @@ export class {{.Namespace.ClassName}} {
     params?: {{query_params_type .QueryParams}},
     {{- end}}
     signal?: AbortSignal
-  ): Promise<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}> {
+  ): Promise<{{.TSOutputType}}> {
     const formData = new FormData();
     {{- if .HasInput}}
     formData.append('data', JSON.stringify(input));
@@ -109,14 +109,18 @@ export class {{.Namespace.ClassName}} {
     {{- end}}
     {{- end}}
 
-    const result = await this.client.{{multipart_method .Method}}<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
+    const result = await this.client.{{multipart_method .Method}}<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       formData,
       { signal{{if has_query_params .QueryParams}}, params{{end}} }
     );
 
     {{- if $endpoint.HasOutputParser}}
-    {{- if $endpoint.OutputIsArray}}
+    {{- if $endpoint.OutputIsArrayOfArrays}}
+    return Array.isArray(result)
+      ? result.map((row) => (Array.isArray(row) ? row.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : row))
+      : result;
+    {{- else if $endpoint.OutputIsArray}}
     return Array.isArray(result) ? result.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result;
     {{- else}}
     return parse{{type_ref $endpoint.OutputType}}FromJSON(result);
@@ -150,7 +154,7 @@ export class {{.Namespace.ClassName}} {
    * @param params - Optional query parameters
    {{- end}}
    * @param signal - Optional AbortSignal for request cancellation
-   * @returns {{if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
+   * @returns {{if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
    * @throws {ApiError} if the API request fails
    */
   public async {{.Name}}Raw(
@@ -162,15 +166,19 @@ export class {{.Namespace.ClassName}} {
     params?: {{query_params_type .QueryParams}},
     {{- end}}
     signal?: AbortSignal
-  ): Promise<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}> {
-    const result = await this.client.{{multipart_method .Method}}<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
+  ): Promise<{{.TSOutputType}}> {
+    const result = await this.client.{{multipart_method .Method}}<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       formData,
       { signal{{if has_query_params .QueryParams}}, params{{end}} }
     );
 
     {{- if $endpoint.HasOutputParser}}
-    {{- if $endpoint.OutputIsArray}}
+    {{- if $endpoint.OutputIsArrayOfArrays}}
+    return Array.isArray(result)
+      ? result.map((row) => (Array.isArray(row) ? row.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : row))
+      : result;
+    {{- else if $endpoint.OutputIsArray}}
     return Array.isArray(result) ? result.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result;
     {{- else}}
     return parse{{type_ref $endpoint.OutputType}}FromJSON(result);
@@ -214,7 +222,7 @@ export class {{.Namespace.ClassName}} {
   {{- else}}
   * @param signal - Optional AbortSignal for request cancellation
   {{- end}}
-   * @returns {{if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
+   * @returns {{if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
    */
@@ -245,7 +253,7 @@ export class {{.Namespace.ClassName}} {
     signal?: any,
     {{- end}}
     ...extraArgs: any[]
-  ): Promise<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}> {
+  ): Promise<{{.TSOutputType}}> {
     {{- if and .ScalarArgs (not .HasInput)}}
     {{- $firstArg := index .ScalarArgs 0}}
     {{- $firstName := toCamelCase $firstArg.Name}}
@@ -287,7 +295,33 @@ export class {{.Namespace.ClassName}} {
     // Validate scalar arguments before sending request
     const errors = newValidationErrors();
     {{- range .ScalarArgs}}
-    {{- if not (scalar_needs_validation .Type)}}
+    {{- if .IsArrayOfArrays}}
+    {
+      // An array of arrays: each inner list must be an array (an empty one
+      // is valid){{if scalar_needs_validation .Type}} and each element runs its own validation{{end}}.
+      const rows: unknown = scalarInput.{{toCamelCase .Name}};
+      if (Array.isArray(rows)) {
+        rows.forEach((row: unknown, rowIndex: number) => {
+          if (!Array.isArray(row)) {
+            setFieldErrors(errors, `{{toCamelCase .Name}}[${rowIndex}]`, [{ validator: "required", message: "inner list must be an array" }]);
+            {{- if scalar_needs_validation .Type}}
+            return;
+            {{- end}}
+          }
+          {{- if scalar_needs_validation .Type}}
+          row.forEach((elem: unknown, index: number) => {
+            const [valid, fieldErrors] = validate{{scalar_validator_symbol .Type}}Required(elem as {{type_ref .Type}});
+            if (!valid && fieldErrors) {
+              setFieldErrors(errors, `{{toCamelCase .Name}}[${rowIndex}][${index}]`, fieldErrors);
+            }
+          });
+          {{- end}}
+        });
+      }{{if .Required}} else {
+        setFieldErrors(errors, "{{toCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
+      }{{end}}
+    }
+    {{- else if not (scalar_needs_validation .Type)}}
     {{- if .Required}}
     {
       // Bare-primitive argument: presence check only, no scalar validator.
@@ -447,13 +481,13 @@ export class {{.Namespace.ClassName}} {
     // Scalar args take precedence over @query params; spread order is intentional.
     const scalarParams = { {{if has_query_params .QueryParams}}...requestParams, {{end}}...scalarInput };
     {{- end}}
-    const result = await this.client.get<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
+    const result = await this.client.get<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       { signal{{if .ScalarArgs}}: requestSignal{{end}}{{if .HasInput}}, data: input{{end}}{{if and .ScalarArgs (not .HasInput)}}{{if .Filterable}}, params: { ...scalarParams, ...filterParams }{{else}}, params: scalarParams{{end}}{{else if and (has_query_params .QueryParams) .Filterable}}, params: { ...params, ...filterParams }{{else if has_query_params .QueryParams}}, params{{else if .Filterable}}, params: filterParams{{end}} }
     );
     {{- else if eq .Method "POST"}}
     // Make POST request
-    const result = await this.client.post<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
+    const result = await this.client.post<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       {{- if has_encrypted_body .Method .Encrypted}}
       requestPayload,
@@ -468,7 +502,7 @@ export class {{.Namespace.ClassName}} {
     );
     {{- else if eq .Method "PUT"}}
     // Make PUT request
-    const result = await this.client.put<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
+    const result = await this.client.put<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       {{- if has_encrypted_body .Method .Encrypted}}
       requestPayload,
@@ -483,7 +517,7 @@ export class {{.Namespace.ClassName}} {
     );
     {{- else if eq .Method "PATCH"}}
     // Make PATCH request
-    const result = await this.client.patch<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
+    const result = await this.client.patch<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       {{- if has_encrypted_body .Method .Encrypted}}
       requestPayload,
@@ -498,14 +532,18 @@ export class {{.Namespace.ClassName}} {
     );
     {{- else if eq .Method "DELETE"}}
     // Make DELETE request; Axios carries a declared body through config.data.
-    const result = await this.client.delete<{{if .OutputIsArray}}{{type_ref .OutputType}}[]{{else}}{{type_ref .OutputType}}{{end}}>(
+    const result = await this.client.delete<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       { signal{{if .ScalarArgs}}: requestSignal{{end}}{{if .HasInput}}, data: input{{end}}{{if and (has_query_params .QueryParams) .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if has_query_params .QueryParams}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}} }
     );
     {{- end}}
 
     {{- if $endpoint.HasOutputParser}}
-    {{- if $endpoint.OutputIsArray}}
+    {{- if $endpoint.OutputIsArrayOfArrays}}
+    return Array.isArray(result)
+      ? result.map((row) => (Array.isArray(row) ? row.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : row))
+      : result;
+    {{- else if $endpoint.OutputIsArray}}
     return Array.isArray(result) ? result.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result;
     {{- else}}
     return parse{{type_ref $endpoint.OutputType}}FromJSON(result);

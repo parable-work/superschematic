@@ -176,7 +176,8 @@ func TestNestedArraysEdgesRendering(t *testing.T) {
 			"const [valid, fieldErrors] = validateTone(item);",
 			"setFieldErrors(errors, `tones[${rowIndex}][${index}]`, fieldErrors);",
 			"const [valid, fieldErrors] = validateIdentityUUIDRequired(item);",
-			"addFieldError(errors, `ids[${rowIndex}]`, \"required\", \"inner list must be an array\");",
+			"addFieldError(errors, `ids[${rowIndex}]`, \"required\", \"required field\");",
+			"addFieldError(errors, `ids[${rowIndex}]`, \"type\", \"expected an array\");",
 			// @strictJSON objects are validated at every innermost element.
 			"validateNested(item, `cells[${rowIndex}][${index}]`)",
 			// List bounds on the outer list, element rules on each element.
@@ -310,8 +311,8 @@ var drawingVectors = []nestedVector{
 		typ:     "Drawing",
 		payload: `{"labels": ["a"], "shades": [["light"], "dark"], "polygons": []}`,
 		want: map[string][]string{
-			"labels[0]": {"required"},
-			"shades[1]": {"required"},
+			"labels[0]": {"type"},
+			"shades[1]": {"type"},
 		},
 	},
 	{
