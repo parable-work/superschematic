@@ -360,6 +360,13 @@ of a generated artifact is always listed here with the bump it requires.
   runtime's parse, validate, mask, merge and serialize walk inner lists with
   the same paths. A types module with enums and types but no scalars no
   longer declares `ValidationError` twice. Minor.
+- Arrays of arrays in TypeScript: tsgen emits `T[][]`, and its validators
+  and the TypeScript schema runtime check every innermost element at
+  `field[i][j]`, apply list bounds to the outer list and reject an inner
+  list that is not an array at `field[i]` (`required`). Minor.
+- Rust types render a list of lists as `Vec<Vec<T>>` (`Option<Vec<Vec<T>>>`
+  when optional) with the serde attributes of `Vec<T>`; a null inner list
+  fails to decode. Minor.
 
 ### Changed
 

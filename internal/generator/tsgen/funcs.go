@@ -53,6 +53,8 @@ func customTemplateFuncs() template.FuncMap {
 			}
 			return false
 		},
+		"listValidations":    listValidations,
+		"elementValidations": elementValidations,
 		"mapScalarValueRequired": func(field FieldInfo) bool {
 			if !field.IsMap || field.IsArray {
 				return false
@@ -66,6 +68,37 @@ func customTemplateFuncs() template.FuncMap {
 			return !strings.Contains(field.TSType, "| null")
 		},
 	}
+}
+
+// listValidations returns a field's list-size rules (listMin, listMax). On a
+// T[][] field they bound the outer list only.
+func listValidations(field FieldInfo) []codegen.ValidationRule {
+	var rules []codegen.ValidationRule
+	for _, v := range field.Validations {
+		if v.Validator == "listMin" || v.Validator == "listMax" {
+			rules = append(rules, v)
+		}
+	}
+	return rules
+}
+
+// elementValidations returns the explicit @validate rules a field's
+// validator checks on each value, which for a T[][] field is each innermost
+// element: every rule except required and the list-size rules. A scalar
+// field returns none, because its scalar validator covers these constraints.
+func elementValidations(field FieldInfo) []codegen.ValidationRule {
+	if field.IsScalar {
+		return nil
+	}
+	var rules []codegen.ValidationRule
+	for _, v := range field.Validations {
+		switch v.Validator {
+		case "required", "listMin", "listMax":
+			continue
+		}
+		rules = append(rules, v)
+	}
+	return rules
 }
 
 // scalarLibTypeName returns the structured superscalar type name a scalar's

@@ -174,6 +174,39 @@ function walkArrayField(
     result[key] = value;
     return;
   }
+  if (!field.typeRef.isArrayOfArrays) {
+    result[key] = walkArrayElements(ctx, field, key, kind, value, errors);
+    return;
+  }
+  // T[][]: walk each inner list; its elements report at key[i][j]. A null
+  // inner list passes through for validation to reject, as a null element
+  // of T[] does.
+  const out: unknown[] = new Array(value.length);
+  for (let i = 0; i < value.length; i += 1) {
+    const inner = value[i];
+    const innerKey = `${key}[${i}]`;
+    if (inner === null || inner === undefined) {
+      out[i] = null;
+      continue;
+    }
+    if (!Array.isArray(inner)) {
+      addFieldError(errors, innerKey, 'type', 'expected array value');
+      out[i] = inner;
+      continue;
+    }
+    out[i] = walkArrayElements(ctx, field, innerKey, kind, inner, errors);
+  }
+  result[key] = out;
+}
+
+function walkArrayElements(
+  ctx: WalkContext,
+  field: FieldDef,
+  key: string,
+  kind: RefKind,
+  value: unknown[],
+  errors: ValidationErrors
+): unknown[] {
   const out: unknown[] = new Array(value.length);
   for (let i = 0; i < value.length; i += 1) {
     const elem = value[i];
@@ -241,7 +274,7 @@ function walkArrayField(
       }
     }
   }
-  result[key] = out;
+  return out;
 }
 
 function applyScalar(
