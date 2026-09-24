@@ -98,6 +98,12 @@ class Board(BaseModel):
                 for index, row in enumerate(self.labels):
                     if row is None:
                         errors.add_field_error(f"labels[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"labels[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"labels[{index}][{inner_index}]", "required", "required field")
 
         # Validate states
         if self.states is None:
@@ -108,6 +114,12 @@ class Board(BaseModel):
                 for index, row in enumerate(self.states):
                     if row is None:
                         errors.add_field_error(f"states[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"states[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"states[{index}][{inner_index}]", "required", "required field")
 
         # Validate walls
         if self.walls is None:
@@ -118,18 +130,33 @@ class Board(BaseModel):
                 for index, row in enumerate(self.walls):
                     if row is None:
                         errors.add_field_error(f"walls[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"walls[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"walls[{index}][{inner_index}]", "required", "required field")
 
         # Validate scores
         if self.scores is not None:
-            try:
-                TypeAdapter(List[List[float]]).validate_python(self.scores)
-            except PydanticValidationError as e:
-                errors.add_field_error("scores", "invalid", str(e))
+            # A None entry is reported at its own index below; the whole-value
+            # check would repeat it at the field.
+            if not (isinstance(self.scores, list) and any(row is None or not isinstance(row, list) or None in row for row in self.scores)):
+                try:
+                    TypeAdapter(List[List[float]]).validate_python(self.scores)
+                except PydanticValidationError as e:
+                    errors.add_field_error("scores", "invalid", str(e))
 
             if isinstance(self.scores, list):
                 for index, row in enumerate(self.scores):
                     if row is None:
                         errors.add_field_error(f"scores[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"scores[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"scores[{index}][{inner_index}]", "required", "required field")
 
         return errors
 

@@ -80,12 +80,15 @@ def test_null_inner_list_is_rejected():
         drawing.polygons = [None]
     assert _locs(excinfo) == [(("polygons", 0), "list_type")]
 
-    # validate_all names the row when data bypassed validation.
+    # validate_all names the row when data bypassed validation, once: the
+    # optional field reports no whole-value "invalid" next to it.
     constructed = Drawing.model_construct(**{**_payload(), "labels": [["a"], None], "samples": [None]})
-    verdicts = _verdicts(constructed)
-    assert verdicts["labels[1]"] == ["required"]
-    assert verdicts["samples[0]"] == ["required"]
-    assert verdicts["samples"] == ["invalid"]
+    assert _verdicts(constructed) == {"labels[1]": ["required"], "samples[0]": ["required"]}
+
+    # A non-list inner value is a type error at its index; a None innermost
+    # element is required at both indexes.
+    constructed = Drawing.model_construct(**{**_payload(), "labels": [["a"], "b"], "samples": [[1.0, None]]})
+    assert _verdicts(constructed) == {"labels[1]": ["type"], "samples[0][1]": ["required"]}
 
 
 def test_bad_element_is_reported_at_both_indexes():
