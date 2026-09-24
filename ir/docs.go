@@ -71,6 +71,25 @@ type OperationDocs struct {
 
 	// Sunset is the date (YYYY-MM-DD) the operation stops being served.
 	Sunset string `json:"sunset,omitempty" yaml:"sunset,omitempty"`
+
+	// UseWhen and DoNotUseWhen tell a caller, a person or a model, when to
+	// choose this operation and when to choose another.
+	UseWhen      string `json:"useWhen,omitempty" yaml:"useWhen,omitempty"`
+	DoNotUseWhen string `json:"doNotUseWhen,omitempty" yaml:"doNotUseWhen,omitempty"`
+
+	// Success is the outcome a caller should expect after a successful call.
+	Success string `json:"success,omitempty" yaml:"success,omitempty"`
+
+	// Errors lists the operation's expected errors and how to correct them.
+	Errors []OperationDocsError `json:"errors,omitempty" yaml:"errors,omitempty"`
+}
+
+// OperationDocsError is one expected error of an operation and the usual
+// correction a caller makes before retrying.
+type OperationDocsError struct {
+	Code             string `json:"code" yaml:"code"`
+	Description      string `json:"description" yaml:"description"`
+	CommonCorrection string `json:"commonCorrection" yaml:"commonCorrection"`
 }
 
 var docsCapabilityPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+$`)
@@ -126,7 +145,45 @@ func ValidateOperationDocs(docs *OperationDocs) error {
 			return fmt.Errorf("sunset %q must use YYYY-MM-DD", docs.Sunset)
 		}
 	}
-	return checkOptionalText("audience", string(docs.Audience))
+	for _, field := range []struct{ name, value string }{
+		{"audience", string(docs.Audience)},
+		{"useWhen", docs.UseWhen},
+		{"doNotUseWhen", docs.DoNotUseWhen},
+		{"success", docs.Success},
+	} {
+		if err := checkOptionalText(field.name, field.value); err != nil {
+			return err
+		}
+	}
+	return validateDocsErrors(docs.Errors)
+}
+
+// validateDocsErrors requires every field of every expected error, with no
+// surrounding whitespace, and a code that no other entry repeats, ignoring
+// case.
+func validateDocsErrors(docErrors []OperationDocsError) error {
+	seen := make(map[string]struct{}, len(docErrors))
+	for _, docError := range docErrors {
+		for _, field := range []struct{ name, value string }{
+			{"errors code", docError.Code},
+			{"errors description", docError.Description},
+			{"errors commonCorrection", docError.CommonCorrection},
+		} {
+			trimmed := strings.TrimSpace(field.value)
+			if trimmed == "" {
+				return fmt.Errorf("%s must be non-empty", field.name)
+			}
+			if trimmed != field.value {
+				return fmt.Errorf("%s must not contain surrounding whitespace", field.name)
+			}
+		}
+		code := strings.ToLower(docError.Code)
+		if _, duplicate := seen[code]; duplicate {
+			return fmt.Errorf("errors code %q must not be duplicated", docError.Code)
+		}
+		seen[code] = struct{}{}
+	}
+	return nil
 }
 
 // checkOptionalText accepts an absent value and rejects a blank or padded

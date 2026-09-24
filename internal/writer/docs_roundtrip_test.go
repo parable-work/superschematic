@@ -28,7 +28,7 @@ func TestTSWriterRoundTripsOperationDocs(t *testing.T) {
 	}
 	for _, want := range []string{
 		`import { HttpMethod, docs as apiDocs, rest } from "@superschematic/api";`,
-		`@apiDocs({ title: "Get an order", description: "Returns one order by its identifier.", capability: "orders.get", lifecycle: "active", visibility: "public", audience: "shoppers" })`,
+		`@apiDocs({ title: "Get an order", description: "Returns one order by its identifier.", capability: "orders.get", lifecycle: "active", visibility: "public", audience: "shoppers", useWhen: "Use when you have an order identifier.", doNotUseWhen: "Do not use to list orders; call listOrders.", success: "Returns the order with its total.", errors: [{ code: "order_not_found", description: "No order has that identifier.", commonCorrection: "Take the identifier from a listOrders result." }] })`,
 		`@apiDocs({ title: "Open a return", description: "Opens a return for one delivered order.", capability: "orders.returns.open", lifecycle: "deprecated", visibility: "preview", mappingStatus: "uncertain", replacement: "orders.returns.create", sunset: "2027-01-31" })`,
 	} {
 		if !strings.Contains(string(got), want) {

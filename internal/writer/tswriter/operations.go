@@ -188,5 +188,22 @@ func operationDocsLiteral(docs *ir.OperationDocs) string {
 	if docs.Sunset != "" {
 		parts = append(parts, "sunset: "+quote(docs.Sunset))
 	}
+	if docs.UseWhen != "" {
+		parts = append(parts, "useWhen: "+quote(docs.UseWhen))
+	}
+	if docs.DoNotUseWhen != "" {
+		parts = append(parts, "doNotUseWhen: "+quote(docs.DoNotUseWhen))
+	}
+	if docs.Success != "" {
+		parts = append(parts, "success: "+quote(docs.Success))
+	}
+	if len(docs.Errors) > 0 {
+		entries := make([]string, len(docs.Errors))
+		for i, docError := range docs.Errors {
+			entries[i] = fmt.Sprintf("{ code: %s, description: %s, commonCorrection: %s }",
+				quote(docError.Code), quote(docError.Description), quote(docError.CommonCorrection))
+		}
+		parts = append(parts, "errors: ["+strings.Join(entries, ", ")+"]")
+	}
 	return "{ " + strings.Join(parts, ", ") + " }"
 }

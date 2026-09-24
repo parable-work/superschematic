@@ -543,6 +543,15 @@
         "description": {
           "type": "string"
         },
+        "doNotUseWhen": {
+          "type": "string"
+        },
+        "errors": {
+          "items": {
+            "$ref": "#/$defs/OperationDocsError"
+          },
+          "type": "array"
+        },
         "lifecycle": {
           "enum": [
             "draft",
@@ -563,10 +572,16 @@
         "replacement": {
           "type": "string"
         },
+        "success": {
+          "type": "string"
+        },
         "sunset": {
           "type": "string"
         },
         "title": {
+          "type": "string"
+        },
+        "useWhen": {
           "type": "string"
         },
         "visibility": {
@@ -585,6 +600,26 @@
         "lifecycle",
         "visibility",
         "mappingStatus"
+      ],
+      "type": "object"
+    },
+    "OperationDocsError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "commonCorrection": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "description",
+        "commonCorrection"
       ],
       "type": "object"
     },

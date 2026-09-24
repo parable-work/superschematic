@@ -46,6 +46,14 @@ export class ReturnMutations {
 | `mappingStatus` | no | `mapped` (the default) or `uncertain`: how sure the author is of the capability |
 | `replacement` | no | what replaces a deprecated or retired operation |
 | `sunset` | no | the date the operation stops being served, `YYYY-MM-DD` |
+| `useWhen` | no | when a caller, a person or a model, should choose this operation |
+| `doNotUseWhen` | no | when a caller should choose another operation instead |
+| `success` | no | the outcome a caller should expect after a successful call |
+| `errors` | no | a non-empty list of `{ code, description, commonCorrection }`: the expected errors and the usual correction for each; every field required, codes unique ignoring case |
+
+The optional texts are non-blank and have no surrounding whitespace when
+given. The guidance keys (`useWhen` through `errors`) are written for a
+caller choosing between operations, a model included.
 
 An operation takes at most one `@docs`. Every value must be a literal. A
 config that breaks a rule fails the load with the decorator's location:
@@ -68,7 +76,7 @@ The Go API's OpenAPI document (`openapi.json`, embedded in `openapi.go`):
   operation's comment.
 - `deprecated: true` when `lifecycle` is `deprecated` or `retired`.
 - The whole record is written under the vendor key `x-superschematic-docs`,
-  with the optional keys only when set:
+  with the optional keys only when set, and `errors` as a list of objects:
 
 ```json
 "x-superschematic-docs": {

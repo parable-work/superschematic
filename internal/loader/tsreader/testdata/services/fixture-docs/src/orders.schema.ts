@@ -19,7 +19,17 @@ export class OrderQueries {
     capability: "orders.get",
     lifecycle: "active",
     visibility: "public",
-    audience: "shoppers"
+    audience: "shoppers",
+    useWhen: "Use when you have an order identifier.",
+    doNotUseWhen: "Do not use to list orders; call listOrders.",
+    success: "Returns the order with its total.",
+    errors: [
+      {
+        code: "order_not_found",
+        description: "No order has that identifier.",
+        commonCorrection: "Take the identifier from a listOrders result."
+      }
+    ]
   })
   @rest(HttpMethod.GET, "orders/{id}")
   getOrder(id: Identity.UUID): Order {

@@ -42,6 +42,21 @@ export type DocsConfig = {
   readonly replacement?: string;
   /** The date the operation stops being served, YYYY-MM-DD. */
   readonly sunset?: string;
+  /** When a caller, a person or a model, should choose this operation. */
+  readonly useWhen?: string;
+  /** When a caller should choose another operation instead. */
+  readonly doNotUseWhen?: string;
+  /** The outcome a caller should expect after a successful call. */
+  readonly success?: string;
+  /** The operation's expected errors and the usual correction for each. */
+  readonly errors?: readonly DocsError[];
+};
+
+/** One expected error of an operation. Codes are unique, ignoring case. */
+export type DocsError = {
+  readonly code: string;
+  readonly description: string;
+  readonly commonCorrection: string;
 };
 
 const noopClassDecorator: ClassDecorator = () => {};

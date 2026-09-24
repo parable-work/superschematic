@@ -29,9 +29,9 @@ func docsDecorators() []DecoratorSpec {
 }
 
 // operationDocs reads @docs({ title, description, capability, lifecycle,
-// visibility, audience?, mappingStatus?, replacement?, sunset? }).
-// mappingStatus defaults to "mapped". Keys are read in sorted order so the
-// first error is the same on every run.
+// visibility, audience?, mappingStatus?, replacement?, sunset?, useWhen?,
+// doNotUseWhen?, success?, errors? }). mappingStatus defaults to "mapped".
+// Keys are read in sorted order so the first error is the same on every run.
 func operationDocs(args []any) (*ir.OperationDocs, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("@docs takes exactly one config object")
@@ -42,6 +42,14 @@ func operationDocs(args []any) (*ir.OperationDocs, error) {
 	}
 	out := &ir.OperationDocs{MappingStatus: ir.DocsMappingStatusMapped}
 	for _, key := range sortedKeys(cfg) {
+		if key == "errors" {
+			docErrors, err := operationDocsErrors(cfg[key])
+			if err != nil {
+				return nil, err
+			}
+			out.Errors = docErrors
+			continue
+		}
 		value, ok := cfg[key].(string)
 		if !ok {
 			return nil, ArgErrorf(0, "@docs %s must be a string literal", key)
@@ -65,12 +73,53 @@ func operationDocs(args []any) (*ir.OperationDocs, error) {
 			out.Replacement = value
 		case "sunset":
 			out.Sunset = value
+		case "useWhen":
+			out.UseWhen = value
+		case "doNotUseWhen":
+			out.DoNotUseWhen = value
+		case "success":
+			out.Success = value
 		default:
 			return nil, ArgErrorf(0, "@docs config has unknown key %q", key)
 		}
 	}
 	if err := ir.ValidateOperationDocs(out); err != nil {
 		return nil, ArgErrorf(0, "invalid @docs config: %s", err)
+	}
+	return out, nil
+}
+
+// operationDocsErrors reads @docs errors: a non-empty array of
+// { code, description, commonCorrection } objects.
+func operationDocsErrors(value any) ([]ir.OperationDocsError, error) {
+	list, ok := value.([]any)
+	if !ok || len(list) == 0 {
+		return nil, ArgErrorf(0, "@docs errors must be a non-empty array of object literals")
+	}
+	out := make([]ir.OperationDocsError, 0, len(list))
+	for _, item := range list {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			return nil, ArgErrorf(0, "@docs errors must be a non-empty array of object literals")
+		}
+		var docError ir.OperationDocsError
+		for _, key := range sortedKeys(entry) {
+			text, ok := entry[key].(string)
+			if !ok {
+				return nil, ArgErrorf(0, "@docs errors %s must be a string literal", key)
+			}
+			switch key {
+			case "code":
+				docError.Code = text
+			case "description":
+				docError.Description = text
+			case "commonCorrection":
+				docError.CommonCorrection = text
+			default:
+				return nil, ArgErrorf(0, "@docs errors has unknown key %q", key)
+			}
+		}
+		out = append(out, docError)
 	}
 	return out, nil
 }

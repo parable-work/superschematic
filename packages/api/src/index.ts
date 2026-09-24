@@ -20,6 +20,7 @@ export {
 export type {
   BodyLimitConfig,
   DocsConfig,
+  DocsError,
   DocsLifecycle,
   DocsMappingStatus,
   DocsVisibility,

@@ -147,6 +147,12 @@ of a generated artifact is always listed here with the bump it requires.
   (`registry.OpenAPIDocsKey`), which an OpenAPI hook can rename. Operations
   without `@docs` are unchanged. The TypeScript writer emits the decorator.
   The acme example restricts audiences and writes `x-acme-docs`. Minor.
+- `@docs` guidance: `useWhen`, `doNotUseWhen` and `success` (non-blank
+  texts) and `errors`, a non-empty list of `{ code, description,
+  commonCorrection }` with codes unique ignoring case. `ir.OperationDocs`
+  gains the four fields and `ir.OperationDocsError`; the OpenAPI
+  `x-superschematic-docs` record carries them when set; the TypeScript
+  writer emits them. Minor.
 
 ### Changed
 

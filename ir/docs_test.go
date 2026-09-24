@@ -119,3 +119,50 @@ func TestOperationDocsMarshalsWithoutEmptyOptionals(t *testing.T) {
 		t.Fatalf("docs JSON = %s\nwant       %s", raw, want)
 	}
 }
+
+func TestValidateOperationDocsGuidance(t *testing.T) {
+	base := func() OperationDocs {
+		d := validOperationDocs()
+		d.UseWhen = "Use when you have an order identifier."
+		d.DoNotUseWhen = "Do not use to list orders."
+		d.Success = "Returns the requested order."
+		d.Errors = []OperationDocsError{{
+			Code:             "order_not_found",
+			Description:      "No order has that identifier.",
+			CommonCorrection: "Take the identifier from a listOrders result.",
+		}}
+		return d
+	}
+	valid := base()
+	if err := ValidateOperationDocs(&valid); err != nil {
+		t.Fatalf("valid guidance: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*OperationDocs)
+		want   string
+	}{
+		{name: "blank useWhen", mutate: func(d *OperationDocs) { d.UseWhen = " \t" }, want: "useWhen must be non-empty when provided"},
+		{name: "padded doNotUseWhen", mutate: func(d *OperationDocs) { d.DoNotUseWhen = " Do not use to list orders." }, want: "doNotUseWhen must not contain surrounding whitespace"},
+		{name: "padded success", mutate: func(d *OperationDocs) { d.Success = "Returns the order. " }, want: "success must not contain surrounding whitespace"},
+		{name: "blank error correction", mutate: func(d *OperationDocs) { d.Errors[0].CommonCorrection = " " }, want: "errors commonCorrection must be non-empty"},
+		{name: "missing error code", mutate: func(d *OperationDocs) { d.Errors[0].Code = "" }, want: "errors code must be non-empty"},
+		{name: "padded error description", mutate: func(d *OperationDocs) { d.Errors[0].Description = " No order has that identifier." }, want: "errors description must not contain surrounding whitespace"},
+		{name: "duplicate error code", mutate: func(d *OperationDocs) {
+			duplicate := d.Errors[0]
+			duplicate.Code = "ORDER_NOT_FOUND"
+			d.Errors = append(d.Errors, duplicate)
+		}, want: `errors code "ORDER_NOT_FOUND" must not be duplicated`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := base()
+			test.mutate(&candidate)
+			err := ValidateOperationDocs(&candidate)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ValidateOperationDocs() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
