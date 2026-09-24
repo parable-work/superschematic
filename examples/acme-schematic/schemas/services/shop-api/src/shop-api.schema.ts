@@ -1,5 +1,5 @@
 import { Identity } from "superscalar";
-import { Authenticated, HttpMethod, QueryParam, requirePermission, rest, source } from "@superschematic/api";
+import { Authenticated, HttpMethod, QueryParam, docs, requirePermission, rest, source } from "@superschematic/api";
 import { Product } from "@acme/shop-db";
 
 // The public projection of the Product table.
@@ -22,7 +22,19 @@ export abstract class CreateProductInput {
 // the apikey provider the caller identifies itself with an X-API-Key header;
 // the generated APIKeyMiddleware resolves it to a principal before the route
 // runs, and @requirePermission is checked against the principal's roles.
+//
+// @docs gives each operation its OpenAPI summary and description. The acme
+// extension accepts only its own audiences and writes the record under
+// x-acme-docs.
 export class ProductQueries extends Authenticated {
+  @docs({
+    title: "Get a product",
+    description: "Returns one product from the catalog.",
+    capability: "catalog.products.get",
+    lifecycle: "active",
+    visibility: "public",
+    audience: "shoppers"
+  })
   @rest(HttpMethod.GET, "products/{id}")
   @requirePermission(["products.read"])
   getProduct(id: Identity.UUID): ProductView {
@@ -37,6 +49,14 @@ export class ProductQueries extends Authenticated {
 }
 
 export class ProductMutations extends Authenticated {
+  @docs({
+    title: "Create a product",
+    description: "Adds a product to the catalog.",
+    capability: "catalog.products.create",
+    lifecycle: "active",
+    visibility: "internal",
+    audience: "staff"
+  })
   @rest(HttpMethod.POST, "products")
   @requirePermission(["products.write"])
   createProduct(input: CreateProductInput): ProductView {

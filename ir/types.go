@@ -241,6 +241,10 @@ type FieldDef struct {
 	// Comment stores the node-attached comment for the field declaration.
 	Comment string `json:"comment,omitempty" yaml:"comment,omitempty"`
 
+	// Docs is the reader-facing documentation of an operation, declared with
+	// @docs. Nil on data fields and on operations without @docs.
+	Docs *OperationDocs `json:"docs,omitempty" yaml:"docs,omitempty"`
+
 	// TypeRef references the field's type (scalar, enum, object, etc.).
 	TypeRef TypeRef `json:"typeRef" yaml:"typeRef"`
 

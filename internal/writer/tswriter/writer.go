@@ -138,6 +138,14 @@ func (e *emitter) use(symbol string) string {
 	return symbol
 }
 
+// useAs records an aliased import of symbol from the declaring package pkg
+// and returns the alias. @superschematic/api and @superschematic/schema both
+// export docs; the aliases keep one file that uses both unambiguous.
+func (e *emitter) useAs(pkg, symbol, alias string) string {
+	e.importSymbol(naming.Active().Specifier(pkg), symbol+" as "+alias)
+	return alias
+}
+
 func (e *emitter) importSymbol(pkg, symbol string) {
 	if e.pkgImports[pkg] == nil {
 		e.pkgImports[pkg] = make(map[string]bool)

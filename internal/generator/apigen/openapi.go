@@ -305,14 +305,25 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 		}
 		pathItem := paths[endpoint.Path].(map[string]interface{})
 
+		summary := endpoint.Name
+		if endpoint.Title != "" {
+			summary = endpoint.Title
+		}
 		operation := map[string]interface{}{
-			"summary":     endpoint.Name,
+			"summary":     summary,
 			"operationId": endpoint.HandlerName,
 			"tags":        []string{endpoint.Namespace},
 		}
-
-		if endpoint.Description != "" {
-			operation["description"] = endpoint.Description
+		description := endpoint.Description
+		if endpoint.Docs != nil {
+			description = endpoint.Docs.Description
+			operation[OpenAPIDocsKey] = openAPIDocsExtension(endpoint.Docs)
+			if endpoint.Docs.Lifecycle == ir.DocsLifecycleDeprecated || endpoint.Docs.Lifecycle == ir.DocsLifecycleRetired {
+				operation["deprecated"] = true
+			}
+		}
+		if description != "" {
+			operation["description"] = description
 		}
 
 		parameters := buildCommonHeaderParameters(output)

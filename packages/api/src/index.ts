@@ -2,6 +2,7 @@ export { Authenticated, Encrypted } from "./bases";
 export {
   auth,
   bodyLimit,
+  docs,
   encrypted,
   hmacVerified,
   manualRouteRegistration,
@@ -16,6 +17,15 @@ export {
   virtual,
   webhook
 } from "./decorators";
-export type { BodyLimitConfig, HmacVerifiedConfig, RateLimitConfig, TimeoutConfig } from "./decorators";
+export type {
+  BodyLimitConfig,
+  DocsConfig,
+  DocsLifecycle,
+  DocsMappingStatus,
+  DocsVisibility,
+  HmacVerifiedConfig,
+  RateLimitConfig,
+  TimeoutConfig
+} from "./decorators";
 export { HttpMethod } from "./enums";
 export type { EncryptedField, QueryParam } from "./wrappers";

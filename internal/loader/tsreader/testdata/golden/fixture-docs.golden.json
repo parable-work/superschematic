@@ -1,0 +1,136 @@
+{
+  "name": "fixture-docs",
+  "kind": "API",
+  "scalars": {
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "UUID"
+      }
+    }
+  },
+  "types": {
+    "Order": {
+      "name": "Order",
+      "owner": "src/orders.schema.ts",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "totalCents",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true
+        }
+      ]
+    },
+    "ReturnRequest": {
+      "name": "ReturnRequest",
+      "owner": "src/orders.schema.ts",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "orderId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "reason",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        }
+      ]
+    }
+  },
+  "operationSets": [
+    {
+      "name": "OrderQueries",
+      "operations": [
+        {
+          "name": "getOrder",
+          "comment": "Fetch one order. OpenAPI takes the @docs description instead.",
+          "docs": {
+            "title": "Get an order",
+            "description": "Returns one order by its identifier.",
+            "capability": "orders.get",
+            "lifecycle": "active",
+            "visibility": "public",
+            "audience": "shoppers",
+            "mappingStatus": "mapped"
+          },
+          "typeRef": {
+            "name": "Order"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "httpMethod": "GET",
+          "restPath": "orders/{id}"
+        },
+        {
+          "name": "listOrders",
+          "comment": "Lists every order. Without @docs the summary is the operation name.",
+          "typeRef": {
+            "name": "Order",
+            "isArray": true
+          },
+          "required": true,
+          "httpMethod": "GET",
+          "restPath": "orders"
+        }
+      ]
+    },
+    {
+      "name": "ReturnMutations",
+      "operations": [
+        {
+          "name": "openReturn",
+          "docs": {
+            "title": "Open a return",
+            "description": "Opens a return for one delivered order.",
+            "capability": "orders.returns.open",
+            "lifecycle": "deprecated",
+            "visibility": "preview",
+            "mappingStatus": "uncertain",
+            "replacement": "orders.returns.create",
+            "sunset": "2027-01-31"
+          },
+          "typeRef": {
+            "name": "Order"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ReturnRequest"
+              },
+              "required": true
+            }
+          ],
+          "httpMethod": "POST",
+          "restPath": "returns"
+        }
+      ]
+    }
+  ]
+}

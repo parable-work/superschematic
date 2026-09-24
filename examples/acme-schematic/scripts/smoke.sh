@@ -35,7 +35,10 @@
 #      copy is current;
 #  13. `fields` type-checks the label declarations with the loader's
 #      declaration program and prints each field's checked type; a bad
-#      declaration fails with a located diagnostic.
+#      declaration fails with a located diagnostic;
+#  14. the @docs records of shop-api reach its OpenAPI document under acme's
+#      x-acme-docs key through the acme OpenAPI hook, and under the core key
+#      when the core-only binary builds the same service.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -194,5 +197,13 @@ if "$OUT/acme-schematic" fields "$OUT/bad-labels/bad.d.ts" Bad >"$OUT/fields-bad
   exit 1
 fi
 grep -q 'bad.d.ts:1:31: ' "$OUT/fields-bad.log"
+
+echo "==> @docs policy: acme's vendor key in the OpenAPI document"
+OPENAPI="$DIST/api/shop-api/openapi.json"
+jq -e '.paths["/api/products/{id}"].get.summary == "Get a product"' "$OPENAPI" >/dev/null
+jq -e '.paths["/api/products/{id}"].get["x-acme-docs"].audience == "shoppers"' "$OPENAPI" >/dev/null
+jq -e '[.. | objects | has("x-superschematic-docs")] | any | not' "$OPENAPI" >/dev/null
+jq -e '.paths["/api/products/{id}"].get["x-superschematic-docs"].audience == "shoppers"' \
+  "$OUT/session-dist/api/shop-api/openapi.json" >/dev/null
 
 echo "acme smoke: ok"

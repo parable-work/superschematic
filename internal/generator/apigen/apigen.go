@@ -81,6 +81,7 @@ type FileUploadField struct {
 // EndpointInfo represents one REST API endpoint extracted from an operation.
 type EndpointInfo struct {
 	Name          string // operation name as declared in the schema
+	Title         string // short reader-facing title from @docs; "" without it
 	Path          string // full route path including the /api prefix
 	RoutePath     string // route path relative to the /api mount point
 	Method        string // upper-case HTTP method ("GET", "POST", ...)
@@ -104,6 +105,8 @@ type EndpointInfo struct {
 	ScalarArgs  []Param
 
 	Description string
+	// Docs is the operation's @docs record; nil without it.
+	Docs *ir.OperationDocs
 
 	RequiresAuth     bool
 	RequiredPerms    []string
@@ -490,6 +493,9 @@ func defaultMethodForSet(setName string) string {
 
 // operationToEndpoint converts an operation FieldDef into an endpoint.
 func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *ir.OperationSet, types *typeMapper, schema *ir.Schema, provider AuthProvider) (*EndpointInfo, error) {
+	if err := ir.ValidateOperationDocs(op.Docs); err != nil {
+		return nil, fmt.Errorf("apigen: operation %s.%s has invalid docs: %w", namespace, op.Name, err)
+	}
 	method := strings.ToUpper(op.HTTPMethod)
 	if method == "" {
 		method = defaultMethod
@@ -570,8 +576,14 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		webhookHMACTypesExpr = fmt.Sprintf("%q", op.HMACVerifiedProvider)
 	}
 
+	title := ""
+	if op.Docs != nil {
+		title = op.Docs.Title
+	}
+
 	endpoint := &EndpointInfo{
 		Name:                         op.Name,
+		Title:                        title,
 		Path:                         path,
 		RoutePath:                    strings.TrimPrefix(path, "/api"),
 		Method:                       method,
@@ -590,6 +602,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		QueryParams:                  queryParams,
 		ScalarArgs:                   scalarArgs,
 		Description:                  codegen.DocText(op.Description, op.Comment),
+		Docs:                         op.Docs,
 		RequiresAuth:                 requiresAuth,
 		RequiredPerms:                op.Permissions,
 		RequireOwnership:             op.RequireOwnership,

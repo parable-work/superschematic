@@ -224,6 +224,9 @@
         "description": {
           "type": "string"
         },
+        "docs": {
+          "$ref": "#/$defs/OperationDocs"
+        },
         "encrypted": {
           "type": "boolean"
         },
@@ -526,6 +529,63 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "OperationDocs": {
+      "additionalProperties": false,
+      "properties": {
+        "audience": {
+          "type": "string"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "experimental",
+            "active",
+            "deprecated",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "mappingStatus": {
+          "enum": [
+            "mapped",
+            "uncertain"
+          ],
+          "type": "string"
+        },
+        "replacement": {
+          "type": "string"
+        },
+        "sunset": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "public",
+            "internal",
+            "preview"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "capability",
+        "lifecycle",
+        "visibility",
+        "mappingStatus"
+      ],
       "type": "object"
     },
     "OperationSet": {

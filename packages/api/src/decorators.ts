@@ -16,12 +16,44 @@ export type HmacVerifiedConfig = {
   readonly provider: string;
 };
 
+export type DocsLifecycle = "draft" | "experimental" | "active" | "deprecated" | "retired";
+
+export type DocsVisibility = "public" | "internal" | "preview";
+
+export type DocsMappingStatus = "mapped" | "uncertain";
+
+/** The reader-facing documentation of one operation. */
+export type DocsConfig = {
+  /** Short name: the OpenAPI summary. */
+  readonly title: string;
+  /** The OpenAPI description; it replaces the operation's comment there. */
+  readonly description: string;
+  /** Stable dotted identifier, at least two lowercase segments: "orders.returns.create". */
+  readonly capability: string;
+  /** deprecated and retired mark the OpenAPI operation deprecated. */
+  readonly lifecycle: DocsLifecycle;
+  /** How the operation appears in documentation; it grants no access. */
+  readonly visibility: DocsVisibility;
+  /** The primary reader. Open to any value unless an extension restricts it. */
+  readonly audience?: string;
+  /** Defaults to "mapped". */
+  readonly mappingStatus?: DocsMappingStatus;
+  /** What replaces a deprecated or retired operation. */
+  readonly replacement?: string;
+  /** The date the operation stops being served, YYYY-MM-DD. */
+  readonly sunset?: string;
+};
+
 const noopClassDecorator: ClassDecorator = () => {};
 const noopMethodDecorator: MethodDecorator = () => {};
 const noopPropertyDecorator: PropertyDecorator = () => {};
 const noopClassOrMethodDecorator: ClassDecorator & MethodDecorator = () => {};
 
 export function rest(_method: HttpMethod, _path?: string): MethodDecorator {
+  return noopMethodDecorator;
+}
+
+export function docs(_config: DocsConfig): MethodDecorator {
   return noopMethodDecorator;
 }
 

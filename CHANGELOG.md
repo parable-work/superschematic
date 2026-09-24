@@ -132,6 +132,21 @@ of a generated artifact is always listed here with the bump it requires.
   in registration order and a hook error names the hook. With neither
   registered, output is unchanged. The public `registry` package exports
   `CheckSpec` and `OpenAPIHook`. Minor.
+- `@docs` (from `@superschematic/api`) on an operation declares its
+  reader-facing documentation: `title`, `description`, `capability` (a
+  dotted lowercase identifier), `lifecycle`, `visibility`, and optionally
+  `audience`, `mappingStatus` (default `mapped`), `replacement` and
+  `sunset`. The IR `FieldDef` gains `docs` (`ir.OperationDocs`,
+  `ir.ValidateOperationDocs`); the loader checks it in every authoring form
+  and rejects it on a data field, and the schema-file JSON Schema accepts it
+  on operations. The audience is an open string: a distribution restricts
+  it with a registered check. In the OpenAPI document the operation's
+  `summary` becomes the title, its `description` the `@docs` description
+  (over the comment), `deprecated` is set for a deprecated or retired
+  operation, and the record is written under `x-superschematic-docs`
+  (`registry.OpenAPIDocsKey`), which an OpenAPI hook can rename. Operations
+  without `@docs` are unchanged. The TypeScript writer emits the decorator.
+  The acme example restricts audiences and writes `x-acme-docs`. Minor.
 
 ### Changed
 

@@ -60,6 +60,9 @@ func (e *emitter) emitOperation(setName string, op *ir.FieldDef) {
 	e.checkOperationField(op, owner)
 
 	e.comment("  ", op.Comment)
+	if op.Docs != nil {
+		fmt.Fprintf(&e.body, "  @%s(%s)\n", e.useAs("@superschematic/api", "docs", "apiDocs"), operationDocsLiteral(op.Docs))
+	}
 
 	if op.HTTPMethod != "" {
 		member, ok := httpMethodMembers[op.HTTPMethod]
@@ -145,6 +148,7 @@ func (e *emitter) checkOperationField(op *ir.FieldDef, owner string) {
 	rest := *op
 	rest.Name = ""
 	rest.Comment = ""
+	rest.Docs = nil
 	rest.TypeRef = ir.TypeRef{}
 	rest.Required = false
 	rest.Auth = false
@@ -159,4 +163,30 @@ func (e *emitter) checkOperationField(op *ir.FieldDef, owner string) {
 	if !reflect.DeepEqual(&rest, &ir.FieldDef{}) {
 		e.failf("%s: carries metadata with no TypeScript authoring form on an operation", owner)
 	}
+}
+
+// operationDocsLiteral renders an @docs record as the object literal the
+// decorator takes. Optional keys are written only when set, and
+// mappingStatus only when it is not the default.
+func operationDocsLiteral(docs *ir.OperationDocs) string {
+	parts := []string{
+		"title: " + quote(docs.Title),
+		"description: " + quote(docs.Description),
+		"capability: " + quote(docs.Capability),
+		"lifecycle: " + quote(string(docs.Lifecycle)),
+		"visibility: " + quote(string(docs.Visibility)),
+	}
+	if docs.Audience != "" {
+		parts = append(parts, "audience: "+quote(string(docs.Audience)))
+	}
+	if docs.MappingStatus != "" && docs.MappingStatus != ir.DocsMappingStatusMapped {
+		parts = append(parts, "mappingStatus: "+quote(string(docs.MappingStatus)))
+	}
+	if docs.Replacement != "" {
+		parts = append(parts, "replacement: "+quote(docs.Replacement))
+	}
+	if docs.Sunset != "" {
+		parts = append(parts, "sunset: "+quote(docs.Sunset))
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
 }

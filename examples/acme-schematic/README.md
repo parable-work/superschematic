@@ -16,6 +16,7 @@ The extension adds one of each registration surface:
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
 | Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |
 | Auth provider | `apikey`, an `X-API-Key` header over the generic session runtime | `ext/auth/` |
+| Check and OpenAPI hook | policy over the core `@docs` decorator: acme's audiences only, and the `x-acme-docs` vendor key | `ext/docs.go` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
@@ -64,6 +65,7 @@ examples/acme-schematic/
     document.go               catalog.config document + generator
     manifest.go               acmeManifest generator on every kind
     inventory.go              acmeInventory build-all hook
+    docs.go                   @docs policy: audience check, x-acme-docs OpenAPI hook
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
@@ -73,7 +75,7 @@ examples/acme-schematic/
     deps.json                 the committed copy of the dependency graph ([deps] copy)
     tsconfig.base.json        path aliases for @superschematic/*, @acme/*, superscalar
     services/shop-db          DB: User, Session, ApiKey, Product tables
-    services/shop-api         API: ProductQueries, ProductMutations over shop-db
+    services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs
     services/shop-config      General: ShopConfig with @envVars
     services/shop-catalog     Catalog: Product, Bundle with @shelf; catalog.config.yaml
   labels/                     shelf-label.d.ts and location.d.ts, the declarations `fields` reads
@@ -356,6 +358,38 @@ and `auth_provider = "session"` and compiles that too. Writing this example
 is how the session provider's stores were found not to compile against a
 DB with a `User` table; the fix is in the core with a test, and the smoke
 keeps it fixed.
+
+## Policy on a core decorator
+
+`@docs` is a core decorator: the core checks the record's shape, writes it
+to the IR and puts it in the OpenAPI document under `x-superschematic-docs`.
+acme adds two rules in `ext/docs.go` without a core option:
+
+```go
+r.RegisterCheck(registry.CheckSpec{
+	Name:      "acmeDocsAudience",
+	Extension: Name,
+	Verify: func(schema *ir.Schema, rep registry.VerifyReporter) {
+		// report a @docs audience that is not "shoppers" or "staff"
+	},
+})
+r.RegisterOpenAPIHook(registry.OpenAPIHook{
+	Name:      "acmeDocsKey",
+	Extension: Name,
+	Edit: func(_ *ir.Schema, doc map[string]any) error {
+		// move each operation's registry.OpenAPIDocsKey entry to x-acme-docs
+		return nil
+	},
+})
+```
+
+The check runs after the core checks on every schema the binary loads,
+core kinds included, in every authoring form. The hook edits the OpenAPI
+document the api generator builds before it is written. `shop-api` declares
+`@docs` on two operations; `ext/docs_test.go` checks the record lands under
+`x-acme-docs` and that an audience outside acme's set fails the load while
+the core registry accepts it. The smoke checks the generated
+`openapi.json` from both binaries.
 
 ## A command
 

@@ -284,6 +284,11 @@ r.RegisterOpenAPIHook(registry.OpenAPIHook{
 })
 ```
 
+acme uses both on the core `@docs` decorator (`ext/docs.go`): a check that
+accepts only its own audiences, and a hook that moves each operation's
+record from `registry.OpenAPIDocsKey` to `x-acme-docs`. See
+[Documentation decorators](/superschematic/reference/documentation/).
+
 ## A command
 
 `cli.New` returns `build`, `build-all`, `json-schema` and `format`. An

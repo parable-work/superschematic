@@ -90,6 +90,10 @@ const (
 	APILanguageGo   = registry.APILanguageGo
 	APILanguageRust = registry.APILanguageRust
 	APIProtocolREST = registry.APIProtocolREST
+
+	// OpenAPIDocsKey is the vendor-extension key an operation's @docs record
+	// is written under in the OpenAPI document; an OpenAPIHook renames it.
+	OpenAPIDocsKey = apigen.OpenAPIDocsKey
 )
 
 // New returns a registry with the core kinds and decorators registered; see
