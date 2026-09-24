@@ -397,6 +397,18 @@ of a generated artifact is always listed here with the bump it requires.
 - Rust types render a list of lists as `Vec<Vec<T>>` (`Option<Vec<Vec<T>>>`
   when optional) with the serde attributes of `Vec<T>`; a null inner list
   fails to decode. Minor.
+- Arrays of arrays in the TypeScript API server. Before, the generator
+  rendered a `T[][]` body argument or response as `T[]`; it now renders
+  `T[][]`. The runtime decodes a list-of-lists body argument from its JSON
+  value. List bounds apply to the outer list. A null inner list is refused
+  at `name[i]` (`required`, "required field"), and so is a non-list one
+  (`type`, "expected an array"). Each element is checked at `name[i][j]`,
+  an object element through the generated `parse<T>Json`, and the 400
+  `details` carry the `path`. A `T[][]` response sends a nullish inner list
+  as `[]`. `ParamSpec` gains `isArrayOfArrays` and `parse`, `ParamKind`
+  gains `object`, `OperationSpec` gains `outputIsArrayOfArrays`, and the
+  runtime exports `decodeListOfLists`. A list of lists of a union fails
+  the build with "tsrestgen does not support arrays of arrays yet". Minor.
 - Arrays of arrays in the SDKs and the Rust API: a `T[][]` body argument
   or response is `[][]T` in the Go SDK, `T[][]` in the TypeScript SDK,
   `list[list[T]]` in the Python SDK and `Vec<Vec<T>>` in the Rust SDK. The

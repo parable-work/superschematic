@@ -49,6 +49,12 @@ type ParamInfo struct {
 	Kind     string // runtime ParamKind
 	Required bool
 	IsArray  bool
+	// IsArrayOfArrays marks a T[][] body argument (IsArray is also set). The
+	// runtime decodes it from the JSON body with the list rules: an inner
+	// list is never null and each element is checked at name[i][j]. An
+	// object element type has Kind "object" and is parsed by the generated
+	// strict parser of that type.
+	IsArrayOfArrays bool
 	// SpecLiteral is the ParamSpec object literal the router carries.
 	SpecLiteral string
 }
@@ -75,6 +81,9 @@ type EndpointInfo struct {
 	InputRequired  bool
 
 	OutputType string // TypeScript type expression of the result
+	// OutputIsArrayOfArrays marks a T[][] result; the runtime sends a
+	// nullish inner list as [].
+	OutputIsArrayOfArrays bool
 
 	PathParams  []ParamInfo
 	QueryParams []ParamInfo
@@ -321,36 +330,63 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 		return endpoint, fmt.Errorf("tsrestgen: operation %s.%s: %w", ep.Namespace, ep.Name, err)
 	}
 	endpoint.OutputType = outputType
+	endpoint.OutputIsArrayOfArrays = ep.OutputIsArrayOfArrays
 	endpoint.DocLines = docLines(endpoint)
 
+	// b.param fails only for an array of arrays whose element it cannot
+	// decode; the error names the argument.
+	param := func(p apigen.Param, isPath bool) (ParamInfo, error) {
+		info, err := b.param(p, isPath)
+		if err != nil {
+			return info, fmt.Errorf("tsrestgen does not support arrays of arrays yet (%s.%s(%s)): %w", ep.Namespace, ep.Name, p.Name, err)
+		}
+		return info, nil
+	}
 	for _, p := range ep.PathParams {
-		endpoint.PathParams = append(endpoint.PathParams, b.param(p, true))
+		info, err := param(p, true)
+		if err != nil {
+			return endpoint, err
+		}
+		endpoint.PathParams = append(endpoint.PathParams, info)
 	}
 	for _, p := range ep.QueryParams {
-		endpoint.QueryParams = append(endpoint.QueryParams, b.param(p, false))
+		info, err := param(p, false)
+		if err != nil {
+			return endpoint, err
+		}
+		endpoint.QueryParams = append(endpoint.QueryParams, info)
 	}
 	// Undecorated scalar arguments travel in the query string on GET (the Go
 	// router's rule) and as fields of the JSON body object otherwise.
 	for _, p := range ep.ScalarArgs {
+		info, err := param(p, false)
+		if err != nil {
+			return endpoint, err
+		}
 		if endpoint.Method == "GET" {
-			endpoint.QueryParams = append(endpoint.QueryParams, b.param(p, false))
+			endpoint.QueryParams = append(endpoint.QueryParams, info)
 		} else {
-			endpoint.BodyParams = append(endpoint.BodyParams, b.param(p, false))
+			endpoint.BodyParams = append(endpoint.BodyParams, info)
 		}
 	}
 	return endpoint, nil
 }
 
 // param resolves the runtime kind, the TypeScript type, and the ParamSpec
-// literal of one parameter from apigen's parse flags.
-func (b *builder) param(p apigen.Param, isPath bool) ParamInfo {
+// literal of one parameter from apigen's parse flags. apigen admits an
+// array of arrays only as a body argument; its element may also be an
+// object type, which the runtime parses with the generated strict parser.
+// It fails for any other element type (a union has no parser).
+func (b *builder) param(p apigen.Param, isPath bool) (ParamInfo, error) {
 	info := ParamInfo{
-		Name:     p.Name,
-		TSName:   tsutil.ToCamelCase(p.Name),
-		Required: p.Required || isPath,
-		IsArray:  p.IsArray,
+		Name:            p.Name,
+		TSName:          tsutil.ToCamelCase(p.Name),
+		Required:        p.Required || isPath,
+		IsArray:         p.IsArray,
+		IsArrayOfArrays: p.IsArrayOfArrays,
 	}
 	var enumValues []string
+	var elementParser string
 	switch {
 	case p.IsInt:
 		info.Kind, info.TSType = "integer", "number"
@@ -377,13 +413,23 @@ func (b *builder) param(p apigen.Param, isPath bool) ParamInfo {
 				}
 				enumValues = append(enumValues, serialized)
 			}
+		} else if _, isScalar := b.findScalar(p.Type); p.IsArrayOfArrays && !isScalar {
+			pkg, ok := b.ownerPackage(p.Type)
+			if !ok {
+				return info, fmt.Errorf("element type %s is not a scalar, enum or object type", p.Type)
+			}
+			info.Kind, info.TSType = "object", p.Type
+			b.addImport(b.typeImports, pkg, p.Type)
+			b.addImport(b.routerTypeImports, pkg, p.Type)
+			validator, parser := "parse"+p.Type+"Json", "parse"+p.Type+"FromJSON"
+			b.addImport(b.validatorImports, pkg, validator)
+			b.addImport(b.validatorImports, pkg, parser)
+			elementParser = fmt.Sprintf("(value: unknown) => %s(%s(value))", parser, validator)
 		} else {
 			info.Kind, info.TSType = "string", b.scalarType(p.Type)
 		}
 	}
-	if p.IsArray {
-		info.TSType += "[]"
-	}
+	info.TSType = tsListType(info.TSType, p.ArrayDepth())
 
 	fields := []string{
 		"name: " + tsString(p.Name),
@@ -392,6 +438,9 @@ func (b *builder) param(p apigen.Param, isPath bool) ParamInfo {
 	}
 	if p.IsArray {
 		fields = append(fields, "isArray: true")
+	}
+	if p.IsArrayOfArrays {
+		fields = append(fields, "isArrayOfArrays: true")
 	}
 	if len(enumValues) > 0 {
 		fields = append(fields, "enumValues: "+tsStringList(enumValues))
@@ -420,8 +469,17 @@ func (b *builder) param(p apigen.Param, isPath bool) ParamInfo {
 	if p.ValidatePattern != "" {
 		fields = append(fields, "pattern: "+tsString(p.ValidatePattern))
 	}
+	if elementParser != "" {
+		fields = append(fields, "parse: "+elementParser)
+	}
 	info.SpecLiteral = "{ " + strings.Join(fields, ", ") + " }"
-	return info
+	return info, nil
+}
+
+// tsListType wraps a TypeScript element type in depth list levels: "T",
+// "T[]" or "T[][]".
+func tsListType(elem string, depth int) string {
+	return codegen.WrapArray(elem, depth, func(inner string) string { return inner + "[]" })
 }
 
 // scalarType returns the scalar library wire type symbol of a named scalar,
@@ -461,10 +519,7 @@ func (b *builder) outputType(ep apigen.EndpointInfo) (string, error) {
 			return "", fmt.Errorf("output type %s is not declared by the schema or its dependencies", name)
 		}
 	}
-	if ep.OutputIsArray {
-		tsType += "[]"
-	}
-	return tsType, nil
+	return tsListType(tsType, ep.OutputArrayDepth()), nil
 }
 
 // ownerPackage returns the generated types package that declares a type or

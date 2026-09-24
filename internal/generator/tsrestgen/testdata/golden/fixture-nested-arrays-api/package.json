@@ -1,0 +1,47 @@
+{
+  "name": "@schemas/fixture-nested-arrays-api-api",
+  "version": "1.0.0",
+  "description": "Generated TypeScript API server for the fixture-nested-arrays-api schema. DO NOT EDIT.",
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": {
+      "types": "./index.ts",
+      "import": "./index.ts"
+    },
+    "./interfaces": {
+      "types": "./interfaces.ts",
+      "import": "./interfaces.ts"
+    },
+    "./router": {
+      "types": "./router.ts",
+      "import": "./router.ts"
+    },
+    "./openapi.json": "./openapi.json"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "keywords": [
+    "api",
+    "server",
+    "hono",
+    "typescript",
+    "fixture-nested-arrays-api"
+  ],
+  "author": "superschematic",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {},
+  "peerDependencies": {
+    "@schemas/fixture-nested-arrays-api-types": "*",
+    "@superschematic/http-runtime": "*",
+    "hono": "4.13.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "hono": "4.13.8",
+    "typescript": "5.9.3"
+  }
+}

@@ -60,6 +60,9 @@ export const operationSpecs = {
 {{- if .HasInput }}
     input: { parse: (value: unknown) => {{ .InputParser }}({{ .InputValidator }}(value)), required: {{ .InputRequired }} },
 {{- end }}
+{{- if .OutputIsArrayOfArrays }}
+    outputIsArrayOfArrays: true,
+{{- end }}
     auth: { public: {{ .PublicRoute }}, required: {{ .RequiresAuth }}, permissions: {{ .PermsLiteral }} },
 {{- if .BodyLimitBytes }}
     bodyLimitBytes: {{ .BodyLimitBytes }},

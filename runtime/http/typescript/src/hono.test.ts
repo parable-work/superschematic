@@ -204,6 +204,64 @@ describe('mountOperation', () => {
     expect(JSON.stringify(body)).not.toContain('secret internals');
   });
 
+  test('a list-of-lists body parameter is decoded from its JSON value, other body parameters as before', async () => {
+    const replaceRows: OperationSpec = {
+      ...health,
+      name: 'replaceRows',
+      method: 'PUT',
+      path: '/api/rows',
+      bodyParams: [
+        { name: 'rows', kind: 'enum', required: true, isArray: true, isArrayOfArrays: true, enumValues: ['light', 'dark'] },
+        { name: 'note', kind: 'string', required: false },
+      ],
+    };
+    const app = build(a => {
+      mountOperation(a, replaceRows, async (_ctx, request) => request.body);
+    });
+    const put = (body: unknown) => app.request('/api/rows', { method: 'PUT', body: JSON.stringify(body) });
+    const saved = await put({ rows: [['light'], [], ['dark', 'light']], note: 'n' });
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).data).toEqual({ rows: [['light'], [], ['dark', 'light']], note: 'n' });
+    const nullRow = await put({ rows: [['light'], null] });
+    expect(nullRow.status).toBe(400);
+    expect(await nullRow.json()).toMatchObject({
+      status: 400,
+      code: 'bad_request',
+      detail: 'Invalid body parameter rows[1]: required field',
+      details: { location: 'body', parameter: 'rows', path: 'rows[1]', errors: [{ validator: 'required', message: 'required field' }] },
+    });
+    const badElement = await put({ rows: [['light', 'dim']] });
+    expect(badElement.status).toBe(400);
+    expect(await badElement.json()).toMatchObject({ details: { parameter: 'rows', path: 'rows[0][1]' } });
+    const missing = await put({ note: 'n' });
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toMatchObject({ details: { location: 'body', parameter: 'rows', reason: 'required' } });
+  });
+
+  test('a list-of-lists result is sent with every nullish list as []', async () => {
+    const rowsOf: OperationSpec = { ...health, name: 'rowsOf', path: '/api/rows/{kind}', outputIsArrayOfArrays: true };
+    const results: Record<string, unknown> = {
+      ragged: [['a'], null, undefined, [], ['b', 'c']],
+      absent: undefined,
+      wrapped: new OperationResult([null, ['x']], 202),
+    };
+    const app = build(a => {
+      mountOperation(a, rowsOf, async ctx => results[ctx.pathParams.kind ?? '']);
+    });
+    const ragged = await app.request('/api/rows/ragged');
+    expect((await ragged.json()).data).toEqual([['a'], [], [], [], ['b', 'c']]);
+    const absent = await app.request('/api/rows/absent');
+    expect((await absent.json()).data).toEqual([]);
+    const wrapped = await app.request('/api/rows/wrapped');
+    expect(wrapped.status).toBe(202);
+    expect((await wrapped.json()).data).toEqual([[], ['x']]);
+    // Without the flag a result is sent as returned.
+    const plain = build(a => {
+      mountOperation(a, { ...health, name: 'plain', path: '/api/plain' }, async () => [null]);
+    });
+    expect((await (await plain.request('/api/plain')).json()).data).toEqual([null]);
+  });
+
   test('a handler may answer with a finished Response', async () => {
     const app = build(a => {
       mountOperation(a, { ...health, name: 'raw', path: '/api/raw' }, async () => new Response('plain', { status: 202 }));

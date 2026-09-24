@@ -21,6 +21,14 @@ Two entry points:
   body parameter decoding from `ParamSpec`s (`Identity.UUID` and
   `Temporal.DateTime` go through superscalar; primitives stay local), the
   permission gate, and a token-bucket rate limiter with a pluggable store.
+  A list of lists (`T[][]`) travels only as a body parameter.
+  `decodeListOfLists` reads it from its JSON value with the schema
+  runtimes' list rules. List bounds apply to the outer list. A null inner
+  list is refused at `name[i]` (`required`), and so is a non-list inner
+  value (`type`). Each element is checked at `name[i][j]`; an object
+  element goes through the generated parser of its type. The 400 detail
+  carries the failing `path`. A list-of-lists result is sent with every
+  nullish list as `[]`.
 - `@superschematic/http-runtime/hono`, the Hono adapter. `mountOperation`
   runs the pipeline for one operation: request id, `@rateLimit`,
   `hono/timeout`, `hono/bearer-auth` and the permission gate, parameter

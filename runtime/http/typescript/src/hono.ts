@@ -6,7 +6,7 @@ import { timeout } from 'hono/timeout';
 import { authorize, type Authenticator, type PermissionMatcher } from './auth';
 import { OperationResult, envelopeResponse, requestIdOf } from './envelope';
 import type { OperationSpec, RequestContext } from './operation';
-import { decodeParams } from './params';
+import { decodeListOfLists, decodeParams } from './params';
 import {
   HttpProblem,
   badRequest,
@@ -328,21 +328,34 @@ async function decode(ctx: RequestContext, spec: OperationSpec): Promise<Decoded
       throw badRequest('Request body must be a JSON object');
     }
     const object = (raw ?? {}) as Record<string, unknown>;
-    body = decodeParams('body', spec.bodyParams, name => {
+    // A list of lists is decoded from its JSON value; the other body
+    // parameters go through the string decoding that path and query use.
+    body = decodeParams('body', spec.bodyParams.filter(param => !param.isArrayOfArrays), name => {
       const value = object[name];
       if (value === undefined || value === null) return undefined;
       return Array.isArray(value) ? value.map(item => String(item)) : [String(value)];
     });
+    for (const param of spec.bodyParams.filter(param => param.isArrayOfArrays)) {
+      const value = decodeListOfLists('body', param, object[param.name]);
+      if (value !== undefined) body[param.name] = value;
+    }
   }
   return { path, query, body, input };
 }
 
-function successResponse(result: unknown, requestId: string): Response {
+/** A list-of-lists result with every nullish list as []: an inner list is never null on the wire. */
+function listOfListsResult(data: unknown): unknown {
+  if (data === undefined || data === null) return [];
+  return Array.isArray(data) ? data.map((row: unknown) => row ?? []) : data;
+}
+
+function successResponse(result: unknown, requestId: string, spec: OperationSpec): Response {
   if (result instanceof Response) return result;
+  const shape = spec.outputIsArrayOfArrays ? listOfListsResult : (data: unknown) => data;
   if (result instanceof OperationResult) {
-    return envelopeResponse(result.data, requestId, result.status, result.headers);
+    return envelopeResponse(shape(result.data), requestId, result.status, result.headers);
   }
-  return envelopeResponse(result ?? null, requestId);
+  return envelopeResponse(shape(result) ?? null, requestId);
 }
 
 function routeMiddleware(spec: OperationSpec, timeoutSeconds: number | undefined, bodyLimitBytes: number | undefined): MiddlewareHandler[] {
@@ -377,7 +390,7 @@ export function mountOperation<E extends Env>(
           if (rateLimitPerMinute) await admit(ctx, rateLimitPerMinute, options);
           await establishCaller(ctx, options);
           const decoded = await decode(ctx, spec);
-          return successResponse(await handler(ctx, decoded), ctx.requestId);
+          return successResponse(await handler(ctx, decoded), ctx.requestId, spec);
         } catch (error) {
           return failureResponse(error, ctx, options);
         }
