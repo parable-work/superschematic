@@ -460,5 +460,13 @@ of a generated artifact is always listed here with the bump it requires.
   directly. Go does not inherit `replace` lines from a dependency's
   `go.mod`, so a module that reached a sibling only through another
   generated module did not resolve it. Patch.
+- Go types: a map field of a scalar or enum (`Record<string, Identity.UUID>`),
+  and a `minLength`, `maxLength`, `pattern`, `min` or `max` rule on a map
+  field, did not compile: `Validate` called the scalar's methods on the map
+  itself. `Validate` now checks each entry and reports its errors under
+  `name[key]`; a nil required map reports `required`, an optional map skips
+  a null entry, and an input map is checked when present and not null.
+  `MaskSecrets` on an optional map of a generated type, which did not
+  compile either, keeps a null entry null. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main

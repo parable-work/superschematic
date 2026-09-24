@@ -356,9 +356,13 @@ func (t *{{.Name}}) MaskSecrets() *{{.Name}} {
 		{{if and (not .IsScalar) (isGeneratedType $.Types $.ImportedTypes .Type)}}
 		for key, item := range t.{{.GoName}} {
 			maskedValue := item.MaskSecrets()
+			{{if .Required}}
 			if maskedValue != nil {
 				masked.{{.GoName}}[key] = *maskedValue
 			}
+			{{else}}
+			masked.{{.GoName}}[key] = maskedValue
+			{{end}}
 		}
 		{{else}}
 		for key, item := range t.{{.GoName}} {
@@ -403,6 +407,30 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 
 	{{range .Fields}}
 	{{if or (isValidatableScalarField .) (isEnumType $.Enums $.ImportedEnums .Type)}}
+	{{if .IsMap}}
+	// Validate {{.Name}} entries independently of the map container.
+	{{if .UsesWrapper}}
+	if t.{{.GoName}}.IsSet() && !t.{{.GoName}}.IsNull() {
+	{{else}}
+	{
+	{{end}}
+		{{if .Required}}
+		if t.{{.GoName}} == nil {
+			errors.AddFieldError("{{.Name}}", "required", "required field")
+		}
+		{{end}}
+		for key, item := range t.{{.GoName}}{{if .UsesWrapper}}.Value{{end}} {
+			{{if or (hasPrefix .GoType "map[string]*") (hasPrefix .GoType "InputField[map[string]*")}}
+			if item == nil {
+				continue
+			}
+			{{end}}
+			if valid, itemErrs := item.ValidateRequired(); !valid {
+				errors.SetFieldErrors(fmt.Sprintf("{{.Name}}[%s]", key), itemErrs)
+			}
+		}
+	}
+	{{else}}
 	{{if and .Required (not .HasDefault)}}
 	{{/* Skip validation for common audit fields that are auto-generated */}}
 	{{if and (not .InternalMetadata) (ne .Name "id") (ne .Name "createdAt") (ne .Name "createdBy") (ne .Name "updatedAt") (ne .Name "updatedBy")}}
@@ -479,6 +507,7 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 			errors.SetFieldErrors("{{.Name}}", fieldErrs)
 		}
 	}
+	{{end}}
 	{{end}}
 	{{end}}
 	{{end}}
@@ -569,7 +598,42 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	{{end}}
 	{{if hasEmittableValidations .Validations}}
 	{{$field := .}}
+	{{if .IsMap}}
+	{{/* A map's value rules apply to each entry, keyed by its map key. */}}
 	{{if .UsesWrapper}}
+	if t.{{.GoName}}.IsSet() && !t.{{.GoName}}.IsNull() {
+	{{end}}
+	{{range .Validations}}
+	{{if or (eq .Validator "minLength") (eq .Validator "maxLength") (eq .Validator "pattern") (eq .Validator "min") (eq .Validator "max")}}
+	for key, item := range t.{{$field.GoName}}{{if $field.UsesWrapper}}.Value{{end}} {
+		{{if or (hasPrefix $field.GoType "map[string]*") (hasPrefix $field.GoType "InputField[map[string]*")}}
+		if item == nil {
+			continue
+		}
+		value := *item
+		{{else}}
+		value := item
+		{{end}}
+		{{if eq .Validator "minLength"}}
+		if len({{validationStringExpr $field "value"}}) < {{printf "%v" .Value}} {
+		{{else if eq .Validator "maxLength"}}
+		if len({{validationStringExpr $field "value"}}) > {{printf "%v" .Value}} {
+		{{else if eq .Validator "pattern"}}
+		if matched, err := regexp.MatchString("{{escapeString (printf "%v" .Value)}}", {{validationStringExpr $field "value"}}); err != nil || !matched {
+		{{else if eq .Validator "min"}}
+		if float64(value) < {{printf "%v" .Value}} {
+		{{else if eq .Validator "max"}}
+		if float64(value) > {{printf "%v" .Value}} {
+		{{end}}
+			errors.AddFieldError(fmt.Sprintf("{{$field.Name}}[%s]", key), "{{.Validator}}", "{{escapeString .Message}}")
+		}
+	}
+	{{end}}
+	{{end}}
+	{{if .UsesWrapper}}
+	}
+	{{end}}
+	{{else if .UsesWrapper}}
 	if t.{{.GoName}}.IsSet() && !t.{{.GoName}}.IsNull() {
 		value := t.{{.GoName}}.Value
 		{{range .Validations}}
