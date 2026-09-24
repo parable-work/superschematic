@@ -477,5 +477,12 @@ of a generated artifact is always listed here with the bump it requires.
   `Field(discriminator=...)`. Pydantic resolves that name against the
   members' Python field names (`event_kind`), so importing the package
   failed. The union now names the Python field. Patch.
+- Rust types: a discriminated union failed to decode a member with a
+  floating-point field (`invalid type: map, expected f64`) whenever
+  serde_json's `arbitrary_precision` feature was on anywhere in the build.
+  Cargo unifies features, so any crate in the graph could turn it on. The
+  union now decodes through a `serde_json::Value` and picks the member by
+  its tag; a missing or unknown tag is an error that names the union. A
+  crate with a discriminated union depends on `serde_json`. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main

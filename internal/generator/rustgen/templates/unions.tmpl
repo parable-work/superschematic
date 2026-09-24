@@ -10,13 +10,44 @@ use crate::types::*;
 {{- end}}
 {{- if .Discriminator}}
 /// Discriminated by the `{{.Discriminator}}` member field.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "{{escapeString .Discriminator}}")]
 pub enum {{.Name}} {
 {{- range .Members}}
     #[serde(rename = "{{escapeString .TagValue}}")]
     {{.Name}}({{.Name}}),
 {{- end}}
+}
+
+// Deserialize through a generic JSON value before selecting a variant. Direct
+// deserialization of an internally tagged newtype enum is incompatible with
+// serde_json's arbitrary_precision feature for variants containing floating
+// point fields. Cargo feature unification can enable that feature from any
+// crate, so generated wire types must not depend on which other crates share a graph.
+impl<'de> Deserialize<'de> for {{.Name}} {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = value
+            .get("{{escapeString .Discriminator}}")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| serde::de::Error::custom(
+                "{{escapeString .Name}} requires string discriminator {{escapeString .Discriminator}}",
+            ))?;
+        match tag.as_str() {
+{{- range .Members}}
+            "{{escapeString .TagValue}}" => serde_json::from_value::<{{.Name}}>(value)
+                .map(Self::{{.Name}})
+                .map_err(serde::de::Error::custom),
+{{- end}}
+            _ => Err(serde::de::Error::custom(format!(
+                "unknown {{escapeString .Name}} discriminator {tag:?}",
+            ))),
+        }
+    }
 }
 {{- else}}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

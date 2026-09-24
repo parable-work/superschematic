@@ -777,6 +777,13 @@ func collectExternalCrateDeps(output *ModuleOutput) []ExternalCrateDep {
 	if len(output.CompositeDefaults) > 0 {
 		crateNames["serde_json"] = struct{}{}
 	}
+	// A discriminated union decodes through serde_json::Value (unions.tmpl).
+	for _, union := range output.Unions {
+		if union.Discriminator != "" {
+			crateNames["serde_json"] = struct{}{}
+			break
+		}
+	}
 
 	for _, scalar := range output.Scalars {
 		extractCrateNames(scalar.RustType, crateNames)
