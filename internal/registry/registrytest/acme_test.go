@@ -142,6 +142,24 @@ func TestAcmeExtensionEndToEnd(t *testing.T) {
 		t.Errorf("catalog.json:\n%s\nwant:\n%s", catalog, wantCatalog)
 	}
 
+	// The YAML twin's config is a data form too, and it switches the
+	// extension generator on with the extension's own output key.
+	yamlRoot := t.TempDir()
+	if _, err := generator.Run(yamlSchema, yamlCfg, generator.Options{
+		OutputRoot:  yamlRoot,
+		ServicePath: "testdata/shop-yaml",
+		Registry:    reg,
+	}); err != nil {
+		t.Fatalf("generator.Run(shop-yaml): %v", err)
+	}
+	yamlCatalog, err := os.ReadFile(filepath.Join(registrytest.OutDir(yamlRoot, "shop"), "catalog.json"))
+	if err != nil {
+		t.Fatalf("catalog.json from the YAML twin: %v", err)
+	}
+	if string(yamlCatalog) != wantCatalog {
+		t.Errorf("catalog.json from the YAML twin:\n%s\nwant:\n%s", yamlCatalog, wantCatalog)
+	}
+
 	// The emitted JSON Schema composes the extension in.
 	def, err := schemafile.DefinitionFor(reg)
 	if err != nil {
@@ -173,6 +191,21 @@ func TestAcmeExtensionEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(string(root.Defs["Document"].Properties["kind"]), `"Catalog"`) {
 		t.Errorf("Document.kind enum lacks Catalog: %s", root.Defs["Document"].Properties["kind"])
+	}
+}
+
+// outputs.catalog is checked against the catalog generator's OutputSchema
+// before any generator runs, from either config form.
+func TestAcmeOutputSectionFailsItsOutputSchema(t *testing.T) {
+	reg := acmeRegistry(t)
+	schema, cfg, err := loader.LoadServiceWithConfig("testdata/shop-yaml", loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Outputs = map[string]any{"catalog": map[string]any{"enabled": true, "shelves": 3}}
+	_, err = generator.Run(schema, cfg, generator.Options{OutputRoot: t.TempDir(), ServicePath: "testdata/shop-yaml", Registry: reg})
+	if err == nil || !strings.Contains(err.Error(), "outputs.catalog") || !strings.Contains(err.Error(), "shelves") {
+		t.Fatalf("a catalog section with an undeclared key: %v", err)
 	}
 }
 

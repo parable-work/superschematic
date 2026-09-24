@@ -77,6 +77,30 @@ outputs:
 	}
 }
 
+// An extension generator's output key reaches the registry from a data-form
+// config, as it does from schema.config.ts: the embedded schema checks the
+// core sections and leaves other keys to registry.ParseOutputs, which knows
+// the registered generators and their OutputSchema.
+func TestReadFileAcceptsAnExtensionOutputKey(t *testing.T) {
+	dir := writeConfig(t, "schema.config.yaml", `name: shop
+kind: DB
+outputs:
+  types: { go: { enabled: true } }
+  catalog: { enabled: true }
+`)
+	cfg, err := ReadFile(dir, coreKinds)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if _, ok := cfg.Outputs["catalog"]; !ok {
+		t.Errorf("outputs = %+v, want the catalog section kept", cfg.Outputs)
+	}
+	bad := writeConfig(t, "schema.config.json", `{"name": "shop", "kind": "DB", "outputs": {"types": {"go": {"enabled": "yes"}}}}`)
+	if _, err := ReadFile(bad, coreKinds); err == nil {
+		t.Error("a malformed core section was accepted")
+	}
+}
+
 func TestReadFileRejectsUnknownKeys(t *testing.T) {
 	dir := writeConfig(t, "schema.config.json", `{
 		"name": "web-db", "kind": "DB", "outputs": {}, "sparkles": true

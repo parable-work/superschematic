@@ -74,7 +74,7 @@ kinds, decorators, documents, generators, auth providers and subcommands.`, name
 	root.AddCommand(newBuildCmd(a))
 	root.AddCommand(newBuildAllCmd(a))
 	root.AddCommand(newJSONSchemaCmd(a))
-	root.AddCommand(newFormatCmd())
+	root.AddCommand(newFormatCmd(a))
 	for _, ext := range exts {
 		if provider, ok := ext.(CommandProvider); ok {
 			root.AddCommand(provider.Commands()...)

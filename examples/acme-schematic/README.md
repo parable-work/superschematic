@@ -178,10 +178,11 @@ r.RegisterGenerator(registry.GeneratorSpec{
 
 - `OutputKey` is the key under `outputs:` in `schema.config` that switches
   the generator on; `OutputSchema` is the JSON Schema of that block, checked
-  when the config loads. `registry.DecodeOutput(c.Outputs, "catalog", &o)`
+  before any generator runs. `registry.DecodeOutput(c.Outputs, "catalog", &o)`
   reads it back in `Enabled`. The core's `outputs` type knows only the core
-  keys, so the schema config carries a `@ts-expect-error` on the line; the
-  registry, not tsc, is the authority.
+  keys, so a `schema.config.ts` carries a `@ts-expect-error` on the line; a
+  `schema.config.json` or `.yaml` needs none. The registry, not tsc, is the
+  authority.
 - `Dirs` lists every directory `Generate` writes to, so `build` can clean
   stale output and `build-all` can compute what changed.
 - `Generate` gets the loaded `ir.Schema`, the config, the naming and the

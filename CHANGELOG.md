@@ -13,6 +13,11 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- `schema.config.json` and `schema.config.yaml` accept an extension
+  generator's output key, as `schema.config.ts` already did. The embedded
+  config schema checks the core sections and admits any other key
+  (`SchemaOutputsDocument` in `@superschematic/schema-config`);
+  `ParseOutputs` rejects a key no registered generator claims. Minor.
 - Core import: the schema loaders
   (TypeScript, JSON, YAML), the IR, the registry with its extension surfaces
   (kinds, decorators, documents, generators, auth providers, commands), the
@@ -302,6 +307,20 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- `ParseOutputs` validates each `outputs.<key>` section against the
+  `OutputSchema` of the generator that claims the key, before any generator
+  runs; `RegisterGenerator` compiles the schema and rejects one that does
+  not compile or has no `OutputKey`. Before, `OutputSchema` was never read.
+  A config whose section fails its schema, such as an undeclared key in an
+  extension's section, now fails the build. Minor.
+- `Registry.Finalize` fails when the `Kinds` list of a generator,
+  decorator, document or check names a kind no one registered. Before, such
+  a spec was silently inert for that kind. Minor.
+- `format` reads the file with the binary's registry, so a file that uses
+  a linked extension's kind, decorators or documents converts between JSON
+  and YAML. The TypeScript writer fails with the slot's name on extension
+  data or documents it cannot render; before, a type's or operation set's
+  extension slots were dropped. Minor.
 - OpenAPI: the placeholders the generator writes for `info.version` and
   the server URL are `__OPENAPI_VERSION__` and `__OPENAPI_BASE_URL__`. The
   generated Go server replaces both values at startup, so only a reader

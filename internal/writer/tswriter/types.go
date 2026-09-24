@@ -41,6 +41,9 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 	if def.Description != "" {
 		e.failf("type %s: descriptions have no TypeScript authoring form", def.Name)
 	}
+	if len(def.Extensions) > 0 {
+		e.failf("type %s: extension data (%s) has no TypeScript authoring form in this writer", def.Name, strings.Join(sortedKeys(def.Extensions), ", "))
+	}
 
 	switch def.Role {
 	case ir.RoleDBTable:

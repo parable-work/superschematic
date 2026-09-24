@@ -68,6 +68,17 @@ export type SchemaOutputs = {
   readonly sql?: SqlOutputConfig;
 };
 
+/**
+ * The outputs block of the data forms: the core keys, plus the output key of
+ * any generator an extension registers. The authoring packages cannot see the
+ * registry, so an extension key is any name here; superschematic checks each
+ * key against the registered generators, and each section against its
+ * generator's OutputSchema, when it reads the config.
+ */
+export type SchemaOutputsDocument = SchemaOutputs & {
+  readonly [outputKey: string]: unknown;
+};
+
 export type SchemaConfig = {
   readonly name: string;
   readonly kind: SchemaKindName;
@@ -102,7 +113,7 @@ export type SchemaConfigDocument = {
   readonly public?: boolean;
   readonly authDb?: string;
   readonly dependencies?: readonly ServiceDependencyRef[];
-  readonly outputs: SchemaOutputs;
+  readonly outputs: SchemaOutputsDocument;
 };
 
 export function defineConfig<TConfig extends SchemaConfig>(cfg: TConfig): TConfig {
