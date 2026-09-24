@@ -100,7 +100,25 @@ func (m *Masker) maskField(field *ir.FieldDef, value any) any {
 	return deepCopyValue(value)
 }
 
+// maskArrayField masks each element of an array field; for an array of
+// arrays (T[][]) it masks each element of each inner list.
 func (m *Masker) maskArrayField(field *ir.FieldDef, kind string, arr []any) []any {
+	if !field.TypeRef.IsArrayOfArrays {
+		return m.maskElems(field, kind, arr)
+	}
+	masked := make([]any, len(arr))
+	for i, elem := range arr {
+		if inner, ok := elem.([]any); ok && inner != nil {
+			masked[i] = m.maskElems(field, kind, inner)
+			continue
+		}
+		masked[i] = deepCopyValue(elem)
+	}
+	return masked
+}
+
+// maskElems masks one list of elements.
+func (m *Masker) maskElems(field *ir.FieldDef, kind string, arr []any) []any {
 	masked := make([]any, len(arr))
 	for i, elem := range arr {
 		if elem == nil {

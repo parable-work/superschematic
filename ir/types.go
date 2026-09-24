@@ -536,6 +536,13 @@ type TypeRef struct {
 	// IsArray indicates this is a list/array type.
 	IsArray bool `json:"isArray,omitempty" yaml:"isArray,omitempty"`
 
+	// IsArrayOfArrays marks T[][]: each element of the outer list is a list
+	// of Name. It requires IsArray and is not valid with IsMap; nesting stops
+	// at two levels. An inner list is never null and may be empty. List
+	// bounds (ValidateListMin, ValidateListMax) apply to the outer list;
+	// every other constraint applies to each innermost element.
+	IsArrayOfArrays bool `json:"isArrayOfArrays,omitempty" yaml:"isArrayOfArrays,omitempty"`
+
 	// ElemNonNull is retained for legacy runtime schema payloads.
 	ElemNonNull bool `json:"elemNonNull,omitempty" yaml:"elemNonNull,omitempty"`
 
@@ -543,6 +550,18 @@ type TypeRef struct {
 	// When true, Name is the map value type and IsArray applies to that value.
 	// IsMap and IsArray can both be true to represent Map<string, ValueType[]>.
 	IsMap bool `json:"isMap,omitempty" yaml:"isMap,omitempty"`
+}
+
+// ArrayDepth is the list nesting of the reference: 0 for T, 1 for T[] and 2
+// for T[][]. For a map it is the nesting of the value type.
+func (t TypeRef) ArrayDepth() int {
+	switch {
+	case t.IsArrayOfArrays:
+		return 2
+	case t.IsArray:
+		return 1
+	}
+	return 0
 }
 
 // IndexDef represents a database index on a type.

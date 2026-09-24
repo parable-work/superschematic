@@ -24,7 +24,9 @@
 //     preserving integer scalar values as int64.
 //  6. For nested type / input fields, recurse with the same Parser instance.
 //  7. For arrays, apply per-element recursion using index-keyed error paths
-//     (foo[0], foo[1], ...).
+//     (foo[0], foo[1], ...). For an array of arrays (T[][]) each element
+//     must be a list and each inner element is walked at foo[i][j]; a null
+//     inner list is kept for validate to reject at foo[i].
 //
 // # Contract with validate
 //

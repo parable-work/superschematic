@@ -52,6 +52,12 @@ type ScalarInfo struct {
 	HasCustomValidate            bool
 	HasCustomParse               bool
 
+	// HasJSONParse marks a custom-parse scalar with a JSON shape (a map such
+	// as Generic.StringMap): superscalar's parser takes a value or its JSON
+	// text and returns the decoded value, so the validator runs it instead of
+	// string checks.
+	HasJSONParse bool
+
 	// IsIntegerLike marks number scalars with integer semantics; validators
 	// emit a Number.isInteger check for them.
 	IsIntegerLike bool
@@ -78,6 +84,12 @@ type FieldInfo struct {
 	Doc              string
 	ScalarInfo       *ScalarInfo
 	Validations      []codegen.ValidationRule
+
+	// IsArrayOfArrays marks T[][]: IsArray is also set, TSType is T[][] and
+	// Type is the innermost element type. Validators check every innermost
+	// element, list bounds apply to the outer list, and an inner list must
+	// be an array, never null.
+	IsArrayOfArrays bool
 
 	// HasDefault is true when @default was declared on the field and a
 	// TypeScript literal could be produced for it.
@@ -347,6 +359,7 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 			HasCustomNormalize:           s.HasCustomNormalize,
 			HasCustomValidate:            s.HasCustomValidate,
 			HasCustomParse:               s.HasCustomParse,
+			HasJSONParse:                 s.HasCustomParse && s.Traits.IsJSONLike,
 			IsIntegerLike:                s.Traits.IsIntegerLike,
 			HasParseFromJSON:             s.HasCustomParse && s.TargetType == "JSDate",
 		}
@@ -415,6 +428,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			InternalMetadata: f.InternalMetadata,
 			Secret:           f.Secret,
 			IsArray:          f.IsArray,
+			IsArrayOfArrays:  f.IsArrayOfArrays,
 			IsMap:            f.IsMap,
 			IsScalar:         f.IsScalar,
 			Doc:              f.Doc(),
@@ -464,26 +478,32 @@ func inferTSType(primitive ir.LanguagePrimitive, scalarName string) string {
 }
 
 // fieldTypeMapperTS maps IR type references to TypeScript types.
-func fieldTypeMapperTS(typeName string, isArray bool, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	valueType := fieldValueTypeMapperTS(typeName, isArray, isMap, isRequired, scalarMap)
+func fieldTypeMapperTS(typeName string, arrayDepth int, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	valueType := fieldValueTypeMapperTS(typeName, arrayDepth, isMap, isRequired, scalarMap)
 	if !isMap {
 		return valueType
 	}
 	return "Record<string, " + valueType + ">"
 }
 
-func fieldValueTypeMapperTS(typeName string, isArray bool, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	if isArray {
-		elemType := fieldValueTypeMapperTS(typeName, false, false, true, scalarMap)
+func fieldValueTypeMapperTS(typeName string, arrayDepth int, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	if arrayDepth > 0 {
+		elemType := fieldValueTypeMapperTS(typeName, 0, false, true, scalarMap)
 		if inMap && !isRequired {
 			elemType = "(" + elemType + " | null)"
 		}
-		return elemType + "[]"
+		return codegen.WrapArray(elemType, arrayDepth, func(elem string) string { return elem + "[]" })
 	}
 
 	var resolvedType string
 	if scalar, ok := scalarMap[typeName]; ok {
 		resolvedType = scalar.TargetType
+		// A field names Generic.JSON by the scalar's own alias (GenericJSON),
+		// which types/scalars.ts re-exports, rather than superscalar's
+		// JSONValue, so the type modules need no second import.
+		if resolvedType == "JSONValue" {
+			resolvedType = scalar.Tokens.Symbol
+		}
 	} else {
 		switch typeName {
 		case codegen.PrimitiveString:

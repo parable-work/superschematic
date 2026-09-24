@@ -64,6 +64,12 @@ function maskField(schema: Schema, field: FieldDef, value: unknown): unknown {
   const kind = resolveRefKind(schema, field.typeRef);
   if (field.typeRef.isArray) {
     if (!Array.isArray(value)) return deepCopyValue(value);
+    if (field.typeRef.isArrayOfArrays) {
+      // T[][]: mask the elements of every inner list.
+      return value.map(inner =>
+        Array.isArray(inner) ? maskArrayField(schema, field, kind, inner) : deepCopyValue(inner)
+      );
+    }
     return maskArrayField(schema, field, kind, value);
   }
 

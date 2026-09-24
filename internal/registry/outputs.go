@@ -35,8 +35,8 @@ type TargetOutputConfig struct {
 type APIOutputConfig struct {
 	Enabled bool `json:"enabled"`
 
-	// Language is the API server implementation language (GO or RUST).
-	// Defaults to GO when omitted.
+	// Language is the API server implementation language (GO, RUST, or
+	// TYPESCRIPT). Defaults to GO when omitted.
 	Language string `json:"language,omitempty"`
 
 	// Protocol is the API wire protocol. Defaults to REST_JSON when omitted.
@@ -63,9 +63,10 @@ type SQLOutputConfig struct {
 
 // API server language and protocol values.
 const (
-	APILanguageGo   = "GO"
-	APILanguageRust = "RUST"
-	APIProtocolREST = "REST_JSON"
+	APILanguageGo         = "GO"
+	APILanguageRust       = "RUST"
+	APILanguageTypeScript = "TYPESCRIPT"
+	APIProtocolREST       = "REST_JSON"
 )
 
 // Outputs is the typed interpretation of SchemaConfig.Outputs (the

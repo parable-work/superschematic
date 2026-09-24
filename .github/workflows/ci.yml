@@ -3,8 +3,8 @@ name: ci
 # Gates for the superschematic repository: DCO sign-off, the four Go modules
 # (build, vet, test, gofmt, golangci-lint, scalar catalog drift, CLI smoke
 # over the fixture corpus), the acme example extension (smoke plus the
-# no-core-edits check), the TypeScript authoring packages and schema
-# runtime, the Python schema runtime, the Rust http runtime, the Starlight
+# no-core-edits check), the TypeScript authoring packages, schema runtime
+# and http runtime, the Python schema runtime, the Rust http runtime, the Starlight
 # docs build, and the extraction scrub. `ci-pass` is the single aggregating
 # job the branch ruleset requires; every other job must be listed in its
 # `needs`. The docs job on pull requests is a recorded deviation from
@@ -253,7 +253,7 @@ jobs:
         run: examples/acme-schematic/scripts/check_second_decorator.sh
 
   typescript:
-    name: typescript (authoring packages + schema runtime)
+    name: typescript (authoring packages + schema and http runtimes)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -307,6 +307,12 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
           bun run build
+          bun run test
+
+      - name: runtime/http/typescript typecheck + test
+        working-directory: runtime/http/typescript
+        run: |
+          bun install --frozen-lockfile
           bun run test
 
   python:

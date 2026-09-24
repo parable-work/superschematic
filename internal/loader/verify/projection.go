@@ -202,6 +202,8 @@ func resolveProjectionScope(schema *ir.Schema, td *ir.TypeDef, def *ir.Projectio
 
 // resolve splits an alias.field reference and finds the field on the
 // aliased table. The reference is the schema field name, never a SQL column.
+// An array of arrays is refused: no column, join key, row rule or collapse
+// key reads one.
 func (s *projectionScope) resolve(ref string) (alias string, table *ir.TypeDef, field *ir.FieldDef, problem string) {
 	alias, fieldName, found := strings.Cut(ref, ".")
 	if !found || alias == "" || fieldName == "" || strings.Contains(fieldName, ".") {
@@ -212,9 +214,13 @@ func (s *projectionScope) resolve(ref string) (alias string, table *ir.TypeDef, 
 		return "", nil, nil, fmt.Sprintf("unknown alias %q (declared: %s)", alias, strings.Join(s.order, ", "))
 	}
 	for _, fd := range table.Fields {
-		if fd.Name == fieldName {
-			return alias, table, fd, ""
+		if fd.Name != fieldName {
+			continue
 		}
+		if fd.TypeRef.IsArrayOfArrays {
+			return "", nil, nil, fmt.Sprintf("%s.%s is an array of arrays, which a projection cannot read", table.Name, fieldName)
+		}
+		return alias, table, fd, ""
 	}
 	return "", nil, nil, fmt.Sprintf("%s has no field %q", table.Name, fieldName)
 }
@@ -265,6 +271,10 @@ func checkProjectionColumns(schema *ir.Schema, td *ir.TypeDef, scope *projection
 		}
 		if fd.TypeRef.IsMap {
 			r.errorf(td.Owner, "%s: projection columns cannot be maps", owner)
+			continue
+		}
+		if fd.TypeRef.IsArrayOfArrays {
+			r.errorf(td.Owner, "%s: projection columns cannot be arrays of arrays", owner)
 			continue
 		}
 		if projectionTable(schema, fd.TypeRef.Name) != nil || isObjectType(schema, fd.TypeRef.Name) {

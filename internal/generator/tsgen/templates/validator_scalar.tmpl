@@ -34,7 +34,7 @@ export function validate{{.Scalar.Symbol}}(
     return [true, null];
   }
 
-  {{if eq .Scalar.Primitive "string"}}
+  {{if and (eq .Scalar.Primitive "string") (not .Scalar.HasJSONParse) (ne .Scalar.TSType "JSONValue")}}
   const s = String(value);
 
   {{if .Scalar.MinLength}}
@@ -105,6 +105,12 @@ export function validate{{.Scalar.Symbol}}(
   }
   {{end}}
 
+  {{if and .Scalar.HasJSONParse (not .Scalar.HasCustomValidate)}}
+  if (parse{{.Scalar.Symbol}}FromLib(value) === null) {
+    errors.push({ validator: "parse", message: "invalid {{.Scalar.Name}}" });
+  }
+  {{end}}
+
   return errors.length > 0 ? [false, errors] : [true, null];
 }
 
@@ -114,7 +120,12 @@ export function validate{{.Scalar.Symbol}}(
 export function validate{{.Scalar.Symbol}}Required(
   value: {{.Scalar.TSType}} | null | undefined
 ): ScalarValidationResult {
-  {{if eq .Scalar.TSType "string"}}
+  {{if eq .Scalar.TSType "JSONValue"}}
+  // JSON null is a present Generic.JSON value; only undefined means absent.
+  if (value === undefined) {
+    return [false, [{ validator: "required", message: "required field" }]];
+  }
+  {{else if eq .Scalar.TSType "string"}}
   if (value === null || value === undefined || value === "") {
     return [false, [{ validator: "required", message: "required field" }]];
   }
@@ -131,16 +142,16 @@ export function validate{{.Scalar.Symbol}}Required(
 /**
  * Normalizes a {{.Scalar.Name}} value using custom normalization
  */
-export function normalize{{.Scalar.Symbol}}(value: string): {{.Scalar.TSType}} | null {
+export function normalize{{.Scalar.Symbol}}(value: string): {{.Scalar.TSType}} | {{if eq .Scalar.TSType "JSONValue"}}undefined{{else}}null{{end}} {
   return normalize{{.Scalar.Symbol}}FromLib(value);
 }
 {{end}}
 
 {{if .Scalar.HasCustomParse}}
 /**
- * Parses a string and returns a {{.Scalar.Name}} scalar
+ * Parses a {{if .Scalar.HasJSONParse}}value{{else}}string{{end}} and returns a {{.Scalar.Name}} scalar
  */
-export function parse{{.Scalar.Symbol}}(value: string): {{.Scalar.TSType}} | null {
+export function parse{{.Scalar.Symbol}}(value: {{if .Scalar.HasJSONParse}}unknown{{else}}string{{end}}): {{.Scalar.TSType}} | {{if eq .Scalar.TSType "JSONValue"}}undefined{{else}}null{{end}} {
   return parse{{.Scalar.Symbol}}FromLib(value);
 }
 {{end}}

@@ -15,6 +15,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 )
 
 var pythonKeywords = map[string]struct{}{
@@ -167,6 +168,10 @@ func IsToolUnavailable(err error) bool {
 func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clock codegen.Clock) (*SDKOutput, error) {
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
+	}
+	// nested-arrays guard: remove when pysdkgen renders T[][].
+	if err := nestedguard.Check("pysdkgen", apiOutput); err != nil {
+		return nil, err
 	}
 
 	names := apiOutput.Naming.OrDefault()

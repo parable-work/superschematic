@@ -1,0 +1,93 @@
+{
+  "name": "fixture-nested-arrays",
+  "kind": "General",
+  "types": {
+    "Drawing": {
+      "name": "Drawing",
+      "owner": "src/drawing.schema.ts",
+      "comment": "A drawing made of lists of lists: grid rows of cells, polygons as lists\nof points and batches of sample vectors.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "labels",
+          "comment": "Cell labels, one inner list per grid row.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true,
+            "isArrayOfArrays": true
+          },
+          "required": true
+        },
+        {
+          "name": "shades",
+          "comment": "Cell shades, one inner list per grid row.",
+          "typeRef": {
+            "name": "Shade",
+            "isArray": true,
+            "isArrayOfArrays": true
+          },
+          "required": true
+        },
+        {
+          "name": "polygons",
+          "comment": "Polygons, each a list of its points.",
+          "typeRef": {
+            "name": "Point",
+            "isArray": true,
+            "isArrayOfArrays": true
+          },
+          "required": true
+        },
+        {
+          "name": "samples",
+          "comment": "Sample vectors in batches of at most 64; absent before sampling.",
+          "typeRef": {
+            "name": "number",
+            "isArray": true,
+            "isArrayOfArrays": true
+          },
+          "validateListMax": 64
+        }
+      ]
+    },
+    "Point": {
+      "name": "Point",
+      "owner": "src/drawing.schema.ts",
+      "comment": "A point on a plane.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "x",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true
+        },
+        {
+          "name": "y",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true
+        }
+      ]
+    }
+  },
+  "enums": {
+    "Shade": {
+      "name": "Shade",
+      "owner": "fixture-nested-arrays",
+      "comment": "The shade of one grid cell.",
+      "values": [
+        {
+          "name": "Light",
+          "serializedAs": "light"
+        },
+        {
+          "name": "Dark",
+          "serializedAs": "dark"
+        }
+      ]
+    }
+  }
+}

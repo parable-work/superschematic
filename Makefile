@@ -1,6 +1,6 @@
 # superschematic (the schema compiler). Convenience targets for the Go
 # modules, the TypeScript authoring packages, the schema runtimes and the
-# Rust http runtime. Mirrors the CI workflow gates (.github/workflows/ci.yml).
+# TypeScript and Rust http runtimes. Mirrors the CI workflow gates (.github/workflows/ci.yml).
 #
 #   make setup && make all
 
@@ -29,6 +29,7 @@ setup:
 	scripts/superscalar-dep.sh
 	cd packages && bun install
 	cd runtime/schema/typescript && bun install
+	cd runtime/http/typescript && bun install
 	cd runtime/schema/python && uv sync
 
 build: go-build $(BIN)
@@ -67,6 +68,7 @@ catalog-check:
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
 	cd runtime/schema/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
+	cd runtime/http/typescript && bun install --frozen-lockfile && bun run test
 
 python:
 	cd runtime/schema/python && uv run pytest -q

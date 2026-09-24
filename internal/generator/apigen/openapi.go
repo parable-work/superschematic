@@ -419,7 +419,7 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			required := []string{}
 
 			for _, arg := range endpoint.ScalarArgs {
-				argSchema := typeToOpenAPISchema(arg.Type, scalarExamples, scalarDescriptions, scalarMap)
+				argSchema := codegen.WrapJSONSchemaArray(typeToOpenAPISchema(arg.Type, scalarExamples, scalarDescriptions, scalarMap), arg.ArrayDepth())
 				if arg.Required {
 					required = append(required, arg.Name)
 				} else {
@@ -446,13 +446,10 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			}
 		}
 
-		responseSchema := typeToOpenAPISchema(endpoint.OutputType, scalarExamples, scalarDescriptions, scalarMap)
-		if endpoint.OutputIsArray {
-			responseSchema = map[string]interface{}{
-				"type":  "array",
-				"items": responseSchema,
-			}
-		}
+		responseSchema := codegen.WrapJSONSchemaArray(
+			typeToOpenAPISchema(endpoint.OutputType, scalarExamples, scalarDescriptions, scalarMap),
+			endpoint.OutputArrayDepth(),
+		)
 		envelopeSchema := map[string]interface{}{
 			"type":     "object",
 			"required": []string{"data", "meta"},
@@ -709,8 +706,9 @@ func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, sche
 			nil,
 			nil,
 		)
-		// listMin/listMax bound the array itself. A required array without
-		// listMin may be empty; only listMin >= 1 forbids [].
+		// listMin/listMax bound the array itself, the outer one of an array
+		// of arrays. A required array without listMin may be empty; only
+		// listMin >= 1 forbids [].
 		if field.TypeRef.IsArray && !field.TypeRef.IsMap {
 			applyOpenAPIValidationConstraints(fieldSchema, nil, nil, nil, nil, "", field.ValidateListMin, field.ValidateListMax)
 		}
@@ -858,8 +856,9 @@ func sortedSchemaNames(schemas map[string]*ir.Schema) []string {
 
 // openAPIConstraintTarget returns the schema object that receives scalar
 // and field validation constraints: the value schema inside a map, then
-// inside an array. typeRefToOpenAPISchema wraps arrays first, then maps, so
-// this unwraps in reverse.
+// inside every array level, so each innermost element of an array of
+// arrays. typeRefToOpenAPISchema wraps arrays first, then maps, so this
+// unwraps in reverse.
 func openAPIConstraintTarget(fieldSchema map[string]interface{}, typeRef ir.TypeRef) map[string]interface{} {
 	target := fieldSchema
 	if typeRef.IsMap {
@@ -867,10 +866,12 @@ func openAPIConstraintTarget(fieldSchema map[string]interface{}, typeRef ir.Type
 			target = additional
 		}
 	}
-	if typeRef.IsArray {
-		if items, ok := target["items"].(map[string]interface{}); ok {
-			target = items
+	for level := 0; level < typeRef.ArrayDepth(); level++ {
+		items, ok := target["items"].(map[string]interface{})
+		if !ok {
+			break
 		}
+		target = items
 	}
 	return target
 }
@@ -896,18 +897,15 @@ func openAPIEnumSchema(enumDef *ir.EnumDef) map[string]interface{} {
 }
 
 // typeRefToOpenAPISchema converts a TypeRef to an OpenAPI schema, wrapping
-// array and map containers around the base type schema. nullable applies to
-// the outermost container: the IR carries nullability at field level, not
-// element level.
+// array and map containers around the base type schema: one array level
+// for T[], two for T[][]. nullable applies to the outermost container: the
+// IR carries nullability at field level, not element level, and the inner
+// lists of an array of arrays are never null.
 func typeRefToOpenAPISchema(typeRef ir.TypeRef, nullable bool, scalarExamples, scalarDescriptions, scalarMap map[string]string, schema *ir.Schema, dependencies map[string]*ir.Schema) map[string]interface{} {
-	valueSchema := typeToOpenAPISchema(typeRef.Name, scalarExamples, scalarDescriptions, scalarMap)
-
-	if typeRef.IsArray {
-		valueSchema = map[string]interface{}{
-			"type":  "array",
-			"items": valueSchema,
-		}
-	}
+	valueSchema := codegen.WrapJSONSchemaArray(
+		typeToOpenAPISchema(typeRef.Name, scalarExamples, scalarDescriptions, scalarMap),
+		typeRef.ArrayDepth(),
+	)
 
 	if typeRef.IsMap {
 		valueSchema = map[string]interface{}{

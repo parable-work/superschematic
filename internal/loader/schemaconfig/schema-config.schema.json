@@ -3,11 +3,23 @@
   "$ref": "#/definitions/SchemaConfigDocument",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "ApiLanguage": {
+      "description": "The REST API server language. GO (the default) emits the chi server module, RUST the axum crate, TYPESCRIPT the Hono package built on the TypeScript HTTP runtime (`<out>/api/<service>`, `<scope>/<service>-api`).",
+      "enum": [
+        "GO",
+        "RUST",
+        "TYPESCRIPT"
+      ],
+      "type": "string"
+    },
     "ApiOutputConfig": {
       "additionalProperties": false,
       "properties": {
         "enabled": {
           "type": "boolean"
+        },
+        "language": {
+          "$ref": "#/definitions/ApiLanguage"
         },
         "scaffoldsOutputDir": {
           "type": "string"

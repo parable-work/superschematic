@@ -10,11 +10,31 @@ import (
 // FieldTypeMapper maps an IR type reference to a target language type string.
 // Parameters:
 //   - typeName: the base type name (scalar, enum, object, primitive, etc.)
-//   - isArray: whether this is a list/array type
-//   - isMap: whether this is a string-keyed map type
+//   - arrayDepth: how many list levels wrap the base type, as
+//     ir.TypeRef.ArrayDepth reports it: 0 for T, 1 for T[], 2 for T[][]
+//   - isMap: whether this is a string-keyed map type; the map value is the
+//     base type wrapped arrayDepth times. A map value is never T[][], so
+//     isMap implies arrayDepth <= 1.
 //   - isRequired: whether the field is non-null (affects pointer types in Go)
 //   - scalarMap: lookup table for resolved scalar types
-type FieldTypeMapper func(typeName string, isArray bool, isMap bool, isRequired bool, scalarMap ScalarMap) string
+//
+// A mapper renders the element type once and wraps it arrayDepth times with
+// WrapArray.
+type FieldTypeMapper func(typeName string, arrayDepth int, isMap bool, isRequired bool, scalarMap ScalarMap) string
+
+// WrapArray applies wrap to elem depth times, innermost first, so depth 2
+// returns wrap(wrap(elem)). Depth 0 (or less) returns elem unchanged.
+//
+// Type mappers pass the target language's list constructor, for example
+// func(e string) string { return "[]" + e } for Go. JSON Schema builders
+// with their own schema type pass a function that returns an array schema
+// whose items are its argument.
+func WrapArray[T any](elem T, depth int, wrap func(T) T) T {
+	for i := 0; i < depth; i++ {
+		elem = wrap(elem)
+	}
+	return elem
+}
 
 // FieldNameMapper converts a schema field name to the target naming convention.
 type FieldNameMapper func(name string) string
@@ -236,7 +256,7 @@ func ExtractFieldInfo(field *ir.FieldDef, scalarMap ScalarMap, schema *ir.Schema
 	if config.FieldTypeMapper != nil {
 		targetType = config.FieldTypeMapper(
 			field.TypeRef.Name,
-			field.TypeRef.IsArray,
+			field.TypeRef.ArrayDepth(),
 			field.TypeRef.IsMap,
 			required,
 			scalarMap,
@@ -252,6 +272,7 @@ func ExtractFieldInfo(field *ir.FieldDef, scalarMap ScalarMap, schema *ir.Schema
 		InternalMetadata: field.InternalMetadata,
 		Secret:           field.Secret,
 		IsArray:          field.TypeRef.IsArray,
+		IsArrayOfArrays:  field.TypeRef.IsArrayOfArrays,
 		IsMap:            field.TypeRef.IsMap,
 		IsPrimitive:      IsLanguagePrimitive(field.TypeRef.Name),
 		InheritedFrom:    field.InheritedFrom,
@@ -587,4 +608,21 @@ func primitiveToJSONSchemaType(primitive ir.LanguagePrimitive) string {
 	default:
 		return ""
 	}
+}
+
+// WrapJSONSchemaArray wraps a JSON Schema item schema in depth levels of
+// {"type": "array", "items": ...}, innermost first. Depth 1 (T[]) returns
+// {"type":"array","items":item}; depth 2 (T[][]) returns
+// {"type":"array","items":{"type":"array","items":item}}. Depth 0 returns item
+// unchanged. item is referenced, not copied.
+//
+// List bounds (minItems, maxItems) belong on the returned outer schema;
+// constraints on T stay on item.
+func WrapJSONSchemaArray(item map[string]interface{}, depth int) map[string]interface{} {
+	return WrapArray(item, depth, func(items map[string]interface{}) map[string]interface{} {
+		return map[string]interface{}{
+			"type":  "array",
+			"items": items,
+		}
+	})
 }

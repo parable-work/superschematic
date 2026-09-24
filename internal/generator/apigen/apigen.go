@@ -45,10 +45,14 @@ type Param struct {
 	// (e.g. "types.ParseIdentityUUID"). Empty unless IsUUID.
 	ParseFunc string
 
-	Required     bool
-	IsArray      bool
-	IsMap        bool
-	DefaultValue *string
+	Required bool
+	IsArray  bool
+	// IsArrayOfArrays marks T[][] (ir.TypeRef.IsArrayOfArrays); IsArray is
+	// also set. Only a request body carries one: a body argument or a field
+	// of a type. ArrayDepth and GoListType read both flags.
+	IsArrayOfArrays bool
+	IsMap           bool
+	DefaultValue    *string
 
 	ValidateMin       *float64
 	ValidateMax       *float64
@@ -57,6 +61,29 @@ type Param struct {
 	ValidateListMin   *int
 	ValidateListMax   *int
 	ValidatePattern   string
+}
+
+// ArrayDepth is 0 for T, 1 for T[] and 2 for T[][], as ir.TypeRef.ArrayDepth.
+func (p Param) ArrayDepth() int {
+	return ir.TypeRef{IsArray: p.IsArray, IsArrayOfArrays: p.IsArrayOfArrays}.ArrayDepth()
+}
+
+// IsGoPrimitive reports whether GoType is a Go primitive (string, int64,
+// float64, bool), which has no validation of its own; a scalar, enum or
+// object type of the types package may.
+func (p Param) IsGoPrimitive() bool {
+	return p.IsString || p.IsInt || p.IsFloat || p.IsBool
+}
+
+// GoListType is GoType with one "[]" per list level: "string", "[]string"
+// or "[][]string".
+func (p Param) GoListType() string {
+	return goListType(p.GoType, p.ArrayDepth())
+}
+
+// goListType wraps a Go element type in depth slice levels.
+func goListType(elem string, depth int) string {
+	return codegen.WrapArray(elem, depth, func(inner string) string { return "[]" + inner })
 }
 
 // SDK and tool-binding generators use these aliases for the unified Param type.
@@ -100,6 +127,9 @@ type EndpointInfo struct {
 	OutputType    string // schema output type name
 	OutputGoType  string // qualified Go type expression for the output
 	OutputIsArray bool
+	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
+	// set. OutputArrayDepth and OutputGoListType read both flags.
+	OutputIsArrayOfArrays bool
 
 	PathParams  []Param
 	QueryParams []Param
@@ -120,6 +150,9 @@ type EndpointInfo struct {
 	RequiresAuth     bool
 	RequiredPerms    []string
 	RequireOwnership bool
+	// PublicRoute marks an operation declared @publicRoute: intentionally
+	// unauthenticated, as opposed to one that merely declares no auth.
+	PublicRoute bool
 
 	// IsScopedEndpoint and ScopeParamName are filled by the auth provider's
 	// Endpoint hook; the SDK generators read them to hoist one path
@@ -155,6 +188,17 @@ type EndpointInfo struct {
 	// NeedsTypesImport reports whether the endpoint scaffold references the
 	// generated types module.
 	NeedsTypesImport bool
+}
+
+// OutputArrayDepth is 0 for a T response, 1 for T[] and 2 for T[][].
+func (e EndpointInfo) OutputArrayDepth() int {
+	return ir.TypeRef{IsArray: e.OutputIsArray, IsArrayOfArrays: e.OutputIsArrayOfArrays}.ArrayDepth()
+}
+
+// OutputGoListType is OutputGoType with one "[]" per list level of the
+// response.
+func (e EndpointInfo) OutputGoListType() string {
+	return goListType(e.OutputGoType, e.OutputArrayDepth())
 }
 
 // APIOutput contains everything needed to render the generated API module.
@@ -247,6 +291,24 @@ type APIOutput struct {
 // with a UUID-like scalar get a SystemUserID constant.
 func (o *APIOutput) HasConstants() bool {
 	return o.IsPublic && o.UUIDTypeExpr != ""
+}
+
+// ValidatesListElements reports whether a route validates the elements of
+// a body argument that is an array of arrays of a type that may carry its
+// own validation (not a Go primitive); routes.go then carries the
+// validateListElement helper those routes call.
+func (o *APIOutput) ValidatesListElements() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.Method == "GET" || endpoint.HasInput {
+			continue
+		}
+		for _, arg := range endpoint.ScalarArgs {
+			if arg.IsArrayOfArrays && !arg.IsGoPrimitive() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // EndpointOutput is the template data for per-endpoint scaffold files.
@@ -591,9 +653,9 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 			queryParams = append(queryParams, param)
 		case op.RestPath != "" && embeddedParams[arg.Name]:
 			pathParams = append(pathParams, param)
-		case op.RestPath == "" && types.isPathParamType(arg.TypeRef.Name):
+		case op.RestPath == "" && types.isPathParamType(arg.TypeRef):
 			pathParams = append(pathParams, param)
-		case types.isInputType(arg.TypeRef.Name):
+		case types.isInputType(arg.TypeRef):
 			if hasInput {
 				return nil, fmt.Errorf("apigen: operation %s.%s declares multiple input-type arguments", namespace, op.Name)
 			}
@@ -603,6 +665,10 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		default:
 			scalarArgs = append(scalarArgs, param)
 		}
+	}
+
+	if err := checkArraysOfArraysInBody(namespace, op.Name, method, pathParams, queryParams, scalarArgs); err != nil {
+		return nil, err
 	}
 
 	if hasInput && len(scalarArgs) > 0 {
@@ -619,7 +685,10 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	var fileUploadFields []FileUploadField
 	if inputType != "" {
 		inputTypeFields = types.inputTypeFields(inputType)
-		fileUploadFields = types.extractFileUploadFields(inputType)
+		fileUploadFields, err = types.extractFileUploadFields(inputType)
+		if err != nil {
+			return nil, fmt.Errorf("apigen: operation %s.%s: %w", namespace, op.Name, err)
+		}
 	}
 
 	requiresAuth := op.Auth || op.RequireOwnership || len(op.Permissions) > 0
@@ -655,6 +724,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		OutputType:                   op.TypeRef.Name,
 		OutputGoType:                 outputGoType,
 		OutputIsArray:                op.TypeRef.IsArray,
+		OutputIsArrayOfArrays:        op.TypeRef.IsArrayOfArrays,
 		PathParams:                   pathParams,
 		QueryParams:                  queryParams,
 		ScalarArgs:                   scalarArgs,
@@ -665,6 +735,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		RequiresAuth:                 requiresAuth,
 		RequiredPerms:                op.Permissions,
 		RequireOwnership:             op.RequireOwnership,
+		PublicRoute:                  op.Public,
 		HasFileUpload:                len(fileUploadFields) > 0,
 		FileUploadFields:             fileUploadFields,
 		RateLimit:                    rateLimit,
@@ -863,11 +934,16 @@ func newTypeMapper(schema *ir.Schema, dependencies map[string]*ir.Schema) *typeM
 	return &typeMapper{schema: schema, dependencies: dependencies, scalars: scalars}
 }
 
-// isInputType reports whether the named type is an object type usable as an
-// operation input payload. The v2 IR drops the GraphQL Object/Input split:
-// any data shape passed as an operation argument is that operation's input.
-func (m *typeMapper) isInputType(name string) bool {
-	typeDef, ok := m.findTypeDef(name)
+// isInputType reports whether an argument of this type is the operation's
+// input payload: a single object type. The v2 IR drops the GraphQL
+// Object/Input split: any data shape passed as an operation argument is
+// that operation's input. A list of objects is not one; it is a body
+// argument.
+func (m *typeMapper) isInputType(ref ir.TypeRef) bool {
+	if ref.IsArray {
+		return false
+	}
+	typeDef, ok := m.findTypeDef(ref.Name)
 	if !ok {
 		return false
 	}
@@ -894,13 +970,17 @@ func (m *typeMapper) findTypeDef(name string) (*ir.TypeDef, bool) {
 	return nil, false
 }
 
-// isPathParamType reports whether the named type can appear as a URL path
-// parameter when no explicit @rest path positions the arguments.
-func (m *typeMapper) isPathParamType(name string) bool {
-	if entry, ok := m.scalars[name]; ok {
+// isPathParamType reports whether an argument of this type can appear as a
+// URL path parameter when no explicit @rest path positions the arguments.
+// A list is never one path segment, whatever its element type.
+func (m *typeMapper) isPathParamType(ref ir.TypeRef) bool {
+	if ref.IsArray {
+		return false
+	}
+	if entry, ok := m.scalars[ref.Name]; ok {
 		return entry.traits.IsPathLike || entry.traits.IsUUIDLike || entry.traits.IsIDLike || entry.traits.IsIntegerLike
 	}
-	return codegen.LanguagePrimitiveTraits(name).IsPathLike
+	return codegen.LanguagePrimitiveTraits(ref.Name).IsPathLike
 }
 
 // mapArgument converts an IR argument into a Param with its Go type and
@@ -912,6 +992,7 @@ func (m *typeMapper) mapArgument(arg *ir.ArgumentDef) (Param, error) {
 		Type:              arg.TypeRef.Name,
 		Required:          arg.Required,
 		IsArray:           arg.TypeRef.IsArray,
+		IsArrayOfArrays:   arg.TypeRef.IsArrayOfArrays,
 		IsMap:             arg.TypeRef.IsMap,
 		DefaultValue:      arg.Default,
 		ValidateMin:       arg.ValidateMin,
@@ -1011,6 +1092,7 @@ func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 			Type:              field.TypeRef.Name,
 			Required:          field.Required,
 			IsArray:           field.TypeRef.IsArray,
+			IsArrayOfArrays:   field.TypeRef.IsArrayOfArrays,
 			IsMap:             field.TypeRef.IsMap,
 			ValidateMin:       field.ValidateMin,
 			ValidateMax:       field.ValidateMax,
@@ -1028,11 +1110,12 @@ func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 
 // extractFileUploadFields extracts file upload fields from an input type. A
 // field is an upload when its scalar carries fileUpload metadata; the
-// scalar's name plays no part.
-func (m *typeMapper) extractFileUploadFields(inputTypeName string) []FileUploadField {
+// scalar's name plays no part. A multipart request carries files as flat
+// form parts, so a file upload field that is an array of arrays is refused.
+func (m *typeMapper) extractFileUploadFields(inputTypeName string) ([]FileUploadField, error) {
 	typeDef, ok := m.findTypeDef(inputTypeName)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 
 	var fields []FileUploadField
@@ -1042,6 +1125,9 @@ func (m *typeMapper) extractFileUploadFields(inputTypeName string) []FileUploadF
 			continue
 		}
 
+		if field.TypeRef.IsArrayOfArrays {
+			return nil, fmt.Errorf("input field %s.%s: a file upload cannot be an array of arrays", inputTypeName, field.Name)
+		}
 		fu := scalarDef.FileUpload
 		maxSize := int64(fu.MaxSize)
 		allowedTypes := fu.AllowedTypes
@@ -1066,7 +1152,7 @@ func (m *typeMapper) extractFileUploadFields(inputTypeName string) []FileUploadF
 			ImageConstraints: scalarDef.ImageConstraints,
 		})
 	}
-	return fields
+	return fields, nil
 }
 
 func (m *typeMapper) findScalarDef(name string) (*ir.ScalarDef, bool) {

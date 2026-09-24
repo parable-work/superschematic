@@ -246,6 +246,12 @@ func stripScalarLibHydratedMetadata(name string, def *ir.ScalarDef) {
 	if def.MinLength == metadata.MinLength {
 		def.MinLength = 0
 	}
+	if equalOptionalInt64(def.Maximum, metadata.Maximum) {
+		def.Maximum = nil
+	}
+	if equalOptionalInt64(def.Minimum, metadata.Minimum) {
+		def.Minimum = nil
+	}
 	if def.Pattern == metadata.Pattern {
 		def.Pattern = ""
 	}
@@ -264,13 +270,15 @@ func stripScalarLibHydratedMetadata(name string, def *ir.ScalarDef) {
 		switch {
 		case key == "go" && value == metadata.Symbol:
 			continue
-		case key == "rust" && value == metadata.Symbol:
+		case key == "typescript" && (value == metadata.TypeScriptType || value == metadata.GoType):
+			continue
+		case key == "python" && value == metadata.PythonType:
+			continue
+		case key == "rust" && (value == metadata.RustType || value == metadata.Symbol):
 			continue
 		case key == "sql" && value == metadata.SQLType:
 			continue
 		case key == "json_schema" && value == metadata.JSONSchemaType:
-			continue
-		case key == "typescript" && value == metadata.GoType:
 			continue
 		default:
 			cleaned[key] = value
@@ -281,6 +289,13 @@ func stripScalarLibHydratedMetadata(name string, def *ir.ScalarDef) {
 		return
 	}
 	def.TypeMappings = cleaned
+}
+
+func equalOptionalInt64(left, right *int64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func scalarLibLanguagePrimitive(primitive string) ir.LanguagePrimitive {

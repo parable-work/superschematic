@@ -19,81 +19,96 @@ const fixturesDir = "../../loader/tsreader/testdata/services"
 
 func generateFixtureDB(t *testing.T) *ORMOutput {
 	t.Helper()
+	return generateFixture(t, "fixture-db")
+}
 
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
+func generateFixture(t *testing.T, svc string) *ORMOutput {
+	t.Helper()
+
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, svc))
 	if err != nil {
-		t.Fatalf("load fixture-db: %v", err)
+		t.Fatalf("load %s: %v", svc, err)
 	}
 
 	output, err := Generate(schema, Options{
-		SchemaName:  "fixture-db",
-		ModulePath:  "example.com/schemas/orm/fixture-db",
-		TypesModule: "example.com/schemas/types/go/fixture-db",
+		SchemaName:  svc,
+		ModulePath:  "example.com/schemas/orm/" + svc,
+		TypesModule: "example.com/schemas/types/go/" + svc,
 		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 	if output == nil {
-		t.Fatal("expected ORM output for fixture-db")
+		t.Fatalf("expected ORM output for %s", svc)
 	}
 	return output
 }
 
-// TestWriteORMGolden generates the ORM module for the fixture-db service and
-// compares every emitted file against its golden copy. Regenerate with:
+// TestWriteORMGolden generates the ORM module for the fixture-db and
+// fixture-nested-arrays-db services and compares every emitted file against
+// its golden copy. Regenerate with:
 // go test ./internal/generator/ormgen -run TestWriteORMGolden -update
 func TestWriteORMGolden(t *testing.T) {
-	output := generateFixtureDB(t)
-
-	outDir := t.TempDir()
-	if err := WriteORM(output, outDir); err != nil {
-		t.Fatalf("write orm: %v", err)
-	}
-
-	files := []string{
+	common := []string{
 		"database.go", "interfaces.go", "query.go", "utils.go",
 		"go.mod", "README.md", "Makefile",
-		"repository_tenant.go", "repository_tenant_user.go",
 	}
+	for _, tc := range []struct {
+		svc          string
+		repositories []string
+	}{
+		{"fixture-db", []string{"repository_tenant.go", "repository_tenant_user.go"}},
+		{"fixture-nested-arrays-db", []string{"repository_board.go"}},
+	} {
+		t.Run(tc.svc, func(t *testing.T) {
+			output := generateFixture(t, tc.svc)
 
-	entries, err := os.ReadDir(outDir)
-	if err != nil {
-		t.Fatalf("read output dir: %v", err)
-	}
-	if len(entries) != len(files) {
-		var names []string
-		for _, e := range entries {
-			names = append(names, e.Name())
-		}
-		t.Errorf("expected %d output files, got %d: %v", len(files), len(entries), names)
-	}
-
-	goldenDir := filepath.Join("testdata", "golden", "fixture-db")
-	for _, name := range files {
-		got, err := os.ReadFile(filepath.Join(outDir, name))
-		if err != nil {
-			t.Fatalf("read generated %s: %v", name, err)
-		}
-
-		goldenPath := filepath.Join(goldenDir, name)
-		if *update {
-			if err := os.MkdirAll(goldenDir, 0o755); err != nil {
-				t.Fatalf("create golden dir: %v", err)
+			outDir := t.TempDir()
+			if err := WriteORM(output, outDir); err != nil {
+				t.Fatalf("write orm: %v", err)
 			}
-			if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
-				t.Fatalf("write golden %s: %v", name, err)
-			}
-			continue
-		}
 
-		want, err := os.ReadFile(goldenPath)
-		if err != nil {
-			t.Fatalf("read golden %s: %v", name, err)
-		}
-		if string(got) != string(want) {
-			t.Errorf("%s differs from golden (run with -update to accept)", name)
-		}
+			files := append(append([]string{}, common...), tc.repositories...)
+			entries, err := os.ReadDir(outDir)
+			if err != nil {
+				t.Fatalf("read output dir: %v", err)
+			}
+			if len(entries) != len(files) {
+				var names []string
+				for _, e := range entries {
+					names = append(names, e.Name())
+				}
+				t.Errorf("expected %d output files, got %d: %v", len(files), len(entries), names)
+			}
+
+			goldenDir := filepath.Join("testdata", "golden", tc.svc)
+			for _, name := range files {
+				got, err := os.ReadFile(filepath.Join(outDir, name))
+				if err != nil {
+					t.Fatalf("read generated %s: %v", name, err)
+				}
+
+				goldenPath := filepath.Join(goldenDir, name)
+				if *update {
+					if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+						t.Fatalf("create golden dir: %v", err)
+					}
+					if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
+						t.Fatalf("write golden %s: %v", name, err)
+					}
+					continue
+				}
+
+				want, err := os.ReadFile(goldenPath)
+				if err != nil {
+					t.Fatalf("read golden %s: %v", name, err)
+				}
+				if string(got) != string(want) {
+					t.Errorf("%s differs from golden (run with -update to accept)", name)
+				}
+			}
+		})
 	}
 }
 
@@ -721,6 +736,92 @@ func TestGenerateSyntheticAuditAndSoftDelete(t *testing.T) {
 	}
 	if label.PrimaryKeyType != "types.IdentityUUID" {
 		t.Errorf("Label PK type = %q, want types.IdentityUUID", label.PrimaryKeyType)
+	}
+}
+
+// TestOptionalMapFieldsAreNilable checks every optional map value shape: the
+// map itself is the nilable value (never dereferenced, never compared with a
+// zero value), and the update holds the same map[string]*T typegen emits.
+// TestGeneratedORMCompiles compiles the shapes the types module supports.
+func TestOptionalMapFieldsAreNilable(t *testing.T) {
+	schema := ir.NewSchema("maps", ir.SchemaKindDB)
+	schema.Scalars["Identity.UUID"] = &ir.ScalarDef{Name: "Identity.UUID"}
+	schema.Scalars["Temporal.DateTime"] = &ir.ScalarDef{Name: "Temporal.DateTime"}
+	schema.Enums["Status"] = &ir.EnumDef{Name: "Status", Values: []ir.EnumValueDef{{Name: "On", SerializedAs: "on"}}}
+	schema.Types["Detail"] = &ir.TypeDef{
+		Name:   "Detail",
+		Role:   ir.RoleEmbeddedStruct,
+		Fields: []*ir.FieldDef{{Name: "note", TypeRef: ir.TypeRef{Name: "string"}, Required: true}},
+	}
+	schema.Types["Record"] = &ir.TypeDef{
+		Name: "Record",
+		Role: ir.RoleDBTable,
+		Fields: []*ir.FieldDef{
+			{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, Key: true},
+			{Name: "labels", TypeRef: ir.TypeRef{Name: "string", IsMap: true}},
+			{Name: "statusByName", TypeRef: ir.TypeRef{Name: "Status", IsMap: true}},
+			{Name: "seenAtByName", TypeRef: ir.TypeRef{Name: "Temporal.DateTime", IsMap: true}},
+			{Name: "detailsByName", TypeRef: ir.TypeRef{Name: "Detail", IsMap: true}},
+			{Name: "detailListsByName", TypeRef: ir.TypeRef{Name: "Detail", IsMap: true, IsArray: true}},
+			{Name: "requiredLabels", TypeRef: ir.TypeRef{Name: "string", IsMap: true}, Required: true},
+		},
+	}
+
+	output, err := Generate(schema, Options{
+		SchemaName:  "maps",
+		ModulePath:  "example.com/orm/maps",
+		TypesModule: "example.com/types/maps",
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	fields := map[string]Field{}
+	for _, field := range output.Repositories[0].Fields {
+		fields[field.Name] = field
+	}
+	for _, name := range []string{"labels", "statusByName", "seenAtByName", "detailsByName", "detailListsByName"} {
+		field := fields[name]
+		if !field.OptionalNilCheck || field.DerefValue || field.IsNullableEnum || field.IsNullableScalar || !field.NullableMapValues {
+			t.Errorf("%s: optional map flags = %+v, want a nil-checked, non-dereferenced map of *T", name, field)
+		}
+	}
+	if fields["requiredLabels"].NullableMapValues {
+		t.Error("a required map holds values, not pointers")
+	}
+	if output.Repositories[0].NeedsSQLNull {
+		t.Error("an optional map of string is a JSON column and needs no sql.NullString")
+	}
+
+	outDir := t.TempDir()
+	if err := WriteORM(output, outDir); err != nil {
+		t.Fatalf("write orm: %v", err)
+	}
+	queryFile, err := os.ReadFile(filepath.Join(outDir, "query.go"))
+	if err != nil {
+		t.Fatalf("read query.go: %v", err)
+	}
+	// gofmt aligns struct fields; compare with runs of blanks collapsed.
+	generated := strings.Join(strings.Fields(string(queryFile)), " ")
+	for _, want := range []string{
+		"Labels *map[string]*string",
+		"StatusByName *map[string]*types.Status",
+		"SeenAtByName *map[string]*types.TemporalDateTime",
+		"DetailsByName *map[string]*types.Detail",
+		"DetailListsByName *map[string][]*types.Detail",
+		"RequiredLabels *map[string]string",
+		"update.StatusByName = &input.StatusByName",
+		"row.StatusByName = nil",
+		"row.StatusByName = *u.StatusByName",
+		"row.DetailsByName = nil",
+	} {
+		if !strings.Contains(generated, want) {
+			t.Errorf("query.go missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"var zeroLabels", "var zeroStatusByName", "var zeroSeenAtByName", "var zeroDetailsByName", "row.SeenAtByName = u.SeenAtByName"} {
+		if strings.Contains(generated, unwanted) {
+			t.Errorf("query.go has %q; an optional map is nil-checked, not zero-compared or dereferenced", unwanted)
+		}
 	}
 }
 

@@ -334,8 +334,16 @@ func hydrateScalarsFromRegistry(schema *ir.Schema, catalog registry.ScalarCatalo
 		if metadata.Symbol != "" {
 			scalar.TypeMappings["go"] = metadata.Symbol
 		}
-		if scalar.LanguagePrimitive == ir.LanguageObject && metadata.GoType != "" {
-			scalar.TypeMappings["typescript"] = metadata.GoType
+		// The catalog declares each scalar's TypeScript, Python and Rust
+		// types; the generators read them as the per-language mappings.
+		if metadata.TypeScriptType != "" {
+			scalar.TypeMappings["typescript"] = metadata.TypeScriptType
+		}
+		if metadata.PythonType != "" {
+			scalar.TypeMappings["python"] = metadata.PythonType
+		}
+		if isRustTypeExpression(metadata.RustType) {
+			scalar.TypeMappings["rust"] = metadata.RustType
 		}
 		if metadata.SQLType != "" {
 			scalar.TypeMappings["sql"] = metadata.SQLType
@@ -358,6 +366,14 @@ func isCatalogReference(def *ir.ScalarDef) bool {
 		def.MaxLength == 0 && def.MinLength == 0 && def.Minimum == nil && def.Maximum == nil &&
 		len(def.ReservedWords) == 0 && def.Example == "" && def.FileUpload == nil && def.ImageConstraints == nil &&
 		!def.HasCustomNormalize && !def.HasCustomValidate && !def.HasCustomParse
+}
+
+// isRustTypeExpression reports whether a catalog Rust type can stand where
+// a type goes. A row may describe its shape as a declaration instead
+// (`struct Location { lat: f64, lon: f64 }`); rustgen then keeps its own
+// mapping for the scalar.
+func isRustTypeExpression(rustType string) bool {
+	return rustType != "" && !strings.ContainsAny(rustType, "{};")
 }
 
 func languagePrimitiveFromScalarMetadata(primitive string) ir.LanguagePrimitive {

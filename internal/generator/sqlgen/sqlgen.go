@@ -493,6 +493,15 @@ func convertTypeToTable(
 	for _, field := range typeDef.Fields {
 		relationalTarget := isRelationalTarget(field.TypeRef.Name, schema)
 
+		// A relation cannot nest, so an array of arrays of a table type has
+		// no column to become.
+		if !field.JsonField && field.TypeRef.IsArrayOfArrays && relationalTarget {
+			return table, fmt.Errorf(
+				"field %s.%s is an array of arrays of table type %s, which cannot be a relation; store a list of lists of its keys or of a @jsonField type",
+				typeDef.Name, field.Name, field.TypeRef.Name,
+			)
+		}
+
 		// List relationship (one-to-many or many-to-many): no column here.
 		if !field.JsonField && !field.TypeRef.IsMap && field.TypeRef.IsArray && relationalTarget {
 			if !field.HasMany && !field.ManyToMany {
@@ -844,9 +853,12 @@ func buildJoinTable(parentTypeName string, field *ir.FieldDef, targetTypeName st
 	}
 }
 
-// columnType returns the PostgreSQL column type for an IR field.
+// columnType returns the PostgreSQL column type for an IR field. Maps,
+// @jsonField values and arrays of arrays (T[][]) are JSONB. A T[][] is never
+// a native multi-dimensional array: Postgres requires those to be
+// rectangular, and a list of lists is often ragged.
 func columnType(field *ir.FieldDef, scalarMapping map[string]string) string {
-	if field.JsonField || field.TypeRef.IsMap {
+	if field.JsonField || field.TypeRef.IsMap || field.TypeRef.IsArrayOfArrays {
 		return "JSONB"
 	}
 

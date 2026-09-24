@@ -105,9 +105,7 @@ func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 		if fd.TypeRef.IsMap {
 			e.failf("%s: map-typed fields have no TypeScript authoring form", fieldOwner)
 		}
-		if fd.TypeRef.IsArray {
-			expr += "[]"
-		}
+		expr += arraySuffix(fd.TypeRef)
 		fmt.Fprintf(&e.body, "  readonly %s%s: %s;\n", e.ident(fd.Name, "field"), optional, expr)
 	}
 	e.body.WriteString("};\n")

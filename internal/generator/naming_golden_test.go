@@ -22,7 +22,7 @@ const namingFixtureDir = "testdata/naming"
 // defaultCoordinateRE matches every default coordinate a manifest could
 // carry: module roots, npm scope, Python module prefixes, crate prefixes,
 // the runtime modules and the scalar library.
-var defaultCoordinateRE = regexp.MustCompile(`example\.com/schemas|@schemas/|schemas_types_|schemas_[a-z0-9_]+_sdk|schemas-[a-z0-9-]+-(types|sdk|api)|parable-work/superschematic|parable-work/superscalar|superschematic-http-runtime|\bsuperscalar\b`)
+var defaultCoordinateRE = regexp.MustCompile(`example\.com/schemas|@schemas/|schemas_types_|schemas_[a-z0-9_]+_sdk|schemas-[a-z0-9-]+-(types|sdk|api)|parable-work/superschematic|parable-work/superscalar|superschematic-http-runtime|@superschematic/http-runtime|\bsuperscalar\b`)
 
 // TestRunWithFixtureNamingEmitsFixtureNames builds the fixture services with
 // a superschematic.toml whose every value differs from the core defaults,
@@ -94,6 +94,23 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 		t.Fatalf("run fixture-api: %v", err)
 	}
 
+	// The TypeScript API server shares api/<service> with the Go server, so
+	// it is built into its own root under the scanned tree.
+	tsAPICfg := *apiCfg
+	tsAPICfg.Outputs = map[string]any{}
+	for key, value := range apiCfg.Outputs {
+		tsAPICfg.Outputs[key] = value
+	}
+	tsAPICfg.Outputs["api"] = map[string]any{"enabled": true, "language": APILanguageTypeScript}
+	if _, err := Run(apiSchema, &tsAPICfg, Options{
+		OutputRoot:     filepath.Join(outputRoot, "typescript-api"),
+		Naming:         names,
+		Clock:          fixedClock,
+		LoadDependency: loadDependency,
+	}); err != nil {
+		t.Fatalf("run fixture-api with the TypeScript server: %v", err)
+	}
+
 	if err := filepath.WalkDir(outputRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -124,6 +141,7 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 		"sdk/go/fixture-api/go.mod",
 		"sdk/python/fixture-api/pyproject.toml",
 		"sdk/rust/fixture-api/Cargo.toml",
+		"typescript-api/api/fixture-api/package.json",
 	}
 	goldenDir := filepath.Join(namingFixtureDir, "golden")
 	for _, rel := range manifests {

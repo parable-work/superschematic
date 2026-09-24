@@ -17,6 +17,13 @@
 //	    // handle validation errors
 //	}
 //
+// # Arrays
+//
+// Each element of a list field is validated at field[i]. For an array of
+// arrays (T[][]) each element must be a list: a null inner list is reported
+// as required at field[i], and each inner element is validated at
+// field[i][j]. An empty inner list is valid.
+//
 // # Scalar Validator Registry
 //
 // The [Registry] bridges IR scalar definitions to superscalar validation functions.

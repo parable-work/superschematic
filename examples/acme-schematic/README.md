@@ -24,7 +24,8 @@ The extension adds one of each registration surface:
 
 The schemas root under `schemas/` has one service per kind: `shop-db` (DB),
 `shop-api` (API, authenticated with `apikey`), `shop-config` (General) and
-`shop-catalog` (Catalog). Its `superschematic.toml` names the generated
+`shop-catalog` (Catalog). A second API service, `shop-storefront`, selects
+the TypeScript server; `storefront/` is the app that implements it. Its `superschematic.toml` names the generated
 packages `example.com/acme/...`, `@acme/...`, `acme_types_...` and `acme-...`.
 
 ## Run it
@@ -84,6 +85,8 @@ examples/acme-schematic/
     services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs, @mcp, @icon
     services/shop-config      General: ShopConfig with @envVars and field @docs/@purpose/@icon
     services/shop-catalog     Catalog: Product, Bundle with @shelf; catalog.config.yaml
+    services/shop-storefront  API on the TypeScript server: carts, a public probe, a manual event stream
+  storefront/                 app.ts implements the generated shop-storefront router; app.test.ts drives it
   labels/                     shelf-label.d.ts and location.d.ts, the declarations `fields` reads
   scripts/smoke.sh            the end-to-end assertions
   scripts/check_second_decorator.sh, second_decorator.patch
@@ -314,7 +317,7 @@ up to date or restored from the build cache and nothing was built. Then
 `bc.SchemaFor` has no IR for any service, so the hook reads each manifest
 from the service's `OutputDirs`, the directories the cache stores and
 restores. A manifest missing there fails the hook instead of leaving a
-service out of the inventory. The smoke deletes `dist`, restores all four
+service out of the inventory. The smoke deletes `dist`, restores all five
 services from the cache, and checks the inventory is the same.
 
 ## An auth provider
@@ -365,6 +368,33 @@ and `auth_provider = "session"` and compiles that too. Writing this example
 is how the session provider's stores were found not to compile against a
 DB with a `User` table; the fix is in the core with a test, and the smoke
 keeps it fixed.
+
+## A TypeScript API server
+
+`shop-storefront` sets `api: { enabled: true, language: "TYPESCRIPT" }`, so
+the core `api` generator emits `dist/api/shop-storefront` as the npm package
+`@acme/shop-storefront-api` instead of a Go module: `interfaces.ts` (one
+`<Namespace>Implementation` per operation class), `router.ts` (`buildRouter`
+and the operation table), `openapi.json` and a README. The names come from
+the naming file like every other package: `npm_scope` gives `@acme`, and
+`http_runtime_npm_package` (left at its default here) names the runtime the
+router imports, `@superschematic/http-runtime`.
+
+The TypeScript router does not render through the auth provider's snippets.
+Its operation table records each route's requirement (`@publicRoute`, an
+authenticated caller, the `@requirePermission` list) and the runtime applies
+it with the caller the app's `Authenticator` returns. `storefront/app.ts`
+resolves an `X-API-Key` header to a principal, the same idea the `apikey`
+provider generates for `shop-api`'s Go server, and supplies the handler for
+the `@manualRouteRegistration` event stream. `storefront/app.test.ts` drives
+the whole thing over HTTP: the public probe, 401 and 403 from the gate, the
+generated body parser's 400, decoded path and query parameters, and the
+manual route.
+
+The smoke's last step installs the runtime and the generated types package,
+links the packages the router imports into `node_modules` the way a
+service's own install would, type-checks the generated package and the app,
+and runs the test.
 
 ## Policy on core decorators
 

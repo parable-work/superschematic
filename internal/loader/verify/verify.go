@@ -3,8 +3,9 @@
 // generation, and owns the checks that are properties of the IR rather than
 // of any one authoring syntax: schema-kind / import-path compatibility,
 // cross-kind type-reference rules, full @source structural verification,
-// trait shape checks, projection view declarations, the kind's own
-// KindSpec.Verify and every registered CheckSpec.
+// trait shape checks, projection view declarations, the contexts that refuse
+// an array of arrays, the kind's own KindSpec.Verify and every registered
+// CheckSpec.
 //
 // The readers stay responsible for syntax-level invariants (wildcard
 // imports, decorator argument shapes); this pass is what makes those rules
@@ -188,6 +189,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkTraits(schema, r)
 	checkVersioned(schema, r)
 	checkProjections(schema, r)
+	checkArraysOfArrays(schema, r)
 	reg := in.registry()
 	if kind, ok := reg.Kind(string(schema.Kind)); ok && kind.Verify != nil {
 		kind.Verify(schema, r)

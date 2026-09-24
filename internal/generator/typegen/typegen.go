@@ -89,6 +89,12 @@ type FieldInfo struct {
 	ScalarInfo       *ScalarInfo
 	Validations      []codegen.ValidationRule
 
+	// IsArrayOfArrays marks T[][]; IsArray is then true too. GoType is
+	// [][]T, or InputField[[][]T] for an optional input field. An inner list
+	// is never null, so Validate rejects a nil inner slice, and list bounds
+	// apply to the outer list.
+	IsArrayOfArrays bool
+
 	// HasDefault is true when a @default was declared on the field and a Go
 	// literal could be produced for it.
 	HasDefault bool
@@ -96,6 +102,11 @@ type FieldInfo struct {
 	// DefaultLiteral is the Go expression used to initialize the field with
 	// its declared default value. Only populated when HasDefault is true.
 	DefaultLiteral string
+}
+
+// ArrayDepth is 0 for T, 1 for T[] and 2 for T[][].
+func (f FieldInfo) ArrayDepth() int {
+	return ir.TypeRef{IsArray: f.IsArray, IsArrayOfArrays: f.IsArrayOfArrays}.ArrayDepth()
 }
 
 // TypeInfo holds information about a complex type.
@@ -144,15 +155,16 @@ type UnionMemberInfo struct {
 
 // TypePairField describes how to convert one field from input to output type.
 type TypePairField struct {
-	GoName         string
-	InputGoType    string
-	GoType         string
-	Required       bool
-	UsesWrapper    bool
-	IsArray        bool
-	IsScalar       bool
-	IsPaired       bool
-	PairedTypeName string
+	GoName          string
+	InputGoType     string
+	GoType          string
+	Required        bool
+	UsesWrapper     bool
+	IsArray         bool
+	IsArrayOfArrays bool
+	IsScalar        bool
+	IsPaired        bool
+	PairedTypeName  string
 }
 
 // TypePair describes a matched input/output type pair for ToType() generation.
@@ -405,21 +417,22 @@ func SetReplacePaths(output *ModuleOutput, paths naming.LocalPaths, outputDir st
 }
 
 // fieldTypeMapperGo maps IR type references to Go types.
-func fieldTypeMapperGo(typeName string, isArray bool, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	valueType := fieldValueTypeMapperGo(typeName, isArray, isMap, isRequired, scalarMap)
+func fieldTypeMapperGo(typeName string, arrayDepth int, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	valueType := fieldValueTypeMapperGo(typeName, arrayDepth, isMap, isRequired, scalarMap)
 	if !isMap {
 		return valueType
 	}
 	return "map[string]" + valueType
 }
 
-func fieldValueTypeMapperGo(typeName string, isArray bool, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	if isArray {
+func fieldValueTypeMapperGo(typeName string, arrayDepth int, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	if arrayDepth > 0 {
 		elemRequired := true
 		if inMap {
 			elemRequired = isRequired
 		}
-		return "[]" + fieldValueTypeMapperGo(typeName, false, inMap, elemRequired, scalarMap)
+		elemType := fieldValueTypeMapperGo(typeName, 0, inMap, elemRequired, scalarMap)
+		return codegen.WrapArray(elemType, arrayDepth, func(elem string) string { return "[]" + elem })
 	}
 
 	if scalar, ok := scalarMap[typeName]; ok {
@@ -673,6 +686,8 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			scalarInfo = scalarMap[cf.ScalarInfo.Name]
 		}
 		usesWrapper := isInput && !cf.Required
+		// The pointer edits below never apply to a list: the elements of
+		// T[] and T[][] are value types, so [][]*T cannot arise.
 		goType := normalizeImportedGoType(cf.TargetType, importAliases)
 		if !isInput && cf.IsScalar && !cf.Required && cf.ScalarInfo != nil && cf.ScalarInfo.Traits.IsIntegerLike {
 			goType = strings.TrimPrefix(goType, "*")
@@ -682,13 +697,13 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 		if !isInput && isUnion && !cf.Required && !cf.IsArray && !cf.IsMap {
 			goType = strings.TrimPrefix(goType, "*")
 		}
+		// A map of union values stores the interface values directly, input
+		// or not; the optional nested-type path would add a pointer per value.
+		if isUnion && cf.IsMap && !cf.Required {
+			goType = strings.Replace(goType, "]*", "]", 1)
+		}
 		if usesWrapper {
 			innerType := goType
-			// A map of union values stores the interface values directly;
-			// the optional nested-type path would add a pointer per value.
-			if isUnion && cf.IsMap {
-				innerType = strings.Replace(innerType, "]*", "]", 1)
-			}
 			if cf.IsScalar || (isUnion && !cf.IsArray && !cf.IsMap) {
 				innerType = strings.TrimPrefix(innerType, "*")
 			}
@@ -706,6 +721,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			UsesWrapper:      usesWrapper,
 			Secret:           cf.Secret,
 			IsArray:          cf.IsArray,
+			IsArrayOfArrays:  cf.IsArrayOfArrays,
 			IsMap:            cf.IsMap,
 			IsScalar:         cf.IsScalar,
 			IsUnion:          isUnion,
@@ -852,13 +868,14 @@ func buildTypePairs(types []TypeInfo, importedTypes []ImportedTypeInfo) []TypePa
 			}
 
 			pf := TypePairField{
-				GoName:      inputField.GoName,
-				InputGoType: inputField.GoType,
-				GoType:      objectField.GoType,
-				Required:    inputField.Required,
-				UsesWrapper: inputField.UsesWrapper,
-				IsArray:     inputField.IsArray,
-				IsScalar:    inputField.IsScalar,
+				GoName:          inputField.GoName,
+				InputGoType:     inputField.GoType,
+				GoType:          objectField.GoType,
+				Required:        inputField.Required,
+				UsesWrapper:     inputField.UsesWrapper,
+				IsArray:         inputField.IsArray,
+				IsArrayOfArrays: inputField.IsArrayOfArrays,
+				IsScalar:        inputField.IsScalar,
 			}
 
 			innerInputType := unwrapGoType(inputField.GoType)
