@@ -342,8 +342,9 @@ of a generated artifact is always listed here with the bump it requires.
   longer declares `ValidationError` twice. Minor.
 - Arrays of arrays in TypeScript: tsgen emits `T[][]`, and its validators
   and the TypeScript schema runtime check every innermost element at
-  `field[i][j]`, apply list bounds to the outer list and reject an inner
-  list that is not an array at `field[i]` (`required`). Minor.
+  `field[i][j]`, apply list bounds to the outer list and reject a null inner
+  list at `field[i]` (`required`) and any other non-list one (`type`).
+  Minor.
 - Arrays of arrays in Python (D12): pygen renders `T[][]` as
   `List[List[T]]` with element errors at `field[i][j]`, and the Python
   schema runtime reads, parses, validates, serializes, masks and merges
@@ -436,6 +437,31 @@ of a generated artifact is always listed here with the bump it requires.
   one comma-separated value. Before, the handler parsed the parameter as a
   single scalar. The Rust SDK also drops a zero `listMin` check, which
   compared an unsigned length with zero. Minor.
+
+- Schema runtimes (Go, TypeScript, Python): one set of list rules for
+  `T[]` and for the outer list of `T[][]` (D12), which changes `T[]`
+  validation too. The Go and Python runtimes accept an explicit `[]` for a
+  required list (present, not non-empty; `listMin` declares non-emptiness).
+  The Go runtime enforces `listMin` and `listMax` ("must contain at least N
+  items"). The TypeScript and Python runtimes apply a field's `minLength`,
+  `maxLength`, `pattern`, `min` and `max` to each element, as the Go
+  runtime did. All three report a null list element as `required` at
+  `field[i]` whether or not the schema sets the legacy `elemNonNull`;
+  before, the Go runtime and the TypeScript IR reader accepted it. The
+  Go, TypeScript and Python runtimes and the TypeScript and Python
+  validators report a null inner list as `required` ("required field") and
+  a non-list inner value as `type` ("expected an array") at `field[i]`.
+  Every runtime suite now asserts the parity matrix of the generated
+  validators, `runtime/schema/testdata/validation_parity.json`. Minor.
+- Python types: `validate_all` reports a `None` list element at
+  `field[i]` (`required`), and a `None` innermost element at
+  `field[i][j]`, for `T[]` and `T[][]`; element rules skip it. An optional
+  list with a `None` entry no longer also reports `field: invalid` from the
+  whole-value check. Minor.
+- Verification refuses a DB table column that is an array of arrays of a
+  table type (`Table[][]`) with one error naming the field, instead of
+  failing later in the sql and orm generators, which keep their check.
+  Patch.
 
 ### Fixed
 

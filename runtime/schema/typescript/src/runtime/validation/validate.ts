@@ -455,12 +455,17 @@ function validateArrayField(
     return;
   }
 
-  // T[][]: every inner list is an array, never null, and may be empty.
+  // T[][]: every inner list is an array, never null, and may be empty. A
+  // null inner list is "required" and any other value "type", at key[i].
   for (let index = 0; index < value.length; index += 1) {
     const inner = value[index];
     const innerKey = `${key}[${index}]`;
+    if (inner === null || inner === undefined) {
+      addFieldError(errors, innerKey, 'required', 'required field');
+      continue;
+    }
     if (!Array.isArray(inner)) {
-      addFieldError(errors, innerKey, 'required', `${field.name} inner list must be an array.`);
+      addFieldError(errors, innerKey, 'type', 'expected an array');
       continue;
     }
     validateArrayElements(schema, field, kind, innerKey, inner, errors, options);
@@ -470,7 +475,9 @@ function validateArrayField(
 /**
  * Validates the elements of one list of a T[] or T[][] field, reporting each
  * at `${key}[${index}]`. For T[][] the key already names the inner list, so
- * elements report at field[i][j].
+ * elements report at field[i][j]. A list element is never null, in a
+ * required list and an optional one alike, and the field's own constraints
+ * (length, pattern, bounds) apply to each element.
  */
 function validateArrayElements(
   schema: Schema,
@@ -486,9 +493,7 @@ function validateArrayElements(
     const elementKey = `${key}[${index}]`;
 
     if (element === null || element === undefined) {
-      if (field.typeRef.elemNonNull) {
-        addFieldError(errors, elementKey, 'required', `${field.typeRef.name} is required.`);
-      }
+      addFieldError(errors, elementKey, 'required', `${field.typeRef.name} is required.`);
       continue;
     }
 
@@ -498,7 +503,17 @@ function validateArrayElements(
         continue;
       }
       const elementErrors = validateScalarValue(scalar, element, field.required, options);
+      if (hasFieldLevelConstraints(field)) {
+        elementErrors.push(...applyFieldLevelConstraints(field, element));
+      }
       setFieldErrors(errors, elementKey, elementErrors);
+      continue;
+    }
+
+    if (kind === 'builtin') {
+      if (hasFieldLevelConstraints(field)) {
+        setFieldErrors(errors, elementKey, applyFieldLevelConstraints(field, element));
+      }
       continue;
     }
 

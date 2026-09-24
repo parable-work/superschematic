@@ -9,8 +9,16 @@ scalar functions in superscalar and adds nothing to them.
 go/          github.com/parable-work/superschematic/runtime/schema/go: ir, parse, validate, mask, merge, serialize
 typescript/  @superschematic/schema-runtime: JSON/YAML reader and writer, IR reader, parse, validate, mask, merge
 python/      superschematic-schema-runtime: JSON/YAML reader, parse, validate, mask, merge, serialize
-testdata/    fixtures the TypeScript and Python suites share
+testdata/    fixtures the runtime suites share
 ```
+
+`testdata/validation_parity.json` is the validation corpus every runtime
+asserts: the matrix schema's IR and one vector table with the expected
+verdicts, the same table the generated Go, TypeScript and Python validators
+run in `internal/generator/parity`. That package writes it
+(`go test ./internal/generator/parity -update`); the TypeScript suite keeps
+`testdata/validation_parity.document.json`, the schema JSON form the Python
+runtime reads, equal to it (`UPDATE_PARITY_DOCUMENT=1 bun run test`).
 
 ## Dependency direction
 
