@@ -45,7 +45,8 @@ type Naming struct {
 
 	// NpmScope is the npm scope of generated TypeScript packages and of the
 	// service authoring packages schemas import from each other:
-	// <scope>/<name>-types, <scope>/<name>-sdk, <scope>/<name>.
+	// <scope>/<name>-types, <scope>/<name>-sdk, <scope>/<name>-api,
+	// <scope>/<name>.
 	NpmScope string `toml:"npm_scope"`
 
 	// PythonTypesModulePrefix prefixes generated Python type modules:
@@ -74,6 +75,10 @@ type Naming struct {
 	HTTPRuntimeGoModule   string `toml:"http_runtime_go_module"`
 	HTTPRuntimeRustCrate  string `toml:"http_runtime_rust_crate"`
 	PtrGoModule           string `toml:"ptr_go_module"`
+
+	// HTTPRuntimeNpmPackage is the npm package the generated TypeScript
+	// API router imports its request pipeline from.
+	HTTPRuntimeNpmPackage string `toml:"http_runtime_npm_package"`
 
 	// SchemaLanguage is how generated readmes and the schema-file JSON
 	// Schema name the schema language ("generated from <SchemaLanguage>
@@ -282,6 +287,7 @@ func Default() Naming {
 		HTTPRuntimeGoModule:     "github.com/parable-work/superschematic/runtime/http/go",
 		HTTPRuntimeRustCrate:    "superschematic-http-runtime",
 		PtrGoModule:             "github.com/parable-work/superschematic/runtime/schema/go/ptr",
+		HTTPRuntimeNpmPackage:   "@superschematic/http-runtime",
 		SchemaLanguage:          "Superschematic",
 		PackageAuthor:           "superschematic",
 		MetaSchemaURLPrefix:     "superschematic://",
@@ -323,6 +329,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.HTTPRuntimeGoModule, d.HTTPRuntimeGoModule)
 	fill(&n.HTTPRuntimeRustCrate, d.HTTPRuntimeRustCrate)
 	fill(&n.PtrGoModule, d.PtrGoModule)
+	fill(&n.HTTPRuntimeNpmPackage, d.HTTPRuntimeNpmPackage)
 	fill(&n.SchemaLanguage, d.SchemaLanguage)
 	fill(&n.PackageAuthor, d.PackageAuthor)
 	fill(&n.MetaSchemaURLPrefix, d.MetaSchemaURLPrefix)
@@ -455,6 +462,12 @@ func (n Naming) NpmTypesPackage(schemaName string) string {
 // NpmSDKPackage returns the npm name of a schema's generated TypeScript SDK.
 func (n Naming) NpmSDKPackage(schemaName string) string {
 	return n.NpmScope + "/" + schemaName + "-sdk"
+}
+
+// NpmAPIPackage returns the npm name of a schema's generated TypeScript API
+// server.
+func (n Naming) NpmAPIPackage(schemaName string) string {
+	return n.NpmScope + "/" + schemaName + "-api"
 }
 
 // PythonTypesModule returns the Python module name for a schema stem (the

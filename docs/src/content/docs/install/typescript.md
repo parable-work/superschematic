@@ -120,3 +120,60 @@ const product = await sdk.productQueries.getProduct(id);
 `auth.token` is a static token. `auth.getToken` is called per request.
 `setToken` / `clearToken` change the token after construction. Operation
 sets become camelCase namespace fields.
+
+## Serve a generated API
+
+An API schema can be served by a generated TypeScript router instead of the
+Go server. Set the server language in `schema.config.ts`:
+
+```ts
+outputs: {
+  types: { [TargetLanguage.TypeScript]: { enabled: true } },
+  api: { enabled: true, language: "TYPESCRIPT" }
+}
+```
+
+The build writes `schemas/dist/api/<name>` as `@schemas/<name>-api`:
+`interfaces.ts` has one `<Namespace>Implementation` interface per operation
+namespace, and `router.ts` has `buildRouter(implementations, options)`, which
+returns a Hono app. The router decodes path and query parameters, parses
+JSON bodies with the generated `parse<Input>Json` decoder, applies
+`@publicRoute`, `@auth` and `@requirePermission`, `@bodyLimit`,
+`@rateLimit` and `@timeout`, and writes the `{data, meta: {requestId}}` and
+RFC 9457 problem envelopes. It is built on `@superschematic/http-runtime`
+(the `http_runtime_npm_package` naming key) and Hono, which are its peer
+dependencies.
+
+```ts
+import { Hono } from "hono";
+import { errorHandler, notFoundHandler } from "@superschematic/http-runtime/hono";
+import { buildRouter, type Implementations } from "@schemas/catalog-api";
+
+// ProductQueries and ProductMutations share the `product` namespace.
+const implementations: Implementations = {
+  product: {
+    getProduct: async ({ id }, ctx) => loadProduct(id),
+  },
+};
+
+const app = new Hono();
+app.route("/", buildRouter(implementations, {
+  authenticate: async ctx => callerFor(ctx.bearerToken),
+}));
+app.notFound(notFoundHandler());
+app.onError(errorHandler());
+```
+
+The router decides nothing about who the caller is. `authenticate` returns a
+principal (`{ subject, permissions }`) or null. A route that needs a caller
+answers 401 without one, and 403 when the caller's permissions cover none
+of the route's. A granted permission covers itself and every permission
+nested under it (`carts` covers `carts.write`). Pass `permissionMatcher` to
+use another rule. An operation declared `@manualRouteRegistration` is gated
+the same way and then handed to `options.manualRoutes.<operation>` with the
+Hono context, for a streaming response or anything else the JSON router
+cannot express.
+
+The generated package and the runtime ship TypeScript sources, so run them
+with Bun, a bundler or a TypeScript loader. `examples/acme-schematic`
+(`shop-storefront` and its `storefront/` app) is a complete example.

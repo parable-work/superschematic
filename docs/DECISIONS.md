@@ -272,6 +272,35 @@ bytes must survive the move.
 
 The names, values and default are reversible until the first release.
 
+## D12. The TypeScript server is provider-neutral
+
+The TypeScript API generator (`tsrestgen`, `outputs.api.language =
+"TYPESCRIPT"`) emits a Hono router package on `@superschematic/http-runtime`
+(`runtime/http/typescript`). The Go server renders its authentication
+through the selected auth provider's template snippets (section 8 of
+`docs/extension-model.md`). The TypeScript server does not. Its operation
+table states each route's requirement, and the runtime applies it with two
+functions the service passes to `buildRouter`:
+
+- an `Authenticator`, which turns a request into a `Principal` or null;
+- optionally a `PermissionMatcher`. Without one, the gate uses the Go
+  `session` runtime's rule: dotted-path coverage and no root permission.
+
+The runtime keeps what every deployment shares: the 401/403 gate, the
+success and RFC 9457 problem envelopes, parameter decoding through the
+scalar library, the body limit, the `@rateLimit` token bucket and the
+`@timeout` deadline. A deployment's identities, token verification
+(service-to-service tokens, for example) and root permissions belong in a
+TypeScript package that deployment ships with its auth provider. That
+package supplies the two functions. The generated router is the same for
+every provider, so a provider needs no TypeScript templates. The runtime
+imports no identity type, so it cannot drift toward one deployment.
+
+The runtime ships TypeScript sources, as the authoring packages do. The
+generated package it serves is itself TypeScript source, so a consumer
+already runs a TypeScript-aware toolchain. Its npm name is the naming key
+`http_runtime_npm_package`, so a distribution that republishes the runtime
+under its own name renders the same generated router.
 ## D12. Arrays of arrays: one flag, two levels
 
 A field type can be a list of lists (`T[][]`): grid rows of cells, a

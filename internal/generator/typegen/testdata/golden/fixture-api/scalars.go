@@ -10,7 +10,7 @@ import scalars "github.com/parable-work/superscalar/go"
 // All scalar types are aliases to the scalar library.
 // This enables zero-cast interoperability between different type libraries.
 
-// Generic.JSON - A JSON object represented as a string
+// Generic.JSON - Any valid JSON value: object, array, primitive, or null
 type GenericJSON = scalars.GenericJSON
 
 // Identity.Name - An objects name

@@ -81,6 +81,10 @@ type ModuleOutput struct {
 	// imports json and math for its host-value validator.
 	HasGenericJSON bool
 
+	// HasJSONParse is true when a custom parser takes and returns JSON
+	// values (pythonParsesJSON); scalars.py imports json for it.
+	HasJSONParse bool
+
 	// Custom superscalar implementation flags (any scalar).
 	HasCustomNormalize bool
 	HasCustomValidate  bool
@@ -217,6 +221,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		}
 		if scalar.HasCustomParse {
 			output.HasCustomParse = true
+		}
+		if pythonParsesJSON(scalar) {
+			output.HasJSONParse = true
 		}
 	}
 
