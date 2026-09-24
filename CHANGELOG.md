@@ -348,6 +348,9 @@ of a generated artifact is always listed here with the bump it requires.
   `List[List[T]]` with element errors at `field[i][j]`, and the Python
   schema runtime reads, parses, validates, serializes, masks and merges
   lists of lists (`TypeRef.is_array_of_arrays`). Minor.
+- Rust types render a list of lists as `Vec<Vec<T>>` (`Option<Vec<Vec<T>>>`
+  when optional) with the serde attributes of `Vec<T>`; a null inner list
+  fails to decode. Minor.
 
 ### Changed
 
