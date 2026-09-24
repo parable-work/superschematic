@@ -188,3 +188,64 @@ func TestSchemaValidateRejectsBlankFieldPresentation(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateOperationDocsReplay(t *testing.T) {
+	tests := []struct {
+		name     string
+		mode     DocsReplayMode
+		keys     []string
+		revision []string
+		want     string
+	}{
+		{name: "none"},
+		{name: "read only", mode: DocsReplayModeReadOnly},
+		{name: "idempotent", mode: DocsReplayModeIdempotent, keys: []string{"/requestId"}},
+		{name: "compare and swap", mode: DocsReplayModeCompareAndSwap, revision: []string{"/revision"}},
+		{name: "compare and swap with key", mode: DocsReplayModeCompareAndSwap, keys: []string{"/requestId"}, revision: []string{"/order/revision"}},
+		{name: "escaped pointer", mode: DocsReplayModeIdempotent, keys: []string{"/a~1b/c~0d"}},
+		{name: "pointers without mode", keys: []string{"/requestId"}, want: "replay pointers require replayMode"},
+		{name: "read only with pointers", mode: DocsReplayModeReadOnly, revision: []string{"/revision"}, want: "read_only replayMode cannot declare replay pointers"},
+		{name: "idempotent without key", mode: DocsReplayModeIdempotent, want: "idempotent replayMode requires idempotencyKeyPointers"},
+		{name: "idempotent with revision", mode: DocsReplayModeIdempotent, keys: []string{"/requestId"}, revision: []string{"/revision"}, want: "cannot declare expectedRevisionPointers"},
+		{name: "compare and swap without revision", mode: DocsReplayModeCompareAndSwap, want: "compare_and_swap replayMode requires expectedRevisionPointers"},
+		{name: "unknown mode", mode: "retry", want: `replayMode "retry" must be read_only, idempotent, or compare_and_swap`},
+		{name: "relative pointer", mode: DocsReplayModeIdempotent, keys: []string{"requestId"}, want: "must be an RFC 6901 JSON pointer"},
+		{name: "bad escape", mode: DocsReplayModeIdempotent, keys: []string{"/a~2"}, want: "must be an RFC 6901 JSON pointer"},
+		{name: "duplicate pointer", mode: DocsReplayModeIdempotent, keys: []string{"/requestId", "/requestId"}, want: "must not be duplicated"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			docs := validOperationDocs()
+			docs.ReplayMode = test.mode
+			docs.IdempotencyKeyPointers = test.keys
+			docs.ExpectedRevisionPointers = test.revision
+			err := ValidateOperationDocs(&docs)
+			if test.want == "" {
+				if err != nil {
+					t.Fatalf("ValidateOperationDocs() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ValidateOperationDocs() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+// TestOperationDocsReplayKeyOrder: the replay keys sit between sunset and
+// useWhen in the persisted IR.
+func TestOperationDocsReplayKeyOrder(t *testing.T) {
+	docs := validOperationDocs()
+	docs.ReplayMode = DocsReplayModeIdempotent
+	docs.IdempotencyKeyPointers = []string{"/requestId"}
+	docs.UseWhen = "Use when a delivered order needs a return."
+	raw, err := json.Marshal(&docs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `"sunset":"2026-12-31","replayMode":"idempotent","idempotencyKeyPointers":["/requestId"],"useWhen":`
+	if !strings.Contains(string(raw), want) {
+		t.Fatalf("docs JSON = %s\nwant it to contain %s", raw, want)
+	}
+}

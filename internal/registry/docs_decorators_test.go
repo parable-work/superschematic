@@ -211,3 +211,138 @@ func TestFieldPresentationDecoratorsRejectBadArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestOperationDocsDecoratorReadsReplay(t *testing.T) {
+	op := &ir.FieldDef{Name: "openReturn"}
+	err := applyDocs(t, TargetOperation, op, map[string]any{
+		"title": "Open a return", "description": "Opens a return.",
+		"capability": "orders.returns.open", "lifecycle": "active", "visibility": "public",
+		"replayMode":             "idempotent",
+		"idempotencyKeyPointers": []any{"/requestId"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op.Docs.ReplayMode != ir.DocsReplayModeIdempotent || !reflect.DeepEqual(op.Docs.IdempotencyKeyPointers, []string{"/requestId"}) {
+		t.Fatalf("replay = %q %v", op.Docs.ReplayMode, op.Docs.IdempotencyKeyPointers)
+	}
+
+	for _, test := range []struct {
+		name string
+		key  string
+		val  any
+		want string
+	}{
+		{name: "empty pointers", key: "idempotencyKeyPointers", val: []any{}, want: "@docs idempotencyKeyPointers must be a non-empty array of string literals"},
+		{name: "pointer not a string", key: "expectedRevisionPointers", val: []any{1.0}, want: "@docs expectedRevisionPointers must be a non-empty array of string literals"},
+		{name: "mode without pointer", key: "replayMode", val: "compare_and_swap", want: "invalid @docs config: compare_and_swap replayMode requires expectedRevisionPointers"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := map[string]any{
+				"title": "Open a return", "description": "Opens a return.",
+				"capability": "orders.returns.open", "lifecycle": "active", "visibility": "public",
+				test.key: test.val,
+			}
+			err := applyDocs(t, TargetOperation, &ir.FieldDef{}, cfg)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("err = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func applyOperation(t *testing.T, name string, op *ir.FieldDef, args ...any) error {
+	t.Helper()
+	spec, ok := New(naming.Naming{}).Decorator(name, TargetOperation)
+	if !ok {
+		t.Fatalf("no operation decorator @%s", name)
+	}
+	if !spec.DeclaredIn(pkgAPI) {
+		t.Fatalf("@%s on an operation is not declared in %s", name, pkgAPI)
+	}
+	return spec.Apply(Node{Field: op}, args, Site{})
+}
+
+func TestMCPDecoratorWritesTheRecord(t *testing.T) {
+	op := &ir.FieldDef{Name: "getOrder"}
+	meta := map[string]any{"ui": map[string]any{"resourceUri": "ui://orders/detail"}}
+	if err := applyOperation(t, "mcp", op, map[string]any{"handle": "get_order", "_meta": meta}); err != nil {
+		t.Fatal(err)
+	}
+	if want := (&ir.OperationMCP{Handle: "get_order", Meta: meta}); !reflect.DeepEqual(op.MCP, want) {
+		t.Fatalf("MCP = %+v, want %+v", op.MCP, want)
+	}
+	err := applyOperation(t, "mcp", op, map[string]any{"handle": "get_order"})
+	if err == nil || !strings.Contains(err.Error(), "operation getOrder has more than one @mcp decorator") {
+		t.Fatalf("second @mcp: %v", err)
+	}
+
+	hidden := &ir.FieldDef{Name: "uploadReceipt"}
+	if err := applyOperation(t, "mcp", hidden, map[string]any{"hidden": true, "reason": "Browser upload only."}); err != nil {
+		t.Fatal(err)
+	}
+	if want := (&ir.OperationMCP{Hidden: true, HiddenReason: "Browser upload only."}); !reflect.DeepEqual(hidden.MCP, want) {
+		t.Fatalf("MCP = %+v, want %+v", hidden.MCP, want)
+	}
+}
+
+func TestMCPDecoratorRejectsBadConfig(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []any
+		want string
+	}{
+		{name: "no argument", want: "@mcp takes exactly one config object"},
+		{name: "not an object", args: []any{"get_order"}, want: "@mcp config must be an object literal"},
+		{name: "unknown key", args: []any{map[string]any{"handle": "get_order", "policy": "ask"}}, want: `@mcp config has unknown key "policy"`},
+		{name: "handle not a string", args: []any{map[string]any{"handle": 1.0}}, want: "@mcp handle must be a string literal"},
+		{name: "hidden not a bool", args: []any{map[string]any{"hidden": "yes", "reason": "x"}}, want: "@mcp hidden must be a boolean literal"},
+		{name: "meta not an object", args: []any{map[string]any{"handle": "get_order", "_meta": "x"}}, want: "@mcp _meta must be an object literal"},
+		{name: "bad handle", args: []any{map[string]any{"handle": "getOrder"}}, want: "invalid @mcp config: handle \"getOrder\" must be lowercase snake_case"},
+		{name: "hidden without reason", args: []any{map[string]any{"hidden": true}}, want: "invalid @mcp config: reason must be non-empty"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			op := &ir.FieldDef{Name: "getOrder"}
+			err := applyOperation(t, "mcp", op, test.args...)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("err = %v, want %q", err, test.want)
+			}
+			if op.MCP != nil {
+				t.Fatalf("a rejected @mcp wrote %+v", op.MCP)
+			}
+		})
+	}
+	err := applyOperation(t, "mcp", &ir.FieldDef{}, map[string]any{"handle": "Get"})
+	var argErr *ArgError
+	if !errors.As(err, &argErr) || argErr.Index != 0 {
+		t.Fatalf("err = %#v, want an ArgError at index 0", err)
+	}
+}
+
+func TestOperationIconDecorator(t *testing.T) {
+	op := &ir.FieldDef{Name: "getOrder"}
+	if err := applyOperation(t, "icon", op, "receipt"); err != nil {
+		t.Fatal(err)
+	}
+	if op.Icon != "receipt" {
+		t.Fatalf("Icon = %q", op.Icon)
+	}
+	// Any glyph name: an icon set is an extension's check.
+	if err := applyOperation(t, "icon", &ir.FieldDef{}, "Any Glyph"); err != nil {
+		t.Fatalf("core rejected an icon name: %v", err)
+	}
+	for _, test := range []struct {
+		op   *ir.FieldDef
+		args []any
+		want string
+	}{
+		{op, []any{"box"}, "operation getOrder has more than one @icon decorator"},
+		{&ir.FieldDef{}, nil, "@icon takes exactly one string argument"},
+		{&ir.FieldDef{}, []any{true}, "@icon takes a string literal"},
+		{&ir.FieldDef{}, []any{" receipt"}, "invalid @icon: icon name must not contain surrounding whitespace"},
+	} {
+		if err := applyOperation(t, "icon", test.op, test.args...); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("@icon%v: err = %v, want %q", test.args, err, test.want)
+		}
+	}
+}

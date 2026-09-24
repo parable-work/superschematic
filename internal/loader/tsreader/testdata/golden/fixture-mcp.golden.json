@@ -1,0 +1,374 @@
+{
+  "name": "fixture-mcp",
+  "kind": "API",
+  "scalars": {
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "UUID"
+      }
+    }
+  },
+  "types": {
+    "Address": {
+      "name": "Address",
+      "owner": "src/orders.schema.ts",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "line1",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "city",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "postalCode",
+          "typeRef": {
+            "name": "string"
+          }
+        }
+      ]
+    },
+    "Order": {
+      "name": "Order",
+      "owner": "src/orders.schema.ts",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "status",
+          "typeRef": {
+            "name": "OrderStatus"
+          },
+          "required": true
+        },
+        {
+          "name": "revision",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true
+        },
+        {
+          "name": "totalCents",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true
+        }
+      ]
+    },
+    "OrderUpdate": {
+      "name": "OrderUpdate",
+      "owner": "src/orders.schema.ts",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "revision",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true
+        },
+        {
+          "name": "note",
+          "typeRef": {
+            "name": "string"
+          }
+        }
+      ]
+    },
+    "ReturnRequest": {
+      "name": "ReturnRequest",
+      "owner": "src/orders.schema.ts",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "requestId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "orderId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "reason",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "validateMaxLength": 500
+        },
+        {
+          "name": "pickup",
+          "typeRef": {
+            "name": "Address"
+          },
+          "required": true
+        },
+        {
+          "name": "labels",
+          "typeRef": {
+            "name": "string",
+            "isMap": true
+          },
+          "required": true
+        }
+      ]
+    }
+  },
+  "enums": {
+    "OrderStatus": {
+      "name": "OrderStatus",
+      "owner": "fixture-mcp",
+      "values": [
+        {
+          "name": "Open",
+          "serializedAs": "open"
+        },
+        {
+          "name": "Shipped",
+          "serializedAs": "shipped"
+        }
+      ]
+    }
+  },
+  "operationSets": [
+    {
+      "name": "OrderQueries",
+      "operations": [
+        {
+          "name": "getOrder",
+          "comment": "Fetch one order.",
+          "docs": {
+            "title": "Get an order",
+            "description": "Returns one order by its identifier.",
+            "capability": "orders.get",
+            "lifecycle": "active",
+            "visibility": "public",
+            "audience": "shoppers",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only",
+            "useWhen": "Use when you have an order identifier.",
+            "doNotUseWhen": "Do not use to list orders; call list_orders.",
+            "success": "Returns the order with its status and total.",
+            "errors": [
+              {
+                "code": "order_not_found",
+                "description": "No order has that identifier.",
+                "commonCorrection": "Take the identifier from a list_orders result."
+              }
+            ]
+          },
+          "mcp": {
+            "handle": "get_order",
+            "hidden": false,
+            "_meta": {
+              "ui": {
+                "resourceUri": "ui://orders/detail"
+              }
+            }
+          },
+          "icon": "receipt",
+          "typeRef": {
+            "name": "Order"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "httpMethod": "GET",
+          "restPath": "orders/{id}"
+        },
+        {
+          "name": "listOrders",
+          "docs": {
+            "title": "List orders",
+            "description": "Lists orders by status.",
+            "capability": "orders.list",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "read_only"
+          },
+          "mcp": {
+            "handle": "list_orders",
+            "hidden": false
+          },
+          "icon": "list",
+          "typeRef": {
+            "name": "Order",
+            "isArray": true
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "statuses",
+              "typeRef": {
+                "name": "OrderStatus",
+                "isArray": true
+              },
+              "required": true,
+              "validateListMin": 1,
+              "validateListMax": 2,
+              "isQuery": true
+            },
+            {
+              "name": "limit",
+              "typeRef": {
+                "name": "number"
+              },
+              "validateMin": 1,
+              "validateMax": 100,
+              "isQuery": true
+            }
+          ],
+          "httpMethod": "GET",
+          "restPath": "orders"
+        },
+        {
+          "name": "exportOrders",
+          "comment": "Not classified: no @mcp, so no tool.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "httpMethod": "GET",
+          "restPath": "orders/export"
+        }
+      ]
+    },
+    {
+      "name": "OrderMutations",
+      "operations": [
+        {
+          "name": "openReturn",
+          "docs": {
+            "title": "Open a return",
+            "description": "Opens a return for one delivered order.",
+            "capability": "orders.returns.open",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "idempotent",
+            "idempotencyKeyPointers": [
+              "/requestId"
+            ]
+          },
+          "mcp": {
+            "handle": "open_return",
+            "hidden": false
+          },
+          "icon": "box",
+          "typeRef": {
+            "name": "Order"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ReturnRequest"
+              },
+              "required": true
+            }
+          ],
+          "httpMethod": "POST",
+          "restPath": "returns"
+        },
+        {
+          "name": "updateOrder",
+          "docs": {
+            "title": "Update an order",
+            "description": "Changes an order's note when its revision still matches.",
+            "capability": "orders.update",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped",
+            "replayMode": "compare_and_swap",
+            "expectedRevisionPointers": [
+              "/revision"
+            ]
+          },
+          "mcp": {
+            "handle": "update_order",
+            "hidden": false
+          },
+          "icon": "pen",
+          "typeRef": {
+            "name": "Order"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "OrderUpdate"
+              },
+              "required": true
+            }
+          ],
+          "httpMethod": "PATCH",
+          "restPath": "orders/{id}"
+        },
+        {
+          "name": "deleteOrder",
+          "mcp": {
+            "hidden": true,
+            "hiddenReason": "Staff console only."
+          },
+          "typeRef": {
+            "name": "Order"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "httpMethod": "DELETE",
+          "restPath": "orders/{id}"
+        }
+      ]
+    }
+  ]
+}

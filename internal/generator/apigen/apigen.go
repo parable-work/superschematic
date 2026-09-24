@@ -107,6 +107,10 @@ type EndpointInfo struct {
 	Description string
 	// Docs is the operation's @docs record; nil without it.
 	Docs *ir.OperationDocs
+	// MCP is the operation's resolved @mcp record: for a visible tool, Name
+	// and Description come from @docs and Icon from @icon. Nil without
+	// @mcp. It is a copy; the schema's record is unchanged.
+	MCP *ir.OperationMCP
 
 	RequiresAuth     bool
 	RequiredPerms    []string
@@ -454,6 +458,9 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	if err := validateHandlerNameCollisions(output.Endpoints); err != nil {
 		return nil, err
 	}
+	if err := validateMCPCollisions(output.Endpoints); err != nil {
+		return nil, err
+	}
 
 	rawSpec, escapedSpec, err := generateOpenAPISpec(output, schema, opts.Dependencies, opts.OpenAPIHooks)
 	if err != nil {
@@ -495,6 +502,10 @@ func defaultMethodForSet(setName string) string {
 func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *ir.OperationSet, types *typeMapper, schema *ir.Schema, provider AuthProvider) (*EndpointInfo, error) {
 	if err := ir.ValidateOperationDocs(op.Docs); err != nil {
 		return nil, fmt.Errorf("apigen: operation %s.%s has invalid docs: %w", namespace, op.Name, err)
+	}
+	mcp, err := resolveOperationMCP(op, namespace)
+	if err != nil {
+		return nil, err
 	}
 	method := strings.ToUpper(op.HTTPMethod)
 	if method == "" {
@@ -603,6 +614,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		ScalarArgs:                   scalarArgs,
 		Description:                  codegen.DocText(op.Description, op.Comment),
 		Docs:                         op.Docs,
+		MCP:                          mcp,
 		RequiresAuth:                 requiresAuth,
 		RequiredPerms:                op.Permissions,
 		RequireOwnership:             op.RequireOwnership,

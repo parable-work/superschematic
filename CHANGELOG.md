@@ -167,6 +167,35 @@ of a generated artifact is always listed here with the bump it requires.
   and `x-icon` into `FieldDef.purpose` and `icon`; the TypeScript IR
   declarations gain both. Minor.
 
+- `@mcp` (from `@superschematic/api`) on an operation classifies it for
+  MCP: `{ handle, _meta? }` publishes a visible tool, `{ hidden: true,
+  reason }` records why the operation is not one. A handle is lowercase
+  snake_case, at most 48 characters; a visible tool must also declare
+  `@docs`. `@icon(name)` from `@superschematic/api` names an operation's
+  tool icon (any non-blank name). The IR `FieldDef` gains `mcp`
+  (`ir.OperationMCP`, `ir.MCPIcon`, `ir.ValidateOperationMCP`,
+  `ir.ValidateOperationIcon`) and the operation's `icon` uses the existing
+  field; the loader checks both in every authoring form and rejects `mcp`
+  on a data field, and the schema-file JSON Schema accepts them. The `api`
+  generator resolves each record (`apigen.EndpointInfo.MCP`): a visible
+  tool's name and description come from `@docs`, its icon from `@icon`.
+  It fails the build when two visible tools of one API share a handle or
+  have display names that differ only by case. The TypeScript writer emits
+  `@mcp` and `@icon` (as `apiIcon`). Which APIs must classify their
+  operations, and which icon names exist, is a registered check; the acme
+  example requires `@mcp` on every `shop-api` operation. Minor.
+- `@docs` replay keys: `replayMode` (`read_only`, `idempotent`,
+  `compare_and_swap`) and the RFC 6901 pointer lists
+  `idempotencyKeyPointers` and `expectedRevisionPointers`, which address the
+  operation's generated tool arguments. `idempotent` needs idempotency keys
+  and no revision, `compare_and_swap` needs a revision, `read_only` and no
+  mode take no pointers, and a list names a pointer once.
+  `ir.OperationDocs` gains the three fields (`ir.DocsReplayMode`) between
+  `sunset` and `useWhen`; the OpenAPI `x-superschematic-docs` record
+  carries `replay: { mode, idempotencyKeyPointers,
+  expectedRevisionPointers }` when a mode is set; the TypeScript writer
+  emits them. Minor.
+
 ### Changed
 
 - Generated Go API modules require `github.com/go-chi/chi/v5` v5.3.2

@@ -17,6 +17,7 @@ The extension adds one of each registration surface:
 | Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |
 | Auth provider | `apikey`, an `X-API-Key` header over the generic session runtime | `ext/auth/` |
 | Checks and an OpenAPI hook | policy over the core documentation decorators: acme's `@docs` audiences and `@icon` names only, and the `x-acme-docs` vendor key | `ext/docs.go` |
+| Check on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden | `ext/mcp.go` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
@@ -66,6 +67,7 @@ examples/acme-schematic/
     manifest.go               acmeManifest generator on every kind
     inventory.go              acmeInventory build-all hook
     docs.go                   audience and icon checks, x-acme-docs OpenAPI hook
+    mcp.go                    every shop-api operation declares @mcp
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
@@ -75,7 +77,7 @@ examples/acme-schematic/
     deps.json                 the committed copy of the dependency graph ([deps] copy)
     tsconfig.base.json        path aliases for @superschematic/*, @acme/*, superscalar
     services/shop-db          DB: User, Session, ApiKey, Product tables
-    services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs
+    services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs, @mcp, @icon
     services/shop-config      General: ShopConfig with @envVars and field @docs/@purpose/@icon
     services/shop-catalog     Catalog: Product, Bundle with @shelf; catalog.config.yaml
   labels/                     shelf-label.d.ts and location.d.ts, the declarations `fields` reads
@@ -393,6 +395,29 @@ document the api generator builds before it is written. `shop-api` declares
 `x-acme-docs` and that an audience or icon outside acme's sets fails the
 load while the core registry accepts it. The smoke checks the generated
 `openapi.json` from both binaries and the field presentation in the IR.
+
+`@mcp` is a core decorator too: an operation opts in as a visible MCP tool
+with a handle, or says why it is hidden, and the core publishes only the
+visible ones. Which APIs must classify every operation is acme's rule, a
+check in `ext/mcp.go` over API schemas:
+
+```go
+r.RegisterCheck(registry.CheckSpec{
+	Name:      "acmeToolsClassified",
+	Extension: Name,
+	Kinds:     []string{string(ir.SchemaKindAPI)},
+	Verify: func(schema *ir.Schema, rep registry.VerifyReporter) {
+		// in shop-api, report an operation without @mcp
+	},
+})
+```
+
+`shop-api` classifies its three operations: `getProduct` and
+`createProduct` are visible tools with an `@icon` from acme's set,
+`listProducts` is hidden with a reason. `acmeIcons` covers operation
+icons as well as field icons. `ext/mcp_test.go` checks that an
+unclassified `shop-api` operation fails the load while another API and the
+core registry accept it; the smoke checks the classification in the IR.
 
 ## A command
 

@@ -288,7 +288,10 @@ acme uses both on the core documentation decorators (`ext/docs.go`):
 checks that accept only its own `@docs` audiences and `@icon` names, and a
 hook that moves each operation's `@docs` record from
 `registry.OpenAPIDocsKey` to `x-acme-docs`. See
-[Documentation decorators](/superschematic/reference/documentation/).
+[Documentation decorators](/superschematic/reference/documentation/). A
+check also carries the rule of which APIs must classify every operation
+for MCP: acme's `acmeToolsClassified` (`ext/mcp.go`) requires `@mcp` on
+each operation of `shop-api`. See [MCP tools](/superschematic/reference/mcp-tools/).
 
 ## A command
 

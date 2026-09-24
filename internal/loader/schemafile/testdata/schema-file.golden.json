@@ -283,6 +283,9 @@
         "manyToMany": {
           "type": "boolean"
         },
+        "mcp": {
+          "$ref": "#/$defs/OperationMCP"
+        },
         "middleware": {
           "$ref": "#/$defs/MiddlewareConfig"
         },
@@ -522,6 +525,24 @@
       ],
       "type": "object"
     },
+    "MCPIcon": {
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "style": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "MiddlewareConfig": {
       "additionalProperties": false,
       "properties": {
@@ -558,6 +579,18 @@
           },
           "type": "array"
         },
+        "expectedRevisionPointers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "idempotencyKeyPointers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "lifecycle": {
           "enum": [
             "draft",
@@ -576,6 +609,14 @@
           "type": "string"
         },
         "replacement": {
+          "type": "string"
+        },
+        "replayMode": {
+          "enum": [
+            "read_only",
+            "idempotent",
+            "compare_and_swap"
+          ],
           "type": "string"
         },
         "success": {
@@ -626,6 +667,36 @@
         "code",
         "description",
         "commonCorrection"
+      ],
+      "type": "object"
+    },
+    "OperationMCP": {
+      "additionalProperties": false,
+      "properties": {
+        "_meta": {
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        },
+        "handle": {
+          "type": "string"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "hiddenReason": {
+          "type": "string"
+        },
+        "icon": {
+          "$ref": "#/$defs/MCPIcon"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hidden"
       ],
       "type": "object"
     },

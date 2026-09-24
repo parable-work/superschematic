@@ -39,7 +39,8 @@
 #  14. the @docs records of shop-api reach its OpenAPI document under acme's
 #      x-acme-docs key through the acme OpenAPI hook, and under the core key
 #      when the core-only binary builds the same service; the shop-config
-#      field presentation (@docs title, @purpose, @icon) is in the IR.
+#      field presentation (@docs title, @purpose, @icon) is in the IR;
+#  13. every shop-api operation carries its @mcp classification in the IR.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -209,5 +210,12 @@ jq -e '.paths["/api/products/{id}"].get["x-superschematic-docs"].audience == "sh
 "$OUT/acme-schematic" build "$SCHEMAS/services/shop-config" --emit-ir --out "$OUT/ir-dist" >"$OUT/config-ir.json"
 jq -e '.types.ShopConfig.fields[] | select(.name == "DATABASE_URL") | .title == "Database URL" and .icon == "globe" and (.purpose | length) > 0' \
   "$OUT/config-ir.json" >/dev/null
+
+echo "==> MCP classification: every shop-api operation declares @mcp"
+"$OUT/acme-schematic" build "$SCHEMAS/services/shop-api" --emit-ir --out "$OUT/api-ir-dist" >"$OUT/api-ir.json"
+jq -e '[.operationSets[].operations[] | .mcp != null] | all' "$OUT/api-ir.json" >/dev/null
+jq -e '.operationSets[].operations[] | select(.name == "getProduct") | .mcp.handle == "get_product" and .icon == "tag"' \
+  "$OUT/api-ir.json" >/dev/null
+jq -e '.operationSets[].operations[] | select(.name == "listProducts") | .mcp.hidden' "$OUT/api-ir.json" >/dev/null
 
 echo "acme smoke: ok"
