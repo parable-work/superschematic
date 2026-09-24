@@ -34,7 +34,7 @@ export function validate{{.Scalar.Symbol}}(
     return [true, null];
   }
 
-  {{if eq .Scalar.Primitive "string"}}
+  {{if and (eq .Scalar.Primitive "string") (not .Scalar.HasJSONParse)}}
   const s = String(value);
 
   {{if .Scalar.MinLength}}
@@ -98,6 +98,12 @@ export function validate{{.Scalar.Symbol}}(
   {{end}}
   {{end}}
 
+  {{if and .Scalar.HasJSONParse (not .Scalar.HasCustomValidate)}}
+  if (parse{{.Scalar.Symbol}}FromLib(value) === null) {
+    errors.push({ validator: "parse", message: "invalid {{.Scalar.Name}}" });
+  }
+  {{end}}
+
   {{if .Scalar.HasCustomValidate}}
   const [isValid, customErrors] = validate{{.Scalar.Symbol}}FromLib(value as {{.Scalar.TSType}});
   if (!isValid && customErrors) {
@@ -138,9 +144,9 @@ export function normalize{{.Scalar.Symbol}}(value: string): {{.Scalar.TSType}} |
 
 {{if .Scalar.HasCustomParse}}
 /**
- * Parses a string and returns a {{.Scalar.Name}} scalar
+ * Parses a {{if .Scalar.HasJSONParse}}value{{else}}string{{end}} and returns a {{.Scalar.Name}} scalar
  */
-export function parse{{.Scalar.Symbol}}(value: string): {{.Scalar.TSType}} | null {
+export function parse{{.Scalar.Symbol}}(value: {{if .Scalar.HasJSONParse}}unknown{{else}}string{{end}}): {{.Scalar.TSType}} | null {
   return parse{{.Scalar.Symbol}}FromLib(value);
 }
 {{end}}

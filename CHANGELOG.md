@@ -391,6 +391,17 @@ of a generated artifact is always listed here with the bump it requires.
     `Temporal.DateTime`; stringifying the map gave `[object Object]`.
 
   Minor.
+- TypeScript and Python types: a custom-parse scalar whose `json_schema`
+  type is `object` (`Generic.StringMap`) takes its TypeScript and Python
+  types from the scalar catalog, `Record<string, string>` and
+  `Dict[str, str]` (were `string` and `Any`). The TypeScript
+  `validate<Symbol>` runs superscalar's parser instead of string checks,
+  and `parse<Symbol>` takes the map or its JSON text and returns the map.
+  The Python field parses through `parse_generic_string_map` and holds a
+  dict; a map with a non-string value now fails validation. OpenAPI types
+  such a map's values through `additionalProperties`. Before, a TypeScript
+  types package that used `Generic.StringMap` did not compile against the
+  pinned superscalar, whose parser returns a map. Minor.
 
 ### Fixed
 
