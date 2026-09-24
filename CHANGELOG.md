@@ -196,14 +196,47 @@ of a generated artifact is always listed here with the bump it requires.
   expectedRevisionPointers }` when a mode is set; the TypeScript writer
   emits them. Minor.
 
+- MCP tool documents: the TypeScript, Go and Rust SDKs write
+  `tools/mcp-audit.json`, one record per operation (handle, title,
+  description, icon, hidden and reason, permissions, `@docs` facts,
+  guidance, replay contract, input schema digest, binding status), and
+  `tools/schema.json` gains, per operation, `operationId`, `title`, the
+  resolved `mcp` record, `capability`, `lifecycle`, `visibility`,
+  `audience`, `guidance`, `replay`, `requiredPermissions`,
+  `bindingStatus` (`unsupported_multipart` for a file upload) and
+  `inputSchemaDigest` (the SHA-256 of the encoded argument schema). The
+  TypeScript `tools/index.ts` carries the same values. A visible tool's
+  `_meta` also carries its `@docs` guidance. When an operation declares
+  replay pointers, tool generation fails unless each resolves to a
+  required argument, a string for an idempotency key and a number for a
+  revision. Minor.
+- Tool argument schemas are complete: query parameters are arguments,
+  nested object types expand to closed objects, unions render as `oneOf`
+  with the discriminator pinned, a map is an object whose
+  `additionalProperties` is the value schema, `Validate<>` bounds carry
+  over, a body field that is not required is nullable, the root is
+  `additionalProperties: false`, and a scalar property names its scalar
+  under `x-superschematic-scalar`. `apigen.APIOutput` gains `TypeFields`,
+  `TypeUnions` and `ToolKeys`, `apigen.Param` gains `IsMap`, and
+  `apigen.ScalarJSONSchemaInfo` gains `CanonicalName`. In `tools/index.ts`
+  a map argument is typed `Record<string, T>`. Minor.
 - `ir.ToolManifest` and `ir.ToolBindingManifest` (with
   `ir.ToolManifestTool`, `ir.ToolParameterSchema`, `ir.ToolSchemaProperty`,
   `ir.ToolSchemaType`, `ir.ToolSchemaAdditionalProperties` and the binding
-  types): Go wire types for the SDK tool documents `tools/schema.json`
-  and `tools/mcp-binding.json`, so a consumer decodes them without its own
-  copy of the field list. Minor.
+  types): the Go wire types of `tools/schema.json` and
+  `tools/mcp-binding.json`. A test decodes the rendered documents with
+  unknown fields refused and checks the round trip. The TypeScript and Go
+  SDK generators use `ir.ToolBinding` for the binding records. Minor.
 ### Changed
 
+- `tools/openai.json` and `tools/anthropic.json` list only the operations
+  with a visible `@mcp`: publishing an operation to a model is opt-in.
+  Before, they listed every operation. `tools/schema.json`,
+  `tools/mcp-binding.json` and `tools/index.ts` still list every
+  operation. An API that relied on the old lists declares `@mcp` on the
+  operations it publishes. Major.
+- The TypeScript SDK takes a method's JSDoc description from `@docs` when
+  the operation has one, as the tool documents do. Patch.
 - Generated Go API modules require `github.com/go-chi/chi/v5` v5.3.2
   (was v5.3.1), matching `runtime/http/go`. Patch.
 - Generated Go ORM modules require `github.com/jackc/pgx/v5` v5.11.0 (was
@@ -257,6 +290,10 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- `tools/mcp-binding.json` listed a method's query object before its
+  input, while the generated methods take path, input, query, options; a
+  consumer that followed the positions passed them in the wrong order. It
+  now lists them in the method's order. Patch.
 - `session` auth provider: the generated session and principal stores passed
   a `*string` where the ORM's `UUIDFilter` takes the scalar UUID, so any
   upstream DB with a `Session` or `User` table failed to compile the generated

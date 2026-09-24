@@ -47,6 +47,7 @@ type Param struct {
 
 	Required     bool
 	IsArray      bool
+	IsMap        bool
 	DefaultValue *string
 
 	ValidateMin       *float64
@@ -202,6 +203,17 @@ type APIOutput struct {
 
 	// Scalars carries JSON Schema metadata for tool-calling bindings.
 	Scalars map[string]ScalarJSONSchemaInfo
+
+	// TypeFields holds the fields of every object type a tool argument can
+	// reach, in the schema and its dependencies, so the tool schemas expand
+	// nested objects.
+	TypeFields map[string][]Param
+	// TypeUnions holds every union a tool argument can reach; the tool
+	// schemas render them as oneOf.
+	TypeUnions map[string]ToolUnionInfo
+	// ToolKeys are the vendor-extension keys the SDK tool documents are
+	// written with.
+	ToolKeys ToolKeys
 
 	// EnvConfig holds environment-variable loader output when populated by
 	// the dispatch layer before WriteAPI.
@@ -359,6 +371,8 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	output.Auth = auth
 
 	types := newTypeMapper(schema, opts.Dependencies)
+	output.TypeFields = types.allTypeFields()
+	output.TypeUnions = types.allTypeUnions()
 
 	for _, set := range schema.OperationSets {
 		namespace := extractNamespace(set.Name)
@@ -458,6 +472,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	if err := validateHandlerNameCollisions(output.Endpoints); err != nil {
 		return nil, err
 	}
+	output.ToolKeys = DefaultToolKeys()
 	if err := validateMCPCollisions(output.Endpoints); err != nil {
 		return nil, err
 	}
@@ -865,6 +880,7 @@ func (m *typeMapper) mapArgument(arg *ir.ArgumentDef) (Param, error) {
 		Type:              arg.TypeRef.Name,
 		Required:          arg.Required,
 		IsArray:           arg.TypeRef.IsArray,
+		IsMap:             arg.TypeRef.IsMap,
 		DefaultValue:      arg.Default,
 		ValidateMin:       arg.ValidateMin,
 		ValidateMax:       arg.ValidateMax,
@@ -949,15 +965,28 @@ func (m *typeMapper) inputTypeFields(inputTypeName string) []Param {
 	if !ok {
 		return nil
 	}
+	return m.fieldsFromTypeDef(typeDef)
+}
 
+// fieldsFromTypeDef maps a type's fields to Params, with their shape and
+// Validate<> bounds.
+func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 	var fields []Param
 	for _, field := range typeDef.Fields {
 		param := Param{
-			Name:     field.Name,
-			GoName:   codegen.ToPascalCase(field.Name),
-			Type:     field.TypeRef.Name,
-			Required: field.Required,
-			IsArray:  field.TypeRef.IsArray,
+			Name:              field.Name,
+			GoName:            codegen.ToPascalCase(field.Name),
+			Type:              field.TypeRef.Name,
+			Required:          field.Required,
+			IsArray:           field.TypeRef.IsArray,
+			IsMap:             field.TypeRef.IsMap,
+			ValidateMin:       field.ValidateMin,
+			ValidateMax:       field.ValidateMax,
+			ValidateMinLength: field.ValidateMinLength,
+			ValidateMaxLength: field.ValidateMaxLength,
+			ValidateListMin:   field.ValidateListMin,
+			ValidateListMax:   field.ValidateListMax,
+			ValidatePattern:   field.ValidatePattern,
 		}
 		m.applyGoMapping(&param, field.TypeRef.Name)
 		fields = append(fields, param)
