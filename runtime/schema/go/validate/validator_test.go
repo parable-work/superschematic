@@ -743,9 +743,18 @@ func TestValidateType_RequiredArrayField(t *testing.T) {
 		assert.Equal(t, []ValidationError{{Validator: "required", Message: "required field"}}, errs.GetFieldErrors("members"))
 	})
 
-	t.Run("empty array is required", func(t *testing.T) {
+	// A required list means present, not non-empty; listMin declares
+	// non-emptiness.
+	t.Run("empty array is present", func(t *testing.T) {
 		errs := v.ValidateType("Group", map[string]any{
 			"members": []any{},
+		})
+		assert.False(t, errs.HasErrors(), "errs=%v", errs)
+	})
+
+	t.Run("non-list value is required", func(t *testing.T) {
+		errs := v.ValidateType("Group", map[string]any{
+			"members": "Alice",
 		})
 		assert.Equal(t, []ValidationError{{Validator: "required", Message: "required field"}}, errs.GetFieldErrors("members"))
 	})

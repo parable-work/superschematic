@@ -21,7 +21,7 @@
     "link-deps": "node scripts/link-local-deps.mjs",
     "typecheck": "node scripts/link-local-deps.mjs && tsc -p tsconfig.json --noEmit",
     "build": "node scripts/link-local-deps.mjs && tsc -p tsconfig.json && tsc -p tsconfig.esm.json && node scripts/fix-esm-extensions.mjs",
-    "test": "node scripts/link-local-deps.mjs && node test/ir-reader.cjs && node test/field-length-parity.cjs && node test/parse-registry-datetime.cjs && node test/parse-registry-names.cjs && node test/nested-arrays.cjs"
+    "test": "node scripts/link-local-deps.mjs && node test/ir-reader.cjs && node test/field-length-parity.cjs && node test/parse-registry-datetime.cjs && node test/parse-registry-names.cjs && node test/nested-arrays.cjs && node test/list-rules.cjs"
   },
   "dependencies": {
     "js-yaml": "4.1.0"

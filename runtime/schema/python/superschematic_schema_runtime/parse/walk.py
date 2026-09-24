@@ -282,7 +282,7 @@ def _walk_array_field(
             continue
         if not isinstance(row, list):
             append_field_error(
-                errors, row_key, ValidationError(validator="type", message="expected array value")
+                errors, row_key, ValidationError(validator="type", message="expected an array")
             )
             out.append(row)
             continue
