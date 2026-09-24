@@ -1026,7 +1026,9 @@ func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 	return fields
 }
 
-// extractFileUploadFields extracts file upload fields from an input type.
+// extractFileUploadFields extracts file upload fields from an input type. A
+// field is an upload when its scalar carries fileUpload metadata; the
+// scalar's name plays no part.
 func (m *typeMapper) extractFileUploadFields(inputTypeName string) []FileUploadField {
 	typeDef, ok := m.findTypeDef(inputTypeName)
 	if !ok {
@@ -1036,35 +1038,13 @@ func (m *typeMapper) extractFileUploadFields(inputTypeName string) []FileUploadF
 	var fields []FileUploadField
 	for _, field := range typeDef.Fields {
 		scalarDef, ok := m.findScalarDef(field.TypeRef.Name)
-		if !ok {
+		if !ok || scalarDef.FileUpload == nil {
 			continue
 		}
 
-		var maxSize int64
-		var allowedTypes []string
-		var category string
-		imageConstraints := scalarDef.ImageConstraints
-		if scalarDef.FileUpload != nil {
-			fu := scalarDef.FileUpload
-			maxSize = int64(fu.MaxSize)
-			allowedTypes = fu.AllowedTypes
-			category = fu.Category
-		}
-		if scalarDef.FileUpload == nil {
-			switch field.TypeRef.Name {
-			case "Artifact.File", "Asset.File":
-				category = "file"
-			case "Asset.Image":
-				category = "image"
-			case "Asset.LogoImage":
-				category = "image"
-				if imageConstraints == nil {
-					imageConstraints = &ir.ImageConstraints{RequireTransparency: true}
-				}
-			default:
-				continue
-			}
-		}
+		fu := scalarDef.FileUpload
+		maxSize := int64(fu.MaxSize)
+		allowedTypes := fu.AllowedTypes
 		if field.ValidateUploadMaxBytes != nil {
 			maxSize = *field.ValidateUploadMaxBytes
 		}
@@ -1081,9 +1061,9 @@ func (m *typeMapper) extractFileUploadFields(inputTypeName string) []FileUploadF
 			ScalarType:       field.TypeRef.Name,
 			MaxSize:          maxSize,
 			AllowedTypes:     allowedTypes,
-			Category:         category,
+			Category:         fu.Category,
 			Required:         field.Required,
-			ImageConstraints: imageConstraints,
+			ImageConstraints: scalarDef.ImageConstraints,
 		})
 	}
 	return fields

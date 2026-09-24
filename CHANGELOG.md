@@ -398,6 +398,19 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Go types: a module with enums and types but no scalars declared
+  `ValidationError` in both `scalars.go` and `enums.go` and did not
+  compile. `enums.go` declares it only when the module has no `scalars.go`.
+  Patch.
+- Go API: a field is a multipart upload only when its scalar carries
+  `fileUpload` metadata. Before, four scalar names (`Artifact.File`,
+  `Asset.File`, `Asset.Image`, `Asset.LogoImage`) were treated as uploads
+  without it, with a 100 MiB limit and no allowed types. A catalog that
+  registers those names declares `fileUpload` on them. Minor.
+- `build-all` writes the TypeScript types workspace manifest
+  (`types/typescript/package.json`) on a run where every service was
+  restored from the cache or up to date. Before, only a service's types
+  build wrote it, so a fully cached run could leave it missing. Patch.
 - `tools/mcp-binding.json` listed a method's query object before its
   input, while the generated methods take path, input, query, options; a
   consumer that followed the positions passed them in the wrong order. It
