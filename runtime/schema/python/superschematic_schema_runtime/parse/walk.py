@@ -197,6 +197,60 @@ def _walk_single_field(
         result[key] = nested[0]
 
 
+def _walk_array_elem(
+    ctx: WalkContext,
+    field: FieldDef,
+    kind: str,
+    elem: Any,
+    elem_key: str,
+    errors: ValidationErrors,
+) -> Any:
+    if elem is None:
+        return None
+    if kind == "scalar":
+        scalar = ctx.schema.scalars.get(field.type_ref.name)
+        if scalar is None:
+            return elem
+        v, ok = _apply_scalar(ctx, scalar, elem)
+        if not ok:
+            append_field_error(
+                errors,
+                elem_key,
+                ValidationError(validator="type", message=_type_mismatch_message(scalar)),
+            )
+            return elem
+        return _apply_scalar_parse(ctx, scalar, v, elem_key, errors)
+    if kind == "enum":
+        return elem
+    if kind == "builtin":
+        v, ok = _apply_builtin(field.type_ref.name, elem, ctx.strict)
+        if not ok:
+            append_field_error(
+                errors,
+                elem_key,
+                ValidationError(
+                    validator="type", message=f"expected {field.type_ref.name} value"
+                ),
+            )
+            return elem
+        return v
+    if kind in ("type", "input"):
+        defs = ctx.schema.types if kind == "type" else ctx.schema.inputs
+        td = defs.get(field.type_ref.name)
+        if td is None or not _is_object(elem):
+            append_field_error(
+                errors,
+                elem_key,
+                ValidationError(validator="type", message="expected object value"),
+            )
+            return elem
+        nested = walk_type_def(ctx, td, elem)
+        if _has_errors(nested[1]):
+            errors[elem_key] = nested[1]
+        return nested[0]
+    return elem
+
+
 def _walk_array_field(
     ctx: WalkContext,
     field: FieldDef,
@@ -212,74 +266,32 @@ def _walk_array_field(
         )
         result[key] = value
         return
+    if not field.type_ref.is_array_of_arrays:
+        result[key] = [
+            _walk_array_elem(ctx, field, kind, elem, f"{key}[{index}]", errors)
+            for index, elem in enumerate(value)
+        ]
+        return
+    # A list of lists: walk every inner list. A null inner list passes
+    # through; validation rejects it.
     out: list[Any] = []
-    for index, elem in enumerate(value):
-        elem_key = f"{key}[{index}]"
-        if elem is None:
+    for index, row in enumerate(value):
+        row_key = f"{key}[{index}]"
+        if row is None:
             out.append(None)
             continue
-        if kind == "scalar":
-            scalar = ctx.schema.scalars.get(field.type_ref.name)
-            if scalar is None:
-                out.append(elem)
-                continue
-            v, ok = _apply_scalar(ctx, scalar, elem)
-            if not ok:
-                append_field_error(
-                    errors,
-                    elem_key,
-                    ValidationError(validator="type", message=_type_mismatch_message(scalar)),
-                )
-                out.append(elem)
-                continue
-            out.append(_apply_scalar_parse(ctx, scalar, v, elem_key, errors))
+        if not isinstance(row, list):
+            append_field_error(
+                errors, row_key, ValidationError(validator="type", message="expected array value")
+            )
+            out.append(row)
             continue
-        if kind == "enum":
-            out.append(elem)
-            continue
-        if kind == "builtin":
-            v, ok = _apply_builtin(field.type_ref.name, elem, ctx.strict)
-            if not ok:
-                append_field_error(
-                    errors,
-                    elem_key,
-                    ValidationError(
-                        validator="type", message=f"expected {field.type_ref.name} value"
-                    ),
-                )
-                out.append(elem)
-                continue
-            out.append(v)
-            continue
-        if kind == "type":
-            td = ctx.schema.types.get(field.type_ref.name)
-            if td is None or not _is_object(elem):
-                append_field_error(
-                    errors,
-                    elem_key,
-                    ValidationError(validator="type", message="expected object value"),
-                )
-                out.append(elem)
-                continue
-            nested = walk_type_def(ctx, td, elem)
-            if _has_errors(nested[1]):
-                errors[elem_key] = nested[1]
-            out.append(nested[0])
-            continue
-        if kind == "input":
-            td = ctx.schema.inputs.get(field.type_ref.name)
-            if td is None or not _is_object(elem):
-                append_field_error(
-                    errors,
-                    elem_key,
-                    ValidationError(validator="type", message="expected object value"),
-                )
-                out.append(elem)
-                continue
-            nested = walk_type_def(ctx, td, elem)
-            if _has_errors(nested[1]):
-                errors[elem_key] = nested[1]
-            out.append(nested[0])
+        out.append(
+            [
+                _walk_array_elem(ctx, field, kind, elem, f"{row_key}[{inner_index}]", errors)
+                for inner_index, elem in enumerate(row)
+            ]
+        )
     result[key] = out
 
 

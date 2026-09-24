@@ -344,6 +344,10 @@ of a generated artifact is always listed here with the bump it requires.
   and the TypeScript schema runtime check every innermost element at
   `field[i][j]`, apply list bounds to the outer list and reject an inner
   list that is not an array at `field[i]` (`required`). Minor.
+- Arrays of arrays in Python (D12): pygen renders `T[][]` as
+  `List[List[T]]` with element errors at `field[i][j]`, and the Python
+  schema runtime reads, parses, validates, serializes, masks and merges
+  lists of lists (`TypeRef.is_array_of_arrays`). Minor.
 
 ### Changed
 

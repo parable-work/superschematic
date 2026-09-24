@@ -234,9 +234,13 @@ def _parse_type_ref(raw: dict[str, Any], path: str) -> TypeRef:
             )
         items = _as_object(items_raw, f"{path}.items")
         inner = _parse_type_ref(items, f"{path}.items")
-        if inner.is_array:
+        if inner.is_array_of_arrays:
             raise SchemaParseError(
-                f"runtime schema parse error: nested arrays are not supported at {path}"
+                f"runtime schema parse error: arrays nest at most two levels (T[][]) at {path}"
+            )
+        if inner.is_array:
+            return TypeRef(
+                name=inner.name, is_array=True, is_array_of_arrays=True, elem_non_null=True
             )
         return TypeRef(name=inner.name, is_array=True, elem_non_null=True)
 

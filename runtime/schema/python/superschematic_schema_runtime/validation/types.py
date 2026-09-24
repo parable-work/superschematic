@@ -19,6 +19,10 @@ class TypeRef:
     name: str
     is_array: bool = False
     elem_non_null: bool = True
+    # A list of lists (T[][]): each element of the outer list is a list of
+    # ``name``. Requires ``is_array``. Inner lists are never null. Last, so
+    # positional construction keeps its meaning.
+    is_array_of_arrays: bool = False
 
 
 @dataclass
