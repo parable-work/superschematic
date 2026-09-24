@@ -145,10 +145,21 @@ func TestGeneratedArraysOfArraysORM(t *testing.T) {
 	runArraysOfArraysORMModule(t, ormDir, nestedArraysCreateSQL(t, t.TempDir()))
 }
 
-// runArraysOfArraysORMModule adds the round-trip test to a generated
-// fixture-nested-arrays-db ORM module and builds, vets and tests it.
+// runArraysOfArraysORMModule adds the round-trip test and its DDL
+// (testdata/create.sql) to a generated fixture-nested-arrays-db ORM module
+// and builds, vets and tests it.
 func runArraysOfArraysORMModule(t *testing.T, ormDir, createSQL string) {
 	t.Helper()
+	ddl, err := os.ReadFile(createSQL)
+	if err != nil {
+		t.Fatalf("read create.sql: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(ormDir, "testdata"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ormDir, "testdata", "create.sql"), ddl, 0o644); err != nil {
+		t.Fatalf("write create.sql: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(ormDir, "arrays_of_arrays_test.go"), []byte(arraysOfArraysORMTest), 0o644); err != nil {
 		t.Fatalf("write round-trip test: %v", err)
 	}
@@ -159,9 +170,10 @@ func runArraysOfArraysORMModule(t *testing.T, ormDir, createSQL string) {
 		t.Skipf("go mod tidy failed (likely offline): %v\n%s", err, out)
 	}
 	for _, args := range [][]string{{"build", "./..."}, {"vet", "./..."}, {"test", "-count=1", "-v", "./..."}} {
+		// No cmd.Env: exec then sets PWD to cmd.Dir, which keeps the
+		// module's relative replace paths valid under a symlinked temp dir.
 		cmd := exec.Command("go", args...)
 		cmd.Dir = ormDir
-		cmd.Env = append(os.Environ(), "ARRAYS_OF_ARRAYS_CREATE_SQL="+createSQL)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("go %s in the generated ORM module: %v\n%s", strings.Join(args, " "), err, out)
@@ -191,7 +203,7 @@ func TestBoardArraysOfArraysOnPostgres(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the generated ORM against Postgres")
 	}
-	createSQL, err := os.ReadFile(os.Getenv("ARRAYS_OF_ARRAYS_CREATE_SQL"))
+	createSQL, err := os.ReadFile("testdata/create.sql")
 	if err != nil {
 		t.Fatalf("read create.sql: %v", err)
 	}
