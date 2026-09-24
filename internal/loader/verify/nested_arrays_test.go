@@ -71,6 +71,54 @@ func TestArraysOfArraysRejectedOnTypeFields(t *testing.T) {
 	}
 }
 
+// TestArraysOfArraysOfTableType: a DB table column that is a list of lists
+// of another table (Table[][]) would be a nested relation, which has no
+// column to become. Verify names it once; sqlgen and ormgen keep their own
+// check as a backstop. Storing the value whole as JSON is accepted.
+func TestArraysOfArraysOfTableType(t *testing.T) {
+	const want = "A.grid: an array of arrays of table type B cannot be a relation; store a list of lists of its keys or of a @jsonField type"
+	cases := []struct {
+		name   string
+		mutate func(schema *ir.Schema, owner *ir.TypeDef, fd *ir.FieldDef)
+		want   string
+	}{
+		{"table column", func(*ir.Schema, *ir.TypeDef, *ir.FieldDef) {}, want},
+		{"optional table column", func(_ *ir.Schema, _ *ir.TypeDef, fd *ir.FieldDef) { fd.Required = false }, want},
+		{"@jsonField column", func(_ *ir.Schema, _ *ir.TypeDef, fd *ir.FieldDef) { fd.JsonField = true }, ""},
+		{"@jsonField element type", func(schema *ir.Schema, _ *ir.TypeDef, _ *ir.FieldDef) { schema.Types["B"].JsonField = true }, ""},
+		{"element type is not a table", func(schema *ir.Schema, _ *ir.TypeDef, _ *ir.FieldDef) {
+			schema.Types["B"].Role = ir.RoleEmbeddedStruct
+		}, ""},
+		{"owner is not a table", func(_ *ir.Schema, owner *ir.TypeDef, _ *ir.FieldDef) { owner.Role = ir.RoleAPIView }, ""},
+		{"a relation reports the relation error only", func(_ *ir.Schema, _ *ir.TypeDef, fd *ir.FieldDef) { fd.HasMany = true },
+			"A.grid: a relation (hasMany, manyToMany or relation) cannot be an array of arrays"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := ir.NewSchema("svc", ir.SchemaKindDB)
+			grid := &ir.FieldDef{Name: "grid", TypeRef: ir.TypeRef{Name: "B", IsArray: true, IsArrayOfArrays: true}, Required: true}
+			schema.Types["A"] = &ir.TypeDef{Name: "A", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{
+				{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Key: true},
+				grid,
+			}}
+			schema.Types["B"] = &ir.TypeDef{Name: "B", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{
+				{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Key: true},
+			}}
+			tc.mutate(schema, schema.Types["A"], grid)
+			msgs := nestedArrayErrors(schema)
+			if tc.want == "" {
+				if len(msgs) != 0 {
+					t.Fatalf("errors = %q, want none", msgs)
+				}
+				return
+			}
+			if len(msgs) != 1 || msgs[0] != tc.want {
+				t.Fatalf("errors = %q, want [%q]", msgs, tc.want)
+			}
+		})
+	}
+}
+
 // TestArraysOfArraysOperationArguments: a request body carries T[][]; a
 // query or path parameter, or any argument of an operation that has no body,
 // does not. The response accepts it.

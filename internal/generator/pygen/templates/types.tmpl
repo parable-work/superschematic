@@ -77,6 +77,17 @@ def _safe_load_yaml(input_data: str | bytes) -> Dict[str, Any]:
                 for index, row in enumerate(self.{{$fieldAttr}}):
                     if row is None:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"{{$fieldName}}[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "required", "required field")
+{{- else if isList .}}
+            if isinstance(self.{{$fieldAttr}}, list):
+                for index, item in enumerate(self.{{$fieldAttr}}):
+                    if item is None:
+                        errors.add_field_error(f"{{$fieldName}}[{index}]", "required", "required field")
 {{- end}}
 {{- range .Validations}}
 {{- if ne .Validator "required"}}
@@ -93,12 +104,12 @@ def _safe_load_yaml(input_data: str | bytes) -> Dict[str, Any]:
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if len(str(item)) < {{.Value}}:
+                        if item is not None and len(str(item)) < {{.Value}}:
                             errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "minLength", "{{pythonString .Message}}")
 {{- else if $field.IsArray}}
             if isinstance(self.{{$fieldAttr}}, list):
                 for index, item in enumerate(self.{{$fieldAttr}}):
-                    if len(str(item)) < {{.Value}}:
+                    if item is not None and len(str(item)) < {{.Value}}:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "minLength", "{{pythonString .Message}}")
 {{- else}}
             if len(str(self.{{$fieldAttr}})) < {{.Value}}:
@@ -111,12 +122,12 @@ def _safe_load_yaml(input_data: str | bytes) -> Dict[str, Any]:
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if len(str(item)) > {{.Value}}:
+                        if item is not None and len(str(item)) > {{.Value}}:
                             errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "maxLength", "{{pythonString .Message}}")
 {{- else if $field.IsArray}}
             if isinstance(self.{{$fieldAttr}}, list):
                 for index, item in enumerate(self.{{$fieldAttr}}):
-                    if len(str(item)) > {{.Value}}:
+                    if item is not None and len(str(item)) > {{.Value}}:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "maxLength", "{{pythonString .Message}}")
 {{- else}}
             if len(str(self.{{$fieldAttr}})) > {{.Value}}:
@@ -129,12 +140,12 @@ def _safe_load_yaml(input_data: str | bytes) -> Dict[str, Any]:
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(item)) is None:
+                        if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(item)) is None:
                             errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "pattern", "{{pythonString .Message}}")
 {{- else if $field.IsArray}}
             if isinstance(self.{{$fieldAttr}}, list):
                 for index, item in enumerate(self.{{$fieldAttr}}):
-                    if re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(item)) is None:
+                    if item is not None and re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(item)) is None:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "pattern", "{{pythonString .Message}}")
 {{- else}}
             if re.search(r"{{pythonRawString (printf "%v" .Value)}}", str(self.{{$fieldAttr}})) is None:
@@ -147,12 +158,12 @@ def _safe_load_yaml(input_data: str | bytes) -> Dict[str, Any]:
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if float(item) < {{.Value}}:
+                        if item is not None and float(item) < {{.Value}}:
                             errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "min", "{{pythonString .Message}}")
 {{- else if $field.IsArray}}
             if isinstance(self.{{$fieldAttr}}, list):
                 for index, item in enumerate(self.{{$fieldAttr}}):
-                    if float(item) < {{.Value}}:
+                    if item is not None and float(item) < {{.Value}}:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "min", "{{pythonString .Message}}")
 {{- else}}
             if float(self.{{$fieldAttr}}) < {{.Value}}:
@@ -165,12 +176,12 @@ def _safe_load_yaml(input_data: str | bytes) -> Dict[str, Any]:
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if float(item) > {{.Value}}:
+                        if item is not None and float(item) > {{.Value}}:
                             errors.add_field_error(f"{{$fieldName}}[{index}][{inner_index}]", "max", "{{pythonString .Message}}")
 {{- else if $field.IsArray}}
             if isinstance(self.{{$fieldAttr}}, list):
                 for index, item in enumerate(self.{{$fieldAttr}}):
-                    if float(item) > {{.Value}}:
+                    if item is not None and float(item) > {{.Value}}:
                         errors.add_field_error(f"{{$fieldName}}[{index}]", "max", "{{pythonString .Message}}")
 {{- else}}
             if float(self.{{$fieldAttr}}) > {{.Value}}:
@@ -229,17 +240,27 @@ class {{.Name}}(BaseModel):
         {{- else}}
         if self.{{.TargetName}} is None:
             errors.add_field_error("{{snakeCase .Name}}", "required", "required field")
-        {{- if or (hasNonRequiredValidations .) .IsArrayOfArrays}}
+        {{- if or (hasNonRequiredValidations .) (isList .)}}
         else:
 {{template "ruleChecks" .}}
         {{- end}}
         {{- end}}
         {{- else}}
         if self.{{.TargetName}} is not None:
+            {{- if isList .}}
+            # A None entry is reported at its own index below; the whole-value
+            # check would repeat it at the field.
+            if not ({{nullEntryCheck .}}):
+                try:
+                    TypeAdapter({{.TargetType}}).validate_python(self.{{.TargetName}})
+                except PydanticValidationError as e:
+                    errors.add_field_error("{{snakeCase .Name}}", "invalid", str(e))
+            {{- else}}
             try:
                 TypeAdapter({{.TargetType}}).validate_python(self.{{.TargetName}})
             except PydanticValidationError as e:
                 errors.add_field_error("{{snakeCase .Name}}", "invalid", str(e))
+            {{- end}}
 {{template "ruleChecks" .}}
         {{- end}}
         {{end}}

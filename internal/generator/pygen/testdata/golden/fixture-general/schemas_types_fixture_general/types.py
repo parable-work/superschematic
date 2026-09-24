@@ -257,14 +257,21 @@ class FixtureFilter(BaseModel):
 
         # Validate values
         if self.values is not None:
-            try:
-                TypeAdapter(List[str]).validate_python(self.values)
-            except PydanticValidationError as e:
-                errors.add_field_error("values", "invalid", str(e))
+            # A None entry is reported at its own index below; the whole-value
+            # check would repeat it at the field.
+            if not (isinstance(self.values, list) and None in self.values):
+                try:
+                    TypeAdapter(List[str]).validate_python(self.values)
+                except PydanticValidationError as e:
+                    errors.add_field_error("values", "invalid", str(e))
 
             if isinstance(self.values, list):
                 for index, item in enumerate(self.values):
-                    if len(str(item)) > 64:
+                    if item is None:
+                        errors.add_field_error(f"values[{index}]", "required", "required field")
+            if isinstance(self.values, list):
+                for index, item in enumerate(self.values):
+                    if item is not None and len(str(item)) > 64:
                         errors.add_field_error(f"values[{index}]", "maxLength", "must be at most 64 characters")
             if isinstance(self.values, list) and len(self.values) > 10:
                 errors.add_field_error("values", "listMax", "must contain at most 10 items")

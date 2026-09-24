@@ -324,10 +324,18 @@ class Tenant(BaseModel):
 
         # Validate users
         if self.users is not None:
-            try:
-                TypeAdapter(List[TenantUser]).validate_python(self.users)
-            except PydanticValidationError as e:
-                errors.add_field_error("users", "invalid", str(e))
+            # A None entry is reported at its own index below; the whole-value
+            # check would repeat it at the field.
+            if not (isinstance(self.users, list) and None in self.users):
+                try:
+                    TypeAdapter(List[TenantUser]).validate_python(self.users)
+                except PydanticValidationError as e:
+                    errors.add_field_error("users", "invalid", str(e))
+
+            if isinstance(self.users, list):
+                for index, item in enumerate(self.users):
+                    if item is None:
+                        errors.add_field_error(f"users[{index}]", "required", "required field")
 
         return errors
 

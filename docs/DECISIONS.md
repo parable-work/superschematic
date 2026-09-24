@@ -306,3 +306,37 @@ Rollout: the IR and the loaders land first. Until a generator renders
 instead of emitting `T[]`. The change that teaches a generator nested
 lists removes its own call and adds its output for the
 `fixture-nested-arrays` services; the package goes when no call remains.
+
+### D12, amended: one set of list rules for every validator
+
+The Go, TypeScript and Python schema runtimes and the generated Go,
+TypeScript and Python validators follow one set of rules for `T[]` and
+`T[][]`. `internal/generator/parity` holds them as one vector table with
+one expected column: it runs the table through the generated validators
+and writes it, with the matrix schema's IR, to
+`runtime/schema/testdata/validation_parity.json`, which each runtime's own
+suite asserts.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A required list means present, not non-empty: `[]` is a value, and so is an empty outer list of `T[][]`. Non-emptiness is declared with `listMin`. | Required implying non-empty, which the Go and Python runtimes did |
+| `listMin` and `listMax` bound the list, and the outer list of `T[][]`, in every validator, the Go runtime included. | Leaving the bounds to the generated validators |
+| A field's own constraints (`minLength`, `maxLength`, `pattern`, `min`, `max`) apply to every element of `T[]` and every innermost element of `T[][]`, in every runtime. | Narrowing D12 to the generated validators |
+| A null inner list is `required` ("required field") and any other non-list inner value is `type` ("expected an array"), both at `field[i]`. Innermost element errors are at `field[i][j]`. | `required` for both, as the TypeScript validators reported |
+| A list element is never null: a null element is `required` at `field[i]`, or at `field[i][j]` for an innermost element, in a required and an optional list alike. The runtimes no longer consult the legacy `elemNonNull` flag for it, and Python `validate_all` reports the index. | The field's requiredness deciding it; nullable elements |
+| Python `validate_all` skips the whole-value check of an optional list when a `None` entry is reported at its index, so each problem is reported once. | Reporting `field: invalid` next to `field[i]: required` |
+| Verification refuses a DB table column that is an array of arrays of another table (`Table[][]`) with one error that names the field; sqlgen and ormgen keep their check as a backstop. | Leaving the refusal to the generators |
+
+Known gaps, each pinned in the harness's `knownDivergences`:
+
+- The generated Go validator sees a null element only as its type's zero
+  value, since `json.Unmarshal` decodes it so. It reports `required` for a
+  string scalar or enum element of a required list and nothing for a
+  builtin element.
+- The generated TypeScript validator accepts a null element of an optional
+  list, recurses into a nested object element only for a `@strictJSON`
+  type, and reports a non-string scalar element by the scalar's pattern.
+
+Some payloads never reach a generated validator: `json.Unmarshal` refuses a
+non-list inner value, and pydantic's strict parse refuses a bad enum or
+nested object element. For those vectors the harness asserts the refusal.
