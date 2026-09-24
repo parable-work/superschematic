@@ -427,6 +427,16 @@ of a generated artifact is always listed here with the bump it requires.
   `HashMap` now comes from the catalog. An extension that registers a
   scalar catalog (`RegisterScalars`) sets these fields to choose each
   language's type. Minor.
+- Rust types: a `Generic.JSON` field (direct, optional, list, map or map of
+  lists) decodes through the scalar crate's lossless adapter,
+  `<scalar_rust_crate>::scalars::json_scalar::serde::deserialize`, where
+  the crate name comes from the naming file. The field keeps every
+  number's digits, and an object whose key spells one of serde_json's
+  private marker names stays an object. A union that reaches
+  `Generic.JSON`, directly, through an imported member or through a
+  recursive type, reads its input through the adapter too; an untagged one
+  then tries each member in order. A crate with such a field or union
+  depends on the scalar crate and `serde_json`. Minor.
 
 ### Fixed
 

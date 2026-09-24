@@ -11,6 +11,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
 // TestCatalogRustTypes pins the Rust aliases of scalars whose Rust type
@@ -54,7 +55,16 @@ func TestCatalogRustTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	outDir := t.TempDir()
+	// Resolve symlinks (macOS /var -> /private/var) so the relative crate
+	// path in Cargo.toml resolves from the real directory.
+	outDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The Generic.JSON field decodes through the scalar crate's adapter.
+	if err := SetScalarLibPath(output, testpaths.Local(t), outDir); err != nil {
+		t.Fatal(err)
+	}
 	if err := WriteTypes(output, outDir); err != nil {
 		t.Fatal(err)
 	}
