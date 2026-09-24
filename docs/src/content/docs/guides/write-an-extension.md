@@ -291,7 +291,31 @@ hook that moves each operation's `@docs` record from
 [Documentation decorators](/superschematic/reference/documentation/). A
 check also carries the rule of which APIs must classify every operation
 for MCP: acme's `acmeToolsClassified` (`ext/mcp.go`) requires `@mcp` on
-each operation of `shop-api`. See [MCP tools](/superschematic/reference/mcp-tools/).
+each operation of `shop-api`.
+
+A tool hook edits what the SDK generators publish about an API's MCP
+tools: the vendor keys of the tool documents and each operation's
+resolved `@mcp` record. Hooks run in registration order, once per API
+build, and every SDK language reads what they leave:
+
+```go
+r.RegisterToolHook(registry.ToolHook{
+    Name:      "tools",
+    Extension: Name,
+    Edit: func(schema *ir.Schema, tools *registry.ToolSet) error {
+        tools.Keys.Scalar = "x-acme-scalar"
+        tools.Keys.Parameters = append(tools.Keys.Parameters, registry.ToolKeyValue{Key: "x-acme-arguments", Value: 1})
+        for _, tool := range tools.Tools {
+            if tool.MCP != nil && tool.MCP.Icon != nil {
+                tool.MCP.Icon.Family = "acme"
+            }
+        }
+        return nil
+    },
+})
+```
+
+See [MCP tools](/superschematic/reference/mcp-tools/).
 
 ## A command
 

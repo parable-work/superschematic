@@ -12,7 +12,7 @@
       "apiId": "{{$tool.MCPBinding.APIID}}",
       "namespace": "{{$tool.MCPBinding.Namespace}}",
       "methodName": "{{$tool.MCPBinding.MethodName}}",
-      "isScoped": {{$tool.MCPBinding.IsScopedNS}}{{if $tool.MCPBinding.ScopeParam}},
+      "isScoped": {{$tool.MCPBinding.IsScoped}}{{if $tool.MCPBinding.ScopeParam}},
       "scopeParam": "{{$tool.MCPBinding.ScopeParam}}"{{end}},
       "arguments": [
 {{- range $j, $argument := $tool.MCPBinding.Arguments}}

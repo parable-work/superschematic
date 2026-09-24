@@ -1,9 +1,11 @@
 package registry
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -101,6 +103,38 @@ func TestRegisterOpenAPIHookKeepsOrderAndRejectsInvalid(t *testing.T) {
 	}
 	finalizeWithCoreGenerators(t, reg)
 	err := reg.RegisterOpenAPIHook(OpenAPIHook{Name: "late", Edit: noopEdit})
+	if err == nil || !strings.Contains(err.Error(), "after Finalize") {
+		t.Fatalf("post-Finalize registration: got %v, want an after-Finalize error", err)
+	}
+}
+
+func noopToolEdit(*ir.Schema, *apigen.ToolSet) error { return nil }
+
+func TestRegisterToolHookKeepsOrderAndRejectsInvalid(t *testing.T) {
+	reg := New(naming.Default())
+	if err := reg.RegisterToolHook(ToolHook{Edit: noopToolEdit}); err == nil {
+		t.Error("nameless hook: want error")
+	}
+	if err := reg.RegisterToolHook(ToolHook{Name: "keys"}); err == nil {
+		t.Error("hook without Edit: want error")
+	}
+	for _, name := range []string{"second", "first"} {
+		if err := reg.RegisterToolHook(ToolHook{Name: name, Extension: "policy", Edit: noopToolEdit}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := reg.RegisterToolHook(ToolHook{Name: "first", Edit: noopToolEdit}); err == nil {
+		t.Error("duplicate hook: want error")
+	}
+	hooks := reg.ToolHooks()
+	if len(hooks) != 2 || hooks[0].Name != "second" || hooks[1].Name != "first" {
+		t.Fatalf("ToolHooks() = %+v", hooks)
+	}
+	if !slices.Contains(reg.Extensions(), "policy") {
+		t.Fatalf("Extensions() = %v, want the hook's extension", reg.Extensions())
+	}
+	finalizeWithCoreGenerators(t, reg)
+	err := reg.RegisterToolHook(ToolHook{Name: "late", Edit: noopToolEdit})
 	if err == nil || !strings.Contains(err.Error(), "after Finalize") {
 		t.Fatalf("post-Finalize registration: got %v, want an after-Finalize error", err)
 	}

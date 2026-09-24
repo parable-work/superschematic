@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "1.0",
+  "apiId": "{{.APIID}}",
+  "registryDigestInputs": [
+{{- range $i, $tool := .Tools}}
+{{- if $i}},{{end}}
+    {
+      "apiId": "{{$tool.APIID}}",
+      "namespace": "{{$tool.Namespace}}",
+      "operationId": "{{$tool.OperationID}}",
+      "method": "{{$tool.HTTPMethod}}",
+      "path": "{{$tool.HTTPPath}}",
+      "handle": "{{if and $tool.MCP (not $tool.MCP.Hidden)}}{{escapeJSON $tool.MCP.Handle}}{{end}}",
+      "title": "{{escapeJSON $tool.Title}}",
+      "description": "{{escapeJSON $tool.Description}}",
+      "icon": {{if and $tool.MCP (not $tool.MCP.Hidden) $tool.MCP.Icon}}{
+        "name": "{{escapeJSON $tool.MCP.Icon.Name}}"
+{{- if $tool.MCP.Icon.Family}},
+        "family": "{{escapeJSON $tool.MCP.Icon.Family}}"
+{{- end}}
+{{- if $tool.MCP.Icon.Style}},
+        "style": "{{escapeJSON $tool.MCP.Icon.Style}}"
+{{- end}}
+      }{{else}}null{{end}},
+      "hidden": {{if $tool.MCP}}{{$tool.MCP.Hidden}}{{else}}true{{end}},
+      "hiddenReason": "{{if and $tool.MCP $tool.MCP.Hidden}}{{escapeJSON $tool.MCP.HiddenReason}}{{end}}",
+      "requiresAuth": {{$tool.RequiresAuth}},
+      "requiredPermissions": [{{range $j, $permission := $tool.RequiredPerms}}{{if $j}}, {{end}}"{{escapeJSON $permission}}"{{end}}],
+      "capability": "{{$tool.Capability}}",
+      "lifecycle": "{{$tool.Lifecycle}}",
+      "audience": "{{escapeJSON $tool.Audience}}",
+      "guidance": {{jsonValue $tool.Guidance}},
+      "replay": {{if $tool.ReplayMode}}{
+        "mode": "{{$tool.ReplayMode}}",
+        "idempotencyKeyPointers": [{{range $j, $pointer := $tool.IdempotencyKeyPointers}}{{if $j}}, {{end}}"{{escapeJSON $pointer}}"{{end}}],
+        "expectedRevisionPointers": [{{range $j, $pointer := $tool.ExpectedRevisionPointers}}{{if $j}}, {{end}}"{{escapeJSON $pointer}}"{{end}}]
+      }{{else}}null{{end}},
+      "inputSchemaDigest": "{{$tool.InputSchemaDigest}}",
+      "bindingStatus": "{{$tool.BindingStatus}}"
+    }
+{{- end}}
+  ]
+}

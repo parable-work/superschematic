@@ -1,0 +1,59 @@
+{
+  "functions": [
+    {
+      "name": "order.getOrder",
+      "description": "Returns one order by its identifier.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "order.listOrders",
+      "description": "Lists orders by status.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {"description":"A numeric value","maximum":100,"minimum":1,"type":"number"},
+          "statuses": {"description":"Array of OrderStatus values","items":{"description":"A OrderStatus value","type":"string"},"maxItems":2,"minItems":1,"type":"array"}
+        },
+        "required": ["statuses"]
+      }
+    },
+    {
+      "name": "order.openReturn",
+      "description": "Opens a return for one delivered order.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "labels": {"additionalProperties":{"description":"A string value","type":"string"},"description":"Map of string values","type":"object"},
+          "orderId": {"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "pickup": {"additionalProperties":false,"description":"Address object","properties":{"city":{"description":"A string value","type":"string"},"line1":{"description":"A string value","type":"string"},"postalCode":{"description":"A string value","type":["string","null"]}},"required":["city","line1"],"type":"object"},
+          "reason": {"description":"A string value","maxLength":500,"minLength":1,"type":"string"},
+          "requestId": {"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["labels", "orderId", "pickup", "reason", "requestId"]
+      }
+    },
+    {
+      "name": "order.updateOrder",
+      "description": "Changes an order's note when its revision still matches.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "note": {"description":"A string value","type":["string","null"]},
+          "revision": {"description":"A numeric value","type":"number"}
+        },
+        "required": ["id", "revision"]
+      }
+    }
+  ]
+}

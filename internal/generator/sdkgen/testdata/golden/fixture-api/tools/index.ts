@@ -14,6 +14,8 @@ export interface TenantCustomHandlerParams {
 }
 
 export interface TenantListTenantsParams {
+  ids: string[];
+  statuses?: string[];
 }
 
 export interface TenantCreateTenantParams {
@@ -24,6 +26,7 @@ export interface TenantCreateTenantParams {
 
 export interface TenantGetTenantParams {
   id: string;
+  includeArchived: boolean;
 }
 
 export interface TenantUpdateSecretParams {
@@ -37,13 +40,47 @@ export interface TenantUpdateSecretParams {
  */
 export interface ToolDefinition {
   name: string;
+  operationId: string;
+  title: string;
+  mcp: {
+    hidden: boolean;
+    hiddenReason?: string;
+    name?: string;
+    handle?: string;
+    description?: string;
+    _meta?: Record<string, unknown>;
+    icon?: {
+      name: string;
+      family?: string;
+      style?: string;
+    };
+  } | null;
+  capability: string;
+  lifecycle: string;
+  visibility: string;
+  audience: string;
+  guidance: {
+    useWhen: string;
+    doNotUseWhen: string;
+    success: string;
+    errors: Array<{ code: string; description: string; commonCorrection: string }>;
+  };
+  requiredPermissions: string[];
+  replay: {
+    mode: string;
+    idempotencyKeyPointers: string[];
+    expectedRevisionPointers: string[];
+  } | null;
   description: string;
   namespace: string;
   methodName: string;
   requiresAuth: boolean;
   isScoped: boolean;
+  bindingStatus: 'ready' | 'unsupported_multipart';
+  inputSchemaDigest: string;
   parameters: {
     type: 'object';
+    additionalProperties: false;
     properties: Record<string, JSONSchemaProperty>;
     required?: string[];
   };
@@ -58,7 +95,9 @@ export interface ToolDefinition {
  * JSON Schema property interface
  */
 export interface JSONSchemaProperty {
-  type: string;
+  'x-superschematic-scalar'?: string;
+  additionalProperties?: boolean | JSONSchemaProperty;
+  type: string | string[];
   format?: string;
   description?: string;
   pattern?: string;
@@ -67,6 +106,12 @@ export interface JSONSchemaProperty {
   maxLength?: number;
   minimum?: number;
   maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+  items?: JSONSchemaProperty;
+  properties?: Record<string, JSONSchemaProperty>;
+  required?: string[];
+  oneOf?: JSONSchemaProperty[];
 }
 
 /**
@@ -77,6 +122,7 @@ export interface OpenAIFunction {
   description: string;
   parameters: {
     type: 'object';
+    additionalProperties: false;
     properties: Record<string, JSONSchemaProperty>;
     required?: string[];
   };
@@ -90,6 +136,7 @@ export interface AnthropicTool {
   description: string;
   input_schema: {
     type: 'object';
+    additionalProperties: false;
     properties: Record<string, JSONSchemaProperty>;
     required?: string[];
   };
@@ -134,13 +181,26 @@ export const TOOL_NAMES: ToolName[] = [
 export const toolDefinitions: Record<ToolName, ToolDefinition> = {
   [SESSION_CURRENT_TENANT]: {
     name: 'session.currentTenant',
+    operationId: 'SessionCurrentTenantHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: [],
+    replay: null,
     description: `currentTenant endpoint (Requires authentication)`,
     namespace: 'session',
     methodName: 'currentTenant',
     requiresAuth: true,
     isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7',
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
       }
     },
@@ -151,18 +211,28 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
   },
   [TENANT_CUSTOM_HANDLER]: {
     name: 'tenant.customHandler',
+    operationId: 'TenantCustomHandlerHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: [],
+    replay: null,
     description: `customHandler endpoint`,
     namespace: 'tenant',
     methodName: 'customHandler',
     requiresAuth: false,
     isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:cee363a8569edca80ad04f28692f6c2f2ce34f10d74cbf25e4f17ca1395a9568',
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        publicEncryptionKey: {
-          type: 'object',
-          description: `Public key details used to encrypt this request payload`
-        },
+        publicEncryptionKey: {"additionalProperties":false,"description":"Public key details used to encrypt this request payload","properties":{"algorithm":{"description":"Encryption algorithm identifier from the server","type":"string"},"keyId":{"description":"Server key identifier for the public key","type":"string"},"publicKey":{"description":"PEM-encoded RSA public key","type":"string"}},"required":["publicKey","algorithm","keyId"],"type":"object"},
       }
     },
     returns: {
@@ -172,15 +242,31 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
   },
   [TENANT_LIST_TENANTS]: {
     name: 'tenant.listTenants',
+    operationId: 'TenantListTenantsHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: ['tenants.read'],
+    replay: null,
     description: `Array query parameters: ?ids=a,b&statuses=active,suspended. (Requires authentication)`,
     namespace: 'tenant',
     methodName: 'listTenants',
     requiresAuth: true,
     isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:5bf0b823cb8dce1f31570933eb8b7c29c70e722981a791b7b73a43ab3a7595e4',
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-      }
+        ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":100,"minItems":1,"type":"array"},
+        statuses: {"description":"Array of TenantListStatus values","items":{"description":"A TenantListStatus value","type":"string"},"maxItems":10,"minItems":0,"type":"array"},
+      },
+      required: ['ids']
     },
     returns: {
       type: 'array',
@@ -193,31 +279,30 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
   },
   [TENANT_CREATE_TENANT]: {
     name: 'tenant.createTenant',
+    operationId: 'TenantCreateTenantHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: ['tenants.write'],
+    replay: null,
     description: `createTenant endpoint (Requires authentication)`,
     namespace: 'tenant',
     methodName: 'createTenant',
     requiresAuth: true,
     isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:7a6e13320e1976662bf32b4e590112dd2b11a988695597dfa1781502c56e2d64',
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        name: {
-          type: 'string',
-          description: `An objects name`,
-          minLength: 2,
-          maxLength: 80
-        },
-        publicEncryptionKey: {
-          type: 'object',
-          description: `Public key details used to encrypt this request payload`
-        },
-        slug: {
-          type: 'string',
-          description: `A URL friendly version of a string`,
-          pattern: '^[a-z0-9]+(?:[-_][a-z0-9]+)*$',
-          minLength: 1,
-          maxLength: 255
-        },
+        name: {"description":"An objects name","maxLength":80,"minLength":2,"type":"string","x-superschematic-scalar":"Identity.Name"},
+        publicEncryptionKey: {"additionalProperties":false,"description":"Public key details used to encrypt this request payload","properties":{"algorithm":{"description":"Encryption algorithm identifier from the server","type":"string"},"keyId":{"description":"Server key identifier for the public key","type":"string"},"publicKey":{"description":"PEM-encoded RSA public key","type":"string"}},"required":["publicKey","algorithm","keyId"],"type":"object"},
+        slug: {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":"string","x-superschematic-scalar":"Identity.Slug"},
       },
       required: ['name', 'slug']
     },
@@ -228,21 +313,31 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
   },
   [TENANT_GET_TENANT]: {
     name: 'tenant.getTenant',
+    operationId: 'TenantGetTenantHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: ['tenants.read'],
+    replay: null,
     description: `Fetch one tenant by id. (Requires authentication)`,
     namespace: 'tenant',
     methodName: 'getTenant',
     requiresAuth: true,
     isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:81b292e2a44210f1e2252abc22b3b774b667b7d5018af3b506149a00f9a43b2b',
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        id: {
-          type: 'string',
-          description: `id parameter`,
-          pattern: '^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$'
-        },
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        includeArchived: {"description":"A boolean value (true or false)","type":"boolean"},
       },
-      required: ['id']
+      required: ['id', 'includeArchived']
     },
     returns: {
       type: 'object',
@@ -251,27 +346,30 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
   },
   [TENANT_UPDATE_SECRET]: {
     name: 'tenant.updateSecret',
+    operationId: 'TenantUpdateSecretHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: ['tenants.write'],
+    replay: null,
     description: `updateSecret endpoint (Requires authentication)`,
     namespace: 'tenant',
     methodName: 'updateSecret',
     requiresAuth: true,
     isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:d34dee8bf3bb47f9b1367d9025d2ae3b13d0c9469e88afec5b2e17d603e191c4',
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        id: {
-          type: 'string',
-          description: `id parameter`,
-          pattern: '^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$'
-        },
-        publicEncryptionKey: {
-          type: 'object',
-          description: `Public key details used to encrypt this request payload`
-        },
-        secret: {
-          type: 'string',
-          description: `A string value`
-        },
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        publicEncryptionKey: {"additionalProperties":false,"description":"Public key details used to encrypt this request payload","properties":{"algorithm":{"description":"Encryption algorithm identifier from the server","type":"string"},"keyId":{"description":"Server key identifier for the public key","type":"string"},"publicKey":{"description":"PEM-encoded RSA public key","type":"string"}},"required":["publicKey","algorithm","keyId"],"type":"object"},
+        secret: {"description":"A string value","type":"string"},
       },
       required: ['id', 'secret']
     },
@@ -292,6 +390,7 @@ export const openAIFunctions: OpenAIFunction[] = [
     description: `currentTenant endpoint (Requires authentication)`,
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
       }
     }
@@ -301,11 +400,9 @@ export const openAIFunctions: OpenAIFunction[] = [
     description: `customHandler endpoint`,
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        publicEncryptionKey: {
-          type: 'object',
-          description: `Public key details used to encrypt this request payload`
-        },
+        publicEncryptionKey: {"additionalProperties":false,"description":"Public key details used to encrypt this request payload","properties":{"algorithm":{"description":"Encryption algorithm identifier from the server","type":"string"},"keyId":{"description":"Server key identifier for the public key","type":"string"},"publicKey":{"description":"PEM-encoded RSA public key","type":"string"}},"required":["publicKey","algorithm","keyId"],"type":"object"},
       }
     }
   },
@@ -314,8 +411,12 @@ export const openAIFunctions: OpenAIFunction[] = [
     description: `Array query parameters: ?ids=a,b&statuses=active,suspended. (Requires authentication)`,
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-      }
+        ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":100,"minItems":1,"type":"array"},
+        statuses: {"description":"Array of TenantListStatus values","items":{"description":"A TenantListStatus value","type":"string"},"maxItems":10,"minItems":0,"type":"array"},
+      },
+      required: ['ids']
     }
   },
   {
@@ -323,24 +424,11 @@ export const openAIFunctions: OpenAIFunction[] = [
     description: `createTenant endpoint (Requires authentication)`,
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        name: {
-          type: 'string',
-          description: `An objects name`,
-          minLength: 2,
-          maxLength: 80
-        },
-        publicEncryptionKey: {
-          type: 'object',
-          description: `Public key details used to encrypt this request payload`
-        },
-        slug: {
-          type: 'string',
-          description: `A URL friendly version of a string`,
-          pattern: '^[a-z0-9]+(?:[-_][a-z0-9]+)*$',
-          minLength: 1,
-          maxLength: 255
-        },
+        name: {"description":"An objects name","maxLength":80,"minLength":2,"type":"string","x-superschematic-scalar":"Identity.Name"},
+        publicEncryptionKey: {"additionalProperties":false,"description":"Public key details used to encrypt this request payload","properties":{"algorithm":{"description":"Encryption algorithm identifier from the server","type":"string"},"keyId":{"description":"Server key identifier for the public key","type":"string"},"publicKey":{"description":"PEM-encoded RSA public key","type":"string"}},"required":["publicKey","algorithm","keyId"],"type":"object"},
+        slug: {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":"string","x-superschematic-scalar":"Identity.Slug"},
       },
       required: ['name', 'slug']
     }
@@ -350,14 +438,12 @@ export const openAIFunctions: OpenAIFunction[] = [
     description: `Fetch one tenant by id. (Requires authentication)`,
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        id: {
-          type: 'string',
-          description: `id parameter`,
-          pattern: '^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$'
-        },
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        includeArchived: {"description":"A boolean value (true or false)","type":"boolean"},
       },
-      required: ['id']
+      required: ['id', 'includeArchived']
     }
   },
   {
@@ -365,20 +451,11 @@ export const openAIFunctions: OpenAIFunction[] = [
     description: `updateSecret endpoint (Requires authentication)`,
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        id: {
-          type: 'string',
-          description: `id parameter`,
-          pattern: '^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$'
-        },
-        publicEncryptionKey: {
-          type: 'object',
-          description: `Public key details used to encrypt this request payload`
-        },
-        secret: {
-          type: 'string',
-          description: `A string value`
-        },
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        publicEncryptionKey: {"additionalProperties":false,"description":"Public key details used to encrypt this request payload","properties":{"algorithm":{"description":"Encryption algorithm identifier from the server","type":"string"},"keyId":{"description":"Server key identifier for the public key","type":"string"},"publicKey":{"description":"PEM-encoded RSA public key","type":"string"}},"required":["publicKey","algorithm","keyId"],"type":"object"},
+        secret: {"description":"A string value","type":"string"},
       },
       required: ['id', 'secret']
     }
@@ -395,6 +472,7 @@ export const anthropicTools: AnthropicTool[] = [
     description: `currentTenant endpoint (Requires authentication)`,
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
       }
     }
@@ -404,11 +482,9 @@ export const anthropicTools: AnthropicTool[] = [
     description: `customHandler endpoint`,
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        publicEncryptionKey: {
-          type: 'object',
-          description: `Public key details used to encrypt this request payload`
-        },
+        publicEncryptionKey: {"additionalProperties":false,"description":"Public key details used to encrypt this request payload","properties":{"algorithm":{"description":"Encryption algorithm identifier from the server","type":"string"},"keyId":{"description":"Server key identifier for the public key","type":"string"},"publicKey":{"description":"PEM-encoded RSA public key","type":"string"}},"required":["publicKey","algorithm","keyId"],"type":"object"},
       }
     }
   },
@@ -417,8 +493,12 @@ export const anthropicTools: AnthropicTool[] = [
     description: `Array query parameters: ?ids=a,b&statuses=active,suspended. (Requires authentication)`,
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-      }
+        ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":100,"minItems":1,"type":"array"},
+        statuses: {"description":"Array of TenantListStatus values","items":{"description":"A TenantListStatus value","type":"string"},"maxItems":10,"minItems":0,"type":"array"},
+      },
+      required: ['ids']
     }
   },
   {
@@ -426,24 +506,11 @@ export const anthropicTools: AnthropicTool[] = [
     description: `createTenant endpoint (Requires authentication)`,
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        name: {
-          type: 'string',
-          description: `An objects name`,
-          minLength: 2,
-          maxLength: 80
-        },
-        publicEncryptionKey: {
-          type: 'object',
-          description: `Public key details used to encrypt this request payload`
-        },
-        slug: {
-          type: 'string',
-          description: `A URL friendly version of a string`,
-          pattern: '^[a-z0-9]+(?:[-_][a-z0-9]+)*$',
-          minLength: 1,
-          maxLength: 255
-        },
+        name: {"description":"An objects name","maxLength":80,"minLength":2,"type":"string","x-superschematic-scalar":"Identity.Name"},
+        publicEncryptionKey: {"additionalProperties":false,"description":"Public key details used to encrypt this request payload","properties":{"algorithm":{"description":"Encryption algorithm identifier from the server","type":"string"},"keyId":{"description":"Server key identifier for the public key","type":"string"},"publicKey":{"description":"PEM-encoded RSA public key","type":"string"}},"required":["publicKey","algorithm","keyId"],"type":"object"},
+        slug: {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":"string","x-superschematic-scalar":"Identity.Slug"},
       },
       required: ['name', 'slug']
     }
@@ -453,14 +520,12 @@ export const anthropicTools: AnthropicTool[] = [
     description: `Fetch one tenant by id. (Requires authentication)`,
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        id: {
-          type: 'string',
-          description: `id parameter`,
-          pattern: '^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$'
-        },
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        includeArchived: {"description":"A boolean value (true or false)","type":"boolean"},
       },
-      required: ['id']
+      required: ['id', 'includeArchived']
     }
   },
   {
@@ -468,20 +533,11 @@ export const anthropicTools: AnthropicTool[] = [
     description: `updateSecret endpoint (Requires authentication)`,
     input_schema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
-        id: {
-          type: 'string',
-          description: `id parameter`,
-          pattern: '^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$'
-        },
-        publicEncryptionKey: {
-          type: 'object',
-          description: `Public key details used to encrypt this request payload`
-        },
-        secret: {
-          type: 'string',
-          description: `A string value`
-        },
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        publicEncryptionKey: {"additionalProperties":false,"description":"Public key details used to encrypt this request payload","properties":{"algorithm":{"description":"Encryption algorithm identifier from the server","type":"string"},"keyId":{"description":"Server key identifier for the public key","type":"string"},"publicKey":{"description":"PEM-encoded RSA public key","type":"string"}},"required":["publicKey","algorithm","keyId"],"type":"object"},
+        secret: {"description":"A string value","type":"string"},
       },
       required: ['id', 'secret']
     }
@@ -526,11 +582,11 @@ export async function invokeTool<T extends ToolName>(
     case TENANT_CUSTOM_HANDLER:
       return sdk.tenant.customHandler((params as TenantCustomHandlerParams).publicEncryptionKey ? { publicEncryptionKey: (params as TenantCustomHandlerParams).publicEncryptionKey as { publicKey: string; algorithm: string; keyId: string } } : undefined);
     case TENANT_LIST_TENANTS:
-      return sdk.tenant.listTenants();
+      return sdk.tenant.listTenants({ ids: (params as TenantListTenantsParams).ids, statuses: (params as TenantListTenantsParams).statuses });
     case TENANT_CREATE_TENANT:
       return sdk.tenant.createTenant(params as TenantCreateTenantParams, (params as TenantCreateTenantParams).publicEncryptionKey ? { publicEncryptionKey: (params as TenantCreateTenantParams).publicEncryptionKey as { publicKey: string; algorithm: string; keyId: string } } : undefined);
     case TENANT_GET_TENANT:
-      return sdk.tenant.getTenant((params as TenantGetTenantParams).id);
+      return sdk.tenant.getTenant((params as TenantGetTenantParams).id, { includeArchived: (params as TenantGetTenantParams).includeArchived });
     case TENANT_UPDATE_SECRET:
       return sdk.tenant.updateSecret((params as TenantUpdateSecretParams).id, params as TenantUpdateSecretParams, (params as TenantUpdateSecretParams).publicEncryptionKey ? { publicEncryptionKey: (params as TenantUpdateSecretParams).publicEncryptionKey as { publicKey: string; algorithm: string; keyId: string } } : undefined);
     default:
@@ -575,4 +631,3 @@ export function validateToolParams(toolName: ToolName, params: Record<string, un
   const missing = required.filter(field => !(field in params) || params[field] === undefined);
   return { valid: missing.length === 0, missing };
 }
-

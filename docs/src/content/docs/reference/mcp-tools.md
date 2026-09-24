@@ -1,6 +1,6 @@
 ---
 title: MCP tools
-description: The @mcp and @icon decorators on operations, how a visible tool gets its name, description and icon, and the rules the core checks.
+description: The @mcp and @icon decorators on operations, the tool documents the SDK generators write from them, and how an extension adds its rules and vendor keys.
 sidebar:
   order: 4
 ---
@@ -93,6 +93,119 @@ when two visible tools of the API:
 Hidden operations take no part in either check. Tools of different APIs
 are the consumer's to reconcile.
 
+## The tool documents
+
+An API whose config enables a TypeScript, Go or Rust SDK gets a `tools/`
+directory next to the SDK. Every operation is a tool entry there; `@mcp`
+decides what is published to a model.
+
+| File | TypeScript | Go | Rust | What it holds |
+| --- | --- | --- | --- | --- |
+| `tools/schema.json` | yes | yes | yes | every operation: its classification, `@docs` facts, replay contract, arguments and return shape |
+| `tools/mcp-audit.json` | yes | yes | yes | one flat record per operation, for review and for a registry digest |
+| `tools/mcp-binding.json` | yes | yes | no | how each tool argument reaches the TypeScript SDK method |
+| `tools/openai.json`, `tools/anthropic.json` | yes | yes | yes | the visible tools only, in each provider's function format |
+| `tools/index.ts` | yes | no | no | the same definitions as TypeScript values, and `invokeTool` |
+
+An operation without `@mcp`, or with a hidden one, is not in the provider
+lists. The Go documents are the TypeScript ones with the Go SDK's struct
+name in the title; the Rust documents list tools by namespace and name and
+use the Rust method names.
+
+### `tools/schema.json`
+
+One entry per operation, with these keys in this order: `name`
+(`<namespace>.<method>`), `operationId`, `title`, `mcp` (absent without
+`@mcp`), `capability`, `lifecycle`, `visibility`, `audience`, `guidance`,
+`replay`, `description`, `namespace`, `methodName`, `httpMethod`,
+`httpPath`, `requiresAuth`, `requiredPermissions`, `isScoped`,
+`bindingStatus`, `inputSchemaDigest`, `parameters`, `returns`.
+
+```json
+"mcp": {
+  "hidden": false,
+  "name": "Get an order",
+  "handle": "get_order",
+  "description": "Returns one order by its identifier.",
+  "_meta": {"superschematic/operation-guidance": {...}, "ui": {"resourceUri": "ui://orders/detail"}},
+  "icon": {
+    "name": "receipt"
+  }
+}
+```
+
+- `mcp` is `{ hidden, hiddenReason }` for a hidden operation. A visible
+  tool's `_meta` is the declared `_meta` plus its `@docs` guidance under
+  `superschematic/operation-guidance`; `icon` is present when the
+  operation has `@icon`, with `family` and `style` when a tool hook set
+  them.
+- `guidance` is `{ useWhen, doNotUseWhen, success, errors }` from `@docs`,
+  every member present (empty strings and `[]` without them).
+- `replay` is `{ mode, idempotencyKeyPointers, expectedRevisionPointers }`
+  when `@docs` declares a replay mode, else `null`.
+- `description` is the `@docs` description; without `@docs` it is the
+  operation's comment, with ` (Requires authentication)` appended when the
+  route requires it.
+- `bindingStatus` is `ready`, or `unsupported_multipart` for an operation
+  with a file upload.
+- `parameters` is one closed JSON Schema object (`additionalProperties:
+  false`) over the path parameters, the query parameters, the input type's
+  fields or the scalar arguments, and `publicEncryptionKey` for an
+  encrypted endpoint. Nested object types expand to their fields, closed;
+  a union is `oneOf` with each member's discriminator pinned; a map is an
+  object whose `additionalProperties` is the value schema; `Validate<>`
+  bounds carry over. A body field that is not required is nullable
+  (`"type": ["string", "null"]`); an optional query parameter is left out
+  instead. A property of a schema scalar names it under
+  `x-superschematic-scalar`.
+- `inputSchemaDigest` is `sha256:` and the hex SHA-256 of `parameters` as
+  the generator encodes it (vendor keys first, then `additionalProperties`,
+  `type`, `properties`, `required`), so a change to the arguments changes
+  the digest.
+
+`ir.ToolManifest` (in the `ir` module) is the Go type of this document and
+`ir.ToolBindingManifest` of `tools/mcp-binding.json`. A test in the SDK
+generator decodes both with unknown fields refused and checks that
+re-encoding gives the same JSON, so a consumer can decode them without its
+own copy of the field list.
+
+### `tools/mcp-audit.json`
+
+```json
+{
+  "schemaVersion": "1.0",
+  "apiId": "fixture-mcp",
+  "registryDigestInputs": [
+    {
+      "apiId": "fixture-mcp", "namespace": "order", "operationId": "OrderGetOrderHandler",
+      "method": "GET", "path": "/api/orders/{id}", "handle": "get_order",
+      "title": "Get an order", "description": "Returns one order by its identifier.",
+      "icon": {"name": "receipt"}, "hidden": false, "hiddenReason": "",
+      "requiresAuth": false, "requiredPermissions": [], "capability": "orders.get",
+      "lifecycle": "active", "audience": "shoppers", "guidance": {...},
+      "replay": {...}, "inputSchemaDigest": "sha256:...", "bindingStatus": "ready"
+    }
+  ]
+}
+```
+
+(Shown compact; the file writes one key per line.) Every operation has a
+record. An operation without `@mcp` reads `hidden: true` with an empty
+reason and `icon: null`, so a reviewer sees every route and why it is or
+is not a tool.
+
+### The replay contract
+
+When the SDK generators build a tool whose `@docs` declares replay
+pointers, they resolve each pointer against the tool's `parameters`. Every
+segment must name a required argument, every segment but the last an
+object with properties; an idempotency key must be a string and an
+expected revision a number. Otherwise the build fails:
+
+```
+operation OrderOpenReturnHandler replay contract: idempotency pointer "/pickup/postalCode": segment "postalCode" is optional
+```
+
 ## Rules an extension adds
 
 The core checks shapes. Which schemas must classify their operations,
@@ -101,5 +214,29 @@ guidance keys are a distribution's rules. It registers them with
 `Registry.RegisterCheck`: a `CheckSpec` whose `Verify` walks the
 operations and reports what breaks the rule. A check runs on every loaded
 schema of its kinds, core kinds included, in every authoring form.
-`examples/acme-schematic/ext/mcp.go` requires `@mcp` on every operation of
-acme's shop API.
+
+How the tool documents spell their vendor keys, and what an icon set adds
+to an icon, is a tool hook: `Registry.RegisterToolHook` with a `ToolHook`
+whose `Edit` receives the API schema and a `ToolSet`. The set holds the
+keys (`ToolKeys`) and one `Tool` per operation: its namespace, the
+schema's operation, and the resolved `mcp` record, which the hook may edit
+or replace. Hooks run in registration order, after the api generator
+resolves the records and before it checks them for collisions, and every
+SDK language reads what they leave.
+
+| `ToolKeys` field | Default | Written as |
+| --- | --- | --- |
+| `Scalar` | `x-superschematic-scalar` | the key of a property's scalar name; empty leaves it out |
+| `Guidance` | `superschematic/operation-guidance` | the `_meta` key of a visible tool's guidance; empty leaves it out |
+| `Parameters` | none | key/value pairs at the root of every argument schema: first in the digest input, after `additionalProperties` in the documents, and as literal types in `tools/index.ts` |
+
+A `Parameters` key may not be empty, repeat, or reuse `type`,
+`additionalProperties`, `properties`, `required` or the scalar key; a hook
+that adds or removes tools fails the build, as does a hook error, which
+names the hook. The `ir` wire types spell the default keys: a distribution
+that renames them decodes its documents with its own types.
+
+`examples/acme-schematic/ext/mcp.go` does both: it requires `@mcp` on every
+operation of acme's shop API, and its hook writes `x-acme-scalar`,
+`acme/operation-guidance` and `x-acme-arguments: 1` and gives every tool
+icon acme's family and style.

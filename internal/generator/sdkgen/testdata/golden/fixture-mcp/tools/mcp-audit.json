@@ -1,0 +1,162 @@
+{
+  "schemaVersion": "1.0",
+  "apiId": "fixture-mcp",
+  "registryDigestInputs": [
+    {
+      "apiId": "fixture-mcp",
+      "namespace": "order",
+      "operationId": "OrderListOrdersHandler",
+      "method": "GET",
+      "path": "/api/orders",
+      "handle": "list_orders",
+      "title": "List orders",
+      "description": "Lists orders by status.",
+      "icon": {
+        "name": "list"
+      },
+      "hidden": false,
+      "hiddenReason": "",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "capability": "orders.list",
+      "lifecycle": "active",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "inputSchemaDigest": "sha256:0908611e4289a8ae0e89cb020c06b4c09b92865c0dded660c09230d951a12216",
+      "bindingStatus": "ready"
+    },
+    {
+      "apiId": "fixture-mcp",
+      "namespace": "order",
+      "operationId": "OrderExportOrdersHandler",
+      "method": "GET",
+      "path": "/api/orders/export",
+      "handle": "",
+      "title": "",
+      "description": "Not classified: no @mcp, so no tool.",
+      "icon": null,
+      "hidden": true,
+      "hiddenReason": "",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "capability": "",
+      "lifecycle": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+      "bindingStatus": "ready"
+    },
+    {
+      "apiId": "fixture-mcp",
+      "namespace": "order",
+      "operationId": "OrderDeleteOrderHandler",
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "handle": "",
+      "title": "",
+      "description": "deleteOrder endpoint",
+      "icon": null,
+      "hidden": true,
+      "hiddenReason": "Staff console only.",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "capability": "",
+      "lifecycle": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "bindingStatus": "ready"
+    },
+    {
+      "apiId": "fixture-mcp",
+      "namespace": "order",
+      "operationId": "OrderGetOrderHandler",
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "handle": "get_order",
+      "title": "Get an order",
+      "description": "Returns one order by its identifier.",
+      "icon": {
+        "name": "receipt"
+      },
+      "hidden": false,
+      "hiddenReason": "",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "capability": "orders.get",
+      "lifecycle": "active",
+      "audience": "shoppers",
+      "guidance": {"useWhen":"Use when you have an order identifier.","doNotUseWhen":"Do not use to list orders; call list_orders.","success":"Returns the order with its status and total.","errors":[{"code":"order_not_found","description":"No order has that identifier.","commonCorrection":"Take the identifier from a list_orders result."}]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "bindingStatus": "ready"
+    },
+    {
+      "apiId": "fixture-mcp",
+      "namespace": "order",
+      "operationId": "OrderUpdateOrderHandler",
+      "method": "PATCH",
+      "path": "/api/orders/{id}",
+      "handle": "update_order",
+      "title": "Update an order",
+      "description": "Changes an order's note when its revision still matches.",
+      "icon": {
+        "name": "pen"
+      },
+      "hidden": false,
+      "hiddenReason": "",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "capability": "orders.update",
+      "lifecycle": "active",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "compare_and_swap",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": ["/revision"]
+      },
+      "inputSchemaDigest": "sha256:3a7a5f56db6c146b0d3870be165bf7dee89766c877091d99404bbbf26cd2d29b",
+      "bindingStatus": "ready"
+    },
+    {
+      "apiId": "fixture-mcp",
+      "namespace": "order",
+      "operationId": "OrderOpenReturnHandler",
+      "method": "POST",
+      "path": "/api/returns",
+      "handle": "open_return",
+      "title": "Open a return",
+      "description": "Opens a return for one delivered order.",
+      "icon": {
+        "name": "box"
+      },
+      "hidden": false,
+      "hiddenReason": "",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "capability": "orders.returns.open",
+      "lifecycle": "active",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "idempotent",
+        "idempotencyKeyPointers": ["/requestId"],
+        "expectedRevisionPointers": []
+      },
+      "inputSchemaDigest": "sha256:ffbec234ba92460ddbffbca2d1008ec205785c072d4b40b889df8a17a6af696f",
+      "bindingStatus": "ready"
+    }
+  ]
+}
