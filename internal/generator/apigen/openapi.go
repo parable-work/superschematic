@@ -54,6 +54,62 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 	return rawSpec, escapedSpec, nil
 }
 
+// TypeOpenAPISchema returns a standalone OpenAPI schema for one named type
+// of schema: the type's component schema with a title, and the components
+// it references under definitions, so it can be handed to a consumer
+// without the surrounding API document. References to the type itself
+// become "#" and references to other components "#/definitions/<Name>".
+func TypeOpenAPISchema(typeName string, schema *ir.Schema, dependencies map[string]*ir.Schema) (map[string]interface{}, error) {
+	if schema == nil || schema.Types[typeName] == nil {
+		return nil, fmt.Errorf("build OpenAPI schema for unknown type %q", typeName)
+	}
+
+	scalarMap := buildOpenAPIScalarMap(schema, dependencies)
+	scalarExamples, scalarDescriptions := collectOpenAPIScalarMetadata(schema, dependencies)
+	components := make(map[string]interface{})
+	addSchemaFromIR(components, typeName, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, make(map[string]bool))
+
+	root, ok := components[typeName].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("build OpenAPI schema for type %q", typeName)
+	}
+	root["title"] = typeName
+	delete(components, typeName)
+	if len(components) > 0 {
+		root["definitions"] = components
+	}
+	rewriteOpenAPIComponentRefs(root, typeName)
+	return root, nil
+}
+
+// rewriteOpenAPIComponentRefs points #/components/schemas references at the
+// standalone schema's own layout.
+func rewriteOpenAPIComponentRefs(value interface{}, rootTypeName string) {
+	const componentPrefix = "#/components/schemas/"
+
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		if ref, ok := typed["$ref"].(string); ok {
+			if ref == componentPrefix+rootTypeName {
+				typed["$ref"] = "#"
+			} else {
+				typed["$ref"] = strings.Replace(ref, componentPrefix, "#/definitions/", 1)
+			}
+		}
+		for _, child := range typed {
+			rewriteOpenAPIComponentRefs(child, rootTypeName)
+		}
+	case []interface{}:
+		for _, child := range typed {
+			rewriteOpenAPIComponentRefs(child, rootTypeName)
+		}
+	case []map[string]interface{}:
+		for _, child := range typed {
+			rewriteOpenAPIComponentRefs(child, rootTypeName)
+		}
+	}
+}
+
 // buildOpenAPIScalarMap maps every resolvable type name to a JSON-schema-ish
 // primitive token: "string", "number", "integer", "boolean", "object", or
 // the internal sentinel "any" for a scalar whose value may be any JSON value
@@ -658,6 +714,10 @@ func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, sche
 		"type":       "object",
 		"properties": properties,
 	}
+	if typeDef.StrictJSON {
+		// @strictJSON: an undeclared key is invalid.
+		schemaObj["additionalProperties"] = false
+	}
 	if len(required) > 0 {
 		schemaObj["required"] = required
 	}
@@ -679,6 +739,7 @@ func applyOpenAPIScalarConstraints(
 	dependencies map[string]*ir.Schema,
 ) {
 	var best ScalarJSONSchemaInfo
+	var bestDef *ir.ScalarDef
 	score := -1
 	candidates := make([]*ir.Schema, 0, len(dependencies)+1)
 	candidates = append(candidates, schema)
@@ -704,7 +765,7 @@ func applyOpenAPIScalarConstraints(
 			}
 		}
 		if candidateScore > score {
-			best, score = candidate, candidateScore
+			best, bestDef, score = candidate, candidateSchema.Scalars[typeName], candidateScore
 		}
 	}
 	if score < 0 {
@@ -727,6 +788,42 @@ func applyOpenAPIScalarConstraints(
 	}
 	if best.Maximum != nil {
 		schemaObject["maximum"] = *best.Maximum
+	}
+	if valueSchema := scalarMapValueOpenAPISchema(bestDef); valueSchema != nil {
+		schemaObject["additionalProperties"] = valueSchema
+	}
+}
+
+// scalarMapValueOpenAPISchema returns the value schema of an object scalar
+// that is a string-keyed map of one primitive (map[string]string in Go,
+// Dict[str, str] in Python, Record<string, string> in TypeScript), or nil.
+func scalarMapValueOpenAPISchema(scalarDef *ir.ScalarDef) map[string]interface{} {
+	if scalarDef == nil || scalarDef.TypeMappings["json_schema"] != "object" {
+		return nil
+	}
+	goType := strings.ReplaceAll(scalarDef.TypeMappings["go"], " ", "")
+	pythonType := strings.ReplaceAll(scalarDef.TypeMappings["python"], " ", "")
+	typeScriptType := strings.ReplaceAll(scalarDef.TypeMappings["typescript"], " ", "")
+	valueType := ""
+	switch {
+	case strings.HasPrefix(goType, "map[string]"):
+		valueType = strings.TrimPrefix(goType, "map[string]")
+	case strings.HasPrefix(pythonType, "Dict[str,") && strings.HasSuffix(pythonType, "]"):
+		valueType = strings.TrimSuffix(strings.TrimPrefix(pythonType, "Dict[str,"), "]")
+	case strings.HasPrefix(typeScriptType, "Record<string,") && strings.HasSuffix(typeScriptType, ">"):
+		valueType = strings.TrimSuffix(strings.TrimPrefix(typeScriptType, "Record<string,"), ">")
+	}
+	switch strings.ToLower(valueType) {
+	case "string", "str":
+		return map[string]interface{}{"type": "string"}
+	case "bool", "boolean":
+		return map[string]interface{}{"type": "boolean"}
+	case "float", "float32", "float64", "number":
+		return map[string]interface{}{"type": "number"}
+	case "int", "int32", "int64", "integer":
+		return map[string]interface{}{"type": "integer"}
+	default:
+		return nil
 	}
 }
 

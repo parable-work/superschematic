@@ -114,6 +114,13 @@ of a generated artifact is always listed here with the bump it requires.
   scalar and union it reaches, imported ones included. Generation fails if
   a reached type does not resolve. The crate README lists the files.
   Minor.
+- Go types: a `@strictJSON` type in a General schema gets
+  `<Type>OpenAPISchema() map[string]any`, a fresh copy of its standalone
+  OpenAPI schema (`title`, `additionalProperties: false`, referenced types
+  under `definitions`). The schema comes from the new
+  `apigen.TypeOpenAPISchema`. In every OpenAPI document a `@strictJSON`
+  component sets `additionalProperties: false`, and a string-map scalar's
+  values are typed from its type mappings. Minor.
 
 ### Changed
 

@@ -34,7 +34,8 @@ func strictJSONSchema(t *testing.T) *ir.Schema {
 // drops a test into it and runs it: a strict type rejects an undeclared key
 // at its own level and in a strict nested type, a null root, a null required
 // field that has a default, and an absent required field. The unmarked type
-// still ignores an unknown key.
+// still ignores an unknown key. The strict type's OpenAPI schema accessor
+// returns a fresh schema that forbids unknown keys.
 func TestGeneratedStrictJSONRejectsUnknownNestedFields(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping generated-module test run in -short mode")
@@ -70,6 +71,10 @@ func TestDecodePolicy(t *testing.T) {
 	}
 	var ordinary Ordinary
 	if err := json.Unmarshal([]byte("{\"name\":\"ordinary\",\"future\":true}"), &ordinary); err != nil { t.Fatalf("unmarked decoding changed: %v", err) }
+	schema := PolicyOpenAPISchema()
+	if schema["additionalProperties"] != false || schema["title"] != "Policy" { t.Fatalf("Policy OpenAPI schema = %v", schema) }
+	schema["title"] = "changed"
+	if PolicyOpenAPISchema()["title"] != "Policy" { t.Fatal("the accessor must return a fresh copy") }
 }
 `
 	if err := os.WriteFile(filepath.Join(dir, "strict_test.go"), []byte(test), 0o600); err != nil {

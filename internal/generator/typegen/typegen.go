@@ -11,6 +11,7 @@ package typegen
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	ir "github.com/parable-work/superschematic/ir"
@@ -106,6 +108,10 @@ type TypeInfo struct {
 	IsInput     bool
 	IsJsonField bool
 	StrictJSON  bool
+	// OpenAPISchemaJSON is the quoted standalone OpenAPI schema of a
+	// @strictJSON type in a General schema; the template emits a
+	// <Type>OpenAPISchema() accessor for it. Empty emits none.
+	OpenAPISchemaJSON string
 
 	// HasDefaults is true when at least one field on this type has a usable
 	// DefaultLiteral. Templates use this flag to decide whether to emit a
@@ -337,6 +343,25 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	unionNames := knownUnionNames(output.Unions, output.ImportedUnions)
 	output.Types = convertTypes(objectTypes, output.Scalars, false, enumLookup, importAliases, unionNames)
 	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, true, enumLookup, importAliases, unionNames)...)
+	// A strict General type is a closed payload contract; give it its
+	// standalone OpenAPI schema so a Go program can hand the contract to a
+	// consumer that validates or documents it.
+	if schema.Kind == ir.SchemaKindGeneral {
+		for i := range output.Types {
+			if !output.Types[i].StrictJSON {
+				continue
+			}
+			openAPISchema, err := apigen.TypeOpenAPISchema(output.Types[i].Name, schema, opts.Dependencies)
+			if err != nil {
+				return nil, err
+			}
+			encoded, err := json.Marshal(openAPISchema)
+			if err != nil {
+				return nil, fmt.Errorf("encode OpenAPI schema for %s: %w", output.Types[i].Name, err)
+			}
+			output.Types[i].OpenAPISchemaJSON = strconv.Quote(string(encoded))
+		}
+	}
 	output.TypePairs = buildTypePairs(output.Types, output.ImportedTypes)
 
 	for _, typeInfo := range output.Types {
