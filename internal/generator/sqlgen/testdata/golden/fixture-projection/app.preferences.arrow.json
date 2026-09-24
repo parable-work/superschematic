@@ -121,7 +121,7 @@
         "superschematic.projection.source": "base.value",
         "superschematic.scalar.canonical_name": "Generic.JSON",
         "superschematic.scalar.flat_name": "Generic_JSON",
-        "superschematic.scalar.json_schema_type": "object",
+        "superschematic.scalar.json_schema_type": "any",
         "superschematic.scalar.primitive": "String",
         "superschematic.scalar.sql_type": "JSONB"
       },
