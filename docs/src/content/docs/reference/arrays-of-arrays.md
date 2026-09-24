@@ -77,6 +77,12 @@ A schema without a list of lists generates exactly what it did before the
 feature existed, and its IR JSON is unchanged: `isArrayOfArrays` is omitted
 when false.
 
+The TypeScript API server (`api: { language: "TYPESCRIPT" }`) does not
+render `T[][]` yet. It types a list-of-lists body argument or response as
+`T[]`. A list-of-lists field of a request input type or a response type is
+right, because the server takes those types, and the input type's
+validator, from the TypeScript types package.
+
 ## Where it is accepted
 
 - Fields of DB, API and General types. In a DB table, the element type of

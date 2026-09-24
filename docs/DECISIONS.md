@@ -344,12 +344,14 @@ it handles uses nested lists; `Schema.FindArrayOfArrays` lets such a reader
 refuse the schema instead.
 
 Rollout: the IR and the loaders landed first, and until a generator
-rendered `T[][]` it refused the schema with an error naming itself, so no
-generator ever emitted `T[]` for a list of lists. Each change that taught a
-generator nested lists removed its own refusal and added its output for the
-`fixture-nested-arrays` services; the shared check went with the last one.
-Every generator renders `T[][]`, and the docs site's arrays-of-arrays
-reference describes the result.
+rendered `T[][]` it refused the schema with an error naming itself. Each
+change that taught a generator nested lists removed its own refusal and
+added its output for the `fixture-nested-arrays` services; the shared check
+went with the last one. The TypeScript API server generator (`tsrestgen`)
+arrived after the refusals and never had one: it still types a
+list-of-lists body argument or response as `T[]`. Every other generator
+renders `T[][]`, and the docs site's arrays-of-arrays reference describes
+the result.
 
 ### D12, amended: one set of list rules for every validator
 
