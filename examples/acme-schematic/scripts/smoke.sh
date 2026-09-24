@@ -12,7 +12,8 @@
 #
 # Asserts, in order:
 #   1. the acme module builds, vets and passes its tests;
-#   2. `describe` lists the Catalog kind, the document and the apikey provider;
+#   2. `describe` lists the Catalog kind, the document, the apikey provider
+#      and acme's tool invocation policy;
 #   3. build-all over the schemas root builds all four services;
 #   4. the catalog generator wrote catalog.json for the Catalog service;
 #   5. the @shelf payload reached the IR (--emit-ir + jq);
@@ -43,7 +44,9 @@
 #  13. every shop-api operation carries its @mcp classification in the IR;
 #      its TypeScript SDK tool documents carry acme's vendor keys and icon
 #      variant through the acme tool hook, and the core keys when the
-#      core-only binary builds the same service.
+#      core-only binary builds the same service; a visible tool carries
+#      acme's confirm policy at its default in the IR and the tool
+#      documents, and the core's invocationPolicy from the core-only binary.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -83,6 +86,7 @@ grep -q '^kinds: API, Catalog, DB, General$' "$OUT/describe.txt"
 grep -q '^  Catalog: types -> catalog -> acmeManifest$' "$OUT/describe.txt"
 grep -q '^documents: catalog.config (catalog.config.yaml)$' "$OUT/describe.txt"
 grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.txt"
+grep -q '^tool invocation policy: confirm (never, always; default never)$' "$OUT/describe.txt"
 
 echo "==> build-all over the schemas root"
 rm -rf "$DIST"
@@ -220,16 +224,22 @@ jq -e '[.operationSets[].operations[] | .mcp != null] | all' "$OUT/api-ir.json" 
 jq -e '.operationSets[].operations[] | select(.name == "getProduct") | .mcp.handle == "get_product" and .icon == "tag"' \
   "$OUT/api-ir.json" >/dev/null
 jq -e '.operationSets[].operations[] | select(.name == "listProducts") | .mcp.hidden' "$OUT/api-ir.json" >/dev/null
+jq -e '.operationSets[].operations[] | select(.name == "getProduct") | .mcp.confirm == "never"' "$OUT/api-ir.json" >/dev/null
 TOOLS="$DIST/sdk/typescript/shop-api/tools"
 jq -e '.tools[] | select(.name == "product.getProduct") | .mcp.handle == "get_product" and .mcp.icon.family == "acme"' \
   "$TOOLS/schema.json" >/dev/null
 jq -e '.tools[] | select(.name == "product.getProduct") | .parameters.properties.id["x-acme-scalar"] == "Identity.UUID"' \
   "$TOOLS/schema.json" >/dev/null
 jq -e '[.. | objects | has("x-superschematic-scalar")] | any | not' "$TOOLS/schema.json" >/dev/null
+jq -e '.tools[] | select(.name == "product.getProduct") | .mcp.confirm == "never"' "$TOOLS/schema.json" >/dev/null
+jq -e '[.. | objects | has("invocationPolicy")] | any | not' "$TOOLS/schema.json" >/dev/null
+jq -e '[.registryDigestInputs[] | select(.hidden | not) | .confirm] | unique == ["never"]' "$TOOLS/mcp-audit.json" >/dev/null
 jq -e '[.registryDigestInputs[] | select(.hidden | not) | .handle] | sort == ["create_product", "get_product"]' \
   "$TOOLS/mcp-audit.json" >/dev/null
 jq -e '[.tools[].name] | sort == ["product.createProduct", "product.getProduct"]' "$TOOLS/anthropic.json" >/dev/null
 jq -e '.tools[] | select(.name == "product.getProduct") | .parameters.properties.id["x-superschematic-scalar"] == "Identity.UUID"' \
+  "$OUT/session-dist/sdk/typescript/shop-api/tools/schema.json" >/dev/null
+jq -e '.tools[] | select(.name == "product.getProduct") | .mcp.invocationPolicy == "auto" and (.mcp | has("confirm") | not)' \
   "$OUT/session-dist/sdk/typescript/shop-api/tools/schema.json" >/dev/null
 
 echo "acme smoke: ok"

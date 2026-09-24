@@ -26,11 +26,28 @@ const (
 	IconStyle  = "outline"
 )
 
+// acme's invocation policy, in place of the core's invocationPolicy: a
+// visible tool declares confirm: "always" when a client must ask the person
+// before it runs; without the key it is "never".
+const (
+	ConfirmKey    = "confirm"
+	ConfirmNever  = "never"
+	ConfirmAlways = "always"
+)
+
 // registerMCPPolicy lays acme's policy over the core MCP tools: a check that
-// fails the load when an operation of ToolsAPI has no MCP classification,
-// and a tool hook that writes acme's vendor keys and fills in each tool
-// icon's family and style. Neither needs a core option.
+// fails the load when an operation of ToolsAPI has no MCP classification, a
+// tool hook that writes acme's vendor keys and fills in each tool icon's
+// family and style, and acme's invocation policy. None needs a core option.
 func registerMCPPolicy(r *registry.Registry) error {
+	if err := r.RegisterToolInvocationPolicy(registry.ToolInvocationPolicy{
+		Extension: Name,
+		Key:       ConfirmKey,
+		Values:    []string{ConfirmNever, ConfirmAlways},
+		Default:   ConfirmNever,
+	}); err != nil {
+		return err
+	}
 	if err := r.RegisterToolHook(registry.ToolHook{
 		Name:      "acmeTools",
 		Extension: Name,
