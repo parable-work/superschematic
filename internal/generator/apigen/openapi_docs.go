@@ -21,6 +21,13 @@ func openAPIDocsExtension(docs *ir.OperationDocs) map[string]interface{} {
 	if docs.Audience != "" {
 		metadata["audience"] = docs.Audience
 	}
+	if docs.ReplayMode != "" {
+		metadata["replay"] = map[string]interface{}{
+			"mode":                     docs.ReplayMode,
+			"idempotencyKeyPointers":   append([]string{}, docs.IdempotencyKeyPointers...),
+			"expectedRevisionPointers": append([]string{}, docs.ExpectedRevisionPointers...),
+		}
+	}
 	if docs.Replacement != "" {
 		metadata["replacement"] = docs.Replacement
 	}

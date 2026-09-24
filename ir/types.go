@@ -251,9 +251,14 @@ type FieldDef struct {
 	// @docs. Nil on data fields and on operations without @docs.
 	Docs *OperationDocs `json:"docs,omitempty" yaml:"docs,omitempty"`
 
-	// Icon names the glyph a UI shows for the field, declared with @icon
-	// (`x-icon` in the legacy form). The core accepts any name; an icon set
-	// is an extension's check. Empty means none.
+	// MCP is an operation's MCP classification, declared with @mcp. Nil on
+	// data fields and on operations without @mcp.
+	MCP *OperationMCP `json:"mcp,omitempty" yaml:"mcp,omitempty"`
+
+	// Icon names the glyph a UI shows for the field or operation, declared
+	// with @icon (`x-icon` in the legacy form). On an operation it is the
+	// MCP tool's icon. The core accepts any name; an icon set is an
+	// extension's check. Empty means none.
 	Icon string `json:"icon,omitempty" yaml:"icon,omitempty"`
 
 	// TypeRef references the field's type (scalar, enum, object, etc.).

@@ -40,7 +40,15 @@ type (
 	// through VerifyReporter.
 	CheckSpec = registry.CheckSpec
 	// OpenAPIHook edits the OpenAPI document the api generator builds.
-	OpenAPIHook   = registry.OpenAPIHook
+	OpenAPIHook = registry.OpenAPIHook
+	// ToolHook edits the vendor keys of an API's SDK tool documents and the
+	// resolved @mcp records of its operations. It edits a ToolSet: the
+	// ToolKeys (with ToolKeyValue entries) and one Tool per operation.
+	ToolHook      = registry.ToolHook
+	ToolSet       = apigen.ToolSet
+	Tool          = apigen.Tool
+	ToolKeys      = apigen.ToolKeys
+	ToolKeyValue  = apigen.ToolKeyValue
 	ScalarCatalog = registry.ScalarCatalog
 	// SchemaCatalogEntry is one discovered service's identity facts, the
 	// value type of LoadContext.Catalog.
@@ -94,6 +102,11 @@ const (
 	// OpenAPIDocsKey is the vendor-extension key an operation's @docs record
 	// is written under in the OpenAPI document; an OpenAPIHook renames it.
 	OpenAPIDocsKey = apigen.OpenAPIDocsKey
+
+	// DefaultToolScalarKey and DefaultToolGuidanceKey are the vendor keys
+	// the SDK tool documents carry unless a ToolHook renames them.
+	DefaultToolScalarKey   = apigen.DefaultToolScalarKey
+	DefaultToolGuidanceKey = apigen.DefaultToolGuidanceKey
 )
 
 // New returns a registry with the core kinds and decorators registered; see

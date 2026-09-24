@@ -86,3 +86,48 @@ func TestFieldPresentationDecoratorsLoadIntoIR(t *testing.T) {
 		t.Fatalf("Order.id carries presentation it never declared: %+v", id)
 	}
 }
+
+// TestOperationMCPDecoratorsLoadIntoIR: @mcp writes the classification,
+// @icon from @superschematic/api writes the operation's icon, @docs carries
+// the replay keys, and an operation without @mcp has no record.
+func TestOperationMCPDecoratorsLoadIntoIR(t *testing.T) {
+	schema, _, err := LoadService(filepath.Join("testdata", "services", "fixture-mcp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := operationNamed(t, schema, "getOrder")
+	if get.MCP == nil || get.MCP.Handle != "get_order" || get.MCP.Hidden || get.Icon != "receipt" {
+		t.Fatalf("getOrder mcp = %+v, icon %q", get.MCP, get.Icon)
+	}
+	ui, _ := get.MCP.Meta["ui"].(map[string]any)
+	if ui["resourceUri"] != "ui://orders/detail" {
+		t.Fatalf("getOrder _meta = %#v", get.MCP.Meta)
+	}
+	open := operationNamed(t, schema, "openReturn")
+	if open.Docs.ReplayMode != ir.DocsReplayModeIdempotent || len(open.Docs.IdempotencyKeyPointers) != 1 || open.Docs.IdempotencyKeyPointers[0] != "/requestId" {
+		t.Fatalf("openReturn replay = %+v", open.Docs)
+	}
+	del := operationNamed(t, schema, "deleteOrder")
+	if del.MCP == nil || !del.MCP.Hidden || del.MCP.HiddenReason != "Staff console only." || del.Docs != nil {
+		t.Fatalf("deleteOrder mcp = %+v", del.MCP)
+	}
+	if export := operationNamed(t, schema, "exportOrders"); export.MCP != nil || export.Icon != "" {
+		t.Fatalf("exportOrders carries MCP metadata it never declared: %+v", export.MCP)
+	}
+}
+
+// TestInvalidOperationMCPIsALocatedSchemaError: a bad @mcp handle fails the
+// load with a diagnostic at the decorator's argument.
+func TestInvalidOperationMCPIsALocatedSchemaError(t *testing.T) {
+	_, _, err := LoadService(filepath.Join("testdata", "services", "broken-mcp"))
+	if err == nil {
+		t.Fatal("expected schema errors")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `invalid @mcp config: handle "getNote" must be lowercase snake_case and begin with a letter`) {
+		t.Fatalf("unexpected error: %s", msg)
+	}
+	if !regexp.MustCompile(`broken\.schema\.ts:\d+:\d+:`).MatchString(msg) {
+		t.Fatalf("diagnostic should carry file:line:col, got: %s", msg)
+	}
+}

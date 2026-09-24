@@ -13,8 +13,8 @@ import (
 // audience; acme requires one of these on every documented operation.
 var Audiences = []string{"shoppers", "staff"}
 
-// Icons is acme's icon set for the core @icon field decorator. The core
-// accepts any name; acme's UI draws only these.
+// Icons is acme's icon set for the core @icon decorators, on fields and on
+// operations. The core accepts any name; acme's UI draws only these.
 var Icons = []string{"box", "globe", "key", "receipt", "tag"}
 
 // DocsKey is the vendor-extension key acme's OpenAPI documents carry an
@@ -40,6 +40,9 @@ func registerDocsPolicy(r *registry.Registry) error {
 			}
 			for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 				check(name, schema.Types[name].Fields)
+			}
+			for _, set := range schema.OperationSets {
+				check(set.Name, set.Operations)
 			}
 		},
 	}); err != nil {

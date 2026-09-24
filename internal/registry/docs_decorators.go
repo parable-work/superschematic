@@ -9,10 +9,11 @@ import (
 )
 
 // docsDecorators returns the documentation decorators: @docs on an
-// operation writes FieldDef.Docs; on a field, @docs({ title }), @purpose
-// and @icon write FieldDef.Title, Purpose and Icon. What values an
-// extension accepts on top of the shape checked here (an audience
-// vocabulary, an icon set) is a CheckSpec the extension registers.
+// operation writes FieldDef.Docs, @mcp writes FieldDef.MCP and @icon writes
+// FieldDef.Icon; on a field, @docs({ title }), @purpose and @icon write
+// FieldDef.Title, Purpose and Icon. What values an extension accepts on top
+// of the shape checked here (an audience vocabulary, an icon set, which
+// operations must declare @mcp) is a CheckSpec the extension registers.
 func docsDecorators() []DecoratorSpec {
 	return []DecoratorSpec{{
 		Name: "docs", Packages: []string{pkgSchema}, Target: TargetField,
@@ -50,12 +51,92 @@ func docsDecorators() []DecoratorSpec {
 			n.Field.Docs = docs
 			return nil
 		},
+	}, {
+		Name: "mcp", Packages: []string{pkgAPI}, Target: TargetOperation,
+		Apply: func(n Node, args []any, _ Site) error {
+			if n.Field.MCP != nil {
+				return fmt.Errorf("operation %s has more than one @mcp decorator", n.Field.Name)
+			}
+			mcp, err := operationMCP(args)
+			if err != nil {
+				return err
+			}
+			n.Field.MCP = mcp
+			return nil
+		},
+	}, {
+		Name: "icon", Packages: []string{pkgAPI}, Target: TargetOperation,
+		Apply: func(n Node, args []any, _ Site) error {
+			if n.Field.Icon != "" {
+				return fmt.Errorf("operation %s has more than one @icon decorator", n.Field.Name)
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("@icon takes exactly one string argument")
+			}
+			name, ok := args[0].(string)
+			if !ok {
+				return ArgErrorf(0, "@icon takes a string literal")
+			}
+			if err := ir.ValidateOperationIcon(name); err != nil {
+				return ArgErrorf(0, "invalid @icon: %s", err)
+			}
+			n.Field.Icon = name
+			return nil
+		},
 	}}
 }
 
+// operationMCP reads @mcp({ handle, _meta? }) for a visible tool or
+// @mcp({ hidden: true, reason }) for an operation that is not one.
+func operationMCP(args []any) (*ir.OperationMCP, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("@mcp takes exactly one config object")
+	}
+	cfg, ok := args[0].(map[string]any)
+	if !ok {
+		return nil, ArgErrorf(0, "@mcp config must be an object literal")
+	}
+	out := &ir.OperationMCP{}
+	for _, key := range sortedKeys(cfg) {
+		value := cfg[key]
+		switch key {
+		case "handle", "reason":
+			text, ok := value.(string)
+			if !ok {
+				return nil, ArgErrorf(0, "@mcp %s must be a string literal", key)
+			}
+			if key == "handle" {
+				out.Handle = text
+			} else {
+				out.HiddenReason = text
+			}
+		case "hidden":
+			hidden, ok := value.(bool)
+			if !ok {
+				return nil, ArgErrorf(0, "@mcp hidden must be a boolean literal")
+			}
+			out.Hidden = hidden
+		case "_meta":
+			meta, ok := value.(map[string]any)
+			if !ok {
+				return nil, ArgErrorf(0, "@mcp _meta must be an object literal")
+			}
+			out.Meta = meta
+		default:
+			return nil, ArgErrorf(0, "@mcp config has unknown key %q", key)
+		}
+	}
+	if err := ir.ValidateOperationMCP(out); err != nil {
+		return nil, ArgErrorf(0, "invalid @mcp config: %s", err)
+	}
+	return out, nil
+}
+
 // operationDocs reads @docs({ title, description, capability, lifecycle,
-// visibility, audience?, mappingStatus?, replacement?, sunset?, useWhen?,
-// doNotUseWhen?, success?, errors? }). mappingStatus defaults to "mapped".
+// visibility, audience?, mappingStatus?, replacement?, sunset?,
+// replayMode?, idempotencyKeyPointers?, expectedRevisionPointers?,
+// useWhen?, doNotUseWhen?, success?, errors? }). mappingStatus defaults to
+// "mapped".
 // Keys are read in sorted order so the first error is the same on every run.
 func operationDocs(args []any) (*ir.OperationDocs, error) {
 	if len(args) != 1 {
@@ -67,12 +148,24 @@ func operationDocs(args []any) (*ir.OperationDocs, error) {
 	}
 	out := &ir.OperationDocs{MappingStatus: ir.DocsMappingStatusMapped}
 	for _, key := range sortedKeys(cfg) {
-		if key == "errors" {
+		switch key {
+		case "errors":
 			docErrors, err := operationDocsErrors(cfg[key])
 			if err != nil {
 				return nil, err
 			}
 			out.Errors = docErrors
+			continue
+		case "idempotencyKeyPointers", "expectedRevisionPointers":
+			pointers, err := operationDocsPointers(key, cfg[key])
+			if err != nil {
+				return nil, err
+			}
+			if key == "idempotencyKeyPointers" {
+				out.IdempotencyKeyPointers = pointers
+			} else {
+				out.ExpectedRevisionPointers = pointers
+			}
 			continue
 		}
 		value, ok := cfg[key].(string)
@@ -98,6 +191,8 @@ func operationDocs(args []any) (*ir.OperationDocs, error) {
 			out.Replacement = value
 		case "sunset":
 			out.Sunset = value
+		case "replayMode":
+			out.ReplayMode = ir.DocsReplayMode(value)
 		case "useWhen":
 			out.UseWhen = value
 		case "doNotUseWhen":
@@ -110,6 +205,24 @@ func operationDocs(args []any) (*ir.OperationDocs, error) {
 	}
 	if err := ir.ValidateOperationDocs(out); err != nil {
 		return nil, ArgErrorf(0, "invalid @docs config: %s", err)
+	}
+	return out, nil
+}
+
+// operationDocsPointers reads a @docs replay pointer list: a non-empty
+// array of string literals.
+func operationDocsPointers(key string, value any) ([]string, error) {
+	list, ok := value.([]any)
+	if !ok || len(list) == 0 {
+		return nil, ArgErrorf(0, "@docs %s must be a non-empty array of string literals", key)
+	}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		pointer, ok := item.(string)
+		if !ok {
+			return nil, ArgErrorf(0, "@docs %s must be a non-empty array of string literals", key)
+		}
+		out = append(out, pointer)
 	}
 	return out, nil
 }

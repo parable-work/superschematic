@@ -47,6 +47,9 @@ export class ReturnMutations {
 | `mappingStatus` | no | `mapped` (the default) or `uncertain`: how sure the author is of the capability |
 | `replacement` | no | what replaces a deprecated or retired operation |
 | `sunset` | no | the date the operation stops being served, `YYYY-MM-DD` |
+| `replayMode` | no | `read_only`, `idempotent` or `compare_and_swap`: what happens when a caller sends the same call twice |
+| `idempotencyKeyPointers` | with `idempotent` | RFC 6901 pointers into the operation's tool arguments to the keys that make a repeat idempotent |
+| `expectedRevisionPointers` | with `compare_and_swap` | RFC 6901 pointers into the tool arguments to the revision the call expects |
 | `useWhen` | no | when a caller, a person or a model, should choose this operation |
 | `doNotUseWhen` | no | when a caller should choose another operation instead |
 | `success` | no | the outcome a caller should expect after a successful call |
@@ -55,6 +58,18 @@ export class ReturnMutations {
 The optional texts are non-blank and have no surrounding whitespace when
 given. The guidance keys (`useWhen` through `errors`) are written for a
 caller choosing between operations, a model included.
+
+The replay keys are declared, never inferred from the operation's name or
+arguments. `read_only` and no mode take no pointers; `idempotent` needs
+`idempotencyKeyPointers` and no revision; `compare_and_swap` needs
+`expectedRevisionPointers` and may also list idempotency keys. Each list
+names a pointer once. The pointers address the operation's generated tool
+arguments (the `parameters` object in the SDK's `tools/schema.json`, see
+[MCP tools](/superschematic/reference/mcp-tools/)), so `/requestId` is the
+`requestId` field of the operation's input and `/pickup/postalCode` a field
+of a nested object. The SDK generators check that every segment is a
+required argument, that an idempotency key is a string and that a revision
+is a number, and fail the build otherwise.
 
 An operation takes at most one `@docs`. Every value must be a literal. A
 config that breaks a rule fails the load with the decorator's location:
@@ -77,7 +92,9 @@ The Go API's OpenAPI document (`openapi.json`, embedded in `openapi.go`):
   operation's comment.
 - `deprecated: true` when `lifecycle` is `deprecated` or `retired`.
 - The whole record is written under the vendor key `x-superschematic-docs`,
-  with the optional keys only when set, and `errors` as a list of objects:
+  with the optional keys only when set, `errors` as a list of objects, and
+  a declared replay mode as `replay: { mode, idempotencyKeyPointers,
+  expectedRevisionPointers }` with both lists always present:
 
 ```json
 "x-superschematic-docs": {
@@ -122,11 +139,14 @@ generated type, validator or wire format changes. The JSON and YAML forms
 write `title`, `purpose` and `icon` on the field; a blank value is a load
 error in every form.
 
-`@superschematic/api` also exports `docs`, for operations. A file that
-uses both imports one under another name
+`@superschematic/api` also exports `docs` and `icon`, for operations (an
+operation's `@icon` is its MCP tool's icon, see
+[MCP tools](/superschematic/reference/mcp-tools/)). A file that uses both
+imports one under another name
 (`import { docs as fieldDocs } from "@superschematic/schema"`); the loader
 resolves a decorator by its declaring package, not by the local name. The
-TypeScript writer imports them as `apiDocs`, `schemaDocs` and `schemaIcon`.
+TypeScript writer imports them as `apiDocs`, `apiIcon`, `schemaDocs` and
+`schemaIcon`.
 
 The schema runtimes carry the three fields. The TypeScript runtime's
 `parseSchema` and `writeSchemaJson` read and write `title`, `x-purpose` and

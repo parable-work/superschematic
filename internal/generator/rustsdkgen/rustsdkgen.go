@@ -729,6 +729,14 @@ func WriteSDKWithTools(output *SDKOutput, apiOutput *apigen.APIOutput, outputDir
 			); err != nil {
 				return fmt.Errorf("failed to generate tools/schema.json: %w", err)
 			}
+			if err := generateFile(
+				"tools-mcp-audit.tmpl",
+				filepath.Join(outputDir, "tools", "mcp-audit.json"),
+				toolsOutput,
+				toolsFuncs,
+			); err != nil {
+				return fmt.Errorf("failed to generate tools/mcp-audit.json: %w", err)
+			}
 		}
 	}
 

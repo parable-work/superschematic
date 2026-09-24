@@ -45,6 +45,7 @@ type Registry struct {
 	authProviders  map[string]AuthProvider
 	checks         []CheckSpec
 	openAPIHooks   []OpenAPIHook
+	toolHooks      []ToolHook
 
 	// authoring is Naming.AuthoringPackages plus every registered
 	// decorator's Packages: the set IsAuthoringPackage answers from.
@@ -417,6 +418,35 @@ func (r *Registry) RegisterOpenAPIHook(h OpenAPIHook) error {
 // OpenAPIHooks returns the registered OpenAPI hooks in registration order.
 func (r *Registry) OpenAPIHooks() []OpenAPIHook {
 	return append([]OpenAPIHook(nil), r.openAPIHooks...)
+}
+
+// RegisterToolHook adds a hook that edits what the SDK generators publish
+// about an API's MCP tools: the vendor keys of the tool documents and each
+// operation's resolved @mcp record. Hooks run in registration order. It
+// needs a Name, unique among tool hooks, and an Edit.
+func (r *Registry) RegisterToolHook(h ToolHook) error {
+	if err := r.registrable("tool hook " + h.Name); err != nil {
+		return err
+	}
+	if h.Name == "" {
+		return fmt.Errorf("registry: tool hook has no name")
+	}
+	if h.Edit == nil {
+		return fmt.Errorf("registry: tool hook %q has no Edit function", h.Name)
+	}
+	for _, existing := range r.toolHooks {
+		if existing.Name == h.Name {
+			return fmt.Errorf("registry: tool hook %q is already registered", h.Name)
+		}
+	}
+	r.toolHooks = append(r.toolHooks, h)
+	r.noteExtension(h.Extension)
+	return nil
+}
+
+// ToolHooks returns the registered tool hooks in registration order.
+func (r *Registry) ToolHooks() []ToolHook {
+	return append([]ToolHook(nil), r.toolHooks...)
 }
 
 // Kind returns the spec registered under name.
