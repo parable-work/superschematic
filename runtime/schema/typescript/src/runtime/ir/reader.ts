@@ -84,11 +84,20 @@ function normalizeTypeName(name: string): string {
 
 function parseIRTypeRef(raw: unknown, path: string): TypeRef {
   const typeRef = asObject(raw, path);
-  return {
+  const parsed: TypeRef = {
     name: normalizeTypeName(asString(typeRef.name)),
     isArray: asBoolean(typeRef.isArray),
     elemNonNull: asBoolean(typeRef.elemNonNull),
   };
+  // T[][]: set only when true, so a TypeRef without nested lists keeps its
+  // shape.
+  if (asBoolean(typeRef.isArrayOfArrays)) {
+    if (!parsed.isArray) {
+      throw new Error(`runtime schema IR parse error: isArrayOfArrays requires isArray at ${path}`);
+    }
+    parsed.isArrayOfArrays = true;
+  }
+  return parsed;
 }
 
 function parseIRRelation(raw: unknown): RelationDef | null {
