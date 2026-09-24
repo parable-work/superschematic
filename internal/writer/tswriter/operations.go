@@ -3,10 +3,15 @@ package tswriter
 import (
 	"fmt"
 	"reflect"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
+
+var identifierPattern = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
 
 // httpMethodMembers maps IR HTTP methods to HttpMethod enum members.
 var httpMethodMembers = map[string]string{
@@ -62,6 +67,12 @@ func (e *emitter) emitOperation(setName string, op *ir.FieldDef) {
 	e.comment("  ", op.Comment)
 	if op.Docs != nil {
 		fmt.Fprintf(&e.body, "  @%s(%s)\n", e.useAs("@superschematic/api", "docs", "apiDocs"), operationDocsLiteral(op.Docs))
+	}
+	if op.Icon != "" {
+		fmt.Fprintf(&e.body, "  @%s(%s)\n", e.useAs("@superschematic/api", "icon", "apiIcon"), quote(op.Icon))
+	}
+	if op.MCP != nil {
+		fmt.Fprintf(&e.body, "  @%s(%s)\n", e.use("mcp"), operationMCPLiteral(op.MCP))
 	}
 
 	if op.HTTPMethod != "" {
@@ -149,6 +160,8 @@ func (e *emitter) checkOperationField(op *ir.FieldDef, owner string) {
 	rest.Name = ""
 	rest.Comment = ""
 	rest.Docs = nil
+	rest.MCP = nil
+	rest.Icon = ""
 	rest.TypeRef = ir.TypeRef{}
 	rest.Required = false
 	rest.Auth = false
@@ -188,5 +201,94 @@ func operationDocsLiteral(docs *ir.OperationDocs) string {
 	if docs.Sunset != "" {
 		parts = append(parts, "sunset: "+quote(docs.Sunset))
 	}
+	if docs.ReplayMode != "" {
+		parts = append(parts, "replayMode: "+quote(string(docs.ReplayMode)))
+	}
+	if len(docs.IdempotencyKeyPointers) > 0 {
+		parts = append(parts, "idempotencyKeyPointers: "+stringListLiteral(docs.IdempotencyKeyPointers))
+	}
+	if len(docs.ExpectedRevisionPointers) > 0 {
+		parts = append(parts, "expectedRevisionPointers: "+stringListLiteral(docs.ExpectedRevisionPointers))
+	}
+	if docs.UseWhen != "" {
+		parts = append(parts, "useWhen: "+quote(docs.UseWhen))
+	}
+	if docs.DoNotUseWhen != "" {
+		parts = append(parts, "doNotUseWhen: "+quote(docs.DoNotUseWhen))
+	}
+	if docs.Success != "" {
+		parts = append(parts, "success: "+quote(docs.Success))
+	}
+	if len(docs.Errors) > 0 {
+		entries := make([]string, len(docs.Errors))
+		for i, docError := range docs.Errors {
+			entries[i] = fmt.Sprintf("{ code: %s, description: %s, commonCorrection: %s }",
+				quote(docError.Code), quote(docError.Description), quote(docError.CommonCorrection))
+		}
+		parts = append(parts, "errors: ["+strings.Join(entries, ", ")+"]")
+	}
 	return "{ " + strings.Join(parts, ", ") + " }"
+}
+
+// operationMCPLiteral renders an @mcp record as the object literal the
+// decorator takes: { handle, _meta? } for a visible tool, { hidden: true,
+// reason } for a hidden one.
+func operationMCPLiteral(mcp *ir.OperationMCP) string {
+	if mcp.Hidden {
+		return "{ hidden: true, reason: " + quote(mcp.HiddenReason) + " }"
+	}
+	parts := []string{"handle: " + quote(mcp.Handle)}
+	if len(mcp.Meta) > 0 {
+		parts = append(parts, "_meta: "+valueLiteral(mcp.Meta))
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
+}
+
+func stringListLiteral(values []string) string {
+	quoted := make([]string, len(values))
+	for i, value := range values {
+		quoted[i] = quote(value)
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+// valueLiteral renders a decoded JSON value as a TypeScript literal: object
+// keys sorted, quoted when they are not identifiers.
+func valueLiteral(value any) string {
+	switch v := value.(type) {
+	case map[string]any:
+		if len(v) == 0 {
+			return "{}"
+		}
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		parts := make([]string, len(keys))
+		for i, key := range keys {
+			name := key
+			if !identifierPattern.MatchString(key) {
+				name = quote(key)
+			}
+			parts[i] = name + ": " + valueLiteral(v[key])
+		}
+		return "{ " + strings.Join(parts, ", ") + " }"
+	case []any:
+		parts := make([]string, len(v))
+		for i, item := range v {
+			parts[i] = valueLiteral(item)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case string:
+		return quote(v)
+	case float64:
+		return formatFloat(v)
+	case bool:
+		return strconv.FormatBool(v)
+	case nil:
+		return "null"
+	default:
+		return quote(fmt.Sprint(v))
+	}
 }

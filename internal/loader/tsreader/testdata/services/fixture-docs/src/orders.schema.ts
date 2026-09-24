@@ -1,8 +1,16 @@
+// Operation @docs from @superschematic/api and field @docs from
+// @superschematic/schema in one file: the field decorator is imported under
+// another name.
 import { Identity } from "superscalar";
 import { HttpMethod, docs, rest } from "@superschematic/api";
+import { docs as fieldDocs, icon, purpose } from "@superschematic/schema";
 
 export abstract class Order {
   id: Identity.UUID;
+
+  @fieldDocs({ title: "Total" })
+  @purpose("The order total in **cents**, tax included.")
+  @icon("receipt")
   totalCents: number;
 }
 
@@ -19,7 +27,17 @@ export class OrderQueries {
     capability: "orders.get",
     lifecycle: "active",
     visibility: "public",
-    audience: "shoppers"
+    audience: "shoppers",
+    useWhen: "Use when you have an order identifier.",
+    doNotUseWhen: "Do not use to list orders; call listOrders.",
+    success: "Returns the order with its total.",
+    errors: [
+      {
+        code: "order_not_found",
+        description: "No order has that identifier.",
+        commonCorrection: "Take the identifier from a listOrders result."
+      }
+    ]
   })
   @rest(HttpMethod.GET, "orders/{id}")
   getOrder(id: Identity.UUID): Order {

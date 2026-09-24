@@ -17,6 +17,8 @@
           "name": "client_domain",
           "description": "Salesforce My Domain name",
           "title": "My Domain name",
+          "purpose": "Used to build the **login URL**.",
+          "icon": "globe",
           "placeholder": "acme",
           "typeRef": { "name": "String" },
           "required": true,

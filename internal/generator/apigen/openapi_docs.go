@@ -21,11 +21,40 @@ func openAPIDocsExtension(docs *ir.OperationDocs) map[string]interface{} {
 	if docs.Audience != "" {
 		metadata["audience"] = docs.Audience
 	}
+	if docs.ReplayMode != "" {
+		metadata["replay"] = map[string]interface{}{
+			"mode":                     docs.ReplayMode,
+			"idempotencyKeyPointers":   append([]string{}, docs.IdempotencyKeyPointers...),
+			"expectedRevisionPointers": append([]string{}, docs.ExpectedRevisionPointers...),
+		}
+	}
 	if docs.Replacement != "" {
 		metadata["replacement"] = docs.Replacement
 	}
 	if docs.Sunset != "" {
 		metadata["sunset"] = docs.Sunset
+	}
+	if docs.UseWhen != "" {
+		metadata["useWhen"] = docs.UseWhen
+	}
+	if docs.DoNotUseWhen != "" {
+		metadata["doNotUseWhen"] = docs.DoNotUseWhen
+	}
+	if docs.Success != "" {
+		metadata["success"] = docs.Success
+	}
+	if len(docs.Errors) > 0 {
+		// Maps, not structs: every JSON object in the document then has
+		// sorted keys, so an OpenAPI hook's JSON round trip changes no byte.
+		errors := make([]interface{}, 0, len(docs.Errors))
+		for _, docError := range docs.Errors {
+			errors = append(errors, map[string]interface{}{
+				"code":             docError.Code,
+				"description":      docError.Description,
+				"commonCorrection": docError.CommonCorrection,
+			})
+		}
+		metadata["errors"] = errors
 	}
 	return metadata
 }

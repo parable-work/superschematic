@@ -1,5 +1,5 @@
 import { Network } from "superscalar";
-import { Default, Nullable, Secret, Validate, jsonField } from "@superschematic/schema";
+import { Default, Nullable, Secret, Validate, docs, icon, jsonField, purpose } from "@superschematic/schema";
 import { envVars } from "@superschematic/schema-config";
 
 // Runtime environment classification.
@@ -15,6 +15,9 @@ export type RetryPolicy = {
 
 @envVars
 export abstract class FixtureConfig {
+  @docs({ title: "Database URL" })
+  @purpose("Connection target for the **primary database**.")
+  @icon("database")
   DATABASE_URL: Network.Url;
   JWT_SECRET: Secret<string>;
   PORT: Default<number, 8080>;

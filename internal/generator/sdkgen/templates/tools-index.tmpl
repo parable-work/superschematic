@@ -23,13 +23,50 @@ export interface {{toPascalCase $tool.Name}}Params {
  */
 export interface ToolDefinition {
   name: string;
+  operationId: string;
+  title: string;
+  mcp: {
+    hidden: boolean;
+    hiddenReason?: string;
+    name?: string;
+    handle?: string;
+    description?: string;
+    _meta?: Record<string, unknown>;
+    icon?: {
+      name: string;
+      family?: string;
+      style?: string;
+    };
+  } | null;
+  capability: string;
+  lifecycle: string;
+  visibility: string;
+  audience: string;
+  guidance: {
+    useWhen: string;
+    doNotUseWhen: string;
+    success: string;
+    errors: Array<{ code: string; description: string; commonCorrection: string }>;
+  };
+  requiredPermissions: string[];
+  replay: {
+    mode: string;
+    idempotencyKeyPointers: string[];
+    expectedRevisionPointers: string[];
+  } | null;
   description: string;
   namespace: string;
   methodName: string;
   requiresAuth: boolean;
   isScoped: boolean;
+  bindingStatus: 'ready' | 'unsupported_multipart';
+  inputSchemaDigest: string;
   parameters: {
     type: 'object';
+    additionalProperties: false;
+{{- range $.Keys.Parameters}}
+    '{{.Key}}': {{jsonValue .Value}};
+{{- end}}
     properties: Record<string, JSONSchemaProperty>;
     required?: string[];
   };
@@ -44,7 +81,11 @@ export interface ToolDefinition {
  * JSON Schema property interface
  */
 export interface JSONSchemaProperty {
-  type: string;
+{{- if .Keys.Scalar}}
+  '{{.Keys.Scalar}}'?: string;
+{{- end}}
+  additionalProperties?: boolean | JSONSchemaProperty;
+  type: string | string[];
   format?: string;
   description?: string;
   pattern?: string;
@@ -53,6 +94,12 @@ export interface JSONSchemaProperty {
   maxLength?: number;
   minimum?: number;
   maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+  items?: JSONSchemaProperty;
+  properties?: Record<string, JSONSchemaProperty>;
+  required?: string[];
+  oneOf?: JSONSchemaProperty[];
 }
 
 /**
@@ -63,6 +110,10 @@ export interface OpenAIFunction {
   description: string;
   parameters: {
     type: 'object';
+    additionalProperties: false;
+{{- range $.Keys.Parameters}}
+    '{{.Key}}': {{jsonValue .Value}};
+{{- end}}
     properties: Record<string, JSONSchemaProperty>;
     required?: string[];
   };
@@ -76,6 +127,10 @@ export interface AnthropicTool {
   description: string;
   input_schema: {
     type: 'object';
+    additionalProperties: false;
+{{- range $.Keys.Parameters}}
+    '{{.Key}}': {{jsonValue .Value}};
+{{- end}}
     properties: Record<string, JSONSchemaProperty>;
     required?: string[];
   };
@@ -113,27 +168,61 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
 {{- if $i}},{{end}}
   [{{formatToolName .Name}}]: {
     name: '{{.Name}}',
+    operationId: '{{.OperationID}}',
+    title: `{{escapeBacktick .Title}}`,
+    mcp: {{if .MCP}}{
+      hidden: {{.MCP.Hidden}},
+{{- if .MCP.Hidden}}
+      hiddenReason: `{{escapeBacktick .MCP.HiddenReason}}`
+{{- else}}
+      name: `{{escapeBacktick .MCP.Name}}`,
+      handle: '{{.MCP.Handle}}',
+      description: `{{escapeBacktick .MCP.Description}}`
+{{- if .MCP.Meta}},
+      _meta: {{jsonValue .MCP.Meta}}
+{{- end}}
+{{- with .MCP.Icon}},
+      icon: {
+        name: '{{escapeBackslash .Name}}'
+{{- if .Family}},
+        family: '{{escapeBackslash .Family}}'
+{{- end}}
+{{- if .Style}},
+        style: '{{escapeBackslash .Style}}'
+{{- end}}
+      }
+{{- end}}
+{{- end}}
+    }{{else}}null{{end}},
+    capability: '{{.Capability}}',
+    lifecycle: '{{.Lifecycle}}',
+    visibility: '{{.Visibility}}',
+    audience: '{{escapeBackslash .Audience}}',
+    guidance: {{jsonValue .Guidance}},
+    requiredPermissions: [{{range $j, $permission := .RequiredPerms}}{{if $j}}, {{end}}'{{$permission}}'{{end}}],
+    replay: {{if .ReplayMode}}{
+      mode: '{{.ReplayMode}}',
+      idempotencyKeyPointers: [{{range $j, $pointer := .IdempotencyKeyPointers}}{{if $j}}, {{end}}`{{escapeBacktick $pointer}}`{{end}}],
+      expectedRevisionPointers: [{{range $j, $pointer := .ExpectedRevisionPointers}}{{if $j}}, {{end}}`{{escapeBacktick $pointer}}`{{end}}]
+    }{{else}}null{{end}},
     description: `{{escapeBacktick .Description}}`,
     namespace: '{{.Namespace}}',
     methodName: '{{.MethodName}}',
     requiresAuth: {{.RequiresAuth}},
     isScoped: {{.IsScopedNS}},
+    bindingStatus: '{{.BindingStatus}}',
+    inputSchemaDigest: '{{.InputSchemaDigest}}',
     parameters: {
       type: 'object',
+      additionalProperties: false,
+{{- range $.Keys.Parameters}}
+      '{{.Key}}': {{jsonValue .Value}},
+{{- end}}
       properties: {
 {{- $defProps := .Parameters.Properties}}
 {{- range $propName := sortedKeys $defProps}}
 {{- $prop := index $defProps $propName}}
-        {{$propName}}: {
-          type: '{{$prop.Type}}'{{if $prop.Format}},
-          format: '{{$prop.Format}}'{{end}}{{if $prop.Description}},
-          description: `{{escapeBacktick $prop.Description}}`{{end}}{{if $prop.Pattern}},
-          pattern: '{{escapeBackslash $prop.Pattern}}'{{end}}{{if $prop.MinLength}},
-          minLength: {{$prop.MinLength}}{{end}}{{if $prop.MaxLength}},
-          maxLength: {{$prop.MaxLength}}{{end}}{{if $prop.Minimum}},
-          minimum: {{$prop.Minimum}}{{end}}{{if $prop.Maximum}},
-          maximum: {{$prop.Maximum}}{{end}}
-        },
+        {{$propName}}: {{schemaJSON $prop}},
 {{- end}}
       }{{if .Parameters.Required}},
       required: [{{range $j, $r := .Parameters.Required}}{{if $j}}, {{end}}'{{$r}}'{{end}}]{{end}}
@@ -162,20 +251,15 @@ export const openAIFunctions: OpenAIFunction[] = [
     description: `{{escapeBacktick .Description}}`,
     parameters: {
       type: 'object',
+      additionalProperties: false,
+{{- range $.Keys.Parameters}}
+      '{{.Key}}': {{jsonValue .Value}},
+{{- end}}
       properties: {
 {{- $oaiProps := .Parameters.Properties}}
 {{- range $propName := sortedKeys $oaiProps}}
 {{- $prop := index $oaiProps $propName}}
-        {{$propName}}: {
-          type: '{{$prop.Type}}'{{if $prop.Format}},
-          format: '{{$prop.Format}}'{{end}}{{if $prop.Description}},
-          description: `{{escapeBacktick $prop.Description}}`{{end}}{{if $prop.Pattern}},
-          pattern: '{{escapeBackslash $prop.Pattern}}'{{end}}{{if $prop.MinLength}},
-          minLength: {{$prop.MinLength}}{{end}}{{if $prop.MaxLength}},
-          maxLength: {{$prop.MaxLength}}{{end}}{{if $prop.Minimum}},
-          minimum: {{$prop.Minimum}}{{end}}{{if $prop.Maximum}},
-          maximum: {{$prop.Maximum}}{{end}}
-        },
+        {{$propName}}: {{schemaJSON $prop}},
 {{- end}}
       }{{if .Parameters.Required}},
       required: [{{range $j, $r := .Parameters.Required}}{{if $j}}, {{end}}'{{$r}}'{{end}}]{{end}}
@@ -196,20 +280,15 @@ export const anthropicTools: AnthropicTool[] = [
     description: `{{escapeBacktick .Description}}`,
     input_schema: {
       type: 'object',
+      additionalProperties: false,
+{{- range $.Keys.Parameters}}
+      '{{.Key}}': {{jsonValue .Value}},
+{{- end}}
       properties: {
 {{- $antProps := .Parameters.Properties}}
 {{- range $propName := sortedKeys $antProps}}
 {{- $prop := index $antProps $propName}}
-        {{$propName}}: {
-          type: '{{$prop.Type}}'{{if $prop.Format}},
-          format: '{{$prop.Format}}'{{end}}{{if $prop.Description}},
-          description: `{{escapeBacktick $prop.Description}}`{{end}}{{if $prop.Pattern}},
-          pattern: '{{escapeBackslash $prop.Pattern}}'{{end}}{{if $prop.MinLength}},
-          minLength: {{$prop.MinLength}}{{end}}{{if $prop.MaxLength}},
-          maxLength: {{$prop.MaxLength}}{{end}}{{if $prop.Minimum}},
-          minimum: {{$prop.Minimum}}{{end}}{{if $prop.Maximum}},
-          maximum: {{$prop.Maximum}}{{end}}
-        },
+        {{$propName}}: {{schemaJSON $prop}},
 {{- end}}
       }{{if .Parameters.Required}},
       required: [{{range $j, $r := .Parameters.Required}}{{if $j}}, {{end}}'{{$r}}'{{end}}]{{end}}
@@ -301,4 +380,3 @@ export function validateToolParams(toolName: ToolName, params: Record<string, un
   const missing = required.filter(field => !(field in params) || params[field] === undefined);
   return { valid: missing.length === 0, missing };
 }
-

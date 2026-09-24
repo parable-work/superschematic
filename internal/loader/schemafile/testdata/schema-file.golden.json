@@ -259,6 +259,9 @@
           ],
           "type": "string"
         },
+        "icon": {
+          "type": "string"
+        },
         "inheritedFrom": {
           "type": "string"
         },
@@ -279,6 +282,9 @@
         },
         "manyToMany": {
           "type": "boolean"
+        },
+        "mcp": {
+          "$ref": "#/$defs/OperationMCP"
         },
         "middleware": {
           "$ref": "#/$defs/MiddlewareConfig"
@@ -312,6 +318,9 @@
         },
         "public": {
           "type": "boolean"
+        },
+        "purpose": {
+          "type": "string"
         },
         "relation": {
           "$ref": "#/$defs/RelationDef"
@@ -522,6 +531,24 @@
       ],
       "type": "object"
     },
+    "MCPIcon": {
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "style": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "MiddlewareConfig": {
       "additionalProperties": false,
       "properties": {
@@ -549,6 +576,27 @@
         "description": {
           "type": "string"
         },
+        "doNotUseWhen": {
+          "type": "string"
+        },
+        "errors": {
+          "items": {
+            "$ref": "#/$defs/OperationDocsError"
+          },
+          "type": "array"
+        },
+        "expectedRevisionPointers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "idempotencyKeyPointers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "lifecycle": {
           "enum": [
             "draft",
@@ -569,10 +617,24 @@
         "replacement": {
           "type": "string"
         },
+        "replayMode": {
+          "enum": [
+            "read_only",
+            "idempotent",
+            "compare_and_swap"
+          ],
+          "type": "string"
+        },
+        "success": {
+          "type": "string"
+        },
         "sunset": {
           "type": "string"
         },
         "title": {
+          "type": "string"
+        },
+        "useWhen": {
           "type": "string"
         },
         "visibility": {
@@ -591,6 +653,56 @@
         "lifecycle",
         "visibility",
         "mappingStatus"
+      ],
+      "type": "object"
+    },
+    "OperationDocsError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "commonCorrection": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "description",
+        "commonCorrection"
+      ],
+      "type": "object"
+    },
+    "OperationMCP": {
+      "additionalProperties": false,
+      "properties": {
+        "_meta": {
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        },
+        "handle": {
+          "type": "string"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "hiddenReason": {
+          "type": "string"
+        },
+        "icon": {
+          "$ref": "#/$defs/MCPIcon"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hidden"
       ],
       "type": "object"
     },

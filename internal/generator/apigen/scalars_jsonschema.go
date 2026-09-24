@@ -10,14 +10,17 @@ import (
 // ScalarJSONSchemaInfo contains JSON Schema metadata for a scalar type.
 // SDK tool bindings use this when describing parameter shapes to LLMs.
 type ScalarJSONSchemaInfo struct {
-	Type        string
-	Format      string
-	Description string
-	Pattern     string
-	MinLength   *int
-	MaxLength   *int
-	Minimum     *int64
-	Maximum     *int64
+	// CanonicalName is the scalar's name in the schema ("Identity.UUID");
+	// empty for the language primitives.
+	CanonicalName string
+	Type          string
+	Format        string
+	Description   string
+	Pattern       string
+	MinLength     *int
+	MaxLength     *int
+	Minimum       *int64
+	Maximum       *int64
 }
 
 func extractScalarJSONSchemaInfo(schema *ir.Schema) map[string]ScalarJSONSchemaInfo {
@@ -29,8 +32,9 @@ func extractScalarJSONSchemaInfo(schema *ir.Schema) map[string]ScalarJSONSchemaI
 
 	for name, scalarDef := range schema.Scalars {
 		info := ScalarJSONSchemaInfo{
-			Description: codegen.DocText(scalarDef.Description, scalarDef.Comment),
-			Pattern:     scalarDef.Pattern,
+			CanonicalName: name,
+			Description:   codegen.DocText(scalarDef.Description, scalarDef.Comment),
+			Pattern:       scalarDef.Pattern,
 		}
 
 		if jsType, ok := scalarDef.TypeMappings["json_schema"]; ok {

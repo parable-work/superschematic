@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureMcpSdk Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-mcp API",
+  "tools": [
+    {
+      "name": "order.deleteOrder",
+      "operationId": "OrderDeleteOrderHandler",
+      "title": "",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "Staff console only."
+      },
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "deleteOrder endpoint",
+      "namespace": "order",
+      "methodName": "delete_order",
+      "httpMethod": "DELETE",
+      "httpPath": "/api/orders/{id}",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "Order object"
+      }
+    },
+    {
+      "name": "order.exportOrders",
+      "operationId": "OrderExportOrdersHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Not classified: no @mcp, so no tool.",
+      "namespace": "order",
+      "methodName": "export_orders",
+      "httpMethod": "GET",
+      "httpPath": "/api/orders/export",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+        }
+      },
+      "returns": {
+        "type": "string",
+        "description": "A string value"
+      }
+    },
+    {
+      "name": "order.getOrder",
+      "operationId": "OrderGetOrderHandler",
+      "title": "Get an order",
+      "mcp": {
+        "hidden": false,
+        "name": "Get an order",
+        "handle": "get_order",
+        "description": "Returns one order by its identifier.",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"Use when you have an order identifier.","doNotUseWhen":"Do not use to list orders; call list_orders.","success":"Returns the order with its status and total.","errors":[{"code":"order_not_found","description":"No order has that identifier.","commonCorrection":"Take the identifier from a list_orders result."}]},"ui":{"resourceUri":"ui://orders/detail"}},
+        "icon": {
+          "name": "receipt"
+        }
+      },
+      "capability": "orders.get",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "shoppers",
+      "guidance": {"useWhen":"Use when you have an order identifier.","doNotUseWhen":"Do not use to list orders; call list_orders.","success":"Returns the order with its status and total.","errors":[{"code":"order_not_found","description":"No order has that identifier.","commonCorrection":"Take the identifier from a list_orders result."}]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Returns one order by its identifier.",
+      "namespace": "order",
+      "methodName": "get_order",
+      "httpMethod": "GET",
+      "httpPath": "/api/orders/{id}",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "Order object"
+      }
+    },
+    {
+      "name": "order.listOrders",
+      "operationId": "OrderListOrdersHandler",
+      "title": "List orders",
+      "mcp": {
+        "hidden": false,
+        "name": "List orders",
+        "handle": "list_orders",
+        "description": "Lists orders by status.",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}},
+        "icon": {
+          "name": "list"
+        }
+      },
+      "capability": "orders.list",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Lists orders by status.",
+      "namespace": "order",
+      "methodName": "list_orders",
+      "httpMethod": "GET",
+      "httpPath": "/api/orders",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:0908611e4289a8ae0e89cb020c06b4c09b92865c0dded660c09230d951a12216",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {"description":"A numeric value","maximum":100,"minimum":1,"type":"number"},
+          "statuses": {"description":"Array of OrderStatus values","items":{"description":"A OrderStatus value","type":"string"},"maxItems":2,"minItems":1,"type":"array"}
+        },
+        "required": ["statuses"]
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of Order",
+        "items": {
+          "type": "object",
+          "description": "Order object"
+        }
+      }
+    },
+    {
+      "name": "order.openReturn",
+      "operationId": "OrderOpenReturnHandler",
+      "title": "Open a return",
+      "mcp": {
+        "hidden": false,
+        "name": "Open a return",
+        "handle": "open_return",
+        "description": "Opens a return for one delivered order.",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}},
+        "icon": {
+          "name": "box"
+        }
+      },
+      "capability": "orders.returns.open",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "idempotent",
+        "idempotencyKeyPointers": ["/requestId"],
+        "expectedRevisionPointers": []
+      },
+      "description": "Opens a return for one delivered order.",
+      "namespace": "order",
+      "methodName": "open_return",
+      "httpMethod": "POST",
+      "httpPath": "/api/returns",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:ffbec234ba92460ddbffbca2d1008ec205785c072d4b40b889df8a17a6af696f",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "labels": {"additionalProperties":{"description":"A string value","type":"string"},"description":"Map of string values","type":"object"},
+          "orderId": {"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "pickup": {"additionalProperties":false,"description":"Address object","properties":{"city":{"description":"A string value","type":"string"},"line1":{"description":"A string value","type":"string"},"postalCode":{"description":"A string value","type":["string","null"]}},"required":["city","line1"],"type":"object"},
+          "reason": {"description":"A string value","maxLength":500,"minLength":1,"type":"string"},
+          "requestId": {"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["labels", "orderId", "pickup", "reason", "requestId"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "Order object"
+      }
+    },
+    {
+      "name": "order.updateOrder",
+      "operationId": "OrderUpdateOrderHandler",
+      "title": "Update an order",
+      "mcp": {
+        "hidden": false,
+        "name": "Update an order",
+        "handle": "update_order",
+        "description": "Changes an order's note when its revision still matches.",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}},
+        "icon": {
+          "name": "pen"
+        }
+      },
+      "capability": "orders.update",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "compare_and_swap",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": ["/revision"]
+      },
+      "description": "Changes an order's note when its revision still matches.",
+      "namespace": "order",
+      "methodName": "update_order",
+      "httpMethod": "PATCH",
+      "httpPath": "/api/orders/{id}",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:3a7a5f56db6c146b0d3870be165bf7dee89766c877091d99404bbbf26cd2d29b",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "note": {"description":"A string value","type":["string","null"]},
+          "revision": {"description":"A numeric value","type":"number"}
+        },
+        "required": ["id", "revision"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "Order object"
+      }
+    }
+  ]
+}

@@ -46,6 +46,8 @@ var corpus = []roundtripFixture{
 	{name: "fixture-strict-json", dir: tsFixtures + "/fixture-strict-json", native: FormatTS},
 	// Operation @docs records in the data forms.
 	{name: "fixture-docs", dir: tsFixtures + "/fixture-docs", native: FormatTS},
+	// Operation @mcp, @icon and @docs replay keys in the data forms.
+	{name: "fixture-mcp", dir: tsFixtures + "/fixture-mcp", native: FormatTS},
 	// SQL projection views: every row rule form, joins, @column in both
 	// forms of the source and the collapse.
 	{name: "fixture-projection", dir: tsFixtures + "/fixture-projection", native: FormatTS},

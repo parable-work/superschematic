@@ -21,6 +21,7 @@ func TestLoadServiceGolden(t *testing.T) {
 		"fixture-json-config",
 		"fixture-traits",
 		"fixture-docs",
+		"fixture-mcp",
 		"fixture-projection",
 	}
 	for _, svc := range services {
@@ -144,6 +145,7 @@ func TestProgramCacheMatchesPerServiceLoads(t *testing.T) {
 		"fixture-json-config",
 		"fixture-traits",
 		"fixture-docs",
+		"fixture-mcp",
 		"fixture-projection",
 	}
 	serviceDirs := make([]string, 0, len(services))

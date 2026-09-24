@@ -298,6 +298,15 @@ func (e *emitter) emitSourceDecorator(def *ir.TypeDef) {
 // wrappers instead.
 func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 	var out []string
+	if fd.Title != "" {
+		out = append(out, e.useAs("@superschematic/schema", "docs", "schemaDocs")+fmt.Sprintf("({ title: %s })", quote(fd.Title)))
+	}
+	if fd.Purpose != "" {
+		out = append(out, e.use("purpose")+fmt.Sprintf("(%s)", quote(fd.Purpose)))
+	}
+	if fd.Icon != "" {
+		out = append(out, e.useAs("@superschematic/schema", "icon", "schemaIcon")+fmt.Sprintf("(%s)", quote(fd.Icon)))
+	}
 	if fd.Key {
 		out = append(out, e.use("key"))
 	}
@@ -330,6 +339,7 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 	rest.Comment = ""
 	rest.TypeRef = ir.TypeRef{}
 	rest.Required = false
+	rest.Title, rest.Purpose, rest.Icon = "", "", ""
 	rest.Default = nil
 	rest.ValidateMin, rest.ValidateMax = nil, nil
 	rest.ValidateUploadMaxBytes = nil
