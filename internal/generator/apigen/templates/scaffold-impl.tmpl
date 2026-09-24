@@ -71,7 +71,7 @@ import (
 //
 // Arguments:
 {{- range .Endpoint.ScalarArgs }}
-//   - {{ .Name }} ({{ if .IsArray }}[]{{ end }}{{ .GoType }}): {{ if .Required }}Required{{ else }}Optional{{ end }}
+//   - {{ .Name }} ({{ .GoListType }}): {{ if .Required }}Required{{ else }}Optional{{ end }}
 {{- end }}
 {{- end }}
 {{- if .Endpoint.HasFileUpload }}
@@ -85,12 +85,12 @@ import (
 //
 // Returns:
 {{- if .Endpoint.OutputIsArray }}
-//   - []{{ .Endpoint.OutputGoType }}: Success response
+//   - {{ .Endpoint.OutputGoListType }}: Success response
 {{- else }}
 //   - *{{ .Endpoint.OutputGoType }}: Success response
 {{- end }}
 //   - error: Error if operation fails
-func (impl *Implementation) {{ .Endpoint.ShortImplName }}(ctx context.Context{{- range .Endpoint.PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .Endpoint.QueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Endpoint.Filterable }}, filters []filterparse.Filter{{- end }}{{- if .Endpoint.HasInput }}, input *types.{{ .Endpoint.InputType }}{{- else if .Endpoint.ScalarArgs }}{{- range .Endpoint.ScalarArgs }}, {{ .Name }} {{ if .IsArray }}[]{{ end }}{{ .GoType }}{{- end }}{{- end }}{{- if .Endpoint.HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}) ({{- if .Endpoint.OutputIsArray }}[]{{ .Endpoint.OutputGoType }}{{- else }}*{{ .Endpoint.OutputGoType }}{{- end }}, error) {
+func (impl *Implementation) {{ .Endpoint.ShortImplName }}(ctx context.Context{{- range .Endpoint.PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .Endpoint.QueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Endpoint.Filterable }}, filters []filterparse.Filter{{- end }}{{- if .Endpoint.HasInput }}, input *types.{{ .Endpoint.InputType }}{{- else if .Endpoint.ScalarArgs }}{{- range .Endpoint.ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .Endpoint.HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}) ({{- if .Endpoint.OutputIsArray }}{{ .Endpoint.OutputGoListType }}{{- else }}*{{ .Endpoint.OutputGoType }}{{- end }}, error) {
 	// TODO: Implement {{ .Endpoint.ShortImplName }}
 	//
 	// Example implementation patterns:

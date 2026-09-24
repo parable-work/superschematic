@@ -1236,7 +1236,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		// Parse scalar arguments from request body (non-GET endpoints)
 		var requestBody struct {
 			{{- range .ScalarArgs }}
-			{{ .GoName }} {{ if .IsArray }}[]{{ end }}{{ .GoType }} `json:"{{ .Name }}"`
+			{{ .GoName }} {{ .GoListType }} `json:"{{ .Name }}"`
 			{{- end }}
 		}
 		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
@@ -1246,7 +1246,38 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- range .ScalarArgs }}
 
 		// Validate {{ .Name }}
-		{{- if .Required }}
+		{{- if .IsArrayOfArrays }}
+		// An array of arrays: an inner list is never null, reported at
+		// {{ .Name }}[i]; an empty one is valid.
+		{{- if not .IsGoPrimitive }} Each element runs its own
+		// validation, reported at {{ .Name }}[i][j].
+		{{- end }}
+		{
+			validationErrors := types.NewValidationErrors()
+			{{- if .Required }}
+			if requestBody.{{ .GoName }} == nil {
+				validationErrors.AddFieldError("{{ .Name }}", "required", "required field")
+			}
+			{{- end }}
+			for i, row := range requestBody.{{ .GoName }} {
+				if row == nil {
+					validationErrors.AddFieldError(fmt.Sprintf("{{ .Name }}[%d]", i), "required", "required field")
+					{{- if not .IsGoPrimitive }}
+					continue
+					{{- end }}
+				}
+				{{- if not .IsGoPrimitive }}
+				for j := range row {
+					validateListElement(validationErrors, fmt.Sprintf("{{ .Name }}[%d][%d]", i, j), &row[j])
+				}
+				{{- end }}
+			}
+			if validationErrors.HasErrors() {
+				RespondValidationErrors(w, r, validationErrors)
+				return
+			}
+		}
+		{{- else if .Required }}
 		if validator, ok := interface{}(requestBody.{{ .GoName }}).(interface{ ValidateRequired() (bool, []types.ValidationError) }); ok {
 			if valid, fieldErrs := validator.ValidateRequired(); !valid {
 				validationErrors := types.NewValidationErrors()
@@ -1286,7 +1317,24 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		}
 
 		{{- if .OutputType }}
-		{{- if .OutputIsArray }}
+		{{- if .OutputIsArrayOfArrays }}
+		// Validate output rows (if validation method exists on elements). An
+		// inner list is never null on the wire: a nil one is sent as [].
+		for i, row := range result {
+			if row == nil {
+				result[i] = []{{ .OutputGoType }}{}
+				continue
+			}
+			for j, item := range row {
+				if validator, ok := interface{}(item).(interface{ Validate() interface{ HasErrors() bool } }); ok {
+					if validationErrors := validator.Validate(); validationErrors.HasErrors() {
+						RespondError(w, r, gohttp.StatusInternalServerError, fmt.Sprintf("Invalid response from implementation at index [%d][%d]", i, j))
+						return
+					}
+				}
+			}
+		}
+		{{- else if .OutputIsArray }}
 		// Validate output array (if validation method exists on elements)
 		for i, item := range result {
 			if validator, ok := interface{}(item).(interface{ Validate() interface{ HasErrors() bool } }); ok {
@@ -1313,6 +1361,30 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- else }}
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
 		{{- end }}
+	}
+}
+{{- end }}
+
+{{- if .ValidatesListElements }}
+
+// validateListElement runs the validation of one element of a list argument
+// when its type has one, and records the errors under path
+// ("rows[2][5]"). item points at the element, so object types, whose
+// Validate has a pointer receiver, qualify.
+func validateListElement(validationErrors types.ValidationErrors, path string, item any) {
+	switch validator := item.(type) {
+	case interface{ ValidateRequired() (bool, []types.ValidationError) }:
+		if valid, itemErrs := validator.ValidateRequired(); !valid {
+			validationErrors.SetFieldErrors(path, itemErrs)
+		}
+	case interface{ Validate() (bool, []types.ValidationError) }:
+		if valid, itemErrs := validator.Validate(); !valid {
+			validationErrors.SetFieldErrors(path, itemErrs)
+		}
+	case interface{ Validate() types.ValidationErrors }:
+		if itemErrs := validator.Validate(); itemErrs.HasErrors() {
+			validationErrors.AddNestedError(path, itemErrs)
+		}
 	}
 }
 {{- end }}

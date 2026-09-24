@@ -1,0 +1,83 @@
+{
+  "definitions": {
+    "Point": {
+      "description": "A point on a plane.",
+      "properties": {
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "Shade": {
+      "description": "The shade of one grid cell.",
+      "enum": [
+        "light",
+        "dark"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "A drawing made of lists of lists: grid rows of cells, polygons as lists\nof points and batches of sample vectors.",
+  "properties": {
+    "labels": {
+      "description": "Cell labels, one inner list per grid row.",
+      "items": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "type": "array"
+    },
+    "polygons": {
+      "description": "Polygons, each a list of its points.",
+      "items": {
+        "items": {
+          "$ref": "#/definitions/Point"
+        },
+        "type": "array"
+      },
+      "type": "array"
+    },
+    "samples": {
+      "description": "Sample vectors in batches of at most 64; absent before sampling.",
+      "items": {
+        "items": {
+          "format": "double",
+          "type": "number"
+        },
+        "type": "array"
+      },
+      "maxItems": 64,
+      "nullable": true,
+      "type": "array"
+    },
+    "shades": {
+      "description": "Cell shades, one inner list per grid row.",
+      "items": {
+        "items": {
+          "$ref": "#/definitions/Shade"
+        },
+        "type": "array"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "labels",
+    "shades",
+    "polygons"
+  ],
+  "title": "Drawing",
+  "type": "object"
+}
