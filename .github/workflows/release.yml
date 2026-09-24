@@ -12,7 +12,7 @@ name: release
 # the superscalar archive that scripts/superscalar-dep.sh builds from the
 # pinned checkout; each runner records the commit it built from. assemble
 # refuses a set whose binaries disagree on that commit, writes SHA256SUMS,
-# packs the five npm tarballs, and builds the PyPI sdist and wheel.
+# packs the six npm tarballs, and builds the PyPI sdist and wheel.
 # github-release attaches everything to a GitHub release with build provenance
 # and an SBOM. The three publish jobs use trusted publishing (OIDC; no
 # registry tokens in this repository) and are gated on the repository variable
@@ -306,9 +306,10 @@ jobs:
           cat SHA256SUMS
 
       - name: Pack the npm tarballs
-        # The four authoring packages ship their TypeScript source; the schema
-        # runtime ships its compiled dist. npm pack writes
-        # superschematic-<name>-<version>.tgz for a scoped @superschematic/<name>.
+        # The four authoring packages and the http runtime ship their
+        # TypeScript source; the schema runtime ships its compiled dist. npm
+        # pack writes superschematic-<name>-<version>.tgz for a scoped
+        # @superschematic/<name>.
         run: |
           set -euo pipefail
           mkdir -p release-assets/npm
@@ -316,8 +317,9 @@ jobs:
             (cd "packages/$pkg" && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           done
           (cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
+          (cd runtime/http/typescript && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           ls -l release-assets/npm
-          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 5
+          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 6
 
       - name: Build the PyPI sdist and wheel
         working-directory: runtime/schema/python

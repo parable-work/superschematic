@@ -69,6 +69,23 @@ func TestDefaultParseRegistry_TemporalIntegerUnits(t *testing.T) {
 	}
 }
 
+// Generic.StringMap parses JSON text to the core's canonical JSON text: keys
+// sorted, every value a string.
+func TestDefaultParseRegistry_StringMap(t *testing.T) {
+	fn, ok := DefaultParseRegistry().Get("Generic.StringMap")
+	require.True(t, ok)
+
+	got, errs := fn(`{ "tier": "gold", "region": "eu" }`)
+	require.Empty(t, errs)
+	assert.Equal(t, `{"region":"eu","tier":"gold"}`, got)
+
+	for _, invalid := range []string{`{"region":null}`, `{"region":1}`, `not json`} {
+		_, errs = fn(invalid)
+		require.Len(t, errs, 1, invalid)
+		assert.Equal(t, "parse", errs[0].Validator, invalid)
+	}
+}
+
 // DefaultParseRegistry holds exactly the names the Parser consults it for:
 // those whose core metadata marks a custom parse step. Names with a no-op
 // parse (Contact.Email) are not registered; the extension's registry in

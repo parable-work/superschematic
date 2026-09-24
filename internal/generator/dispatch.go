@@ -18,6 +18,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sdkgen"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
+	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -402,10 +403,71 @@ func (r run) generateAPI() error {
 	if proto := r.Outputs.API.Protocol; proto != APIProtocolREST {
 		return fmt.Errorf("generator: schema %s requests unsupported API protocol %q", r.Config.Name, proto)
 	}
-	if r.Outputs.API.Language == APILanguageRust {
+	switch lang := r.Outputs.API.Language; lang {
+	case APILanguageGo:
+		return r.generateGoAPI()
+	case APILanguageRust:
 		return r.generateRustAPI()
+	case APILanguageTypeScript:
+		return r.generateTypeScriptAPI()
+	default:
+		return fmt.Errorf("generator: schema %s requests unsupported API language %q (expected %s, %s, or %s)", r.Config.Name, lang, APILanguageGo, APILanguageRust, APILanguageTypeScript)
 	}
-	return r.generateGoAPI()
+}
+
+// generateTypeScriptAPI emits the TypeScript (Hono) REST API package from the
+// shared apigen output. There is no TypeScript env loader: an @envVars class
+// contributes its values-schema.json beside the package, and the service
+// reads its config through the generated types package.
+func (r run) generateTypeScriptAPI() error {
+	var apiOutput *apigen.APIOutput
+	if err := r.measure("output.api.prepare", func() error {
+		var err error
+		apiOutput, err = r.APIOutput()
+		return err
+	}); err != nil {
+		return err
+	}
+	deps, err := r.loadDependencySchemas()
+	if err != nil {
+		return err
+	}
+
+	output, err := tsrestgen.Generate(r.Schema, apiOutput, tsrestgen.Options{
+		SchemaName:   r.Config.Name,
+		Dependencies: deps,
+		Naming:       r.Options.Naming,
+		Clock:        r.Options.Clock,
+	})
+	if err != nil {
+		return fmt.Errorf("generator: typescript api for %s: %w", r.Config.Name, err)
+	}
+	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
+	if output != nil {
+		if err := r.measure("output.api.write", func() error {
+			return tsrestgen.WriteAPI(output, dir)
+		}); err != nil {
+			return fmt.Errorf("generator: typescript api for %s: %w", r.Config.Name, err)
+		}
+		r.Done("api-typescript", dir)
+	}
+
+	envOutput, err := envgen.GenerateWithOptions(r.Schema, envgen.Options{
+		SchemaName:   r.Config.Name,
+		Dependencies: deps,
+		Naming:       r.Options.Naming,
+	})
+	if err != nil {
+		return fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
+	}
+	if envOutput == nil {
+		return nil
+	}
+	if err := envgen.WriteValuesSchema(envOutput, dir); err != nil {
+		return fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
+	}
+	r.Done("env-values-schema", dir)
+	return nil
 }
 
 // resolveUpstreamAuth determines the DB schema backing authentication for a

@@ -1,0 +1,57 @@
+# {{ .PackageName }}
+
+Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
+`{{ .RuntimePackage }}` and Hono {{ .HonoVersion }}.
+
+**Do not edit manually.** Regenerate it by building the `{{ .SchemaName }}` schema.
+
+## Layout
+
+- `interfaces.ts`: one `<Namespace>Implementation` interface per operation
+  class with typed arguments (path params as scalar types, query params
+  optional unless required, the input type from the generated types package)
+  and the `Implementations` record the router takes.
+- `router.ts`: `buildRouter(implementations, options)` returns a Hono router
+  that mounts every `@rest` operation under `/api`, decodes parameters,
+  parses JSON bodies through the generated strict `parse<Input>FromJSON`
+  validators, applies the `@requirePermission` / `@publicRoute` gate, wraps
+  results in the `{data, meta: {requestId}}` envelope and failures in
+  RFC 9457 `application/problem+json`. `operationSpecs` is the operation table.
+- `openapi.json`: the OpenAPI document shared with the Go and Rust generators.
+- `values-schema.json`: the env-var contract, when the schema declares an
+  `@envVars` class.
+
+## Routes
+
+| Method | Path | Operation | Auth |
+| --- | --- | --- | --- |
+{{- range .Endpoints }}
+| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .ManualRouteRegistration }} (manual){{ end }} | {{ if .PublicRoute }}public{{ else if .RequiredPerms }}{{ join .RequiredPerms ", " }}{{ else if .RequiresAuth }}authenticated{{ else }}none{{ end }} |
+{{- end }}
+
+## Usage
+
+```ts
+import { Hono } from 'hono';
+import { errorHandler, notFoundHandler } from '{{ .RuntimePackage }}/hono';
+import { buildRouter, type Implementations } from '{{ .PackageName }}';
+
+const implementations: Implementations = { /* one object per operation class */ };
+const app = new Hono();
+app.route('/', buildRouter(implementations, {
+  authenticate: async ctx => /* the caller, or null */ null,
+{{- if .HasManualRoutes }}
+  manualRoutes: {
+{{- range .ManualEndpoints }}
+    {{ .Name }}: async (c, ctx) => new Response(/* the service's own handler */),
+{{- end }}
+  },
+{{- end }}
+}));
+app.notFound(notFoundHandler());
+app.onError(errorHandler());
+```
+
+Peer dependencies (`{{ .RuntimePackage }}`, the generated types packages,
+`hono`) are resolved by the consuming service, the way it resolves the scalar
+library.

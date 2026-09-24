@@ -110,6 +110,9 @@ func collectTypeScript(distRoot string, index map[string]*Package) error {
 	}{
 		{"types/typescript", "types"},
 		{"sdk/typescript", "sdk"},
+		// api/<service> is shared with the Go and Rust servers; only a
+		// TypeScript API package carries a package.json there.
+		{"api", "api"},
 	}
 	for _, td := range typeDirs {
 		root := filepath.Join(distRoot, filepath.FromSlash(td.rel))
@@ -163,6 +166,9 @@ func tsPackageID(npmName, kind, schemaDir string) string {
 	}
 	if kind == "sdk" {
 		return schemaDir + "-sdk"
+	}
+	if kind == "api" {
+		return schemaDir + "-api"
 	}
 	if strings.HasSuffix(schemaDir, "-types") {
 		return schemaDir

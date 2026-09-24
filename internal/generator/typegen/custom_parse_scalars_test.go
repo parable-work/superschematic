@@ -20,6 +20,12 @@ import (
 
 const customParseService = "custom-parse-scalars"
 
+// fallbackParseExamples supplies parse inputs for custom-parse scalars
+// whose superscalar metadata carries no example.
+var fallbackParseExamples = map[string][]string{
+	"Generic.StringMap": {`{"region":"eu","tier":"gold"}`},
+}
+
 // customParseScalars returns the canonical names of every scalar the linked
 // catalog marks HasCustomParse, sorted. The list comes from the catalog so a
 // scalar added to it is covered without editing this test.
@@ -186,10 +192,14 @@ func TestCustomParseScalarsCompile(t *testing.T) {
 	for _, field := range record.Fields {
 		scalar := field.ScalarInfo
 		meta, _ := catalog.Scalar(scalar.Name)
-		if len(meta.Examples) == 0 {
-			t.Fatalf("%s has no catalog example to parse", scalar.Name)
+		examples := meta.Examples
+		if len(examples) == 0 {
+			examples = fallbackParseExamples[scalar.Name]
 		}
-		for i, example := range meta.Examples {
+		if len(examples) == 0 {
+			t.Fatalf("%s has no catalog example to parse; add one to fallbackParseExamples", scalar.Name)
+		}
+		for i, example := range examples {
 			target := "_"
 			if i == 0 {
 				target = "record." + field.GoName
