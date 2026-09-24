@@ -215,6 +215,21 @@ func TestJSONUnionDecoders(t *testing.T) {
 	if _, err := decodeUnionRecordCreatedAgainstJSONUnion([]byte(` + "`" + `{"kind":"deleted"}` + "`" + `)); err == nil {
 		t.Fatal("an unknown union member was accepted")
 	}
+
+	// An optional map of a union holds the union interface values, like the
+	// types module's field, so the update and ApplyTo paths line up.
+	latest, err := decodeUnionRecordLatestByNameJSONUnion([]byte(` + "`" + `{"a":{"kind":"updated","revision":3}}` + "`" + `))
+	if err != nil {
+		t.Fatalf("decode optional union map: %v", err)
+	}
+	var row types.UnionRecord
+	(&UnionRecordUpdate{LatestByName: &latest}).ApplyTo(&row)
+	if value, ok := row.LatestByName["a"].(types.UpdatedRevision); !ok || value.Revision != 3 {
+		t.Fatalf("latestByName[a] = %#v, want UpdatedRevision revision 3", row.LatestByName["a"])
+	}
+	if snapshot := NewUnionRecordSnapshotUpdate(&types.UnionRecord{}); !snapshot.LatestByNameSetNull {
+		t.Fatal("a nil optional union map must snapshot as SetNull")
+	}
 }
 `
 	if err := os.WriteFile(filepath.Join(ormDir, "json_union_decoder_test.go"), []byte(unionDecoderTest), 0o644); err != nil {
@@ -288,6 +303,48 @@ func TestTenantUserUpdateApplyTo(t *testing.T) {
 	(&TenantUserUpdate{DisplayNameSetNull: true}).ApplyTo(&row)
 	if row.DisplayName != "" {
 		t.Fatalf("DisplayName = %q after SetNull, want empty", row.DisplayName)
+	}
+}
+
+// Optional maps: a nil map is null, a snapshot carries a set map as a value
+// and a nil one as SetNull, and ApplyTo writes both back.
+func TestTenantUserOptionalMaps(t *testing.T) {
+	admin := "admin"
+	alias := "al"
+	setting := types.GenericJSON(` + "`" + `{"on":true}` + "`" + `)
+	source := types.TenantUser{
+		Labels:          map[string]*string{"role": &admin, "unset": nil},
+		AliasesByLocale: map[string][]*string{"en": {&alias}},
+		SettingsByName:  map[string]*types.GenericJSON{"flags": &setting},
+	}
+
+	snapshot := NewTenantUserSnapshotUpdate(&source)
+	if snapshot.LabelsSetNull || snapshot.Labels == nil || len(*snapshot.Labels) != 2 {
+		t.Fatalf("snapshot Labels = %v (SetNull %t), want the two-key map", snapshot.Labels, snapshot.LabelsSetNull)
+	}
+	if snapshot.SettingsByNameSetNull || snapshot.SettingsByName == nil {
+		t.Fatalf("snapshot SettingsByName = %v (SetNull %t), want the map", snapshot.SettingsByName, snapshot.SettingsByNameSetNull)
+	}
+	empty := NewTenantUserSnapshotUpdate(&types.TenantUser{})
+	if !empty.LabelsSetNull || !empty.AliasesByLocaleSetNull || !empty.SettingsByNameSetNull {
+		t.Fatal("a nil optional map must snapshot as SetNull")
+	}
+
+	var row types.TenantUser
+	snapshot.ApplyTo(&row)
+	if row.Labels["role"] == nil || *row.Labels["role"] != "admin" || row.Labels["unset"] != nil {
+		t.Fatalf("Labels = %v, want role=admin and a null unset", row.Labels)
+	}
+	if len(row.AliasesByLocale["en"]) != 1 || *row.AliasesByLocale["en"][0] != "al" {
+		t.Fatalf("AliasesByLocale = %v, want en=[al]", row.AliasesByLocale)
+	}
+	if row.SettingsByName["flags"] == nil || string(*row.SettingsByName["flags"]) != ` + "`" + `{"on":true}` + "`" + ` {
+		t.Fatalf("SettingsByName = %v, want flags", row.SettingsByName)
+	}
+
+	empty.ApplyTo(&row)
+	if row.Labels != nil || row.AliasesByLocale != nil || row.SettingsByName != nil {
+		t.Fatalf("SetNull left maps = %v %v %v, want nil", row.Labels, row.AliasesByLocale, row.SettingsByName)
 	}
 }
 `
@@ -654,8 +711,9 @@ func findSnapshotUser(t *testing.T, users []types.TenantUser, id types.IdentityU
 // extendFixtureForCompileCoverage mutates the loaded fixture-db IR to
 // exercise template branches the fixture schema does not reach: nullable,
 // list and map Generic.JSON columns, a table of closed-union JSON columns
-// (single, nullable, list and map), createdBy/updatedBy user audit fields,
-// scalar arrays, optional enums, and optional non-audit datetime scalars.
+// (single, nullable, list, map and nullable map), createdBy/updatedBy user
+// audit fields, scalar arrays, optional enums, optional non-audit datetime
+// scalars, and optional maps.
 // Soft-delete fields (deletedAt/deletedBy) live on the fixture's TenantUser
 // itself. The mutation reuses scalars the fixture already resolves so the
 // generated types module stays compilable.
@@ -694,6 +752,7 @@ func extendFixtureForCompileCoverage(schema *ir.Schema) {
 			{Name: "supersededBy", TypeRef: ir.TypeRef{Name: "RevisionRef"}, JsonField: true},
 			{Name: "events", TypeRef: ir.TypeRef{Name: "RevisionRef", IsArray: true}, Required: true, JsonField: true},
 			{Name: "revisionByName", TypeRef: ir.TypeRef{Name: "RevisionRef", IsMap: true}, Required: true, JsonField: true},
+			{Name: "latestByName", TypeRef: ir.TypeRef{Name: "RevisionRef", IsMap: true}, JsonField: true},
 		},
 	}
 
@@ -705,5 +764,20 @@ func extendFixtureForCompileCoverage(schema *ir.Schema) {
 		&ir.FieldDef{Name: "lastStatus", TypeRef: ir.TypeRef{Name: "TenantStatus"}},
 		&ir.FieldDef{Name: "lastSeenAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}},
 		&ir.FieldDef{Name: "invitedBy", TypeRef: ir.TypeRef{Name: "Identity.UUID"}},
+		// Optional maps: typegen emits map[string]*T, and the update, snapshot
+		// and ApplyTo paths treat the map itself as the nilable value.
+		&ir.FieldDef{Name: "labels", TypeRef: ir.TypeRef{Name: "string", IsMap: true}},
+		&ir.FieldDef{Name: "aliasesByLocale", TypeRef: ir.TypeRef{Name: "string", IsMap: true, IsArray: true}},
+		&ir.FieldDef{Name: "settingsByName", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsMap: true}},
 	)
+
+	// A table whose only optional string-typed field is a map.
+	schema.Types["LabelSet"] = &ir.TypeDef{
+		Name: "LabelSet",
+		Role: ir.RoleDBTable,
+		Fields: []*ir.FieldDef{
+			{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, Key: true},
+			{Name: "labels", TypeRef: ir.TypeRef{Name: "string", IsMap: true}},
+		},
+	}
 }

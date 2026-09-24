@@ -108,7 +108,7 @@ of them; run them locally before pushing.
 | `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the four Go modules      |
 | `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar |
 | `make cli-smoke`      | `bin/superschematic build` with no extension builds the DB, API and General fixtures |
-| `make ts`             | `packages/` and `runtime/schema/typescript` typecheck, build and test |
+| `make ts`             | `packages/`, `runtime/schema/typescript` and `runtime/http/typescript` typecheck, build and test |
 | `make python`         | `runtime/schema/python` pytest                                       |
 | `make rust`           | `runtime/http/rust` fmt, clippy `-D warnings`, test                  |
 | `make docs`           | Starlight site in `docs/` (`npm ci && npm run build`)                |

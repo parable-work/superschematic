@@ -1,0 +1,43 @@
+{
+  "name": "@superschematic/http-runtime",
+  "version": "0.0.0",
+  "description": "Runtime for generated TypeScript API servers: request context, RFC 9457 problem envelope, success envelope, parameter decoding over the superscalar scalar functions, the permission gate, a token-bucket rate limiter, and the Hono adapter. Ships TypeScript sources. Needs superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./hono": {
+      "types": "./src/hono.ts",
+      "import": "./src/hono.ts"
+    }
+  },
+  "files": [
+    "src/*.ts",
+    "!src/*.test.ts"
+  ],
+  "scripts": {
+    "link-deps": "node scripts/link-local-deps.mjs",
+    "typecheck": "node scripts/link-local-deps.mjs && tsc --noEmit -p tsconfig.json",
+    "test": "node scripts/link-local-deps.mjs && tsc --noEmit -p tsconfig.json && bun test src"
+  },
+  "peerDependencies": {
+    "@hono/node-server": "2.1.1",
+    "hono": "4.13.8"
+  },
+  "peerDependenciesMeta": {
+    "@hono/node-server": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@hono/node-server": "2.1.1",
+    "@types/node": "22.19.9",
+    "hono": "4.13.8",
+    "typescript": "5.9.3"
+  },
+  "license": "Apache-2.0"
+}

@@ -12,9 +12,9 @@ import (
 )
 
 // unionFieldsSchema declares a discriminated union (Choice, tagged by kind)
-// and uses it in every field shape: an optional object field, a required
-// map, a map of lists, and optional input fields (InputField wrappers) that
-// hold one value, a list and a map. The link field gives the module a
+// and uses it in every field shape: an optional object field, required and
+// optional maps and maps of lists, and optional input fields (InputField
+// wrappers) that hold one value, a list and a map. The link field gives the module a
 // scalar, so scalars.go and enums.go do not both declare ValidationError.
 func unionFieldsSchema(t *testing.T) *ir.Schema {
 	t.Helper()
@@ -29,7 +29,7 @@ func unionFieldsSchema(t *testing.T) *ir.Schema {
 	for _, encoded := range []string{
 		`{"name":"AlphaChoice","role":"EmbeddedStruct","fields":[{"name":"kind","typeRef":{"name":"ChoiceKind"},"required":true,"default":"alpha","internalMetadata":true},{"name":"value","typeRef":{"name":"string"},"required":true}]}`,
 		`{"name":"BetaChoice","role":"EmbeddedStruct","fields":[{"name":"kind","typeRef":{"name":"ChoiceKind"},"required":true,"default":"beta","internalMetadata":true},{"name":"count","typeRef":{"name":"number"},"required":true}]}`,
-		`{"name":"ChoiceRecord","role":"EmbeddedStruct","fields":[{"name":"link","typeRef":{"name":"Network.Url"}},{"name":"optionalChoice","typeRef":{"name":"Choice"}},{"name":"byName","typeRef":{"name":"Choice","isMap":true},"required":true},{"name":"listsByName","typeRef":{"name":"Choice","isMap":true,"isArray":true},"required":true}]}`,
+		`{"name":"ChoiceRecord","role":"EmbeddedStruct","fields":[{"name":"link","typeRef":{"name":"Network.Url"}},{"name":"optionalChoice","typeRef":{"name":"Choice"}},{"name":"byName","typeRef":{"name":"Choice","isMap":true},"required":true},{"name":"listsByName","typeRef":{"name":"Choice","isMap":true,"isArray":true},"required":true},{"name":"optionalByName","typeRef":{"name":"Choice","isMap":true}},{"name":"optionalListsByName","typeRef":{"name":"Choice","isMap":true,"isArray":true}}]}`,
 		`{"name":"NullableUnionInput","role":"APIInput","fields":[{"name":"scalar","typeRef":{"name":"Choice"}},{"name":"array","typeRef":{"name":"Choice","isArray":true}},{"name":"map","typeRef":{"name":"Choice","isMap":true}}]}`,
 	} {
 		var model ir.TypeDef
@@ -60,9 +60,18 @@ func TestGeneratedUnionFieldsDecode(t *testing.T) {
 		if typeInfo.Name != "ChoiceRecord" {
 			continue
 		}
+		// A union is an interface and already nilable: no field shape adds a
+		// pointer to it.
+		want := map[string]string{
+			"optionalChoice":      "Choice",
+			"byName":              "map[string]Choice",
+			"listsByName":         "map[string][]Choice",
+			"optionalByName":      "map[string]Choice",
+			"optionalListsByName": "map[string][]Choice",
+		}
 		for _, field := range typeInfo.Fields {
-			if field.Name == "optionalChoice" && field.GoType != "Choice" {
-				t.Fatalf("optional union Go type = %q, want the Choice interface", field.GoType)
+			if goType, ok := want[field.Name]; ok && field.GoType != goType {
+				t.Errorf("%s Go type = %q, want %q", field.Name, field.GoType, goType)
 			}
 		}
 	}
@@ -106,6 +115,21 @@ func TestChoiceRecord(t *testing.T) {
 	}
 	if _, ok := record.OptionalChoice.(BetaChoice); !ok {
 		t.Fatalf("optionalChoice = %#v", record.OptionalChoice)
+	}
+	if record.OptionalByName != nil || record.OptionalListsByName != nil {
+		t.Fatalf("absent optional union maps = %#v, %#v; want nil", record.OptionalByName, record.OptionalListsByName)
+	}
+	var optionalMaps ChoiceRecord
+	if err := json.Unmarshal([]byte(` + "`" + `{"byName":{},"listsByName":{},"optionalByName":{"a":{"kind":"alpha","value":"two"}},"optionalListsByName":{"x":[{"kind":"beta","count":4}]}}` + "`" + `), &optionalMaps); err != nil {
+		t.Fatalf("decode optional maps: %v", err)
+	}
+	if alpha, ok := optionalMaps.OptionalByName["a"].(AlphaChoice); !ok || alpha.Value != "two" {
+		t.Fatalf("optionalByName[a] = %#v", optionalMaps.OptionalByName["a"])
+	}
+	if items := optionalMaps.OptionalListsByName["x"]; len(items) != 1 {
+		t.Fatalf("optionalListsByName[x] = %#v", items)
+	} else if beta, ok := items[0].(BetaChoice); !ok || beta.Count != 4 {
+		t.Fatalf("optionalListsByName[x][0] = %#v", items[0])
 	}
 }
 

@@ -19,6 +19,8 @@ from datetime import datetime
 try:
     from superscalar import (
 
+        validate_generic_json,
+
         parse_identity_uuid,
 
         parse_temporal_date_time,
@@ -59,7 +61,7 @@ def _custom_parse_temporal_date_time(v: Any) -> Any:
         raise ValueError(str(e))
     return parsed
 
-# Generic.JSON - A JSON object represented as a string
+# Generic.JSON - Any valid JSON value: object, array, primitive, or null
 
 def _validate_generic_json(v: Any) -> Any:
     """Reject host values JSON cannot represent without loss."""
@@ -92,6 +94,10 @@ def _validate_generic_json(v: Any) -> Any:
             ancestors.remove(identity)
 
     visit(v)
+    if _SCALAR_LIB_AVAILABLE:
+        errors = validate_generic_json(json.dumps(v, allow_nan=False, separators=(",", ":")))
+        if errors:
+            raise ValueError("; ".join([e.message for e in errors]))
     return v
 
 # Any JSON value: object, array, string, number, boolean or null. `Any`
@@ -100,7 +106,7 @@ def _validate_generic_json(v: Any) -> Any:
 GenericJSON = Annotated[
     Any,
     Field(
-        description="A JSON object represented as a string",
+        description="Any valid JSON value: object, array, primitive, or null",
     ),
     AfterValidator(_validate_generic_json),
 ]

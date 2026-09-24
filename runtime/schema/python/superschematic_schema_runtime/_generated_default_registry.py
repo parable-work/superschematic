@@ -15,6 +15,7 @@ from superscalar import (
     normalize_temporal_duration,
     parse_finance_money,
     parse_generic_int64,
+    parse_generic_string_map,
     parse_identity_user_id,
     parse_identity_uuid,
     parse_temporal_date_time,
@@ -43,6 +44,7 @@ def _validator(canonical_name: str) -> Callable[[str], list]:
 DEFAULT_PARSE_FUNCTIONS: dict[str, Callable[[str], str]] = {
     "Finance.Money": parse_finance_money,
     "Generic.Int64": parse_generic_int64,
+    "Generic.StringMap": parse_generic_string_map,
     "Identity.UUID": parse_identity_uuid,
     "Identity.UserID": parse_identity_user_id,
     "Temporal.DateTime": parse_temporal_date_time,
@@ -64,6 +66,7 @@ DEFAULT_NORMALIZE_FUNCTIONS: dict[str, Callable[[str], str]] = {
 
 
 DEFAULT_VALIDATE_FUNCTIONS: dict[str, Callable[[str], list]] = {
+    "AgentSkill.Name": _validator("AgentSkill.Name"),
     "Auth.JWT": _validator("Auth.JWT"),
     "Auth.Password": _validator("Auth.Password"),
     "Contact.Email": _validator("Contact.Email"),
@@ -80,6 +83,7 @@ DEFAULT_VALIDATE_FUNCTIONS: dict[str, Callable[[str], list]] = {
     "Generic.Probability": _validator("Generic.Probability"),
     "Generic.StringMap": _validator("Generic.StringMap"),
     "Geo.Location": _validator("Geo.Location"),
+    "Git.PathPattern": _validator("Git.PathPattern"),
     "Identity.Name": _validator("Identity.Name"),
     "Identity.Slug": _validator("Identity.Slug"),
     "Identity.UUID": _validator("Identity.UUID"),
@@ -90,6 +94,7 @@ DEFAULT_VALIDATE_FUNCTIONS: dict[str, Callable[[str], list]] = {
     "Network.IpAddress": _validator("Network.IpAddress"),
     "Network.Uri": _validator("Network.Uri"),
     "Network.Url": _validator("Network.Url"),
+    "Ordering.Rank": _validator("Ordering.Rank"),
     "Temporal.CronExpression": _validator("Temporal.CronExpression"),
     "Temporal.Date": _validator("Temporal.Date"),
     "Temporal.DateTime": _validator("Temporal.DateTime"),
@@ -108,6 +113,7 @@ DEFAULT_VALIDATE_FUNCTIONS: dict[str, Callable[[str], list]] = {
     "Temporal.Year": _validator("Temporal.Year"),
     "Text.Markdown": _validator("Text.Markdown"),
     "Text.Sql": _validator("Text.Sql"),
+    "Version.SemVer": _validator("Version.SemVer"),
 }
 
 

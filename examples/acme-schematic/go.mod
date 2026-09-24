@@ -18,7 +18,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/parable-work/superscalar/go v0.0.0-20260908181317-c9da122f99b8 // indirect
+	github.com/parable-work/superscalar/go v0.0.0-20260924135511-79a8e6a73504 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
