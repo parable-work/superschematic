@@ -14,7 +14,6 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
-	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	"github.com/parable-work/superschematic/internal/generator/rustapigen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	ir "github.com/parable-work/superschematic/ir"
@@ -77,12 +76,11 @@ type Options struct {
 	Clock        codegen.Clock
 }
 
-// Generate produces Rust REST API metadata from an IR schema.
+// Generate produces Rust REST API metadata from an IR schema. Handlers take
+// the request body and return the response as serde_json::Value, so a body
+// argument or response that is an array of arrays (T[][]) passes through as
+// nested JSON arrays; the implementation decodes it.
 func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
-	// nested-arrays guard: remove when rustrestgen renders T[][].
-	if err := nestedguard.Check("rustrestgen", schema); err != nil {
-		return nil, err
-	}
 	generated, err := rustapigen.Generate(schema, rustapigen.Options{
 		SchemaName:     opts.SchemaName,
 		IsPublic:       opts.IsPublic,
