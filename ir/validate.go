@@ -46,7 +46,9 @@ func WithStrictScalarResolution() ValidateOption {
 // Validate checks the schema for dangling type references and malformed
 // imports. It walks all TypeRef.Name values in types, operations, and union
 // member lists, verifying that each resolves to a known definition, and
-// verifies that every import is a named import.
+// verifies that every import is a named import. It also checks the TypeRef
+// invariants of an array of arrays: isArrayOfArrays requires isArray and
+// excludes isMap.
 //
 // Resolution sources (checked in order):
 //   - schema.Scalars
@@ -136,6 +138,7 @@ func (s *Schema) validateTypeDef(cfg *validateConfig, td *TypeDef) []error {
 		if f.PlatformDefault != "" && f.PlatformDefault != f.TypeRef.Name {
 			errs = append(errs, fmt.Errorf("%s.%s platform default %q does not match field type %q", td.Name, f.Name, f.PlatformDefault, f.TypeRef.Name))
 		}
+		errs = append(errs, validateArrayOfArrays(td.Name+"."+f.Name, f.TypeRef)...)
 		errs = append(errs, s.validateFieldUploadMaxBytes(td.Name, f)...)
 		if f.Relation != nil && f.Relation.OnDelete != "" {
 			switch f.Relation.OnDelete {
@@ -148,6 +151,7 @@ func (s *Schema) validateTypeDef(cfg *validateConfig, td *TypeDef) []error {
 			if !s.isResolvable(cfg, arg.TypeRef.Name) {
 				errs = append(errs, fmt.Errorf("%s.%s argument %q references unknown type %q", td.Name, f.Name, arg.Name, arg.TypeRef.Name))
 			}
+			errs = append(errs, validateArrayOfArrays(fmt.Sprintf("%s.%s argument %q", td.Name, f.Name, arg.Name), arg.TypeRef)...)
 		}
 	}
 	return errs
@@ -159,11 +163,13 @@ func (s *Schema) validateOperationSet(cfg *validateConfig, set *OperationSet) []
 		if !s.isResolvable(cfg, op.TypeRef.Name) {
 			errs = append(errs, fmt.Errorf("%s.%s references unknown type %q", set.Name, op.Name, op.TypeRef.Name))
 		}
+		errs = append(errs, validateArrayOfArrays(set.Name+"."+op.Name, op.TypeRef)...)
 		errs = append(errs, s.validateFieldUploadMaxBytes(set.Name, op)...)
 		for _, arg := range op.Arguments {
 			if !s.isResolvable(cfg, arg.TypeRef.Name) {
 				errs = append(errs, fmt.Errorf("%s.%s argument %q references unknown type %q", set.Name, op.Name, arg.Name, arg.TypeRef.Name))
 			}
+			errs = append(errs, validateArrayOfArrays(fmt.Sprintf("%s.%s argument %q", set.Name, op.Name, arg.Name), arg.TypeRef)...)
 		}
 	}
 	return errs
