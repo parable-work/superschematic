@@ -127,9 +127,6 @@ func TestNestedArraysAPIShape(t *testing.T) {
 			t.Fatalf("SaveGridInput.polygons = %+v", field)
 		}
 	}
-	if where, found := output.FindArrayOfArrays(); !found || !strings.Contains(where, ".") {
-		t.Fatalf("FindArrayOfArrays() = %q, %v", where, found)
-	}
 }
 
 // TestNestedArraysRouteValidatesElements: a body argument that is an array
@@ -187,33 +184,6 @@ func TestNestedArraysRouteValidatesElements(t *testing.T) {
 	}
 	if strings.Contains(string(routes), `AddFieldError("polygons", "required"`) {
 		t.Error("the optional polygons argument is checked for presence")
-	}
-}
-
-// TestAPIOutputFindArrayOfArrays: the SDK generators' guards read nested
-// arrays off the API output, where apigen carries IsArrayOfArrays on every
-// Param and on the endpoint response.
-func TestAPIOutputFindArrayOfArrays(t *testing.T) {
-	var none *apigen.APIOutput
-	if where, found := none.FindArrayOfArrays(); found {
-		t.Fatalf("nil output: %q", where)
-	}
-	nested := apigen.Param{Name: "cells", IsArray: true, IsArrayOfArrays: true}
-	cases := []struct {
-		out  apigen.APIOutput
-		want string
-	}{
-		{apigen.APIOutput{TypeFields: map[string][]apigen.Param{"Grid": {{Name: "id"}, nested}}}, "Grid.cells"},
-		{apigen.APIOutput{Endpoints: []apigen.EndpointInfo{{Namespace: "grid", Name: "rows", OutputIsArray: true, OutputIsArrayOfArrays: true}}}, "grid.rows"},
-		{apigen.APIOutput{Endpoints: []apigen.EndpointInfo{{Namespace: "grid", Name: "save", ScalarArgs: []apigen.Param{nested}}}}, "grid.save(cells)"},
-		{apigen.APIOutput{Endpoints: []apigen.EndpointInfo{{Namespace: "grid", Name: "save", InputTypeFields: []apigen.Param{nested}}}}, "grid.save(cells)"},
-		{apigen.APIOutput{Endpoints: []apigen.EndpointInfo{{Namespace: "grid", Name: "list", QueryParams: []apigen.Param{{Name: "ids", IsArray: true}}}}}, ""},
-	}
-	for _, tc := range cases {
-		where, found := tc.out.FindArrayOfArrays()
-		if where != tc.want || found != (tc.want != "") {
-			t.Errorf("FindArrayOfArrays() = %q, %v; want %q", where, found, tc.want)
-		}
 	}
 }
 

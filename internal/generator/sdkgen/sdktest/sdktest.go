@@ -1,4 +1,5 @@
-// Package sdktest holds schema edits the SDK generator tests share.
+// Package sdktest holds schema edits the SDK generator tests and the
+// generated API server test share.
 package sdktest
 
 import (

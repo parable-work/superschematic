@@ -351,11 +351,9 @@ of a generated artifact is always listed here with the bump it requires.
   a platform default takes a list of lists. Verification refuses it in env
   config fields, relations, indexed fields and `@index` keys, query and
   path parameters, arguments of GET operations and operations without a
-  method, and every projection column, join and row rule. No generator
-  renders it yet: each one fails with "<generator> does not support
-  arrays of arrays yet", and `apigen.Param` and `apigen.EndpointInfo`
-  carry `IsArrayOfArrays` / `OutputIsArrayOfArrays` for the SDK
-  generators. Minor.
+  method, and every projection column, join and row rule.
+  `apigen.Param` and `apigen.EndpointInfo` carry `IsArrayOfArrays` /
+  `OutputIsArrayOfArrays` for the SDK generators. Minor.
 - Naming file: `scalar_jsdoc_tag` names a JSDoc tag that the TypeScript
   types write above every scalar-typed field in `types/types.ts`, followed
   by the scalar's canonical name (`/** @scalar Contact.Email */`), after
@@ -409,6 +407,13 @@ of a generated artifact is always listed here with the bump it requires.
   body arguments (`T[]` and `T[][]` arguments were rendered as `T`) and
   nest the return schema's items. The Rust API crate passes lists of lists
   through its `serde_json::Value` handlers. Minor.
+- Arrays of arrays on the docs site: a reference page for `T[][]` (the
+  TypeScript and data forms, what each generator writes, where a list of
+  lists is accepted and refused with each error, the list rules and the
+  error paths), and a note in the extension guide that a generator reads
+  `TypeRef.ArrayDepth()`. `examples/acme-schematic` declares a list of
+  lists as a DB column, in API types and as a tool argument, and its smoke
+  follows it into every output. No generated output changes.
 
 ### Changed
 

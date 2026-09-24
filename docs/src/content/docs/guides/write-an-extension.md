@@ -119,6 +119,10 @@ r.RegisterGenerator(registry.GeneratorSpec{
 - `Generate` gets the loaded `ir.Schema`, the config, the naming and the
   output root in one `GenerateContext`, writes its files and calls
   `c.Done(key, dir)`.
+- A generator that renders field types reads a field's list depth from
+  `TypeRef.ArrayDepth()` (0, 1 or 2), not from `IsArray` alone, or it
+  renders a list of lists as a flat list. See
+  [Arrays of arrays](/superschematic/reference/arrays-of-arrays/#reading-the-ir).
 
 A generator on kinds the extension did not define lists those kinds and
 omits `OutputKey`. It then runs after every listed kind's own pipeline and
