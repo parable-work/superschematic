@@ -320,6 +320,15 @@ of a generated artifact is always listed here with the bump it requires.
   arrays of arrays yet", and `apigen.Param` and `apigen.EndpointInfo`
   carry `IsArrayOfArrays` / `OutputIsArrayOfArrays` for the SDK
   generators. Minor.
+- Arrays of arrays in Go types and the Go schema runtime: typegen renders
+  `T[][]` as `[][]T` (`InputField[[][]T]` for an optional input field) and
+  no longer refuses it; `Validate` reports a null inner list as required at
+  `field[i]`, checks each inner element at `field[i][j]` and applies list
+  bounds to the outer list; union elements decode through the union wrapper
+  at `[i][j]`, and `MaskSecrets` and `To<Type>` copy each inner list. The
+  runtime's parse, validate, mask, merge and serialize walk inner lists with
+  the same paths. A types module with enums and types but no scalars no
+  longer declares `ValidationError` twice. Minor.
 
 ### Changed
 
