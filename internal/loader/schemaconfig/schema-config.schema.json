@@ -84,6 +84,9 @@
         "sdk": {
           "$ref": "#/definitions/SdkOutputConfig"
         },
+        "sql": {
+          "$ref": "#/definitions/SqlOutputConfig"
+        },
         "types": {
           "$ref": "#/definitions/TypesOutputConfig"
         }
@@ -123,6 +126,21 @@
         "name",
         "kind"
       ],
+      "type": "object"
+    },
+    "SqlOutputConfig": {
+      "additionalProperties": false,
+      "description": "The DB kind's sql output. The DDL and the ORM are implied by the kind; this block places and owns the generated projection view migrations.",
+      "properties": {
+        "migrationsDir": {
+          "description": "Where the projection view migrations are written, relative to the service directory. Unset keeps them under <out>/sql/<service>/projections/migrations.",
+          "type": "string"
+        },
+        "viewOwner": {
+          "description": "The Postgres role the migrations create the views as: SET ROLE around the view DDL and RESET ROLE after it, so the schema's default privileges for that role apply. The migration runner must be a member of the role. Unset creates the views as the runner.",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "TargetOutputConfig": {

@@ -1,16 +1,28 @@
 package generator
 
 import (
+	"encoding/json"
+
 	"github.com/parable-work/superschematic/internal/registry"
 )
+
+// sqlOutputSchema is the JSON Schema of outputs.sql.
+var sqlOutputSchema = json.RawMessage(`{
+	"type": "object",
+	"additionalProperties": false,
+	"properties": {
+		"migrationsDir": {"type": "string"},
+		"viewOwner": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
+	}
+}`)
 
 // RegisterCore adds the core generators to reg. The kinds are registered by
 // registry.New; this half lives here because the generator closures call
 // the dispatch methods of this package. Core registers no documents and no
 // build-all hooks; extensions do.
 //
-// Registration order fixes Registry.OutputKeys: types, api, sdk is the order
-// the ParseOutputs error lists.
+// Registration order fixes Registry.OutputKeys: types, sql, api, sdk is the
+// order the ParseOutputs error lists.
 func RegisterCore(reg *registry.Registry) error {
 	specs := []registry.GeneratorSpec{
 		{
@@ -29,8 +41,11 @@ func RegisterCore(reg *registry.Registry) error {
 		},
 		{
 			// SQL DDL and the Go ORM are implied by the DB kind; the outputs
-			// block carries no switches for them.
-			Name: "sql",
+			// block has no switch for them. outputs.sql places and owns the
+			// generated projection view migrations.
+			Name:         "sql",
+			OutputKey:    "sql",
+			OutputSchema: sqlOutputSchema,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{SQLDir(c.Options.OutputRoot, c.Config.Name)}
 			},

@@ -169,6 +169,25 @@ of a generated artifact is always listed here with the bump it requires.
   every view's first `where` rule to bind the setting
   `[extension.acme] projection_scope_setting` names. `describe` lists the
   registered checks. Patch.
+- The sql generator writes projection views: each view in `create.sql`
+  (after the tables, in `CREATE SCHEMA IF NOT EXISTS "pool"`) and
+  `drop.sql` (dropped first), a re-runnable migration pair
+  `<stamp>_<pool>_<name>_projection.{up,down}.sql`, and
+  `projections/<pool>.<name>.arrow.json` (the view's Arrow schema in arrow-rs
+  serde form) and `.docs.json`. Views are `security_barrier`; a required
+  setting binding makes an unset setting raise, an optional one matches no
+  row. A new `outputs.sql` block (`@superschematic/schema-config`
+  `SqlOutputConfig`, and the data-form config schema) takes
+  `migrationsDir`, relative to the service directory, and `viewOwner`, the
+  role the up migration creates the view as with `SET ROLE`; the `sql`
+  generator now claims the `sql` output key, so the unknown-key error lists
+  `types, sql, api, sdk`, and an unknown key in `outputs.sql` fails the
+  build. The generator refuses unsafe names and unmappable column types
+  even when the IR skipped verification. Minor.
+- Naming file: `metadata_key_prefix` (default `superschematic.`) prefixes
+  every key of the projection Arrow schemas' metadata
+  (`<prefix>scalar.canonical_name`, `<prefix>projection.settings`, ...).
+  Minor.
 
 ### Changed
 

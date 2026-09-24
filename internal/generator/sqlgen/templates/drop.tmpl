@@ -1,6 +1,13 @@
 -- Drop statements for schema: {{ .SchemaName }}
 -- This file is auto-generated. Do not edit manually.
 -- WARNING: This will drop all tables and data!
+{{- if .Projections }}
+
+-- Drop projection views first (they read the tables below)
+{{- range $view := .Projections }}
+DROP VIEW IF EXISTS {{ $view.QualifiedView }};
+{{- end }}
+{{- end }}
 
 -- Drop indexes
 {{- range $table := .Tables | reverse }}

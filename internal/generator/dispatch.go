@@ -313,9 +313,11 @@ func (r run) generateSQL() error {
 		return err
 	}
 	output, err := sqlgen.Generate(r.Schema, sqlgen.Options{
-		SchemaName:   r.Config.Name,
-		Dependencies: deps,
-		Clock:        r.Options.Clock,
+		SchemaName:        r.Config.Name,
+		Dependencies:      deps,
+		Clock:             r.Options.Clock,
+		ViewOwner:         r.Outputs.SQLViewOwner(),
+		MetadataKeyPrefix: r.Options.Naming.OrDefault().MetadataKeyPrefix,
 	})
 	if err != nil {
 		return fmt.Errorf("generator: sql for %s: %w", r.Config.Name, err)
@@ -328,6 +330,23 @@ func (r run) generateSQL() error {
 	dir := SQLDir(r.Options.OutputRoot, r.Config.Name)
 	if err := sqlgen.WriteDDL(output, dir); err != nil {
 		return fmt.Errorf("generator: sql for %s: %w", r.Config.Name, err)
+	}
+
+	// Projection migrations land next to the service's hand-written ones
+	// when outputs.sql.migrationsDir says where those are; otherwise they
+	// stay under the output root.
+	migrationsDir := filepath.Join(dir, sqlgen.ProjectionsSubdir, "migrations")
+	if subdir := r.Outputs.SQLMigrationsDir(); subdir != "" {
+		if r.Options.ServicePath == "" {
+			return fmt.Errorf("generator: sql for %s: outputs.sql.migrationsDir needs the service path", r.Config.Name)
+		}
+		migrationsDir = filepath.Join(r.Options.ServicePath, filepath.FromSlash(subdir))
+	}
+	if err := sqlgen.WriteProjections(r.Schema, output, dir, migrationsDir); err != nil {
+		return fmt.Errorf("generator: sql projections for %s: %w", r.Config.Name, err)
+	}
+	if len(output.Projections) > 0 {
+		r.Logf("  + sql projections: %d view migration(s) in %s\n", len(output.Projections), migrationsDir)
 	}
 
 	r.Done("sql", dir)

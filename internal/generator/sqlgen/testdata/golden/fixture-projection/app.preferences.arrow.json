@@ -1,0 +1,206 @@
+{
+  "fields": [
+    {
+      "data_type": "Utf8",
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {
+        "superschematic.projection.source": "base.slotKey",
+        "superschematic.scalar.canonical_name": "Identity.UUID",
+        "superschematic.scalar.flat_name": "Identity_UUID",
+        "superschematic.scalar.json_schema_type": "string",
+        "superschematic.scalar.pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+        "superschematic.scalar.primitive": "String",
+        "superschematic.scalar.sql_type": "UUID"
+      },
+      "name": "slot_key",
+      "nullable": false
+    },
+    {
+      "data_type": "Utf8",
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {
+        "superschematic.projection.source": "base.handle",
+        "superschematic.scalar.canonical_name": "Identity.Slug",
+        "superschematic.scalar.flat_name": "Identity_Slug",
+        "superschematic.scalar.json_schema_type": "string",
+        "superschematic.scalar.max_length": "255",
+        "superschematic.scalar.min_length": "1",
+        "superschematic.scalar.pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+        "superschematic.scalar.primitive": "String",
+        "superschematic.scalar.sql_type": "CITEXT"
+      },
+      "name": "handle",
+      "nullable": false
+    },
+    {
+      "data_type": "Utf8",
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {
+        "superschematic.enum.name": "PreferenceScope",
+        "superschematic.enum.values": "app,team,user",
+        "superschematic.projection.source": "base.scope"
+      },
+      "name": "scope",
+      "nullable": false
+    },
+    {
+      "data_type": "Utf8",
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {
+        "superschematic.projection.source": "base.userId",
+        "superschematic.scalar.canonical_name": "Identity.UUID",
+        "superschematic.scalar.flat_name": "Identity_UUID",
+        "superschematic.scalar.json_schema_type": "string",
+        "superschematic.scalar.pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+        "superschematic.scalar.primitive": "String",
+        "superschematic.scalar.sql_type": "UUID"
+      },
+      "name": "user_id",
+      "nullable": true
+    },
+    {
+      "data_type": "Utf8",
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {
+        "superschematic.projection.source": "base.channel",
+        "superschematic.scalar.canonical_name": "Identity.UUID",
+        "superschematic.scalar.flat_name": "Identity_UUID",
+        "superschematic.scalar.json_schema_type": "string",
+        "superschematic.scalar.pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+        "superschematic.scalar.primitive": "String",
+        "superschematic.scalar.sql_type": "UUID"
+      },
+      "name": "channel_id",
+      "nullable": false
+    },
+    {
+      "data_type": "Utf8",
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {
+        "superschematic.projection.source": "channel.handle",
+        "superschematic.scalar.canonical_name": "Identity.Slug",
+        "superschematic.scalar.flat_name": "Identity_Slug",
+        "superschematic.scalar.json_schema_type": "string",
+        "superschematic.scalar.max_length": "255",
+        "superschematic.scalar.min_length": "1",
+        "superschematic.scalar.pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+        "superschematic.scalar.primitive": "String",
+        "superschematic.scalar.sql_type": "CITEXT"
+      },
+      "name": "channel_handle",
+      "nullable": false
+    },
+    {
+      "data_type": "Utf8",
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {
+        "superschematic.projection.source": "branch.name",
+        "superschematic.scalar.canonical_name": "Identity.Name",
+        "superschematic.scalar.flat_name": "Identity_Name",
+        "superschematic.scalar.json_schema_type": "string",
+        "superschematic.scalar.max_length": "80",
+        "superschematic.scalar.min_length": "2",
+        "superschematic.scalar.primitive": "String",
+        "superschematic.scalar.sql_type": "VARCHAR(80)"
+      },
+      "name": "branch_name",
+      "nullable": true
+    },
+    {
+      "data_type": "Utf8",
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {
+        "superschematic.projection.source": "base.value",
+        "superschematic.scalar.canonical_name": "Generic.JSON",
+        "superschematic.scalar.flat_name": "Generic_JSON",
+        "superschematic.scalar.json_schema_type": "object",
+        "superschematic.scalar.primitive": "String",
+        "superschematic.scalar.sql_type": "JSONB"
+      },
+      "name": "value",
+      "nullable": false
+    },
+    {
+      "data_type": "Int64",
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {
+        "superschematic.projection.source": "base.revision",
+        "superschematic.scalar.canonical_name": "Generic.Int64",
+        "superschematic.scalar.flat_name": "Generic_Int64",
+        "superschematic.scalar.json_schema_type": "integer",
+        "superschematic.scalar.primitive": "Int",
+        "superschematic.scalar.sql_type": "BIGINT"
+      },
+      "name": "revision",
+      "nullable": false
+    },
+    {
+      "data_type": {
+        "List": {
+          "data_type": "Utf8",
+          "dict_id": 0,
+          "dict_is_ordered": false,
+          "metadata": {},
+          "name": "item",
+          "nullable": true
+        }
+      },
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {
+        "superschematic.projection.source": "base.tags",
+        "superschematic.scalar.canonical_name": "Identity.Slug",
+        "superschematic.scalar.flat_name": "Identity_Slug",
+        "superschematic.scalar.json_schema_type": "string",
+        "superschematic.scalar.max_length": "255",
+        "superschematic.scalar.min_length": "1",
+        "superschematic.scalar.pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+        "superschematic.scalar.primitive": "String",
+        "superschematic.scalar.sql_type": "CITEXT"
+      },
+      "name": "tags",
+      "nullable": false
+    },
+    {
+      "data_type": {
+        "Timestamp": [
+          "Microsecond",
+          "UTC"
+        ]
+      },
+      "dict_id": 0,
+      "dict_is_ordered": false,
+      "metadata": {
+        "superschematic.projection.source": "base.updatedAt",
+        "superschematic.scalar.canonical_name": "Temporal.DateTime",
+        "superschematic.scalar.flat_name": "Temporal_DateTime",
+        "superschematic.scalar.json_schema_type": "string",
+        "superschematic.scalar.primitive": "String",
+        "superschematic.scalar.sql_type": "TIMESTAMPTZ"
+      },
+      "name": "updated_at",
+      "nullable": true
+    }
+  ],
+  "metadata": {
+    "superschematic.projection.migration": "20260902120000",
+    "superschematic.projection.name": "preferences",
+    "superschematic.projection.optional_settings": "app.branch_id,app.commit_id",
+    "superschematic.projection.pool": "app",
+    "superschematic.projection.relation": "app.preferences",
+    "superschematic.projection.rows": "one",
+    "superschematic.projection.schema": "fixture-projection",
+    "superschematic.projection.settings": "app.account_id,app.channel_id,app.user_id,app.branch_id,app.commit_id",
+    "superschematic.projection.type": "AppPreference",
+    "superschematic.projection.view": "app.preferences"
+  }
+}

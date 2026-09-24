@@ -35,6 +35,7 @@ type (
 	Outputs            = registry.Outputs
 	TargetOutputConfig = registry.TargetOutputConfig
 	APIOutputConfig    = registry.APIOutputConfig
+	SQLOutputConfig    = registry.SQLOutputConfig
 )
 
 // ParseOutputs decodes the raw outputs block from schema.config against the

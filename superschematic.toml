@@ -34,6 +34,10 @@ schema_language = "Superschematic"
 package_author = "superschematic"
 meta_schema_url_prefix = "superschematic://"
 
+# Prefix of the metadata keys in the generated projection Arrow schemas
+# (<prefix>scalar.canonical_name, <prefix>projection.settings, ...).
+metadata_key_prefix = "superschematic."
+
 # The auth provider the api generator renders with. The core registers
 # "session"; an extension that registers another provider names it here.
 auth_provider = "session"

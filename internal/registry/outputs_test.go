@@ -83,3 +83,24 @@ func TestParseOutputsEmptyBlock(t *testing.T) {
 		t.Errorf("empty outputs should enable nothing: %+v", outputs)
 	}
 }
+
+func TestParseOutputsReadsTheSQLSectionStrictly(t *testing.T) {
+	reg := New(naming.Default())
+	if err := reg.RegisterGenerator(GeneratorSpec{Name: "sql", OutputKey: "sql", Generate: func(GenerateContext) error { return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	outputs, err := ParseOutputs(map[string]any{"sql": map[string]any{"migrationsDir": "db/migrations", "viewOwner": "app_view_owner"}}, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outputs.SQLMigrationsDir() != "db/migrations" || outputs.SQLViewOwner() != "app_view_owner" {
+		t.Errorf("sql section = %+v", outputs.SQL)
+	}
+	if (&Outputs{}).SQLMigrationsDir() != "" || (*Outputs)(nil).SQLViewOwner() != "" {
+		t.Error("an absent sql section must leave both unset")
+	}
+	_, err = ParseOutputs(map[string]any{"sql": map[string]any{"migrationDir": "db"}}, reg)
+	if err == nil || !strings.Contains(err.Error(), `outputs.sql: json: unknown field "migrationDir"`) {
+		t.Fatalf("a misspelt outputs.sql key: %v", err)
+	}
+}
