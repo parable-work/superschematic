@@ -430,5 +430,13 @@ of a generated artifact is always listed here with the bump it requires.
   directly. Go does not inherit `replace` lines from a dependency's
   `go.mod`, so a module that reached a sibling only through another
   generated module did not resolve it. Patch.
+- Go ORM: an optional map column did not compile. `NewXSnapshotUpdate`
+  compared the map with a zero value of its element type, `ApplyTo`
+  assigned that zero value on `SetNull`, and a map of a scalar or enum was
+  treated as a pointer and assigned without a dereference. An optional map
+  is now nil-checked like a list, and its `<Type>Update` field holds the map
+  type the types module emits: `map[string]*T` for a non-union value (was
+  `map[string]T`). A table whose only optional string field is a map no
+  longer imports `database/sql` without using it. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main

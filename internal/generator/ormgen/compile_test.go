@@ -290,6 +290,48 @@ func TestTenantUserUpdateApplyTo(t *testing.T) {
 		t.Fatalf("DisplayName = %q after SetNull, want empty", row.DisplayName)
 	}
 }
+
+// Optional maps: a nil map is null, a snapshot carries a set map as a value
+// and a nil one as SetNull, and ApplyTo writes both back.
+func TestTenantUserOptionalMaps(t *testing.T) {
+	admin := "admin"
+	alias := "al"
+	setting := types.GenericJSON(` + "`" + `{"on":true}` + "`" + `)
+	source := types.TenantUser{
+		Labels:          map[string]*string{"role": &admin, "unset": nil},
+		AliasesByLocale: map[string][]*string{"en": {&alias}},
+		SettingsByName:  map[string]*types.GenericJSON{"flags": &setting},
+	}
+
+	snapshot := NewTenantUserSnapshotUpdate(&source)
+	if snapshot.LabelsSetNull || snapshot.Labels == nil || len(*snapshot.Labels) != 2 {
+		t.Fatalf("snapshot Labels = %v (SetNull %t), want the two-key map", snapshot.Labels, snapshot.LabelsSetNull)
+	}
+	if snapshot.SettingsByNameSetNull || snapshot.SettingsByName == nil {
+		t.Fatalf("snapshot SettingsByName = %v (SetNull %t), want the map", snapshot.SettingsByName, snapshot.SettingsByNameSetNull)
+	}
+	empty := NewTenantUserSnapshotUpdate(&types.TenantUser{})
+	if !empty.LabelsSetNull || !empty.AliasesByLocaleSetNull || !empty.SettingsByNameSetNull {
+		t.Fatal("a nil optional map must snapshot as SetNull")
+	}
+
+	var row types.TenantUser
+	snapshot.ApplyTo(&row)
+	if row.Labels["role"] == nil || *row.Labels["role"] != "admin" || row.Labels["unset"] != nil {
+		t.Fatalf("Labels = %v, want role=admin and a null unset", row.Labels)
+	}
+	if len(row.AliasesByLocale["en"]) != 1 || *row.AliasesByLocale["en"][0] != "al" {
+		t.Fatalf("AliasesByLocale = %v, want en=[al]", row.AliasesByLocale)
+	}
+	if row.SettingsByName["flags"] == nil || string(*row.SettingsByName["flags"]) != ` + "`" + `{"on":true}` + "`" + ` {
+		t.Fatalf("SettingsByName = %v, want flags", row.SettingsByName)
+	}
+
+	empty.ApplyTo(&row)
+	if row.Labels != nil || row.AliasesByLocale != nil || row.SettingsByName != nil {
+		t.Fatalf("SetNull left maps = %v %v %v, want nil", row.Labels, row.AliasesByLocale, row.SettingsByName)
+	}
+}
 `
 	if err := os.WriteFile(filepath.Join(ormDir, "apply_to_test.go"), []byte(applyToTest), 0o644); err != nil {
 		t.Fatalf("write apply to test: %v", err)
@@ -705,5 +747,20 @@ func extendFixtureForCompileCoverage(schema *ir.Schema) {
 		&ir.FieldDef{Name: "lastStatus", TypeRef: ir.TypeRef{Name: "TenantStatus"}},
 		&ir.FieldDef{Name: "lastSeenAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}},
 		&ir.FieldDef{Name: "invitedBy", TypeRef: ir.TypeRef{Name: "Identity.UUID"}},
+		// Optional maps: typegen emits map[string]*T, and the update, snapshot
+		// and ApplyTo paths treat the map itself as the nilable value.
+		&ir.FieldDef{Name: "labels", TypeRef: ir.TypeRef{Name: "string", IsMap: true}},
+		&ir.FieldDef{Name: "aliasesByLocale", TypeRef: ir.TypeRef{Name: "string", IsMap: true, IsArray: true}},
+		&ir.FieldDef{Name: "settingsByName", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsMap: true}},
 	)
+
+	// A table whose only optional string-typed field is a map.
+	schema.Types["LabelSet"] = &ir.TypeDef{
+		Name: "LabelSet",
+		Role: ir.RoleDBTable,
+		Fields: []*ir.FieldDef{
+			{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, Key: true},
+			{Name: "labels", TypeRef: ir.TypeRef{Name: "string", IsMap: true}},
+		},
+	}
 }
