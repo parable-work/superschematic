@@ -78,6 +78,10 @@ type ToolsOutput struct {
 	Namespaces        []ToolsNamespace            // Tools grouped by namespace
 	Timestamp         string                      // Generation timestamp
 	MCPBindingVersion string                      // MCP binding manifest schema version
+
+	// HasListOfListsReturns reports whether a tool returns an array of
+	// arrays (T[][]), whose return schema nests a second items level.
+	HasListOfListsReturns bool
 }
 
 // ToolsNamespace groups tools by namespace for TypeScript generation
@@ -130,6 +134,9 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 			}
 			toolsNS.Tools = append(toolsNS.Tools, tool)
 			output.Tools = append(output.Tools, tool)
+			if tool.Returns.Items != nil && tool.Returns.Items.Items != nil {
+				output.HasListOfListsReturns = true
+			}
 			if tool.MCP != nil && !tool.MCP.Hidden {
 				output.VisibleTools = append(output.VisibleTools, tool)
 			}
@@ -177,6 +184,9 @@ func endpointToTool(
 			TSName:   tsutil.ToCamelCase(arg.Name),
 			Type:     arg.Type,
 			Required: arg.Required,
+			// The list shape: the argument schema is T, T[] or T[][].
+			IsArray:         arg.IsArray,
+			IsArrayOfArrays: arg.IsArrayOfArrays,
 		}
 	}
 
@@ -230,7 +240,7 @@ func endpointToTool(
 		Namespace:                ns.Name,
 		IsScopedNS:               ns.IsScopedNS,
 		Parameters:               parameters,
-		Returns:                  toolsutil.BuildReturnSchema(endpoint.OutputType, endpoint.OutputIsArray, scalars),
+		Returns:                  toolsutil.BuildReturnSchemaAtDepth(endpoint.OutputType, endpoint.OutputArrayDepth(), scalars),
 		PathParams:               pathParams,
 		HasInput:                 endpoint.HasInput,
 		InputType:                endpoint.InputType,

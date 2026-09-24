@@ -16,7 +16,6 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
-	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	"github.com/parable-work/superschematic/internal/generator/rustapigen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 )
@@ -196,10 +195,6 @@ func IsToolUnavailable(err error) bool {
 func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock codegen.Clock) (*SDKOutput, error) {
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
-	}
-	// nested-arrays guard: remove when rustsdkgen renders T[][].
-	if err := nestedguard.Check("rustsdkgen", apiOutput); err != nil {
-		return nil, err
 	}
 
 	names := apiOutput.Naming.OrDefault()
@@ -463,7 +458,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		rustType := qualifyType(arg.Type)
 		isArray := arg.IsArray
 		if isArray {
-			rustType = "Vec<" + rustType + ">"
+			rustType = rustListType(rustType, arg.ArrayDepth())
 		}
 		if !arg.Required {
 			rustType = rustutil.WrapOptionalType(rustType)
@@ -507,7 +502,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		InputType:              qualifyType(ep.InputType),
 		InputSchemaName:        ep.InputType,
 		OutputType:             ep.OutputType,
-		OutputRustType:         outputType(ep.OutputType, ep.OutputIsArray),
+		OutputRustType:         outputType(ep.OutputType, ep.OutputArrayDepth()),
 		HasInput:               ep.HasInput,
 		RequiresAuth:           ep.RequiresAuth,
 		PathParams:             pathParams,
@@ -577,15 +572,20 @@ func listAllPagination(
 	return true, pageSize
 }
 
-func outputType(typeName string, isArray bool) string {
+// outputType is the Rust type of a response: the qualified output type in
+// arrayDepth Vec levels.
+func outputType(typeName string, arrayDepth int) string {
 	base := qualifyType(typeName)
 	if base == "" {
 		base = "serde_json::Value"
 	}
-	if isArray {
-		return "Vec<" + base + ">"
-	}
-	return base
+	return rustListType(base, arrayDepth)
+}
+
+// rustListType wraps a Rust element type in depth Vec levels: "T",
+// "Vec<T>" or "Vec<Vec<T>>".
+func rustListType(elem string, depth int) string {
+	return codegen.WrapArray(elem, depth, func(inner string) string { return "Vec<" + inner + ">" })
 }
 
 func isBodyMethod(method string) bool {

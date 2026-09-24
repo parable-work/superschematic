@@ -16,7 +16,6 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
-	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	"github.com/parable-work/superschematic/internal/generator/sdkgen"
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/profile"
@@ -54,6 +53,12 @@ type SDKOutput struct {
 	Timestamp              string
 	Version                string
 	Naming                 naming.Naming
+
+	// ValidatesListElements reports whether a namespace validates the
+	// elements of an array-of-arrays argument whose type may carry its own
+	// validation (not a Go primitive); namespaces/validation.go then
+	// carries the validateListElement helper those checks call.
+	ValidatesListElements bool
 }
 
 // ModuleReplace describes a go.mod replace directive needed by generated SDK modules.
@@ -157,6 +162,12 @@ type ScalarArg struct {
 	ValidateListMin   *int
 	ValidateListMax   *int
 	ValidatePattern   string
+
+	// IsArrayOfArrays marks a T[][] argument ([][]T; IsArray is also set).
+	// Each inner list is checked for nil and, unless IsGoPrimitive, each
+	// element runs its own validation.
+	IsArrayOfArrays bool
+	IsGoPrimitive   bool
 }
 
 // FileUploadField represents file upload field metadata.
@@ -170,10 +181,6 @@ type FileUploadField struct {
 func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock codegen.Clock) (*SDKOutput, error) {
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
-	}
-	// nested-arrays guard: remove when gosdkgen renders T[][].
-	if err := nestedguard.Check("gosdkgen", apiOutput); err != nil {
-		return nil, err
 	}
 
 	names := apiOutput.Naming.OrDefault()
@@ -232,6 +239,11 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 		converted := convertEndpoint(endpoint, ns.IsScopedNS, ns.ScopeParamName, goutil.GoPublicIdentifier(nsName))
 		if endpointUsesTypes(converted) {
 			ns.RequiresTypes = true
+		}
+		for _, arg := range converted.ScalarArgs {
+			if arg.IsArrayOfArrays && !arg.IsGoPrimitive {
+				output.ValidatesListElements = true
+			}
 		}
 		ns.Endpoints = append(ns.Endpoints, converted)
 	}
@@ -332,7 +344,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		isArray := arg.IsArray
 		pointer := !arg.Required
 		if isArray {
-			goType = "[]" + goType
+			goType = goListType(goType, arg.ArrayDepth())
 			pointer = false // slices are nil-able, no pointer needed
 		}
 		scalarArgs = append(scalarArgs, ScalarArg{
@@ -349,6 +361,8 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			ValidateListMin:   arg.ValidateListMin,
 			ValidateListMax:   arg.ValidateListMax,
 			ValidatePattern:   arg.ValidatePattern,
+			IsArrayOfArrays:   arg.IsArrayOfArrays,
+			IsGoPrimitive:     arg.IsGoPrimitive(),
 		})
 	}
 
@@ -371,7 +385,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		PathArgs:              pathArgs,
 		InputType:             qualifyType(ep.InputType),
 		OutputType:            ep.OutputType,
-		OutputGoType:          outputType(ep.OutputType, ep.OutputIsArray),
+		OutputGoType:          outputType(ep.OutputType, ep.OutputArrayDepth()),
 		HasInput:              ep.HasInput,
 		RequiresAuth:          ep.RequiresAuth,
 		PathParams:            pathParams,
@@ -391,12 +405,16 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 	}
 }
 
-func outputType(typeName string, isArray bool) string {
-	base := qualifyType(typeName)
-	if isArray {
-		return "[]" + base
-	}
-	return base
+// outputType is the Go type of a response: the qualified output type in
+// arrayDepth slice levels.
+func outputType(typeName string, arrayDepth int) string {
+	return goListType(qualifyType(typeName), arrayDepth)
+}
+
+// goListType wraps a Go element type in depth slice levels: "T", "[]T" or
+// "[][]T".
+func goListType(elem string, depth int) string {
+	return codegen.WrapArray(elem, depth, func(inner string) string { return "[]" + inner })
 }
 
 func isBodyMethod(method string) bool {
@@ -876,6 +894,12 @@ func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, n
 		}
 		if ep.HasInput || ep.HasScalarArgs {
 			needsTypes = true
+		}
+		for _, arg := range ep.ScalarArgs {
+			if arg.IsArrayOfArrays {
+				// The inner-list checks name the index: fmt.Sprintf.
+				needsFmt = true
+			}
 		}
 		if endpointNeedsRegexp(ep) {
 			needsRegexp = true

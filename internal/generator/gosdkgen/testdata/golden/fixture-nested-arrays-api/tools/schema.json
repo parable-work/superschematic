@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureNestedArraysApiSDK Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-nested-arrays-api API",
+  "tools": [
+    {
+      "name": "grid.saveGrid",
+      "operationId": "GridSaveGridHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Store a grid from a request body.",
+      "namespace": "grid",
+      "methodName": "saveGrid",
+      "httpMethod": "POST",
+      "httpPath": "/api/grids",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:536566a8571936c08eb74193e3e997c187df26d137493d61e6f921f246e93329",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "labels": {"description":"Array of arrays of string values","items":{"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},"type":"array"},
+          "polygons": {"description":"Array of arrays of Point values","items":{"description":"Array of Point values","items":{"additionalProperties":false,"description":"Point object","properties":{"x":{"description":"A numeric value","type":"number"},"y":{"description":"A numeric value","type":"number"}},"required":["x","y"],"type":"object"},"type":"array"},"type":"array"},
+          "shades": {"description":"Array of arrays of Shade values","items":{"description":"Array of Shade values","items":{"description":"A Shade value","type":"string"},"type":"array"},"type":"array"},
+          "weights": {"description":"Array of arrays of number values","items":{"description":"Array of number values","items":{"description":"A numeric value","type":"number"},"type":"array"},"type":["array","null"]}
+        },
+        "required": ["labels", "polygons", "shades"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "GridView object"
+      }
+    },
+    {
+      "name": "grid.getGrid",
+      "operationId": "GridGetGridHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "getGrid endpoint",
+      "namespace": "grid",
+      "methodName": "getGrid",
+      "httpMethod": "GET",
+      "httpPath": "/api/grids/{id}",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "GridView object"
+      }
+    },
+    {
+      "name": "grid.gridLabels",
+      "operationId": "GridGridLabelsHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "One grid's labels as a bare list of lists, at most `limit` rows.",
+      "namespace": "grid",
+      "methodName": "gridLabels",
+      "httpMethod": "GET",
+      "httpPath": "/api/grids/{id}/labels",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:3ba9b52f7397ab93b89d2332971bbd13ab11b6f60027ff97b66ee6d122c96f79",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "limit": {"description":"A numeric value","type":"number"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of arrays of string",
+        "items": {
+          "type": "array",
+          "description": "Array of string",
+          "items": {
+            "type": "string",
+            "description": "A string value"
+          }
+        }
+      }
+    },
+    {
+      "name": "grid.replaceLabels",
+      "operationId": "GridReplaceLabelsHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Replace a grid's labels; the body argument is a list of lists.",
+      "namespace": "grid",
+      "methodName": "replaceLabels",
+      "httpMethod": "PUT",
+      "httpPath": "/api/grids/{id}/labels",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:18ce302660b90047cdb226467010fad5df1989bc262a5512e82cfb8303a820e6",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "labels": {"description":"Array of arrays of string values","items":{"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},"type":"array"}
+        },
+        "required": ["id", "labels"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "GridView object"
+      }
+    }
+  ]
+}

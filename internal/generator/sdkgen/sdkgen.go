@@ -14,7 +14,6 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
-	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	"github.com/parable-work/superschematic/internal/profile"
@@ -68,6 +67,10 @@ type EndpointInfo struct {
 
 	// JSON parse configuration
 	HasOutputParser bool // True if the output type has a parseFromJSON function
+
+	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
+	// set.
+	OutputIsArrayOfArrays bool
 }
 
 // FileUploadField represents a file upload field in an endpoint's input for TypeScript SDK
@@ -127,10 +130,6 @@ type SDKOutput struct {
 func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock codegen.Clock) (*SDKOutput, error) {
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
-	}
-	// nested-arrays guard: remove when sdkgen renders T[][].
-	if err := nestedguard.Check("sdkgen", apiOutput); err != nil {
-		return nil, err
 	}
 
 	// Check if this is public api (has authentication)
@@ -366,7 +365,22 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 		HasFileUpload:    ep.HasFileUpload,
 		FileUploadFields: fileUploadFields,
 		HasOutputParser:  hasOutputParser,
+
+		OutputIsArrayOfArrays: ep.OutputIsArrayOfArrays,
 	}
+}
+
+// OutputArrayDepth is 0 for a T response, 1 for T[] and 2 for T[][].
+func (e EndpointInfo) OutputArrayDepth() int {
+	return ir.TypeRef{IsArray: e.OutputIsArray, IsArrayOfArrays: e.OutputIsArrayOfArrays}.ArrayDepth()
+}
+
+// TSOutputType is the TypeScript type of the response: the output type
+// with one "[]" per list level ("GridView", "GridView[]", "string[][]").
+func (e EndpointInfo) TSOutputType() string {
+	return codegen.WrapArray(normalizeTSTypeIdentifier(e.OutputType), e.OutputArrayDepth(), func(inner string) string {
+		return inner + "[]"
+	})
 }
 
 // IRTypeToTSType converts an IR type-reference name to a TypeScript type for
@@ -738,6 +752,10 @@ func toolsTemplateFuncs() template.FuncMap {
 			case "boolean":
 				return "boolean"
 			case "array":
+				if prop.Items != nil && prop.Items.Type == "array" && prop.Items.Items != nil {
+					// An array of arrays (T[][]).
+					return jsonSchemaTypeToTS(prop.Items.Items.Type) + "[][]"
+				}
 				if prop.Items != nil {
 					itemType := jsonSchemaTypeToTS(prop.Items.Type)
 					return itemType + "[]"
