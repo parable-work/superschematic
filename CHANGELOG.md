@@ -443,5 +443,12 @@ of a generated artifact is always listed here with the bump it requires.
   `UnmarshalJSON` builds `map[string]Choice`, so the module did not
   compile. It is now `map[string]Choice` (`map[string][]Choice`), as the
   required map and the optional input map already were. Patch.
+- Rust SDK: an array query parameter was validated as its comma-joined
+  wire text, so the pattern and length checks saw `a,b`, `min` and `max`
+  tried to parse `1,5` as one number, and the list count split items that
+  contain a comma. The generated server checks each item, so the SDK
+  rejected requests the server accepts. The SDK now checks each item and
+  counts the list it was given, in the JSON and the multipart methods.
+  Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main
