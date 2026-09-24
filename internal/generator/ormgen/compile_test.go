@@ -215,6 +215,21 @@ func TestJSONUnionDecoders(t *testing.T) {
 	if _, err := decodeUnionRecordCreatedAgainstJSONUnion([]byte(` + "`" + `{"kind":"deleted"}` + "`" + `)); err == nil {
 		t.Fatal("an unknown union member was accepted")
 	}
+
+	// An optional map of a union holds the union interface values, like the
+	// types module's field, so the update and ApplyTo paths line up.
+	latest, err := decodeUnionRecordLatestByNameJSONUnion([]byte(` + "`" + `{"a":{"kind":"updated","revision":3}}` + "`" + `))
+	if err != nil {
+		t.Fatalf("decode optional union map: %v", err)
+	}
+	var row types.UnionRecord
+	(&UnionRecordUpdate{LatestByName: &latest}).ApplyTo(&row)
+	if value, ok := row.LatestByName["a"].(types.UpdatedRevision); !ok || value.Revision != 3 {
+		t.Fatalf("latestByName[a] = %#v, want UpdatedRevision revision 3", row.LatestByName["a"])
+	}
+	if snapshot := NewUnionRecordSnapshotUpdate(&types.UnionRecord{}); !snapshot.LatestByNameSetNull {
+		t.Fatal("a nil optional union map must snapshot as SetNull")
+	}
 }
 `
 	if err := os.WriteFile(filepath.Join(ormDir, "json_union_decoder_test.go"), []byte(unionDecoderTest), 0o644); err != nil {
@@ -696,8 +711,9 @@ func findSnapshotUser(t *testing.T, users []types.TenantUser, id types.IdentityU
 // extendFixtureForCompileCoverage mutates the loaded fixture-db IR to
 // exercise template branches the fixture schema does not reach: nullable,
 // list and map Generic.JSON columns, a table of closed-union JSON columns
-// (single, nullable, list and map), createdBy/updatedBy user audit fields,
-// scalar arrays, optional enums, and optional non-audit datetime scalars.
+// (single, nullable, list, map and nullable map), createdBy/updatedBy user
+// audit fields, scalar arrays, optional enums, optional non-audit datetime
+// scalars, and optional maps.
 // Soft-delete fields (deletedAt/deletedBy) live on the fixture's TenantUser
 // itself. The mutation reuses scalars the fixture already resolves so the
 // generated types module stays compilable.
@@ -736,6 +752,7 @@ func extendFixtureForCompileCoverage(schema *ir.Schema) {
 			{Name: "supersededBy", TypeRef: ir.TypeRef{Name: "RevisionRef"}, JsonField: true},
 			{Name: "events", TypeRef: ir.TypeRef{Name: "RevisionRef", IsArray: true}, Required: true, JsonField: true},
 			{Name: "revisionByName", TypeRef: ir.TypeRef{Name: "RevisionRef", IsMap: true}, Required: true, JsonField: true},
+			{Name: "latestByName", TypeRef: ir.TypeRef{Name: "RevisionRef", IsMap: true}, JsonField: true},
 		},
 	}
 

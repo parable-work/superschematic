@@ -438,5 +438,10 @@ of a generated artifact is always listed here with the bump it requires.
   type the types module emits: `map[string]*T` for a non-union value (was
   `map[string]T`). A table whose only optional string field is a map no
   longer imports `database/sql` without using it. Patch.
+- Go types: an optional map or map of lists of a union on an output type
+  was `map[string]*Choice` (`map[string][]*Choice`), while its generated
+  `UnmarshalJSON` builds `map[string]Choice`, so the module did not
+  compile. It is now `map[string]Choice` (`map[string][]Choice`), as the
+  required map and the optional input map already were. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main
