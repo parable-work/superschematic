@@ -410,21 +410,22 @@ func SetReplacePaths(output *ModuleOutput, paths naming.LocalPaths, outputDir st
 }
 
 // fieldTypeMapperGo maps IR type references to Go types.
-func fieldTypeMapperGo(typeName string, isArray bool, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	valueType := fieldValueTypeMapperGo(typeName, isArray, isMap, isRequired, scalarMap)
+func fieldTypeMapperGo(typeName string, arrayDepth int, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	valueType := fieldValueTypeMapperGo(typeName, arrayDepth, isMap, isRequired, scalarMap)
 	if !isMap {
 		return valueType
 	}
 	return "map[string]" + valueType
 }
 
-func fieldValueTypeMapperGo(typeName string, isArray bool, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	if isArray {
+func fieldValueTypeMapperGo(typeName string, arrayDepth int, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	if arrayDepth > 0 {
 		elemRequired := true
 		if inMap {
 			elemRequired = isRequired
 		}
-		return "[]" + fieldValueTypeMapperGo(typeName, false, inMap, elemRequired, scalarMap)
+		elemType := fieldValueTypeMapperGo(typeName, 0, inMap, elemRequired, scalarMap)
+		return codegen.WrapArray(elemType, arrayDepth, func(elem string) string { return "[]" + elem })
 	}
 
 	if scalar, ok := scalarMap[typeName]; ok {

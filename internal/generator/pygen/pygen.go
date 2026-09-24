@@ -409,21 +409,21 @@ func refinePythonScalarType(scalar *codegen.ScalarInfo, scalarDef *ir.ScalarDef)
 }
 
 // fieldTypeMapperPython maps IR type references to Python type strings.
-func fieldTypeMapperPython(typeName string, isArray bool, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	valueType := fieldValueTypeMapperPython(typeName, isArray, isMap, isRequired, scalarMap)
+func fieldTypeMapperPython(typeName string, arrayDepth int, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	valueType := fieldValueTypeMapperPython(typeName, arrayDepth, isMap, isRequired, scalarMap)
 	if !isMap {
 		return valueType
 	}
 	return "Dict[str, " + valueType + "]"
 }
 
-func fieldValueTypeMapperPython(typeName string, isArray bool, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	if isArray {
-		elemType := fieldValueTypeMapperPython(typeName, false, false, true, scalarMap)
+func fieldValueTypeMapperPython(typeName string, arrayDepth int, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	if arrayDepth > 0 {
+		elemType := fieldValueTypeMapperPython(typeName, 0, false, true, scalarMap)
 		if inMap && !isRequired {
 			elemType = elemType + " | None"
 		}
-		return "List[" + elemType + "]"
+		return codegen.WrapArray(elemType, arrayDepth, func(elem string) string { return "List[" + elem + "]" })
 	}
 
 	var resolvedType string
