@@ -20,7 +20,6 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
-	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -85,6 +84,12 @@ type FieldInfo struct {
 	Doc              string
 	ScalarInfo       *ScalarInfo
 	Validations      []codegen.ValidationRule
+
+	// IsArrayOfArrays marks T[][]: IsArray is also set, TSType is T[][] and
+	// Type is the innermost element type. Validators check every innermost
+	// element, list bounds apply to the outer list, and an inner list must
+	// be an array, never null.
+	IsArrayOfArrays bool
 
 	// HasDefault is true when @default was declared on the field and a
 	// TypeScript literal could be produced for it.
@@ -247,10 +252,6 @@ type Options struct {
 
 // Generate generates TypeScript types from a v2 IR schema.
 func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
-	// nested-arrays guard: remove when tsgen renders T[][].
-	if err := nestedguard.Check("tsgen", schema); err != nil {
-		return nil, err
-	}
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}
@@ -428,6 +429,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			InternalMetadata: f.InternalMetadata,
 			Secret:           f.Secret,
 			IsArray:          f.IsArray,
+			IsArrayOfArrays:  f.IsArrayOfArrays,
 			IsMap:            f.IsMap,
 			IsScalar:         f.IsScalar,
 			Doc:              f.Doc(),

@@ -2,9 +2,9 @@ package typegen
 
 import "testing"
 
-// The Go field type mapper wraps the element type once per list level.
-// Depth 2 is exercised here only: the generator still refuses T[][] at its
-// entry until it renders every part of a nested-array field.
+// The Go field type mapper wraps the element type once per list level. The
+// elements of a list are value types at every depth; only a map value keeps
+// a pointer for a nullable element.
 func TestFieldTypeMapperGoArrayDepth(t *testing.T) {
 	cases := []struct {
 		typeName   string

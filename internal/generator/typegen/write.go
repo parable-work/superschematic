@@ -32,6 +32,13 @@ func (o *ModuleOutput) TypeImports() []ModuleImport {
 	return o.filterImports(used)
 }
 
+// WritesScalars reports whether the module has a scalars.go. It carries the
+// ValidationError aliases types.go's Validate() references, so it exists
+// whenever types.go does; enums.go declares ValidationError only without it.
+func (o *ModuleOutput) WritesScalars() bool {
+	return len(o.Scalars) > 0 || len(o.Types) > 0 || len(o.ImportedTypes) > 0 || len(o.ImportedUnions) > 0
+}
+
 // NeedsRegexp reports whether types.go emits regexp-based pattern checks.
 func (o *ModuleOutput) NeedsRegexp() bool {
 	for _, typeInfo := range o.Types {
@@ -84,7 +91,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		// Validate() references, so it must exist whenever types.go does --
 		// a schema with types but no scalars previously generated
 		// uncompilable Go (the go.mod requires superscalar unconditionally).
-		{Condition: len(output.Scalars) > 0 || len(output.Types) > 0 || len(output.ImportedTypes) > 0 || len(output.ImportedUnions) > 0, Template: "scalars.tmpl", Filename: "scalars.go"},
+		{Condition: output.WritesScalars(), Template: "scalars.tmpl", Filename: "scalars.go"},
 		{Condition: len(output.Enums) > 0 || len(output.ImportedEnums) > 0, Template: "enums.tmpl", Filename: "enums.go"},
 		{Condition: len(output.Types) > 0 || len(output.ImportedTypes) > 0 || len(output.ImportedUnions) > 0, Template: "types.tmpl", Filename: "types.go"},
 		{Condition: len(output.Unions) > 0, Template: "unions.tmpl", Filename: "unions.go"},

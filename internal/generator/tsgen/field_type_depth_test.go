@@ -3,8 +3,6 @@ package tsgen
 import "testing"
 
 // The TS field type mapper wraps the element type once per list level.
-// Depth 2 is exercised here only: the generator still refuses T[][] at its
-// entry until it renders every part of a nested-array field.
 func TestFieldTypeMapperTSArrayDepth(t *testing.T) {
 	cases := []struct {
 		typeName   string

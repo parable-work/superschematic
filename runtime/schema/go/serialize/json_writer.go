@@ -93,7 +93,11 @@ func (s *Serializer) writeFieldValue(buf *bytes.Buffer, field *ir.FieldDef, valu
 			if i > 0 {
 				buf.WriteByte(',')
 			}
-			if err := s.writeElemValue(buf, field, kind, elem); err != nil {
+			write := s.writeElemValue
+			if field.TypeRef.IsArrayOfArrays {
+				write = s.writeInnerList
+			}
+			if err := write(buf, field, kind, elem); err != nil {
 				return err
 			}
 		}
@@ -121,6 +125,31 @@ func (s *Serializer) writeFieldValue(buf *bytes.Buffer, field *ir.FieldDef, valu
 		return err
 	}
 	buf.Write(raw)
+	return nil
+}
+
+// writeInnerList writes one inner list of an array of arrays (T[][]); a nil
+// inner list is written as [].
+func (s *Serializer) writeInnerList(buf *bytes.Buffer, field *ir.FieldDef, kind string, value any) error {
+	inner, ok := value.([]any)
+	if value != nil && !ok {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		buf.Write(raw)
+		return nil
+	}
+	buf.WriteByte('[')
+	for j, elem := range inner {
+		if j > 0 {
+			buf.WriteByte(',')
+		}
+		if err := s.writeElemValue(buf, field, kind, elem); err != nil {
+			return err
+		}
+	}
+	buf.WriteByte(']')
 	return nil
 }
 

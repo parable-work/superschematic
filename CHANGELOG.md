@@ -359,6 +359,40 @@ of a generated artifact is always listed here with the bump it requires.
   no tag line is written, so existing output does not change. A value that
   is not an identifier fails the load (D13). `examples/acme-schematic`
   sets `acmeScalar`. Minor.
+- Arrays of arrays in Python (D12): pygen renders `T[][]` as
+  `List[List[T]]` with element errors at `field[i][j]`, and the Python
+  schema runtime reads, parses, validates, serializes, masks and merges
+  lists of lists (`TypeRef.is_array_of_arrays`). Minor.
+- Arrays of arrays in the Go API and the tool schemas: the api generator
+  and `apigen.TypeOpenAPISchema` render `T[][]` as items of items, with
+  element constraints on the inner items and `minItems`/`maxItems` on the
+  outer array; the Go routes decode a `T[][]` body argument as `[][]T`,
+  refuse a null inner list at `name[i]`, validate each element at
+  `name[i][j]` and send a nil inner list of a `T[][]` response as `[]`.
+  `toolsutil` renders `T[][]` input fields, body arguments
+  (`ToolScalarArg.IsArray`, `IsArrayOfArrays`) and responses
+  (`BuildReturnSchemaAtDepth`). A list argument is no longer taken as a
+  path parameter or as the operation's input type, and a `T[]` body
+  argument is an array in the OpenAPI request body. Minor.
+- Arrays of arrays in SQL and the Go ORM: a `T[][]` column is `JSONB`,
+  never a native array, and the ORM writes it through its JSON codec with
+  nil inner lists stored as `[]`. Minor.
+- Arrays of arrays in Go types and the Go schema runtime: typegen renders
+  `T[][]` as `[][]T` (`InputField[[][]T]` for an optional input field) and
+  no longer refuses it; `Validate` reports a null inner list as required at
+  `field[i]`, checks each inner element at `field[i][j]` and applies list
+  bounds to the outer list; union elements decode through the union wrapper
+  at `[i][j]`, and `MaskSecrets` and `To<Type>` copy each inner list. The
+  runtime's parse, validate, mask, merge and serialize walk inner lists with
+  the same paths. A types module with enums and types but no scalars no
+  longer declares `ValidationError` twice. Minor.
+- Arrays of arrays in TypeScript: tsgen emits `T[][]`, and its validators
+  and the TypeScript schema runtime check every innermost element at
+  `field[i][j]`, apply list bounds to the outer list and reject an inner
+  list that is not an array at `field[i]` (`required`). Minor.
+- Rust types render a list of lists as `Vec<Vec<T>>` (`Option<Vec<Vec<T>>>`
+  when optional) with the serde attributes of `Vec<T>`; a null inner list
+  fails to decode. Minor.
 
 ### Changed
 

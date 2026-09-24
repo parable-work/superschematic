@@ -105,6 +105,13 @@ def _mask_field(schema: Schema, field: FieldDef, value: Any) -> Any:
     if field.type_ref.is_array:
         if not isinstance(value, list):
             return deep_copy_value(value)
+        if field.type_ref.is_array_of_arrays:
+            return [
+                _mask_array_field(schema, field, kind, row)
+                if isinstance(row, list)
+                else deep_copy_value(row)
+                for row in value
+            ]
         return _mask_array_field(schema, field, kind, value)
     if kind == "type":
         td = schema.types.get(field.type_ref.name)

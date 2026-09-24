@@ -167,14 +167,3 @@ func runGeneratedPackageScript(t *testing.T, output *ModuleOutput, script string
 		}
 	}
 }
-
-// requireOrSkipTSTooling skips a TypeScript gate, or fails it under
-// SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1, where a skip is the failure the gate
-// exists to catch.
-func requireOrSkipTSTooling(t *testing.T, reason string) {
-	t.Helper()
-	if os.Getenv("SUPERSCHEMATIC_REQUIRE_TS_CHECKS") == "1" {
-		t.Fatalf("SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1 requires this TypeScript gate to run: %s", reason)
-	}
-	t.Skip(reason)
-}

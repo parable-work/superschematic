@@ -68,7 +68,9 @@ function mergeTypeDef(
     const kind = resolveRefKind(schema, field.typeRef);
     if (field.typeRef.isArray) {
       if (Array.isArray(newVal) && Array.isArray(existingVal)) {
-        merged[key] = mergeArrayField(schema, field, kind, newVal, existingVal);
+        merged[key] = field.typeRef.isArrayOfArrays
+          ? mergeNestedArrayField(schema, field, kind, newVal, existingVal)
+          : mergeArrayField(schema, field, kind, newVal, existingVal);
       }
       continue;
     }
@@ -119,6 +121,26 @@ function mergeArrayField(
     merged[i] = deepCopyValue(newElem);
   }
   return merged;
+}
+
+/**
+ * T[][]: merges each new inner list with the existing inner list at the same
+ * position, element by element, so secrets inside nested objects survive.
+ */
+function mergeNestedArrayField(
+  schema: Schema,
+  field: FieldDef,
+  kind: RefKind,
+  newArr: unknown[],
+  existingArr: unknown[]
+): unknown[] {
+  return newArr.map((newInner, i) => {
+    const existingInner = i < existingArr.length ? existingArr[i] : undefined;
+    if (Array.isArray(newInner) && Array.isArray(existingInner)) {
+      return mergeArrayField(schema, field, kind, newInner, existingInner);
+    }
+    return deepCopyValue(newInner);
+  });
 }
 
 function isZeroValue(value: unknown): boolean {

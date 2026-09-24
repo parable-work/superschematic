@@ -103,8 +103,32 @@ func (m *Merger) mergeTypeDef(td *ir.TypeDef, newData, existingData map[string]a
 }
 
 // mergeArrayField merges arrays element-by-element for nested types that may
-// contain secret fields. Elements are matched by index.
+// contain secret fields. Elements are matched by index; for an array of
+// arrays (T[][]) inner lists are matched by index and then their elements.
 func (m *Merger) mergeArrayField(field *ir.FieldDef, kind string, newArr, existingArr []any) []any {
+	if !field.TypeRef.IsArrayOfArrays {
+		return m.mergeElems(field, kind, newArr, existingArr)
+	}
+	merged := make([]any, len(newArr))
+	for i, newElem := range newArr {
+		newInner, newOk := newElem.([]any)
+		var existingInner []any
+		existingOk := false
+		if i < len(existingArr) {
+			existingInner, existingOk = existingArr[i].([]any)
+		}
+		if newOk && newInner != nil && existingOk {
+			merged[i] = m.mergeElems(field, kind, newInner, existingInner)
+			continue
+		}
+		merged[i] = deepCopyValue(newElem)
+	}
+	return merged
+}
+
+// mergeElems merges one list of elements against the existing list,
+// matching elements by index.
+func (m *Merger) mergeElems(field *ir.FieldDef, kind string, newArr, existingArr []any) []any {
 	merged := make([]any, len(newArr))
 	for i, newElem := range newArr {
 		if newElem == nil {

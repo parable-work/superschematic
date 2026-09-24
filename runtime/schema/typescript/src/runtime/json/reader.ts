@@ -268,10 +268,18 @@ function parseTypeRef(raw: JsonObject, path: string): TypeRef {
     }
     const items = asObject(itemsRaw, `${path}.items`);
     const inner = parseTypeRef(items, `${path}.items`);
-    if (inner.isArray) {
+    if (inner.isArrayOfArrays) {
       throw new Error(
-        `runtime schema parse error: nested arrays are not supported at ${path}`,
+        `runtime schema parse error: arrays nest at most two levels (T[][]) at ${path}`,
       );
+    }
+    if (inner.isArray) {
+      return {
+        name: inner.name,
+        isArray: true,
+        isArrayOfArrays: true,
+        elemNonNull: true,
+      };
     }
     return {
       name: inner.name,
