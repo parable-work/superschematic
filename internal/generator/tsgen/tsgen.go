@@ -52,6 +52,12 @@ type ScalarInfo struct {
 	HasCustomValidate            bool
 	HasCustomParse               bool
 
+	// HasJSONParse marks a custom-parse scalar with a JSON shape (a map such
+	// as Generic.StringMap): superscalar's parser takes a value or its JSON
+	// text and returns the decoded value, so the validator runs it instead of
+	// string checks.
+	HasJSONParse bool
+
 	// IsIntegerLike marks number scalars with integer semantics; validators
 	// emit a Number.isInteger check for them.
 	IsIntegerLike bool
@@ -164,7 +170,8 @@ type ModuleOutput struct {
 	// via SetScalarLibSpec.
 	ScalarLibSpec string
 
-	// Naming supplies the scalar package name the templates import from.
+	// Naming supplies the scalar package name the templates import from
+	// and the scalar JSDoc tag types.ts writes above scalar fields.
 	Naming naming.Naming
 }
 
@@ -353,6 +360,7 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 			HasCustomNormalize:           s.HasCustomNormalize,
 			HasCustomValidate:            s.HasCustomValidate,
 			HasCustomParse:               s.HasCustomParse,
+			HasJSONParse:                 s.HasCustomParse && s.Traits.IsJSONLike,
 			IsIntegerLike:                s.Traits.IsIntegerLike,
 			HasParseFromJSON:             s.HasCustomParse && s.TargetType == "JSDate",
 		}
@@ -491,6 +499,12 @@ func fieldValueTypeMapperTS(typeName string, arrayDepth int, inMap bool, isRequi
 	var resolvedType string
 	if scalar, ok := scalarMap[typeName]; ok {
 		resolvedType = scalar.TargetType
+		// A field names Generic.JSON by the scalar's own alias (GenericJSON),
+		// which types/scalars.ts re-exports, rather than superscalar's
+		// JSONValue, so the type modules need no second import.
+		if resolvedType == "JSONValue" {
+			resolvedType = scalar.Tokens.Symbol
+		}
 	} else {
 		switch typeName {
 		case codegen.PrimitiveString:

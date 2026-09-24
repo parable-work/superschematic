@@ -27,6 +27,7 @@ schema_ir_go_module = "github.com/parable-work/superschematic/ir"
 schema_runtime_go_module = "github.com/parable-work/superschematic/runtime/schema/go"
 http_runtime_go_module = "github.com/parable-work/superschematic/runtime/http/go"
 http_runtime_rust_crate = "superschematic-http-runtime"
+http_runtime_npm_package = "@superschematic/http-runtime"
 ptr_go_module = "github.com/parable-work/superschematic/runtime/schema/go/ptr"
 
 # Prose the generated readmes and package manifests carry.
@@ -37,6 +38,13 @@ meta_schema_url_prefix = "superschematic://"
 # Prefix of the metadata keys in the generated projection Arrow schemas
 # (<prefix>scalar.canonical_name, <prefix>projection.settings, ...).
 metadata_key_prefix = "superschematic."
+
+# The JSDoc tag the generated TypeScript types write above every
+# scalar-typed field, with the scalar's canonical name. Unset by default,
+# which writes no tag line. A distribution whose tools read the tag from
+# the declaration files names it:
+#
+#   scalar_jsdoc_tag = "scalar"    # /** @scalar Contact.Email */
 
 # The auth provider the api generator renders with. The core registers
 # "session"; an extension that registers another provider names it here.

@@ -154,6 +154,12 @@ superschematic format --to=json ./src/orders.schema.ts --force
 `format` discovers `superschematic.toml` by walking up from the file.
 There is no `--naming` flag.
 
+The file is read with the binary's registry, so a file that uses a linked
+extension's kind, decorators or documents converts between JSON and YAML
+with its extension data. The TypeScript writer cannot render an
+extension's decorators: converting such a file to `ts` fails and names the
+extension slot instead of dropping it.
+
 ## Extension commands
 
 An extension that implements `cli.CommandProvider` adds its commands to

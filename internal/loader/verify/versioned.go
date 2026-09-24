@@ -10,8 +10,8 @@ import (
 // exclusion is interpolated into DDL as; anything else is rejected up front.
 var sqlIdentifierPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
-// checkVersioned validates the Phase 0 contract for @versioned. Later
-// generators rely on a single row key and only know how to version DB tables.
+// checkVersioned validates the @versioned contract. The generators rely on a
+// single row key and only know how to version DB tables.
 func checkVersioned(schema *ir.Schema, r *Result) {
 	for _, name := range sortedTypeNames(schema.Types) {
 		td := schema.Types[name]

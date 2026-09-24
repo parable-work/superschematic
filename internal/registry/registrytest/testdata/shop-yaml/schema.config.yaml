@@ -1,0 +1,8 @@
+# An extension kind and an extension output key. The data-form config schema
+# admits both; the registry checks the kind, and outputs.catalog against the
+# catalog generator's OutputSchema.
+name: shop
+kind: Catalog
+outputs:
+  catalog:
+    enabled: true

@@ -739,6 +739,92 @@ func TestGenerateSyntheticAuditAndSoftDelete(t *testing.T) {
 	}
 }
 
+// TestOptionalMapFieldsAreNilable checks every optional map value shape: the
+// map itself is the nilable value (never dereferenced, never compared with a
+// zero value), and the update holds the same map[string]*T typegen emits.
+// TestGeneratedORMCompiles compiles the shapes the types module supports.
+func TestOptionalMapFieldsAreNilable(t *testing.T) {
+	schema := ir.NewSchema("maps", ir.SchemaKindDB)
+	schema.Scalars["Identity.UUID"] = &ir.ScalarDef{Name: "Identity.UUID"}
+	schema.Scalars["Temporal.DateTime"] = &ir.ScalarDef{Name: "Temporal.DateTime"}
+	schema.Enums["Status"] = &ir.EnumDef{Name: "Status", Values: []ir.EnumValueDef{{Name: "On", SerializedAs: "on"}}}
+	schema.Types["Detail"] = &ir.TypeDef{
+		Name:   "Detail",
+		Role:   ir.RoleEmbeddedStruct,
+		Fields: []*ir.FieldDef{{Name: "note", TypeRef: ir.TypeRef{Name: "string"}, Required: true}},
+	}
+	schema.Types["Record"] = &ir.TypeDef{
+		Name: "Record",
+		Role: ir.RoleDBTable,
+		Fields: []*ir.FieldDef{
+			{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, Key: true},
+			{Name: "labels", TypeRef: ir.TypeRef{Name: "string", IsMap: true}},
+			{Name: "statusByName", TypeRef: ir.TypeRef{Name: "Status", IsMap: true}},
+			{Name: "seenAtByName", TypeRef: ir.TypeRef{Name: "Temporal.DateTime", IsMap: true}},
+			{Name: "detailsByName", TypeRef: ir.TypeRef{Name: "Detail", IsMap: true}},
+			{Name: "detailListsByName", TypeRef: ir.TypeRef{Name: "Detail", IsMap: true, IsArray: true}},
+			{Name: "requiredLabels", TypeRef: ir.TypeRef{Name: "string", IsMap: true}, Required: true},
+		},
+	}
+
+	output, err := Generate(schema, Options{
+		SchemaName:  "maps",
+		ModulePath:  "example.com/orm/maps",
+		TypesModule: "example.com/types/maps",
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	fields := map[string]Field{}
+	for _, field := range output.Repositories[0].Fields {
+		fields[field.Name] = field
+	}
+	for _, name := range []string{"labels", "statusByName", "seenAtByName", "detailsByName", "detailListsByName"} {
+		field := fields[name]
+		if !field.OptionalNilCheck || field.DerefValue || field.IsNullableEnum || field.IsNullableScalar || !field.NullableMapValues {
+			t.Errorf("%s: optional map flags = %+v, want a nil-checked, non-dereferenced map of *T", name, field)
+		}
+	}
+	if fields["requiredLabels"].NullableMapValues {
+		t.Error("a required map holds values, not pointers")
+	}
+	if output.Repositories[0].NeedsSQLNull {
+		t.Error("an optional map of string is a JSON column and needs no sql.NullString")
+	}
+
+	outDir := t.TempDir()
+	if err := WriteORM(output, outDir); err != nil {
+		t.Fatalf("write orm: %v", err)
+	}
+	queryFile, err := os.ReadFile(filepath.Join(outDir, "query.go"))
+	if err != nil {
+		t.Fatalf("read query.go: %v", err)
+	}
+	// gofmt aligns struct fields; compare with runs of blanks collapsed.
+	generated := strings.Join(strings.Fields(string(queryFile)), " ")
+	for _, want := range []string{
+		"Labels *map[string]*string",
+		"StatusByName *map[string]*types.Status",
+		"SeenAtByName *map[string]*types.TemporalDateTime",
+		"DetailsByName *map[string]*types.Detail",
+		"DetailListsByName *map[string][]*types.Detail",
+		"RequiredLabels *map[string]string",
+		"update.StatusByName = &input.StatusByName",
+		"row.StatusByName = nil",
+		"row.StatusByName = *u.StatusByName",
+		"row.DetailsByName = nil",
+	} {
+		if !strings.Contains(generated, want) {
+			t.Errorf("query.go missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"var zeroLabels", "var zeroStatusByName", "var zeroSeenAtByName", "var zeroDetailsByName", "row.SeenAtByName = u.SeenAtByName"} {
+		if strings.Contains(generated, unwanted) {
+			t.Errorf("query.go has %q; an optional map is nil-checked, not zero-compared or dereferenced", unwanted)
+		}
+	}
+}
+
 // TestHasManyWithoutDirectiveFails verifies that a list of a table type
 // without @hasMany or @manyToMany is rejected.
 func TestHasManyWithoutDirectiveFails(t *testing.T) {

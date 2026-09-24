@@ -79,8 +79,8 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 ### Scalars (5)
 
 
-- **Generic.JSON** - A JSON object represented as a string
-  - TypeScript type: `Record<string, any>`
+- **Generic.JSON** - Any valid JSON value: object, array, primitive, or null
+  - TypeScript type: `JSONValue`
 
 
 - **Identity.Name** - An objects name

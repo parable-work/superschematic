@@ -3,11 +3,23 @@
   "$ref": "#/definitions/SchemaConfigDocument",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "ApiLanguage": {
+      "description": "The REST API server language. GO (the default) emits the chi server module, RUST the axum crate, TYPESCRIPT the Hono package built on the TypeScript HTTP runtime (`<out>/api/<service>`, `<scope>/<service>-api`).",
+      "enum": [
+        "GO",
+        "RUST",
+        "TYPESCRIPT"
+      ],
+      "type": "string"
+    },
     "ApiOutputConfig": {
       "additionalProperties": false,
       "properties": {
         "enabled": {
           "type": "boolean"
+        },
+        "language": {
+          "$ref": "#/definitions/ApiLanguage"
         },
         "scaffoldsOutputDir": {
           "type": "string"
@@ -42,7 +54,7 @@
           "type": "string"
         },
         "outputs": {
-          "$ref": "#/definitions/SchemaOutputs"
+          "$ref": "#/definitions/SchemaOutputsDocument"
         },
         "public": {
           "type": "boolean"
@@ -75,8 +87,8 @@
       ],
       "description": "What a config's `kind` admits: a core SchemaKind member or an extension kind name."
     },
-    "SchemaOutputs": {
-      "additionalProperties": false,
+    "SchemaOutputsDocument": {
+      "description": "The outputs block of the data forms: the core keys, plus the output key of any generator an extension registers. The authoring packages cannot see the registry, so an extension key is any name here; superschematic checks each key against the registered generators, and each section against its generator's OutputSchema, when it reads the config.",
       "properties": {
         "api": {
           "$ref": "#/definitions/ApiOutputConfig"

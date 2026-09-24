@@ -15,12 +15,14 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 	enumLookup := buildEnumLookup(output)
 	return template.FuncMap{
 		"snakeCase":          codegen.ToSnakeCase,
+		"pythonFieldName":    toPythonFieldName,
 		"pythonString":       pythonString,
 		"pythonRawString":    pythonRawString,
 		"pythonComment":      pythonComment,
 		"pythonScalarType":   pythonScalarType,
 		"pythonScalarSymbol": pythonScalarSymbol,
 		"pythonScalarModule": pythonScalarModule,
+		"pythonParsesJSON":   pythonParsesJSON,
 		"scalarDoc": func(s codegen.ScalarInfo) string {
 			return codegen.DocText(s.Description, s.Comment)
 		},
@@ -42,6 +44,14 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 			return pythonMaskFieldExpr(field, enumLookup)
 		},
 	}
+}
+
+// pythonParsesJSON reports whether a custom-parse scalar has a JSON shape (a
+// map such as Generic.StringMap): its generated wrapper hands superscalar the
+// value's JSON text and decodes the canonical JSON it returns, so the model
+// holds a native value rather than JSON text.
+func pythonParsesJSON(scalar codegen.ScalarInfo) bool {
+	return scalar.HasCustomParse && scalar.Traits.IsJSONLike
 }
 
 // buildEnumLookup reports whether a type name refers to a local or imported enum.

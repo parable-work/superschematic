@@ -125,7 +125,7 @@ const openAPISpec = `{
   "info": {
     "description": "REST API generated from the fixture-api schema",
     "title": "Fixture-Api API",
-    "version": "__PSGEN_OPENAPI_VERSION__"
+    "version": "__OPENAPI_VERSION__"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -660,7 +660,7 @@ const openAPISpec = `{
   "servers": [
     {
       "description": "Runtime server",
-      "url": "__PSGEN_OPENAPI_BASE_URL__"
+      "url": "__OPENAPI_BASE_URL__"
     }
   ]
 }`

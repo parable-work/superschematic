@@ -1,0 +1,49 @@
+{
+  "name": "{{ .PackageName }}",
+  "version": "1.0.0",
+  "description": "Generated TypeScript API server for the {{ .SchemaName }} schema. DO NOT EDIT.",
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": {
+      "types": "./index.ts",
+      "import": "./index.ts"
+    },
+    "./interfaces": {
+      "types": "./interfaces.ts",
+      "import": "./interfaces.ts"
+    },
+    "./router": {
+      "types": "./router.ts",
+      "import": "./router.ts"
+    },
+    "./openapi.json": "./openapi.json"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "keywords": [
+    "api",
+    "server",
+    "hono",
+    "typescript",
+    "{{ .SchemaName }}"
+  ],
+  "author": "{{ .Author }}",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {},
+  "peerDependencies": {
+{{- range $i, $pkg := .PeerPackages }}
+    "{{ $pkg }}": "*",
+{{- end }}
+    "{{ .RuntimePackage }}": "*",
+    "hono": "{{ .HonoVersion }}"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "hono": "{{ .HonoVersion }}",
+    "typescript": "{{ .TSVersion }}"
+  }
+}

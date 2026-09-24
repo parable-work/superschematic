@@ -366,7 +366,10 @@ type GeneratorSpec struct {
 	// or "" if it has none. The union of OutputKeys is the set ParseOutputs
 	// accepts.
 	OutputKey string
-	// OutputSchema is the JSON Schema of outputs.<OutputKey>.
+	// OutputSchema is the JSON Schema of outputs.<OutputKey>. It is
+	// compiled at registration, and ParseOutputs validates the section
+	// against it before any generator reads it. nil leaves the section to
+	// the generator.
 	OutputSchema json.RawMessage
 	// Dirs returns the output directories this generator writes under
 	// OutputRoot for the run. Run rejects a pipeline in which two enabled
@@ -377,6 +380,8 @@ type GeneratorSpec struct {
 	Enabled func(ctx GenerateContext) (bool, string)
 	// Generate emits the outputs and records them on ctx.Result.
 	Generate func(ctx GenerateContext) error
+
+	compiledOutput *validator.Schema
 }
 
 // AuthProvider and AuthModel are declared in apigen (which this package

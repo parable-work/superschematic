@@ -22,8 +22,8 @@ import (
 // TestSessionProviderAPIDependsOnGenericRuntimeOnly generates the types, ORM
 // and API modules for the fixture services into a temp tree mirroring the
 // dist layout, wires the real superscalar module, and runs go build and go
-// vet on the API module. It is also the W7 proof that the core session
-// provider emits an API module whose dependency closure holds the generic
+// vet on the API module. It also proves that the core session provider
+// emits an API module whose dependency closure holds the generic
 // http-runtime session package and none of the Acme runtime packages
 // (docs/extension-model.md section 8.2). The Acme provider's module is
 // compiled by every service that builds against the schemas dist.
@@ -49,9 +49,8 @@ func TestSessionProviderAPIDependsOnGenericRuntimeOnly(t *testing.T) {
 		case "authmw", "authz":
 			t.Errorf("session-provider API depends on Acme runtime package %s", dep)
 		}
-		// requestctx is allowed: its logger, client-IP and CheckContext half is
-		// generic and the core context.tmpl uses it; its authctx.go half is
-		// Acme's and moves out with the W12 shim module.
+		// requestctx is allowed: its logger, client-IP and CheckContext
+		// helpers are generic and the core context.tmpl uses them.
 	}
 	if !sawSession {
 		t.Errorf("session-provider API does not depend on %s/session; runtime deps: %v", runtimeModule, deps)

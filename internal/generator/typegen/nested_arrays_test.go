@@ -463,11 +463,15 @@ func TestNestedArraysShapesModule(t *testing.T) {
 	for _, field := range custom.Fields {
 		scalar := field.ScalarInfo
 		meta, _ := registry.CoreScalars().Scalar(scalar.Name)
-		if len(meta.Examples) == 0 {
-			t.Fatalf("%s has no catalog example", scalar.Name)
+		examples := meta.Examples
+		if len(examples) == 0 {
+			examples = fallbackParseExamples[scalar.Name]
+		}
+		if len(examples) == 0 {
+			t.Fatalf("%s has no catalog example; add one to fallbackParseExamples", scalar.Name)
 		}
 		fmt.Fprintf(&build, "\tif value, err := Parse%s(%q); err != nil {\n\t\tt.Fatalf(\"%s: %%v\", err)\n\t} else {\n\t\trecord.%s = %s{{value, value}, {}}\n\t}\n",
-			scalar.Tokens.Symbol, meta.Examples[0], scalar.Name, field.GoName, field.GoType)
+			scalar.Tokens.Symbol, examples[0], scalar.Name, field.GoName, field.GoType)
 	}
 	code := strings.Replace(nestedShapesModuleTest, "\t// CUSTOM PARSE FIELDS\n", build.String(), 1)
 	vetAndTestModule(t, dir, "nested_shapes_test.go", code+nestedModuleTestHelpers)

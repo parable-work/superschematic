@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -45,7 +46,8 @@ type Naming struct {
 
 	// NpmScope is the npm scope of generated TypeScript packages and of the
 	// service authoring packages schemas import from each other:
-	// <scope>/<name>-types, <scope>/<name>-sdk, <scope>/<name>.
+	// <scope>/<name>-types, <scope>/<name>-sdk, <scope>/<name>-api,
+	// <scope>/<name>.
 	NpmScope string `toml:"npm_scope"`
 
 	// PythonTypesModulePrefix prefixes generated Python type modules:
@@ -75,6 +77,10 @@ type Naming struct {
 	HTTPRuntimeRustCrate  string `toml:"http_runtime_rust_crate"`
 	PtrGoModule           string `toml:"ptr_go_module"`
 
+	// HTTPRuntimeNpmPackage is the npm package the generated TypeScript
+	// API router imports its request pipeline from.
+	HTTPRuntimeNpmPackage string `toml:"http_runtime_npm_package"`
+
 	// SchemaLanguage is how generated readmes and the schema-file JSON
 	// Schema name the schema language ("generated from <SchemaLanguage>
 	// definitions").
@@ -93,6 +99,14 @@ type Naming struct {
 	// <prefix>projection.settings, ...), so the keys land in the namespace
 	// the schemas' readers expect.
 	MetadataKeyPrefix string `toml:"metadata_key_prefix"`
+
+	// ScalarJSDocTag names the JSDoc tag the generated TypeScript types
+	// write above every scalar-typed field, followed by the scalar's
+	// canonical name: "scalar" gives `/** @scalar Contact.Email */`. A tool
+	// that reads the declaration files finds each field's scalar through it.
+	// Empty, the default, writes no tag line; unlike the other keys it has
+	// no fallback, so leaving it out is the way to turn the line off.
+	ScalarJSDocTag string `toml:"scalar_jsdoc_tag"`
 
 	// AuthoringPackages lists the npm packages whose exports the TypeScript
 	// frontend treats as toolchain: decorators and type wrappers must
@@ -282,6 +296,7 @@ func Default() Naming {
 		HTTPRuntimeGoModule:     "github.com/parable-work/superschematic/runtime/http/go",
 		HTTPRuntimeRustCrate:    "superschematic-http-runtime",
 		PtrGoModule:             "github.com/parable-work/superschematic/runtime/schema/go/ptr",
+		HTTPRuntimeNpmPackage:   "@superschematic/http-runtime",
 		SchemaLanguage:          "Superschematic",
 		PackageAuthor:           "superschematic",
 		MetaSchemaURLPrefix:     "superschematic://",
@@ -323,6 +338,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.HTTPRuntimeGoModule, d.HTTPRuntimeGoModule)
 	fill(&n.HTTPRuntimeRustCrate, d.HTTPRuntimeRustCrate)
 	fill(&n.PtrGoModule, d.PtrGoModule)
+	fill(&n.HTTPRuntimeNpmPackage, d.HTTPRuntimeNpmPackage)
 	fill(&n.SchemaLanguage, d.SchemaLanguage)
 	fill(&n.PackageAuthor, d.PackageAuthor)
 	fill(&n.MetaSchemaURLPrefix, d.MetaSchemaURLPrefix)
@@ -457,6 +473,12 @@ func (n Naming) NpmSDKPackage(schemaName string) string {
 	return n.NpmScope + "/" + schemaName + "-sdk"
 }
 
+// NpmAPIPackage returns the npm name of a schema's generated TypeScript API
+// server.
+func (n Naming) NpmAPIPackage(schemaName string) string {
+	return n.NpmScope + "/" + schemaName + "-api"
+}
+
 // PythonTypesModule returns the Python module name for a schema stem (the
 // schema name already folded to identifier characters by the caller).
 func (n Naming) PythonTypesModule(stem string) string {
@@ -552,8 +574,15 @@ func Parse(data []byte, name string) (Naming, error) {
 	if len(unknown) > 0 {
 		return Naming{}, fmt.Errorf("naming: %s: unknown keys: %s", name, strings.Join(unknown, ", "))
 	}
+	if n.ScalarJSDocTag != "" && !jsdocTagRE.MatchString(n.ScalarJSDocTag) {
+		return Naming{}, fmt.Errorf("naming: %s: scalar_jsdoc_tag %q is not a JSDoc tag name: use letters, digits and _, not starting with a digit, without the @", name, n.ScalarJSDocTag)
+	}
 	return n.OrDefault(), nil
 }
+
+// jsdocTagRE is the tag names scalar_jsdoc_tag accepts: an identifier, so
+// the tag parses as one in a JSDoc comment and cannot close the comment.
+var jsdocTagRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 var (
 	activeMu sync.RWMutex
