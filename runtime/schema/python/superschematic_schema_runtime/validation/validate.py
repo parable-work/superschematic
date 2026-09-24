@@ -391,6 +391,44 @@ def _validate_single_field(
         _set_field_errors(errors, key, field_errors)
 
 
+def _validate_array_element(
+    schema: Schema,
+    field: FieldDef,
+    kind: str,
+    element_key: str,
+    element: Any,
+    errors: ValidationErrors,
+    registry: ScalarValidatorRegistry,
+) -> None:
+    if element is None:
+        if field.type_ref.elem_non_null:
+            append_field_error(
+                errors,
+                element_key,
+                ValidationError(
+                    validator="required", message=f"{field.type_ref.name} is required."
+                ),
+            )
+        return
+    if kind == "scalar":
+        scalar = schema.scalars.get(field.type_ref.name)
+        if scalar is None:
+            return
+        element_errors = _validate_scalar_value(scalar, element, field.required, registry)
+        _set_field_errors(errors, element_key, element_errors)
+        return
+    if kind == "enum":
+        element_errors = _validate_enum_value(schema, field.type_ref.name, element)
+        _set_field_errors(errors, element_key, element_errors)
+        return
+    if kind in ("type", "input"):
+        defs = schema.types if kind == "type" else schema.inputs
+        nested = defs.get(field.type_ref.name)
+        if nested is not None and _is_object(element):
+            nested_errors = _validate_type_def(schema, nested, element, registry)
+            _add_nested_errors(errors, element_key, nested_errors)
+
+
 def _validate_array_field(
     schema: Schema,
     field: FieldDef,
@@ -402,40 +440,31 @@ def _validate_array_field(
     if not isinstance(value, list):
         return
     kind = _resolve_ref_kind(schema, field.type_ref.name)
-    for index, element in enumerate(value):
-        element_key = f"{key}[{index}]"
-        if element is None:
-            if field.type_ref.elem_non_null:
-                append_field_error(
-                    errors,
-                    element_key,
-                    ValidationError(
-                        validator="required", message=f"{field.type_ref.name} is required."
-                    ),
-                )
+    if not field.type_ref.is_array_of_arrays:
+        for index, element in enumerate(value):
+            _validate_array_element(
+                schema, field, kind, f"{key}[{index}]", element, errors, registry
+            )
+        return
+    # A list of lists: an inner list is never null and may be empty; every
+    # innermost element is validated as a T[] element is.
+    for index, row in enumerate(value):
+        row_key = f"{key}[{index}]"
+        if row is None:
+            append_field_error(
+                errors,
+                row_key,
+                ValidationError(
+                    validator="required", message=f"{field.type_ref.name}[] is required."
+                ),
+            )
             continue
-        if kind == "scalar":
-            scalar = schema.scalars.get(field.type_ref.name)
-            if scalar is None:
-                continue
-            element_errors = _validate_scalar_value(scalar, element, field.required, registry)
-            _set_field_errors(errors, element_key, element_errors)
+        if not isinstance(row, list):
             continue
-        if kind == "enum":
-            element_errors = _validate_enum_value(schema, field.type_ref.name, element)
-            _set_field_errors(errors, element_key, element_errors)
-            continue
-        if kind == "type":
-            nested = schema.types.get(field.type_ref.name)
-            if nested is not None and _is_object(element):
-                nested_errors = _validate_type_def(schema, nested, element, registry)
-                _add_nested_errors(errors, element_key, nested_errors)
-            continue
-        if kind == "input":
-            nested = schema.inputs.get(field.type_ref.name)
-            if nested is not None and _is_object(element):
-                nested_errors = _validate_type_def(schema, nested, element, registry)
-                _add_nested_errors(errors, element_key, nested_errors)
+        for inner_index, element in enumerate(row):
+            _validate_array_element(
+                schema, field, kind, f"{row_key}[{inner_index}]", element, errors, registry
+            )
 
 
 def _validate_field(

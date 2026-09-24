@@ -80,6 +80,24 @@ def _merge_array_field(
     return merged
 
 
+def _merge_nested_array_field(
+    schema: Schema,
+    field: FieldDef,
+    kind: str,
+    new_rows: list[Any],
+    existing_rows: list[Any],
+) -> list[Any]:
+    """Merge a list of lists row by row, pairing inner lists by index."""
+    merged: list[Any] = []
+    for index, new_row in enumerate(new_rows):
+        existing_row = existing_rows[index] if index < len(existing_rows) else None
+        if isinstance(new_row, list) and isinstance(existing_row, list):
+            merged.append(_merge_array_field(schema, field, kind, new_row, existing_row))
+            continue
+        merged.append(deep_copy_value(new_row))
+    return merged
+
+
 def _merge_type_def(
     schema: Schema,
     td: TypeDef,
@@ -107,7 +125,12 @@ def _merge_type_def(
         kind = _resolve_ref_kind(schema, field.type_ref)
         if field.type_ref.is_array:
             if isinstance(new_val, list) and isinstance(existing_val, list):
-                merged[key] = _merge_array_field(schema, field, kind, new_val, existing_val)
+                if field.type_ref.is_array_of_arrays:
+                    merged[key] = _merge_nested_array_field(
+                        schema, field, kind, new_val, existing_val
+                    )
+                else:
+                    merged[key] = _merge_array_field(schema, field, kind, new_val, existing_val)
             continue
 
         if kind == "type":
