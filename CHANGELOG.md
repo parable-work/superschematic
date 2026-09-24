@@ -484,5 +484,11 @@ of a generated artifact is always listed here with the bump it requires.
   union now decodes through a `serde_json::Value` and picks the member by
   its tag; a missing or unknown tag is an error that names the union. A
   crate with a discriminated union depends on `serde_json`. Patch.
+- TypeScript loader: a class that extends a class from another service
+  failed to load (`references unknown type`) when an inherited field
+  referenced a type or enum declared in that service. The loader flattens
+  the base's fields into the class but did not record the types they
+  reference as imports. It now records them, so the generated code
+  imports them from the base's package. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main
