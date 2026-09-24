@@ -154,6 +154,10 @@ type ExternalCrateDep struct {
 
 // ModuleOutput contains all generated code for a Rust types crate.
 type ModuleOutput struct {
+	// RuntimeSchemas holds, per @jsonField payload type, the IR document
+	// with that type as root and every definition it reaches, written as
+	// schemas/<Type>.json next to the crate's sources.
+	RuntimeSchemas    map[string][]byte
 	CrateName         string
 	SchemaName        string
 	Scalars           []ScalarInfo
@@ -310,6 +314,10 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	output.UsesUnions = hasUnionFields(output.Types)
 	output.ExternalCrateDeps = collectExternalCrateDeps(output)
 	output.UsesScalarLib = usesScalarLib(output)
+	output.RuntimeSchemas, err = runtimeSchemas(schema, opts.Dependencies)
+	if err != nil {
+		return nil, err
+	}
 
 	return output, nil
 }

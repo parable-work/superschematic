@@ -109,6 +109,11 @@ of a generated artifact is always listed here with the bump it requires.
   not a single file-upload scalar (a scalar with `fileUpload` metadata), and
   the TypeScript reader rejects a literal that is not an exact integer and
   the key on an operation argument. Minor.
+- Rust types: a crate gets `schemas/<Type>.json` for each `@jsonField`
+  type: the schema IR with that type as `rootType` and every type, enum,
+  scalar and union it reaches, imported ones included. Generation fails if
+  a reached type does not resolve. The crate README lists the files.
+  Minor.
 
 ### Changed
 
