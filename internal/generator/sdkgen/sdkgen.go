@@ -14,6 +14,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	"github.com/parable-work/superschematic/internal/profile"
@@ -126,6 +127,10 @@ type SDKOutput struct {
 func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock codegen.Clock) (*SDKOutput, error) {
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
+	}
+	// nested-arrays guard: remove when sdkgen renders T[][].
+	if err := nestedguard.Check("sdkgen", apiOutput); err != nil {
+		return nil, err
 	}
 
 	// Check if this is public api (has authentication)

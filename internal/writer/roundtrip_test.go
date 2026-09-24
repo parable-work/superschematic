@@ -51,6 +51,11 @@ var corpus = []roundtripFixture{
 	// SQL projection views: every row rule form, joins, @column in both
 	// forms of the source and the collapse.
 	{name: "fixture-projection", dir: tsFixtures + "/fixture-projection", native: FormatTS},
+	// Arrays of arrays (T[][]) in a General type, a DB table and an API's
+	// request body, argument and response.
+	{name: "fixture-nested-arrays", dir: tsFixtures + "/fixture-nested-arrays", native: FormatTS},
+	{name: "fixture-nested-arrays-db", dir: tsFixtures + "/fixture-nested-arrays-db", native: FormatTS},
+	{name: "fixture-nested-arrays-api", dir: tsFixtures + "/fixture-nested-arrays-api", native: FormatTS},
 	{name: "fixture-db-json", dir: dataFixtures + "/fixture-db-json", native: FormatJSON},
 	{name: "fixture-db-yaml", dir: dataFixtures + "/fixture-db-yaml", native: FormatYAML},
 	{name: "fixture-general-json", dir: dataFixtures + "/fixture-general-json", native: FormatJSON},
@@ -104,6 +109,64 @@ func TestRoundTrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTSWriterRoundTripsArraysOfArrays: the corpus skips the TS leg of a
+// TS-native fixture, so this writes the nested-array fixtures back to
+// TypeScript and reloads them. The writer spells T[][] as T[][]. The TS
+// writer has no form for the APIInput role (the reader infers it from
+// use), so the API fixture's input type is written as a plain struct and
+// the reload is compared with the loaded original.
+func TestTSWriterRoundTripsArraysOfArrays(t *testing.T) {
+	for _, name := range []string{"fixture-nested-arrays", "fixture-nested-arrays-db", "fixture-nested-arrays-api"} {
+		t.Run(name, func(t *testing.T) {
+			schema, err := loader.LoadService(tsFixtures + "/" + name)
+			if err != nil {
+				t.Fatalf("loading fixture: %v", err)
+			}
+			want := normalizeIR(t, schema)
+			written := writableAsTS(t, schema)
+			if got := normalizeIR(t, writeAndReload(t, written, FormatTS)); got != want {
+				t.Errorf("IR mismatch after TS -> TS round trip\nwant:\n%s\ngot:\n%s", want, got)
+			}
+
+			dir := t.TempDir()
+			if _, err := WriteService(written, FormatTS, dir); err != nil {
+				t.Fatal(err)
+			}
+			var source strings.Builder
+			_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+				if err == nil && !d.IsDir() && strings.HasSuffix(path, ".ts") {
+					data, _ := os.ReadFile(path)
+					source.Write(data)
+				}
+				return err
+			})
+			if !strings.Contains(source.String(), "[][]") || strings.Contains(source.String(), "[][][]") {
+				t.Errorf("written TypeScript does not spell T[][]:\n%s", source.String())
+			}
+		})
+	}
+}
+
+// writableAsTS returns a copy of schema whose APIInput types are plain
+// structs, the form the TS writer emits and the reader re-classifies.
+func writableAsTS(t *testing.T, schema *ir.Schema) *ir.Schema {
+	t.Helper()
+	data, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var clone ir.Schema
+	if err := json.Unmarshal(data, &clone); err != nil {
+		t.Fatal(err)
+	}
+	for _, td := range clone.Types {
+		if td.Role == ir.RoleAPIInput {
+			td.Role = ir.RoleEmbeddedStruct
+		}
+	}
+	return &clone
 }
 
 // TestWriteJSONSourceLineageImports: a TS-authored @source with no
