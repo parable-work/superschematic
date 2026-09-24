@@ -63,38 +63,114 @@ func validationStringExpr(field FieldInfo, valueVar string) string {
 	return "string(" + valueVar + ")"
 }
 
+// isValidatableScalarField reports whether field's Go type is a scalar with
+// its own Validate and ValidateRequired methods.
+func isValidatableScalarField(field FieldInfo) bool {
+	if !field.IsScalar || field.ScalarInfo == nil {
+		return false
+	}
+	// JSON-like scalars map to generic Go values (for example
+	// interface{}) and do not provide scalar Validate /
+	// ValidateRequired methods.
+	if field.ScalarInfo.Traits.IsJSONLike {
+		return false
+	}
+	return true
+}
+
+// isGeneratedType reports whether typeName is an object or input type this
+// module declares or aliases, which has Validate and MaskSecrets methods.
+func isGeneratedType(types []TypeInfo, importedTypes []ImportedTypeInfo, typeName string) bool {
+	for _, typeInfo := range types {
+		if typeInfo.Name == typeName {
+			return true
+		}
+	}
+	for _, typeInfo := range importedTypes {
+		if typeInfo.Name == typeName {
+			return true
+		}
+	}
+	return false
+}
+
+// nestedList is what the nested-list template blocks render a T[][] field
+// from.
+type nestedList struct {
+	Field FieldInfo
+
+	// ListGoType is the field's Go type without an InputField wrapper,
+	// [][]T, and InnerGoType the type of one inner list, []T.
+	ListGoType  string
+	InnerGoType string
+
+	// ElemValidate names the method each innermost scalar or enum element
+	// validates with, ValidateRequired or Validate as for T[]. It is empty
+	// for other element types.
+	ElemValidate string
+
+	// ElemNested is true when each innermost element is a generated type
+	// that validates and masks its own fields.
+	ElemNested bool
+
+	// ListBounds are the listMin and listMax rules, checked against the
+	// outer list. ElemRules are the length, pattern and range rules, checked
+	// against every innermost element.
+	ListBounds []codegen.ValidationRule
+	ElemRules  []codegen.ValidationRule
+}
+
+// ChecksElements reports whether Validate visits each innermost element.
+func (n nestedList) ChecksElements() bool {
+	return n.ElemValidate != "" || n.ElemNested || len(n.ElemRules) > 0
+}
+
+// newNestedList describes the T[][] field to the template, resolving its
+// element kind against the module's types and enums.
+func newNestedList(module *ModuleOutput, field FieldInfo) nestedList {
+	listType := field.GoType
+	if field.UsesWrapper {
+		listType = strings.TrimSuffix(strings.TrimPrefix(listType, "InputField["), "]")
+	}
+	list := nestedList{
+		Field:       field,
+		ListGoType:  listType,
+		InnerGoType: strings.TrimPrefix(listType, "[]"),
+	}
+	switch {
+	case isValidatableScalarField(field) || isEnumType(module.Enums, module.ImportedEnums, field.Type):
+		list.ElemValidate = "Validate"
+		if field.Required && !field.HasDefault {
+			list.ElemValidate = "ValidateRequired"
+		}
+	case !field.IsScalar && isGeneratedType(module.Types, module.ImportedTypes, field.Type):
+		list.ElemNested = true
+	}
+	for _, rule := range field.Validations {
+		switch rule.Validator {
+		case "listMin":
+			if !isZeroListMinimum(rule) {
+				list.ListBounds = append(list.ListBounds, rule)
+			}
+		case "listMax":
+			list.ListBounds = append(list.ListBounds, rule)
+		case "minLength", "maxLength", "pattern", "min", "max":
+			list.ElemRules = append(list.ElemRules, rule)
+		}
+	}
+	return list
+}
+
 // templateFuncs returns the typegen-specific template functions.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"hasEmittableValidations": hasEmittableValidations,
-		"isZeroListMinimum":       isZeroListMinimum,
-		"validationStringExpr":    validationStringExpr,
-		"isEnumType":              isEnumType,
-		"isValidatableScalarField": func(field FieldInfo) bool {
-			if !field.IsScalar || field.ScalarInfo == nil {
-				return false
-			}
-			// JSON-like scalars map to generic Go values (for example
-			// interface{}) and do not provide scalar Validate /
-			// ValidateRequired methods.
-			if field.ScalarInfo.Traits.IsJSONLike {
-				return false
-			}
-			return true
-		},
-		"isGeneratedType": func(types []TypeInfo, importedTypes []ImportedTypeInfo, typeName string) bool {
-			for _, typeInfo := range types {
-				if typeInfo.Name == typeName {
-					return true
-				}
-			}
-			for _, typeInfo := range importedTypes {
-				if typeInfo.Name == typeName {
-					return true
-				}
-			}
-			return false
-		},
+		"hasEmittableValidations":  hasEmittableValidations,
+		"isZeroListMinimum":        isZeroListMinimum,
+		"validationStringExpr":     validationStringExpr,
+		"isEnumType":               isEnumType,
+		"isValidatableScalarField": isValidatableScalarField,
+		"isGeneratedType":          isGeneratedType,
+		"nestedList":               newNestedList,
 		"hasUnionFields": func(fields []FieldInfo) bool {
 			for _, f := range fields {
 				if f.IsUnion {

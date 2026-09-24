@@ -450,8 +450,39 @@ function validateArrayField(
   }
 
   const kind = resolveRefKind(schema, field.typeRef.name);
+  if (!field.typeRef.isArrayOfArrays) {
+    validateArrayElements(schema, field, kind, key, value, errors, options);
+    return;
+  }
+
+  // T[][]: every inner list is an array, never null, and may be empty.
   for (let index = 0; index < value.length; index += 1) {
-    const element = value[index];
+    const inner = value[index];
+    const innerKey = `${key}[${index}]`;
+    if (!Array.isArray(inner)) {
+      addFieldError(errors, innerKey, 'required', `${field.name} inner list must be an array.`);
+      continue;
+    }
+    validateArrayElements(schema, field, kind, innerKey, inner, errors, options);
+  }
+}
+
+/**
+ * Validates the elements of one list of a T[] or T[][] field, reporting each
+ * at `${key}[${index}]`. For T[][] the key already names the inner list, so
+ * elements report at field[i][j].
+ */
+function validateArrayElements(
+  schema: Schema,
+  field: FieldDef,
+  kind: ReturnType<typeof resolveRefKind>,
+  key: string,
+  elements: unknown[],
+  errors: ValidationErrors,
+  options?: ValidationOptions
+): void {
+  for (let index = 0; index < elements.length; index += 1) {
+    const element = elements[index];
     const elementKey = `${key}[${index}]`;
 
     if (element === null || element === undefined) {
@@ -524,6 +555,7 @@ function validateField(
   }
 
   if (field.typeRef.isArray) {
+    // List bounds apply to the outer list, including for T[][].
     if (Array.isArray(value)) {
       if (field.validateListMin !== null && value.length < field.validateListMin) {
         addFieldError(

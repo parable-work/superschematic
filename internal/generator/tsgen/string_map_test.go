@@ -15,10 +15,10 @@ import (
 )
 
 // loadScalarService writes a data-form General service that declares the
-// named catalog scalars and one EmbeddedStruct with the given fields, and
-// loads it so every scalar is hydrated from the catalog as a real schema's
-// is.
-func loadScalarService(t *testing.T, name string, scalarNames []string, fields []map[string]any) *ir.Schema {
+// named catalog scalars and, when fields are given, one EmbeddedStruct named
+// typeName with them, and loads it so every scalar is hydrated from the
+// catalog as a real schema's is.
+func loadScalarService(t *testing.T, name string, scalarNames []string, typeName string, fields []map[string]any) *ir.Schema {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), name)
 	scalarDefs := map[string]any{}
@@ -28,7 +28,7 @@ func loadScalarService(t *testing.T, name string, scalarNames []string, fields [
 	source := map[string]any{"scalars": scalarDefs}
 	if len(fields) > 0 {
 		source["types"] = map[string]any{
-			"StringMapFixture": map[string]any{"name": "StringMapFixture", "role": "EmbeddedStruct", "fields": fields},
+			typeName: map[string]any{"name": typeName, "role": "EmbeddedStruct", "fields": fields},
 		}
 	}
 	files := map[string]any{
@@ -63,7 +63,7 @@ func loadScalarService(t *testing.T, name string, scalarNames []string, fields [
 // adapter: the custom-parse scalars with a JSON shape, which in the linked
 // catalog is Generic.StringMap alone.
 func TestCatalogJSONParserScope(t *testing.T) {
-	schema := loadScalarService(t, "catalog-fixture", registry.CoreScalars().Names(), nil)
+	schema := loadScalarService(t, "catalog-fixture", registry.CoreScalars().Names(), "", nil)
 	output, err := Generate(schema, Options{SchemaName: schema.Name})
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestCatalogJSONParserScope(t *testing.T) {
 // superscalar binding, type-checks it, and runs a script that parses and
 // validates maps through the generated functions.
 func TestGeneratedStringMapUsesCanonicalParser(t *testing.T) {
-	schema := loadScalarService(t, "string-map-fixture", []string{"Generic.StringMap"}, []map[string]any{
+	schema := loadScalarService(t, "string-map-fixture", []string{"Generic.StringMap"}, "StringMapFixture", []map[string]any{
 		{"name": "values", "typeRef": map[string]any{"name": "Generic.StringMap"}, "required": true},
 		{"name": "optional_values", "typeRef": map[string]any{"name": "Generic.StringMap"}},
 	})
@@ -96,24 +96,6 @@ func TestGeneratedStringMapUsesCanonicalParser(t *testing.T) {
 		if scalar.Name == "Generic.StringMap" && scalar.TSType != "Record<string, string>" {
 			t.Fatalf("Generic.StringMap TypeScript type = %q, want Record<string, string>", scalar.TSType)
 		}
-	}
-	if testing.Short() {
-		t.Skip("skipping generated TypeScript runtime check in -short mode")
-	}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		requireOrSkipTSTooling(t, "bun unavailable")
-	}
-	paths := testpaths.Local(t)
-	outDir, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := SetScalarLibSpec(output, paths, outDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteTypes(output, outDir); err != nil {
-		t.Fatal(err)
 	}
 	const runtimeTest = `
 import type { StringMapFixture } from './types';
@@ -143,7 +125,33 @@ for (const invalid of [{ region: null }, { region: 1 }, ['eu']]) {
   assert(validateStringMapFixture(value) !== true, 'the type validator bypassed the map parser');
 }
 `
-	if err := os.WriteFile(filepath.Join(outDir, "runtime_test.ts"), []byte(runtimeTest), 0o644); err != nil {
+	runGeneratedPackageScript(t, output, runtimeTest)
+}
+
+// runGeneratedPackageScript writes output as a types package wired against
+// the real superscalar binding, adds script as runtime_test.ts, then
+// type-checks the package and runs the script with bun.
+func runGeneratedPackageScript(t *testing.T, output *ModuleOutput, script string) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping generated TypeScript runtime check in -short mode")
+	}
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		requireOrSkipTSTooling(t, "bun unavailable")
+	}
+	paths := testpaths.Local(t)
+	outDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetScalarLibSpec(output, paths, outDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteTypes(output, outDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "runtime_test.ts"), []byte(script), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	install := exec.Command(bun, "install")
@@ -155,18 +163,7 @@ for (const invalid of [{ region: null }, { region: 1 }, ['eu']]) {
 		command := exec.Command(bun, args...)
 		command.Dir = outDir
 		if result, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("generated StringMap check %v failed: %v\n%s", args, err, result)
+			t.Fatalf("generated package check %v failed: %v\n%s", args, err, result)
 		}
 	}
-}
-
-// requireOrSkipTSTooling skips a TypeScript gate, or fails it under
-// SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1, where a skip is the failure the gate
-// exists to catch.
-func requireOrSkipTSTooling(t *testing.T, reason string) {
-	t.Helper()
-	if os.Getenv("SUPERSCHEMATIC_REQUIRE_TS_CHECKS") == "1" {
-		t.Fatalf("SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1 requires this TypeScript gate to run: %s", reason)
-	}
-	t.Skip(reason)
 }

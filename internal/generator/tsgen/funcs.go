@@ -53,6 +53,8 @@ func customTemplateFuncs() template.FuncMap {
 			}
 			return false
 		},
+		"listValidations":    listValidations,
+		"elementValidations": elementValidations,
 		"mapScalarValueRequired": func(field FieldInfo) bool {
 			if !field.IsMap || field.IsArray {
 				return false
@@ -68,13 +70,46 @@ func customTemplateFuncs() template.FuncMap {
 	}
 }
 
+// listValidations returns a field's list-size rules (listMin, listMax). On a
+// T[][] field they bound the outer list only.
+func listValidations(field FieldInfo) []codegen.ValidationRule {
+	var rules []codegen.ValidationRule
+	for _, v := range field.Validations {
+		if v.Validator == "listMin" || v.Validator == "listMax" {
+			rules = append(rules, v)
+		}
+	}
+	return rules
+}
+
+// elementValidations returns the explicit @validate rules a field's
+// validator checks on each value, which for a T[][] field is each innermost
+// element: every rule except required and the list-size rules. A scalar
+// field returns none, because its scalar validator covers these constraints.
+func elementValidations(field FieldInfo) []codegen.ValidationRule {
+	if field.IsScalar {
+		return nil
+	}
+	var rules []codegen.ValidationRule
+	for _, v := range field.Validations {
+		switch v.Validator {
+		case "required", "listMin", "listMax":
+			continue
+		}
+		rules = append(rules, v)
+	}
+	return rules
+}
+
 // scalarLibTypeName returns the structured superscalar type name a scalar's
 // TypeScript type resolves to, or "" when the scalar maps to a builtin shape
 // (string/number/boolean/JSDate/object literals/generics). Structured types
 // are declared in superscalar's scalar-validators module and must be imported
 // from there.
 func scalarLibTypeName(s ScalarInfo) string {
-	if s.Primitive != ir.LanguageObject {
+	// JSONValue (Generic.JSON) is declared by superscalar whatever the
+	// scalar's primitive.
+	if s.Primitive != ir.LanguageObject && s.TSType != "JSONValue" {
 		return ""
 	}
 	if s.TSType == "" || !isImportableType(s.TSType) {

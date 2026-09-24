@@ -2,13 +2,15 @@
 
 import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
 
+import type { JSONValue } from 'superscalar/scalars';
+
 import { validateGenericJSON as validateGenericJSONFromLib } from 'superscalar/scalars';
 
 /**
  * Validates a Generic.JSON value
  */
 export function validateGenericJSON(
-  value: Record<string, any> | null | undefined
+  value: JSONValue | null | undefined
 ): ScalarValidationResult {
   const errors: ValidationError[] = [];
 
@@ -16,9 +18,7 @@ export function validateGenericJSON(
     return [true, null];
   }
 
-  const s = String(value);
-
-  const [isValid, customErrors] = validateGenericJSONFromLib(value as Record<string, any>);
+  const [isValid, customErrors] = validateGenericJSONFromLib(value as JSONValue);
   if (!isValid && customErrors) {
     errors.push(...customErrors);
   }
@@ -30,10 +30,11 @@ export function validateGenericJSON(
  * Validates a Generic.JSON value with required check
  */
 export function validateGenericJSONRequired(
-  value: Record<string, any> | null | undefined
+  value: JSONValue | null | undefined
 ): ScalarValidationResult {
 
-  if (value === null || value === undefined) {
+  // JSON null is a present Generic.JSON value; only undefined means absent.
+  if (value === undefined) {
     return [false, [{ validator: "required", message: "required field" }]];
   }
 

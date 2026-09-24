@@ -41,7 +41,7 @@ export interface Tenant {
   status: TenantStatus;
   isActive: boolean;
   seatCount: number;
-  metadata: Record<string, any>;
+  metadata: GenericJSON;
   users: TenantUser[];
   _version: number;
 }

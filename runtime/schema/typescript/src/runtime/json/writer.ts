@@ -80,12 +80,13 @@ function withMiddleware(
 
 function serializeTypeRef(typeRef: TypeRef, scalarNames: Set<string>): JsonObject {
   if (typeRef.isArray) {
+    // T[][]: the items of the outer list are the inner list T[].
     return {
       type: 'array',
       items: serializeTypeRef(
         {
           name: typeRef.name,
-          isArray: false,
+          isArray: typeRef.isArrayOfArrays === true,
           elemNonNull: typeRef.elemNonNull,
         },
         scalarNames
