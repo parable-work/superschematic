@@ -497,5 +497,12 @@ of a generated artifact is always listed here with the bump it requires.
   the base's fields into the class but did not record the types they
   reference as imports. It now records them, so the generated code
   imports them from the base's package. Patch.
+- TypeScript SDK: a file-upload endpoint with query parameters had no way
+  to pass them; the convenience and raw methods now take
+  `params?: { ... }` before `signal` and send them. A DELETE endpoint that
+  declares an input dropped it, and the Go API handler, which decodes the
+  body of every method with an input, answered "Invalid request body"; the
+  SDK now sends the input as the DELETE body. The Go, Python and Rust SDKs
+  already did both. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main
