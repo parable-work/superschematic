@@ -20,6 +20,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -241,6 +242,10 @@ type Options struct {
 // Generate generates the Go ORM from a v2 IR schema. Returns nil when the
 // schema declares no database tables.
 func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
+	// nested-arrays guard: remove when ormgen renders T[][].
+	if err := nestedguard.Check("ormgen", schema); err != nil {
+		return nil, err
+	}
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}

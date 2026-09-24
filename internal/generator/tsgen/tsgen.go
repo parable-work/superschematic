@@ -20,6 +20,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -239,6 +240,10 @@ type Options struct {
 
 // Generate generates TypeScript types from a v2 IR schema.
 func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
+	// nested-arrays guard: remove when tsgen renders T[][].
+	if err := nestedguard.Check("tsgen", schema); err != nil {
+		return nil, err
+	}
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}

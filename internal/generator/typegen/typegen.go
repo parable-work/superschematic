@@ -22,6 +22,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -272,6 +273,10 @@ type Options struct {
 
 // Generate generates Go types from a v2 IR schema.
 func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
+	// nested-arrays guard: remove when typegen renders T[][].
+	if err := nestedguard.Check("typegen", schema); err != nil {
+		return nil, err
+	}
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}

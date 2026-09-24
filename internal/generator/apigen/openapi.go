@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -67,6 +68,10 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 func TypeOpenAPISchema(typeName string, schema *ir.Schema, dependencies map[string]*ir.Schema) (map[string]interface{}, error) {
 	if schema == nil || schema.Types[typeName] == nil {
 		return nil, fmt.Errorf("build OpenAPI schema for unknown type %q", typeName)
+	}
+	// nested-arrays guard: remove when apigen renders T[][].
+	if err := nestedguard.CheckWithDependencies("apigen", schema, dependencies); err != nil {
+		return nil, err
 	}
 
 	scalarMap := buildOpenAPIScalarMap(schema, dependencies)
