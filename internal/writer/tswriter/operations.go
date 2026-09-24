@@ -124,10 +124,7 @@ func (e *emitter) operationReturnExpr(op *ir.FieldDef, owner string) string {
 		e.failf("%s: map-typed returns have no TypeScript authoring form", owner)
 		return "never"
 	}
-	expr := e.renderTypeName(op.TypeRef.Name, owner)
-	if op.TypeRef.IsArray {
-		expr += "[]"
-	}
+	expr := e.renderTypeName(op.TypeRef.Name, owner) + arraySuffix(op.TypeRef)
 	if op.Encrypted {
 		expr = fmt.Sprintf("%s<%s>", e.use("EncryptedField"), expr)
 	}
