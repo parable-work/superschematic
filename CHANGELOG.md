@@ -315,11 +315,9 @@ of a generated artifact is always listed here with the bump it requires.
   a platform default takes a list of lists. Verification refuses it in env
   config fields, relations, indexed fields and `@index` keys, query and
   path parameters, arguments of GET operations and operations without a
-  method, and every projection column, join and row rule. No generator
-  renders it yet: each one fails with "<generator> does not support
-  arrays of arrays yet", and `apigen.Param` and `apigen.EndpointInfo`
-  carry `IsArrayOfArrays` / `OutputIsArrayOfArrays` for the SDK
-  generators. Minor.
+  method, and every projection column, join and row rule.
+  `apigen.Param` and `apigen.EndpointInfo` carry `IsArrayOfArrays` /
+  `OutputIsArrayOfArrays` for the SDK generators. Minor.
 - Arrays of arrays in the Go API and the tool schemas: the api generator
   and `apigen.TypeOpenAPISchema` render `T[][]` as items of items, with
   element constraints on the inner items and `minItems`/`maxItems` on the

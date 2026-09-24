@@ -300,12 +300,13 @@ byte what it was. A reader that does not know the key reads `T[][]` as
 it handles uses nested lists; `Schema.FindArrayOfArrays` lets such a reader
 refuse the schema instead.
 
-Rollout: the IR and the loaders land first. Until a generator renders
-`T[][]`, it fails with "<generator> does not support arrays of arrays yet"
-(`internal/generator/nestedguard`, one marked call per generator entry)
-instead of emitting `T[]`. The change that teaches a generator nested
-lists removes its own call and adds its output for the
-`fixture-nested-arrays` services; the package goes when no call remains.
+Rollout: the IR and the loaders landed first, and until a generator
+rendered `T[][]` it refused the schema with an error naming itself, so no
+generator ever emitted `T[]` for a list of lists. Each change that taught a
+generator nested lists removed its own refusal and added its output for the
+`fixture-nested-arrays` services; the shared check went with the last one.
+Every generator renders `T[][]`, and the docs site's arrays-of-arrays
+reference describes the result.
 
 ### D12, amended: one set of list rules for every validator
 
