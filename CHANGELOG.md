@@ -320,6 +320,10 @@ of a generated artifact is always listed here with the bump it requires.
   arrays of arrays yet", and `apigen.Param` and `apigen.EndpointInfo`
   carry `IsArrayOfArrays` / `OutputIsArrayOfArrays` for the SDK
   generators. Minor.
+- Arrays of arrays in Python (D12): pygen renders `T[][]` as
+  `List[List[T]]` with element errors at `field[i][j]`, and the Python
+  schema runtime reads, parses, validates, serializes, masks and merges
+  lists of lists (`TypeRef.is_array_of_arrays`). Minor.
 
 ### Changed
 
