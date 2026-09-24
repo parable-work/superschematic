@@ -468,5 +468,9 @@ of a generated artifact is always listed here with the bump it requires.
   a null entry, and an input map is checked when present and not null.
   `MaskSecrets` on an optional map of a generated type, which did not
   compile either, keeps a null entry null. Patch.
+- TypeScript types: `parse<Type>FromJSON` for a type with an optional map
+  of a nested type returned a null or absent entry as is, typed `unknown`,
+  so the package did not type-check against the map's `T | null` values.
+  It now maps such an entry to `null`. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main
