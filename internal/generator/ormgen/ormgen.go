@@ -125,6 +125,7 @@ type Field struct {
 	IsRequired         bool
 	IsArray            bool
 	IsMap              bool
+	NullableMapValues  bool // optional non-union map: typegen emits map[string]*T (map[string][]*T for lists)
 	IsUnion            bool // closed union; JSON decoding dispatches through types.<IRType>Wrapper
 	IsPrimaryKey       bool
 	IsAuditField       bool // createdAt/createdBy/updatedAt/updatedBy/deletedAt/deletedBy
@@ -659,13 +660,15 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		traits = codegen.GuessScalarTraits(irType)
 	}
 
-	// Arrays are emitted as []T by typegen (nil slice = null), not *T, even
-	// when the list itself is nullable. Optional integer-like scalars keep
+	// Arrays and maps are nilable in typegen output ([]T, map[string]T; an
+	// optional non-union map holds *T values), so neither is a *T even when
+	// the field itself is nullable. Optional integer-like scalars keep
 	// value-type parity with the legacy generator; other optional scalars and
 	// enums still use pointers.
-	isNullableEnum := !isRequired && !isArray && isEnum
-	isNullableScalar := !isRequired && !isArray && isScalar && !traits.IsIntegerLike
-	preservesExplicitJSONNull := isScalar && irType == "Generic.JSON" && !isArray && !fieldDef.TypeRef.IsMap
+	isMap := fieldDef.TypeRef.IsMap
+	isNullableEnum := !isRequired && !isArray && !isMap && isEnum
+	isNullableScalar := !isRequired && !isArray && !isMap && isScalar && !traits.IsIntegerLike
+	preservesExplicitJSONNull := isScalar && irType == "Generic.JSON" && !isArray && !isMap
 
 	field := Field{
 		Name:                      fieldDef.Name,
@@ -675,7 +678,8 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		GoType:                    mapIRToGoType(irType, scalars),
 		IsRequired:                isRequired,
 		IsArray:                   isArray,
-		IsMap:                     fieldDef.TypeRef.IsMap,
+		IsMap:                     isMap,
+		NullableMapValues:         isMap && !isRequired && !isUnion,
 		IsUnion:                   isUnion,
 		IsPrimaryKey:              fieldDef.Key,
 		IsAuditField:              isAuditField(fieldDef.Name),
@@ -703,7 +707,7 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 	nilCheckedJSONScalar := field.IsScalarType && field.IsJSONLike && !field.IsArray
 	nullableComplex := !field.IsRequired && !field.IsArray && !field.IsMap && !field.IsUnion &&
 		strings.HasPrefix(field.GoType, "types.") && !field.IsScalarType
-	field.OptionalNilCheck = nilCheckedJSONScalar || nullableComplex || field.IsUnion ||
+	field.OptionalNilCheck = nilCheckedJSONScalar || nullableComplex || field.IsUnion || field.IsMap ||
 		field.IsNullableEnum || field.IsNullableScalar
 	field.DerefValue = nullableComplex || field.IsNullableEnum || field.IsNullableScalar
 
@@ -880,7 +884,9 @@ func computeImportNeeds(repo *Repository) {
 		if !field.IsJSONField && !field.IsArray && field.IsDateLike && !field.IsPrimaryKey && !field.IsAuditField {
 			repo.NeedsPgtype = true
 		}
-		if !field.IsRequired && !field.IsPrimaryKey && !field.IsAuditField && !field.IsArray && field.GoType == "string" {
+		// A JSON column (a map among them) scans through []byte, never
+		// sql.NullString.
+		if !field.IsJSONField && !field.IsRequired && !field.IsPrimaryKey && !field.IsAuditField && !field.IsArray && field.GoType == "string" {
 			repo.NeedsSQLNull = true
 		}
 

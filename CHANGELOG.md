@@ -460,5 +460,25 @@ of a generated artifact is always listed here with the bump it requires.
   directly. Go does not inherit `replace` lines from a dependency's
   `go.mod`, so a module that reached a sibling only through another
   generated module did not resolve it. Patch.
+- Go ORM: an optional map column did not compile. `NewXSnapshotUpdate`
+  compared the map with a zero value of its element type, `ApplyTo`
+  assigned that zero value on `SetNull`, and a map of a scalar or enum was
+  treated as a pointer and assigned without a dereference. An optional map
+  is now nil-checked like a list, and its `<Type>Update` field holds the map
+  type the types module emits: `map[string]*T` for a non-union value (was
+  `map[string]T`). A table whose only optional string field is a map no
+  longer imports `database/sql` without using it. Patch.
+- Go types: an optional map or map of lists of a union on an output type
+  was `map[string]*Choice` (`map[string][]*Choice`), while its generated
+  `UnmarshalJSON` builds `map[string]Choice`, so the module did not
+  compile. It is now `map[string]Choice` (`map[string][]Choice`), as the
+  required map and the optional input map already were. Patch.
+- Rust SDK: an array query parameter was validated as its comma-joined
+  wire text, so the pattern and length checks saw `a,b`, `min` and `max`
+  tried to parse `1,5` as one number, and the list count split items that
+  contain a comma. The generated server checks each item, so the SDK
+  rejected requests the server accepts. The SDK now checks each item and
+  counts the list it was given, in the JSON and the multipart methods.
+  Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main
