@@ -168,7 +168,7 @@ func (p *Parser) walkArrayField(field *ir.FieldDef, key, kind string, value any,
 			continue
 		}
 		if !isList {
-			errs.AddFieldError(elemKey, "type", "expected array value")
+			errs.AddFieldError(elemKey, "type", "expected an array")
 			out[i] = elem
 			continue
 		}

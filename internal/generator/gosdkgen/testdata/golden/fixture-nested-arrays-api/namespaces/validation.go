@@ -1,0 +1,82 @@
+package namespaces
+
+import (
+	"fmt"
+
+	types "example.com/schemas/types/go/fixture-nested-arrays-api"
+)
+
+// ValidationError reports client-side input validation failures.
+type ValidationError struct {
+	Errors types.ValidationErrors
+}
+
+func NewValidationError(errors types.ValidationErrors) *ValidationError {
+	if errors == nil {
+		errors = types.NewValidationErrors()
+	}
+	return &ValidationError{
+		Errors: errors,
+	}
+}
+
+func (e *ValidationError) Error() string {
+	if e == nil || !e.Errors.HasErrors() {
+		return "validation failed"
+	}
+
+	return fmt.Sprintf("validation failed (%d field errors)", len(e.Errors))
+}
+
+type inputValidator interface {
+	Validate() types.ValidationErrors
+}
+
+type requiredScalarValidator interface {
+	ValidateRequired() (bool, []types.ValidationError)
+}
+
+type scalarValidator interface {
+	Validate() (bool, []types.ValidationError)
+}
+
+func mergeValidationErrors(target types.ValidationErrors, source types.ValidationErrors) {
+	if !source.HasErrors() {
+		return
+	}
+
+	for field, fieldErrors := range source {
+		target[field] = fieldErrors
+	}
+}
+
+func appendInputValidationErrors(validationErrors types.ValidationErrors, input any) {
+	validator, ok := input.(inputValidator)
+	if !ok {
+		return
+	}
+
+	mergeValidationErrors(validationErrors, validator.Validate())
+}
+
+func appendRequiredScalarValidationErrors(validationErrors types.ValidationErrors, fieldName string, value any) {
+	validator, ok := value.(requiredScalarValidator)
+	if !ok {
+		return
+	}
+
+	if valid, fieldErrors := validator.ValidateRequired(); !valid {
+		validationErrors.SetFieldErrors(fieldName, fieldErrors)
+	}
+}
+
+func appendScalarValidationErrors(validationErrors types.ValidationErrors, fieldName string, value any) {
+	validator, ok := value.(scalarValidator)
+	if !ok {
+		return
+	}
+
+	if valid, fieldErrors := validator.Validate(); !valid {
+		validationErrors.SetFieldErrors(fieldName, fieldErrors)
+	}
+}

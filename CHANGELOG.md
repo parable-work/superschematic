@@ -351,11 +351,9 @@ of a generated artifact is always listed here with the bump it requires.
   a platform default takes a list of lists. Verification refuses it in env
   config fields, relations, indexed fields and `@index` keys, query and
   path parameters, arguments of GET operations and operations without a
-  method, and every projection column, join and row rule. No generator
-  renders it yet: each one fails with "<generator> does not support
-  arrays of arrays yet", and `apigen.Param` and `apigen.EndpointInfo`
-  carry `IsArrayOfArrays` / `OutputIsArrayOfArrays` for the SDK
-  generators. Minor.
+  method, and every projection column, join and row rule.
+  `apigen.Param` and `apigen.EndpointInfo` carry `IsArrayOfArrays` /
+  `OutputIsArrayOfArrays` for the SDK generators. Minor.
 - Naming file: `scalar_jsdoc_tag` names a JSDoc tag that the TypeScript
   types write above every scalar-typed field in `types/types.ts`, followed
   by the scalar's canonical name (`/** @scalar Contact.Email */`), after
@@ -393,11 +391,29 @@ of a generated artifact is always listed here with the bump it requires.
   longer declares `ValidationError` twice. Minor.
 - Arrays of arrays in TypeScript: tsgen emits `T[][]`, and its validators
   and the TypeScript schema runtime check every innermost element at
-  `field[i][j]`, apply list bounds to the outer list and reject an inner
-  list that is not an array at `field[i]` (`required`). Minor.
+  `field[i][j]`, apply list bounds to the outer list and reject a null inner
+  list at `field[i]` (`required`) and any other non-list one (`type`).
+  Minor.
 - Rust types render a list of lists as `Vec<Vec<T>>` (`Option<Vec<Vec<T>>>`
   when optional) with the serde attributes of `Vec<T>`; a null inner list
   fails to decode. Minor.
+- Arrays of arrays in the SDKs and the Rust API: a `T[][]` body argument
+  or response is `[][]T` in the Go SDK, `T[][]` in the TypeScript SDK,
+  `list[list[T]]` in the Python SDK and `Vec<Vec<T>>` in the Rust SDK. The
+  Go, TypeScript and Python SDKs refuse a null inner list at `name[i]` and
+  an element that fails its type's validation at `name[i][j]` before
+  sending; the TypeScript and Python SDKs parse a list-of-lists response of
+  an object type row by row. The SDK tool documents carry the list shape of
+  body arguments (`T[]` and `T[][]` arguments were rendered as `T`) and
+  nest the return schema's items. The Rust API crate passes lists of lists
+  through its `serde_json::Value` handlers. Minor.
+- Arrays of arrays on the docs site: a reference page for `T[][]` (the
+  TypeScript and data forms, what each generator writes, where a list of
+  lists is accepted and refused with each error, the list rules and the
+  error paths), and a note in the extension guide that a generator reads
+  `TypeRef.ArrayDepth()`. `examples/acme-schematic` declares a list of
+  lists as a DB column, in API types and as a tool argument, and its smoke
+  follows it into every output. No generated output changes.
 
 ### Changed
 
@@ -559,6 +575,30 @@ of a generated artifact is always listed here with the bump it requires.
   recursive type, reads its input through the adapter too; an untagged one
   then tries each member in order. A crate with such a field or union
   depends on the scalar crate and `serde_json`. Minor.
+- Schema runtimes (Go, TypeScript, Python): one set of list rules for
+  `T[]` and for the outer list of `T[][]` (D12), which changes `T[]`
+  validation too. The Go and Python runtimes accept an explicit `[]` for a
+  required list (present, not non-empty; `listMin` declares non-emptiness).
+  The Go runtime enforces `listMin` and `listMax` ("must contain at least N
+  items"). The TypeScript and Python runtimes apply a field's `minLength`,
+  `maxLength`, `pattern`, `min` and `max` to each element, as the Go
+  runtime did. All three report a null list element as `required` at
+  `field[i]` whether or not the schema sets the legacy `elemNonNull`;
+  before, the Go runtime and the TypeScript IR reader accepted it. The
+  Go, TypeScript and Python runtimes and the TypeScript and Python
+  validators report a null inner list as `required` ("required field") and
+  a non-list inner value as `type` ("expected an array") at `field[i]`.
+  Every runtime suite now asserts the parity matrix of the generated
+  validators, `runtime/schema/testdata/validation_parity.json`. Minor.
+- Python types: `validate_all` reports a `None` list element at
+  `field[i]` (`required`), and a `None` innermost element at
+  `field[i][j]`, for `T[]` and `T[][]`; element rules skip it. An optional
+  list with a `None` entry no longer also reports `field: invalid` from the
+  whole-value check. Minor.
+- Verification refuses a DB table column that is an array of arrays of a
+  table type (`Table[][]`) with one error naming the field, instead of
+  failing later in the sql and orm generators, which keep their check.
+  Patch.
 
 ### Fixed
 

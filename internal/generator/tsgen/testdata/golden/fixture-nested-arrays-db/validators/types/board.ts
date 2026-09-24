@@ -34,8 +34,10 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
 
   if (Array.isArray(value.labels)) {
     value.labels.forEach((row, rowIndex) => {
-      if (!Array.isArray(row)) {
-        addFieldError(errors, `labels[${rowIndex}]`, "required", "inner list must be an array");
+      if (row === null || row === undefined) {
+        addFieldError(errors, `labels[${rowIndex}]`, "required", "required field");
+      } else if (!Array.isArray(row)) {
+        addFieldError(errors, `labels[${rowIndex}]`, "type", "expected an array");
       }
     });
   }
@@ -46,8 +48,12 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
 
   if (Array.isArray(value.states)) {
     value.states.forEach((row, rowIndex) => {
+      if (row === null || row === undefined) {
+        addFieldError(errors, `states[${rowIndex}]`, "required", "required field");
+        return;
+      }
       if (!Array.isArray(row)) {
-        addFieldError(errors, `states[${rowIndex}]`, "required", "inner list must be an array");
+        addFieldError(errors, `states[${rowIndex}]`, "type", "expected an array");
         return;
       }
       row.forEach((item, index) => {
@@ -63,8 +69,10 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
 
   if (Array.isArray(value.walls)) {
     value.walls.forEach((row, rowIndex) => {
-      if (!Array.isArray(row)) {
-        addFieldError(errors, `walls[${rowIndex}]`, "required", "inner list must be an array");
+      if (row === null || row === undefined) {
+        addFieldError(errors, `walls[${rowIndex}]`, "required", "required field");
+      } else if (!Array.isArray(row)) {
+        addFieldError(errors, `walls[${rowIndex}]`, "type", "expected an array");
       }
     });
   }
@@ -75,8 +83,10 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
 
   if (Array.isArray(value.scores)) {
     value.scores.forEach((row, rowIndex) => {
-      if (!Array.isArray(row)) {
-        addFieldError(errors, `scores[${rowIndex}]`, "required", "inner list must be an array");
+      if (row === null || row === undefined) {
+        addFieldError(errors, `scores[${rowIndex}]`, "required", "required field");
+      } else if (!Array.isArray(row)) {
+        addFieldError(errors, `scores[${rowIndex}]`, "type", "expected an array");
       }
     });
   }

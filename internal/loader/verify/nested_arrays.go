@@ -8,7 +8,8 @@ import (
 
 // checkArraysOfArrays refuses an array of arrays (T[][]) where a list of
 // lists has no meaning: env config fields, relations, indexed fields and
-// index keys, and operation arguments that do not travel in a request body
+// index keys, a DB table column whose element type is itself a table
+// (Table[][]), and operation arguments that do not travel in a request body
 // (query and path parameters, and any argument of a GET operation or of an
 // operation without a method). Fields of DB, API and General types, request
 // input types and operation responses accept it. A map value is refused by
@@ -31,6 +32,10 @@ func checkArraysOfArrays(schema *ir.Schema, r *Result) {
 				r.errorf(td.Owner, "%s: a relation (hasMany, manyToMany or relation) cannot be an array of arrays", owner)
 			case fd.Key || fd.Unique || fd.SearchField:
 				r.errorf(td.Owner, "%s: an indexed field (@key, @unique or @searchField) cannot be an array of arrays", owner)
+			case isTableColumn(td, fd) && isTable(schema.Types[fd.TypeRef.Name]):
+				// A list of table rows is a relation, and a relation cannot
+				// nest. sqlgen and ormgen refuse it too, as a backstop.
+				r.errorf(td.Owner, "%s: an array of arrays of table type %s cannot be a relation; store a list of lists of its keys or of a @jsonField type", owner, fd.TypeRef.Name)
 			}
 		}
 		for _, idx := range td.Indexes {
@@ -74,6 +79,18 @@ func checkOperationArraysOfArrays(set *ir.OperationSet, op *ir.FieldDef, r *Resu
 			r.errorf("", "%s: argument %q is an array of arrays, which only a request body carries; declare a POST, PUT, PATCH or DELETE method, or move it into an input type", owner, arg.Name)
 		}
 	}
+}
+
+// isTable reports whether td is a DB table that owns rows: a DBTable type
+// that is not stored as a @jsonField value.
+func isTable(td *ir.TypeDef) bool {
+	return td != nil && td.Role == ir.RoleDBTable && !td.JsonField
+}
+
+// isTableColumn reports whether fd is a column of a DB table, not a value
+// stored whole as JSON.
+func isTableColumn(td *ir.TypeDef, fd *ir.FieldDef) bool {
+	return isTable(td) && !fd.JsonField
 }
 
 // restPathParams returns the {name} placeholders of a rest path.

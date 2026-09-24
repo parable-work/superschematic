@@ -1,0 +1,803 @@
+{
+  "$schema": "superschematic://schema-file.json",
+  "definitions": {
+    "AgentSkill_Name": {
+      "description": "Portable Agent Skills directory and frontmatter name",
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "type": "string",
+      "x-example": "data-analysis",
+      "x-scalar": "AgentSkill_Name",
+      "x-typeMapping": {
+        "go": "AgentSkillName",
+        "json_schema": "string",
+        "sql": "CITEXT"
+      }
+    },
+    "Auth_JWT": {
+      "description": "JSON Web Token string",
+      "pattern": "^[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+$",
+      "type": "string",
+      "x-scalar": "Auth_JWT",
+      "x-typeMapping": {
+        "go": "AuthJWT",
+        "json_schema": "string",
+        "sql": "TEXT"
+      }
+    },
+    "Auth_Password": {
+      "description": "User password (minimum 8 characters)",
+      "maxLength": 128,
+      "minLength": 8,
+      "type": "string",
+      "x-scalar": "Auth_Password",
+      "x-typeMapping": {
+        "go": "AuthPassword",
+        "json_schema": "string",
+        "sql": "VARCHAR(128)"
+      }
+    },
+    "Contact_Email": {
+      "description": "An email address",
+      "maxLength": 255,
+      "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+      "type": "string",
+      "x-example": "test@example.com",
+      "x-hasCustomNormalize": true,
+      "x-hasCustomValidate": true,
+      "x-scalar": "Contact_Email",
+      "x-typeMapping": {
+        "go": "ContactEmail",
+        "json_schema": "string",
+        "sql": "CITEXT"
+      }
+    },
+    "Contact_PhoneNumber": {
+      "description": "Phone number in E.164 format",
+      "maxLength": 16,
+      "pattern": "^\\+[1-9]\\d{1,14}$",
+      "type": "string",
+      "x-example": "+1234567890",
+      "x-hasCustomNormalize": true,
+      "x-hasCustomValidate": true,
+      "x-scalar": "Contact_PhoneNumber",
+      "x-typeMapping": {
+        "go": "ContactPhoneNumber",
+        "json_schema": "string",
+        "sql": "VARCHAR(16)"
+      }
+    },
+    "Crypto_RSAPrivateKey": {
+      "description": "RSA private key in PEM format",
+      "pattern": "^-----BEGIN (RSA )?PRIVATE KEY-----[\\s\\S]*-----END (RSA )?PRIVATE KEY-----\\s*$",
+      "type": "string",
+      "x-example": "-----BEGIN RSA PRIVATE KEY----------END RSA PRIVATE KEY-----",
+      "x-scalar": "Crypto_RSAPrivateKey",
+      "x-typeMapping": {
+        "go": "CryptoRSAPrivateKey",
+        "json_schema": "string",
+        "sql": "TEXT"
+      }
+    },
+    "Crypto_RSAPublicKey": {
+      "description": "RSA public key in PEM format",
+      "pattern": "^-----BEGIN PUBLIC KEY-----[\\s\\S]*-----END PUBLIC KEY-----\\s*$",
+      "type": "string",
+      "x-example": "-----BEGIN PUBLIC KEY----------END PUBLIC KEY-----",
+      "x-scalar": "Crypto_RSAPublicKey",
+      "x-typeMapping": {
+        "go": "CryptoRSAPublicKey",
+        "json_schema": "string",
+        "sql": "TEXT"
+      }
+    },
+    "Crypto_SHA256": {
+      "description": "Lowercase hexadecimal SHA-256 digest",
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string",
+      "x-example": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "x-scalar": "Crypto_SHA256",
+      "x-typeMapping": {
+        "go": "CryptoSHA256",
+        "json_schema": "string",
+        "sql": "VARCHAR(64)"
+      }
+    },
+    "Design_Color": {
+      "description": "CSS color value normalized to 8-digit RGBA hex format (#RRGGBBAA)",
+      "maxLength": 9,
+      "pattern": "^#[0-9A-Fa-f]{8}$",
+      "type": "string",
+      "x-example": "#FF5733FF",
+      "x-hasCustomNormalize": true,
+      "x-hasCustomValidate": true,
+      "x-scalar": "Design_Color",
+      "x-typeMapping": {
+        "go": "DesignColor",
+        "json_schema": "string",
+        "sql": "VARCHAR(9)"
+      }
+    },
+    "Embedding_Vector": {
+      "description": "Fixed-dimensional float32 vector",
+      "type": "string",
+      "x-scalar": "Embedding_Vector",
+      "x-typeMapping": {
+        "go": "EmbeddingVector",
+        "json_schema": "array"
+      }
+    },
+    "File_SizeBytes": {
+      "description": "File size in bytes (non-negative, BIGINT-backed)",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer",
+      "x-example": "204800",
+      "x-scalar": "File_SizeBytes",
+      "x-typeMapping": {
+        "go": "FileSizeBytes",
+        "json_schema": "integer",
+        "sql": "BIGINT"
+      }
+    },
+    "Finance_Money": {
+      "description": "Monetary amount in smallest currency unit (e.g., cents for USD)",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer",
+      "x-example": "1000",
+      "x-hasCustomParse": true,
+      "x-scalar": "Finance_Money",
+      "x-typeMapping": {
+        "go": "FinanceMoney",
+        "json_schema": "integer",
+        "sql": "BIGINT"
+      }
+    },
+    "Generic_Int64": {
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "maximum": 9007199254740991,
+      "minimum": -9007199254740991,
+      "type": "integer",
+      "x-example": "1000",
+      "x-hasCustomParse": true,
+      "x-scalar": "Generic_Int64",
+      "x-typeMapping": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "sql": "BIGINT"
+      }
+    },
+    "Generic_JSON": {
+      "description": "Any valid JSON value: object, array, primitive, or null",
+      "type": "string",
+      "x-example": "{\"k\":1}",
+      "x-hasCustomValidate": true,
+      "x-scalar": "Generic_JSON",
+      "x-typeMapping": {
+        "go": "GenericJSON",
+        "json_schema": "any",
+        "sql": "JSONB"
+      }
+    },
+    "Generic_Probability": {
+      "description": "Probability value from 0.0 to 1.0 inclusive",
+      "maximum": 1,
+      "minimum": 0,
+      "type": "number",
+      "x-example": "0.75",
+      "x-scalar": "Generic_Probability",
+      "x-typeMapping": {
+        "go": "GenericProbability",
+        "json_schema": "number",
+        "sql": "DOUBLE PRECISION"
+      }
+    },
+    "Generic_StringMap": {
+      "description": "A string-to-string map stored as JSON",
+      "type": "string",
+      "x-hasCustomParse": true,
+      "x-scalar": "Generic_StringMap",
+      "x-typeMapping": {
+        "go": "GenericStringMap",
+        "json_schema": "object",
+        "sql": "JSONB"
+      }
+    },
+    "Geo_Location": {
+      "description": "Geographic location with latitude and longitude",
+      "pattern": "^-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?$",
+      "type": "string",
+      "x-example": "37.7749,-122.4194",
+      "x-scalar": "Geo_Location",
+      "x-typeMapping": {
+        "go": "GeoLocation",
+        "json_schema": "object",
+        "sql": "POINT"
+      }
+    },
+    "Git_PathPattern": {
+      "description": "Repository-rooted, case-sensitive gitignore-style path pattern",
+      "maxLength": 1024,
+      "minLength": 2,
+      "pattern": "^!?/[^\\x00\\r\\n]+$",
+      "type": "string",
+      "x-example": "/skills/**",
+      "x-hasCustomValidate": true,
+      "x-scalar": "Git_PathPattern",
+      "x-typeMapping": {
+        "go": "GitPathPattern",
+        "json_schema": "string",
+        "sql": "VARCHAR(1024)"
+      }
+    },
+    "Identity_Name": {
+      "description": "An objects name",
+      "maxLength": 80,
+      "minLength": 2,
+      "type": "string",
+      "x-example": "A Name",
+      "x-scalar": "Identity_Name",
+      "x-typeMapping": {
+        "go": "IdentityName",
+        "json_schema": "string",
+        "sql": "VARCHAR(80)"
+      }
+    },
+    "Identity_Slug": {
+      "description": "A URL friendly version of a string",
+      "maxLength": 255,
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+      "type": "string",
+      "x-example": "acme-corp",
+      "x-scalar": "Identity_Slug",
+      "x-typeMapping": {
+        "go": "IdentitySlug",
+        "json_schema": "string",
+        "sql": "CITEXT"
+      }
+    },
+    "Identity_UserID": {
+      "description": "UUID v4 string as base62",
+      "pattern": "^[0-9A-Za-z]{1,22}$",
+      "type": "string",
+      "x-example": "YQJpYwUwvbaLOwTUr4thA",
+      "x-hasCustomParse": true,
+      "x-scalar": "Identity_UserID",
+      "x-typeMapping": {
+        "go": "IdentityUserID",
+        "json_schema": "string",
+        "sql": "UUID"
+      }
+    },
+    "Identity_UUID": {
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "type": "string",
+      "x-example": "YQJpYwUwvbaLOwTUr4thA",
+      "x-hasCustomParse": true,
+      "x-scalar": "Identity_UUID",
+      "x-typeMapping": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "sql": "UUID"
+      }
+    },
+    "ListMatrix": {
+      "properties": {
+        "numGrid": {
+          "items": {
+            "items": {
+              "$ref": "#/definitions/number"
+            },
+            "type": "array"
+          },
+          "type": "array",
+          "x-validateMax": 10,
+          "x-validateMin": 1
+        },
+        "optGrid": {
+          "items": {
+            "items": {
+              "$ref": "#/definitions/string"
+            },
+            "type": "array"
+          },
+          "type": "array",
+          "x-validateListMax": 2,
+          "x-validateListMin": 1,
+          "x-validateMaxLength": 5
+        },
+        "pointGrid": {
+          "items": {
+            "items": {
+              "$ref": "#/definitions/ParityPoint"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "pointList": {
+          "items": {
+            "$ref": "#/definitions/ParityPoint"
+          },
+          "type": "array"
+        },
+        "reqGrid": {
+          "items": {
+            "items": {
+              "$ref": "#/definitions/string"
+            },
+            "type": "array"
+          },
+          "type": "array",
+          "x-validateMaxLength": 5
+        },
+        "reqShadeGrid": {
+          "items": {
+            "items": {
+              "$ref": "#/definitions/ParityShade"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "reqShadeList": {
+          "items": {
+            "$ref": "#/definitions/ParityShade"
+          },
+          "type": "array"
+        },
+        "reqUrlGrid": {
+          "items": {
+            "items": {
+              "$ref": "#/definitions/scalars/Network_Url"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "reqGrid",
+        "reqUrlGrid",
+        "reqShadeGrid",
+        "reqShadeList"
+      ],
+      "type": "object",
+      "x-kind": "type"
+    },
+    "Localization_Locale": {
+      "description": "BCP 47 language tag (e.g., en-US, fr-FR)",
+      "maxLength": 35,
+      "pattern": "^[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2})?$",
+      "type": "string",
+      "x-example": "en-US",
+      "x-scalar": "Localization_Locale",
+      "x-typeMapping": {
+        "go": "LocalizationLocale",
+        "json_schema": "string",
+        "sql": "VARCHAR(35)"
+      }
+    },
+    "Network_DnsLabel": {
+      "description": "Single DNS label (RFC 1035): one hostname segment, no dots",
+      "maxLength": 63,
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$",
+      "type": "string",
+      "x-example": "mycompany",
+      "x-scalar": "Network_DnsLabel",
+      "x-typeMapping": {
+        "go": "NetworkDnsLabel",
+        "json_schema": "string",
+        "sql": "CITEXT"
+      }
+    },
+    "Network_DomainName": {
+      "description": "Valid domain name (RFC 1035 compliant)",
+      "maxLength": 255,
+      "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)*$",
+      "type": "string",
+      "x-example": "example.com",
+      "x-scalar": "Network_DomainName",
+      "x-typeMapping": {
+        "go": "NetworkDomainName",
+        "json_schema": "string",
+        "sql": "CITEXT"
+      }
+    },
+    "Network_IpAddress": {
+      "description": "IPv4 or IPv6 address",
+      "maxLength": 45,
+      "pattern": "^(((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)|([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$",
+      "type": "string",
+      "x-example": "192.168.1.1",
+      "x-scalar": "Network_IpAddress",
+      "x-typeMapping": {
+        "go": "NetworkIpAddress",
+        "json_schema": "string",
+        "sql": "INET"
+      }
+    },
+    "Network_Uri": {
+      "description": "RFC 3986 URI for connection strings and non-HTTP resources",
+      "maxLength": 4096,
+      "pattern": "^[a-zA-Z][a-zA-Z0-9+.-]*://[^\\s]+$",
+      "type": "string",
+      "x-example": "postgres://user:pass@localhost:5432/dbname",
+      "x-scalar": "Network_Uri",
+      "x-typeMapping": {
+        "go": "NetworkUri",
+        "json_schema": "string",
+        "sql": "TEXT"
+      }
+    },
+    "Network_Url": {
+      "description": "Valid HTTP/HTTPS URL",
+      "maxLength": 2048,
+      "pattern": "^https?://[\\w\\-\\{\\}]+(\\.[\\w\\-\\{\\}]+)+([:/?#][\\w\\-\\._~:/?#\\[\\]@!\\$&'\\(\\)\\*\\+,;=\\{\\}%]*)?$",
+      "type": "string",
+      "x-scalar": "Network_Url",
+      "x-typeMapping": {
+        "go": "NetworkUrl",
+        "json_schema": "string",
+        "python": "str",
+        "rust": "String",
+        "sql": "varchar(4096)",
+        "typescript": "string"
+      }
+    },
+    "Ordering_Rank": {
+      "description": "Positive JavaScript-safe ordering rank",
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer",
+      "x-example": "1",
+      "x-scalar": "Ordering_Rank",
+      "x-typeMapping": {
+        "go": "OrderingRank",
+        "json_schema": "integer",
+        "sql": "BIGINT"
+      }
+    },
+    "ParityMatrix": {
+      "properties": {
+        "optList": {
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array",
+          "x-validateListMax": 3,
+          "x-validateListMin": 1,
+          "x-validateMaxLength": 5
+        },
+        "optNum": {
+          "$ref": "#/definitions/number",
+          "x-validateMax": 10,
+          "x-validateMin": 1
+        },
+        "optStr": {
+          "$ref": "#/definitions/string",
+          "x-validateMaxLength": 5
+        },
+        "reqList": {
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array",
+          "x-validateListMax": 3,
+          "x-validateListMin": 1,
+          "x-validateMaxLength": 5
+        },
+        "reqScalarList": {
+          "items": {
+            "$ref": "#/definitions/scalars/Network_Url"
+          },
+          "type": "array"
+        },
+        "reqStr": {
+          "$ref": "#/definitions/string",
+          "x-validateMaxLength": 5
+        },
+        "url": {
+          "$ref": "#/definitions/scalars/Network_Url"
+        }
+      },
+      "required": [
+        "reqStr",
+        "reqList",
+        "reqScalarList"
+      ],
+      "type": "object",
+      "x-kind": "type"
+    },
+    "ParityPoint": {
+      "properties": {
+        "shade": {
+          "$ref": "#/definitions/ParityShade"
+        }
+      },
+      "required": [
+        "shade"
+      ],
+      "type": "object",
+      "x-kind": "type"
+    },
+    "ParityShade": {
+      "enum": [
+        "Light",
+        "Dark"
+      ],
+      "type": "string",
+      "x-enumValues": {
+        "Dark": {
+          "serializedAs": "dark"
+        },
+        "Light": {
+          "serializedAs": "light"
+        }
+      },
+      "x-kind": "enum",
+      "x-owner": "parity-fixture"
+    },
+    "Temporal_CronExpression": {
+      "description": "Standard 5-field cron expression for scheduling",
+      "maxLength": 100,
+      "pattern": "^[0-9*,\\-\\/]+\\s+[0-9*,\\-\\/]+\\s+[0-9*,\\-\\/?]+\\s+[0-9*,\\-\\/A-Za-z]+\\s+[0-9*,\\-\\/A-Za-z]+$",
+      "type": "string",
+      "x-example": "0 9 * * MON-FRI",
+      "x-scalar": "Temporal_CronExpression",
+      "x-typeMapping": {
+        "go": "TemporalCronExpression",
+        "json_schema": "string",
+        "sql": "VARCHAR(100)"
+      }
+    },
+    "Temporal_Date": {
+      "description": "Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).",
+      "maxLength": 40,
+      "type": "string",
+      "x-example": "2025-01-01",
+      "x-scalar": "Temporal_Date",
+      "x-typeMapping": {
+        "go": "TemporalDate",
+        "json_schema": "string",
+        "sql": "DATE"
+      }
+    },
+    "Temporal_DateTime": {
+      "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+      "type": "string",
+      "x-example": "2025-01-01T12:00:00Z",
+      "x-hasCustomParse": true,
+      "x-scalar": "Temporal_DateTime",
+      "x-typeMapping": {
+        "go": "TemporalDateTime",
+        "json_schema": "string",
+        "sql": "TIMESTAMPTZ"
+      }
+    },
+    "Temporal_Days": {
+      "description": "Signed integer count of days: an amount of elapsed time, never a point in time or a calendar date.",
+      "maximum": 9007199254740991,
+      "minimum": -9007199254740991,
+      "type": "integer",
+      "x-example": "7",
+      "x-hasCustomParse": true,
+      "x-scalar": "Temporal_Days",
+      "x-typeMapping": {
+        "go": "TemporalDays",
+        "json_schema": "integer",
+        "sql": "BIGINT"
+      }
+    },
+    "Temporal_Duration": {
+      "description": "Duration for timeouts and intervals",
+      "maxLength": 32,
+      "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
+      "type": "string",
+      "x-example": "30s",
+      "x-hasCustomNormalize": true,
+      "x-hasCustomParse": true,
+      "x-hasCustomValidate": true,
+      "x-scalar": "Temporal_Duration",
+      "x-typeMapping": {
+        "go": "TemporalDuration",
+        "json_schema": "string",
+        "sql": "INTERVAL"
+      }
+    },
+    "Temporal_Hours": {
+      "description": "Signed integer count of hours: an amount of elapsed time, never a point in time.",
+      "maximum": 9007199254740991,
+      "minimum": -9007199254740991,
+      "type": "integer",
+      "x-example": "2",
+      "x-hasCustomParse": true,
+      "x-scalar": "Temporal_Hours",
+      "x-typeMapping": {
+        "go": "TemporalHours",
+        "json_schema": "integer",
+        "sql": "BIGINT"
+      }
+    },
+    "Temporal_Milliseconds": {
+      "description": "Signed integer count of milliseconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix_millis.",
+      "maximum": 9007199254740991,
+      "minimum": -9007199254740991,
+      "type": "integer",
+      "x-example": "1000",
+      "x-hasCustomParse": true,
+      "x-scalar": "Temporal_Milliseconds",
+      "x-typeMapping": {
+        "go": "TemporalMilliseconds",
+        "json_schema": "integer",
+        "sql": "BIGINT"
+      }
+    },
+    "Temporal_Minutes": {
+      "description": "Signed integer count of minutes: an amount of elapsed time, never a point in time.",
+      "maximum": 9007199254740991,
+      "minimum": -9007199254740991,
+      "type": "integer",
+      "x-example": "5",
+      "x-hasCustomParse": true,
+      "x-scalar": "Temporal_Minutes",
+      "x-typeMapping": {
+        "go": "TemporalMinutes",
+        "json_schema": "integer",
+        "sql": "BIGINT"
+      }
+    },
+    "Temporal_Month": {
+      "description": "Calendar month, normalized to two-digit numeric (01-12). Accepts '2', '02', 'Feb', 'February' (case-insensitive).",
+      "maxLength": 9,
+      "type": "string",
+      "x-example": "02",
+      "x-scalar": "Temporal_Month",
+      "x-typeMapping": {
+        "go": "TemporalMonth",
+        "json_schema": "string",
+        "sql": "VARCHAR(2)"
+      }
+    },
+    "Temporal_Quarter": {
+      "description": "Calendar quarter (Q1-Q4)",
+      "maxLength": 2,
+      "minLength": 2,
+      "pattern": "^[Qq][1-4]$",
+      "type": "string",
+      "x-example": "Q1",
+      "x-scalar": "Temporal_Quarter",
+      "x-typeMapping": {
+        "go": "TemporalQuarter",
+        "json_schema": "string",
+        "sql": "VARCHAR(2)"
+      }
+    },
+    "Temporal_QuarterYear": {
+      "description": "Quarter and year, normalized to 'YYYY-Q#'. Accepts '2025-Q1', 'Q1/2025', 'Q1-2025', 'Q1-25' (2-digit years interpreted as 20XX).",
+      "maxLength": 8,
+      "type": "string",
+      "x-example": "2025-Q1",
+      "x-scalar": "Temporal_QuarterYear",
+      "x-typeMapping": {
+        "go": "TemporalQuarterYear",
+        "json_schema": "string",
+        "sql": "VARCHAR(7)"
+      }
+    },
+    "Temporal_RecurrenceRule": {
+      "description": "RFC 5545 recurrence rule, without DTSTART",
+      "maxLength": 512,
+      "minLength": 6,
+      "type": "string",
+      "x-example": "FREQ=WEEKLY;BYMINUTE=0;BYHOUR=9;BYDAY=MO,WE,FR",
+      "x-scalar": "Temporal_RecurrenceRule",
+      "x-typeMapping": {
+        "go": "TemporalRecurrenceRule",
+        "json_schema": "string",
+        "sql": "VARCHAR(512)"
+      }
+    },
+    "Temporal_Seconds": {
+      "description": "Signed integer count of seconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix.",
+      "maximum": 9007199254740991,
+      "minimum": -9007199254740991,
+      "type": "integer",
+      "x-example": "60",
+      "x-hasCustomParse": true,
+      "x-scalar": "Temporal_Seconds",
+      "x-typeMapping": {
+        "go": "TemporalSeconds",
+        "json_schema": "integer",
+        "sql": "BIGINT"
+      }
+    },
+    "Temporal_Time": {
+      "description": "Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.",
+      "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$",
+      "type": "string",
+      "x-example": "12:25",
+      "x-scalar": "Temporal_Time",
+      "x-typeMapping": {
+        "go": "TemporalTime",
+        "json_schema": "string",
+        "sql": "TIME"
+      }
+    },
+    "Temporal_TimeZone": {
+      "description": "IANA timezone identifier (e.g., America/New_York, UTC, Etc/UTC)",
+      "maxLength": 100,
+      "pattern": "^(?:UTC|[A-Za-z]+/[A-Za-z_/]+)$",
+      "type": "string",
+      "x-example": "America/New_York",
+      "x-scalar": "Temporal_TimeZone",
+      "x-typeMapping": {
+        "go": "TemporalTimeZone",
+        "json_schema": "string",
+        "sql": "VARCHAR(100)"
+      }
+    },
+    "Temporal_Year": {
+      "description": "Calendar year as a 4-digit string (e.g., 2025)",
+      "maxLength": 4,
+      "minLength": 4,
+      "pattern": "^[1-9]\\d{3}$",
+      "type": "string",
+      "x-example": "2025",
+      "x-scalar": "Temporal_Year",
+      "x-typeMapping": {
+        "go": "TemporalYear",
+        "json_schema": "string",
+        "sql": "VARCHAR(4)"
+      }
+    },
+    "Text_Markdown": {
+      "description": "Markdown text",
+      "minLength": 1,
+      "pattern": "^[\\s\\S]*$",
+      "type": "string",
+      "x-example": "## Hello, World!",
+      "x-scalar": "Text_Markdown",
+      "x-typeMapping": {
+        "go": "TextMarkdown",
+        "json_schema": "string",
+        "sql": "TEXT"
+      }
+    },
+    "Text_Sql": {
+      "description": "SQL text",
+      "minLength": 1,
+      "pattern": "^[\\s\\S]*$",
+      "type": "string",
+      "x-example": "SELECT 1",
+      "x-scalar": "Text_Sql",
+      "x-typeMapping": {
+        "go": "TextSql",
+        "json_schema": "string",
+        "sql": "TEXT"
+      }
+    },
+    "Version_SemVer": {
+      "description": "Canonical Semantic Versioning 2.0.0 value",
+      "maxLength": 255,
+      "minLength": 5,
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+      "type": "string",
+      "x-example": "1.0.0",
+      "x-scalar": "Version_SemVer",
+      "x-typeMapping": {
+        "go": "VersionSemVer",
+        "json_schema": "string",
+        "sql": "VARCHAR(255)"
+      }
+    }
+  },
+  "title": "parity-fixture",
+  "x-kind": "General"
+}

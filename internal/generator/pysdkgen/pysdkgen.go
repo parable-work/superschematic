@@ -15,7 +15,6 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
-	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 )
 
 var pythonKeywords = map[string]struct{}{
@@ -66,6 +65,12 @@ type NamespaceInfo struct {
 	HasAuth                bool
 	HasEncryptedPayload    bool
 	HasFilterableEndpoints bool
+
+	// HasListOfListsArgs gates the _validate_list_of_lists_argument helper
+	// and HasListOfListsModelOutput the _coerce_list_of_lists_response
+	// helper of the namespace class.
+	HasListOfListsArgs        bool
+	HasListOfListsModelOutput bool
 }
 
 // EndpointInfo represents a single API endpoint for the Python SDK.
@@ -96,6 +101,10 @@ type EndpointInfo struct {
 	MultipartStripKeys   []string
 	MethodParams         []MethodParam
 	Filterable           bool
+
+	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
+	// set.
+	OutputIsArrayOfArrays bool
 }
 
 // PathParam represents a URL path parameter mapped to a Python identifier.
@@ -129,6 +138,11 @@ type ScalarArg struct {
 	PyElementType string // Element type for per-element validation (only set when IsArray is true)
 	Required      bool
 	IsArray       bool
+
+	// IsArrayOfArrays marks a T[][] argument (PyType list[list[T]];
+	// IsArray is also set): each inner list must be a list, and each
+	// element is validated as PyElementType.
+	IsArrayOfArrays bool
 }
 
 // FileUploadField represents file upload field metadata for the Python SDK.
@@ -168,10 +182,6 @@ func IsToolUnavailable(err error) bool {
 func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clock codegen.Clock) (*SDKOutput, error) {
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
-	}
-	// nested-arrays guard: remove when pysdkgen renders T[][].
-	if err := nestedguard.Check("pysdkgen", apiOutput); err != nil {
-		return nil, err
 	}
 
 	names := apiOutput.Naming.OrDefault()
@@ -240,6 +250,14 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		if endpoint.Filterable {
 			namespace.HasFilterableEndpoints = true
 			output.HasFilterableEndpoints = true
+		}
+		for _, arg := range converted.ScalarArgs {
+			if arg.IsArrayOfArrays {
+				namespace.HasListOfListsArgs = true
+			}
+		}
+		if converted.OutputIsArrayOfArrays && converted.OutputModelName != "" {
+			namespace.HasListOfListsModelOutput = true
 		}
 
 		collectNamespaceImports(importsByNamespace[namespaceName], endpoint)
@@ -329,15 +347,16 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		pyType := mapIRTypeToPython(arg.Type)
 		if arg.IsArray {
 			pyElementType = pyType
-			pyType = "list[" + pyType + "]"
+			pyType = pythonListType(pyType, arg.ArrayDepth())
 		}
 		scalarArgs = append(scalarArgs, ScalarArg{
-			Name:          arg.Name,
-			PyName:        toPythonIdentifier(arg.Name),
-			PyType:        pyType,
-			PyElementType: pyElementType,
-			Required:      arg.Required,
-			IsArray:       arg.IsArray,
+			Name:            arg.Name,
+			PyName:          toPythonIdentifier(arg.Name),
+			PyType:          pyType,
+			PyElementType:   pyElementType,
+			Required:        arg.Required,
+			IsArray:         arg.IsArray,
+			IsArrayOfArrays: arg.IsArrayOfArrays,
 		})
 	}
 
@@ -386,7 +405,7 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		PathIsFString:        pathIsFString,
 		Description:          endpoint.Description,
 		InputType:            endpoint.InputType,
-		OutputTypeHint:       mapIRTypeToPythonTypeRef(endpoint.OutputType, endpoint.OutputIsArray),
+		OutputTypeHint:       mapIRTypeToPythonTypeRef(endpoint.OutputType, endpoint.OutputArrayDepth()),
 		OutputModelName:      outputModelName(endpoint.OutputType),
 		OutputIsArray:        endpoint.OutputIsArray,
 		HasInput:             endpoint.HasInput,
@@ -406,6 +425,8 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		MultipartStripKeys:   multipartStripKeys,
 		Filterable:           endpoint.Filterable,
 		MethodParams:         buildMethodParams(pathParams, endpoint.HasInput, endpoint.InputType, scalarArgs, queryParams, hasFileUpload, hasRequiredFileField, toPythonClassName(endpoint.Name)+"Files", hasEncryptedBody, endpoint.Filterable),
+
+		OutputIsArrayOfArrays: endpoint.OutputIsArrayOfArrays,
 	}
 
 	if converted.OutputTypeHint == "" {
@@ -568,15 +589,20 @@ func mapIRTypeToPython(typeName string) string {
 	}
 }
 
-func mapIRTypeToPythonTypeRef(typeName string, isArray bool) string {
+// mapIRTypeToPythonTypeRef is the Python type hint of a response: the
+// mapped output type in arrayDepth list levels.
+func mapIRTypeToPythonTypeRef(typeName string, arrayDepth int) string {
 	base := mapIRTypeToPython(typeName)
 	if base == "" {
 		return ""
 	}
-	if isArray {
-		return "list[" + base + "]"
-	}
-	return base
+	return pythonListType(base, arrayDepth)
+}
+
+// pythonListType wraps a Python element type in depth list levels: "T",
+// "list[T]" or "list[list[T]]".
+func pythonListType(elem string, depth int) string {
+	return codegen.WrapArray(elem, depth, func(inner string) string { return "list[" + inner + "]" })
 }
 
 // outputModelName returns the bare IR type name for endpoint outputs that

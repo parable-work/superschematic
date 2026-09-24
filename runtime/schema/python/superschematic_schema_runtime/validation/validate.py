@@ -400,22 +400,31 @@ def _validate_array_element(
     errors: ValidationErrors,
     registry: ScalarValidatorRegistry,
 ) -> None:
+    """Validate one element of a T[] or T[][] field at ``element_key``.
+
+    A list element is never null, in a required list and an optional one
+    alike, and the field's own constraints (length, pattern, bounds) apply
+    to each element.
+    """
     if element is None:
-        if field.type_ref.elem_non_null:
-            append_field_error(
-                errors,
-                element_key,
-                ValidationError(
-                    validator="required", message=f"{field.type_ref.name} is required."
-                ),
-            )
+        append_field_error(
+            errors,
+            element_key,
+            ValidationError(validator="required", message=f"{field.type_ref.name} is required."),
+        )
         return
     if kind == "scalar":
         scalar = schema.scalars.get(field.type_ref.name)
         if scalar is None:
             return
         element_errors = _validate_scalar_value(scalar, element, field.required, registry)
+        if _has_field_level_constraints(field):
+            element_errors.extend(_apply_field_level_constraints(field, element))
         _set_field_errors(errors, element_key, element_errors)
+        return
+    if kind == "builtin":
+        if _has_field_level_constraints(field):
+            _set_field_errors(errors, element_key, _apply_field_level_constraints(field, element))
         return
     if kind == "enum":
         element_errors = _validate_enum_value(schema, field.type_ref.name, element)
@@ -447,19 +456,23 @@ def _validate_array_field(
             )
         return
     # A list of lists: an inner list is never null and may be empty; every
-    # innermost element is validated as a T[] element is.
+    # innermost element is validated as a T[] element is. A null inner list
+    # is "required" and any other value "type", at key[i].
     for index, row in enumerate(value):
         row_key = f"{key}[{index}]"
         if row is None:
             append_field_error(
                 errors,
                 row_key,
-                ValidationError(
-                    validator="required", message=f"{field.type_ref.name}[] is required."
-                ),
+                ValidationError(validator="required", message="required field"),
             )
             continue
         if not isinstance(row, list):
+            append_field_error(
+                errors,
+                row_key,
+                ValidationError(validator="type", message="expected an array"),
+            )
             continue
         for inner_index, element in enumerate(row):
             _validate_array_element(
@@ -486,7 +499,9 @@ def _validate_field(
                 ValidationError(validator="required", message=f"{field.name} is required."),
             )
             return
-        if field.type_ref.is_array and (not isinstance(value, list) or len(value) == 0):
+        # A required list means present, not non-empty: [] is a value.
+        # Non-emptiness is declared with listMin.
+        if field.type_ref.is_array and not isinstance(value, list):
             append_field_error(
                 errors,
                 key,

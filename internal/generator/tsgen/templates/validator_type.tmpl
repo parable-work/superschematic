@@ -83,8 +83,10 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   {{if and .IsArrayOfArrays (not .IsScalar) (not (containsString $.EnumsUsed .Type))}}
   if (Array.isArray(value.{{.TSName}})) {
     value.{{.TSName}}.forEach((row, rowIndex) => {
-      if (!Array.isArray(row)) {
-        addFieldError(errors, `{{.TSName}}[${rowIndex}]`, "required", "inner list must be an array");
+      if (row === null || row === undefined) {
+        addFieldError(errors, `{{.TSName}}[${rowIndex}]`, "required", "required field");
+      } else if (!Array.isArray(row)) {
+        addFieldError(errors, `{{.TSName}}[${rowIndex}]`, "type", "expected an array");
       }
     });
   }
@@ -115,8 +117,12 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   {{else if .IsArrayOfArrays}}
   if (Array.isArray(value.{{.TSName}})) {
     value.{{.TSName}}.forEach((row, rowIndex) => {
+      if (row === null || row === undefined) {
+        addFieldError(errors, `{{.TSName}}[${rowIndex}]`, "required", "required field");
+        return;
+      }
       if (!Array.isArray(row)) {
-        addFieldError(errors, `{{.TSName}}[${rowIndex}]`, "required", "inner list must be an array");
+        addFieldError(errors, `{{.TSName}}[${rowIndex}]`, "type", "expected an array");
         return;
       }
       row.forEach((item, index) => {
@@ -184,8 +190,12 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   {{else if .IsArrayOfArrays}}
   if (Array.isArray(value.{{.TSName}})) {
     value.{{.TSName}}.forEach((row, rowIndex) => {
+      if (row === null || row === undefined) {
+        addFieldError(errors, `{{.TSName}}[${rowIndex}]`, "required", "required field");
+        return;
+      }
       if (!Array.isArray(row)) {
-        addFieldError(errors, `{{.TSName}}[${rowIndex}]`, "required", "inner list must be an array");
+        addFieldError(errors, `{{.TSName}}[${rowIndex}]`, "type", "expected an array");
         return;
       }
       row.forEach((item, index) => {

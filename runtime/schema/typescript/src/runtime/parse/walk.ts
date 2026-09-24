@@ -190,7 +190,7 @@ function walkArrayField(
       continue;
     }
     if (!Array.isArray(inner)) {
-      addFieldError(errors, innerKey, 'type', 'expected array value');
+      addFieldError(errors, innerKey, 'type', 'expected an array');
       out[i] = inner;
       continue;
     }

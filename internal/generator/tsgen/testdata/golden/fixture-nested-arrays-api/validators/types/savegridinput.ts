@@ -25,8 +25,10 @@ export function validateSaveGridInput(value: SaveGridInput | null | undefined): 
 
   if (Array.isArray(value.labels)) {
     value.labels.forEach((row, rowIndex) => {
-      if (!Array.isArray(row)) {
-        addFieldError(errors, `labels[${rowIndex}]`, "required", "inner list must be an array");
+      if (row === null || row === undefined) {
+        addFieldError(errors, `labels[${rowIndex}]`, "required", "required field");
+      } else if (!Array.isArray(row)) {
+        addFieldError(errors, `labels[${rowIndex}]`, "type", "expected an array");
       }
     });
   }
@@ -37,8 +39,12 @@ export function validateSaveGridInput(value: SaveGridInput | null | undefined): 
 
   if (Array.isArray(value.shades)) {
     value.shades.forEach((row, rowIndex) => {
+      if (row === null || row === undefined) {
+        addFieldError(errors, `shades[${rowIndex}]`, "required", "required field");
+        return;
+      }
       if (!Array.isArray(row)) {
-        addFieldError(errors, `shades[${rowIndex}]`, "required", "inner list must be an array");
+        addFieldError(errors, `shades[${rowIndex}]`, "type", "expected an array");
         return;
       }
       row.forEach((item, index) => {
@@ -54,8 +60,10 @@ export function validateSaveGridInput(value: SaveGridInput | null | undefined): 
 
   if (Array.isArray(value.polygons)) {
     value.polygons.forEach((row, rowIndex) => {
-      if (!Array.isArray(row)) {
-        addFieldError(errors, `polygons[${rowIndex}]`, "required", "inner list must be an array");
+      if (row === null || row === undefined) {
+        addFieldError(errors, `polygons[${rowIndex}]`, "required", "required field");
+      } else if (!Array.isArray(row)) {
+        addFieldError(errors, `polygons[${rowIndex}]`, "type", "expected an array");
       }
     });
   }
@@ -66,8 +74,10 @@ export function validateSaveGridInput(value: SaveGridInput | null | undefined): 
 
   if (Array.isArray(value.weights)) {
     value.weights.forEach((row, rowIndex) => {
-      if (!Array.isArray(row)) {
-        addFieldError(errors, `weights[${rowIndex}]`, "required", "inner list must be an array");
+      if (row === null || row === undefined) {
+        addFieldError(errors, `weights[${rowIndex}]`, "required", "required field");
+      } else if (!Array.isArray(row)) {
+        addFieldError(errors, `weights[${rowIndex}]`, "type", "expected an array");
       }
     });
   }

@@ -147,9 +147,10 @@ func (v *Validator) validateField(field *ir.FieldDef, data map[string]any, errs 
 			errs.AddFieldError(key, "required", "required field")
 			return
 		}
+		// A required list means present, not non-empty: [] is a value.
+		// Non-emptiness is declared with listMin.
 		if field.TypeRef.IsArray {
-			arr, ok := value.([]any)
-			if !ok || len(arr) == 0 {
+			if _, ok := value.([]any); !ok {
 				errs.AddFieldError(key, "required", "required field")
 				return
 			}
@@ -163,9 +164,25 @@ func (v *Validator) validateField(field *ir.FieldDef, data map[string]any, errs 
 	kind := v.resolveRefKind(field.TypeRef)
 
 	if field.TypeRef.IsArray {
+		validateListBounds(field, key, value, errs)
 		v.validateArrayField(field, key, kind, isRequired, value, errs)
 	} else {
 		v.validateSingleField(field, key, kind, isRequired, value, errs)
+	}
+}
+
+// validateListBounds enforces listMin and listMax on a list field. For an
+// array of arrays (T[][]) they bound the outer list.
+func validateListBounds(field *ir.FieldDef, key string, value any, errs ValidationErrors) {
+	arr, ok := value.([]any)
+	if !ok {
+		return
+	}
+	if field.ValidateListMin != nil && len(arr) < *field.ValidateListMin {
+		errs.AddFieldError(key, "listMin", "must contain at least "+strconv.Itoa(*field.ValidateListMin)+" items")
+	}
+	if field.ValidateListMax != nil && len(arr) > *field.ValidateListMax {
+		errs.AddFieldError(key, "listMax", "must contain at most "+strconv.Itoa(*field.ValidateListMax)+" items")
 	}
 }
 
@@ -224,8 +241,8 @@ func (v *Validator) validateSingleField(field *ir.FieldDef, key, kind string, re
 
 // validateArrayField validates an array field, applying per-element
 // validation at key[i]. For an array of arrays (T[][]) each element must be
-// a list, never null, reported at key[i], and each inner element is
-// validated at key[i][j].
+// a list: a null one is "required" and any other value is "type", both at
+// key[i]. Each inner element is validated at key[i][j].
 func (v *Validator) validateArrayField(field *ir.FieldDef, key, kind string, required bool, value any, errs ValidationErrors) {
 	arr, ok := value.([]any)
 	if !ok {
@@ -244,7 +261,7 @@ func (v *Validator) validateArrayField(field *ir.FieldDef, key, kind string, req
 			continue
 		}
 		if !isList {
-			errs.AddFieldError(elemKey, "type", "expected array value")
+			errs.AddFieldError(elemKey, "type", "expected an array")
 			continue
 		}
 		for j, innerElem := range inner {
@@ -253,12 +270,12 @@ func (v *Validator) validateArrayField(field *ir.FieldDef, key, kind string, req
 	}
 }
 
-// validateArrayElem validates one element of an array field at elemKey.
+// validateArrayElem validates one element of an array field at elemKey. A
+// list element is never null, in a required list and an optional one alike.
+// The field's own constraints (length, pattern, bounds) apply to each element.
 func (v *Validator) validateArrayElem(field *ir.FieldDef, elemKey, kind string, required bool, elem any, errs ValidationErrors) {
 	if elem == nil {
-		if field.TypeRef.ElemNonNull {
-			errs.AddFieldError(elemKey, "required", "required field")
-		}
+		errs.AddFieldError(elemKey, "required", "required field")
 		return
 	}
 

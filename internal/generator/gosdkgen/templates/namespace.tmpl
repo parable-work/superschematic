@@ -251,7 +251,31 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- end}}
 	{{- if .HasScalarArgs}}
 	{{- range .ScalarArgs}}
-	{{- if .IsArray}}
+	{{- if .IsArrayOfArrays}}
+	// {{.Name}} is an array of arrays: an inner list is never nil, reported
+	// at {{.Name}}[i]; an empty one is valid.
+	{{- if not .IsGoPrimitive}} Each element runs its own validation,
+	// reported at {{.Name}}[i][j].
+	{{- end}}
+	{{- if .Required}}
+	if input.{{.GoName}} == nil {
+		validationErrors.AddFieldError("{{.Name}}", "required", "required field")
+	}
+	{{- end}}
+	for i, row := range input.{{.GoName}} {
+		if row == nil {
+			validationErrors.AddFieldError(fmt.Sprintf("{{.Name}}[%d]", i), "required", "required field")
+			{{- if not .IsGoPrimitive}}
+			continue
+			{{- end}}
+		}
+		{{- if not .IsGoPrimitive}}
+		for j := range row {
+			validateListElement(validationErrors, fmt.Sprintf("{{.Name}}[%d][%d]", i, j), &row[j])
+		}
+		{{- end}}
+	}
+	{{- else if .IsArray}}
 	{{- if .Required}}
 	if len(input.{{.GoName}}) == 0 {
 		validationErrors.SetFieldErrors("{{.Name}}", []types.ValidationError{{"{"}}{Validator: "required", Message: "{{.Name}} is required"}{{"}"}})

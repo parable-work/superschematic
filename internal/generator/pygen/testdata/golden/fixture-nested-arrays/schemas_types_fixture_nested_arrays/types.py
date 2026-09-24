@@ -83,6 +83,12 @@ class Drawing(BaseModel):
                 for index, row in enumerate(self.labels):
                     if row is None:
                         errors.add_field_error(f"labels[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"labels[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"labels[{index}][{inner_index}]", "required", "required field")
 
         # Validate shades
         if self.shades is None:
@@ -93,6 +99,12 @@ class Drawing(BaseModel):
                 for index, row in enumerate(self.shades):
                     if row is None:
                         errors.add_field_error(f"shades[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"shades[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"shades[{index}][{inner_index}]", "required", "required field")
 
         # Validate polygons
         if self.polygons is None:
@@ -103,18 +115,33 @@ class Drawing(BaseModel):
                 for index, row in enumerate(self.polygons):
                     if row is None:
                         errors.add_field_error(f"polygons[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"polygons[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"polygons[{index}][{inner_index}]", "required", "required field")
 
         # Validate samples
         if self.samples is not None:
-            try:
-                TypeAdapter(List[List[float]]).validate_python(self.samples)
-            except PydanticValidationError as e:
-                errors.add_field_error("samples", "invalid", str(e))
+            # A None entry is reported at its own index below; the whole-value
+            # check would repeat it at the field.
+            if not (isinstance(self.samples, list) and any(row is None or not isinstance(row, list) or None in row for row in self.samples)):
+                try:
+                    TypeAdapter(List[List[float]]).validate_python(self.samples)
+                except PydanticValidationError as e:
+                    errors.add_field_error("samples", "invalid", str(e))
 
             if isinstance(self.samples, list):
                 for index, row in enumerate(self.samples):
                     if row is None:
                         errors.add_field_error(f"samples[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"samples[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"samples[{index}][{inner_index}]", "required", "required field")
             if isinstance(self.samples, list) and len(self.samples) > 64:
                 errors.add_field_error("samples", "listMax", "must contain at most 64 items")
 

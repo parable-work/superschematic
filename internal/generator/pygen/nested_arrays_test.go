@@ -81,9 +81,19 @@ func TestNestedArrayRulesRender(t *testing.T) {
 		`codes: List[List[str]] = Field(..., alias="codes", serialization_alias="codes")`,
 		`scores: Optional[List[List[float]]] = Field(default=None, alias="scores", serialization_alias="scores")`,
 		`cells: List[List[Cell]] = Field(..., alias="cells", serialization_alias="cells")`,
-		`TypeAdapter(List[List[float]]).validate_python(self.scores)`,
 		`                    if row is None:
-                        errors.add_field_error(f"codes[{index}]", "required", "required field")`,
+                        errors.add_field_error(f"codes[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"codes[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"codes[{index}][{inner_index}]", "required", "required field")`,
+		// An optional list of lists skips the whole-value check when a None
+		// entry is reported at its own index.
+		`            if not (isinstance(self.scores, list) and any(row is None or not isinstance(row, list) or None in row for row in self.scores)):
+                try:
+                    TypeAdapter(List[List[float]]).validate_python(self.scores)`,
 		`            if isinstance(self.codes, list) and len(self.codes) < 1:
                 errors.add_field_error("codes", "listMin", "must contain at least 1 items")`,
 		`            if isinstance(self.codes, list) and len(self.codes) > 3:
@@ -92,15 +102,15 @@ func TestNestedArrayRulesRender(t *testing.T) {
                     if not isinstance(row, list):
                         continue
                     for inner_index, item in enumerate(row):
-                        if len(str(item)) < 2:
+                        if item is not None and len(str(item)) < 2:
                             errors.add_field_error(f"codes[{index}][{inner_index}]", "minLength", "must be at least 2 characters")`,
-		`                        if len(str(item)) > 4:
+		`                        if item is not None and len(str(item)) > 4:
                             errors.add_field_error(f"codes[{index}][{inner_index}]", "maxLength", "must be at most 4 characters")`,
-		`                        if re.search(r"^[a-z]+$", str(item)) is None:
+		`                        if item is not None and re.search(r"^[a-z]+$", str(item)) is None:
                             errors.add_field_error(f"codes[{index}][{inner_index}]", "pattern", "invalid format")`,
-		`                        if float(item) < 0:
+		`                        if item is not None and float(item) < 0:
                             errors.add_field_error(f"scores[{index}][{inner_index}]", "min", "must be at least 0")`,
-		`                        if float(item) > 10:
+		`                        if item is not None and float(item) > 10:
                             errors.add_field_error(f"scores[{index}][{inner_index}]", "max", "must be at most 10")`,
 		`"cells": [[item.mask_secrets() for item in row] for row in self.cells],`,
 		`"optional_cells": [[item.mask_secrets() for item in row] for row in self.optional_cells] if self.optional_cells is not None else None,`,
@@ -183,13 +193,19 @@ assert verdicts(bad) == {
     "scores[1][1]": ["min"],
 }, verdicts(bad)
 
-# Inner lists are never None: validate_all names the row.
-nulls = Sheet.model_construct(codes=[["ab"], None], scores=[None], cells=[None], secret_rows=[])
-got = verdicts(nulls)
-assert got["codes[1]"] == ["required"], got
-assert got["cells[0]"] == ["required"], got
-assert got["scores[0]"] == ["required"], got
-assert got["scores"] == ["invalid"], got
+# Inner lists and elements are never None: validate_all names the index,
+# once, without a whole-value "invalid" on the optional field.
+nulls = Sheet.model_construct(codes=[["ab"], None], scores=[None, [1, None]], cells=[None], secret_rows=[])
+assert verdicts(nulls) == {
+    "codes[1]": ["required"],
+    "cells[0]": ["required"],
+    "scores[0]": ["required"],
+    "scores[1][1]": ["required"],
+}, verdicts(nulls)
+
+# A non-list inner value is a type error at its index.
+rows = Sheet.model_construct(codes=[["ab"], "cd"], cells=[], secret_rows=[], scores=[[1], 2])
+assert verdicts(rows) == {"codes[1]": ["type"], "scores[1]": ["type"]}, verdicts(rows)
 
 # Masking maps every inner list and zeroes a secret list of lists.
 masked = valid.mask_secrets()
