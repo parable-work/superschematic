@@ -338,6 +338,17 @@ of a generated artifact is always listed here with the bump it requires.
   `json_schema` type mapping now decides its OpenAPI type for every value
   (before, only `object` overrode the language primitive), and the value
   `any` renders as an empty schema that accepts any JSON value. Minor.
+- Array query parameters (`QueryParam<T[]>`) work end to end. The Go API
+  handler parses `?name=a,b` (and repeated keys) into a slice, parses and
+  validates each item with the element type's parser and validator, applies
+  `listMin`/`listMax` to the item count, rejects an empty item, and passes a
+  nil slice for an absent optional parameter; the implementation interface
+  takes `[]T` instead of a scalar. OpenAPI describes the parameter as an
+  array with `style: form`, `explode: false` and `minItems`/`maxItems`. The
+  TypeScript SDK types it `T[]`, and the Rust SDK takes `Vec<T>` and sends
+  one comma-separated value. Before, the handler parsed the parameter as a
+  single scalar. The Rust SDK also drops a zero `listMin` check, which
+  compared an unsigned length with zero. Minor.
 
 ### Fixed
 
@@ -376,19 +387,6 @@ of a generated artifact is always listed here with the bump it requires.
 - Python types: generated enums accept their serialized value when a model
   is validated with `strict=True`, in direct, list and map fields. Unknown
   values and unrelated coercions still fail. Patch.
-
-[Unreleased]: https://github.com/parable-work/superschematic/commits/main
-- Array query parameters (`QueryParam<T[]>`) work end to end. The Go API
-  handler parses `?name=a,b` (and repeated keys) into a slice, parses and
-  validates each item with the element type's parser and validator, applies
-  `listMin`/`listMax` to the item count, rejects an empty item, and passes a
-  nil slice for an absent optional parameter; the implementation interface
-  takes `[]T` instead of a scalar. OpenAPI describes the parameter as an
-  array with `style: form`, `explode: false` and `minItems`/`maxItems`. The
-  TypeScript SDK types it `T[]`, and the Rust SDK takes `Vec<T>` and sends
-  one comma-separated value. Before, the handler parsed the parameter as a
-  single scalar. The Rust SDK also drops a zero `listMin` check, which
-  compared an unsigned length with zero. Minor.
 - Go types: union fields decode in every shape. A map or map-of-lists of a
   union decodes each value through the union's wrapper (before, the
   generated `UnmarshalJSON` did not compile); an optional union field is the
@@ -410,3 +408,5 @@ of a generated artifact is always listed here with the bump it requires.
   directly. Go does not inherit `replace` lines from a dependency's
   `go.mod`, so a module that reached a sibling only through another
   generated module did not resolve it. Patch.
+
+[Unreleased]: https://github.com/parable-work/superschematic/commits/main
