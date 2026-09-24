@@ -12,10 +12,12 @@
 #
 # Asserts, in order:
 #   1. the acme module builds, vets and passes its tests;
-#   2. `describe` lists the Catalog kind, the document and the apikey provider;
+#   2. `describe` lists the Catalog kind, the document, the apikey provider
+#      and the projection check on DB;
 #   3. build-all over the schemas root builds all four services;
 #   4. the catalog generator wrote catalog.json for the Catalog service;
-#   5. the @shelf payload reached the IR (--emit-ir + jq);
+#   5. the @shelf payload reached the IR (--emit-ir + jq), and so did the
+#      shop-db projection that satisfies acme's projection policy;
 #   6. the catalog.config document was loaded and its generator ran;
 #   7. the manifest generator ran on every kind, core and acme, and the
 #      acmeInventory build-all hook merged the manifests from every service's
@@ -78,6 +80,7 @@ grep -q '^kinds: API, Catalog, DB, General$' "$OUT/describe.txt"
 grep -q '^  Catalog: types -> catalog -> acmeManifest$' "$OUT/describe.txt"
 grep -q '^documents: catalog.config (catalog.config.yaml)$' "$OUT/describe.txt"
 grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.txt"
+grep -q '^checks: acmeDocsAudience (every kind), acmeProjectionScope (DB)$' "$OUT/describe.txt"
 
 echo "==> build-all over the schemas root"
 rm -rf "$DIST"
@@ -98,6 +101,11 @@ jq -e '.types.Product.fields[] | select(.name == "name") | has("extensions") | n
 # Every acme decorator the Catalog service uses, for check_second_decorator.sh.
 DECORATORS="$(jq -r '[.types[].fields[]? | .extensions.acme? // {} | keys[]] | unique | join(" ")' "$OUT/catalog-ir.json")"
 echo "ir decorators on shop-catalog: $DECORATORS"
+
+echo "==> shop-db projection is in the IR, scoped the way acme's policy requires"
+"$OUT/acme-schematic" build "$SCHEMAS/services/shop-db" --emit-ir --out "$OUT/ir-dist" >"$OUT/db-ir.json"
+jq -e '.types.ShopStock.role == "Projection" and .types.ShopStock.projection.pool == "storefront"' "$OUT/db-ir.json" >/dev/null
+jq -e '.types.ShopStock.projection.predicates[0] == {"column": "base.shop", "setting": "acme.shop_id"}' "$OUT/db-ir.json" >/dev/null
 
 echo "==> catalog.config document loaded and generated"
 jq -e '.documents["catalog.config"] == {"region": "eu", "currency": "EUR", "aisles": 16}' "$OUT/catalog-ir.json" >/dev/null

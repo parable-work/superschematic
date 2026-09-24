@@ -8,6 +8,8 @@
 //   - a generator on the core kinds, the acme manifest (manifest.go);
 //   - a build-all hook that merges every service's manifest into one
 //     inventory (inventory.go);
+//   - a check on the core DB kind: every projection view binds the shop
+//     scope setting first (projection_policy.go);
 //   - an auth provider, "apikey", that the api generator renders with when
 //     superschematic.toml selects it (auth/);
 //   - a policy over the core @docs decorator: a check on the audience and
@@ -46,6 +48,10 @@ const Package = "@acme/schema"
 type Config struct {
 	// Region is stamped into every acme manifest.
 	Region string
+
+	// ProjectionScopeSetting is the Postgres setting every projection view
+	// must bind in its first where rule. Empty registers no policy.
+	ProjectionScopeSetting string
 }
 
 // Extension is what a superschematic binary passes to cli.New.
@@ -78,6 +84,9 @@ func (Extension) Register(r *registry.Registry) error {
 	if err := registerDocsPolicy(r); err != nil {
 		return err
 	}
+	if err := registerProjectionPolicy(r, cfg); err != nil {
+		return err
+	}
 	return r.RegisterAuthProvider(auth.Provider{})
 }
 
@@ -94,14 +103,18 @@ func decodeConfig(table map[string]any) (Config, error) {
 	var cfg Config
 	for key, value := range table {
 		switch key {
-		case "region":
+		case "region", "projection_scope_setting":
 			s, ok := value.(string)
 			if !ok {
-				return cfg, fmt.Errorf("[extension.%s] region must be a string, got %T", Name, value)
+				return cfg, fmt.Errorf("[extension.%s] %s must be a string, got %T", Name, key, value)
 			}
-			cfg.Region = s
+			if key == "region" {
+				cfg.Region = s
+			} else {
+				cfg.ProjectionScopeSetting = s
+			}
 		default:
-			return cfg, fmt.Errorf("[extension.%s] has unknown key %q (known: region)", Name, key)
+			return cfg, fmt.Errorf("[extension.%s] has unknown key %q (known: region, projection_scope_setting)", Name, key)
 		}
 	}
 	return cfg, nil

@@ -62,3 +62,7 @@ copy = "schemas/deps.json"
 # the keys it knows and rejects the rest.
 [extension.acme]
 region = "eu"
+# The setting every projection view must bind in its first where rule
+# (ext/projection_policy.go). The core requires no rule on a view; this is
+# acme's policy, registered as a check on the DB kind.
+projection_scope_setting = "acme.shop_id"

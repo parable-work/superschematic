@@ -164,6 +164,11 @@ of a generated artifact is always listed here with the bump it requires.
   core `DecoratorSpec` can now take class type arguments, which the
   TypeScript frontend resolves to class names and passes to `Apply` ahead of
   the value arguments (`DecoratorSpec.TypeArgs`). Minor.
+- `examples/acme-schematic` declares a projection view in `shop-db` and
+  registers `acmeProjectionScope`, a check on the DB kind that requires
+  every view's first `where` rule to bind the setting
+  `[extension.acme] projection_scope_setting` names. `describe` lists the
+  registered checks. Patch.
 
 ### Changed
 

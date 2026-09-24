@@ -17,6 +17,7 @@ The extension adds one of each registration surface:
 | Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |
 | Auth provider | `apikey`, an `X-API-Key` header over the generic session runtime | `ext/auth/` |
 | Check and OpenAPI hook | policy over the core `@docs` decorator: acme's audiences only, and the `x-acme-docs` vendor key | `ext/docs.go` |
+| Check on a core kind | policy over core projection views: every view in a DB schema binds `acme.shop_id` first | `ext/projection_policy.go` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
@@ -66,6 +67,7 @@ examples/acme-schematic/
     manifest.go               acmeManifest generator on every kind
     inventory.go              acmeInventory build-all hook
     docs.go                   @docs policy: audience check, x-acme-docs OpenAPI hook
+    projection_policy.go      projection policy: a check on DB views' first rule
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
@@ -74,7 +76,8 @@ examples/acme-schematic/
     superschematic.toml       naming, auth_provider = "apikey", [paths], [deps], [extension.acme]
     deps.json                 the committed copy of the dependency graph ([deps] copy)
     tsconfig.base.json        path aliases for @superschematic/*, @acme/*, superscalar
-    services/shop-db          DB: User, Session, ApiKey, Product tables
+    services/shop-db          DB: User, Session, ApiKey, Product, StockLevel
+                              tables and the storefront.stock projection
     services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs
     services/shop-config      General: ShopConfig with @envVars
     services/shop-catalog     Catalog: Product, Bundle with @shelf; catalog.config.yaml
@@ -391,6 +394,36 @@ document the api generator builds before it is written. `shop-api` declares
 the core registry accepts it. The smoke checks the generated
 `openapi.json` from both binaries.
 
+## Policy on projection views
+
+A deployment that serves projection views usually wants every view scoped
+to one owner of its data, here a shop. The core requires no row rule on a
+view, and `KindSpec.Verify` only reaches kinds the extension registers, so
+acme states the policy as a check on the core DB kind:
+
+```go
+r.RegisterCheck(registry.CheckSpec{
+	Name:      "acmeProjectionScope",
+	Extension: Name,
+	Kinds:     []string{"DB"},
+	Verify: func(schema *ir.Schema, rep registry.VerifyReporter) {
+		for _, td := range schema.Projections() {
+			if !scopedBy(td.Projection, setting) {
+				rep.Errorf(td.Owner, "%s: the first where rule of a projection must bind %s, ...", td.Name, setting)
+			}
+		}
+	},
+})
+```
+
+`setting` is `projection_scope_setting` from `[extension.acme]`
+(`acme.shop_id`); with the key unset acme registers no check. `scopedBy`
+accepts a projection whose first `where` rule is a plain binding of that
+setting, not optional and without a `when` guard. `shop-db`'s
+`storefront.stock` view (`src/stock.projection.schema.ts`) passes; a view
+without the binding fails the load in any authoring form, while the
+core-only binary loads it (`TestProjectionPolicyRequiresTheShopScope`).
+
 ## A command
 
 `cli.New` returns the root cobra command with `build`, `build-all`,
@@ -406,8 +439,9 @@ func (Extension) Commands() []*cobra.Command {
 `describe [<schemas-root>]` assembles the registry the way `build` does
 (`registry.LoadNaming` on the root, then `registry.Assemble(names,
 Extension{})`) and prints every kind with its pipeline, every document,
-every output key and every auth provider. It is the first thing to run when
-a schema is rejected: it shows what the binary knows.
+every output key, every auth provider and every check. It is the
+first thing to run when a schema is rejected: it shows what the binary
+knows.
 
 `fields <file.d.ts> <type>` is a command on TypeScript the schema frontend
 does not walk. It hands the file, and the other `.d.ts` files next to it,
