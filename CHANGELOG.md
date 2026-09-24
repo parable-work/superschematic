@@ -299,6 +299,27 @@ of a generated artifact is always listed here with the bump it requires.
   every key of the projection Arrow schemas' metadata
   (`<prefix>scalar.canonical_name`, `<prefix>projection.settings`, ...).
   Minor.
+- Arrays of arrays, the IR and loader half (D12): a field, a request
+  input field, a body argument or a response can be a list of lists of a
+  scalar, enum, object type or union, one level of nesting only. The IR
+  `TypeRef` gains `isArrayOfArrays` (after `isArray`, omitted when false,
+  so existing IR is unchanged), `TypeRef.ArrayDepth()` and
+  `Schema.FindArrayOfArrays()`; `Schema.Validate` requires `isArray` with
+  it and refuses it with `isMap`. The TypeScript reader accepts `T[][]`,
+  `Array<Array<T>>`, `Array<T[]>`, `Array<T>[]` and their `readonly` forms
+  (and `Array<T>` / `ReadonlyArray<T>` for a single list); it refuses a
+  third level, a map value that is a list of lists, a nullable inner list
+  and list bounds on the inner lists. The data forms write
+  `typeRef: { name, isArray: true, isArrayOfArrays: true }` and the
+  schema-file JSON Schema accepts it; the TypeScript writer emits `T[][]`;
+  a platform default takes a list of lists. Verification refuses it in env
+  config fields, relations, indexed fields and `@index` keys, query and
+  path parameters, arguments of GET operations and operations without a
+  method, and every projection column, join and row rule. No generator
+  renders it yet: each one fails with "<generator> does not support
+  arrays of arrays yet", and `apigen.Param` and `apigen.EndpointInfo`
+  carry `IsArrayOfArrays` / `OutputIsArrayOfArrays` for the SDK
+  generators. Minor.
 
 ### Changed
 
