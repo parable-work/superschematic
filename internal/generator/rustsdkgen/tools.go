@@ -204,6 +204,9 @@ func endpointToTool(
 			TSName:   tsutil.ToCamelCase(arg.Name),
 			Type:     arg.Type,
 			Required: arg.Required,
+			// The list shape: the argument schema is T, T[] or T[][].
+			IsArray:         arg.IsArray,
+			IsArrayOfArrays: arg.IsArrayOfArrays,
 		}
 	}
 	queryArgs := make([]ToolQueryArg, len(endpoint.QueryParams))
@@ -252,7 +255,7 @@ func endpointToTool(
 		Namespace:                ns.Name,
 		IsScopedNS:               ns.IsScopedNS || endpoint.IsScopedEndpoint,
 		Parameters:               parameters,
-		Returns:                  toolsutil.BuildReturnSchema(endpoint.OutputType, endpoint.OutputIsArray, scalars),
+		Returns:                  toolsutil.BuildReturnSchemaAtDepth(endpoint.OutputType, endpoint.OutputArrayDepth(), scalars),
 		PathParams:               pathParams,
 		HasInput:                 endpoint.HasInput,
 		InputType:                endpoint.InputType,
