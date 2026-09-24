@@ -2,9 +2,9 @@
 
 package {{.PackageName}}
 
-{{if or .EnumImports (and .Enums (not .Scalars))}}
+{{if or .EnumImports (and .Enums (not .WritesScalars))}}
 import (
-{{if and .Enums (not .Scalars)}}
+{{if and .Enums (not .WritesScalars)}}
 	scalars "{{$.Naming.ScalarGoModule}}"
 {{end}}
 {{range .EnumImports}}
@@ -13,7 +13,7 @@ import (
 )
 
 {{end}}
-{{if and .Enums (not .Scalars)}}
+{{if and .Enums (not .WritesScalars)}}
 // ValidationError represents a single validation error.
 type ValidationError = scalars.ValidationError
 
