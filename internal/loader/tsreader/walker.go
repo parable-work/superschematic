@@ -715,17 +715,12 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 				ok = false
 				continue
 			}
-			// Foreign bases are TypeScript extends sugar: fields are flattened
-			// into IR here. Suppress import recording so nested type refs on
-			// the parent do not become codegen package dependencies.
-			baseDeclFile := getSourceFileOfNode(id.decl)
-			foreignBase := baseDeclFile != nil && !strings.HasPrefix(baseDeclFile.FileName(), w.servicePath+"/")
-			prevSuppress := w.suppressRecording
-			if foreignBase {
-				w.suppressRecording = true
-			}
+			// Foreign bases are TypeScript extends sugar: their fields are
+			// flattened into this type, so every type those fields reference
+			// is a dependency of this schema's generated code and is recorded
+			// like an own reference. Only an @source target suppresses
+			// recording; its fields are projected, not copied.
 			baseFields, baseOK := w.resolveClassFieldDefs(id.decl)
-			w.suppressRecording = prevSuppress
 			if !baseOK {
 				ok = false
 				continue

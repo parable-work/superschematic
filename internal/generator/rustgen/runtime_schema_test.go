@@ -74,3 +74,38 @@ func TestRuntimeSchemaRejectsUnknownReferencedTypes(t *testing.T) {
 		t.Fatalf("a missing type must refuse generation, got %v", err)
 	}
 }
+
+// TestRuntimeSchemaKeepsListsOfLists: a payload field that is a list of
+// lists keeps isArrayOfArrays in its document, and the element type it
+// names is reached like the element of a single list.
+func TestRuntimeSchemaKeepsListsOfLists(t *testing.T) {
+	schema := ir.NewSchema("example", ir.SchemaKindGeneral)
+	schema.Enums["Shade"] = &ir.EnumDef{Name: "Shade", Values: []ir.EnumValueDef{{Name: "DARK", SerializedAs: "dark"}}}
+	schema.Types["Point"] = &ir.TypeDef{Name: "Point", Role: ir.RoleEmbeddedStruct, Fields: []*ir.FieldDef{
+		{Name: "x", TypeRef: ir.TypeRef{Name: "number"}, Required: true},
+	}}
+	schema.Types["Sketch"] = &ir.TypeDef{Name: "Sketch", Role: ir.RoleEmbeddedStruct, JsonField: true, Fields: []*ir.FieldDef{
+		{Name: "polygons", TypeRef: ir.TypeRef{Name: "Point", IsArray: true, IsArrayOfArrays: true}, Required: true},
+		{Name: "shades", TypeRef: ir.TypeRef{Name: "Shade", IsArray: true, IsArrayOfArrays: true}},
+	}}
+
+	artifacts, err := runtimeSchemas(schema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded ir.Schema
+	if err := json.Unmarshal(artifacts["Sketch"], &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Types["Point"] == nil || decoded.Enums["Shade"] == nil {
+		t.Fatalf("list-of-lists element types were not reached: %s", artifacts["Sketch"])
+	}
+	for _, field := range decoded.Types["Sketch"].Fields {
+		if field.TypeRef.ArrayDepth() != 2 {
+			t.Fatalf("%s depth = %d, want 2: %s", field.Name, field.TypeRef.ArrayDepth(), artifacts["Sketch"])
+		}
+	}
+	if !strings.Contains(string(artifacts["Sketch"]), `"isArrayOfArrays": true`) {
+		t.Fatalf("document does not carry isArrayOfArrays: %s", artifacts["Sketch"])
+	}
+}

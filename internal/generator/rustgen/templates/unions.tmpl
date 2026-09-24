@@ -10,7 +10,7 @@ use crate::types::*;
 {{- end}}
 {{- if .Discriminator}}
 /// Discriminated by the `{{.Discriminator}}` member field.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "{{escapeString .Discriminator}}")]
 pub enum {{.Name}} {
 {{- range .Members}}
@@ -18,14 +18,72 @@ pub enum {{.Name}} {
     {{.Name}}({{.Name}}),
 {{- end}}
 }
+
+// Deserialize through a generic JSON value before selecting a variant. Direct
+// deserialization of an internally tagged newtype enum is incompatible with
+// serde_json's arbitrary_precision feature for variants containing floating
+// point fields. Cargo feature unification can enable that feature from any
+// crate, so generated wire types must not depend on which other crates share a graph.
+impl<'de> Deserialize<'de> for {{.Name}} {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+{{- if .PreserveJSON}}
+        let value: serde_json::Value = {{$.JSONFieldAdapter}}(deserializer)?;
+{{- else}}
+        let value = serde_json::Value::deserialize(deserializer)?;
+{{- end}}
+        let tag = value
+            .get("{{escapeString .Discriminator}}")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| serde::de::Error::custom(
+                "{{escapeString .Name}} requires string discriminator {{escapeString .Discriminator}}",
+            ))?;
+        match tag.as_str() {
+{{- range .Members}}
+            "{{escapeString .TagValue}}" => serde_json::from_value::<{{.Name}}>(value)
+                .map(Self::{{.Name}})
+                .map_err(serde::de::Error::custom),
+{{- end}}
+            _ => Err(serde::de::Error::custom(format!(
+                "unknown {{escapeString .Name}} discriminator {tag:?}",
+            ))),
+        }
+    }
+}
+{{- else}}
+{{- if .PreserveJSON}}
+#[derive(Debug, Clone, PartialEq, Serialize)]
 {{- else}}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+{{- end}}
 #[serde(untagged)]
 pub enum {{.Name}} {
 {{- range .Types}}
     {{.}}({{.}}),
 {{- end}}
 }
+{{- if .PreserveJSON}}
+
+// Use the shared JSON adapter before trying schema-owned members. Serde's
+// untagged Content buffer cannot preserve RawValue or exact JSON numbers.
+impl<'de> Deserialize<'de> for {{.Name}} {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value: serde_json::Value = {{$.JSONFieldAdapter}}(deserializer)?;
+{{- range .Types}}
+        if let Ok(member) = serde_json::from_value::<{{.}}>(value.clone()) {
+            return Ok(Self::{{.}}(member));
+        }
+{{- end}}
+        Err(serde::de::Error::custom("data did not match any variant of untagged enum {{escapeString .Name}}"))
+    }
+}
+{{- end}}
 {{- end}}
 
 {{end -}}

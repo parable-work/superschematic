@@ -1,0 +1,30 @@
+{
+  "name": "fixture-nested-arrays-db",
+  "kind": "General",
+  "rootType": "BoardPoint",
+  "types": {
+    "BoardPoint": {
+      "name": "BoardPoint",
+      "owner": "src/board.schema.ts",
+      "comment": "A board coordinate, stored inside the board's JSON columns.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "x",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true
+        },
+        {
+          "name": "y",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true
+        }
+      ],
+      "jsonField": true
+    }
+  }
+}

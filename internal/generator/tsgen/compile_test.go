@@ -137,3 +137,54 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 	}
 	buildTSPackages(t, append(cases, loadNestedArraysEdges(t)...))
 }
+
+// TestNullableObjectMapParserCompiles type-checks a generated package with
+// an optional map of a nested type. Its values are `T | null` in the public
+// type, so parse<Type>FromJSON must map a null or absent entry to null; it
+// returned the raw `unknown` entry, which does not type-check.
+func TestNullableObjectMapParserCompiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	bunPath, err := exec.LookPath("bun")
+	if err != nil {
+		requireOrSkipTSTooling(t, "bun unavailable")
+	}
+	paths := testpaths.Local(t)
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-maps"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	container := schema.Types["MapContainer"]
+	container.Fields = append(container.Fields, &ir.FieldDef{
+		Name: "receipts", TypeRef: ir.TypeRef{Name: "MapValue", IsMap: true},
+	})
+	output, err := Generate(schema, Options{SchemaName: "fixture-maps", Clock: codegen.FixedClock(time.Unix(0, 0).UTC())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tempRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(tempRoot, "fixture-maps")
+	if err := SetScalarLibSpec(output, paths, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteTypes(output, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteWorkspaceRoot(tempRoot, naming.Naming{}); err != nil {
+		t.Fatal(err)
+	}
+	install := exec.Command(bunPath, "install")
+	install.Dir = dir
+	if out, err := install.CombinedOutput(); err != nil {
+		requireOrSkipTSTooling(t, "bun install failed (likely offline): "+err.Error()+"\n"+string(out))
+	}
+	check := exec.Command(bunPath, "x", "tsc", "--noEmit")
+	check.Dir = dir
+	if out, err := check.CombinedOutput(); err != nil {
+		t.Fatalf("generated nullable object map parser does not type-check: %v\n%s", err, out)
+	}
+}
