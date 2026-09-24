@@ -13,8 +13,9 @@ import (
 // generateOpenAPISpec builds the OpenAPI 3.0 document for the API output.
 // Returns (rawJSON, backtickEscapedForGoEmbed, error). The version and base
 // URL carry placeholder tokens that the generated routes.go replaces at
-// runtime with configured values.
-func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[string]*ir.Schema) (string, string, error) {
+// runtime with configured values. hooks edit the document before it is
+// serialized (OpenAPIHook).
+func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[string]*ir.Schema, hooks []OpenAPIHook) (string, string, error) {
 	scalarMap := buildOpenAPIScalarMap(schema, dependencies)
 	scalarExamples, scalarDescriptions := collectOpenAPIScalarMetadata(schema, dependencies)
 
@@ -44,7 +45,11 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 		},
 	}
 
-	specJSON, err := json.MarshalIndent(spec, "", "  ")
+	doc, err := applyOpenAPIHooks(spec, schema, hooks)
+	if err != nil {
+		return "", "", err
+	}
+	specJSON, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return "", "", fmt.Errorf("marshal OpenAPI spec: %w", err)
 	}
@@ -300,14 +305,25 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 		}
 		pathItem := paths[endpoint.Path].(map[string]interface{})
 
+		summary := endpoint.Name
+		if endpoint.Title != "" {
+			summary = endpoint.Title
+		}
 		operation := map[string]interface{}{
-			"summary":     endpoint.Name,
+			"summary":     summary,
 			"operationId": endpoint.HandlerName,
 			"tags":        []string{endpoint.Namespace},
 		}
-
-		if endpoint.Description != "" {
-			operation["description"] = endpoint.Description
+		description := endpoint.Description
+		if endpoint.Docs != nil {
+			description = endpoint.Docs.Description
+			operation[OpenAPIDocsKey] = openAPIDocsExtension(endpoint.Docs)
+			if endpoint.Docs.Lifecycle == ir.DocsLifecycleDeprecated || endpoint.Docs.Lifecycle == ir.DocsLifecycleRetired {
+				operation["deprecated"] = true
+			}
+		}
+		if description != "" {
+			operation["description"] = description
 		}
 
 		parameters := buildCommonHeaderParameters(output)

@@ -466,6 +466,8 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 		Naming:             r.Options.Naming,
 		Provider:           provider,
 		Clock:              r.Options.Clock,
+		OpenAPIHooks:       r.Registry.OpenAPIHooks(),
+		ToolHooks:          r.Registry.ToolHooks(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generator: api for %s: %w", r.Config.Name, err)

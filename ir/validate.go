@@ -64,6 +64,7 @@ func (s *Schema) Validate(opts ...ValidateOption) []error {
 	var errs []error
 
 	errs = append(errs, s.validateImports()...)
+	errs = append(errs, s.validateDocs()...)
 
 	for _, name := range sortedStringMapKeys(s.Types) {
 		errs = append(errs, s.validateTypeDef(cfg, s.Types[name])...)

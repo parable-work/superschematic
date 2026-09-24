@@ -9,6 +9,9 @@ types:
     envVars: true
     fields:
       - name: DATABASE_URL
+        title: Database URL
+        purpose: Connection target for the **primary database**.
+        icon: database
         typeRef: { name: Network.Url }
         required: true
       - name: JWT_SECRET

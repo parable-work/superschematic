@@ -8,8 +8,8 @@ import (
 )
 
 type (
-	// VerifyReporter is what KindSpec.Verify reports through; see
-	// internal/registry.VerifyReporter.
+	// VerifyReporter is what KindSpec.Verify and CheckSpec.Verify report
+	// through; see internal/registry.VerifyReporter.
 	VerifyReporter = registry.VerifyReporter
 
 	// SchemaConfig is a loaded schema.config; GenerateContext.Config and

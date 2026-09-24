@@ -44,6 +44,10 @@ var corpus = []roundtripFixture{
 	// Type-level decode decorators: the TS writer emits both.
 	{name: "fixture-deny-unknown-fields", dir: tsFixtures + "/fixture-deny-unknown-fields", native: FormatTS},
 	{name: "fixture-strict-json", dir: tsFixtures + "/fixture-strict-json", native: FormatTS},
+	// Operation @docs records in the data forms.
+	{name: "fixture-docs", dir: tsFixtures + "/fixture-docs", native: FormatTS},
+	// Operation @mcp, @icon and @docs replay keys in the data forms.
+	{name: "fixture-mcp", dir: tsFixtures + "/fixture-mcp", native: FormatTS},
 	{name: "fixture-db-json", dir: dataFixtures + "/fixture-db-json", native: FormatJSON},
 	{name: "fixture-db-yaml", dir: dataFixtures + "/fixture-db-yaml", native: FormatYAML},
 	{name: "fixture-general-json", dir: dataFixtures + "/fixture-general-json", native: FormatJSON},

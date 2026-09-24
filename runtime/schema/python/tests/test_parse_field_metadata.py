@@ -1,4 +1,4 @@
-"""Field-level title / x-placeholder parse into FieldDef."""
+"""Field-level title, x-purpose, x-icon and x-placeholder parse into FieldDef."""
 
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ def _fields():
 def test_title_and_placeholder_parsed():
     fields = _fields()
     assert fields["client_domain"].title == "My Domain name"
+    assert fields["client_domain"].purpose == "Used to build the **login URL**."
+    assert fields["client_domain"].icon == "globe"
     assert fields["client_domain"].placeholder == "acme"
     assert fields["client_domain"].validate_pattern == "^[A-Za-z0-9][A-Za-z0-9-]*$"
 
@@ -30,4 +32,6 @@ def test_title_and_placeholder_parsed():
 def test_title_and_placeholder_default_empty():
     fields = _fields()
     assert fields["clientSecret"].title == ""
+    assert fields["clientSecret"].purpose == ""
+    assert fields["clientSecret"].icon == ""
     assert fields["clientSecret"].placeholder == ""

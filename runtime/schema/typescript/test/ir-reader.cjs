@@ -204,7 +204,7 @@ test('rejects non-object input', () => {
 });
 
 
-// Field-level title / x-placeholder metadata.
+// Field-level title, x-purpose, x-icon and x-placeholder metadata.
 const fs = require('node:fs');
 const path = require('node:path');
 const { parseSchema } = require('../dist/runtime/index.js');
@@ -222,40 +222,50 @@ function metadataFields(schema) {
   return byName;
 }
 
-test('parseSchema picks up field title and x-placeholder', () => {
+test('parseSchema picks up field title, x-purpose, x-icon and x-placeholder', () => {
   const schema = parseSchema(legacyMetadataSchema);
   const fields = metadataFields(schema);
   assert.strictEqual(fields.client_domain.title, 'My Domain name');
+  assert.strictEqual(fields.client_domain.purpose, 'Used to build the **login URL**.');
+  assert.strictEqual(fields.client_domain.icon, 'globe');
   assert.strictEqual(fields.client_domain.placeholder, 'acme');
   assert.strictEqual(fields.client_domain.validatePattern, '^[A-Za-z0-9][A-Za-z0-9-]*$');
 });
 
-test('writeSchemaJson round-trips title and x-placeholder to legacy keys', () => {
+test('writeSchemaJson round-trips title, x-purpose, x-icon and x-placeholder to legacy keys', () => {
   const schema = parseSchema(legacyMetadataSchema);
   const written = JSON.parse(writeSchemaJson(schema));
   const prop = written.definitions.ConnectorAuthInput.properties.client_domain;
   assert.strictEqual(prop.title, 'My Domain name');
+  assert.strictEqual(prop['x-purpose'], 'Used to build the **login URL**.');
+  assert.strictEqual(prop['x-icon'], 'globe');
   assert.strictEqual(prop['x-placeholder'], 'acme');
   assert.strictEqual(prop['x-validatePattern'], '^[A-Za-z0-9][A-Za-z0-9-]*$');
 });
 
-test('writeSchemaJson omits title and x-placeholder when unset', () => {
+test('writeSchemaJson omits title, x-purpose, x-icon and x-placeholder when unset', () => {
   const schema = parseSchema(legacyMetadataSchema);
   const written = JSON.parse(writeSchemaJson(schema));
   const prop = written.definitions.ConnectorAuthInput.properties.clientSecret;
   assert.ok(!('title' in prop), 'no title key on metadata-less field');
+  assert.ok(!('x-purpose' in prop), 'no x-purpose key on metadata-less field');
+  assert.ok(!('x-icon' in prop), 'no x-icon key on metadata-less field');
   assert.ok(!('x-placeholder' in prop), 'no x-placeholder key on metadata-less field');
 });
 
-test('parseSchemaIR picks up wire-form title and placeholder (shared Go fixture)', () => {
+test('parseSchemaIR picks up wire-form title, purpose, icon and placeholder (shared Go fixture)', () => {
   const fixturePath = path.join(__dirname, '../../testdata/fielddef_wire.json');
   const wire = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
   const schema = parseSchemaIR(wire);
   const fields = metadataFields(schema);
   assert.strictEqual(fields.client_domain.title, 'My Domain name');
+  assert.strictEqual(fields.client_domain.purpose, 'Used to build the **login URL**.');
+  assert.strictEqual(fields.client_domain.icon, 'globe');
   assert.strictEqual(fields.client_domain.placeholder, 'acme');
   assert.strictEqual(fields.client_domain.validatePattern, '^[A-Za-z0-9][A-Za-z0-9-]*$');
   assert.strictEqual(fields.clientSecret.title, undefined);
+  assert.strictEqual(fields.clientSecret.purpose, undefined);
+  assert.strictEqual(fields.clientSecret.icon, undefined);
   assert.strictEqual(fields.clientSecret.placeholder, undefined);
 });
 

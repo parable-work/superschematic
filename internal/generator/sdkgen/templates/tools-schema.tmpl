@@ -7,47 +7,66 @@
 {{- if $i}},{{end}}
     {
       "name": "{{$tool.Name}}",
+      "operationId": "{{$tool.OperationID}}",
+      "title": "{{escapeJSON $tool.Title}}",
+{{- if $tool.MCP}}
+      "mcp": {
+        "hidden": {{$tool.MCP.Hidden}},
+{{- if $tool.MCP.Hidden}}
+        "hiddenReason": "{{escapeJSON $tool.MCP.HiddenReason}}"
+{{- else}}
+        "name": "{{escapeJSON $tool.MCP.Name}}",
+        "handle": "{{escapeJSON $tool.MCP.Handle}}",
+        "description": "{{escapeJSON $tool.MCP.Description}}"
+{{- if $tool.MCP.Meta}},
+        "_meta": {{jsonValue $tool.MCP.Meta}}
+{{- end}}
+{{- with $tool.MCP.Icon}},
+        "icon": {
+          "name": "{{escapeJSON .Name}}"
+{{- if .Family}},
+          "family": "{{escapeJSON .Family}}"
+{{- end}}
+{{- if .Style}},
+          "style": "{{escapeJSON .Style}}"
+{{- end}}
+        }
+{{- end}}
+{{- end}}
+      },
+{{- end}}
+      "capability": "{{$tool.Capability}}",
+      "lifecycle": "{{$tool.Lifecycle}}",
+      "visibility": "{{$tool.Visibility}}",
+      "audience": "{{escapeJSON $tool.Audience}}",
+      "guidance": {{jsonValue $tool.Guidance}},
+      "replay": {{if $tool.ReplayMode}}{
+        "mode": "{{$tool.ReplayMode}}",
+        "idempotencyKeyPointers": [{{range $j, $pointer := $tool.IdempotencyKeyPointers}}{{if $j}}, {{end}}"{{escapeJSON $pointer}}"{{end}}],
+        "expectedRevisionPointers": [{{range $j, $pointer := $tool.ExpectedRevisionPointers}}{{if $j}}, {{end}}"{{escapeJSON $pointer}}"{{end}}]
+      }{{else}}null{{end}},
       "description": "{{escapeJSON $tool.Description}}",
       "namespace": "{{$tool.Namespace}}",
       "methodName": "{{$tool.MethodName}}",
       "httpMethod": "{{$tool.HTTPMethod}}",
       "httpPath": "{{$tool.HTTPPath}}",
       "requiresAuth": {{$tool.RequiresAuth}},
+      "requiredPermissions": [{{range $j, $permission := $tool.RequiredPerms}}{{if $j}}, {{end}}"{{escapeJSON $permission}}"{{end}}],
       "isScoped": {{$tool.IsScopedNS}},
+      "bindingStatus": "{{$tool.BindingStatus}}",
+      "inputSchemaDigest": "{{$tool.InputSchemaDigest}}",
       "parameters": {
         "type": "object",
+        "additionalProperties": false,
+{{- range $.Keys.Parameters}}
+        "{{escapeJSON .Key}}": {{jsonValue .Value}},
+{{- end}}
         "properties": {
 {{- $props := $tool.Parameters.Properties}}
 {{- range $i, $propName := sortedKeys $props}}
 {{- $prop := index $props $propName}}
 {{- if $i}},{{end}}
-          "{{$propName}}": {
-            "type": "{{$prop.Type}}"
-{{- if $prop.Format}},
-            "format": "{{$prop.Format}}"
-{{- end}}
-{{- if $prop.Description}},
-            "description": "{{escapeJSON $prop.Description}}"
-{{- end}}
-{{- if $prop.Pattern}},
-            "pattern": "{{escapeJSON $prop.Pattern}}"
-{{- end}}
-{{- if $prop.Enum}},
-            "enum": [{{range $j, $e := $prop.Enum}}{{if $j}}, {{end}}"{{$e}}"{{end}}]
-{{- end}}
-{{- if $prop.MinLength}},
-            "minLength": {{$prop.MinLength}}
-{{- end}}
-{{- if $prop.MaxLength}},
-            "maxLength": {{$prop.MaxLength}}
-{{- end}}
-{{- if $prop.Minimum}},
-            "minimum": {{$prop.Minimum}}
-{{- end}}
-{{- if $prop.Maximum}},
-            "maximum": {{$prop.Maximum}}
-{{- end}}
-          }
+          "{{$propName}}": {{schemaJSON $prop}}
 {{- end}}
         }
 {{- if $tool.Parameters.Required}},
@@ -55,13 +74,13 @@
 {{- end}}
       },
       "returns": {
-        "type": "{{$tool.Returns.Type}}"
+        "type": {{if eq $tool.Returns.Type "any"}}["object", "array", "string", "number", "boolean", "null"]{{else}}"{{$tool.Returns.Type}}"{{end}}
 {{- if $tool.Returns.Description}},
         "description": "{{escapeJSON $tool.Returns.Description}}"
 {{- end}}
 {{- if $tool.Returns.Items}},
         "items": {
-          "type": "{{$tool.Returns.Items.Type}}"
+          "type": {{if eq $tool.Returns.Items.Type "any"}}["object", "array", "string", "number", "boolean", "null"]{{else}}"{{$tool.Returns.Items.Type}}"{{end}}
 {{- if $tool.Returns.Items.Description}},
           "description": "{{escapeJSON $tool.Returns.Items.Description}}"
 {{- end}}
@@ -72,4 +91,3 @@
 {{- end}}
   ]
 }
-

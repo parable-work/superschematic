@@ -2,9 +2,12 @@ export { Authenticated, Encrypted } from "./bases";
 export {
   auth,
   bodyLimit,
+  docs,
   encrypted,
   hmacVerified,
+  icon,
   manualRouteRegistration,
+  mcp,
   publicRoute,
   rateLimit,
   requireOwnership,
@@ -16,6 +19,18 @@ export {
   virtual,
   webhook
 } from "./decorators";
-export type { BodyLimitConfig, HmacVerifiedConfig, RateLimitConfig, TimeoutConfig } from "./decorators";
+export type {
+  BodyLimitConfig,
+  DocsConfig,
+  DocsError,
+  DocsLifecycle,
+  DocsMappingStatus,
+  DocsReplayMode,
+  DocsVisibility,
+  HmacVerifiedConfig,
+  MCPConfig,
+  RateLimitConfig,
+  TimeoutConfig
+} from "./decorators";
 export { HttpMethod } from "./enums";
 export type { EncryptedField, QueryParam } from "./wrappers";
