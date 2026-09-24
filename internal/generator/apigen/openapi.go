@@ -13,8 +13,9 @@ import (
 // generateOpenAPISpec builds the OpenAPI 3.0 document for the API output.
 // Returns (rawJSON, backtickEscapedForGoEmbed, error). The version and base
 // URL carry placeholder tokens that the generated routes.go replaces at
-// runtime with configured values.
-func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[string]*ir.Schema) (string, string, error) {
+// runtime with configured values. hooks edit the document before it is
+// serialized (OpenAPIHook).
+func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[string]*ir.Schema, hooks []OpenAPIHook) (string, string, error) {
 	scalarMap := buildOpenAPIScalarMap(schema, dependencies)
 	scalarExamples, scalarDescriptions := collectOpenAPIScalarMetadata(schema, dependencies)
 
@@ -44,7 +45,11 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 		},
 	}
 
-	specJSON, err := json.MarshalIndent(spec, "", "  ")
+	doc, err := applyOpenAPIHooks(spec, schema, hooks)
+	if err != nil {
+		return "", "", err
+	}
+	specJSON, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return "", "", fmt.Errorf("marshal OpenAPI spec: %w", err)
 	}

@@ -43,6 +43,8 @@ type Registry struct {
 	generatorOrder []string
 	hooks          []BuildAllHook
 	authProviders  map[string]AuthProvider
+	checks         []CheckSpec
+	openAPIHooks   []OpenAPIHook
 
 	// authoring is Naming.AuthoringPackages plus every registered
 	// decorator's Packages: the set IsAuthoringPackage answers from.
@@ -351,6 +353,70 @@ func (r *Registry) RegisterBuildAllHook(h BuildAllHook) error {
 	r.hooks = append(r.hooks, h)
 	r.noteExtension(h.Extension)
 	return nil
+}
+
+// RegisterCheck adds a verification rule that runs on every loaded schema
+// of the kinds it lists (all kinds when it lists none), after the core
+// checks and the kind's own Verify. It needs a Name, unique among checks,
+// and a Verify.
+func (r *Registry) RegisterCheck(spec CheckSpec) error {
+	if err := r.registrable("check " + spec.Name); err != nil {
+		return err
+	}
+	if spec.Name == "" {
+		return fmt.Errorf("registry: check has no name")
+	}
+	if spec.Verify == nil {
+		return fmt.Errorf("registry: check %q has no Verify function", spec.Name)
+	}
+	for _, existing := range r.checks {
+		if existing.Name == spec.Name {
+			return fmt.Errorf("registry: check %q is already registered", spec.Name)
+		}
+	}
+	r.checks = append(r.checks, spec)
+	r.noteExtension(spec.Extension)
+	return nil
+}
+
+// Checks returns the checks that run on a schema of kind, in registration
+// order.
+func (r *Registry) Checks(kind string) []CheckSpec {
+	var out []CheckSpec
+	for _, spec := range r.checks {
+		if spec.AllowsKind(kind) {
+			out = append(out, spec)
+		}
+	}
+	return out
+}
+
+// RegisterOpenAPIHook adds a hook that edits the OpenAPI document the api
+// generator builds, before it is written. Hooks run in registration order.
+// It needs a Name, unique among OpenAPI hooks, and an Edit.
+func (r *Registry) RegisterOpenAPIHook(h OpenAPIHook) error {
+	if err := r.registrable("OpenAPI hook " + h.Name); err != nil {
+		return err
+	}
+	if h.Name == "" {
+		return fmt.Errorf("registry: OpenAPI hook has no name")
+	}
+	if h.Edit == nil {
+		return fmt.Errorf("registry: OpenAPI hook %q has no Edit function", h.Name)
+	}
+	for _, existing := range r.openAPIHooks {
+		if existing.Name == h.Name {
+			return fmt.Errorf("registry: OpenAPI hook %q is already registered", h.Name)
+		}
+	}
+	r.openAPIHooks = append(r.openAPIHooks, h)
+	r.noteExtension(h.Extension)
+	return nil
+}
+
+// OpenAPIHooks returns the registered OpenAPI hooks in registration order.
+func (r *Registry) OpenAPIHooks() []OpenAPIHook {
+	return append([]OpenAPIHook(nil), r.openAPIHooks...)
 }
 
 // Kind returns the spec registered under name.

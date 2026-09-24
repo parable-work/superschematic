@@ -72,11 +72,35 @@ type KindSpec struct {
 	Verify func(schema *ir.Schema, r VerifyReporter)
 }
 
-// VerifyReporter receives the findings of a KindSpec.Verify run. file is the
-// schema source path the finding points at, or "" for a schema-level finding.
+// VerifyReporter receives the findings of a KindSpec.Verify or
+// CheckSpec.Verify run. file is the schema source path the finding points
+// at, or "" for a schema-level finding.
 type VerifyReporter interface {
 	Errorf(file string, format string, args ...any)
 	Warnf(file string, format string, args ...any)
+}
+
+// CheckSpec is a verification rule over schemas of any kind, including the
+// core kinds an extension cannot attach a KindSpec.Verify to. It is how an
+// extension enforces its policy on what core decorators write: a closed set
+// of @docs audiences, an icon set for @icon. Checks run after the core
+// checks and the kind's own Verify, in registration order, once per load, in
+// every frontend.
+type CheckSpec struct {
+	// Name identifies the check; it must be unique.
+	Name string
+	// Extension is the registering extension's Name().
+	Extension string
+	// Kinds restricts the check to schema kinds. nil = every kind.
+	Kinds []string
+	// Verify inspects the assembled schema and reports through r; an error
+	// fails the load.
+	Verify func(schema *ir.Schema, r VerifyReporter)
+}
+
+// AllowsKind reports whether the check runs on a schema of kind.
+func (s CheckSpec) AllowsKind(kind string) bool {
+	return len(s.Kinds) == 0 || slices.Contains(s.Kinds, kind)
 }
 
 // DecoratorTarget is the AST node a decorator may sit on.
@@ -343,9 +367,11 @@ type GeneratorSpec struct {
 // AuthProvider and AuthModel are declared in apigen (which this package
 // imports for APIOutput) and aliased here so extensions register providers
 // through the registry vocabulary. See docs/extension-model.md section 8.
+// OpenAPIHook is declared there for the same reason: apigen runs it.
 type (
 	AuthProvider = apigen.AuthProvider
 	AuthModel    = apigen.AuthModel
+	OpenAPIHook  = apigen.OpenAPIHook
 )
 
 // GenerateContext is the per-run state every generator in a pipeline shares.

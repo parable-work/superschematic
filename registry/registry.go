@@ -36,7 +36,12 @@ type (
 	BuildAllHook    = registry.BuildAllHook
 	BuildAllContext = registry.BuildAllContext
 	BuildAllService = registry.BuildAllService
-	ScalarCatalog   = registry.ScalarCatalog
+	// CheckSpec is a verification rule over schemas of any kind, reporting
+	// through VerifyReporter.
+	CheckSpec = registry.CheckSpec
+	// OpenAPIHook edits the OpenAPI document the api generator builds.
+	OpenAPIHook   = registry.OpenAPIHook
+	ScalarCatalog = registry.ScalarCatalog
 	// SchemaCatalogEntry is one discovered service's identity facts, the
 	// value type of LoadContext.Catalog.
 	SchemaCatalogEntry = registry.SchemaCatalogEntry

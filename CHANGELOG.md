@@ -121,6 +121,17 @@ of a generated artifact is always listed here with the bump it requires.
   `apigen.TypeOpenAPISchema`. In every OpenAPI document a `@strictJSON`
   component sets `additionalProperties: false`, and a string-map scalar's
   values are typed from its type mappings. Minor.
+- Registry: two extension surfaces for a rule on top of a core mechanism.
+  `RegisterCheck(CheckSpec{Name, Extension, Kinds, Verify})` adds a
+  verification rule that runs on every loaded schema of the listed kinds,
+  core kinds included (nil means every kind), after the core checks and the
+  kind's own `Verify`, in every frontend; before, an extension could only
+  verify schemas of a kind it registered. `RegisterOpenAPIHook(OpenAPIHook{
+  Name, Extension, Edit})` lets an extension edit the OpenAPI document the
+  `api` generator builds, as decoded JSON, before it is written; hooks run
+  in registration order and a hook error names the hook. With neither
+  registered, output is unchanged. The public `registry` package exports
+  `CheckSpec` and `OpenAPIHook`. Minor.
 
 ### Changed
 

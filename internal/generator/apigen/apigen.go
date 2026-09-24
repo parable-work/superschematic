@@ -294,6 +294,10 @@ type Options struct {
 
 	// Clock stamps generated file headers.
 	Clock codegen.Clock
+
+	// OpenAPIHooks edit the OpenAPI document before it is written, in
+	// order. The registry's OpenAPIHooks supplies them.
+	OpenAPIHooks []OpenAPIHook
 }
 
 // Generate extracts REST endpoints from the schema's operation sets and
@@ -448,7 +452,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		return nil, err
 	}
 
-	rawSpec, escapedSpec, err := generateOpenAPISpec(output, schema, opts.Dependencies)
+	rawSpec, escapedSpec, err := generateOpenAPISpec(output, schema, opts.Dependencies, opts.OpenAPIHooks)
 	if err != nil {
 		return nil, fmt.Errorf("apigen: openapi spec: %w", err)
 	}
