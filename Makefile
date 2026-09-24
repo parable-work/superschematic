@@ -88,7 +88,10 @@ cli-smoke: $(BIN)
 		$(BIN) build internal/loader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
 
 # The extraction scrub: the only allowed maintainer mentions are the license
-# holder, the GitHub org in module paths and the maintainer lines.
+# holder, the GitHub org in module paths and publisher registrations, and the
+# maintainer lines; source-tree identifiers and planning ids (wave, review and
+# phase numbers) fail it, and so do transform* field directives outside the
+# core IR allowlist.
 scrub:
 	scripts/scrub-check.sh
 
