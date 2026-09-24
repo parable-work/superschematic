@@ -179,3 +179,47 @@ on a `v*` tag). This repository also runs `npm ci && npm run build` in
 internal link or a missing sidebar page fails the pull request instead of
 waiting for the first tag. The release job still deploys to GitHub Pages
 once the repository is public; the CI job does not deploy.
+
+## D10. Mechanisms in the core, a distribution's policy in its extension
+
+Three features are expected to be ported from a distribution that built
+them on the source tree: SQL projection views, MCP tool manifests generated
+from operations, and documentation decorators on operations and fields.
+None is implemented in this repository yet. This entry is the rule each
+port follows.
+
+The generic mechanism goes into the core:
+
+- SQL projection views: a view definition over DB tables, with joins and
+  column selection, that the `sql` generator emits.
+- MCP tool manifests: a manifest generated from a schema's operations. The
+  SDK generators already write tool definitions and an MCP binding per API
+  under `tools/`; the manifest builds on them.
+- Documentation decorators: operation- and field-level decorators that
+  write typed IR fields, which OpenAPI, the SDKs and the tool manifests
+  read.
+
+A distribution's policy on top of a mechanism is registered by its
+extension, never built into the core:
+
+- row predicates every view must carry;
+- prefixes required on metadata keys;
+- prefixes of vendor-extension keys in emitted documents (the core's own
+  key is `x-superschematic`, D8);
+- which schemas must declare tools;
+- validation of icons against an icon set.
+
+The core gets no switch, naming-file key or literal for any of these. A
+policy's settings go in the extension's `[extension.<name>]` table. The
+existing seams carry most of it: `KindSpec.Verify` on a kind the extension
+registers, a decorator from the extension's own package that writes its
+`extensions.<name>` slot, and a generator appended to the core kinds.
+Where no seam reaches, the port adds a generic registry seam rather than a
+policy option. A rule over core-kind schemas is the known case: an
+extension cannot attach `Verify` to a kind it did not register
+(`docs/extension-model.md`, section 11).
+
+A port is done when the mechanism works and is tested with no extension
+linked, and the policy that shipped with the source implementation is
+expressed as registrations in an extension, with a test that adds one
+policy without a core edit.

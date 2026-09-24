@@ -27,6 +27,7 @@ naming file (`superschematic.toml`) that gives the generated packages their
 coordinates. A binary is `cli.New(cli.Config{Name: ...}, ext...)`; the
 `cmd/superschematic` binary links no extension. `extensions/deploy` and
 `extensions/platform` are worked examples. The design is written up in
+`docs/extension-model.md`; the decisions behind it are in
 `docs/DECISIONS.md`. The Starlight site under `docs/` (quickstarts, the
 extension guide, the naming-file and CLI references) deploys to GitHub
 Pages on a release tag once the repository is public.

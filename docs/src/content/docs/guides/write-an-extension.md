@@ -17,6 +17,11 @@ of each surface without editing a file under the core, and
 stays that way. This page walks those surfaces. When this page and the
 example disagree, the example is the authority.
 
+The design behind these surfaces, including what `Finalize` checks, how
+the data forms validate extension slots, and the known gaps, is
+[docs/extension-model.md](https://github.com/parable-work/superschematic/blob/main/docs/extension-model.md)
+in the repository.
+
 ## The binary
 
 ```go

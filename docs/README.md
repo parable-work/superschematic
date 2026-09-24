@@ -8,8 +8,9 @@ public. Pull requests also build the site (the `docs` job in `ci.yml`); that
 is a recorded deviation from superscalar, which only builds docs in
 `release.yml` (see `docs/DECISIONS.md`, D9).
 
-`docs/DECISIONS.md` is the decision log for this repository. It is not a
-Starlight page.
+`docs/DECISIONS.md` is the decision log for this repository and
+`docs/extension-model.md` is the design of the extension seam. Neither is a
+Starlight page; source comments cite both by path.
 
 ## Local development
 
@@ -41,6 +42,7 @@ docs/
     404.md                not-found page, emitted as dist/404.html for GitHub Pages
   src/content/i18n/en.json  empty UI-string overrides; keeps the i18n collection non-empty
   DECISIONS.md            repository decision log (not a Starlight page)
+  extension-model.md      extension seam design (not a Starlight page)
 ```
 
 Links inside pages are written with the `/superschematic/` base included, for
