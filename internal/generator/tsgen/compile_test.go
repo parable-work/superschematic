@@ -1,6 +1,8 @@
 package tsgen
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -13,47 +15,48 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// TestGeneratedPackagesCompile generates the TypeScript type packages for
-// the fixture services into a temp tree wired against the real superscalar
-// runtime and runs `tsc --noEmit` on each. This is the cheap end-to-end
-// compile check for the tsgen port. Skips when bun is unavailable.
-func TestGeneratedPackagesCompile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping compile check in -short mode")
+// requireOrSkipTSTooling decides what a missing TypeScript toolchain means.
+// Locally it stays a skip so `go test ./...` runs without bun. CI sets
+// SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1, where a skip would hide a broken gate,
+// so it fails instead.
+func requireOrSkipTSTooling(t *testing.T, reason string) {
+	t.Helper()
+	if os.Getenv("SUPERSCHEMATIC_REQUIRE_TS_CHECKS") == "1" {
+		t.Fatalf("SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1 requires this TypeScript gate to run: %s", reason)
 	}
+	t.Skipf("skipping TypeScript gate: %s", reason)
+}
 
+// tsPackageCase is one generated types package: a schema and the loaded
+// dependency schemas it imports from.
+type tsPackageCase struct {
+	name   string
+	schema *ir.Schema
+	deps   map[string]*ir.Schema
+}
+
+// buildTSPackages generates each case's TypeScript types package into one
+// temp tree wired against the real superscalar runtime, then installs and
+// type-checks (tsc) each package in order, so list a dependency before its
+// consumer. It returns the tree's root and the bun binary. It skips (or
+// fails under SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1) when bun is missing or an
+// install fails.
+func buildTSPackages(t *testing.T, cases []tsPackageCase) (tempRoot, bunPath string) {
+	t.Helper()
 	bunPath, err := exec.LookPath("bun")
 	if err != nil {
-		t.Skip("bun not available; skipping TypeScript compile check")
+		requireOrSkipTSTooling(t, fmt.Sprintf("bun not available: %v", err))
 	}
 
 	paths := testpaths.Local(t)
 
 	// Resolve symlinks (macOS /var -> /private/var) so the relative file:
 	// spec computed against the temp dir resolves correctly at install time.
-	tempRoot, err := filepath.EvalSymlinks(t.TempDir())
+	tempRoot, err = filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("resolve temp dir: %v", err)
 	}
 	fixedClock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
-
-	dbSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
-	if err != nil {
-		t.Fatalf("load fixture-db: %v", err)
-	}
-	apiSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-api"))
-	if err != nil {
-		t.Fatalf("load fixture-api: %v", err)
-	}
-
-	cases := []struct {
-		name   string
-		schema *ir.Schema
-		deps   map[string]*ir.Schema
-	}{
-		{name: "fixture-db", schema: dbSchema},
-		{name: "fixture-api", schema: apiSchema, deps: map[string]*ir.Schema{"fixture-db": dbSchema}},
-	}
 
 	for _, tc := range cases {
 		output, err := Generate(tc.schema, Options{
@@ -88,7 +91,7 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		install := exec.Command(bunPath, "install")
 		install.Dir = outDir
 		if out, err := install.CombinedOutput(); err != nil {
-			t.Skipf("bun install failed for %s (likely offline): %v\n%s", tc.name, err, out)
+			requireOrSkipTSTooling(t, fmt.Sprintf("bun install failed for %s (likely offline): %v\n%s", tc.name, err, out))
 		}
 
 		build := exec.Command(bunPath, "x", "tsc")
@@ -97,4 +100,35 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 			t.Errorf("generated package %s does not type-check: %v\n%s", tc.name, err, out)
 		}
 	}
+	return tempRoot, bunPath
+}
+
+// TestGeneratedPackagesCompile generates the TypeScript type packages for
+// the fixture services, including every arrays-of-arrays fixture, into a
+// temp tree wired against the real superscalar runtime and runs tsc on
+// each. This is the cheap end-to-end compile check for the tsgen port.
+// Skips when bun is unavailable.
+func TestGeneratedPackagesCompile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+
+	load := func(service string) *ir.Schema {
+		t.Helper()
+		schema, err := loader.LoadService(filepath.Join(fixturesDir, service))
+		if err != nil {
+			t.Fatalf("load %s: %v", service, err)
+		}
+		return schema
+	}
+	dbSchema := load("fixture-db")
+
+	cases := []tsPackageCase{
+		{name: "fixture-db", schema: dbSchema},
+		{name: "fixture-api", schema: load("fixture-api"), deps: map[string]*ir.Schema{"fixture-db": dbSchema}},
+		{name: "fixture-nested-arrays", schema: load("fixture-nested-arrays")},
+		{name: "fixture-nested-arrays-db", schema: load("fixture-nested-arrays-db")},
+		{name: "fixture-nested-arrays-api", schema: load("fixture-nested-arrays-api")},
+	}
+	buildTSPackages(t, append(cases, loadNestedArraysEdges(t)...))
 }
