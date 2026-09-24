@@ -129,16 +129,21 @@ function wrapNormalize(
   };
 }
 
-// Route through the core so the registry emits the exact canonical RFC3339Nano
-// form (sub-seconds preserved/trimmed, numeric offset kept) -- not JS
-// `toISOString()`, which forces `.000` padding and UTC and diverged from core.
-function dateTimeAdapter(input: string): [string, ValidationError[]] {
-  const id = scalarIdByCanonical['Temporal.DateTime'];
-  try {
-    return [backend.parse(id, input), []];
-  } catch {
-    return [input, [{ validator: 'parse', message: 'invalid DateTime' }]];
-  }
+// Route through the core and keep its canonical text. Temporal.DateTime gets
+// the exact RFC3339Nano form (sub-seconds preserved/trimmed, numeric offset
+// kept), not JS `toISOString()`, which forces `.000` padding and UTC. A
+// JSON-shaped scalar (json_schema type `object`, such as Generic.StringMap)
+// gets canonical JSON text: its generated parse function returns the decoded
+// map, which wrapParse would stringify as `[object Object]`.
+function coreTextAdapter(canonicalName: string, label: string): ScalarParseFunc {
+  const id = scalarIdByCanonical[canonicalName];
+  return (input: string) => {
+    try {
+      return [backend.parse(id, input), []];
+    } catch {
+      return [input, [{ validator: 'parse', message: `invalid ${label}` }]];
+    }
+  };
 }
 
 type GeneratedScalarFn = (input: unknown) => unknown | null;
@@ -161,21 +166,21 @@ function generatedScalarFn(prefix: 'parse' | 'normalize', symbol: string): Gener
  * custom parse step, adapted over the generated superscalar parse function. The
  * walker only consults the registry for hasCustomParse scalars, so those are
  * the only names registered; the set follows the catalog, not a hand list.
- * Temporal.DateTime routes through the core directly for the exact RFC3339Nano
- * canonical form.
+ * Temporal.DateTime and JSON-shaped scalars route through the core directly
+ * and return its canonical text (coreTextAdapter).
  */
 export function createDefaultScalarParseRegistry(): ScalarParseRegistry {
   const r = new ScalarParseRegistry();
   for (const meta of SCALAR_METADATA) {
     const def = BUILTIN_SCALARS[meta.canonicalName.replace(/\./g, '_')];
     if (!def || !def.hasCustomParse) continue;
-    if (meta.canonicalName === 'Temporal.DateTime') {
-      r.register(meta.canonicalName, dateTimeAdapter);
+    const label = meta.canonicalName.slice(meta.canonicalName.indexOf('.') + 1);
+    if (meta.canonicalName === 'Temporal.DateTime' || def.typeMappings.json_schema === 'object') {
+      r.register(meta.canonicalName, coreTextAdapter(meta.canonicalName, label));
       continue;
     }
     const fn = generatedScalarFn('parse', meta.symbol);
     if (!fn) continue;
-    const label = meta.canonicalName.slice(meta.canonicalName.indexOf('.') + 1);
     r.register(meta.canonicalName, wrapParse(fn, label));
   }
   return r;

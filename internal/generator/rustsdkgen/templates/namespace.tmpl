@@ -282,57 +282,7 @@ impl {{.Namespace.StructName}} {
 {{- else}}
             if let Some(query_param_value) = &query.{{.RustName}} {
 {{- end}}
-{{- if .IsArray}}
-            // An array is one comma-separated query value (?name=a,b).
-            let query_param_text = query_param_value.iter().map(|value| value.to_string()).collect::<Vec<_>>().join(",");
-{{- else if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern .ValidateListMin .ValidateListMax}}
-            let query_param_text = query_param_value.to_string();
-{{- end}}
-{{- if or .ValidateMin .ValidateMax}}
-            let query_param_number = query_param_text
-                .parse::<f64>()
-                .map_err(|_| SDKError::config("{{.Name}} must be numeric"))?;
-{{- end}}
-{{- if .ValidateMin}}
-            if query_param_number < {{float64Lit .ValidateMin}} {
-                return Err(SDKError::config("{{.Name}} must be at least {{.ValidateMin}}"));
-            }
-{{- end}}
-{{- if .ValidateMax}}
-            if query_param_number > {{float64Lit .ValidateMax}} {
-                return Err(SDKError::config("{{.Name}} must be at most {{.ValidateMax}}"));
-            }
-{{- end}}
-{{- if .ValidateMinLength}}
-            if query_param_text.len() < {{.ValidateMinLength}} {
-                return Err(SDKError::config("{{.Name}} must be at least {{.ValidateMinLength}} characters"));
-            }
-{{- end}}
-{{- if .ValidateMaxLength}}
-            if query_param_text.len() > {{.ValidateMaxLength}} {
-                return Err(SDKError::config("{{.Name}} must be at most {{.ValidateMaxLength}} characters"));
-            }
-{{- end}}
-{{- if .ValidatePattern}}
-            let query_param_pattern = Regex::new({{printf "%q" .ValidatePattern}})
-                .map_err(|err| SDKError::config(format!("invalid validation pattern for {{.Name}}: {}", err)))?;
-            if !query_param_pattern.is_match(&query_param_text) {
-                return Err(SDKError::config("{{.Name}} has an invalid format"));
-            }
-{{- end}}
-{{- if .ValidateListMin}}
-            let query_param_items = query_param_text.split(',').filter(|item| !item.is_empty()).count();
-            if query_param_items < {{.ValidateListMin}} {
-                return Err(SDKError::config("{{.Name}} must contain at least {{.ValidateListMin}} items"));
-            }
-{{- end}}
-{{- if .ValidateListMax}}
-            let query_param_items = query_param_text.split(',').filter(|item| !item.is_empty()).count();
-            if query_param_items > {{.ValidateListMax}} {
-                return Err(SDKError::config("{{.Name}} must contain at most {{.ValidateListMax}} items"));
-            }
-{{- end}}
-            query_params.push(("{{.Name}}".to_string(), {{if .IsArray}}query_param_text{{else}}query_param_value.to_string(){{end}}));
+{{- template "queryParamValue" .}}
 {{- if not .Required}}
             }
 {{- end}}
@@ -508,10 +458,86 @@ impl {{.Namespace.StructName}} {
 {{- else}}
             if let Some(query_param_value) = &query.{{.RustName}} {
 {{- end}}
+{{- template "queryParamValue" .}}
+{{- if not .Required}}
+            }
+{{- end}}
+{{- end}}
+        }{{if .HasRequiredQueryParams}} else {
+            return Err(SDKError::config("query parameters are required"));
+        }{{end}}
+{{- else}}
+        let query_params: Vec<(String, String)> = Vec::new();
+{{- end}}
+
+        self.client
+            .request_multipart("{{.HTTPMethod}}", &path, &query_params, body, options)
+            .await
+    }
+{{- end}}
+
+{{- end}}
+}
+{{- /* queryParamValue validates one query parameter and appends it to
+query_params. The server splits an array into items and checks each one,
+so an array is checked item by item and counted as a list. */}}
+{{- define "queryParamValue"}}
 {{- if .IsArray}}
+{{- if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern}}
+{{- if .ValidatePattern}}
+            let query_param_pattern = Regex::new({{printf "%q" .ValidatePattern}})
+                .map_err(|err| SDKError::config(format!("invalid validation pattern for {{.Name}}: {}", err)))?;
+{{- end}}
+            // The server validates each item, not the joined value.
+            for query_param_item in query_param_value.iter() {
+                let query_param_item_text = query_param_item.to_string();
+{{- if or .ValidateMin .ValidateMax}}
+                let query_param_item_number = query_param_item_text
+                    .parse::<f64>()
+                    .map_err(|_| SDKError::config("each {{.Name}} item must be numeric"))?;
+{{- end}}
+{{- if .ValidateMin}}
+                if query_param_item_number < {{float64Lit .ValidateMin}} {
+                    return Err(SDKError::config("each {{.Name}} item must be at least {{.ValidateMin}}"));
+                }
+{{- end}}
+{{- if .ValidateMax}}
+                if query_param_item_number > {{float64Lit .ValidateMax}} {
+                    return Err(SDKError::config("each {{.Name}} item must be at most {{.ValidateMax}}"));
+                }
+{{- end}}
+{{- if .ValidateMinLength}}
+                if query_param_item_text.len() < {{.ValidateMinLength}} {
+                    return Err(SDKError::config("each {{.Name}} item must be at least {{.ValidateMinLength}} characters"));
+                }
+{{- end}}
+{{- if .ValidateMaxLength}}
+                if query_param_item_text.len() > {{.ValidateMaxLength}} {
+                    return Err(SDKError::config("each {{.Name}} item must be at most {{.ValidateMaxLength}} characters"));
+                }
+{{- end}}
+{{- if .ValidatePattern}}
+                if !query_param_pattern.is_match(&query_param_item_text) {
+                    return Err(SDKError::config("each {{.Name}} item has an invalid format"));
+                }
+{{- end}}
+            }
+{{- end}}
+{{- if .ValidateListMin}}
+            if query_param_value.len() < {{.ValidateListMin}} {
+                return Err(SDKError::config("{{.Name}} must contain at least {{.ValidateListMin}} items"));
+            }
+{{- end}}
+{{- if .ValidateListMax}}
+            if query_param_value.len() > {{.ValidateListMax}} {
+                return Err(SDKError::config("{{.Name}} must contain at most {{.ValidateListMax}} items"));
+            }
+{{- end}}
             // An array is one comma-separated query value (?name=a,b).
             let query_param_text = query_param_value.iter().map(|value| value.to_string()).collect::<Vec<_>>().join(",");
-{{- else if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern .ValidateListMin .ValidateListMax}}
+            query_params.push(("{{.Name}}".to_string(), query_param_text));
+{{- else}}
+{{- if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern .ValidateListMin .ValidateListMax}}
             let query_param_text = query_param_value.to_string();
 {{- end}}
 {{- if or .ValidateMin .ValidateMax}}
@@ -558,23 +584,6 @@ impl {{.Namespace.StructName}} {
                 return Err(SDKError::config("{{.Name}} must contain at most {{.ValidateListMax}} items"));
             }
 {{- end}}
-            query_params.push(("{{.Name}}".to_string(), {{if .IsArray}}query_param_text{{else}}query_param_value.to_string(){{end}}));
-{{- if not .Required}}
-            }
+            query_params.push(("{{.Name}}".to_string(), query_param_value.to_string()));
 {{- end}}
 {{- end}}
-        }{{if .HasRequiredQueryParams}} else {
-            return Err(SDKError::config("query parameters are required"));
-        }{{end}}
-{{- else}}
-        let query_params: Vec<(String, String)> = Vec::new();
-{{- end}}
-
-        self.client
-            .request_multipart("{{.HTTPMethod}}", &path, &query_params, body, options)
-            .await
-    }
-{{- end}}
-
-{{- end}}
-}

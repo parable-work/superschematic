@@ -21,6 +21,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -227,6 +228,10 @@ type Options struct {
 
 // Generate generates Rust types from a v2 IR schema.
 func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
+	// nested-arrays guard: remove when rustgen renders T[][].
+	if err := nestedguard.Check("rustgen", schema); err != nil {
+		return nil, err
+	}
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}
@@ -641,21 +646,21 @@ func remapScalarLibType(targetType string, scalar codegen.ScalarInfo, scalarCrat
 }
 
 // fieldTypeMapperRust maps IR type references to Rust types.
-func fieldTypeMapperRust(typeName string, isArray bool, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	valueType := fieldValueTypeMapperRust(typeName, isArray, isMap, isRequired, scalarMap)
+func fieldTypeMapperRust(typeName string, arrayDepth int, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	valueType := fieldValueTypeMapperRust(typeName, arrayDepth, isMap, isRequired, scalarMap)
 	if !isMap {
 		return valueType
 	}
 	return "HashMap<String, " + valueType + ">"
 }
 
-func fieldValueTypeMapperRust(typeName string, isArray bool, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	if isArray {
-		elemType := fieldValueTypeMapperRust(typeName, false, false, true, scalarMap)
+func fieldValueTypeMapperRust(typeName string, arrayDepth int, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	if arrayDepth > 0 {
+		elemType := fieldValueTypeMapperRust(typeName, 0, false, true, scalarMap)
 		if inMap && !isRequired {
 			elemType = rustutil.WrapOptionalType(elemType)
 		}
-		return "Vec<" + elemType + ">"
+		return codegen.WrapArray(elemType, arrayDepth, func(elem string) string { return "Vec<" + elem + ">" })
 	}
 
 	var resolvedType string

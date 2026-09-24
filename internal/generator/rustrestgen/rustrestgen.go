@@ -14,6 +14,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	"github.com/parable-work/superschematic/internal/generator/rustapigen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	ir "github.com/parable-work/superschematic/ir"
@@ -78,6 +79,10 @@ type Options struct {
 
 // Generate produces Rust REST API metadata from an IR schema.
 func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
+	// nested-arrays guard: remove when rustrestgen renders T[][].
+	if err := nestedguard.Check("rustrestgen", schema); err != nil {
+		return nil, err
+	}
 	generated, err := rustapigen.Generate(schema, rustapigen.Options{
 		SchemaName:     opts.SchemaName,
 		IsPublic:       opts.IsPublic,

@@ -330,6 +330,27 @@ of a generated artifact is always listed here with the bump it requires.
   TypeScript server, and `storefront/`, the app that implements it with an
   `X-API-Key` authenticator. The smoke type-checks both and drives the
   generated router over HTTP.
+- Arrays of arrays, the IR and loader half (D12): a field, a request
+  input field, a body argument or a response can be a list of lists of a
+  scalar, enum, object type or union, one level of nesting only. The IR
+  `TypeRef` gains `isArrayOfArrays` (after `isArray`, omitted when false,
+  so existing IR is unchanged), `TypeRef.ArrayDepth()` and
+  `Schema.FindArrayOfArrays()`; `Schema.Validate` requires `isArray` with
+  it and refuses it with `isMap`. The TypeScript reader accepts `T[][]`,
+  `Array<Array<T>>`, `Array<T[]>`, `Array<T>[]` and their `readonly` forms
+  (and `Array<T>` / `ReadonlyArray<T>` for a single list); it refuses a
+  third level, a map value that is a list of lists, a nullable inner list
+  and list bounds on the inner lists. The data forms write
+  `typeRef: { name, isArray: true, isArrayOfArrays: true }` and the
+  schema-file JSON Schema accepts it; the TypeScript writer emits `T[][]`;
+  a platform default takes a list of lists. Verification refuses it in env
+  config fields, relations, indexed fields and `@index` keys, query and
+  path parameters, arguments of GET operations and operations without a
+  method, and every projection column, join and row rule. No generator
+  renders it yet: each one fails with "<generator> does not support
+  arrays of arrays yet", and `apigen.Param` and `apigen.EndpointInfo`
+  carry `IsArrayOfArrays` / `OutputIsArrayOfArrays` for the SDK
+  generators. Minor.
 
 ### Changed
 
@@ -402,6 +423,37 @@ of a generated artifact is always listed here with the bump it requires.
   one comma-separated value. Before, the handler parsed the parameter as a
   single scalar. The Rust SDK also drops a zero `listMin` check, which
   compared an unsigned length with zero. Minor.
+- The superscalar pin moves to `79a8e6a` (`superscalar.pin` and every
+  `go.mod`), and the TypeScript and Python scalar catalogs are regenerated
+  from it. Generated output changes where a scalar changed:
+  - Four new scalars are available to schemas: `AgentSkill.Name`,
+    `Git.PathPattern`, `Ordering.Rank` and `Version.SemVer`.
+  - `Generic.JSON` is any JSON value. Its description changes in every
+    generated scalar comment and readme; its `json_schema` type mapping is
+    `any` (was `object`), which the projection Arrow metadata key
+    `scalar.json_schema_type` reports; and it validates through superscalar,
+    so the generated TypeScript validator and the Python validator also call
+    the library's `validateGenericJSON` / `validate_generic_json`.
+  - `Generic.StringMap` is custom-parse. A Go types module that uses it
+    emits `ParseGenericStringMap`, and the Go, TypeScript and Python schema
+    runtimes parse it to canonical JSON text. superscalar's TypeScript
+    `parseGenericStringMap` now returns the decoded map, so the TypeScript
+    runtime's default parse registry sends a custom-parse scalar whose
+    `json_schema` type is `object` through the core, as it already did for
+    `Temporal.DateTime`; stringifying the map gave `[object Object]`.
+
+  Minor.
+- TypeScript and Python types: a custom-parse scalar whose `json_schema`
+  type is `object` (`Generic.StringMap`) takes its TypeScript and Python
+  types from the scalar catalog, `Record<string, string>` and
+  `Dict[str, str]` (were `string` and `Any`). The TypeScript
+  `validate<Symbol>` runs superscalar's parser instead of string checks,
+  and `parse<Symbol>` takes the map or its JSON text and returns the map.
+  The Python field parses through `parse_generic_string_map` and holds a
+  dict; a map with a non-string value now fails validation. OpenAPI types
+  such a map's values through `additionalProperties`. Before, a TypeScript
+  types package that used `Generic.StringMap` did not compile against the
+  pinned superscalar, whose parser returns a map. Minor.
 
 ### Fixed
 
@@ -421,9 +473,8 @@ of a generated artifact is always listed here with the bump it requires.
 - Go types: `Parse<Scalar>` for a custom-parse scalar with a JSON-shaped Go
   type (a map) called a superscalar function by its leaf name and converted
   the returned string to the map type, which does not compile. It now calls
-  `Parse<Symbol>` and decodes the canonical JSON into the alias. No scalar
-  in the pinned superscalar catalog takes this path yet; `Generic.StringMap`
-  does once superscalar marks it custom-parse. Patch.
+  `Parse<Symbol>` and decodes the canonical JSON into the alias.
+  `Generic.StringMap` takes this path. Patch.
 - Go types: `Parse<Scalar>` for `Finance.Money`, `Generic.Int64`,
   `Identity.UserID` and the `Temporal` integer durations (`Milliseconds`,
   `Seconds`, `Minutes`, `Hours`, `Days`) called a superscalar function named
@@ -461,5 +512,25 @@ of a generated artifact is always listed here with the bump it requires.
   directly. Go does not inherit `replace` lines from a dependency's
   `go.mod`, so a module that reached a sibling only through another
   generated module did not resolve it. Patch.
+- Go ORM: an optional map column did not compile. `NewXSnapshotUpdate`
+  compared the map with a zero value of its element type, `ApplyTo`
+  assigned that zero value on `SetNull`, and a map of a scalar or enum was
+  treated as a pointer and assigned without a dereference. An optional map
+  is now nil-checked like a list, and its `<Type>Update` field holds the map
+  type the types module emits: `map[string]*T` for a non-union value (was
+  `map[string]T`). A table whose only optional string field is a map no
+  longer imports `database/sql` without using it. Patch.
+- Go types: an optional map or map of lists of a union on an output type
+  was `map[string]*Choice` (`map[string][]*Choice`), while its generated
+  `UnmarshalJSON` builds `map[string]Choice`, so the module did not
+  compile. It is now `map[string]Choice` (`map[string][]Choice`), as the
+  required map and the optional input map already were. Patch.
+- Rust SDK: an array query parameter was validated as its comma-joined
+  wire text, so the pattern and length checks saw `a,b`, `min` and `max`
+  tried to parse `1,5` as one number, and the list count split items that
+  contain a comma. The generated server checks each item, so the SDK
+  rejected requests the server accepts. The SDK now checks each item and
+  counts the list it was given, in the JSON and the multipart methods.
+  Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main

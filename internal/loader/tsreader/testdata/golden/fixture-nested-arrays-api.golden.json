@@ -1,0 +1,256 @@
+{
+  "name": "fixture-nested-arrays-api",
+  "kind": "API",
+  "scalars": {
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "UUID"
+      }
+    }
+  },
+  "types": {
+    "GridView": {
+      "name": "GridView",
+      "owner": "src/grid-api.schema.ts",
+      "comment": "Response: a stored grid.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "labels",
+          "typeRef": {
+            "name": "string",
+            "isArray": true,
+            "isArrayOfArrays": true
+          },
+          "required": true
+        },
+        {
+          "name": "shades",
+          "typeRef": {
+            "name": "Shade",
+            "isArray": true,
+            "isArrayOfArrays": true
+          },
+          "required": true
+        },
+        {
+          "name": "polygons",
+          "typeRef": {
+            "name": "Point",
+            "isArray": true,
+            "isArrayOfArrays": true
+          },
+          "required": true
+        },
+        {
+          "name": "weights",
+          "typeRef": {
+            "name": "number",
+            "isArray": true,
+            "isArrayOfArrays": true
+          }
+        }
+      ]
+    },
+    "Point": {
+      "name": "Point",
+      "owner": "src/grid-api.schema.ts",
+      "comment": "A point on a plane.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "x",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true
+        },
+        {
+          "name": "y",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true
+        }
+      ]
+    },
+    "SaveGridInput": {
+      "name": "SaveGridInput",
+      "owner": "src/grid-api.schema.ts",
+      "comment": "Request body: a grid to store.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "labels",
+          "comment": "Cell labels, one inner list per row.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true,
+            "isArrayOfArrays": true
+          },
+          "required": true
+        },
+        {
+          "name": "shades",
+          "comment": "Cell shades, one inner list per row.",
+          "typeRef": {
+            "name": "Shade",
+            "isArray": true,
+            "isArrayOfArrays": true
+          },
+          "required": true
+        },
+        {
+          "name": "polygons",
+          "comment": "Polygons, each a list of its points.",
+          "typeRef": {
+            "name": "Point",
+            "isArray": true,
+            "isArrayOfArrays": true
+          },
+          "required": true
+        },
+        {
+          "name": "weights",
+          "comment": "Weight vectors in batches; absent when the grid is unweighted.",
+          "typeRef": {
+            "name": "number",
+            "isArray": true,
+            "isArrayOfArrays": true
+          }
+        }
+      ]
+    }
+  },
+  "enums": {
+    "Shade": {
+      "name": "Shade",
+      "owner": "fixture-nested-arrays-api",
+      "comment": "The shade of one grid cell.",
+      "values": [
+        {
+          "name": "Light",
+          "serializedAs": "light"
+        },
+        {
+          "name": "Dark",
+          "serializedAs": "dark"
+        }
+      ]
+    }
+  },
+  "operationSets": [
+    {
+      "name": "GridMutations",
+      "operations": [
+        {
+          "name": "saveGrid",
+          "comment": "Store a grid from a request body.",
+          "typeRef": {
+            "name": "GridView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "SaveGridInput"
+              },
+              "required": true
+            }
+          ],
+          "httpMethod": "POST",
+          "restPath": "grids"
+        },
+        {
+          "name": "replaceLabels",
+          "comment": "Replace a grid's labels; the body argument is a list of lists.",
+          "typeRef": {
+            "name": "GridView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "labels",
+              "typeRef": {
+                "name": "string",
+                "isArray": true,
+                "isArrayOfArrays": true
+              },
+              "required": true
+            }
+          ],
+          "httpMethod": "PUT",
+          "restPath": "grids/{id}/labels"
+        }
+      ]
+    },
+    {
+      "name": "GridQueries",
+      "operations": [
+        {
+          "name": "getGrid",
+          "typeRef": {
+            "name": "GridView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "httpMethod": "GET",
+          "restPath": "grids/{id}"
+        },
+        {
+          "name": "gridLabels",
+          "comment": "One grid's labels as a bare list of lists, at most `limit` rows.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true,
+            "isArrayOfArrays": true
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "limit",
+              "typeRef": {
+                "name": "number"
+              },
+              "isQuery": true
+            }
+          ],
+          "httpMethod": "GET",
+          "restPath": "grids/{id}/labels"
+        }
+      ]
+    }
+  ]
+}

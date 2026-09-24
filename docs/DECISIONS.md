@@ -301,3 +301,37 @@ generated package it serves is itself TypeScript source, so a consumer
 already runs a TypeScript-aware toolchain. Its npm name is the naming key
 `http_runtime_npm_package`, so a distribution that republishes the runtime
 under its own name renders the same generated router.
+## D12. Arrays of arrays: one flag, two levels
+
+A field type can be a list of lists (`T[][]`): grid rows of cells, a
+polygon as a list of points, batches of vectors. Before, an author wrapped
+the inner list in a named object, which changes the wire shape, or fell back
+to untyped JSON. Nesting stops at two levels; `T[][][]` is a load error.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `TypeRef.IsArrayOfArrays`, which requires `IsArray`, plus `TypeRef.ArrayDepth()` (0, 1 or 2). A generator renders the element type wrapped `ArrayDepth()` times. | A recursive `Items *TypeRef`, which invites deeper nesting and changes the shape every consumer reads; an integer depth field |
+| An inner list is never null; an empty inner list is valid. The innermost elements follow the element rules of `T[]`. | Nullable inner lists |
+| `listMin` and `listMax` bound the outer list. Every other constraint applies to each innermost element. A validation error path names both indexes (`field[2][5]`). | Separate bounds for the inner lists |
+| Postgres stores a list of lists as `JSONB`, through the JSON codec maps and `@jsonField` already use. | Native `T[][]` columns, which Postgres requires to be rectangular |
+| Refused, each with an error that names the context: map values, query and path parameters, arguments of a GET operation or an operation without a method (they travel in the query string), env config fields, relations, indexed fields and index keys, and projection columns, joins and row rules. | Supporting map values now; nothing needs them, and adding them later is compatible |
+
+Authoring forms: TypeScript `T[][]`, `Array<Array<T>>`, `Array<T[]>` and
+`Array<T>[]`, with or without `readonly`; the data forms
+`typeRef: { name: T, isArray: true, isArrayOfArrays: true }`. The
+TypeScript writer emits `T[][]`, and the schema-file JSON Schema has the
+key.
+
+Wire compatibility: `isArrayOfArrays` is written right after `isArray` and
+omitted when false, so IR JSON for a schema without nested lists is byte for
+byte what it was. A reader that does not know the key reads `T[][]` as
+`T[]`. Anything that stores or reads IR must learn the key before a schema
+it handles uses nested lists; `Schema.FindArrayOfArrays` lets such a reader
+refuse the schema instead.
+
+Rollout: the IR and the loaders land first. Until a generator renders
+`T[][]`, it fails with "<generator> does not support arrays of arrays yet"
+(`internal/generator/nestedguard`, one marked call per generator entry)
+instead of emitting `T[]`. The change that teaches a generator nested
+lists removes its own call and adds its output for the
+`fixture-nested-arrays` services; the package goes when no call remains.

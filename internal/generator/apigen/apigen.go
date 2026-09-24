@@ -17,6 +17,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -45,10 +46,14 @@ type Param struct {
 	// (e.g. "types.ParseIdentityUUID"). Empty unless IsUUID.
 	ParseFunc string
 
-	Required     bool
-	IsArray      bool
-	IsMap        bool
-	DefaultValue *string
+	Required bool
+	IsArray  bool
+	// IsArrayOfArrays marks T[][] (ir.TypeRef.IsArrayOfArrays); IsArray is
+	// also set. No template renders it yet: each generator that reads
+	// Params refuses it until that generator renders T[][].
+	IsArrayOfArrays bool
+	IsMap           bool
+	DefaultValue    *string
 
 	ValidateMin       *float64
 	ValidateMax       *float64
@@ -100,6 +105,9 @@ type EndpointInfo struct {
 	OutputType    string // schema output type name
 	OutputGoType  string // qualified Go type expression for the output
 	OutputIsArray bool
+	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
+	// set. See Param.IsArrayOfArrays.
+	OutputIsArrayOfArrays bool
 
 	PathParams  []Param
 	QueryParams []Param
@@ -351,6 +359,10 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 
 	if len(schema.OperationSets) == 0 {
 		return nil, nil
+	}
+	// nested-arrays guard: remove when apigen renders T[][].
+	if err := nestedguard.CheckWithDependencies("apigen", schema, opts.Dependencies); err != nil {
+		return nil, err
 	}
 	if opts.Provider == nil {
 		return nil, fmt.Errorf("apigen: Options.Provider is required")
@@ -658,6 +670,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		OutputType:                   op.TypeRef.Name,
 		OutputGoType:                 outputGoType,
 		OutputIsArray:                op.TypeRef.IsArray,
+		OutputIsArrayOfArrays:        op.TypeRef.IsArrayOfArrays,
 		PathParams:                   pathParams,
 		QueryParams:                  queryParams,
 		ScalarArgs:                   scalarArgs,
@@ -916,6 +929,7 @@ func (m *typeMapper) mapArgument(arg *ir.ArgumentDef) (Param, error) {
 		Type:              arg.TypeRef.Name,
 		Required:          arg.Required,
 		IsArray:           arg.TypeRef.IsArray,
+		IsArrayOfArrays:   arg.TypeRef.IsArrayOfArrays,
 		IsMap:             arg.TypeRef.IsMap,
 		DefaultValue:      arg.Default,
 		ValidateMin:       arg.ValidateMin,
@@ -1015,6 +1029,7 @@ func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 			Type:              field.TypeRef.Name,
 			Required:          field.Required,
 			IsArray:           field.TypeRef.IsArray,
+			IsArrayOfArrays:   field.TypeRef.IsArrayOfArrays,
 			IsMap:             field.TypeRef.IsMap,
 			ValidateMin:       field.ValidateMin,
 			ValidateMax:       field.ValidateMax,

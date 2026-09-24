@@ -16,6 +16,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	"github.com/parable-work/superschematic/internal/generator/rustapigen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 )
@@ -195,6 +196,10 @@ func IsToolUnavailable(err error) bool {
 func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock codegen.Clock) (*SDKOutput, error) {
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
+	}
+	// nested-arrays guard: remove when rustsdkgen renders T[][].
+	if err := nestedguard.Check("rustsdkgen", apiOutput); err != nil {
+		return nil, err
 	}
 
 	names := apiOutput.Naming.OrDefault()

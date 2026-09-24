@@ -152,8 +152,13 @@ type FieldInfo struct {
 	// Secret indicates whether the field has @secret metadata.
 	Secret bool
 
-	// IsArray indicates whether the field is a list type.
+	// IsArray indicates whether the field is a list type (T[] or T[][]).
 	IsArray bool
+
+	// IsArrayOfArrays indicates T[][]: each element of the outer list is a
+	// list of Type. It implies IsArray and excludes IsMap, as on
+	// ir.TypeRef. ArrayDepth reports the depth these two flags encode.
+	IsArrayOfArrays bool
 
 	// IsMap indicates whether the field is a map/dictionary type with string
 	// keys. When true, Type and IsArray describe the map value type.
@@ -205,6 +210,13 @@ type FieldInfo struct {
 // back to the node-attached comment).
 func (f FieldInfo) Doc() string {
 	return DocText(f.Description, f.Comment)
+}
+
+// ArrayDepth is 0 for T, 1 for T[] and 2 for T[][], matching
+// ir.TypeRef.ArrayDepth. It is the depth the field's TargetType was mapped
+// with.
+func (f FieldInfo) ArrayDepth() int {
+	return ir.TypeRef{IsArray: f.IsArray, IsArrayOfArrays: f.IsArrayOfArrays}.ArrayDepth()
 }
 
 // TypeInfo holds information about an object type.

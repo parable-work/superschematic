@@ -1412,6 +1412,9 @@
         "isArray": {
           "type": "boolean"
         },
+        "isArrayOfArrays": {
+          "type": "boolean"
+        },
         "isMap": {
           "type": "boolean"
         },
