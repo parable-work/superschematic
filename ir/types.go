@@ -128,6 +128,12 @@ type TypeDef struct {
 	// this object only; a nested object type opts in on its own.
 	StrictJSON bool `json:"strictJSON,omitempty" yaml:"strictJSON,omitempty"`
 
+	// Projection is the @projection declaration of a RoleProjection type: the
+	// view's address, the table it reads and the tables it joins, its row
+	// rules and its collapse. Fields are the view's columns. Nil for every
+	// other role. See [ProjectionDef].
+	Projection *ProjectionDef `json:"projection,omitempty" yaml:"projection,omitempty"`
+
 	// Extensions holds extension decorator data keyed by extension name; see
 	// [Schema.Extensions].
 	Extensions map[string]json.RawMessage `json:"extensions,omitempty" yaml:"extensions,omitempty"`
@@ -280,6 +286,16 @@ type FieldDef struct {
 	// projections are expected to carry; a projection omitting it draws a
 	// verification warning (@sourceMustProject).
 	SourceMustProject bool `json:"sourceMustProject,omitempty" yaml:"sourceMustProject,omitempty"`
+
+	// ProjectedFrom is the alias.field a projection column reads (@column).
+	// Empty on a projection column means base.<field name>; meaningless on
+	// every other role. See [FieldDef.ProjectionSource].
+	ProjectedFrom string `json:"projectedFrom,omitempty" yaml:"projectedFrom,omitempty"`
+
+	// ProjectedFunction is the computed form of @column: the column is the
+	// result of a named SQL function over alias.field arguments. Exclusive
+	// with ProjectedFrom and valid only on projection columns.
+	ProjectedFunction *ProjectionFunctionCall `json:"projectedFunction,omitempty" yaml:"projectedFunction,omitempty"`
 
 	// Default is the default value from @default (nil means no default).
 	Default *string `json:"default,omitempty" yaml:"default,omitempty"`

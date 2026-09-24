@@ -18,6 +18,7 @@ The extension adds one of each registration surface:
 | Auth provider | `apikey`, an `X-API-Key` header over the generic session runtime | `ext/auth/` |
 | Checks and an OpenAPI hook | policy over the core documentation decorators: acme's `@docs` audiences and `@icon` names only, and the `x-acme-docs` vendor key | `ext/docs.go` |
 | Check and a tool hook on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden; the SDK tool documents carry acme's vendor keys and icon variant | `ext/mcp.go` |
+| Check on a core kind | policy over core projection views: every view in a DB schema binds `acme.shop_id` first | `ext/projection_policy.go` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
@@ -68,6 +69,7 @@ examples/acme-schematic/
     inventory.go              acmeInventory build-all hook
     docs.go                   audience and icon checks, x-acme-docs OpenAPI hook
     mcp.go                    every shop-api operation declares @mcp; acme tool keys and icon variant
+    projection_policy.go      projection policy: a check on DB views' first rule
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
@@ -76,7 +78,8 @@ examples/acme-schematic/
     superschematic.toml       naming, auth_provider = "apikey", [paths], [deps], [extension.acme]
     deps.json                 the committed copy of the dependency graph ([deps] copy)
     tsconfig.base.json        path aliases for @superschematic/*, @acme/*, superscalar
-    services/shop-db          DB: User, Session, ApiKey, Product tables
+    services/shop-db          DB: User, Session, ApiKey, Product, StockLevel
+                              tables and the storefront.stock projection
     services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs, @mcp, @icon
     services/shop-config      General: ShopConfig with @envVars and field @docs/@purpose/@icon
     services/shop-catalog     Catalog: Product, Bundle with @shelf; catalog.config.yaml
@@ -442,6 +445,39 @@ tool documents carry acme's keys and icon variant while the core registry
 writes the core's. The smoke checks the classification in the IR and the
 tool documents from both binaries.
 
+## Policy on projection views
+
+A deployment that serves projection views usually wants every view scoped
+to one owner of its data, here a shop. The core requires no row rule on a
+view, and `KindSpec.Verify` only reaches kinds the extension registers, so
+acme states the policy as a check on the core DB kind:
+
+```go
+r.RegisterCheck(registry.CheckSpec{
+	Name:      "acmeProjectionScope",
+	Extension: Name,
+	Kinds:     []string{"DB"},
+	Verify: func(schema *ir.Schema, rep registry.VerifyReporter) {
+		for _, td := range schema.Projections() {
+			if !scopedBy(td.Projection, setting) {
+				rep.Errorf(td.Owner, "%s: the first where rule of a projection must bind %s, ...", td.Name, setting)
+			}
+		}
+	},
+})
+```
+
+`setting` is `projection_scope_setting` from `[extension.acme]`
+(`acme.shop_id`); with the key unset acme registers no check. `scopedBy`
+accepts a projection whose first `where` rule is a plain binding of that
+setting, not optional and without a `when` guard. `shop-db`'s
+`storefront.stock` view (`src/stock.projection.schema.ts`) passes; a view
+without the binding fails the load in any authoring form, while the
+core-only binary loads it (`TestProjectionPolicyRequiresTheShopScope`).
+The sql generator writes the view into `create.sql`, its migration pair
+under `dist/sql/shop-db/projections/migrations`, and its Arrow schema with
+the `acme.` metadata keys the naming file's `metadata_key_prefix` sets.
+
 ## A command
 
 `cli.New` returns the root cobra command with `build`, `build-all`,
@@ -457,8 +493,9 @@ func (Extension) Commands() []*cobra.Command {
 `describe [<schemas-root>]` assembles the registry the way `build` does
 (`registry.LoadNaming` on the root, then `registry.Assemble(names,
 Extension{})`) and prints every kind with its pipeline, every document,
-every output key and every auth provider. It is the first thing to run when
-a schema is rejected: it shows what the binary knows.
+every output key, every auth provider and every check. It is the
+first thing to run when a schema is rejected: it shows what the binary
+knows.
 
 `fields <file.d.ts> <type>` is a command on TypeScript the schema frontend
 does not walk. It hands the file, and the other `.d.ts` files next to it,
@@ -497,9 +534,10 @@ extension.
 command. The acme file sets `go_module_root`, `npm_scope`,
 `python_types_module_prefix`, `python_sdk_module_prefix`,
 `python_sdk_module_suffix`, `rust_crate_prefix`, `package_author`,
-`auth_provider`, `authoring_packages`, the `[paths]` and `[deps]` tables
-and `[extension.acme]`. `[deps] copy` makes `build-all` also write the
-dependency graph of the generated packages to `schemas/deps.json`, which is
-committed; each package in it names the service that produced it, and the
-smoke fails when the committed copy is stale. A key left out keeps the default from the naming file
+`metadata_key_prefix`, `auth_provider`, `authoring_packages`, the `[paths]`
+and `[deps]` tables and `[extension.acme]`. `[deps] copy` makes `build-all`
+also write the dependency graph of the generated packages to
+`schemas/deps.json`, which is committed; each package in it names the
+service that produced it, and the smoke fails when the committed copy is
+stale. A key left out keeps the default from the naming file
 at the repository root; the docs site's naming reference lists every key.

@@ -12,15 +12,19 @@
 #
 # Asserts, in order:
 #   1. the acme module builds, vets and passes its tests;
-#   2. `describe` lists the Catalog kind, the document and the apikey provider;
+#   2. `describe` lists the Catalog kind, the document, the apikey provider
+#      and the checks: the icon and audience checks, the @mcp check on API
+#      and the projection check on DB;
 #   3. build-all over the schemas root builds all four services;
 #   4. the catalog generator wrote catalog.json for the Catalog service;
-#   5. the @shelf payload reached the IR (--emit-ir + jq);
+#   5. the @shelf payload reached the IR (--emit-ir + jq), and so did the
+#      shop-db projection that satisfies acme's projection policy;
 #   6. the catalog.config document was loaded and its generator ran;
 #   7. the manifest generator ran on every kind, core and acme, and the
 #      acmeInventory build-all hook merged the manifests from every service's
 #      output directories, again when every service is restored from the
-#      build cache;
+#      build cache; the sql generator wrote the storefront.stock view, its
+#      migration and its Arrow schema under acme's metadata key prefix;
 #   8. the API service compiles against the acme auth provider (go build);
 #   9. the core-only binary rejects the Catalog service with the registered
 #      kinds named, and rejects the naming file that selects apikey;
@@ -40,7 +44,7 @@
 #      x-acme-docs key through the acme OpenAPI hook, and under the core key
 #      when the core-only binary builds the same service; the shop-config
 #      field presentation (@docs title, @purpose, @icon) is in the IR;
-#  13. every shop-api operation carries its @mcp classification in the IR;
+#  15. every shop-api operation carries its @mcp classification in the IR;
 #      its TypeScript SDK tool documents carry acme's vendor keys and icon
 #      variant through the acme tool hook, and the core keys when the
 #      core-only binary builds the same service.
@@ -83,6 +87,7 @@ grep -q '^kinds: API, Catalog, DB, General$' "$OUT/describe.txt"
 grep -q '^  Catalog: types -> catalog -> acmeManifest$' "$OUT/describe.txt"
 grep -q '^documents: catalog.config (catalog.config.yaml)$' "$OUT/describe.txt"
 grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.txt"
+grep -q '^checks: acmeIcons (every kind), acmeDocsAudience (every kind), acmeToolsClassified (API), acmeProjectionScope (DB)$' "$OUT/describe.txt"
 
 echo "==> build-all over the schemas root"
 rm -rf "$DIST"
@@ -104,6 +109,11 @@ jq -e '.types.Product.fields[] | select(.name == "name") | has("extensions") | n
 DECORATORS="$(jq -r '[.types[].fields[]? | .extensions.acme? // {} | keys[]] | unique | join(" ")' "$OUT/catalog-ir.json")"
 echo "ir decorators on shop-catalog: $DECORATORS"
 
+echo "==> shop-db projection is in the IR, scoped the way acme's policy requires"
+"$OUT/acme-schematic" build "$SCHEMAS/services/shop-db" --emit-ir --out "$OUT/ir-dist" >"$OUT/db-ir.json"
+jq -e '.types.ShopStock.role == "Projection" and .types.ShopStock.projection.pool == "storefront"' "$OUT/db-ir.json" >/dev/null
+jq -e '.types.ShopStock.projection.predicates[0] == {"column": "base.shop", "setting": "acme.shop_id"}' "$OUT/db-ir.json" >/dev/null
+
 echo "==> catalog.config document loaded and generated"
 jq -e '.documents["catalog.config"] == {"region": "eu", "currency": "EUR", "aisles": 16}' "$OUT/catalog-ir.json" >/dev/null
 test -s "$DIST/acme/catalog/shop-catalog/config.json"
@@ -116,6 +126,14 @@ for service in shop-db shop-api shop-config shop-catalog; do
 done
 jq -e '.kind == "DB"' "$DIST/acme/manifest/shop-db/manifest.json" >/dev/null
 jq -e '.kind == "Catalog"' "$DIST/acme/manifest/shop-catalog/manifest.json" >/dev/null
+
+echo "==> the storefront.stock view: create.sql, its migration, its Arrow schema"
+STOCK_UP="$DIST/sql/shop-db/projections/migrations/20260923120000_storefront_stock_projection.up.sql"
+test -s "$STOCK_UP"
+grep -q "^WHERE base.shop = current_setting('acme.shop_id')::uuid$" "$STOCK_UP"
+grep -q '^CREATE VIEW storefront.stock WITH (security_barrier = true) AS$' "$DIST/sql/shop-db/create.sql"
+jq -e '.metadata["acme.projection.settings"] == "acme.shop_id" and ([.fields[].name] == ["sku", "name", "quantity", "price_cents", "in_stock"])' \
+  "$DIST/sql/shop-db/projections/storefront.stock.arrow.json" >/dev/null
 
 echo "==> build-all hook merged every manifest, also when every service comes from the cache"
 jq -e '[.services[].service] | sort == ["shop-api", "shop-catalog", "shop-config", "shop-db"]' "$DIST/acme/inventory.json" >/dev/null

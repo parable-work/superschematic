@@ -310,6 +310,12 @@
         "platformDefault": {
           "type": "string"
         },
+        "projectedFrom": {
+          "type": "string"
+        },
+        "projectedFunction": {
+          "$ref": "#/$defs/ProjectionFunctionCall"
+        },
         "public": {
           "type": "boolean"
         },
@@ -774,6 +780,231 @@
       ],
       "type": "object"
     },
+    "ProjectionCollapse": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "order": {
+          "items": {
+            "$ref": "#/$defs/ProjectionOrder"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "by"
+      ],
+      "type": "object"
+    },
+    "ProjectionCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "type": "string"
+        },
+        "equals": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "column",
+        "equals"
+      ],
+      "type": "object"
+    },
+    "ProjectionDef": {
+      "additionalProperties": false,
+      "properties": {
+        "collapse": {
+          "$ref": "#/$defs/ProjectionCollapse"
+        },
+        "joins": {
+          "items": {
+            "$ref": "#/$defs/ProjectionJoin"
+          },
+          "type": "array"
+        },
+        "migration": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pool": {
+          "type": "string"
+        },
+        "predicates": {
+          "items": {
+            "$ref": "#/$defs/ProjectionPredicate"
+          },
+          "type": "array"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pool",
+        "name",
+        "migration",
+        "source"
+      ],
+      "type": "object"
+    },
+    "ProjectionFunctionCall": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "function": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "function",
+        "args"
+      ],
+      "type": "object"
+    },
+    "ProjectionJoin": {
+      "additionalProperties": false,
+      "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "on": {
+          "items": {
+            "$ref": "#/$defs/ProjectionJoinKey"
+          },
+          "type": "array"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "alias",
+        "kind",
+        "on"
+      ],
+      "type": "object"
+    },
+    "ProjectionJoinKey": {
+      "additionalProperties": false,
+      "properties": {
+        "left": {
+          "type": "string"
+        },
+        "right": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "left",
+        "right"
+      ],
+      "type": "object"
+    },
+    "ProjectionLiteral": {
+      "additionalProperties": false,
+      "properties": {
+        "bool": {
+          "type": "boolean"
+        },
+        "number": {
+          "type": "number"
+        },
+        "string": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ProjectionOrder": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "type": "string"
+        },
+        "direction": {
+          "type": "string"
+        },
+        "nulls": {
+          "type": "string"
+        },
+        "rank": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "column"
+      ],
+      "type": "object"
+    },
+    "ProjectionPredicate": {
+      "additionalProperties": false,
+      "properties": {
+        "anyOf": {
+          "items": {
+            "$ref": "#/$defs/ProjectionPredicate"
+          },
+          "type": "array"
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "column": {
+          "type": "string"
+        },
+        "equals": {
+          "$ref": "#/$defs/ProjectionLiteral"
+        },
+        "function": {
+          "type": "string"
+        },
+        "isNull": {
+          "type": "boolean"
+        },
+        "notNull": {
+          "type": "boolean"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "requiredSettings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "setting": {
+          "type": "string"
+        },
+        "when": {
+          "$ref": "#/$defs/ProjectionCondition"
+        }
+      },
+      "type": "object"
+    },
     "PruneReference": {
       "additionalProperties": false,
       "properties": {
@@ -1125,6 +1356,9 @@
         "owner": {
           "type": "string"
         },
+        "projection": {
+          "$ref": "#/$defs/ProjectionDef"
+        },
         "rawHeritage": {
           "$ref": "#/$defs/RawHeritage"
         },
@@ -1135,7 +1369,8 @@
             "APIInput",
             "EmbeddedStruct",
             "APIOperationSet",
-            "Trait"
+            "Trait",
+            "Projection"
           ],
           "type": "string"
         },

@@ -77,6 +77,15 @@ func TestExtensionRegistersEverySurface(t *testing.T) {
 	if strings.Join(hooks, ",") != "acmeInventory" {
 		t.Fatalf("BuildAllHooks = %v, want acmeInventory", hooks)
 	}
+	for _, kind := range []string{"DB", "API", "General", ext.Kind} {
+		var scoped bool
+		for _, check := range reg.Checks(kind) {
+			scoped = scoped || check.Name == ext.ProjectionScopeRule
+		}
+		if scoped != (kind == "DB") {
+			t.Fatalf("%s checks include %s: %v, want it on DB only", kind, ext.ProjectionScopeRule, scoped)
+		}
+	}
 }
 
 // TestInventoryHookReadsOutputDirs runs the hook the way build-all does after
@@ -258,6 +267,75 @@ func TestShelfOnNonCatalogSchemaIsRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "shelf") {
 		t.Fatalf("err = %v, want it to name the decorator", err)
+	}
+}
+
+// TestProjectionPolicyRequiresTheShopScope: acme's check on the core
+// DB kind refuses a projection view whose first where rule does not bind
+// acme.shop_id, in any authoring form; the core registry loads the same
+// schema, because the core requires no rule of its own.
+func TestProjectionPolicyRequiresTheShopScope(t *testing.T) {
+	reg, names := assemble(t)
+	shopDB, err := loader.LoadService(filepath.Join(schemasRoot, "services", "shop-db"), loader.WithRegistry(reg), loader.WithNaming(names))
+	if err != nil {
+		t.Fatalf("shop-db binds the scope and must load: %v", err)
+	}
+	if stock := shopDB.Types["ShopStock"]; stock == nil || stock.Role != ir.RoleProjection || stock.Projection.Pool != "storefront" {
+		t.Fatalf("ShopStock projection = %+v", stock)
+	}
+
+	root := t.TempDir()
+	service := filepath.Join(root, "services", "leaky-db")
+	if err := os.MkdirAll(filepath.Join(service, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"schema.config.json": `{"name": "leaky-db", "kind": "DB", "outputs": {}}`,
+		"src/leaky.schema.json": `{
+			"name": "leaky-db",
+			"kind": "DB",
+			"scalars": {"Identity.UUID": {"name": "Identity.UUID", "languagePrimitive": "string"}},
+			"types": {
+				"Stock": {
+					"name": "Stock",
+					"role": "DBTable",
+					"fields": [
+						{"name": "id", "typeRef": {"name": "Identity.UUID"}, "required": true, "key": true},
+						{"name": "shop", "typeRef": {"name": "Identity.UUID"}, "required": true},
+						{"name": "quantity", "typeRef": {"name": "number"}, "required": true}
+					]
+				},
+				"AllStock": {
+					"name": "AllStock",
+					"role": "Projection",
+					"projection": {
+						"pool": "storefront",
+						"name": "all_stock",
+						"migration": "20260923120001",
+						"source": "Stock",
+						"predicates": [{"column": "base.shop", "setting": "acme.shop_id", "optional": true}]
+					},
+					"fields": [{"name": "quantity", "typeRef": {"name": "number"}, "required": true}]
+				}
+			}
+		}`,
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(service, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err = loader.LoadService(service, loader.WithRegistry(reg), loader.WithNaming(names))
+	if err == nil || !strings.Contains(err.Error(), "AllStock: the first where rule of a projection must bind acme.shop_id") {
+		t.Fatalf("an optional scope binding passed acme's policy: %v", err)
+	}
+
+	core, err := registry.Assemble(registry.DefaultNaming())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loader.LoadService(service, loader.WithRegistry(core)); err != nil {
+		t.Fatalf("the core registry must load a projection with any rules: %v", err)
 	}
 }
 

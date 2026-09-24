@@ -88,6 +88,12 @@ type Naming struct {
 	// emits and validates against (the schema-file document schema).
 	MetaSchemaURLPrefix string `toml:"meta_schema_url_prefix"`
 
+	// MetadataKeyPrefix prefixes every key of the metadata the generated
+	// projection Arrow schemas carry (<prefix>scalar.canonical_name,
+	// <prefix>projection.settings, ...), so the keys land in the namespace
+	// the schemas' readers expect.
+	MetadataKeyPrefix string `toml:"metadata_key_prefix"`
+
 	// AuthoringPackages lists the npm packages whose exports the TypeScript
 	// frontend treats as toolchain: decorators and type wrappers must
 	// resolve from one of them, and the per-kind import rules apply to
@@ -279,6 +285,7 @@ func Default() Naming {
 		SchemaLanguage:          "Superschematic",
 		PackageAuthor:           "superschematic",
 		MetaSchemaURLPrefix:     "superschematic://",
+		MetadataKeyPrefix:       "superschematic.",
 		AuthProvider:            "session",
 		AuthoringPackages: []string{
 			"@superschematic/api",
@@ -319,6 +326,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.SchemaLanguage, d.SchemaLanguage)
 	fill(&n.PackageAuthor, d.PackageAuthor)
 	fill(&n.MetaSchemaURLPrefix, d.MetaSchemaURLPrefix)
+	fill(&n.MetadataKeyPrefix, d.MetadataKeyPrefix)
 	fill(&n.AuthProvider, d.AuthProvider)
 	if len(n.AuthoringPackages) == 0 {
 		n.AuthoringPackages = append([]string(nil), d.AuthoringPackages...)

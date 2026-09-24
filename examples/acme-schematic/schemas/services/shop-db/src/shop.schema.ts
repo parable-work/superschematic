@@ -66,3 +66,19 @@ export abstract class Product extends Auditable {
   priceCents: number;
   inStock: Default<boolean, true>;
 }
+
+// How many units of a product one shop holds. A shop is identified by its
+// id alone; the storefront.stock view below scopes rows to one of them.
+export abstract class StockLevel extends Auditable {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  shop: Identity.UUID;
+
+  product: Relation<Product, { onDelete: "CASCADE" }>;
+
+  quantity: number;
+
+  // Set when the shop stops carrying the product.
+  discontinuedAt: Nullable<Temporal.DateTime>;
+}

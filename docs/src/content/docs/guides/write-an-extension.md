@@ -9,7 +9,8 @@ An extension is a Go package that implements `registry.Extension` and,
 optionally, `cli.CommandProvider`. You pass it to `cli.New`. The core
 binary (`cmd/superschematic`) passes none. Everything project-specific
 registers here: kinds, decorators, documents, generators, build-all
-hooks, auth providers, checks, OpenAPI hooks and extra commands.
+hooks, auth providers, checks, OpenAPI hooks, tool hooks and extra
+commands.
 
 `examples/acme-schematic` is the acceptance test of this model. It adds one
 of each surface without editing a file under the core, and
@@ -317,6 +318,13 @@ r.RegisterToolHook(registry.ToolHook{
 
 See [MCP tools](/superschematic/reference/mcp-tools/).
 
+acme also checks the core projection views (`ext/projection_policy.go`): a
+check on the DB kind refuses a view whose first `where` rule is not a
+required, unconditional binding of the setting `projection_scope_setting`
+names in `[extension.acme]`. A policy's settings belong in the extension's
+own table, not in the core's naming keys. See
+[Projection views](/superschematic/reference/projections/).
+
 ## A command
 
 `cli.New` returns `build`, `build-all`, `json-schema` and `format`. An
@@ -329,8 +337,8 @@ func (Extension) Commands() []*cobra.Command {
 ```
 
 acme's `describe [<schemas-root>]` assembles the registry the way `build`
-does and prints every kind, document, output key and auth provider. Run it
-when a schema is rejected: it shows what the binary knows.
+does and prints every kind, document, output key, auth provider and check.
+Run it when a schema is rejected: it shows what the binary knows.
 
 A command that works on built output, such as one that pins consumers to
 generated packages, reads the dependency graph `build-all` wrote with the

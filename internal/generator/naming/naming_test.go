@@ -381,3 +381,19 @@ func TestParseReadsPackageAliases(t *testing.T) {
 		t.Errorf("DeclaringPackage(@acme/db) = %q", got)
 	}
 }
+
+func TestMetadataKeyPrefixDefaultsAndOverrides(t *testing.T) {
+	if got := Default().MetadataKeyPrefix; got != "superschematic." {
+		t.Errorf("default MetadataKeyPrefix = %q", got)
+	}
+	got, err := Parse([]byte("metadata_key_prefix = \"acme.\"\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MetadataKeyPrefix != "acme." {
+		t.Errorf("MetadataKeyPrefix = %q, want the file's value", got.MetadataKeyPrefix)
+	}
+	if (Naming{}).OrDefault().MetadataKeyPrefix != "superschematic." {
+		t.Error("an empty MetadataKeyPrefix must fill from the defaults")
+	}
+}

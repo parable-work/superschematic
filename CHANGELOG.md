@@ -166,7 +166,6 @@ of a generated artifact is always listed here with the bump it requires.
   `purpose` and `icon` from the IR; the Python runtime reads `x-purpose`
   and `x-icon` into `FieldDef.purpose` and `icon`; the TypeScript IR
   declarations gain both. Minor.
-
 - `@mcp` (from `@superschematic/api`) on an operation classifies it for
   MCP: `{ handle, _meta? }` publishes a visible tool, `{ hidden: true,
   reason }` records why the operation is not one. A handle is lowercase
@@ -195,7 +194,6 @@ of a generated artifact is always listed here with the bump it requires.
   carries `replay: { mode, idempotencyKeyPointers,
   expectedRevisionPointers }` when a mode is set; the TypeScript writer
   emits them. Minor.
-
 - MCP tool documents: the TypeScript, Go and Rust SDKs write
   `tools/mcp-audit.json`, one record per operation (handle, title,
   description, icon, hidden and reason, permissions, `@docs` facts,
@@ -238,6 +236,47 @@ of a generated artifact is always listed here with the bump it requires.
   `Tool`, `ToolKeys`, `ToolKeyValue`, `DefaultToolScalarKey` and
   `DefaultToolGuidanceKey`. The acme example writes its own keys and icon
   variant with one. Minor.
+- Projection views: `@projection<Source>({ pool, name, migration, where?,
+  collapse? })` and `@join<Table>(alias, on, kind?)` on a class and
+  `@column("alias.field" | { function, args })` on its fields, from
+  `@superschematic/db`, declare a read-only relation over tables of the same
+  DB schema. `where` takes setting bindings (optional ones too), `anyOf`
+  alternatives, `isNull`/`notNull`/`equals` literal rules and function
+  rules, each with an optional `when` guard; `collapse` keeps one row per
+  key. The IR gains the `Projection` role, `TypeDef.projection`,
+  `FieldDef.projectedFrom` and `FieldDef.projectedFunction`
+  (`ir/projection.go`) and `Schema.Projections()`; the schema-file JSON
+  Schema accepts them and the TypeScript writer emits them. Verification
+  checks every reference, column type, rule shape and name for every
+  frontend; it requires no particular rule, which a deployment adds with
+  `RegisterCheck`. The type, ORM and table DDL generators skip projections. A
+  core `DecoratorSpec` can now take class type arguments, which the
+  TypeScript frontend resolves to class names and passes to `Apply` ahead of
+  the value arguments (`DecoratorSpec.TypeArgs`). Minor.
+- `examples/acme-schematic` declares a projection view in `shop-db` and
+  registers `acmeProjectionScope`, a check on the DB kind that requires
+  every view's first `where` rule to bind the setting
+  `[extension.acme] projection_scope_setting` names. `describe` lists the
+  registered checks. Patch.
+- The sql generator writes projection views: each view in `create.sql`
+  (after the tables, in `CREATE SCHEMA IF NOT EXISTS "pool"`) and
+  `drop.sql` (dropped first), a re-runnable migration pair
+  `<stamp>_<pool>_<name>_projection.{up,down}.sql`, and
+  `projections/<pool>.<name>.arrow.json` (the view's Arrow schema in arrow-rs
+  serde form) and `.docs.json`. Views are `security_barrier`; a required
+  setting binding makes an unset setting raise, an optional one matches no
+  row. A new `outputs.sql` block (`@superschematic/schema-config`
+  `SqlOutputConfig`, and the data-form config schema) takes
+  `migrationsDir`, relative to the service directory, and `viewOwner`, the
+  role the up migration creates the view as with `SET ROLE`; the `sql`
+  generator now claims the `sql` output key, so the unknown-key error lists
+  `types, sql, api, sdk`, and an unknown key in `outputs.sql` fails the
+  build. The generator refuses unsafe names and unmappable column types
+  even when the IR skipped verification. Minor.
+- Naming file: `metadata_key_prefix` (default `superschematic.`) prefixes
+  every key of the projection Arrow schemas' metadata
+  (`<prefix>scalar.canonical_name`, `<prefix>projection.settings`, ...).
+  Minor.
 
 ### Changed
 
@@ -299,6 +338,17 @@ of a generated artifact is always listed here with the bump it requires.
   `json_schema` type mapping now decides its OpenAPI type for every value
   (before, only `object` overrode the language primitive), and the value
   `any` renders as an empty schema that accepts any JSON value. Minor.
+- Array query parameters (`QueryParam<T[]>`) work end to end. The Go API
+  handler parses `?name=a,b` (and repeated keys) into a slice, parses and
+  validates each item with the element type's parser and validator, applies
+  `listMin`/`listMax` to the item count, rejects an empty item, and passes a
+  nil slice for an absent optional parameter; the implementation interface
+  takes `[]T` instead of a scalar. OpenAPI describes the parameter as an
+  array with `style: form`, `explode: false` and `minItems`/`maxItems`. The
+  TypeScript SDK types it `T[]`, and the Rust SDK takes `Vec<T>` and sends
+  one comma-separated value. Before, the handler parsed the parameter as a
+  single scalar. The Rust SDK also drops a zero `listMin` check, which
+  compared an unsigned length with zero. Minor.
 
 ### Fixed
 
@@ -337,19 +387,6 @@ of a generated artifact is always listed here with the bump it requires.
 - Python types: generated enums accept their serialized value when a model
   is validated with `strict=True`, in direct, list and map fields. Unknown
   values and unrelated coercions still fail. Patch.
-
-[Unreleased]: https://github.com/parable-work/superschematic/commits/main
-- Array query parameters (`QueryParam<T[]>`) work end to end. The Go API
-  handler parses `?name=a,b` (and repeated keys) into a slice, parses and
-  validates each item with the element type's parser and validator, applies
-  `listMin`/`listMax` to the item count, rejects an empty item, and passes a
-  nil slice for an absent optional parameter; the implementation interface
-  takes `[]T` instead of a scalar. OpenAPI describes the parameter as an
-  array with `style: form`, `explode: false` and `minItems`/`maxItems`. The
-  TypeScript SDK types it `T[]`, and the Rust SDK takes `Vec<T>` and sends
-  one comma-separated value. Before, the handler parsed the parameter as a
-  single scalar. The Rust SDK also drops a zero `listMin` check, which
-  compared an unsigned length with zero. Minor.
 - Go types: union fields decode in every shape. A map or map-of-lists of a
   union decodes each value through the union's wrapper (before, the
   generated `UnmarshalJSON` did not compile); an optional union field is the
@@ -371,3 +408,5 @@ of a generated artifact is always listed here with the bump it requires.
   directly. Go does not inherit `replace` lines from a dependency's
   `go.mod`, so a module that reached a sibling only through another
   generated module did not resolve it. Patch.
+
+[Unreleased]: https://github.com/parable-work/superschematic/commits/main

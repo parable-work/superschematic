@@ -150,6 +150,16 @@ Default: `superschematic://`
 Prefix of the `$id` of the JSON Schemas the tool emits and validates
 against (the schema-file document schema).
 
+### `metadata_key_prefix`
+
+Default: `superschematic.`
+
+Prefix of every metadata key in the Arrow schemas the sql generator writes
+for [projection views](/superschematic/reference/projections/):
+`<prefix>scalar.canonical_name`, `<prefix>enum.values`,
+`<prefix>projection.settings` and the rest. Set it to the namespace the
+schemas' readers expect; the part after the prefix is fixed.
+
 ### `auth_provider`
 
 Default: `session`
