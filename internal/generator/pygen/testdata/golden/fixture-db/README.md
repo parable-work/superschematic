@@ -48,7 +48,7 @@ if errors:
 
 This package includes custom scalar types with built-in validation:
 
-- `GenericJSON` (canonical: `Generic.JSON`): A JSON object represented as a string
+- `GenericJSON` (canonical: `Generic.JSON`): Any valid JSON value: object, array, primitive, or null
 - `IdentityName` (canonical: `Identity.Name`): An objects name
 - `IdentitySlug` (canonical: `Identity.Slug`): A URL friendly version of a string
 - `IdentityUUID` (canonical: `Identity.UUID`): UUID v4 with automatic base62 encoding for client-facing APIs

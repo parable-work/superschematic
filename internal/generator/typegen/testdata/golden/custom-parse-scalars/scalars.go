@@ -3,6 +3,7 @@
 package types
 
 import (
+	"encoding/json"
 	"strconv"
 
 	scalars "github.com/parable-work/superscalar/go"
@@ -48,6 +49,24 @@ func ParseGenericInt64(s string) (GenericInt64, error) {
 		return zero, err
 	}
 	return GenericInt64(parsed), nil
+}
+
+// Generic.StringMap - A string-to-string map stored as JSON
+type GenericStringMap = scalars.GenericStringMap
+
+// ParseGenericStringMap parses a string and returns a Generic.StringMap scalar.
+func ParseGenericStringMap(s string) (GenericStringMap, error) {
+	canonical, err := scalars.ParseGenericStringMap(s)
+	if err != nil {
+		var zero GenericStringMap
+		return zero, err
+	}
+	var parsed GenericStringMap
+	if err := json.Unmarshal([]byte(canonical), &parsed); err != nil {
+		var zero GenericStringMap
+		return zero, err
+	}
+	return parsed, nil
 }
 
 // Identity.UUID - UUID v4 with automatic base62 encoding for client-facing APIs

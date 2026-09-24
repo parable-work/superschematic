@@ -10,8 +10,10 @@ All scalars use Pydantic's Annotated types for validation.
 
 from typing import Annotated, Any, Dict
 from pydantic import Field, BeforeValidator, AfterValidator, PlainSerializer, PlainValidator
-{{if .HasGenericJSON -}}
+{{if or .HasGenericJSON .HasJSONParse -}}
 import json
+{{end -}}
+{{if .HasGenericJSON -}}
 import math
 {{end -}}
 import re
@@ -42,19 +44,23 @@ except ImportError:
 
 {{range .Scalars}}{{if and .HasCustomParse (ne .Name "Generic.JSON")}}
 def _custom_parse_{{pythonScalarModule .}}(v: Any) -> Any:
-    """Custom parse wrapper for {{.Name}}.
+{{if pythonParsesJSON .}}    """Parse JSON values through the scalar library and return their native representation."""
+{{else}}    """Custom parse wrapper for {{.Name}}.
 
     The scalar library native hooks are string-in/string-out, so non-string
     inputs are stringified before the call and numeric targets are
     converted back afterwards.
     """
-    if not _SCALAR_LIB_AVAILABLE or v is None:
+{{end}}    if not _SCALAR_LIB_AVAILABLE or v is None:
         return v
     try:
-        parsed = parse_{{pythonScalarModule .}}(v if isinstance(v, str) else str(v))
-    except Exception as e:
+{{if pythonParsesJSON .}}        parsed = parse_{{pythonScalarModule .}}(v if isinstance(v, str) else json.dumps(v))
+{{else}}        parsed = parse_{{pythonScalarModule .}}(v if isinstance(v, str) else str(v))
+{{end}}    except Exception as e:
         raise ValueError(str(e))
-    {{- if eq .TargetType "int"}}
+    {{- if pythonParsesJSON .}}
+    return json.loads(parsed)
+    {{- else if eq .TargetType "int"}}
     return int(parsed)
     {{- else if eq .TargetType "float"}}
     return float(parsed)
@@ -238,7 +244,7 @@ def _validate_generic_json(v: Any) -> Any:
     AfterValidator(_validate_generic_json),
 ]
 
-{{else if .Traits.IsJSONLike -}}
+{{else if and .Traits.IsJSONLike (not (pythonParsesJSON .)) -}}
 # JSON scalar for arbitrary JSON tokens (object, array, or primitive).
 # `Any` rather than `Dict[str, Any]` because the JSON scalar accepts any
 # JSON value -- primitives (string/int/float/bool) included. Narrowing to

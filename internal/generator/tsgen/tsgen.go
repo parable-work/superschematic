@@ -53,6 +53,12 @@ type ScalarInfo struct {
 	HasCustomValidate            bool
 	HasCustomParse               bool
 
+	// HasJSONParse marks a custom-parse scalar with a JSON shape (a map such
+	// as Generic.StringMap): superscalar's parser takes a value or its JSON
+	// text and returns the decoded value, so the validator runs it instead of
+	// string checks.
+	HasJSONParse bool
+
 	// IsIntegerLike marks number scalars with integer semantics; validators
 	// emit a Number.isInteger check for them.
 	IsIntegerLike bool
@@ -352,6 +358,7 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 			HasCustomNormalize:           s.HasCustomNormalize,
 			HasCustomValidate:            s.HasCustomValidate,
 			HasCustomParse:               s.HasCustomParse,
+			HasJSONParse:                 s.HasCustomParse && s.Traits.IsJSONLike,
 			IsIntegerLike:                s.Traits.IsIntegerLike,
 			HasParseFromJSON:             s.HasCustomParse && s.TargetType == "JSDate",
 		}

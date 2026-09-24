@@ -697,13 +697,13 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 		if !isInput && isUnion && !cf.Required && !cf.IsArray && !cf.IsMap {
 			goType = strings.TrimPrefix(goType, "*")
 		}
+		// A map of union values stores the interface values directly, input
+		// or not; the optional nested-type path would add a pointer per value.
+		if isUnion && cf.IsMap && !cf.Required {
+			goType = strings.Replace(goType, "]*", "]", 1)
+		}
 		if usesWrapper {
 			innerType := goType
-			// A map of union values stores the interface values directly;
-			// the optional nested-type path would add a pointer per value.
-			if isUnion && cf.IsMap {
-				innerType = strings.Replace(innerType, "]*", "]", 1)
-			}
 			if cf.IsScalar || (isUnion && !cf.IsArray && !cf.IsMap) {
 				innerType = strings.TrimPrefix(innerType, "*")
 			}

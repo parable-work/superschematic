@@ -5,6 +5,32 @@
 import type { ScalarDef } from './validation/types';
 
 export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
+  "AgentSkill_Name": {
+    "name": "AgentSkill_Name",
+    "description": "Portable Agent Skills directory and frontmatter name",
+    "primitive": "String",
+    "minLength": 1,
+    "maxLength": 64,
+    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "data-analysis",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "AgentSkillName",
+      "json_schema": "string",
+      "sql": "CITEXT"
+    }
+  },
   "Auth_JWT": {
     "name": "Auth_JWT",
     "description": "JSON Web Token string",
@@ -318,7 +344,7 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
   },
   "Generic_JSON": {
     "name": "Generic_JSON",
-    "description": "A JSON object represented as a string",
+    "description": "Any valid JSON value: object, array, primitive, or null",
     "primitive": "String",
     "minLength": 0,
     "maxLength": 0,
@@ -330,15 +356,15 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "reservedWordsMatchPartial": false,
     "minimum": null,
     "maximum": null,
-    "example": "",
+    "example": "{\"k\":1}",
     "fileUpload": null,
     "imageConstraints": null,
     "hasCustomNormalize": false,
-    "hasCustomValidate": false,
+    "hasCustomValidate": true,
     "hasCustomParse": false,
     "typeMappings": {
       "go": "GenericJSON",
-      "json_schema": "object",
+      "json_schema": "any",
       "sql": "JSONB"
     }
   },
@@ -387,7 +413,7 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
     "imageConstraints": null,
     "hasCustomNormalize": false,
     "hasCustomValidate": false,
-    "hasCustomParse": false,
+    "hasCustomParse": true,
     "typeMappings": {
       "go": "GenericStringMap",
       "json_schema": "object",
@@ -418,6 +444,32 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
       "go": "GeoLocation",
       "json_schema": "object",
       "sql": "POINT"
+    }
+  },
+  "Git_PathPattern": {
+    "name": "Git_PathPattern",
+    "description": "Repository-rooted, case-sensitive gitignore-style path pattern",
+    "primitive": "String",
+    "minLength": 2,
+    "maxLength": 1024,
+    "pattern": "^!?/[^\\x00\\r\\n]+$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "/skills/**",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": true,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "GitPathPattern",
+      "json_schema": "string",
+      "sql": "VARCHAR(1024)"
     }
   },
   "Identity_Name": {
@@ -678,6 +730,32 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
       "go": "NetworkUrl",
       "json_schema": "string",
       "sql": "varchar(4096)"
+    }
+  },
+  "Ordering_Rank": {
+    "name": "Ordering_Rank",
+    "description": "Positive JavaScript-safe ordering rank",
+    "primitive": "Int",
+    "minLength": 0,
+    "maxLength": 0,
+    "pattern": "",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": 1,
+    "maximum": 9007199254740991,
+    "example": "1",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "OrderingRank",
+      "json_schema": "integer",
+      "sql": "BIGINT"
     }
   },
   "Temporal_CronExpression": {
@@ -1146,6 +1224,32 @@ export const BUILTIN_SCALARS: Record<string, ScalarDef> = {
       "go": "TextSql",
       "json_schema": "string",
       "sql": "TEXT"
+    }
+  },
+  "Version_SemVer": {
+    "name": "Version_SemVer",
+    "description": "Canonical Semantic Versioning 2.0.0 value",
+    "primitive": "String",
+    "minLength": 5,
+    "maxLength": 255,
+    "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+    "format": "",
+    "reservedWords": [],
+    "caseInsensitive": false,
+    "reservedWordsCaseInsensitive": false,
+    "reservedWordsMatchPartial": false,
+    "minimum": null,
+    "maximum": null,
+    "example": "1.0.0",
+    "fileUpload": null,
+    "imageConstraints": null,
+    "hasCustomNormalize": false,
+    "hasCustomValidate": false,
+    "hasCustomParse": false,
+    "typeMappings": {
+      "go": "VersionSemVer",
+      "json_schema": "string",
+      "sql": "VARCHAR(255)"
     }
   }
 };

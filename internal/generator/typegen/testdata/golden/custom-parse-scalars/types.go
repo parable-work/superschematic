@@ -157,6 +157,8 @@ type CustomParseScalars struct {
 
 	GenericInt64 GenericInt64 `json:"genericInt64"`
 
+	GenericStringMap GenericStringMap `json:"genericStringMap"`
+
 	IdentityUUID IdentityUUID `json:"identityUUID"`
 
 	IdentityUserID IdentityUserID `json:"identityUserID"`
@@ -187,6 +189,8 @@ func (t *CustomParseScalars) MaskSecrets() *CustomParseScalars {
 	masked.FinanceMoney = t.FinanceMoney
 
 	masked.GenericInt64 = t.GenericInt64
+
+	masked.GenericStringMap = t.GenericStringMap
 
 	masked.IdentityUUID = t.IdentityUUID
 

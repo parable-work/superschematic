@@ -240,6 +240,78 @@ func TestWriteSDKEmitsControlPlaneHelpers(t *testing.T) {
 	}
 }
 
+func intPtr(value int) *int {
+	return &value
+}
+
+// TestArrayQueryParamsValidateEachItem: the server splits an array query
+// parameter into items and checks each one (routes.tmpl), so the SDK checks
+// each typed item and counts the typed list. It must not check the joined
+// "a,b" text: the comma fails a pattern and a length limit, a list of
+// numbers does not parse as one number, and an item with a comma in it
+// counts twice.
+func TestArrayQueryParamsValidateEachItem(t *testing.T) {
+	endpoint := apigen.EndpointInfo{
+		Name:          "listItems",
+		Namespace:     "items",
+		Path:          "/api/items",
+		Method:        "GET",
+		OutputType:    "string",
+		OutputIsArray: true,
+		QueryParams: []apigen.Param{
+			{Name: "tags", Type: "string", IsArray: true, Required: true, ValidatePattern: "^[a-z]+$", ValidateMinLength: intPtr(2), ValidateMaxLength: intPtr(3), ValidateListMin: intPtr(1), ValidateListMax: intPtr(2)},
+			{Name: "scores", Type: "number", IsArray: true, ValidateMin: float64Ptr(1), ValidateMax: float64Ptr(5)},
+		},
+	}
+	upload := endpoint
+	upload.Name, upload.Method, upload.HasFileUpload = "uploadItems", "POST", true
+	upload.FileUploadFields = []apigen.FileUploadField{{Name: "file", GoName: "File", Required: true}}
+	apiOutput := &apigen.APIOutput{SchemaName: "items-api", Endpoints: []apigen.EndpointInfo{endpoint, upload}}
+	clock := codegen.DefaultClock()
+	sdkOutput, err := Generate(apiOutput, "", "", clock)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	outDir := t.TempDir()
+	if err := WriteSDKWithTools(sdkOutput, nil, outDir, t.TempDir(), clock); err != nil {
+		t.Fatalf("WriteSDKWithTools: %v", err)
+	}
+	source, err := os.ReadFile(filepath.Join(outDir, "src", "namespaces", "items.rs"))
+	if err != nil {
+		t.Fatalf("read namespace: %v", err)
+	}
+	generated := string(source)
+	// Both the JSON and the multipart method validate the same way.
+	for want, count := range map[string]int{
+		"for query_param_item in query_param_value.iter() {":           4,
+		"let query_param_item_text = query_param_item.to_string();":    4,
+		"if !query_param_pattern.is_match(&query_param_item_text) {":   2,
+		"if query_param_item_text.len() < 2 {":                         2,
+		"if query_param_item_text.len() > 3 {":                         2,
+		"if query_param_value.len() < 1 {":                             2,
+		"if query_param_value.len() > 2 {":                             2,
+		"let query_param_item_number = query_param_item_text":          2,
+		"if query_param_item_number < 1.0 {":                           2,
+		"if query_param_item_number > 5.0 {":                           2,
+		`query_params.push(("tags".to_string(), query_param_text));`:   2,
+		`query_params.push(("scores".to_string(), query_param_text));`: 2,
+	} {
+		if got := strings.Count(generated, want); got != count {
+			t.Errorf("namespace has %d of %q, want %d", got, want, count)
+		}
+	}
+	for _, unwanted := range []string{
+		"query_param_pattern.is_match(&query_param_text)",
+		"query_param_text.len()",
+		"query_param_text.split(',')",
+		"let query_param_number = query_param_text",
+	} {
+		if strings.Contains(generated, unwanted) {
+			t.Errorf("namespace validates the joined array text: found %q", unwanted)
+		}
+	}
+}
+
 func TestWriteSDKGolden(t *testing.T) {
 	apiOutput := loadFixtureAPI(t)
 	clock := codegen.DefaultClock()

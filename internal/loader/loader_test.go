@@ -134,6 +134,48 @@ func TestHydrateScalarsFromRegistryPopulatesScalarLibMetadata(t *testing.T) {
 	}
 }
 
+// A custom-parse scalar with an object JSON shape takes its TypeScript and
+// Python types from the catalog, over whatever the schema file declared,
+// because its parser returns a native map in both languages.
+func TestHydrateObjectParserUsesCatalogLanguageTypes(t *testing.T) {
+	stringMap := scalars.ScalarMetadataByCanonical["Generic.StringMap"]
+	if stringMap == nil || !stringMap.HasCustomParse || stringMap.TypeScriptType == "" || stringMap.PythonType == "" {
+		t.Fatal("the linked catalog must mark Generic.StringMap custom-parse and declare its TypeScript and Python types")
+	}
+	headers := &scalars.ScalarMetadata{
+		CanonicalName:  "Acme.Headers",
+		Primitive:      "String",
+		TypeScriptType: "Record<string, string>",
+		PythonType:     "Dict[str, str]",
+		JSONSchemaType: "object",
+		HasCustomParse: true,
+	}
+	catalog := registry.ScalarCatalogOf(map[string]*scalars.ScalarMetadata{
+		"Generic.StringMap": stringMap,
+		"Acme.Headers":      headers,
+	})
+	schema := ir.NewSchema("temp-service", ir.SchemaKindGeneral)
+	for _, name := range []string{"Generic.StringMap", "Acme.Headers"} {
+		schema.Scalars[name] = &ir.ScalarDef{
+			Name:         name,
+			TypeMappings: map[string]string{"typescript": "string", "python": "str"},
+		}
+	}
+	if err := hydrateScalarsFromRegistry(schema, catalog); err != nil {
+		t.Fatalf("hydrateScalarsFromRegistry: %v", err)
+	}
+	for name, want := range map[string]*scalars.ScalarMetadata{"Generic.StringMap": stringMap, "Acme.Headers": headers} {
+		got := schema.Scalars[name]
+		if !got.HasCustomParse {
+			t.Errorf("%s: HasCustomParse was not hydrated", name)
+		}
+		if got.TypeMappings["typescript"] != want.TypeScriptType || got.TypeMappings["python"] != want.PythonType {
+			t.Errorf("%s: typescript = %q, python = %q; want %q, %q", name,
+				got.TypeMappings["typescript"], got.TypeMappings["python"], want.TypeScriptType, want.PythonType)
+		}
+	}
+}
+
 func TestLoadServiceRejectsDuplicateDefinitionsAcrossFiles(t *testing.T) {
 	dir := writeService(t, map[string]string{
 		"schema.config.json": minimalConfig,
