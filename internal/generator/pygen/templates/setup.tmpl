@@ -9,7 +9,7 @@ setup(
     author="{{.Naming.PackageAuthor}}",
     packages=find_packages(),
     package_data={
-        "{{.PythonModuleName}}": ["py.typed"],
+        "{{.PythonModuleName}}": ["py.typed", "*.schema.json"],
     },
     install_requires=[
         "pydantic>=2.12.0,<3.0.0",{{if .NeedsYAML}}

@@ -37,14 +37,24 @@ directory two levels above the service directory (`<schemas-root>/dist`
 for services under `<schemas-root>/services/`). Names come from
 `<schemas-root>/superschematic.toml` or `--naming`.
 
+`--with-deps` also builds every service the target transitively depends
+on (declared `dependencies` plus `authDb`), dependencies first. The
+closure is resolved from the sibling services under the target's parent
+directory with the discovery, ordering and schema catalog `build-all`
+uses; siblings outside the closure are not built. It writes no
+`schema.deps` and runs no `BuildAllHook`s, since both describe the whole
+services root. It cannot be combined with `--emit-ir`.
+
 ```
 superschematic build ./schemas/services/shop-db
 superschematic build ./schemas/services/shop-db --emit-ir | jq .types
+superschematic build --with-deps ./schemas/services/shop-api
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--emit-ir` | false | print the Schema IR as JSON to stdout; do not generate code |
+| `--with-deps` | false | also build the target's transitive dependencies (declared dependencies plus `authDb`), dependencies first |
 | `--out` | `<service-dir>/../../dist` | output root for generated artifacts |
 | `--profile` | false | emit build phase timings to stderr |
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
@@ -53,7 +63,8 @@ superschematic build ./schemas/services/shop-db --emit-ir | jq .types
 ## `build-all <services-root>`
 
 Discover every schema service under `<services-root>` and build them in
-one process, in dependency order. Writes `schema.deps` under the output
+one process, in dependency order. A service's `authDb` counts as a
+dependency for ordering. Writes `schema.deps` under the output
 root when finished. After every service has built, registered
 `BuildAllHook`s run (a chart merge, for example).
 

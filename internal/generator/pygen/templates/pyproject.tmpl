@@ -41,7 +41,7 @@ dev = [
 packages = ["{{.PythonModuleName}}"]
 
 [tool.setuptools.package-data]
-"{{.PythonModuleName}}" = ["py.typed"]
+"{{.PythonModuleName}}" = ["py.typed", "*.schema.json"]
 
 [tool.mypy]
 python_version = "3.12"

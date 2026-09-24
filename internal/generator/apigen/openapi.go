@@ -605,6 +605,16 @@ func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, sche
 
 	for _, field := range typeDef.Fields {
 		fieldSchema := typeRefToOpenAPISchema(field.TypeRef, !field.Required, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
+		// listMin/listMax bound the array itself. A required array without
+		// listMin may be empty; only listMin >= 1 forbids [].
+		if field.TypeRef.IsArray && !field.TypeRef.IsMap {
+			if field.ValidateListMin != nil {
+				fieldSchema["minItems"] = *field.ValidateListMin
+			}
+			if field.ValidateListMax != nil {
+				fieldSchema["maxItems"] = *field.ValidateListMax
+			}
+		}
 
 		if doc := codegen.DocText(field.Description, field.Comment); doc != "" {
 			fieldSchema["description"] = doc

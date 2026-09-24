@@ -51,15 +51,6 @@ func isZeroListMinimum(validation codegen.ValidationRule) bool {
 	return ok && minimum == 0
 }
 
-func allowsEmptyArray(validations []codegen.ValidationRule) bool {
-	for _, validation := range validations {
-		if isZeroListMinimum(validation) {
-			return true
-		}
-	}
-	return false
-}
-
 // validationStringExpr returns the Go expression that yields the string form
 // of a field value for length/pattern validation.
 func validationStringExpr(field FieldInfo, valueVar string) string {
@@ -72,7 +63,6 @@ func validationStringExpr(field FieldInfo, valueVar string) string {
 // templateFuncs returns the typegen-specific template functions.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"allowsEmptyArray":        allowsEmptyArray,
 		"hasEmittableValidations": hasEmittableValidations,
 		"isZeroListMinimum":       isZeroListMinimum,
 		"validationStringExpr":    validationStringExpr,

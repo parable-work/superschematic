@@ -9,7 +9,7 @@ Generated at: {{ .Timestamp }}
 
 - `database.go` -- connection pool, transactions, user context
 - `interfaces.go` -- repository/database/transaction interfaces + no-op implementations
-- `query.go` -- typed field selectors, filters, and update structs
+- `query.go` -- typed field selectors, filters, update structs, snapshot builders, and `ApplyTo`
 - `utils.go` -- shared query helpers
 {{- range .Repositories }}
 - `repository_{{ toSnakeCase .TypeName }}.go` -- {{ .TypeName }} repository
@@ -36,3 +36,7 @@ record, err := db.{{ .TypeName }}.GetOne(ctx, id, nil)
 Repositories expose `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,
 `CreateOne`, `CreateMany`, `UpdateOne`, `UpdateMany`, `DeleteOne`, and
 `DeleteMany`. Tables with soft deletes additionally expose `HardDeleteOne`.
+
+Each `*Update` type has `ApplyTo(*types.T)` to project set and `SetNull`
+fields onto a stored row, and `New*SnapshotUpdate` to build a full
+replacement from a complete value.

@@ -119,7 +119,7 @@ func TestBuildAllCommand_CacheRestoresEmptyStampedOutput(t *testing.T) {
 }
 
 func TestBuildAllCommand_UsesSharedTypeScriptProgramByDefault(t *testing.T) {
-	servicesRoot := prepareTSServicesRoot(t)
+	servicesRoot := prepareTSServicesRoot(t, "fixture-db")
 	outDir := t.TempDir()
 	out := new(bytes.Buffer)
 	errOut := new(bytes.Buffer)
@@ -135,7 +135,7 @@ func TestBuildAllCommand_UsesSharedTypeScriptProgramByDefault(t *testing.T) {
 }
 
 func TestBuildAllCommand_IsolatedTypeScriptProgramsFallback(t *testing.T) {
-	servicesRoot := prepareTSServicesRoot(t)
+	servicesRoot := prepareTSServicesRoot(t, "fixture-db")
 	outDir := t.TempDir()
 	out := new(bytes.Buffer)
 	errOut := new(bytes.Buffer)
@@ -158,11 +158,16 @@ func prepareJSONServicesRoot(t *testing.T) string {
 	return servicesRoot
 }
 
-func prepareTSServicesRoot(t *testing.T) string {
+// prepareTSServicesRoot copies the named tsreader fixtures into a fresh
+// schemas/services layout with a base tsconfig whose authoring-package and
+// superscalar paths point back at this checkout.
+func prepareTSServicesRoot(t *testing.T, fixtures ...string) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "schemas")
 	servicesRoot := filepath.Join(root, "services")
-	copyDir(t, "../internal/loader/tsreader/testdata/services/fixture-db", filepath.Join(servicesRoot, "fixture-db"))
+	for _, fixture := range fixtures {
+		copyDir(t, filepath.Join(tsreaderTestdata, fixture), filepath.Join(servicesRoot, fixture))
+	}
 	baseConfig, err := os.ReadFile("../internal/loader/tsreader/testdata/tsconfig.base.json")
 	require.NoError(t, err)
 	packagesRoot, err := filepath.Abs("../packages")

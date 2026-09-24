@@ -13,7 +13,7 @@ import (
 func TestNewRegistersCoreDecoratorsForEveryWalkerCase(t *testing.T) {
 	reg := New(naming.Naming{})
 	want := map[DecoratorTarget][]string{
-		TargetType:         {"trait", "source", "envVars", "jsonField", "versioned", "index"},
+		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "versioned", "index"},
 		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "virtual", "sourceMustProject"},
 		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout"},
 		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout"},
@@ -195,6 +195,9 @@ func TestCoreApplyBodiesReproduceWalkerBehaviour(t *testing.T) {
 	}
 
 	td := &ir.TypeDef{}
+	if err := apply("denyUnknownFields", TargetType, Node{Type: td}); err != nil || !td.DenyUnknownFields {
+		t.Errorf("denyUnknownFields = %v, err %v", td.DenyUnknownFields, err)
+	}
 	if err := apply("index", TargetType, Node{Type: td}, []any{"a", "b"}, map[string]any{"unique": true, "name": "digest"}); err != nil {
 		t.Fatal(err)
 	}

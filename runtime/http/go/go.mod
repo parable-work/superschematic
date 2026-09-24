@@ -3,7 +3,7 @@ module github.com/parable-work/superschematic/runtime/http/go
 go 1.26.4
 
 require (
-	github.com/go-chi/chi/v5 v5.3.1
+	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-chi/httprate v0.16.0
 	github.com/parable-work/superscalar/go v0.0.0-20260908181317-c9da122f99b8
 	github.com/parable-work/superschematic/runtime/schema/go v0.0.0

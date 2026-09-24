@@ -5,6 +5,12 @@ const noopClassOrPropertyDecorator: ClassDecorator &
 export const internalMetadata: PropertyDecorator = noopPropertyDecorator;
 export const jsonField: ClassDecorator & PropertyDecorator =
   noopClassOrPropertyDecorator;
+// Make the generated Rust serde deserializer reject a payload key the type
+// does not declare instead of dropping it (#[serde(deny_unknown_fields)]).
+// Opt-in per type: strict decoding suits a closed wire contract, where a
+// misspelled key silently disappearing is the failure, and breaks a payload
+// that has to survive a producer newer than its consumer.
+export const denyUnknownFields: ClassDecorator = () => {};
 export const uiHidden: PropertyDecorator = noopPropertyDecorator;
 export function source(_target: unknown): ClassDecorator {
   return () => {};

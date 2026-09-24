@@ -124,6 +124,7 @@ func toMapValue(value any) (map[string]any, error) {
 
 // normalizeNilSlices sets nil slices to empty non-nil slices so encoding/json
 // emits [] instead of null for list fields (Go nil slices marshal to JSON null).
+// Only call during serialization: decoding must preserve required-list presence.
 // []byte is skipped so nil and empty stay distinct for RawMessage-style payloads.
 // Optional (omitempty) list fields are skipped so nil keeps meaning "absent":
 // omitempty omits nil and empty identically on marshal, and Validate gates
@@ -200,8 +201,6 @@ func fromMapValue(target any, value map[string]any) error {
 		return err
 	}
 
-	normalizeNilSlices(target)
-
 	return nil
 }
 
@@ -216,8 +215,6 @@ func fromMapValueStrict(target any, value map[string]any) error {
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
-
-	normalizeNilSlices(target)
 
 	return nil
 }
@@ -382,7 +379,11 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	{{if and (not .InternalMetadata) (ne .Name "id") (ne .Name "createdAt") (ne .Name "createdBy") (ne .Name "updatedAt") (ne .Name "updatedBy")}}
 	// Validate {{.Name}} (required)
 	{{if .IsArray}}
-	if t.{{.GoName}} == nil{{if not (allowsEmptyArray .Validations)}} || len(t.{{.GoName}}) == 0{{end}} {
+	{{/* required means present, not non-empty: an empty array is a valid value.
+	   Non-emptiness is declared with listMin >= 1, which emits its own check
+	   below. Go used to imply it here and TypeScript and Rust did not, so the
+	   same payload was invalid in one language and valid in two. */}}
+	if t.{{.GoName}} == nil {
 		errors.AddFieldError("{{.Name}}", "required", "required field")
 	} else {
 		for i, item := range t.{{.GoName}} {
@@ -469,7 +470,11 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 		}
 	}
 	{{else if .IsArray}}
-	if t.{{.GoName}} == nil{{if not (allowsEmptyArray .Validations)}} || len(t.{{.GoName}}) == 0{{end}} {
+	{{/* required means present, not non-empty: an empty array is a valid value.
+	   Non-emptiness is declared with listMin >= 1, which emits its own check
+	   below. Go used to imply it here and TypeScript and Rust did not, so the
+	   same payload was invalid in one language and valid in two. */}}
+	if t.{{.GoName}} == nil {
 		errors.AddFieldError("{{.Name}}", "required", "required field")
 	} else {
 		for i, item := range t.{{.GoName}} {
@@ -904,8 +909,7 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	normalizeNilSlices(t)
-
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
 	return nil
 {{- end}}
 }

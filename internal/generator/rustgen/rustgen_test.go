@@ -622,3 +622,109 @@ func TestRustEnumVariants(t *testing.T) {
 		}
 	}
 }
+
+// TestDenyUnknownFieldsEmission pins the opt-in decoder attribute
+// independently of the frontend.
+func TestDenyUnknownFieldsEmission(t *testing.T) {
+	for _, deny := range []bool{false, true} {
+		schema := ir.NewSchema("strict-fixture", ir.SchemaKindGeneral)
+		schema.Types["Payload"] = &ir.TypeDef{
+			Name: "Payload", Role: ir.RoleAPIView, DenyUnknownFields: deny,
+			Fields: []*ir.FieldDef{{Name: "name", TypeRef: ir.TypeRef{Name: "string"}, Required: true}},
+		}
+		output, err := Generate(schema, Options{SchemaName: "strict-fixture"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err := WriteTypes(output, dir); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "src", "types.rs"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(string(data), "#[serde(deny_unknown_fields)]"); got != deny {
+			t.Fatalf("DenyUnknownFields=%v: emitted attribute=%v", deny, got)
+		}
+	}
+}
+
+// TestDenyUnknownFieldsDecoratorRejectsUnknownKeys loads a service that
+// declares @denyUnknownFields on one type, builds the generated crate, and
+// checks that serde rejects an unknown key on that type only.
+func TestDenyUnknownFieldsDecoratorRejectsUnknownKeys(t *testing.T) {
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-deny-unknown-fields"))
+	if err != nil {
+		t.Fatalf("load fixture-deny-unknown-fields: %v", err)
+	}
+	if !schema.Types["StrictPayload"].DenyUnknownFields || schema.Types["LenientPayload"].DenyUnknownFields {
+		t.Fatalf("@denyUnknownFields did not reach the IR: strict=%v lenient=%v",
+			schema.Types["StrictPayload"].DenyUnknownFields, schema.Types["LenientPayload"].DenyUnknownFields)
+	}
+	output, err := Generate(schema, Options{
+		SchemaName: "fixture-deny-unknown-fields",
+		Clock:      codegen.FixedClock(time.Unix(0, 0).UTC()),
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	outDir := t.TempDir()
+	if err := WriteTypes(output, outDir); err != nil {
+		t.Fatalf("write types: %v", err)
+	}
+	typesRs, err := os.ReadFile(filepath.Join(outDir, "src", "types.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(typesRs), "#[serde(deny_unknown_fields)]"); n != 1 {
+		t.Fatalf("want the attribute on StrictPayload only, found %d:\n%s", n, typesRs)
+	}
+
+	if testing.Short() {
+		t.Skip("skipping compiled decode check in short mode")
+	}
+	cargoPath, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo not available; skipping compiled decode check")
+	}
+	cargoTomlPath := filepath.Join(outDir, "Cargo.toml")
+	cargoToml, err := os.ReadFile(cargoTomlPath)
+	if err != nil {
+		t.Fatalf("read Cargo.toml: %v", err)
+	}
+	cargoToml = append(cargoToml, []byte("\n[dev-dependencies]\nserde_json = \"1.0\"\n")...)
+	if err := os.WriteFile(cargoTomlPath, cargoToml, 0o644); err != nil {
+		t.Fatalf("write Cargo.toml: %v", err)
+	}
+	testsDir := filepath.Join(outDir, "tests")
+	if err := os.Mkdir(testsDir, 0o755); err != nil {
+		t.Fatalf("create tests directory: %v", err)
+	}
+	crate := strings.ReplaceAll(output.CrateName, "-", "_")
+	decodeTest := `use ` + crate + `::{LenientPayload, StrictPayload};
+
+#[test]
+fn strict_payload_rejects_unknown_keys() {
+    let known: StrictPayload = serde_json::from_str(r#"{"name":"a"}"#).expect("known keys decode");
+    assert_eq!(known.name, "a");
+    assert!(serde_json::from_str::<StrictPayload>(r#"{"name":"a","nmae":"b"}"#).is_err());
+}
+
+#[test]
+fn lenient_payload_ignores_unknown_keys() {
+    let value: LenientPayload =
+        serde_json::from_str(r#"{"name":"a","extra":1}"#).expect("unknown key is ignored");
+    assert_eq!(value.name, "a");
+}
+`
+	if err := os.WriteFile(filepath.Join(testsDir, "deny_unknown_fields.rs"), []byte(decodeTest), 0o644); err != nil {
+		t.Fatalf("write decode test: %v", err)
+	}
+	cmd := exec.Command(cargoPath, "test", "--quiet")
+	cmd.Dir = outDir
+	cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+filepath.Join(outDir, "target"))
+	if combined, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("cargo test failed: %v\n%s", err, combined)
+	}
+}

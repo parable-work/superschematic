@@ -7,6 +7,7 @@ This module defines enumeration types using Python's Enum class.
 """
 
 from enum import Enum
+from pydantic_core import core_schema
 
 class FixtureEnvironment(str, Enum):
     """
@@ -16,6 +17,13 @@ class FixtureEnvironment(str, Enum):
     Development = "development"
 
     Production = "production"
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        return core_schema.no_info_before_validator_function(
+            cls,
+            handler(source_type),
+        )
 
     def __str__(self) -> str:
         """Return the string value of the enum."""

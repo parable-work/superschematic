@@ -23,7 +23,10 @@
 #      kinds named, and rejects the naming file that selects apikey;
 #  10. the core-only binary builds shop-db and shop-api with the session
 #      provider, both ORM stores (Session and User) are generated, and the
-#      result compiles (the regression the example found).
+#      result compiles (the regression the example found);
+#  11. `build --with-deps shop-api` builds shop-db (its authDb) then shop-api
+#      through the acme registry, runs the acme generator on both, and
+#      builds nothing outside that closure.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -132,5 +135,14 @@ grep -q 'scalars.ParseUUID(id)' "$OUT/session-dist/api/shop-api/middleware.go"
 grep -q 'NewSessionStore' "$OUT/session-dist/api/shop-api/middleware.go"
 grep -q 'NewPrincipalStore' "$OUT/session-dist/api/shop-api/middleware.go"
 go_module_compiles "$OUT/session-dist/api/shop-api"
+
+echo "==> build --with-deps builds shop-api's closure with the acme registry"
+"$OUT/acme-schematic" build --with-deps "$SCHEMAS/services/shop-api" --out "$OUT/deps-dist" | tee "$OUT/with-deps.log"
+grep -q '^Resolved 2 schema services for shop-api: shop-db, shop-api$' "$OUT/with-deps.log"
+test -s "$OUT/deps-dist/acme/manifest/shop-db/manifest.json"
+test -s "$OUT/deps-dist/acme/manifest/shop-api/manifest.json"
+test -d "$OUT/deps-dist/orm/shop-db"
+test ! -e "$OUT/deps-dist/acme/manifest/shop-config"
+test ! -e "$OUT/deps-dist/acme/catalog/shop-catalog"
 
 echo "acme smoke: ok"

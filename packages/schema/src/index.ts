@@ -1,4 +1,5 @@
 export {
+  denyUnknownFields,
   internalMetadata,
   jsonField,
   source,

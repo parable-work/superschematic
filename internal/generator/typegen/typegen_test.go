@@ -140,7 +140,7 @@ func TestGenerateTypedRecordFields(t *testing.T) {
 	}
 }
 
-func TestGenerateRequiredNestedArrayWithZeroMinimumAllowsEmpty(t *testing.T) {
+func TestGenerateRequiredArrayEmptinessIsListMinNotRequired(t *testing.T) {
 	schema := ir.NewSchema("archive-contract", ir.SchemaKindGeneral)
 	schema.Types["ArchiveChange"] = &ir.TypeDef{
 		Name: "ArchiveChange",
@@ -198,8 +198,17 @@ func TestGenerateRequiredNestedArrayWithZeroMinimumAllowsEmpty(t *testing.T) {
 	if strings.Contains(source, "len(value) < 0") {
 		t.Fatal("listMin: 0 must not emit an impossible validation check")
 	}
-	if !strings.Contains(source, "if t.RequiredChanges == nil || len(t.RequiredChanges) == 0 {") {
-		t.Fatal("positive listMin must keep the required non-empty array check")
+	// Required means present, not non-empty, in every language. A positive
+	// listMin is what forbids an empty array, and it reports as a listMin
+	// violation rather than a missing required field.
+	if !strings.Contains(source, "if t.RequiredChanges == nil {") {
+		t.Fatal("a required array must still be rejected when absent")
+	}
+	if strings.Contains(source, "len(t.RequiredChanges) == 0") {
+		t.Fatal("required alone must not imply non-empty")
+	}
+	if !strings.Contains(source, `errors.AddFieldError("requiredChanges", "listMin"`) {
+		t.Fatal("positive listMin must emit its own non-empty check")
 	}
 }
 

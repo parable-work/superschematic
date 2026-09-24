@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	example.com/acme/schemas/types/go/fixture-db v0.0.0-00010101000000-000000000000
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	example.com/acme/scalars v1.0.0
 	example.com/acme/schema-ir v0.0.0-00010101000000-000000000000
 )

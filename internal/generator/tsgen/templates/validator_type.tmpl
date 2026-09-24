@@ -11,8 +11,11 @@ import type { {{.Type.Name}}{{if .ParserScalarsUsed}}, JSDate{{end}}{{range .Par
 {{range .ScalarsUsed}}
 import { validate{{.Symbol}}Required, validate{{.Symbol}} } from '../scalars/{{.Module}}';
 {{end}}
-{{range .EnumsUsed}}
+{{range .LocalEnumsUsed}}
 import { validate{{.}}Required, validate{{.}} } from '../enums';
+{{end}}
+{{range .ImportedEnumsUsed}}
+import { validate{{.Name}}Required, validate{{.Name}} } from '{{.ImportPackage}}/validators/enums';
 {{end}}
 {{range .ParserScalarsUsed}}
 import { parse{{.Symbol}} as parse{{.Symbol}}FromLib } from '{{$.Naming.ScalarNpmPackage}}/scalars';

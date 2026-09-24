@@ -901,6 +901,9 @@
         "comment": {
           "type": "string"
         },
+        "denyUnknownFields": {
+          "type": "boolean"
+        },
         "description": {
           "type": "string"
         },
