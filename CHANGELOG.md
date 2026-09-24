@@ -320,6 +320,10 @@ of a generated artifact is always listed here with the bump it requires.
   arrays of arrays yet", and `apigen.Param` and `apigen.EndpointInfo`
   carry `IsArrayOfArrays` / `OutputIsArrayOfArrays` for the SDK
   generators. Minor.
+- Arrays of arrays in TypeScript: tsgen emits `T[][]`, and its validators
+  and the TypeScript schema runtime check every innermost element at
+  `field[i][j]`, apply list bounds to the outer list and reject an inner
+  list that is not an array at `field[i]` (`required`). Minor.
 
 ### Changed
 
