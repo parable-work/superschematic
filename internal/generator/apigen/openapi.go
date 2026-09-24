@@ -19,16 +19,18 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 	scalarMap := buildOpenAPIScalarMap(schema, dependencies)
 	scalarExamples, scalarDescriptions := collectOpenAPIScalarMetadata(schema, dependencies)
 
+	// info.version and servers are placeholders: the generated server
+	// replaces both at startup (injectOpenAPIRuntimeValues in routes.tmpl).
 	spec := map[string]interface{}{
 		"openapi": "3.0.3",
 		"info": map[string]interface{}{
 			"title":       fmt.Sprintf("%s API", codegen.TitleCase(output.SchemaName)),
 			"description": fmt.Sprintf("REST API generated from the %s schema", output.SchemaName),
-			"version":     "__PSGEN_OPENAPI_VERSION__",
+			"version":     "__OPENAPI_VERSION__",
 		},
 		"servers": []map[string]interface{}{
 			{
-				"url":         "__PSGEN_OPENAPI_BASE_URL__",
+				"url":         "__OPENAPI_BASE_URL__",
 				"description": "Runtime server",
 			},
 		},

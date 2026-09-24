@@ -49,7 +49,7 @@ func persisted(t *testing.T, schema *ir.Schema) string {
 	return string(b)
 }
 
-// The Phase 1 exit test (extension-model.md, section 10): an extension
+// The in-tree acceptance test (extension-model.md, section 10): an extension
 // registers a kind, decorators, a document and a generator through Use and
 // nothing in the engine is edited. The TS fixture loads through the real
 // loader, the decorators' Apply lands values in the IR extension slots, the

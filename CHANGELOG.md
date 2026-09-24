@@ -302,6 +302,11 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- OpenAPI: the placeholders the generator writes for `info.version` and
+  the server URL are `__OPENAPI_VERSION__` and `__OPENAPI_BASE_URL__`. The
+  generated Go server replaces both values at startup, so only a reader
+  that substitutes the old tokens in the raw `openapi.json` needs to
+  change. Patch.
 - `tools/openai.json` and `tools/anthropic.json` list only the operations
   with a visible `@mcp`: publishing an operation to a model is opt-in.
   Before, they listed every operation. `tools/schema.json`,
