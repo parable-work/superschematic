@@ -25,6 +25,9 @@
         },
         {
           "name": "totalCents",
+          "title": "Total",
+          "purpose": "The order total in **cents**, tax included.",
+          "icon": "receipt",
           "typeRef": {
             "name": "number"
           },

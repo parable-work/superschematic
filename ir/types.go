@@ -231,8 +231,14 @@ type FieldDef struct {
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 
 	// Title is the human-facing label for form rendering (JSON Schema
-	// standard `title` key in the legacy form). Empty means derive from Name.
+	// standard `title` key in the legacy form), declared with
+	// @docs({ title }). Empty means derive from Name.
 	Title string `json:"title,omitempty" yaml:"title,omitempty"`
+
+	// Purpose is longer-form Markdown explaining what the field is for,
+	// declared with @purpose (`x-purpose` in the legacy form). Empty means
+	// none.
+	Purpose string `json:"purpose,omitempty" yaml:"purpose,omitempty"`
 
 	// Placeholder is the input placeholder hint for form rendering
 	// (`x-placeholder` in the legacy form). Empty means no hint.
@@ -244,6 +250,11 @@ type FieldDef struct {
 	// Docs is the reader-facing documentation of an operation, declared with
 	// @docs. Nil on data fields and on operations without @docs.
 	Docs *OperationDocs `json:"docs,omitempty" yaml:"docs,omitempty"`
+
+	// Icon names the glyph a UI shows for the field, declared with @icon
+	// (`x-icon` in the legacy form). The core accepts any name; an icon set
+	// is an extension's check. Empty means none.
+	Icon string `json:"icon,omitempty" yaml:"icon,omitempty"`
 
 	// TypeRef references the field's type (scalar, enum, object, etc.).
 	TypeRef TypeRef `json:"typeRef" yaml:"typeRef"`

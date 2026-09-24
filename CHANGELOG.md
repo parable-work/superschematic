@@ -153,6 +153,19 @@ of a generated artifact is always listed here with the bump it requires.
   gains the four fields and `ir.OperationDocsError`; the OpenAPI
   `x-superschematic-docs` record carries them when set; the TypeScript
   writer emits them. Minor.
+- Field presentation decorators from `@superschematic/schema`:
+  `@docs({ title })` sets the field's `title` (a new authoring form for the
+  existing IR field), `@purpose(markdown)` the new `FieldDef.purpose` and
+  `@icon(name)` the new `FieldDef.icon`. Each is non-empty, at most once per
+  field, and changes no generated type or wire format; a blank value fails
+  the load in every authoring form. The core accepts any icon name; an
+  icon set is a registered check (the acme example has one). The
+  TypeScript writer emits them (`docs as schemaDocs`, `purpose`,
+  `icon as schemaIcon`). The TypeScript schema runtime reads and writes
+  `x-purpose` and `x-icon` in the legacy JSON Schema form and reads
+  `purpose` and `icon` from the IR; the Python runtime reads `x-purpose`
+  and `x-icon` into `FieldDef.purpose` and `icon`; the TypeScript IR
+  declarations gain both. Minor.
 
 ### Changed
 

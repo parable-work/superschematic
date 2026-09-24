@@ -157,6 +157,12 @@ function serializeField(field: FieldDef, scalarNames: Set<string>): JsonObject {
   if (field.title) {
     output.title = field.title;
   }
+  if (field.purpose) {
+    output['x-purpose'] = field.purpose;
+  }
+  if (field.icon) {
+    output['x-icon'] = field.icon;
+  }
   if (field.placeholder) {
     output['x-placeholder'] = field.placeholder;
   }

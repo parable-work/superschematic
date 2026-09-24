@@ -166,3 +166,25 @@ func TestValidateOperationDocsGuidance(t *testing.T) {
 		})
 	}
 }
+
+func TestSchemaValidateRejectsBlankFieldPresentation(t *testing.T) {
+	s := NewSchema("shop", SchemaKindGeneral)
+	s.Types["Settings"] = &TypeDef{Name: "Settings", Role: RoleEmbeddedStruct, Fields: []*FieldDef{
+		{Name: "region", TypeRef: TypeRef{Name: "string"}, Required: true, Title: "Region", Purpose: "Where orders ship from.", Icon: "globe"},
+	}}
+	known := WithKnownExternals(map[string]bool{"string": true})
+	if errs := s.Validate(known); len(errs) != 0 {
+		t.Fatalf("valid presentation: %v", errs)
+	}
+	field := s.Types["Settings"].Fields[0]
+	field.Title, field.Purpose, field.Icon = " ", "\n", "\t"
+	errs := s.Validate(known)
+	if len(errs) != 3 {
+		t.Fatalf("errors = %v, want one per blank value", errs)
+	}
+	for i, name := range []string{"title", "purpose", "icon"} {
+		if want := "Settings.region " + name + " must be non-empty"; !strings.Contains(errs[i].Error(), want) {
+			t.Errorf("errors[%d] = %v, want %q", i, errs[i], want)
+		}
+	}
+}

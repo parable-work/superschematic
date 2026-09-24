@@ -141,3 +141,73 @@ func TestOperationDocsDecoratorRejectsBadConfig(t *testing.T) {
 		t.Fatalf("err = %#v, want an ArgError at index 0", err)
 	}
 }
+
+func applyField(t *testing.T, name string, field *ir.FieldDef, args ...any) error {
+	t.Helper()
+	spec, ok := New(naming.Naming{}).Decorator(name, TargetField)
+	if !ok {
+		t.Fatalf("no field decorator @%s", name)
+	}
+	if !spec.DeclaredIn(pkgSchema) {
+		t.Fatalf("@%s on a field is not declared in %s", name, pkgSchema)
+	}
+	return spec.Apply(Node{Field: field}, args, Site{})
+}
+
+func TestFieldPresentationDecoratorsWriteTheField(t *testing.T) {
+	f := &ir.FieldDef{Name: "region"}
+	if err := applyField(t, "docs", f, map[string]any{"title": "Region"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyField(t, "purpose", f, "Where orders **ship** from."); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyField(t, "icon", f, "globe"); err != nil {
+		t.Fatal(err)
+	}
+	if f.Title != "Region" || f.Purpose != "Where orders **ship** from." || f.Icon != "globe" {
+		t.Fatalf("field = %+v", f)
+	}
+	// Any icon name: an icon set is an extension's check.
+	if err := applyField(t, "icon", &ir.FieldDef{}, "Not A Glyph"); err != nil {
+		t.Fatalf("core rejected an icon name: %v", err)
+	}
+	for _, name := range []string{"docs", "purpose", "icon"} {
+		args := []any{"again"}
+		if name == "docs" {
+			args = []any{map[string]any{"title": "Again"}}
+		}
+		err := applyField(t, name, f, args...)
+		if err == nil || !strings.Contains(err.Error(), "field region has more than one @"+name+" decorator") {
+			t.Errorf("second @%s: %v", name, err)
+		}
+	}
+}
+
+func TestFieldPresentationDecoratorsRejectBadArguments(t *testing.T) {
+	tests := []struct {
+		decorator string
+		args      []any
+		want      string
+	}{
+		{"docs", nil, "field @docs takes exactly one config object"},
+		{"docs", []any{"Region"}, "field @docs config must contain only title"},
+		{"docs", []any{map[string]any{"title": "Region", "description": "x"}}, "field @docs config must contain only title"},
+		{"docs", []any{map[string]any{"title": " "}}, "field @docs title must be a non-empty string literal"},
+		{"docs", []any{map[string]any{"title": 1.0}}, "field @docs title must be a non-empty string literal"},
+		{"purpose", nil, "@purpose takes exactly one string argument"},
+		{"purpose", []any{""}, "@purpose takes a non-empty string literal"},
+		{"icon", []any{"globe", "solid"}, "@icon takes exactly one string argument"},
+		{"icon", []any{true}, "@icon takes a non-empty string literal"},
+	}
+	for _, test := range tests {
+		f := &ir.FieldDef{Name: "region"}
+		err := applyField(t, test.decorator, f, test.args...)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("@%s%v: err = %v, want %q", test.decorator, test.args, err, test.want)
+		}
+		if f.Title != "" || f.Purpose != "" || f.Icon != "" {
+			t.Errorf("@%s%v wrote %+v", test.decorator, test.args, f)
+		}
+	}
+}

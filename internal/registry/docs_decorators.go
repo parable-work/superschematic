@@ -3,16 +3,41 @@ package registry
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
 
 // docsDecorators returns the documentation decorators: @docs on an
-// operation writes FieldDef.Docs. What values an extension accepts on top
-// of the shape checked here (an audience vocabulary, say) is a CheckSpec
-// the extension registers.
+// operation writes FieldDef.Docs; on a field, @docs({ title }), @purpose
+// and @icon write FieldDef.Title, Purpose and Icon. What values an
+// extension accepts on top of the shape checked here (an audience
+// vocabulary, an icon set) is a CheckSpec the extension registers.
 func docsDecorators() []DecoratorSpec {
 	return []DecoratorSpec{{
+		Name: "docs", Packages: []string{pkgSchema}, Target: TargetField,
+		Apply: func(n Node, args []any, _ Site) error {
+			if n.Field.Title != "" {
+				return fmt.Errorf("field %s has more than one @docs decorator", n.Field.Name)
+			}
+			title, err := fieldDocsTitle(args)
+			if err != nil {
+				return err
+			}
+			n.Field.Title = title
+			return nil
+		},
+	}, {
+		Name: "purpose", Packages: []string{pkgSchema}, Target: TargetField,
+		Apply: func(n Node, args []any, _ Site) error {
+			return setFieldText(n.Field, "purpose", &n.Field.Purpose, args)
+		},
+	}, {
+		Name: "icon", Packages: []string{pkgSchema}, Target: TargetField,
+		Apply: func(n Node, args []any, _ Site) error {
+			return setFieldText(n.Field, "icon", &n.Field.Icon, args)
+		},
+	}, {
 		Name: "docs", Packages: []string{pkgAPI}, Target: TargetOperation,
 		Apply: func(n Node, args []any, _ Site) error {
 			if n.Field.Docs != nil {
@@ -122,6 +147,40 @@ func operationDocsErrors(value any) ([]ir.OperationDocsError, error) {
 		out = append(out, docError)
 	}
 	return out, nil
+}
+
+// fieldDocsTitle reads a field's @docs({ title }): the object holds the
+// title and nothing else.
+func fieldDocsTitle(args []any) (string, error) {
+	if len(args) != 1 {
+		return "", fmt.Errorf("field @docs takes exactly one config object")
+	}
+	cfg, ok := args[0].(map[string]any)
+	if !ok || len(cfg) != 1 {
+		return "", ArgErrorf(0, "field @docs config must contain only title")
+	}
+	title, ok := cfg["title"].(string)
+	if !ok || strings.TrimSpace(title) == "" {
+		return "", ArgErrorf(0, "field @docs title must be a non-empty string literal")
+	}
+	return title, nil
+}
+
+// setFieldText applies a single-string field decorator (@purpose, @icon)
+// once per field.
+func setFieldText(field *ir.FieldDef, name string, target *string, args []any) error {
+	if *target != "" {
+		return fmt.Errorf("field %s has more than one @%s decorator", field.Name, name)
+	}
+	if len(args) != 1 {
+		return fmt.Errorf("@%s takes exactly one string argument", name)
+	}
+	text, ok := args[0].(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		return ArgErrorf(0, "@%s takes a non-empty string literal", name)
+	}
+	*target = text
+	return nil
 }
 
 func sortedKeys(m map[string]any) []string {

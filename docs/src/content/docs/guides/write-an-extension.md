@@ -284,9 +284,10 @@ r.RegisterOpenAPIHook(registry.OpenAPIHook{
 })
 ```
 
-acme uses both on the core `@docs` decorator (`ext/docs.go`): a check that
-accepts only its own audiences, and a hook that moves each operation's
-record from `registry.OpenAPIDocsKey` to `x-acme-docs`. See
+acme uses both on the core documentation decorators (`ext/docs.go`):
+checks that accept only its own `@docs` audiences and `@icon` names, and a
+hook that moves each operation's `@docs` record from
+`registry.OpenAPIDocsKey` to `x-acme-docs`. See
 [Documentation decorators](/superschematic/reference/documentation/).
 
 ## A command

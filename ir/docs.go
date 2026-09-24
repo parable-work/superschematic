@@ -203,9 +203,10 @@ func checkOptionalText(name, value string) error {
 }
 
 // validateDocs checks the documentation metadata of every field and
-// operation: each operation's @docs record, and that @docs records sit on
-// operations only. It runs for every authoring form, so a data-form file is
-// held to what the TypeScript decorator enforces.
+// operation: each operation's @docs record, that @docs records sit on
+// operations only, and that a field's title, purpose and icon are not blank.
+// It runs for every authoring form, so a data-form file is held to what the
+// TypeScript decorators enforce.
 func (s *Schema) validateDocs() []error {
 	var errs []error
 	fields := func(owner string, list []*FieldDef) {
@@ -215,6 +216,15 @@ func (s *Schema) validateDocs() []error {
 			}
 			if f.Docs != nil {
 				errs = append(errs, fmt.Errorf("%s.%s carries operation docs; only an operation takes @docs", owner, f.Name))
+			}
+			for _, text := range []struct{ name, value string }{
+				{"title", f.Title},
+				{"purpose", f.Purpose},
+				{"icon", f.Icon},
+			} {
+				if text.value != "" && strings.TrimSpace(text.value) == "" {
+					errs = append(errs, fmt.Errorf("%s.%s %s must be non-empty when provided", owner, f.Name, text.name))
+				}
 			}
 		}
 	}

@@ -259,6 +259,9 @@
           ],
           "type": "string"
         },
+        "icon": {
+          "type": "string"
+        },
         "inheritedFrom": {
           "type": "string"
         },
@@ -306,6 +309,9 @@
         },
         "public": {
           "type": "boolean"
+        },
+        "purpose": {
+          "type": "string"
         },
         "relation": {
           "$ref": "#/$defs/RelationDef"

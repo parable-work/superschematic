@@ -1,12 +1,13 @@
 ---
 title: Documentation decorators
-description: The @docs decorator on operations, what it writes to the IR and OpenAPI, and how an extension adds its own rules.
+description: The @docs decorator on operations, @docs, @purpose and @icon on fields, what they write, and how an extension adds its own rules.
 sidebar:
   order: 3
 ---
 
 Documentation decorators attach reader-facing text to a schema: the name
-and description a reader sees, and facts about an operation's lifecycle.
+and description a reader sees, facts about an operation's lifecycle, and a
+field's label, purpose and icon.
 They write typed IR fields that the generators read. They change no wire
 format and no validation of request or response data.
 
@@ -95,20 +96,60 @@ The Go API's OpenAPI document (`openapi.json`, embedded in `openapi.go`):
 The TypeScript writer (`format`) emits the decorator as
 `import { docs as apiDocs } from "@superschematic/api"`.
 
+## `@docs`, `@purpose` and `@icon` on a field
+
+From `@superschematic/schema`, on a property of any type:
+
+```ts
+import { docs, icon, purpose } from "@superschematic/schema";
+
+export abstract class ShopConfig {
+  @docs({ title: "Database URL" })
+  @purpose("Connection string of the **shop database**.")
+  @icon("globe")
+  DATABASE_URL: Network.Url;
+}
+```
+
+| Decorator | Writes | Legacy JSON Schema key | Rule |
+| --- | --- | --- | --- |
+| `@docs({ title })` | `FieldDef.title` | `title` | the object holds `title` and nothing else; non-empty |
+| `@purpose(markdown)` | `FieldDef.purpose` | `x-purpose` | non-empty; Markdown explaining what the field is for |
+| `@icon(name)` | `FieldDef.icon` | `x-icon` | non-empty; any name (see [Rules an extension adds](#rules-an-extension-adds)) |
+
+Each appears at most once on a field. They are presentation only: no
+generated type, validator or wire format changes. The JSON and YAML forms
+write `title`, `purpose` and `icon` on the field; a blank value is a load
+error in every form.
+
+`@superschematic/api` also exports `docs`, for operations. A file that
+uses both imports one under another name
+(`import { docs as fieldDocs } from "@superschematic/schema"`); the loader
+resolves a decorator by its declaring package, not by the local name. The
+TypeScript writer imports them as `apiDocs`, `schemaDocs` and `schemaIcon`.
+
+The schema runtimes carry the three fields. The TypeScript runtime's
+`parseSchema` and `writeSchemaJson` read and write `title`, `x-purpose` and
+`x-icon` in the legacy JSON Schema form and `parseSchemaIR` reads `title`,
+`purpose` and `icon` from the IR; the Python runtime's `parse_schema` reads
+the legacy keys into `FieldDef.title`, `purpose` and `icon`.
+
 ## Rules an extension adds
 
-The core checks the shape of a record and nothing about its vocabulary. A
-distribution that has a closed set of audiences, or wants its own vendor
-key, registers that rule in its extension; the core has no option for it.
+The core checks shapes and nothing about vocabulary. A distribution that
+has a closed set of audiences or icons, or wants its own vendor key,
+registers that rule in its extension; the core has no option for it.
 
 - A value set: `Registry.RegisterCheck` with a `CheckSpec` whose `Verify`
-  walks the operations and reports a `@docs` audience outside the set. It
-  runs on every loaded schema, in every authoring form.
+  walks the operations (or the fields) and reports a `@docs` audience (or
+  an `@icon` name) outside the set. It runs on every loaded schema, core
+  kinds included, in every authoring form.
 - A vendor key: `Registry.RegisterOpenAPIHook` with an `OpenAPIHook` that
   moves each operation's `registry.OpenAPIDocsKey` entry to the
   distribution's key.
 
-`examples/acme-schematic/ext/docs.go` does both: acme accepts the audiences
-`shoppers` and `staff` and writes `x-acme-docs`. The
+`examples/acme-schematic/ext/docs.go` does all three: acme accepts the
+audiences `shoppers` and `staff`, the icons `box`, `globe`, `key`,
+`receipt` and `tag`, and writes `x-acme-docs`. The
 [extension guide](/superschematic/guides/write-an-extension/#policy-on-what-the-core-writes)
 shows the two registrations.

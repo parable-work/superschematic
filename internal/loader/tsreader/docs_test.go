@@ -61,3 +61,28 @@ func TestInvalidOperationDocsIsALocatedSchemaError(t *testing.T) {
 		t.Fatalf("diagnostic should carry file:line:col, got: %s", msg)
 	}
 }
+
+// TestFieldPresentationDecoratorsLoadIntoIR: @docs({ title }), @purpose and
+// @icon from @superschematic/schema write the field's title, purpose and
+// icon, next to operation @docs from @superschematic/api in the same file.
+func TestFieldPresentationDecoratorsLoadIntoIR(t *testing.T) {
+	schema, _, err := LoadService(filepath.Join("testdata", "services", "fixture-docs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total, id *ir.FieldDef
+	for _, f := range schema.Types["Order"].Fields {
+		switch f.Name {
+		case "totalCents":
+			total = f
+		case "id":
+			id = f
+		}
+	}
+	if total == nil || total.Title != "Total" || total.Purpose != "The order total in **cents**, tax included." || total.Icon != "receipt" {
+		t.Fatalf("Order.totalCents = %+v", total)
+	}
+	if id == nil || id.Title != "" || id.Purpose != "" || id.Icon != "" {
+		t.Fatalf("Order.id carries presentation it never declared: %+v", id)
+	}
+}

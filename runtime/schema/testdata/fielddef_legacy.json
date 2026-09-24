@@ -11,6 +11,8 @@
           "type": "string",
           "title": "My Domain name",
           "description": "Salesforce My Domain name",
+          "x-purpose": "Used to build the **login URL**.",
+          "x-icon": "globe",
           "x-placeholder": "acme",
           "x-validatePattern": "^[A-Za-z0-9][A-Za-z0-9-]*$"
         },

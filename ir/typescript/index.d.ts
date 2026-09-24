@@ -49,6 +49,10 @@ export interface FieldDef {
   description: string;
   // Human-facing label (JSON Schema `title` key); absent = derive from name.
   title?: string;
+  // Longer-form Markdown explaining what the field is for (`x-purpose`).
+  purpose?: string;
+  // Name of the glyph a UI shows for the field (`x-icon`).
+  icon?: string;
   // Input placeholder hint (`x-placeholder` in the legacy form).
   placeholder?: string;
   jsonKey: string;
