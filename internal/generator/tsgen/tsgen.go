@@ -20,6 +20,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -246,6 +247,10 @@ type Options struct {
 
 // Generate generates TypeScript types from a v2 IR schema.
 func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
+	// nested-arrays guard: remove when tsgen renders T[][].
+	if err := nestedguard.Check("tsgen", schema); err != nil {
+		return nil, err
+	}
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}
@@ -472,21 +477,21 @@ func inferTSType(primitive ir.LanguagePrimitive, scalarName string) string {
 }
 
 // fieldTypeMapperTS maps IR type references to TypeScript types.
-func fieldTypeMapperTS(typeName string, isArray bool, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	valueType := fieldValueTypeMapperTS(typeName, isArray, isMap, isRequired, scalarMap)
+func fieldTypeMapperTS(typeName string, arrayDepth int, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	valueType := fieldValueTypeMapperTS(typeName, arrayDepth, isMap, isRequired, scalarMap)
 	if !isMap {
 		return valueType
 	}
 	return "Record<string, " + valueType + ">"
 }
 
-func fieldValueTypeMapperTS(typeName string, isArray bool, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	if isArray {
-		elemType := fieldValueTypeMapperTS(typeName, false, false, true, scalarMap)
+func fieldValueTypeMapperTS(typeName string, arrayDepth int, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	if arrayDepth > 0 {
+		elemType := fieldValueTypeMapperTS(typeName, 0, false, true, scalarMap)
 		if inMap && !isRequired {
 			elemType = "(" + elemType + " | null)"
 		}
-		return elemType + "[]"
+		return codegen.WrapArray(elemType, arrayDepth, func(elem string) string { return elem + "[]" })
 	}
 
 	var resolvedType string

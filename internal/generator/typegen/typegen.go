@@ -22,6 +22,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -272,6 +273,10 @@ type Options struct {
 
 // Generate generates Go types from a v2 IR schema.
 func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
+	// nested-arrays guard: remove when typegen renders T[][].
+	if err := nestedguard.Check("typegen", schema); err != nil {
+		return nil, err
+	}
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}
@@ -405,21 +410,22 @@ func SetReplacePaths(output *ModuleOutput, paths naming.LocalPaths, outputDir st
 }
 
 // fieldTypeMapperGo maps IR type references to Go types.
-func fieldTypeMapperGo(typeName string, isArray bool, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	valueType := fieldValueTypeMapperGo(typeName, isArray, isMap, isRequired, scalarMap)
+func fieldTypeMapperGo(typeName string, arrayDepth int, isMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	valueType := fieldValueTypeMapperGo(typeName, arrayDepth, isMap, isRequired, scalarMap)
 	if !isMap {
 		return valueType
 	}
 	return "map[string]" + valueType
 }
 
-func fieldValueTypeMapperGo(typeName string, isArray bool, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
-	if isArray {
+func fieldValueTypeMapperGo(typeName string, arrayDepth int, inMap bool, isRequired bool, scalarMap codegen.ScalarMap) string {
+	if arrayDepth > 0 {
 		elemRequired := true
 		if inMap {
 			elemRequired = isRequired
 		}
-		return "[]" + fieldValueTypeMapperGo(typeName, false, inMap, elemRequired, scalarMap)
+		elemType := fieldValueTypeMapperGo(typeName, 0, inMap, elemRequired, scalarMap)
+		return codegen.WrapArray(elemType, arrayDepth, func(elem string) string { return "[]" + elem })
 	}
 
 	if scalar, ok := scalarMap[typeName]; ok {
@@ -682,13 +688,13 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 		if !isInput && isUnion && !cf.Required && !cf.IsArray && !cf.IsMap {
 			goType = strings.TrimPrefix(goType, "*")
 		}
+		// A map of union values stores the interface values directly, input
+		// or not; the optional nested-type path would add a pointer per value.
+		if isUnion && cf.IsMap && !cf.Required {
+			goType = strings.Replace(goType, "]*", "]", 1)
+		}
 		if usesWrapper {
 			innerType := goType
-			// A map of union values stores the interface values directly;
-			// the optional nested-type path would add a pointer per value.
-			if isUnion && cf.IsMap {
-				innerType = strings.Replace(innerType, "]*", "]", 1)
-			}
 			if cf.IsScalar || (isUnion && !cf.IsArray && !cf.IsMap) {
 				innerType = strings.TrimPrefix(innerType, "*")
 			}

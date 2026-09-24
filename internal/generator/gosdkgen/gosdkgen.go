@@ -16,6 +16,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	"github.com/parable-work/superschematic/internal/generator/sdkgen"
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/profile"
@@ -169,6 +170,10 @@ type FileUploadField struct {
 func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock codegen.Clock) (*SDKOutput, error) {
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
+	}
+	// nested-arrays guard: remove when gosdkgen renders T[][].
+	if err := nestedguard.Check("gosdkgen", apiOutput); err != nil {
+		return nil, err
 	}
 
 	names := apiOutput.Naming.OrDefault()

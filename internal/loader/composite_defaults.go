@@ -140,8 +140,13 @@ func validateCompositeValue(schema *ir.Schema, externalEnums map[string]*ir.Enum
 		if !ok {
 			return fmt.Errorf("%s must be an array", path)
 		}
+		// The element of T[][] is T[]: an inner list, which is never null.
 		elementRef := ref
-		elementRef.IsArray = false
+		if ref.IsArrayOfArrays {
+			elementRef.IsArrayOfArrays = false
+		} else {
+			elementRef.IsArray = false
+		}
 		for i, item := range items {
 			if err := validateCompositeValue(schema, externalEnums, elementRef, item, fmt.Sprintf("%s[%d]", path, i)); err != nil {
 				return err

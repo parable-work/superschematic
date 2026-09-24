@@ -25,9 +25,10 @@ const (
 
 // API server language and protocol values.
 const (
-	APILanguageGo   = registry.APILanguageGo
-	APILanguageRust = registry.APILanguageRust
-	APIProtocolREST = registry.APIProtocolREST
+	APILanguageGo         = registry.APILanguageGo
+	APILanguageRust       = registry.APILanguageRust
+	APILanguageTypeScript = registry.APILanguageTypeScript
+	APIProtocolREST       = registry.APIProtocolREST
 )
 
 // The outputs block types, aliased from internal/registry.

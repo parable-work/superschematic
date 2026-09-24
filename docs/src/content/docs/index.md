@@ -6,8 +6,9 @@ description: A schema compiler. You write one schema per service; it generates S
 superschematic is a schema compiler. You write one schema per service in
 TypeScript, JSON or YAML. The compiler loads it into a Schema IR and runs
 the generators that the schema's kind and its `outputs` block select: SQL
-DDL, a Go ORM, a Go REST server (or a Rust axum crate), OpenAPI, types in
-Go, TypeScript, Python and Rust, and SDKs in those same four languages.
+DDL, a Go ORM, a REST server (Go chi, Rust axum or TypeScript Hono),
+OpenAPI, types in Go, TypeScript, Python and Rust, and SDKs in those same
+four languages.
 
 Scalar types (email, UUID, URL, cron, and about forty more) come from
 [superscalar](https://github.com/parable-work/superscalar). An email address
@@ -18,7 +19,8 @@ schema source (.schema.ts | .schema.json | .schema.yaml)
   -> superschematic build
      -> sql/         Postgres DDL
      -> orm/         Go repositories
-     -> api/         Go chi router, middleware, OpenAPI, or a Rust axum crate
+     -> api/         Go chi router, middleware, OpenAPI; or a Rust axum crate;
+                     or a TypeScript Hono router package
      -> types/       Go, TypeScript, Python, Rust
      -> sdk/         TypeScript, Go, Python, Rust clients
 ```

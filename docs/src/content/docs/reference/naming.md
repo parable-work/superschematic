@@ -36,7 +36,8 @@ Default: `@schemas`
 
 npm scope of generated TypeScript packages and of the service authoring
 packages schemas import from each other: `<scope>/<name>-types`,
-`<scope>/<name>-sdk`, `<scope>/<name>`.
+`<scope>/<name>-sdk`, `<scope>/<name>-api` (a TypeScript API server),
+`<scope>/<name>`.
 
 ### `python_types_module_prefix`
 
@@ -121,6 +122,14 @@ Default: `superschematic-http-runtime`
 
 Cargo crate name of the HTTP runtime. Generated Rust API crates import
 it as the identifier form of this name (`superschematic_http_runtime`).
+
+### `http_runtime_npm_package`
+
+Default: `@superschematic/http-runtime`
+
+npm package name of the TypeScript HTTP runtime. A generated TypeScript
+API package imports its request pipeline from this package and from its
+`/hono` entry point, and lists it as a peer dependency.
 
 ### `ptr_go_module`
 

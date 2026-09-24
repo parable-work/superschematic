@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -208,6 +209,10 @@ const DefaultMetadataKeyPrefix = "superschematic."
 // Generate generates PostgreSQL DDL from a v2 IR schema. Returns nil when
 // the schema declares no database tables.
 func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
+	// nested-arrays guard: remove when sqlgen renders T[][].
+	if err := nestedguard.Check("sqlgen", schema); err != nil {
+		return nil, err
+	}
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}
