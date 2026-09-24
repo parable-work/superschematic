@@ -44,12 +44,7 @@ except ImportError:
 
 {{range .Scalars}}{{if and .HasCustomParse (ne .Name "Generic.JSON")}}
 def _custom_parse_{{pythonScalarModule .}}(v: Any) -> Any:
-{{if pythonParsesJSON .}}    """Custom parse wrapper for {{.Name}}.
-
-    The scalar library parses JSON text, so a non-string value is encoded
-    as JSON before the call and the canonical JSON it returns is decoded
-    back into a native value.
-    """
+{{if pythonParsesJSON .}}    """Parse JSON values through the scalar library and return their native representation."""
 {{else}}    """Custom parse wrapper for {{.Name}}.
 
     The scalar library native hooks are string-in/string-out, so non-string

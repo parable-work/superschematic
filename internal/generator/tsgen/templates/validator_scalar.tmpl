@@ -98,16 +98,16 @@ export function validate{{.Scalar.Symbol}}(
   {{end}}
   {{end}}
 
-  {{if and .Scalar.HasJSONParse (not .Scalar.HasCustomValidate)}}
-  if (parse{{.Scalar.Symbol}}FromLib(value) === null) {
-    errors.push({ validator: "parse", message: "invalid {{.Scalar.Name}}" });
-  }
-  {{end}}
-
   {{if .Scalar.HasCustomValidate}}
   const [isValid, customErrors] = validate{{.Scalar.Symbol}}FromLib(value as {{.Scalar.TSType}});
   if (!isValid && customErrors) {
     errors.push(...customErrors);
+  }
+  {{end}}
+
+  {{if and .Scalar.HasJSONParse (not .Scalar.HasCustomValidate)}}
+  if (parse{{.Scalar.Symbol}}FromLib(value) === null) {
+    errors.push({ validator: "parse", message: "invalid {{.Scalar.Name}}" });
   }
   {{end}}
 
