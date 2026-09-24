@@ -371,6 +371,37 @@ of a generated artifact is always listed here with the bump it requires.
   one comma-separated value. Before, the handler parsed the parameter as a
   single scalar. The Rust SDK also drops a zero `listMin` check, which
   compared an unsigned length with zero. Minor.
+- The superscalar pin moves to `79a8e6a` (`superscalar.pin` and every
+  `go.mod`), and the TypeScript and Python scalar catalogs are regenerated
+  from it. Generated output changes where a scalar changed:
+  - Four new scalars are available to schemas: `AgentSkill.Name`,
+    `Git.PathPattern`, `Ordering.Rank` and `Version.SemVer`.
+  - `Generic.JSON` is any JSON value. Its description changes in every
+    generated scalar comment and readme; its `json_schema` type mapping is
+    `any` (was `object`), which the projection Arrow metadata key
+    `scalar.json_schema_type` reports; and it validates through superscalar,
+    so the generated TypeScript validator and the Python validator also call
+    the library's `validateGenericJSON` / `validate_generic_json`.
+  - `Generic.StringMap` is custom-parse. A Go types module that uses it
+    emits `ParseGenericStringMap`, and the Go, TypeScript and Python schema
+    runtimes parse it to canonical JSON text. superscalar's TypeScript
+    `parseGenericStringMap` now returns the decoded map, so the TypeScript
+    runtime's default parse registry sends a custom-parse scalar whose
+    `json_schema` type is `object` through the core, as it already did for
+    `Temporal.DateTime`; stringifying the map gave `[object Object]`.
+
+  Minor.
+- TypeScript and Python types: a custom-parse scalar whose `json_schema`
+  type is `object` (`Generic.StringMap`) takes its TypeScript and Python
+  types from the scalar catalog, `Record<string, string>` and
+  `Dict[str, str]` (were `string` and `Any`). The TypeScript
+  `validate<Symbol>` runs superscalar's parser instead of string checks,
+  and `parse<Symbol>` takes the map or its JSON text and returns the map.
+  The Python field parses through `parse_generic_string_map` and holds a
+  dict; a map with a non-string value now fails validation. OpenAPI types
+  such a map's values through `additionalProperties`. Before, a TypeScript
+  types package that used `Generic.StringMap` did not compile against the
+  pinned superscalar, whose parser returns a map. Minor.
 
 ### Fixed
 
@@ -390,9 +421,8 @@ of a generated artifact is always listed here with the bump it requires.
 - Go types: `Parse<Scalar>` for a custom-parse scalar with a JSON-shaped Go
   type (a map) called a superscalar function by its leaf name and converted
   the returned string to the map type, which does not compile. It now calls
-  `Parse<Symbol>` and decodes the canonical JSON into the alias. No scalar
-  in the pinned superscalar catalog takes this path yet; `Generic.StringMap`
-  does once superscalar marks it custom-parse. Patch.
+  `Parse<Symbol>` and decodes the canonical JSON into the alias.
+  `Generic.StringMap` takes this path. Patch.
 - Go types: `Parse<Scalar>` for `Finance.Money`, `Generic.Int64`,
   `Identity.UserID` and the `Temporal` integer durations (`Milliseconds`,
   `Seconds`, `Minutes`, `Hours`, `Days`) called a superscalar function named

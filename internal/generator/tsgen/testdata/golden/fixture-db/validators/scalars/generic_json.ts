@@ -2,6 +2,8 @@
 
 import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
 
+import { validateGenericJSON as validateGenericJSONFromLib } from 'superscalar/scalars';
+
 /**
  * Validates a Generic.JSON value
  */
@@ -15,6 +17,11 @@ export function validateGenericJSON(
   }
 
   const s = String(value);
+
+  const [isValid, customErrors] = validateGenericJSONFromLib(value as Record<string, any>);
+  if (!isValid && customErrors) {
+    errors.push(...customErrors);
+  }
 
   return errors.length > 0 ? [false, errors] : [true, null];
 }
