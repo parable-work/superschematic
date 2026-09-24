@@ -307,6 +307,10 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- IR: a type's `strictJSON` key is written after `jsonField` instead of
+  after `denyUnknownFields`, the position the source tree's IR uses, so a
+  persisted schema from either compares byte for byte. The key is written
+  only when set. Patch.
 - `ParseOutputs` validates each `outputs.<key>` section against the
   `OutputSchema` of the generator that claims the key, before any generator
   runs; `RegisterGenerator` compiles the schema and rejects one that does

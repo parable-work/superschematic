@@ -106,6 +106,12 @@ type TypeDef struct {
 	// materialized as a relational table.
 	JsonField bool `json:"jsonField,omitempty" yaml:"jsonField,omitempty"`
 
+	// StrictJSON (@strictJSON) makes every generated decoder of this type,
+	// in Go, TypeScript, Python and Rust, reject a key the type does not
+	// declare and a required field that is absent or null. It applies to
+	// this object only; a nested object type opts in on its own.
+	StrictJSON bool `json:"strictJSON,omitempty" yaml:"strictJSON,omitempty"`
+
 	// Versioned marks a DB table for generated history tracking.
 	Versioned bool `json:"versioned,omitempty" yaml:"versioned,omitempty"`
 
@@ -121,12 +127,6 @@ type TypeDef struct {
 	// dropping it. Opt-in per type: a strict decoder suits a closed wire
 	// contract and breaks a payload that must survive a newer producer.
 	DenyUnknownFields bool `json:"denyUnknownFields,omitempty" yaml:"denyUnknownFields,omitempty"`
-
-	// StrictJSON (@strictJSON) makes every generated decoder of this type,
-	// in Go, TypeScript, Python and Rust, reject a key the type does not
-	// declare and a required field that is absent or null. It applies to
-	// this object only; a nested object type opts in on its own.
-	StrictJSON bool `json:"strictJSON,omitempty" yaml:"strictJSON,omitempty"`
 
 	// Projection is the @projection declaration of a RoleProjection type: the
 	// view's address, the table it reads and the tables it joins, its row
