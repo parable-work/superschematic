@@ -19,6 +19,12 @@ package_author = "acme"
 # projection views: acme.scalar.canonical_name, acme.projection.settings.
 metadata_key_prefix = "acme."
 
+# The JSDoc tag the generated TypeScript types write above every
+# scalar-typed field, with the scalar's canonical name:
+# /** @acmeScalar Contact.Email */. A tool reading the declaration files
+# finds each field's scalar through it. Left out, no tag line is written.
+scalar_jsdoc_tag = "acmeScalar"
+
 # The auth provider the api generator renders with. "apikey" is registered
 # by the acme extension (ext/auth); the core-only binary does not know it
 # and refuses this file, which is one of the smoke's assertions.

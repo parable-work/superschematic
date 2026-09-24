@@ -469,8 +469,12 @@ frontend accepts, and `[package_aliases]` maps a distribution's
 republished package names onto the core packages that declare the symbols.
 A distribution also sets `metadata_key_prefix` (default `superschematic.`),
 the namespace of every metadata key in the Arrow schemas the `sql`
-generator writes for projection views, and `[deps] copy`, the committed
-path of the dependency graph (section 3.8).
+generator writes for projection views; `scalar_jsdoc_tag` (default unset),
+the JSDoc tag the TypeScript types write above every scalar-typed field
+(`/** @<tag> Contact.Email */`) for a tool that reads the declaration
+files; and `[deps] copy`, the committed path of the dependency graph
+(section 3.8). The first two are names in the output, so they are naming
+keys rather than registrations (D10, D13).
 
 ### 3.12 CheckSpec
 
@@ -933,7 +937,7 @@ surface:
 | Check and a tool hook | `acmeToolsClassified` requires `@mcp` on every `shop-api` operation; `acmeTools` writes acme's tool keys and icon variant | `ext/mcp.go` |
 | Check on a core kind | `acmeProjectionScope`: every projection view in a DB schema binds the scope setting first | `ext/projection_policy.go` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
-| Configuration | `[extension.acme] region` and `projection_scope_setting`; `metadata_key_prefix` and `[deps] copy` | `ext/extension.go`, `schemas/superschematic.toml` |
+| Configuration | `[extension.acme] region` and `projection_scope_setting`; `metadata_key_prefix`, `scalar_jsdoc_tag` and `[deps] copy` | `ext/extension.go`, `schemas/superschematic.toml` |
 | Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Command | `describe`, through `cli.CommandProvider` | `ext/command.go` |
 | Configuration | `[extension.acme] region` | `ext/extension.go`, `schemas/superschematic.toml` |
@@ -1031,4 +1035,4 @@ a candidate for a change with its own test.
 | `cli/cli.go` | `cli.New`, `CommandProvider` |
 | `loader/loader.go` | the public loader package |
 | `examples/acme-schematic/` | the worked example and its acceptance scripts |
-| `docs/DECISIONS.md` | the decisions this design rests on (D1, D2, D3, D4, D6, D10, D11) |
+| `docs/DECISIONS.md` | the decisions this design rests on (D1, D2, D3, D4, D6, D10, D11, D13) |

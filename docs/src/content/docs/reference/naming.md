@@ -160,6 +160,35 @@ for [projection views](/superschematic/reference/projections/):
 `<prefix>projection.settings` and the rest. Set it to the namespace the
 schemas' readers expect; the part after the prefix is fixed.
 
+### `scalar_jsdoc_tag`
+
+Default: unset (no tag line)
+
+Name of a JSDoc tag the generated TypeScript types write above every
+scalar-typed field, followed by the scalar's canonical name. With
+`scalar_jsdoc_tag = "scalar"`, `types/types.ts` reads:
+
+```ts
+export interface User {
+  /** @scalar Identity.UUID */
+  id?: string | null;
+  /** Display name shown across the product. */
+  /** @scalar Identity.Name */
+  name: string;
+  isActive: boolean;
+}
+```
+
+The tag line sits directly above the field, after the field's doc line
+when it has one. Fields of a primitive, enum or object type get none.
+`tsc` keeps the comment in the declaration files it emits, so a tool that
+reads the `.d.ts` files can find each field's scalar without the IR.
+
+The value is the tag name without the `@`: letters, digits and `_`, not
+starting with a digit. Any other value fails the load. Unset, the types
+carry no tag line; unlike most keys, an empty value has no default to fall
+back to.
+
 ### `auth_provider`
 
 Default: `session`

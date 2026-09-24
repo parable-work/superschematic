@@ -60,6 +60,9 @@ export interface {{.Name}} {
   {{- if .Doc}}
   /** {{.Doc}} */
   {{- end}}
+  {{- if and $.Naming.ScalarJSDocTag .ScalarInfo}}
+  /** @{{$.Naming.ScalarJSDocTag}} {{.ScalarInfo.Name}} */
+  {{- end}}
   {{.TSName}}{{if not .Required}}?{{end}}: {{.TSType}}{{if not .Required}} | null{{end}};
 {{- end}}
 }

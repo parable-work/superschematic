@@ -299,6 +299,14 @@ of a generated artifact is always listed here with the bump it requires.
   every key of the projection Arrow schemas' metadata
   (`<prefix>scalar.canonical_name`, `<prefix>projection.settings`, ...).
   Minor.
+- Naming file: `scalar_jsdoc_tag` names a JSDoc tag that the TypeScript
+  types write above every scalar-typed field in `types/types.ts`, followed
+  by the scalar's canonical name (`/** @scalar Contact.Email */`), after
+  the field's doc line. `tsc` keeps it in the declaration files, where a
+  tool can read each field's scalar. The key is unset by default, and then
+  no tag line is written, so existing output does not change. A value that
+  is not an identifier fails the load (D13). `examples/acme-schematic`
+  sets `acmeScalar`. Minor.
 
 ### Changed
 

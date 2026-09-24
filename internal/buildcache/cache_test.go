@@ -191,6 +191,10 @@ func TestComputeInputHashesFollowNaming(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, zero["svc"], acme["svc"], "a different npm scope must change the key")
 
+	tagged, err := ComputeInputHashes(services, repo, naming.Naming{ScalarJSDocTag: "scalar"})
+	require.NoError(t, err)
+	assert.NotEqual(t, zero["svc"], tagged["svc"], "a scalar JSDoc tag changes types.ts and must change the key")
+
 	withExt, err := ComputeInputHashes(services, repo, naming.Naming{Extensions: map[string]map[string]any{"acme": {"k": "v"}}})
 	require.NoError(t, err)
 	assert.NotEqual(t, zero["svc"], withExt["svc"], "extension tables reach generators through the registry and must change the key")

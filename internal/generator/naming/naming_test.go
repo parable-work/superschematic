@@ -397,3 +397,22 @@ func TestMetadataKeyPrefixDefaultsAndOverrides(t *testing.T) {
 		t.Error("an empty MetadataKeyPrefix must fill from the defaults")
 	}
 }
+
+func TestScalarJSDocTagIsUnsetByDefaultAndMustBeATagName(t *testing.T) {
+	if Default().ScalarJSDocTag != "" || (Naming{}).OrDefault().ScalarJSDocTag != "" {
+		t.Error("the default must write no tag line")
+	}
+	got, err := Parse([]byte("scalar_jsdoc_tag = \"acmeScalar\"\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ScalarJSDocTag != "acmeScalar" {
+		t.Errorf("ScalarJSDocTag = %q, want the file's value", got.ScalarJSDocTag)
+	}
+	for _, value := range []string{"@scalar", "scalar tag", "9scalar", "scalar*/", "a-b"} {
+		_, err := Parse([]byte("scalar_jsdoc_tag = \""+value+"\"\n"), "superschematic.toml")
+		if err == nil || !strings.Contains(err.Error(), "scalar_jsdoc_tag") {
+			t.Errorf("scalar_jsdoc_tag = %q: err = %v, want a scalar_jsdoc_tag error", value, err)
+		}
+	}
+}
