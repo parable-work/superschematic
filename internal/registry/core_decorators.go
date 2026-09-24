@@ -70,6 +70,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 		},
 	})
 
+	// SQL projection views: @projection and @join on the class, @column on
+	// its fields (core_projection.go).
+	specs = append(specs, projectionDecorators()...)
+
 	// Fields.
 	fieldFlag := func(name string, packages []string, set func(*ir.FieldDef)) {
 		flag(TargetField, name, packages, func(n Node) { set(n.Field) })

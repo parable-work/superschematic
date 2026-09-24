@@ -1,0 +1,496 @@
+{
+  "name": "fixture-projection",
+  "kind": "DB",
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "languagePrimitive": "number",
+      "typeMappings": {
+        "sql": "BIGINT"
+      }
+    },
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "languagePrimitive": "object",
+      "typeMappings": {
+        "sql": "JSONB"
+      }
+    },
+    "Identity.Name": {
+      "name": "Identity.Name",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "VARCHAR(80)"
+      }
+    },
+    "Identity.Slug": {
+      "name": "Identity.Slug",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "CITEXT"
+      }
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "UUID"
+      }
+    },
+    "Temporal.DateTime": {
+      "name": "Temporal.DateTime",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "TIMESTAMPTZ"
+      }
+    }
+  },
+  "types": {
+    "AppPreference": {
+      "name": "AppPreference",
+      "owner": "src/app-preference.projection.schema.ts",
+      "comment": "Preference values visible to the current account, channel and user: app\nand team rows for the selected channel, and user rows only for the user\nwhose session runs the query. App rows resolve by the branch or the\nreleased commit the caller names (either setting may be left unset), and\none row per slot survives: user over team over app, and a branch row\nbefore the released commit's.",
+      "role": "Projection",
+      "fields": [
+        {
+          "name": "slotKey",
+          "comment": "Stable identity of the slot the value belongs to.",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "handle",
+          "typeRef": {
+            "name": "Identity.Slug"
+          },
+          "required": true
+        },
+        {
+          "name": "scope",
+          "typeRef": {
+            "name": "PreferenceScope"
+          },
+          "required": true
+        },
+        {
+          "name": "userId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        },
+        {
+          "name": "channelId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "projectedFrom": "base.channel"
+        },
+        {
+          "name": "channelHandle",
+          "typeRef": {
+            "name": "Identity.Slug"
+          },
+          "required": true,
+          "projectedFrom": "channel.handle"
+        },
+        {
+          "name": "branchName",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "projectedFrom": "branch.name"
+        },
+        {
+          "name": "value",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true
+        },
+        {
+          "name": "revision",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true
+        },
+        {
+          "name": "tags",
+          "typeRef": {
+            "name": "Identity.Slug",
+            "isArray": true
+          },
+          "required": true
+        },
+        {
+          "name": "updatedAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "projectedFrom": "base.updatedAt"
+        }
+      ],
+      "projection": {
+        "pool": "app",
+        "name": "preferences",
+        "migration": "20260902120000",
+        "source": "Preference",
+        "joins": [
+          {
+            "type": "Channel",
+            "alias": "channel",
+            "kind": "inner",
+            "on": [
+              {
+                "left": "channel.id",
+                "right": "base.channel"
+              }
+            ]
+          },
+          {
+            "type": "Channel",
+            "alias": "branch",
+            "kind": "left",
+            "on": [
+              {
+                "left": "branch.id",
+                "right": "base.branch"
+              }
+            ]
+          }
+        ],
+        "predicates": [
+          {
+            "column": "base.account",
+            "setting": "app.account_id"
+          },
+          {
+            "column": "base.channel",
+            "setting": "app.channel_id"
+          },
+          {
+            "column": "base.userId",
+            "setting": "app.user_id",
+            "when": {
+              "column": "base.scope",
+              "equals": "user"
+            }
+          },
+          {
+            "anyOf": [
+              {
+                "column": "base.branch",
+                "setting": "app.branch_id",
+                "optional": true
+              },
+              {
+                "column": "base.commit",
+                "setting": "app.commit_id",
+                "optional": true
+              }
+            ],
+            "when": {
+              "column": "base.scope",
+              "equals": "app"
+            }
+          },
+          {
+            "column": "base.archivedAt",
+            "isNull": true
+          },
+          {
+            "column": "base.hidden",
+            "equals": {
+              "bool": false
+            }
+          },
+          {
+            "column": "base.userId",
+            "notNull": true,
+            "when": {
+              "column": "base.scope",
+              "equals": "user"
+            }
+          }
+        ],
+        "collapse": {
+          "by": [
+            "base.slotKey"
+          ],
+          "order": [
+            {
+              "column": "base.scope",
+              "rank": [
+                "user",
+                "team",
+                "app"
+              ]
+            },
+            {
+              "column": "base.branch",
+              "direction": "asc",
+              "nulls": "last"
+            }
+          ]
+        }
+      }
+    },
+    "Auditable": {
+      "name": "Auditable",
+      "owner": "src/preference.schema.ts",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "key": true,
+          "unique": true,
+          "autoGenerated": true
+        },
+        {
+          "name": "createdAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true
+        },
+        {
+          "name": "updatedAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        }
+      ]
+    },
+    "Channel": {
+      "name": "Channel",
+      "owner": "src/preference.schema.ts",
+      "comment": "A release channel of an app: the line a preference row resolves against.",
+      "role": "DBTable",
+      "extends": "Auditable",
+      "rawHeritage": {
+        "extends": "Auditable"
+      },
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "inheritedFrom": "Auditable",
+          "key": true,
+          "unique": true,
+          "autoGenerated": true
+        },
+        {
+          "name": "createdAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true,
+          "inheritedFrom": "Auditable"
+        },
+        {
+          "name": "updatedAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "inheritedFrom": "Auditable"
+        },
+        {
+          "name": "account",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "required": true
+        },
+        {
+          "name": "handle",
+          "typeRef": {
+            "name": "Identity.Slug"
+          },
+          "required": true
+        }
+      ]
+    },
+    "Preference": {
+      "name": "Preference",
+      "owner": "src/preference.schema.ts",
+      "comment": "One stored preference value for a slot, scoped to an app, a team, or a\nuser.",
+      "role": "DBTable",
+      "extends": "Auditable",
+      "rawHeritage": {
+        "extends": "Auditable"
+      },
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "inheritedFrom": "Auditable",
+          "key": true,
+          "unique": true,
+          "autoGenerated": true
+        },
+        {
+          "name": "createdAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true,
+          "inheritedFrom": "Auditable"
+        },
+        {
+          "name": "updatedAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "inheritedFrom": "Auditable"
+        },
+        {
+          "name": "account",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "channel",
+          "typeRef": {
+            "name": "Channel"
+          },
+          "required": true,
+          "relation": {
+            "type": "Channel"
+          }
+        },
+        {
+          "name": "branch",
+          "typeRef": {
+            "name": "Channel"
+          },
+          "relation": {
+            "type": "Channel"
+          }
+        },
+        {
+          "name": "commit",
+          "comment": "A released value's commit; a row carries a branch or a commit, never\nboth.",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        },
+        {
+          "name": "scope",
+          "typeRef": {
+            "name": "PreferenceScope"
+          },
+          "required": true
+        },
+        {
+          "name": "userId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        },
+        {
+          "name": "slotKey",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "handle",
+          "typeRef": {
+            "name": "Identity.Slug"
+          },
+          "required": true
+        },
+        {
+          "name": "value",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true
+        },
+        {
+          "name": "revision",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "default": "1"
+        },
+        {
+          "name": "tags",
+          "typeRef": {
+            "name": "Identity.Slug",
+            "isArray": true
+          },
+          "required": true
+        },
+        {
+          "name": "archivedAt",
+          "comment": "Set when the row is retired; retired rows leave the projection.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "hidden",
+          "comment": "Hidden rows are kept for audit but never served.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "default": "false"
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "account",
+            "slotKey"
+          ]
+        }
+      ]
+    }
+  },
+  "enums": {
+    "PreferenceScope": {
+      "name": "PreferenceScope",
+      "owner": "fixture-projection",
+      "values": [
+        {
+          "name": "App",
+          "serializedAs": "app"
+        },
+        {
+          "name": "Team",
+          "serializedAs": "team"
+        },
+        {
+          "name": "User",
+          "serializedAs": "user"
+        }
+      ]
+    }
+  }
+}

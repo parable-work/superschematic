@@ -223,3 +223,15 @@ $$ LANGUAGE plpgsql;
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if .Projections }}
+
+-- Create projection views: read-only relations over the tables above. A
+-- setting a view binds without optional makes current_setting raise while
+-- it is unset, so the view fails closed.
+{{- range $view := .Projections }}
+
+CREATE SCHEMA IF NOT EXISTS {{ $view.QuotedPool }};
+
+{{ projectionViewDDL $view }}
+{{- end }}
+{{- end }}

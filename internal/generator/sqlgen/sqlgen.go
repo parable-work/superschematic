@@ -164,11 +164,16 @@ type DDLOutput struct {
 	Tables          []Table
 	JoinTables      []JoinTable
 	HistoryTables   []HistoryTable
+	Projections     []ProjectionView
 	Timestamp       string
 	HasUserTable    bool
 	SystemUserUUID  string
 	SystemUserName  string
 	SystemUserEmail string
+
+	// MetadataKeyPrefix prefixes the keys of the projection Arrow schemas'
+	// metadata (Options.MetadataKeyPrefix).
+	MetadataKeyPrefix string
 }
 
 // Options configures DDL generation.
@@ -182,7 +187,23 @@ type Options struct {
 
 	// Clock stamps the generated output.
 	Clock codegen.Clock
+
+	// ViewOwner is the Postgres role the generated projection migrations
+	// create their views as (SET ROLE around the DDL). Empty creates them as
+	// the migration runner. It must be a plain lowercase identifier.
+	ViewOwner string
+
+	// MetadataKeyPrefix prefixes the keys of the projection Arrow schemas'
+	// metadata (Naming.MetadataKeyPrefix). Empty means "superschematic.".
+	MetadataKeyPrefix string
 }
+
+// viewOwnerPattern constrains Options.ViewOwner to a plain role name.
+var viewOwnerPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// DefaultMetadataKeyPrefix is the metadata key prefix when Options leaves it
+// empty; it matches naming.Default().
+const DefaultMetadataKeyPrefix = "superschematic."
 
 // Generate generates PostgreSQL DDL from a v2 IR schema. Returns nil when
 // the schema declares no database tables.
@@ -336,6 +357,24 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		historyTables = append(historyTables, historyTable)
 	}
 
+	projections, err := buildProjections(schema, opts.Dependencies, tableMap, scalarMapping)
+	if err != nil {
+		return nil, err
+	}
+	if opts.ViewOwner != "" {
+		if !viewOwnerPattern.MatchString(opts.ViewOwner) {
+			return nil, fmt.Errorf("outputs.sql.viewOwner %q must be a lowercase Postgres role name", opts.ViewOwner)
+		}
+		for i := range projections {
+			projections[i].ViewOwner = opts.ViewOwner
+			projections[i].QuotedViewOwner = sqlutil.QuoteIdentifier(opts.ViewOwner)
+		}
+	}
+	metadataKeyPrefix := opts.MetadataKeyPrefix
+	if metadataKeyPrefix == "" {
+		metadataKeyPrefix = DefaultMetadataKeyPrefix
+	}
+
 	hasUserTable := false
 	for _, table := range tables {
 		if table.OriginalName == "User" {
@@ -350,11 +389,14 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		Tables:          tables,
 		JoinTables:      joinTables,
 		HistoryTables:   historyTables,
+		Projections:     projections,
 		Timestamp:       opts.Clock.RFC3339(),
 		HasUserTable:    hasUserTable,
 		SystemUserUUID:  "00000000-0000-4000-8000-000000000000",
 		SystemUserName:  "System",
 		SystemUserEmail: "system@localhost",
+
+		MetadataKeyPrefix: metadataKeyPrefix,
 	}
 
 	return output, nil

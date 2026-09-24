@@ -185,7 +185,8 @@ once the repository is public; the CI job does not deploy.
 Three features are expected to be ported from a distribution that built
 them on the source tree: SQL projection views, MCP tool manifests generated
 from operations, and documentation decorators on operations and fields.
-None is implemented in this repository yet. This entry is the rule each
+All three are now in the core; the status paragraph at the end of this
+entry records how each policy is registered. This entry is the rule each
 port follows.
 
 The generic mechanism goes into the core:
@@ -224,6 +225,17 @@ linked, and the policy that shipped with the source implementation is
 expressed as registrations in an extension, with a test that adds one
 policy without a core edit.
 
+Status: the ports added three generic seams, `RegisterCheck` for a rule
+over core-kind schemas and `RegisterOpenAPIHook` and `RegisterToolHook` for
+vendor keys in emitted documents (`docs/extension-model.md`, sections 3.12
+to 3.14). The acme example registers a policy over each mechanism:
+`acmeProjectionScope` requires a scoped row rule on every view,
+`acmeToolsClassified` requires `@mcp` on its API, `acmeIcons` checks icons
+against its set, and `acmeDocsKey` and `acmeTools` write its own vendor
+keys. One item departs from the rule above: the prefix of the metadata keys
+in the projection Arrow schemas is the naming key `metadata_key_prefix`
+(default `superschematic.`), not an extension registration.
+
 ## D11. The MCP invocation policy is core, with a key an extension renames
 
 A visible MCP tool carries an invocation policy: whether a client runs it
@@ -240,9 +252,9 @@ bytes must survive the move.
   exception a write with side effects opts into; defaulting to `ask` would
   put a prompt in front of every read.
 - `Registry.RegisterToolInvocationPolicy` replaces the key, the values
-  and the default. It is a registration and not a tool hook because the
-  policy decides what the loader accepts and fills in, and a tool hook
-  runs only at generation. One policy per registry; a second is an
+  and the default (`docs/extension-model.md`, section 3.15). It is a
+  registration and not a tool hook because the policy decides what the
+  loader accepts and fills in, and a tool hook runs only at generation. One policy per registry; a second is an
   assembly error, as a second scalar catalog is.
 - The IR stores the key with the value (`ir.MCPInvocation`), and
   `OperationMCP` encodes the pair under the key at a fixed position. The

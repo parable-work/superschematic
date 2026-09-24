@@ -159,7 +159,22 @@ func (w *walker) applyDecorator(d decoratorRef, target registry.DecoratorTarget,
 	if spec.Apply == nil {
 		return nil
 	}
-	args := make([]any, 0, len(d.args))
+	typeArgNodes := decoratorTypeArgs(d)
+	args := make([]any, 0, spec.TypeArgs()+len(d.args))
+	if n := spec.TypeArgs(); n > 0 {
+		if len(typeArgNodes) != n {
+			return errorAtNode(d.node, "@%s takes exactly %d type argument(s) naming a schema class", d.id.name, n)
+		}
+		for _, typeArg := range typeArgNodes {
+			name, serr := w.classTypeArg(d, typeArg)
+			if serr != nil {
+				return serr
+			}
+			args = append(args, name)
+		}
+	} else {
+		typeArgNodes = nil
+	}
 	for _, arg := range d.args {
 		v, serr := w.evaluateExpression(arg)
 		if serr != nil {
@@ -172,12 +187,44 @@ func (w *walker) applyDecorator(d decoratorRef, target registry.DecoratorTarget,
 	}
 	if err := spec.Apply(node, args, w.siteOf(d.node)); err != nil {
 		var argErr *registry.ArgError
-		if errors.As(err, &argErr) && argErr.Index >= 0 && argErr.Index < len(d.args) {
-			return errorAtNode(d.args[argErr.Index], "%s", argErr.Msg)
+		if errors.As(err, &argErr) && argErr.Index >= 0 {
+			// Apply counts the resolved type arguments first.
+			if argErr.Index < len(typeArgNodes) {
+				return errorAtNode(typeArgNodes[argErr.Index], "%s", argErr.Msg)
+			}
+			if i := argErr.Index - len(typeArgNodes); i < len(d.args) {
+				return errorAtNode(d.args[i], "%s", argErr.Msg)
+			}
 		}
 		return errorAtNode(d.node, "%s", err)
 	}
 	return nil
+}
+
+// decoratorTypeArgs returns the type arguments of a decorator call
+// (@projection<Source>(...)), or nil when it has none.
+func decoratorTypeArgs(d decoratorRef) []*astNode {
+	expr := d.node.AsDecorator().Expression
+	if expr.Kind != kindCallExpression {
+		return nil
+	}
+	if typeArgs := expr.AsCallExpression().TypeArguments; typeArgs != nil {
+		return typeArgs.Nodes
+	}
+	return nil
+}
+
+// classTypeArg resolves one decorator type argument to the name of the
+// schema class it references.
+func (w *walker) classTypeArg(d decoratorRef, typeArg *astNode) (string, *SchemaError) {
+	if typeArg.Kind != kindTypeReference {
+		return "", errorAtNode(typeArg, "the @%s type argument must name a schema class", d.id.name)
+	}
+	id, ok := w.identityOf(typeArg.AsTypeReferenceNode().TypeName)
+	if !ok || id.decl == nil || id.decl.Kind != kindClassDeclaration {
+		return "", errorAtNode(typeArg, "cannot resolve the @%s type argument %q to a schema class", d.id.name, w.nodeText(typeArg))
+	}
+	return id.name, nil
 }
 
 // versionedConfigFromDecorator reads @versioned({ ... }?). A nil config means

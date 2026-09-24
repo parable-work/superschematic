@@ -63,6 +63,12 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 		e.emitClass(def)
 	case ir.RoleTrait:
 		e.emitClass(def)
+	case ir.RoleProjection:
+		if e.doc.Kind != "" && e.doc.Kind != ir.SchemaKindDB {
+			e.failf("type %s: role Projection is only expressible in a DB schema (document kind %s)", def.Name, e.doc.Kind)
+			return
+		}
+		e.emitProjection(def)
 	default:
 		e.failf("type %s: role %s has no TypeScript authoring form", def.Name, def.Role)
 	}

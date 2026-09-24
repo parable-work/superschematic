@@ -172,6 +172,14 @@ type DecoratorSpec struct {
 	// walker has always treated that way; extensions cannot set it.
 	recordsErrors bool
 
+	// typeArgs is the number of type arguments the decorator takes
+	// (@projection<Source>). The TypeScript frontend resolves each to the
+	// name of the schema class it references and passes the names to Apply
+	// ahead of the value arguments. Only core decorators set it: the data
+	// forms write core decorators as typed IR fields and have no place for
+	// a type argument in an extension slot.
+	typeArgs int
+
 	compiledArgs *validator.Schema
 }
 
@@ -180,6 +188,13 @@ type DecoratorSpec struct {
 // every other field and operation decorator.
 func (s DecoratorSpec) RecordsErrors() bool {
 	return s.recordsErrors
+}
+
+// TypeArgs returns the number of class type arguments the frontend resolves
+// and passes to Apply ahead of the value arguments; zero for every
+// decorator but the core ones that name a table (@projection, @join).
+func (s DecoratorSpec) TypeArgs() int {
+	return s.typeArgs
 }
 
 // DeclaredIn reports whether pkg is one of the spec's authoring packages.

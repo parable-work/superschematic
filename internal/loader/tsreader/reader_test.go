@@ -22,6 +22,7 @@ func TestLoadServiceGolden(t *testing.T) {
 		"fixture-traits",
 		"fixture-docs",
 		"fixture-mcp",
+		"fixture-projection",
 	}
 	for _, svc := range services {
 		t.Run(svc, func(t *testing.T) {
@@ -145,6 +146,7 @@ func TestProgramCacheMatchesPerServiceLoads(t *testing.T) {
 		"fixture-traits",
 		"fixture-docs",
 		"fixture-mcp",
+		"fixture-projection",
 	}
 	serviceDirs := make([]string, 0, len(services))
 	for _, svc := range services {

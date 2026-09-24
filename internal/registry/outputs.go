@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -44,6 +45,20 @@ type APIOutputConfig struct {
 	ScaffoldsOutputDir string `json:"scaffoldsOutputDir,omitempty"`
 }
 
+// SQLOutputConfig configures the DB kind's sql output. The DDL and the ORM
+// are implied by the kind; this block places and owns the generated
+// projection view migrations.
+type SQLOutputConfig struct {
+	// MigrationsDir is where the projection view migrations are written,
+	// relative to the service directory. Empty keeps them under
+	// <out>/sql/<service>/projections/migrations.
+	MigrationsDir string `json:"migrationsDir,omitempty"`
+
+	// ViewOwner is the Postgres role the migrations create the views as
+	// (SET ROLE around the view DDL). Empty creates them as the runner.
+	ViewOwner string `json:"viewOwner,omitempty"`
+}
+
 // API server language and protocol values.
 const (
 	APILanguageGo   = "GO"
@@ -63,6 +78,9 @@ type Outputs struct {
 
 	// SDK holds per-language client SDK switches.
 	SDK map[string]TargetOutputConfig `json:"sdk,omitempty"`
+
+	// SQL configures the DB kind's sql output.
+	SQL *SQLOutputConfig `json:"sql,omitempty"`
 
 	// Raw holds every key of the block verbatim so extension generators can
 	// decode their own section with DecodeOutput.
@@ -108,6 +126,18 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 		}
 	}
 
+	// outputs.sql is read strictly: a misspelt key would otherwise leave
+	// the migrations in the output root or the views owned by the runner
+	// without a word.
+	if section, ok := outputs.Raw["sql"]; ok {
+		dec := json.NewDecoder(bytes.NewReader(section))
+		dec.DisallowUnknownFields()
+		var sql SQLOutputConfig
+		if err := dec.Decode(&sql); err != nil {
+			return nil, fmt.Errorf("outputs.sql: %w", err)
+		}
+	}
+
 	outputs.applyAPIDefaults()
 
 	return outputs, nil
@@ -149,6 +179,23 @@ func (o *Outputs) TypesEnabled(lang string) bool {
 // SDKEnabled reports whether the client SDK for lang is enabled.
 func (o *Outputs) SDKEnabled(lang string) bool {
 	return o != nil && o.SDK[lang].Enabled
+}
+
+// SQLMigrationsDir returns outputs.sql.migrationsDir, relative to the
+// service directory ("" when unset).
+func (o *Outputs) SQLMigrationsDir() string {
+	if o == nil || o.SQL == nil {
+		return ""
+	}
+	return o.SQL.MigrationsDir
+}
+
+// SQLViewOwner returns outputs.sql.viewOwner ("" when unset).
+func (o *Outputs) SQLViewOwner() string {
+	if o == nil || o.SQL == nil {
+		return ""
+	}
+	return o.SQL.ViewOwner
 }
 
 // APIEnabled reports whether the REST API server output is enabled.

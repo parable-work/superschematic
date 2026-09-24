@@ -15,6 +15,10 @@ rust_crate_prefix = "acme-"
 
 package_author = "acme"
 
+# The namespace of the metadata keys in the Arrow schemas generated for
+# projection views: acme.scalar.canonical_name, acme.projection.settings.
+metadata_key_prefix = "acme."
+
 # The auth provider the api generator renders with. "apikey" is registered
 # by the acme extension (ext/auth); the core-only binary does not know it
 # and refuses this file, which is one of the smoke's assertions.
@@ -62,3 +66,7 @@ copy = "schemas/deps.json"
 # the keys it knows and rejects the rest.
 [extension.acme]
 region = "eu"
+# The setting every projection view must bind in its first where rule
+# (ext/projection_policy.go). The core requires no rule on a view; this is
+# acme's policy, registered as a check on the DB kind.
+projection_scope_setting = "acme.shop_id"

@@ -211,7 +211,7 @@ func roleNames() []string {
 	return []string{
 		string(ir.RoleDBTable), string(ir.RoleAPIView), string(ir.RoleAPIInput),
 		string(ir.RoleEmbeddedStruct), string(ir.RoleAPIOperationSet),
-		string(ir.RoleTrait),
+		string(ir.RoleTrait), string(ir.RoleProjection),
 	}
 }
 
