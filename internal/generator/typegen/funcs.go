@@ -52,9 +52,12 @@ func isZeroListMinimum(validation codegen.ValidationRule) bool {
 }
 
 // validationStringExpr returns the Go expression that yields the string form
-// of a field value for length/pattern validation.
+// of a field value for length/pattern validation. A UUID or duration scalar
+// is not string-backed (Temporal.Duration is an int64 time.Duration), so a
+// string conversion would yield a single rune; it formats through String.
 func validationStringExpr(field FieldInfo, valueVar string) string {
-	if field.IsScalar && field.ScalarInfo != nil && field.ScalarInfo.Traits.IsUUIDLike {
+	if field.IsScalar && field.ScalarInfo != nil &&
+		(field.ScalarInfo.Traits.IsUUIDLike || field.ScalarInfo.Traits.IsDurationLike) {
 		return valueVar + ".String()"
 	}
 	return "string(" + valueVar + ")"
