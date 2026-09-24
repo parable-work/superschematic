@@ -320,6 +320,17 @@ of a generated artifact is always listed here with the bump it requires.
   arrays of arrays yet", and `apigen.Param` and `apigen.EndpointInfo`
   carry `IsArrayOfArrays` / `OutputIsArrayOfArrays` for the SDK
   generators. Minor.
+- Arrays of arrays in the Go API and the tool schemas: the api generator
+  and `apigen.TypeOpenAPISchema` render `T[][]` as items of items, with
+  element constraints on the inner items and `minItems`/`maxItems` on the
+  outer array; the Go routes decode a `T[][]` body argument as `[][]T`,
+  refuse a null inner list at `name[i]`, validate each element at
+  `name[i][j]` and send a nil inner list of a `T[][]` response as `[]`.
+  `toolsutil` renders `T[][]` input fields, body arguments
+  (`ToolScalarArg.IsArray`, `IsArrayOfArrays`) and responses
+  (`BuildReturnSchemaAtDepth`). A list argument is no longer taken as a
+  path parameter or as the operation's input type, and a `T[]` body
+  argument is an array in the OpenAPI request body. Minor.
 
 ### Changed
 
