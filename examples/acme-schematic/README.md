@@ -595,10 +595,14 @@ extension.
 command. The acme file sets `go_module_root`, `npm_scope`,
 `python_types_module_prefix`, `python_sdk_module_prefix`,
 `python_sdk_module_suffix`, `rust_crate_prefix`, `package_author`,
-`metadata_key_prefix`, `auth_provider`, `authoring_packages`, the `[paths]`
-and `[deps]` tables and `[extension.acme]`. `[deps] copy` makes `build-all`
-also write the dependency graph of the generated packages to
-`schemas/deps.json`, which is committed; each package in it names the
-service that produced it, and the smoke fails when the committed copy is
-stale. A key left out keeps the default from the naming file
-at the repository root; the docs site's naming reference lists every key.
+`metadata_key_prefix`, `scalar_jsdoc_tag`, `auth_provider`,
+`authoring_packages`, the `[paths]` and `[deps]` tables and
+`[extension.acme]`. `[deps] copy` makes `build-all` also write the
+dependency graph of the generated packages to `schemas/deps.json`, which is
+committed; each package in it names the service that produced it, and the
+smoke fails when the committed copy is stale. `scalar_jsdoc_tag = "acmeScalar"`
+puts `/** @acmeScalar Contact.Email */` above the `email` field of the
+generated `User` interface, and above every other scalar-typed field; the
+smoke checks the line's position and that a naming file without the key
+writes none. A key left out keeps the default from the naming file at the
+repository root; the docs site's naming reference lists every key.

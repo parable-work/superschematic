@@ -335,3 +335,35 @@ Rollout: the IR and the loaders land first. Until a generator renders
 instead of emitting `T[]`. The change that teaches a generator nested
 lists removes its own call and adds its output for the
 `fixture-nested-arrays` services; the package goes when no call remains.
+
+## D13. The scalar JSDoc tag is a naming key, unset by default
+
+The TypeScript types generator can write a JSDoc line above every
+scalar-typed field that names the field's canonical scalar
+(`/** @scalar Contact.Email */`). A distribution that built on the source
+tree writes that line under its own tag name, and one of its tools reads
+the tag from the compiled declaration files. The line, its position and
+its spelling are part of that distribution's output.
+
+- The tag name is the naming key `scalar_jsdoc_tag`. It is a name that
+  appears in generated output, like an npm scope, not a rule over
+  schemas. D10 keeps a distribution's policy out of the core; its status
+  paragraph already makes `metadata_key_prefix` a naming key on the same
+  ground. The tag follows it: names go in the naming file, rules in hooks.
+- The key has no default. Unset, the core writes no tag line. The core
+  has no reader of the tag, so a default would add a line above every
+  scalar field of every generated types package for no consumer, and
+  would change every TypeScript golden here and in every consumer. An
+  unset default is also the only way to turn the line off: every other
+  string key fills an empty value from its default.
+- The position and the form are fixed. The line comes after the field's
+  doc line, directly above the field, indented two spaces:
+  `/** @<tag> <Canonical.Name> */`. A naming file that sets the key to the
+  source tree's tag name reproduces its `types.ts` byte for byte. That
+  was checked against the source tree's three TypeScript types goldens.
+- The value is an identifier (letters, digits and `_`, not starting with
+  a digit) without the `@`. Anything else fails the load, so the tag
+  cannot break the comment it sits in.
+
+The key name and the unset default are reversible until the first
+release.

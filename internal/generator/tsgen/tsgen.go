@@ -170,7 +170,8 @@ type ModuleOutput struct {
 	// via SetScalarLibSpec.
 	ScalarLibSpec string
 
-	// Naming supplies the scalar package name the templates import from.
+	// Naming supplies the scalar package name the templates import from
+	// and the scalar JSDoc tag types.ts writes above scalar fields.
 	Naming naming.Naming
 }
 

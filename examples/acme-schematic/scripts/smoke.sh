@@ -30,7 +30,10 @@
 #      kinds named, and rejects the naming file that selects apikey;
 #  10. the core-only binary builds shop-db and shop-api with the session
 #      provider, both ORM stores (Session and User) are generated, and the
-#      result compiles (the regression the example found);
+#      result compiles (the regression the example found); the TypeScript
+#      types write acme's scalar_jsdoc_tag directly above every scalar
+#      field, and a naming file without the key writes no tag line and
+#      otherwise the same file;
 #  11. `build --with-deps shop-api` builds shop-db (its authDb) then shop-api
 #      through the acme registry, runs the acme generator on both, and
 #      builds nothing outside that closure;
@@ -197,6 +200,20 @@ grep -q 'scalars.ParseUUID(id)' "$OUT/session-dist/api/shop-api/middleware.go"
 grep -q 'NewSessionStore' "$OUT/session-dist/api/shop-api/middleware.go"
 grep -q 'NewPrincipalStore' "$OUT/session-dist/api/shop-api/middleware.go"
 go_module_compiles "$OUT/session-dist/api/shop-api"
+
+echo "==> TypeScript types tag every scalar field with acme's scalar_jsdoc_tag"
+TS_TYPES="$DIST/types/typescript/shop-db/types/types.ts"
+# The tag line sits directly above its field and names the canonical scalar.
+awk '/^  \/\*\* @acmeScalar Contact\.Email \*\/$/ { if ((getline field) > 0 && field == "  email: string;") found = 1 }
+  END { exit !found }' "$TS_TYPES"
+awk '/@acmeScalar / { tags++; if ((getline field) <= 0 || field !~ /^  [A-Za-z_$][A-Za-z0-9_$]*\??: /) bad++ }
+  END { exit !(tags > 0 && bad == 0) }' "$TS_TYPES"
+# Without the key the core writes no tag line and nothing else changes.
+grep -q '@acmeScalar ' "$OUT/session-dist/types/typescript/shop-db/types/types.ts"
+grep -v '^scalar_jsdoc_tag = ' "$OUT/session.toml" >"$OUT/untagged.toml"
+"$OUT/superschematic" build "$SCHEMAS/services/shop-db" --naming "$OUT/untagged.toml" --out "$OUT/untagged-dist" >/dev/null
+grep -v '^  /\*\* @acmeScalar ' "$OUT/session-dist/types/typescript/shop-db/types/types.ts" |
+  cmp - "$OUT/untagged-dist/types/typescript/shop-db/types/types.ts"
 
 echo "==> build --with-deps builds shop-api's closure with the acme registry"
 "$OUT/acme-schematic" build --with-deps "$SCHEMAS/services/shop-api" --out "$OUT/deps-dist" | tee "$OUT/with-deps.log"

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -98,6 +99,14 @@ type Naming struct {
 	// <prefix>projection.settings, ...), so the keys land in the namespace
 	// the schemas' readers expect.
 	MetadataKeyPrefix string `toml:"metadata_key_prefix"`
+
+	// ScalarJSDocTag names the JSDoc tag the generated TypeScript types
+	// write above every scalar-typed field, followed by the scalar's
+	// canonical name: "scalar" gives `/** @scalar Contact.Email */`. A tool
+	// that reads the declaration files finds each field's scalar through it.
+	// Empty, the default, writes no tag line; unlike the other keys it has
+	// no fallback, so leaving it out is the way to turn the line off.
+	ScalarJSDocTag string `toml:"scalar_jsdoc_tag"`
 
 	// AuthoringPackages lists the npm packages whose exports the TypeScript
 	// frontend treats as toolchain: decorators and type wrappers must
@@ -565,8 +574,15 @@ func Parse(data []byte, name string) (Naming, error) {
 	if len(unknown) > 0 {
 		return Naming{}, fmt.Errorf("naming: %s: unknown keys: %s", name, strings.Join(unknown, ", "))
 	}
+	if n.ScalarJSDocTag != "" && !jsdocTagRE.MatchString(n.ScalarJSDocTag) {
+		return Naming{}, fmt.Errorf("naming: %s: scalar_jsdoc_tag %q is not a JSDoc tag name: use letters, digits and _, not starting with a digit, without the @", name, n.ScalarJSDocTag)
+	}
 	return n.OrDefault(), nil
 }
+
+// jsdocTagRE is the tag names scalar_jsdoc_tag accepts: an identifier, so
+// the tag parses as one in a JSDoc comment and cannot close the comment.
+var jsdocTagRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 var (
 	activeMu sync.RWMutex

@@ -351,6 +351,14 @@ of a generated artifact is always listed here with the bump it requires.
   arrays of arrays yet", and `apigen.Param` and `apigen.EndpointInfo`
   carry `IsArrayOfArrays` / `OutputIsArrayOfArrays` for the SDK
   generators. Minor.
+- Naming file: `scalar_jsdoc_tag` names a JSDoc tag that the TypeScript
+  types write above every scalar-typed field in `types/types.ts`, followed
+  by the scalar's canonical name (`/** @scalar Contact.Email */`), after
+  the field's doc line. `tsc` keeps it in the declaration files, where a
+  tool can read each field's scalar. The key is unset by default, and then
+  no tag line is written, so existing output does not change. A value that
+  is not an identifier fails the load (D13). `examples/acme-schematic`
+  sets `acmeScalar`. Minor.
 - Arrays of arrays in Python (D12): pygen renders `T[][]` as
   `List[List[T]]` with element errors at `field[i][j]`, and the Python
   schema runtime reads, parses, validates, serializes, masks and merges

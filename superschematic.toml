@@ -39,6 +39,13 @@ meta_schema_url_prefix = "superschematic://"
 # (<prefix>scalar.canonical_name, <prefix>projection.settings, ...).
 metadata_key_prefix = "superschematic."
 
+# The JSDoc tag the generated TypeScript types write above every
+# scalar-typed field, with the scalar's canonical name. Unset by default,
+# which writes no tag line. A distribution whose tools read the tag from
+# the declaration files names it:
+#
+#   scalar_jsdoc_tag = "scalar"    # /** @scalar Contact.Email */
+
 # The auth provider the api generator renders with. The core registers
 # "session"; an extension that registers another provider names it here.
 auth_provider = "session"

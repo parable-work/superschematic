@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -126,6 +127,16 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatalf("scan generated tree: %v", err)
+	}
+
+	// scalar_jsdoc_tag has no default; the fixture's value reaches the
+	// TypeScript types.
+	tsTypes, err := os.ReadFile(filepath.Join(outputRoot, "types/typescript/fixture-db/types/types.ts"))
+	if err != nil {
+		t.Fatalf("read generated types.ts: %v", err)
+	}
+	if !strings.Contains(string(tsTypes), "  /** @"+names.ScalarJSDocTag+" Identity.UUID */\n  id?: string | null;\n") {
+		t.Errorf("types.ts does not carry the fixture's scalar JSDoc tag:\n%s", tsTypes)
 	}
 
 	manifests := []string{
