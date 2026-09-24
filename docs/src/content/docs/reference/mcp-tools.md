@@ -1,6 +1,6 @@
 ---
 title: MCP tools
-description: The @mcp and @icon decorators on operations, the tool documents the SDK generators write from them, and how an extension adds its rules and vendor keys.
+description: The @mcp and @icon decorators on operations, a tool's invocation policy, the tool documents the SDK generators write from them, and how an extension adds its rules, vendor keys and policy.
 sidebar:
   order: 4
 ---
@@ -35,6 +35,19 @@ export class OrderQueries {
     throw new Error("schema declaration only");
   }
 
+  @docs({
+    title: "Cancel an order",
+    description: "Cancels an order that has not shipped.",
+    capability: "orders.cancel",
+    lifecycle: "active",
+    visibility: "public"
+  })
+  @mcp({ handle: "cancel_order", invocationPolicy: "ask" })
+  @rest(HttpMethod.POST, "orders/{id}/cancel")
+  cancelOrder(id: Identity.UUID): Order {
+    throw new Error("schema declaration only");
+  }
+
   @mcp({ hidden: true, reason: "Staff console only." })
   @rest(HttpMethod.DELETE, "orders/{id}")
   deleteOrder(id: Identity.UUID): Order {
@@ -43,14 +56,15 @@ export class OrderQueries {
 }
 ```
 
-A visible tool takes `{ handle, _meta? }`; a hidden operation takes
-`{ hidden: true, reason }`.
+A visible tool takes `{ handle, invocationPolicy?, _meta? }`; a hidden
+operation takes `{ hidden: true, reason }`.
 
 | Key | Visible | Hidden | Rule |
 | --- | --- | --- | --- |
 | `handle` | required | not allowed | the tool's wire identifier: lowercase `snake_case` starting with a letter, at most 48 characters |
 | `hidden` | `false` or absent | `true` | |
 | `reason` | not allowed | required | why the operation is not a tool; non-blank, no surrounding whitespace |
+| `invocationPolicy` | optional | not allowed | `"auto"` (the default) or `"ask"`; see [the invocation policy](#the-invocation-policy) |
 | `_meta` | optional | not allowed | an object copied into the tool's MCP `_meta` as written |
 
 A visible tool must also declare `@docs`: the tool's display name is the
@@ -63,11 +77,49 @@ src/notes.schema.ts:16:9: invalid @mcp config: handle "getNote" must be lowercas
 ```
 
 The record is `FieldDef.mcp` (`ir.OperationMCP`) in the IR: `handle`,
-`hidden` (always written), `hiddenReason` and `_meta`. The JSON and YAML
-forms write the same object under the operation's `mcp` key and the loader
-applies the same rules to them. `mcp` on a data field is an error. The
-record's `name`, `description` and `icon` are generated and cannot be
-declared.
+`hidden` (always written), `hiddenReason`, the invocation policy and
+`_meta`, in that order. The JSON and YAML forms write the same object
+under the operation's `mcp` key and the loader applies the same rules to
+them. `mcp` on a data field is an error. The record's `name`,
+`description` and `icon` are generated and cannot be declared.
+
+## The invocation policy
+
+A visible tool's invocation policy says whether an MCP client should run
+the tool as soon as a model calls it (`"auto"`) or ask the person first
+(`"ask"`). It is a default for the client: a client or its user may
+override it. The core's key is `invocationPolicy`; a visible tool that
+omits it gets `"auto"` when it loads, from any authoring form, so the IR
+always carries it. A hidden operation has none.
+
+| Where | Position | Hidden or unclassified operation |
+| --- | --- | --- |
+| IR and the data forms, `mcp` record | after `hiddenReason` (after `hidden` when there is no reason), before `_meta` | absent |
+| `tools/schema.json`, `mcp` object | after `description`, before `_meta` | absent |
+| `tools/mcp-audit.json`, each record | after `hiddenReason`, before `requiresAuth` | `""` |
+| `tools/index.ts`, `ToolDefinition.mcp` | member `invocationPolicy?: 'auto' \| 'ask';` after `description?: string;` | |
+| `tools/index.ts`, `toolDefinitions` | `invocationPolicy: 'auto',` after `description` | absent |
+
+An extension replaces the key, the values and the default with
+`Registry.RegisterToolInvocationPolicy` (see
+[Rules an extension adds](#rules-an-extension-adds)). Everything above
+then uses its key at the same positions, and `tools/index.ts` types the
+member as the union of its values in the order it registered them.
+
+In the IR the policy is `OperationMCP.Invocation`, an `ir.MCPInvocation`
+that carries the key with the value, so the IR encodes and decodes
+without a registry. Its JSON and YAML encoders write the key in place; the
+decoders take the one key of an `mcp` record that is not the record's own
+as the policy.
+
+A value outside the policy fails the load at the decorator:
+
+```
+src/orders.schema.ts:24:9: invalid @mcp config: invocationPolicy "always" is not one of "auto", "ask"
+```
+
+The data forms' JSON Schema lists the key with its values as an enum, and
+a policy on a hidden operation fails the load in every form.
 
 ## `@icon` on an operation
 
@@ -81,9 +133,12 @@ visible tool without one has no icon.
 
 When the `api` generator builds an API it resolves each operation's record:
 a visible tool gets `name` from the `@docs` title, `description` from the
-`@docs` description and `icon: { name }` from `@icon`; a hidden record keeps
-its reason. The schema's own record is not changed. It then fails the build
-when two visible tools of the API:
+`@docs` description and `icon: { name }` from `@icon`, and keeps its
+invocation policy, or gets the policy's default when IR that did not come
+through the loader has none; a hidden record keeps its reason. The schema's
+own record is not changed. A policy under another key, or with a value the
+policy does not allow, fails the build, also when a tool hook left it. It
+then fails the build when two visible tools of the API:
 
 - declare the same handle:
   `apigen: MCP handle collision: "get_order" is declared by both order.listOrders and order.getOrder`;
@@ -127,6 +182,7 @@ One entry per operation, with these keys in this order: `name`
   "name": "Get an order",
   "handle": "get_order",
   "description": "Returns one order by its identifier.",
+  "invocationPolicy": "auto",
   "_meta": {"superschematic/operation-guidance": {...}, "ui": {"resourceUri": "ui://orders/detail"}},
   "icon": {
     "name": "receipt"
@@ -135,7 +191,8 @@ One entry per operation, with these keys in this order: `name`
 ```
 
 - `mcp` is `{ hidden, hiddenReason }` for a hidden operation. A visible
-  tool's `_meta` is the declared `_meta` plus its `@docs` guidance under
+  tool carries its invocation policy after `description`. Its `_meta` is
+  the declared `_meta` plus its `@docs` guidance under
   `superschematic/operation-guidance`; `icon` is present when the
   operation has `@icon`, with `family` and `style` when a tool hook set
   them.
@@ -181,7 +238,7 @@ own copy of the field list.
       "method": "GET", "path": "/api/orders/{id}", "handle": "get_order",
       "title": "Get an order", "description": "Returns one order by its identifier.",
       "icon": {"name": "receipt"}, "hidden": false, "hiddenReason": "",
-      "requiresAuth": false, "requiredPermissions": [], "capability": "orders.get",
+      "invocationPolicy": "auto", "requiresAuth": false, "requiredPermissions": [], "capability": "orders.get",
       "lifecycle": "active", "audience": "shoppers", "guidance": {...},
       "replay": {...}, "inputSchemaDigest": "sha256:...", "bindingStatus": "ready"
     }
@@ -191,8 +248,8 @@ own copy of the field list.
 
 (Shown compact; the file writes one key per line.) Every operation has a
 record. An operation without `@mcp` reads `hidden: true` with an empty
-reason and `icon: null`, so a reviewer sees every route and why it is or
-is not a tool.
+reason, an empty invocation policy and `icon: null`, so a reviewer sees
+every route and why it is or is not a tool.
 
 ### The replay contract
 
@@ -236,7 +293,48 @@ that adds or removes tools fails the build, as does a hook error, which
 names the hook. The `ir` wire types spell the default keys: a distribution
 that renames them decodes its documents with its own types.
 
-`examples/acme-schematic/ext/mcp.go` does both: it requires `@mcp` on every
-operation of acme's shop API, and its hook writes `x-acme-scalar`,
+A distribution's own invocation policy is
+`Registry.RegisterToolInvocationPolicy` with a `ToolInvocationPolicy`:
+
+| Field | Core default | Rule |
+| --- | --- | --- |
+| `Extension` | | the registering extension; required |
+| `Key` | `invocationPolicy` | a letter, then letters, digits or underscores; not a key `@mcp` already uses (`handle`, `hidden`, `hiddenReason`, `reason`, `_meta`, `name`, `description`, `icon`) |
+| `Values` | `auto`, `ask` | at least one; lowercase letters, digits, `_` and `-`, starting with a letter; each once; in the order `tools/index.ts` lists them |
+| `Default` | `auto` | one of `Values` |
+
+A registry holds one policy: a second registration fails assembly and
+names both extensions. With it registered, `@mcp` and the data forms take
+its key and not the core's, a visible tool without the key gets its
+default, and the IR and every tool document write its key where the core
+writes `invocationPolicy`. The position of every line is the same, so a
+distribution that already writes a policy under its own key keeps its
+bytes. A tool hook may change a tool's value to another value of the
+policy.
+
+The TypeScript loader type-checks schema files, so the key must
+type-check too. `@superschematic/api` exports `MCPToolOptions`, the
+options of a visible tool's `@mcp` besides its handle and `_meta`, for
+module augmentation from the extension's authoring package:
+
+```ts
+import "@superschematic/api";
+
+declare module "@superschematic/api" {
+  interface MCPToolOptions {
+    readonly confirm?: "never" | "always";
+  }
+}
+```
+
+A schema whose program does not include the augmentation fails the load
+with `'confirm' does not exist in type 'MCPConfig'`. The core key stays in
+the type: under an extension's policy it type-checks and fails the load
+as an unknown key.
+
+`examples/acme-schematic/ext/mcp.go` does all three: it requires `@mcp` on
+every operation of acme's shop API; its hook writes `x-acme-scalar`,
 `acme/operation-guidance` and `x-acme-arguments: 1` and gives every tool
-icon acme's family and style.
+icon acme's family and style; and it registers `confirm`, `"never"` or
+`"always"`, `"never"` by default, with the augmentation in
+`packages/schema/src/mcp.ts`.

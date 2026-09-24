@@ -211,7 +211,26 @@ func DecodeWith(data []byte, source string, reg *registry.Registry) (*Document, 
 	if err := canonicalizeDocument(doc); err != nil {
 		return nil, fmt.Errorf("%s: %w", source, err)
 	}
+	fillMCPInvocationDefaults(doc, reg.ToolInvocationPolicy())
 	return doc, nil
+}
+
+// fillMCPInvocationDefaults gives every visible @mcp record that omits the
+// invocation policy the registry's default, as the TypeScript frontend's
+// @mcp does, so the IR is the same from every form. The JSON Schema has
+// already held the key and the value to the registry's policy.
+func fillMCPInvocationDefaults(doc *Document, policy registry.ToolInvocationPolicy) {
+	for _, set := range doc.OperationSets {
+		if set == nil {
+			continue
+		}
+		for _, op := range set.Operations {
+			if op == nil || op.MCP == nil || op.MCP.Hidden || !op.MCP.Invocation.IsZero() {
+				continue
+			}
+			op.MCP.Invocation = ir.MCPInvocation{Key: policy.Key, Value: policy.Default}
+		}
+	}
 }
 
 // decodeForm strict-decodes a validated payload into the Document for its

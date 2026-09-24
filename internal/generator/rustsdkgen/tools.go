@@ -59,15 +59,16 @@ type JSONSchemaReturn = toolsutil.JSONSchemaReturn
 
 // ToolsOutput contains all generated tool definitions.
 type ToolsOutput struct {
-	SchemaName    string           // Schema name (e.g. "orders-api")
-	APIID         string           // API identifier for the audit document
-	SDKStructName string           // SDK struct name (e.g. "OrdersApiSdk")
-	TypesCrate    string           // Rust types crate
-	Keys          apigen.ToolKeys  // vendor keys the documents are written with
-	Tools         []ToolDefinition // All tool definitions
-	VisibleTools  []ToolDefinition // Tools with a visible @mcp record: the provider tool lists
-	Namespaces    []ToolsNamespace // Tools grouped by namespace
-	Timestamp     string           // Generation timestamp
+	SchemaName    string                      // Schema name (e.g. "orders-api")
+	APIID         string                      // API identifier for the audit document
+	SDKStructName string                      // SDK struct name (e.g. "OrdersApiSdk")
+	TypesCrate    string                      // Rust types crate
+	Keys          apigen.ToolKeys             // vendor keys the documents are written with
+	Invocation    apigen.ToolInvocationPolicy // the key and values the documents write a tool's invocation policy with
+	Tools         []ToolDefinition            // All tool definitions
+	VisibleTools  []ToolDefinition            // Tools with a visible @mcp record: the provider tool lists
+	Namespaces    []ToolsNamespace            // Tools grouped by namespace
+	Timestamp     string                      // Generation timestamp
 }
 
 // ToolsNamespace groups tools by namespace.
@@ -90,6 +91,7 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 		SDKStructName: sdkOutput.SDKStructName,
 		TypesCrate:    sdkOutput.TypesCrate,
 		Keys:          apiOutput.ToolKeys,
+		Invocation:    apiOutput.ToolInvocation.OrDefault(),
 		Tools:         []ToolDefinition{},
 		VisibleTools:  []ToolDefinition{},
 		Namespaces:    []ToolsNamespace{},

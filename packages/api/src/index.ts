@@ -29,6 +29,8 @@ export type {
   DocsVisibility,
   HmacVerifiedConfig,
   MCPConfig,
+  MCPInvocationPolicy,
+  MCPToolOptions,
   RateLimitConfig,
   TimeoutConfig
 } from "./decorators";

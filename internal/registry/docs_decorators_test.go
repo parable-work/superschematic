@@ -269,7 +269,9 @@ func TestMCPDecoratorWritesTheRecord(t *testing.T) {
 	if err := applyOperation(t, "mcp", op, map[string]any{"handle": "get_order", "_meta": meta}); err != nil {
 		t.Fatal(err)
 	}
-	if want := (&ir.OperationMCP{Handle: "get_order", Meta: meta}); !reflect.DeepEqual(op.MCP, want) {
+	// A visible tool without a policy gets the core default.
+	auto := ir.MCPInvocation{Key: "invocationPolicy", Value: "auto"}
+	if want := (&ir.OperationMCP{Handle: "get_order", Invocation: auto, Meta: meta}); !reflect.DeepEqual(op.MCP, want) {
 		t.Fatalf("MCP = %+v, want %+v", op.MCP, want)
 	}
 	err := applyOperation(t, "mcp", op, map[string]any{"handle": "get_order"})
@@ -277,6 +279,15 @@ func TestMCPDecoratorWritesTheRecord(t *testing.T) {
 		t.Fatalf("second @mcp: %v", err)
 	}
 
+	ask := &ir.FieldDef{Name: "deleteOrder"}
+	if err := applyOperation(t, "mcp", ask, map[string]any{"handle": "delete_order", "invocationPolicy": "ask"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := (ir.MCPInvocation{Key: "invocationPolicy", Value: "ask"}); ask.MCP.Invocation != want {
+		t.Fatalf("Invocation = %+v, want %+v", ask.MCP.Invocation, want)
+	}
+
+	// A hidden operation has no policy.
 	hidden := &ir.FieldDef{Name: "uploadReceipt"}
 	if err := applyOperation(t, "mcp", hidden, map[string]any{"hidden": true, "reason": "Browser upload only."}); err != nil {
 		t.Fatal(err)
@@ -300,6 +311,9 @@ func TestMCPDecoratorRejectsBadConfig(t *testing.T) {
 		{name: "meta not an object", args: []any{map[string]any{"handle": "get_order", "_meta": "x"}}, want: "@mcp _meta must be an object literal"},
 		{name: "bad handle", args: []any{map[string]any{"handle": "getOrder"}}, want: "invalid @mcp config: handle \"getOrder\" must be lowercase snake_case"},
 		{name: "hidden without reason", args: []any{map[string]any{"hidden": true}}, want: "invalid @mcp config: reason must be non-empty"},
+		{name: "unknown policy value", args: []any{map[string]any{"handle": "get_order", "invocationPolicy": "always"}}, want: `invalid @mcp config: invocationPolicy "always" is not one of "auto", "ask"`},
+		{name: "policy not a string", args: []any{map[string]any{"handle": "get_order", "invocationPolicy": false}}, want: "@mcp invocationPolicy must be a string literal"},
+		{name: "policy on a hidden operation", args: []any{map[string]any{"hidden": true, "reason": "x", "invocationPolicy": "ask"}}, want: "invalid @mcp config: a hidden operation must not declare invocationPolicy"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			op := &ir.FieldDef{Name: "getOrder"}

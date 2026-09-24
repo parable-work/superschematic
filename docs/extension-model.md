@@ -48,6 +48,7 @@ links is active for every command it runs.
 | Subcommand | `cli.CommandProvider` on the extension value | 3.9 |
 | Scalar catalog | `RegisterScalars(owner, ScalarCatalog)` | 3.10 |
 | Configuration | `[extension.<name>]` in `superschematic.toml` | 3.11 |
+| MCP tool invocation policy | `RegisterToolInvocationPolicy(ToolInvocationPolicy)` | 3.12 |
 
 `Name()` is the key of everything the extension owns: the `Extension` field
 of each spec it registers, the `extensions.<name>` slot on IR nodes
@@ -167,6 +168,7 @@ Each `Register*` method checks its own spec:
 | `RegisterAuthProvider` | a nil provider, an empty name, a duplicate name |
 | `RegisterBuildAllHook` | an empty name, no `Run`, a duplicate name |
 | `RegisterScalars` | an empty owner, a nil catalog, a second catalog |
+| `RegisterToolInvocationPolicy` | no `Extension`, a key, value list or default that fails `Validate`, a second policy |
 
 Every one of them fails after `Finalize`.
 
@@ -430,6 +432,49 @@ Three core keys exist for extensions: `auth_provider` selects a provider,
 frontend accepts, and `[package_aliases]` maps a distribution's
 republished package names onto the core packages that declare the symbols.
 
+### 3.12 Tool invocation policy
+
+A visible MCP tool's `@mcp` record carries an invocation policy: whether a
+client runs the tool when a model calls it or asks the person first. The
+policy is a core field whose key, values and default a distribution may
+spell its own way, so a registry holds one `ToolInvocationPolicy`
+(declared in `apigen`, aliased in `registry`):
+
+| Field | Meaning |
+| --- | --- |
+| `Extension` | the registering extension; empty only for the core's |
+| `Key` | the key inside `@mcp({...})`, in the data forms' `mcp` record, in the IR and in every tool document |
+| `Values` | the allowed values, in the order `tools/index.ts` types them |
+| `Default` | the value a visible tool gets when `@mcp` omits `Key` |
+
+The core's is `invocationPolicy`, `auto` or `ask`, `auto` by default.
+`RegisterToolInvocationPolicy` replaces it. A second registration is an
+error that names both extensions, so two extensions that disagree fail
+assembly. `Registry.ToolInvocationPolicy()` returns the one in force.
+
+The policy is read in four places, all through the registry:
+
+- The core `@mcp` decorator's `Apply` accepts `Key` with a value from
+  `Values`, fills in `Default` for a visible tool, and names the build's
+  key when an author uses the core key under another policy.
+- The data-form JSON Schema adds `Key` to `OperationMCP` with `Values` as
+  its enum (section 5), and the readers fill in `Default`.
+- The `api` generator resolves every visible tool against it again, after
+  the tool hooks, for IR that did not come through the loader.
+- The SDK generators write `Key` at fixed positions and type it in
+  `tools/index.ts` as the union of `Values`.
+
+In the IR the policy is `OperationMCP.Invocation`, an `ir.MCPInvocation`
+holding the key and the value, which `OperationMCP`'s JSON and YAML
+encoders write after `hiddenReason`. The IR needs no registry to encode or
+decode it; the loader holds it to the registry's policy.
+
+The TypeScript half is `MCPToolOptions` in `@superschematic/api`: the
+options a visible tool's `@mcp` takes besides `handle` and `_meta`. An
+extension's authoring package adds its key by module augmentation. The
+TypeScript frontend type-checks schema files, so a schema whose program
+does not include the augmentation fails the load at the key.
+
 ## 4. The open IR
 
 ### 4.1 Slots
@@ -504,6 +549,8 @@ Schema, which `schemafile.DefinitionFor(reg)` builds per registry:
    extension's value is an open object the extension owns.
 4. Close `documents` on the document to the registered document names, each
    with its `DocumentSpec.Schema`.
+5. Add the registry's tool invocation policy key to `OperationMCP`, with
+   its values as the enum (section 3.12).
 
 With only the core registered, `extensions` and `documents` admit no key.
 The compiled definition is cached per registry, keyed by a weak pointer and
@@ -738,6 +785,7 @@ is given.
 | Generators | `types`, `sql`, `orm`, `api`, `sdks`, `envConfig` (section 3.6) |
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
+| Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.12) |
 | Documents | none |
 | Build-all hooks | none |
 | Commands | `build`, `build-all`, `json-schema`, `format` |
@@ -763,6 +811,7 @@ surface:
 | Auth provider | `apikey` | `ext/auth/` |
 | Command | `describe`, through `cli.CommandProvider` | `ext/command.go` |
 | Configuration | `[extension.acme] region` | `ext/extension.go`, `schemas/superschematic.toml` |
+| Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Binary | `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
 It does not register a build-all hook or a scalar catalog; the tests in
@@ -824,8 +873,8 @@ a candidate for a change with its own test.
    register, so a policy check over core-kind schemas has no seam. D10
    records how the incoming ports should add one.
 5. `format` reads schema files with the core registry only, not the
-   binary's extensions. A file that uses an extension kind, decorator or
-   document does not convert.
+   binary's extensions. A file that uses an extension kind, decorator,
+   document or tool invocation policy key does not convert.
 
 ## 12. References
 
@@ -843,6 +892,7 @@ a candidate for a change with its own test.
 | `internal/loader/schemafile/schema.go`, `slots.go` | the data-form JSON Schema composition and slot checks |
 | `internal/loader/verify/` | import rules and `KindSpec.Verify` |
 | `ir/extensions.go` | the codecs |
+| `ir/mcp_invocation.go`, `internal/generator/apigen/tool_invocation.go` | the IR's invocation policy and its encoding, `ToolInvocationPolicy` |
 | `cli/cli.go` | `cli.New`, `CommandProvider` |
 | `loader/loader.go` | the public loader package |
 | `examples/acme-schematic/` | the worked example and its acceptance scripts |

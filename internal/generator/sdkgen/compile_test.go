@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/toolsutil/toolstest"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/testpaths"
@@ -139,8 +140,8 @@ func typecheckTools(t *testing.T, bunPath, sdkDir string) {
 
 // TestGeneratedMCPToolsCompile type-checks the fixture-mcp SDK, whose
 // tools/index.ts carries visible, hidden and unclassified MCP records and
-// replay contracts, as the core writes it and as a tool hook with its own
-// keys leaves it.
+// replay contracts, as the core writes it, as a tool hook with its own
+// keys leaves it, and under an extension's invocation policy.
 func TestGeneratedMCPToolsCompile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -152,11 +153,14 @@ func TestGeneratedMCPToolsCompile(t *testing.T) {
 	paths := testpaths.Local(t)
 
 	for _, tc := range []struct {
-		name  string
-		hooks []apigen.ToolHook
+		name       string
+		hooks      []apigen.ToolHook
+		invocation apigen.ToolInvocationPolicy
+		rewrite    func(*testing.T, *ir.Schema)
 	}{
 		{name: "core keys"},
 		{name: "hook keys", hooks: []apigen.ToolHook{acmeStyleHook}},
+		{name: "extension invocation policy", invocation: toolstest.ReviewPolicy, rewrite: toolstest.UseReviewPolicy},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tempRoot, err := filepath.EvalSymlinks(t.TempDir())
@@ -192,7 +196,7 @@ func TestGeneratedMCPToolsCompile(t *testing.T) {
 				t.Fatalf("types package fixture-mcp does not type-check: %v\n%s", err, out)
 			}
 
-			apiOutput, parseable := loadMCPFixture(t, tc.hooks...)
+			apiOutput, parseable := loadMCPFixtureWith(t, tc.invocation, tc.rewrite, tc.hooks...)
 			sdkOutput, err := Generate(apiOutput, parseable, mcpClock)
 			if err != nil {
 				t.Fatalf("Generate: %v", err)

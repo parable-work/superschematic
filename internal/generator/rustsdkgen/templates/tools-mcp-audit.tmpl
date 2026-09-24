@@ -24,6 +24,7 @@
       }{{else}}null{{end}},
       "hidden": {{if $tool.MCP}}{{$tool.MCP.Hidden}}{{else}}true{{end}},
       "hiddenReason": "{{if and $tool.MCP $tool.MCP.Hidden}}{{escapeJSON $tool.MCP.HiddenReason}}{{end}}",
+      "{{$.Invocation.Key}}": "{{if and $tool.MCP (not $tool.MCP.Hidden)}}{{escapeJSON $tool.MCP.Invocation.Value}}{{end}}",
       "requiresAuth": {{$tool.RequiresAuth}},
       "requiredPermissions": [{{range $j, $permission := $tool.RequiredPerms}}{{if $j}}, {{end}}"{{escapeJSON $permission}}"{{end}}],
       "capability": "{{$tool.Capability}}",

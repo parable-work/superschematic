@@ -75,7 +75,8 @@ func TestTSWriterRoundTripsOperationMCP(t *testing.T) {
 	for _, want := range []string{
 		`import { HttpMethod, QueryParam, docs as apiDocs, icon as apiIcon, mcp, rest } from "@superschematic/api";`,
 		`@apiIcon("receipt")`,
-		`@mcp({ handle: "get_order", _meta: { ui: { resourceUri: "ui://orders/detail" } } })`,
+		`@mcp({ handle: "get_order", invocationPolicy: "auto", _meta: { ui: { resourceUri: "ui://orders/detail" } } })`,
+		`@mcp({ handle: "update_order", invocationPolicy: "ask" })`,
 		`replayMode: "idempotent", idempotencyKeyPointers: ["/requestId"] })`,
 		`replayMode: "compare_and_swap", expectedRevisionPointers: ["/revision"] })`,
 		`@mcp({ hidden: true, reason: "Staff console only." })`,

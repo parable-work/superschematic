@@ -69,18 +69,47 @@ export type DocsError = {
 };
 
 /**
+ * The core's invocation policy values: "auto" (the default) lets an MCP
+ * client run the tool when a model calls it; "ask" has the client ask the
+ * person first.
+ */
+export type MCPInvocationPolicy = "auto" | "ask";
+
+/**
+ * The options a visible tool's @mcp takes besides its handle and _meta. The
+ * core declares its invocation policy key here.
+ *
+ * An extension that registers its own invocation policy
+ * (Registry.RegisterToolInvocationPolicy) adds its key from its authoring
+ * package by module augmentation:
+ *
+ *     declare module "@superschematic/api" {
+ *       interface MCPToolOptions {
+ *         readonly review?: "never" | "always";
+ *       }
+ *     }
+ *
+ * The registry decides which key a build accepts. With an extension's policy
+ * registered the core key still type-checks and fails the load.
+ */
+export interface MCPToolOptions {
+  /** Whether an MCP client runs the tool when a model calls it ("auto", the default) or asks the person first ("ask"). */
+  readonly invocationPolicy?: MCPInvocationPolicy;
+}
+
+/**
  * An operation's MCP classification. A visible tool takes its title and
  * description from @docs and its icon from @icon; a hidden operation says
  * why it is not a tool.
  */
 export type MCPConfig =
-  | {
+  | (MCPToolOptions & {
       /** The tool's wire identifier: lowercase snake_case, at most 48 characters, unique in the API. */
       readonly handle: string;
       readonly hidden?: false;
       /** Copied into the tool's MCP _meta object as written. */
       readonly _meta?: Readonly<Record<string, unknown>>;
-    }
+    })
   | {
       readonly hidden: true;
       /** Why the operation is not a tool. */

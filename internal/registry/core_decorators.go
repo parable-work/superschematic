@@ -24,8 +24,10 @@ var indexPurposeName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // walker used to switch on. Each Apply sets the typed IR field the walker's
 // case arm set and returns the same error text for the same bad input. The
 // walker still evaluates arguments and formats diagnostics; nothing about the
-// IR changes.
-func coreDecorators() []DecoratorSpec {
+// IR changes. r supplies what an Apply reads from the assembled registry:
+// @mcp reads its invocation policy when it runs, after every extension has
+// registered.
+func coreDecorators(r *Registry) []DecoratorSpec {
 	var specs []DecoratorSpec
 
 	flag := func(target DecoratorTarget, name string, packages []string, set func(Node)) {
@@ -160,7 +162,7 @@ func coreDecorators() []DecoratorSpec {
 			return nil
 		},
 	})
-	specs = append(specs, docsDecorators()...)
+	specs = append(specs, docsDecorators(r.ToolInvocationPolicy)...)
 	return specs
 }
 

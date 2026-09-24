@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/toolsutil/toolstest"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -21,16 +22,27 @@ var update = flag.Bool("update", false, "rewrite golden files")
 // visible, hidden and unclassified tools and all three replay modes.
 func writeMCPTools(t *testing.T, hooks ...apigen.ToolHook) string {
 	t.Helper()
+	return writeMCPToolsWith(t, apigen.ToolInvocationPolicy{}, nil, hooks...)
+}
+
+// writeMCPToolsWith is writeMCPTools under an invocation policy, with the
+// loaded schema's records rewritten first when rewrite is set.
+func writeMCPToolsWith(t *testing.T, invocation apigen.ToolInvocationPolicy, rewrite func(*testing.T, *ir.Schema), hooks ...apigen.ToolHook) string {
+	t.Helper()
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-mcp"))
 	if err != nil {
 		t.Fatalf("load fixture-mcp: %v", err)
 	}
+	if rewrite != nil {
+		rewrite(t, schema)
+	}
 	apiOutput, err := apigen.Generate(schema, apigen.Options{
-		Provider:    sessionauth.Provider{},
-		SchemaName:  "fixture-mcp",
-		ModulePath:  "example.com/schemas/api/fixture-mcp",
-		TypesModule: "example.com/schemas/types/go/fixture-mcp",
-		ToolHooks:   hooks,
+		Provider:       sessionauth.Provider{},
+		SchemaName:     "fixture-mcp",
+		ModulePath:     "example.com/schemas/api/fixture-mcp",
+		TypesModule:    "example.com/schemas/types/go/fixture-mcp",
+		ToolHooks:      hooks,
+		ToolInvocation: invocation,
 	})
 	if err != nil {
 		t.Fatalf("apigen.Generate: %v", err)
@@ -112,6 +124,30 @@ func TestToolHookReachesTheGoDocuments(t *testing.T) {
 		}
 		if name != "tools/openai.json" && name != "tools/anthropic.json" && !strings.Contains(string(rendered), `"family": "line"`) {
 			t.Errorf("%s lacks the icon family", name)
+		}
+	}
+}
+
+// TestWriteToolsUnderAnExtensionsInvocationPolicy: under an extension's
+// invocation policy the Go tool documents write its key and values where
+// they write the core's, and nothing else changes.
+func TestWriteToolsUnderAnExtensionsInvocationPolicy(t *testing.T) {
+	core := writeMCPTools(t)
+	review := writeMCPToolsWith(t, toolstest.ReviewPolicy, toolstest.UseReviewPolicy)
+	read := func(dir, name string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	for _, name := range []string{"tools/schema.json", "tools/mcp-audit.json"} {
+		toolstest.CompareUnderReviewPolicy(t, name, read(core, name), read(review, name))
+	}
+	for _, name := range []string{"tools/mcp-binding.json", "tools/openai.json", "tools/anthropic.json"} {
+		if read(core, name) != read(review, name) {
+			t.Errorf("%s changed under the review policy", name)
 		}
 	}
 }

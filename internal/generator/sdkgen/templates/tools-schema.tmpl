@@ -18,6 +18,9 @@
         "name": "{{escapeJSON $tool.MCP.Name}}",
         "handle": "{{escapeJSON $tool.MCP.Handle}}",
         "description": "{{escapeJSON $tool.MCP.Description}}"
+{{- with $tool.MCP.Invocation.Value}},
+        "{{$.Invocation.Key}}": "{{escapeJSON .}}"
+{{- end}}
 {{- if $tool.MCP.Meta}},
         "_meta": {{jsonValue $tool.MCP.Meta}}
 {{- end}}

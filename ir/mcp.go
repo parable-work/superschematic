@@ -33,6 +33,12 @@ type OperationMCP struct {
 	// Hidden.
 	HiddenReason string `json:"hiddenReason,omitempty" yaml:"hiddenReason,omitempty"`
 
+	// Invocation is a visible tool's invocation policy, written under its
+	// own key right after hiddenReason (see MCPInvocation). The loader
+	// fills in the registry's default when @mcp omits it; a hidden record
+	// has none.
+	Invocation MCPInvocation `json:"-" yaml:"-"`
+
 	// Meta is copied into the tool's MCP _meta object as written. Only a
 	// visible tool takes it.
 	Meta map[string]any `json:"_meta,omitempty" yaml:"_meta,omitempty"`
@@ -57,8 +63,9 @@ type MCPIcon struct {
 
 // ValidateOperationMCP checks the shape of an authored @mcp record. nil is
 // valid: @mcp is optional. A visible record needs a handle and no reason; a
-// hidden one needs a reason and no handle or _meta. The generated fields
-// must be empty.
+// hidden one needs a reason and no handle, _meta or invocation policy. The
+// generated fields must be empty. Which invocation policy key and values a
+// build accepts is the registry's; this checks only the policy's shape.
 func ValidateOperationMCP(mcp *OperationMCP) error {
 	if mcp == nil {
 		return nil
@@ -79,10 +86,16 @@ func ValidateOperationMCP(mcp *OperationMCP) error {
 		if len(mcp.Meta) != 0 {
 			return fmt.Errorf("a hidden operation must not declare _meta")
 		}
+		if !mcp.Invocation.IsZero() {
+			return fmt.Errorf("a hidden operation must not declare %s", mcp.Invocation.keyName())
+		}
 		return nil
 	}
 	if strings.TrimSpace(mcp.Handle) == "" {
 		return fmt.Errorf("handle must be non-empty for a visible operation")
+	}
+	if err := mcp.Invocation.validate(); err != nil {
+		return err
 	}
 	if mcp.HiddenReason != "" {
 		return fmt.Errorf("a visible operation must not declare a reason")

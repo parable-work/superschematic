@@ -112,7 +112,8 @@ type EndpointInfo struct {
 	// Docs is the operation's @docs record; nil without it.
 	Docs *ir.OperationDocs
 	// MCP is the operation's resolved @mcp record: for a visible tool, Name
-	// and Description come from @docs and Icon from @icon. Nil without
+	// and Description come from @docs, Icon from @icon, and Invocation is
+	// set, to the policy's default when the record had none. Nil without
 	// @mcp. It is a copy; the schema's record is unchanged.
 	MCP *ir.OperationMCP
 
@@ -217,6 +218,9 @@ type APIOutput struct {
 	// ToolKeys are the vendor-extension keys the SDK tool documents are
 	// written with: DefaultToolKeys, as the tool hooks left them.
 	ToolKeys ToolKeys
+	// ToolInvocation is the invocation policy the tool documents write
+	// each visible tool's policy under (Options.ToolInvocation).
+	ToolInvocation ToolInvocationPolicy
 
 	// EnvConfig holds environment-variable loader output when populated by
 	// the dispatch layer before WriteAPI.
@@ -325,6 +329,13 @@ type Options struct {
 	// in order, before the SDK generators read them. The registry's
 	// ToolHooks supplies them.
 	ToolHooks []ToolHook
+
+	// ToolInvocation is the invocation policy a visible tool's @mcp record
+	// is resolved against: a record without one gets its default, and one
+	// under another key or with another value fails the build. The zero
+	// value is DefaultToolInvocationPolicy; the registry's
+	// ToolInvocationPolicy supplies it.
+	ToolInvocation ToolInvocationPolicy
 }
 
 // Generate extracts REST endpoints from the schema's operation sets and
@@ -342,6 +353,10 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		return nil, fmt.Errorf("apigen: Options.Provider is required")
 	}
 	opts.Naming = opts.Naming.OrDefault()
+	opts.ToolInvocation = opts.ToolInvocation.OrDefault()
+	if err := opts.ToolInvocation.Validate(); err != nil {
+		return nil, fmt.Errorf("apigen: %w", err)
+	}
 
 	ormModule := opts.ORMModule
 	if ormModule == "" && opts.UpstreamSchema != "" {
@@ -363,6 +378,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		UpstreamTypesModule: upstreamTypesModule,
 		Naming:              opts.Naming,
 		Provider:            opts.Provider,
+		ToolInvocation:      opts.ToolInvocation,
 		Endpoints:           []EndpointInfo{},
 		Timestamp:           opts.Clock.RFC3339(),
 		SystemUserUUID:      "00000000-0000-4000-8000-000000000000",
@@ -387,7 +403,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		defaultMethod := defaultMethodForSet(set.Name)
 
 		for _, op := range set.Operations {
-			endpoint, err := operationToEndpoint(op, namespace, defaultMethod, set, types, schema, opts.Provider)
+			endpoint, err := operationToEndpoint(op, namespace, defaultMethod, set, types, schema, opts.Provider, opts.ToolInvocation)
 			if err != nil {
 				return nil, err
 			}
@@ -485,6 +501,9 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		return nil, err
 	}
 	output.ToolKeys = keys
+	if err := validateMCPInvocations(output.Endpoints, opts.ToolInvocation); err != nil {
+		return nil, err
+	}
 	if err := validateMCPCollisions(output.Endpoints); err != nil {
 		return nil, err
 	}
@@ -526,11 +545,11 @@ func defaultMethodForSet(setName string) string {
 }
 
 // operationToEndpoint converts an operation FieldDef into an endpoint.
-func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *ir.OperationSet, types *typeMapper, schema *ir.Schema, provider AuthProvider) (*EndpointInfo, error) {
+func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *ir.OperationSet, types *typeMapper, schema *ir.Schema, provider AuthProvider, invocation ToolInvocationPolicy) (*EndpointInfo, error) {
 	if err := ir.ValidateOperationDocs(op.Docs); err != nil {
 		return nil, fmt.Errorf("apigen: operation %s.%s has invalid docs: %w", namespace, op.Name, err)
 	}
-	mcp, err := resolveOperationMCP(op, namespace)
+	mcp, err := resolveOperationMCP(op, namespace, invocation)
 	if err != nil {
 		return nil, err
 	}
