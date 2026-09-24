@@ -238,6 +238,45 @@ class {{.Namespace.ClassName}}:
             raise ValidationError(
                 self._build_validation_errors(err, default_field=field_name),
             ) from err
+{{- if .Namespace.HasListOfListsArgs}}
+
+    def _validate_list_of_lists_argument(self, value: Any, element_type_name: str, field_name: str) -> None:
+        """Validate an array-of-arrays argument.
+
+        Each inner list must be a list (an empty one is valid) and each
+        element is validated as element_type_name. Errors name the index:
+        field[i] for an inner list, field[i][j] for an element and
+        field[i][j].name for a field of an element.
+        """
+        if not isinstance(value, (list, tuple)):
+            raise ValidationError(
+                {field_name: [{"validator": "type", "message": f"{field_name} must be a list of lists"}]},
+            )
+        for row_index, row in enumerate(value):
+            if not isinstance(row, (list, tuple)):
+                raise ValidationError(
+                    {f"{field_name}[{row_index}]": [{"validator": "required", "message": "inner list must be a list"}]},
+                )
+            for item_index, item in enumerate(row):
+                item_path = f"{field_name}[{row_index}][{item_index}]"
+                try:
+                    self._validate_scalar_argument(item, element_type_name, item_path)
+                except ValidationError as err:
+                    raise ValidationError(
+                        {
+                            key if key == item_path else f"{item_path}.{key}": errors
+                            for key, errors in err.errors.items()
+                        },
+                    ) from err
+{{- end}}
+{{- if .Namespace.HasListOfListsModelOutput}}
+
+    def _coerce_list_of_lists_response(self, raw: Any, output_type_name: str) -> Any:
+        """Coerce an array-of-arrays response row by row, as _coerce_response."""
+        if not isinstance(raw, list):
+            return raw
+        return [self._coerce_response(row, output_type_name, True) for row in raw]
+{{- end}}
 
     def _validate_query_param_constraints(
         self,
@@ -413,14 +452,27 @@ class {{.Namespace.ClassName}}:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}})
+        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
 {{- else if .HasEncryptedBody}}
 {{- if .HasInput}}
         payload: Any = self._client.to_dict(validated_input_data)
 {{- else if .HasScalarArgs}}
         payload: dict[str, Any] = {}
 {{- range .ScalarArgs}}
-{{- if .IsArray}}
+{{- if .IsArrayOfArrays}}
+{{- if .Required}}
+        if {{.PyName}} is None:
+            raise ValidationError(
+                {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
+            )
+        self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
+        payload["{{.Name}}"] = {{.PyName}}
+{{- else}}
+        if {{.PyName}} is not None:
+            self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
+            payload["{{.Name}}"] = {{.PyName}}
+{{- end}}
+{{- else if .IsArray}}
 {{- if .Required}}
         for _elem in {{.PyName}}:
             self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
@@ -464,7 +516,7 @@ class {{.Namespace.ClassName}}:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}})
+        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
 {{- else}}
 {{- if .HasRequestBody}}
 {{- if .HasInput}}
@@ -472,7 +524,20 @@ class {{.Namespace.ClassName}}:
 {{- else if .HasScalarArgs}}
         payload: dict[str, Any] = {}
 {{- range .ScalarArgs}}
-{{- if .IsArray}}
+{{- if .IsArrayOfArrays}}
+{{- if .Required}}
+        if {{.PyName}} is None:
+            raise ValidationError(
+                {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
+            )
+        self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
+        payload["{{.Name}}"] = {{.PyName}}
+{{- else}}
+        if {{.PyName}} is not None:
+            self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
+            payload["{{.Name}}"] = {{.PyName}}
+{{- end}}
+{{- else if .IsArray}}
 {{- if .Required}}
         for _elem in {{.PyName}}:
             self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
@@ -512,7 +577,7 @@ class {{.Namespace.ClassName}}:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}})
+        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
 {{- else}}
 {{- if .HasScalarArgs}}
 {{- range .ScalarArgs}}
@@ -566,7 +631,7 @@ class {{.Namespace.ClassName}}:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}})
+        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
 {{- else}}
         response = self._client.request(
             method="{{.HTTPMethod}}",
@@ -577,7 +642,7 @@ class {{.Namespace.ClassName}}:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}})
+        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
 {{- end}}
 {{- end}}
 {{- end}}

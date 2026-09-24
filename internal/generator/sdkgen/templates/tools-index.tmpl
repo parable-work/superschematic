@@ -74,7 +74,7 @@ export interface ToolDefinition {
   returns: {
     type: string;
     description?: string;
-    items?: { type: string; description?: string };
+    items?: { type: string; description?: string{{if $.HasListOfListsReturns}}; items?: { type: string; description?: string }{{end}} };
   };
 }
 
@@ -236,7 +236,11 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
       description: `{{escapeBacktick .Returns.Description}}`{{end}}{{if .Returns.Items}},
       items: {
         type: '{{.Returns.Items.Type}}'{{if .Returns.Items.Description}},
-        description: `{{escapeBacktick .Returns.Items.Description}}`{{end}}
+        description: `{{escapeBacktick .Returns.Items.Description}}`{{end}}{{if .Returns.Items.Items}},
+        items: {
+          type: '{{.Returns.Items.Items.Type}}'{{if .Returns.Items.Items.Description}},
+          description: `{{escapeBacktick .Returns.Items.Items.Description}}`{{end}}
+        }{{end}}
       }{{end}}
     }
   }
