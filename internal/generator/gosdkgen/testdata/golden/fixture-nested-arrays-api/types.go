@@ -1,0 +1,74 @@
+package sdk
+
+import (
+	"context"
+	"net/http"
+
+	"example.com/schemas/sdk/go/fixture-nested-arrays-api/runtime"
+)
+
+type TokenProvider func(ctx context.Context) (string, error)
+
+type TokenStorage interface {
+	GetToken(ctx context.Context) string
+	SetToken(ctx context.Context, token string)
+	ClearToken(ctx context.Context)
+}
+
+type RequestInterceptor func(ctx context.Context, req *http.Request) error
+
+type ResponseInterceptor func(ctx context.Context, response *http.Response, body []byte) ([]byte, error)
+
+type SDKConfig struct {
+	BaseURL             string
+	Timeout             int
+	MaxResponseSize     int64
+	Auth                *AuthConfig
+	Encryption          *EncryptionConfig
+	RequestInterceptor  RequestInterceptor
+	ResponseInterceptor ResponseInterceptor
+	Transport           http.RoundTripper
+	MaxRateLimitRetries *int
+}
+
+// AuthConfig configures authentication for the SDK client.
+//
+// Token resolution precedence (first non-empty wins):
+//  1. GetToken — dynamic token provider called on every request
+//  2. Token — static token supplied at construction time
+//  3. Storage — token retrieved from a TokenStorage implementation
+//
+// Only one of GetToken or TokenProvider should be set. If both are provided,
+// NewHTTPClient returns an error. TokenProvider is deprecated; use GetToken instead.
+type AuthConfig struct {
+	Token string
+
+	// Deprecated: Use GetToken instead. Setting both GetToken and TokenProvider
+	// will cause NewHTTPClient to return a configuration error.
+	TokenProvider TokenProvider
+
+	// GetToken is called on every request to dynamically resolve an auth token.
+	// It takes precedence over static Token and Storage values.
+	GetToken TokenProvider
+
+	// RefreshToken is called when a request receives a 401 Unauthorized response.
+	// The returned token replaces the current token for subsequent requests.
+	RefreshToken TokenProvider
+
+	Storage    TokenStorage
+	HeaderName string
+}
+
+type PublicEncryptionKey = runtime.PublicEncryptionKey
+
+type EncryptionConfig struct {
+	PublicEncryptionKey *PublicEncryptionKey
+}
+
+type EncryptedRequestOptions = runtime.EncryptedRequestOptions
+
+type EncryptedPayloadEnvelope = runtime.EncryptedPayloadEnvelope
+
+type UploadFile = runtime.UploadFile
+
+type MultipartBody = runtime.MultipartBody

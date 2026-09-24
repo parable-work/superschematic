@@ -3,7 +3,7 @@ package namespaces
 import (
 	"fmt"
 
-	types "{{.TypesModule}}"
+	types "example.com/schemas/types/go/fixture-nested-arrays-api"
 )
 
 // ValidationError reports client-side input validation failures.
@@ -80,26 +80,3 @@ func appendScalarValidationErrors(validationErrors types.ValidationErrors, field
 		validationErrors.SetFieldErrors(fieldName, fieldErrors)
 	}
 }
-{{- if .ValidatesListElements}}
-
-// validateListElement runs the validation of one element of a list argument
-// when its type has one, and records the errors under path
-// ("rows[2][5]"). item points at the element, so object types, whose
-// Validate has a pointer receiver, qualify.
-func validateListElement(validationErrors types.ValidationErrors, path string, item any) {
-	switch validator := item.(type) {
-	case requiredScalarValidator:
-		if valid, itemErrs := validator.ValidateRequired(); !valid {
-			validationErrors.SetFieldErrors(path, itemErrs)
-		}
-	case scalarValidator:
-		if valid, itemErrs := validator.Validate(); !valid {
-			validationErrors.SetFieldErrors(path, itemErrs)
-		}
-	case inputValidator:
-		if itemErrs := validator.Validate(); itemErrs.HasErrors() {
-			validationErrors.AddNestedError(path, itemErrs)
-		}
-	}
-}
-{{- end}}
