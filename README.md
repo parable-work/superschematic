@@ -1,8 +1,8 @@
 # superschematic
 
 A schema compiler. You write one schema per service in TypeScript, JSON or
-YAML; superschematic generates the SQL DDL, Go ORM, Go REST server, OpenAPI
-document, TypeScript, Python and Rust types, and TypeScript, Go, Python and
+YAML; superschematic generates the SQL DDL, Go ORM, a REST server (Go, Rust
+or TypeScript), OpenAPI document, TypeScript, Python and Rust types, and TypeScript, Go, Python and
 Rust SDKs for it. Scalar types (email, UUID, URL, cron, and about forty more)
 come from [superscalar](https://github.com/parable-work/superscalar), which
 validates them the same way in every language.
@@ -12,7 +12,8 @@ schema source (.schema.ts | .schema.json | .schema.yaml)
   -> superschematic build
      -> sql/         Postgres DDL
      -> orm/         Go repositories
-     -> api/         Go chi router, middleware, OpenAPI, or a Rust axum crate
+     -> api/         Go chi router, middleware, OpenAPI; or a Rust axum crate;
+                     or a TypeScript Hono router package
      -> types/       Go, TypeScript, Python, Rust
      -> sdk/         TypeScript, Go, Python, Rust clients
 ```
@@ -42,7 +43,7 @@ Pages on a release tag once the repository is public.
 | `internal/` | Loader, generators, writers, build plan and cache |
 | `ir/` | The schema IR (own Go module; the runtimes import it) |
 | `runtime/schema/{go,typescript,python}/` | Schema runtime the generated code links |
-| `runtime/http/{go,rust}/` | HTTP runtime the generated servers link |
+| `runtime/http/{go,rust,typescript}/` | HTTP runtime the generated servers link |
 | `packages/` | `@superschematic/{api,db,schema,schema-config}`: the TypeScript authoring packages |
 | `extensions/` | Example extensions |
 | `superschematic.toml` | The default naming file, written out |

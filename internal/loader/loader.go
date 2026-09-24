@@ -343,6 +343,17 @@ func hydrateScalarsFromRegistry(schema *ir.Schema, catalog registry.ScalarCatalo
 		if metadata.JSONSchemaType != "" {
 			scalar.TypeMappings["json_schema"] = metadata.JSONSchemaType
 		}
+		// A custom-parse scalar whose JSON shape is an object (Generic.StringMap)
+		// parses to a native map, so the TypeScript and Python generators need
+		// the map types the catalog declares for it.
+		if metadata.HasCustomParse && metadata.JSONSchemaType == "object" {
+			if metadata.TypeScriptType != "" {
+				scalar.TypeMappings["typescript"] = metadata.TypeScriptType
+			}
+			if metadata.PythonType != "" {
+				scalar.TypeMappings["python"] = metadata.PythonType
+			}
+		}
 	}
 	if len(unknown) > 0 {
 		return fmt.Errorf("unknown scalar %s: not in the scalar registry (%d scalars registered); the schema names it without defining it, so it must come from a registered scalar package or extension", strings.Join(unknown, ", "), len(catalog.Names()))
