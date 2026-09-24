@@ -298,7 +298,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		pathParams = append(pathParams, PathParam{
 			Name:   param.Name,
 			GoName: goutil.GoPublicIdentifier(param.Name),
-			GoType: mapScalarToGo(param.Type),
+			GoType: mapScalarToGo(param),
 		})
 	}
 
@@ -307,7 +307,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		queryParams = append(queryParams, QueryParam{
 			Name:              param.Name,
 			GoName:            goutil.GoPublicIdentifier(param.Name),
-			GoType:            mapScalarToGo(param.Type),
+			GoType:            mapScalarToGo(param),
 			Required:          param.Required,
 			Pointer:           !param.Required,
 			ValidateMin:       param.ValidateMin,
@@ -821,13 +821,18 @@ func normalizeTypeName(typeName string) string {
 	return typeName
 }
 
-// mapScalarToGo maps a path/query parameter type to its Go wire type. Named
-// scalars travel as strings; bare primitives keep their Go shape.
-func mapScalarToGo(typeName string) string {
-	switch typeName {
-	case codegen.PrimitiveNumber:
+// mapScalarToGo maps a path or query parameter to its Go SDK type, keeping
+// the parameter's JSON shape: an integer scalar is int64, a number float64,
+// a boolean bool, anything else a string. The URL encoding formats the value
+// later; a tool call's JSON arguments decode into these fields first, so a
+// numeric argument needs a numeric field.
+func mapScalarToGo(param apigen.Param) string {
+	switch {
+	case param.IsInt:
+		return "int64"
+	case param.IsFloat || param.Type == codegen.PrimitiveNumber:
 		return "float64"
-	case codegen.PrimitiveBoolean:
+	case param.IsBool || param.Type == codegen.PrimitiveBoolean:
 		return "bool"
 	default:
 		return "string"

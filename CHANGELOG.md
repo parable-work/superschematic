@@ -402,6 +402,13 @@ of a generated artifact is always listed here with the bump it requires.
   such a map's values through `additionalProperties`. Before, a TypeScript
   types package that used `Generic.StringMap` did not compile against the
   pinned superscalar, whose parser returns a map. Minor.
+- Go SDK: a path or query parameter typed with an integer, float or
+  boolean scalar (`Generic.Int64`, `Generic.Probability`) is `int64`,
+  `float64` or `bool`, as a bare `number` or `boolean` already was; before,
+  every named scalar was a `string`. A tool call's JSON arguments decode
+  into the query struct, so a numeric argument failed to decode into the
+  string field. A caller that passed such a parameter as a string passes
+  the number. Minor.
 
 ### Fixed
 
