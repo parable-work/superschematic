@@ -196,6 +196,12 @@ of a generated artifact is always listed here with the bump it requires.
   expectedRevisionPointers }` when a mode is set; the TypeScript writer
   emits them. Minor.
 
+- `ir.ToolManifest` and `ir.ToolBindingManifest` (with
+  `ir.ToolManifestTool`, `ir.ToolParameterSchema`, `ir.ToolSchemaProperty`,
+  `ir.ToolSchemaType`, `ir.ToolSchemaAdditionalProperties` and the binding
+  types): Go wire types for the SDK tool documents `tools/schema.json`
+  and `tools/mcp-binding.json`, so a consumer decodes them without its own
+  copy of the field list. Minor.
 ### Changed
 
 - Generated Go API modules require `github.com/go-chi/chi/v5` v5.3.2
