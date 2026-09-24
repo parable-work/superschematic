@@ -136,7 +136,7 @@ func importedTypeNames(schema *ir.Schema) map[string]bool {
 // source field's type. The latter permits an aggregate projection to replace
 // Property[] with Perception[] without weakening the field-level source proof.
 func typeRefsCompatible(schema *ir.Schema, in Input, view, source ir.TypeRef) bool {
-	if view.IsArray != source.IsArray || view.IsMap != source.IsMap {
+	if view.IsArray != source.IsArray || view.IsArrayOfArrays != source.IsArrayOfArrays || view.IsMap != source.IsMap {
 		return false
 	}
 	if unqualifiedName(view.Name) == unqualifiedName(source.Name) {
@@ -175,12 +175,10 @@ func unqualifiedName(name string) string {
 	return name
 }
 
-// typeRefString renders a TypeRef for messages.
+// typeRefString renders a TypeRef for messages: T, T[], T[][] or
+// Map<string, T>.
 func typeRefString(ref ir.TypeRef) string {
-	s := ref.Name
-	if ref.IsArray {
-		s += "[]"
-	}
+	s := ref.Name + strings.Repeat("[]", ref.ArrayDepth())
 	if ref.IsMap {
 		s = "Map<string, " + s + ">"
 	}

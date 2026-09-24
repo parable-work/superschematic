@@ -352,7 +352,7 @@ The core generators:
 | `types` | `types` | Go, TypeScript, Python and Rust types, one switch per language |
 | `sql` | `sql` | Postgres DDL, projection views with their migrations and Arrow schemas; implied by the DB kind, and `outputs.sql` places the view migrations (`migrationsDir`) and sets their role (`viewOwner`) |
 | `orm` | none | the Go ORM; implied by the DB kind |
-| `api` | `api` | the Go chi server or the Rust axum crate, and OpenAPI |
+| `api` | `api` | the Go chi server, the Rust axum crate or the TypeScript Hono package (`outputs.api.language`), and OpenAPI |
 | `sdks` | `sdk` | TypeScript, Go, Python and Rust clients, one switch per language |
 | `envConfig` | none | the environment loader for a schema with an `@envVars` class |
 
@@ -893,6 +893,22 @@ reuses `RequireAuth` and `RequirePermissions` unchanged. The key store
 adapter is generated only when the upstream DB has an `ApiKey(id, secret,
 user)` table, so the generated module always compiles against the ORM it
 is given.
+
+### 8.4 The TypeScript server
+
+An API schema with `outputs.api.language` set to `TYPESCRIPT` gets a Hono
+router package instead of the Go module. It reads the same `APIOutput`, so
+the provider's `Endpoint` hook and the registered OpenAPI and tool hooks
+have run, but it renders no auth snippet: its templates have no hook
+points. Each route's requirement goes into the generated operation table
+(`@publicRoute`, an authenticated caller, the `@requirePermission` list),
+and `@superschematic/http-runtime` applies it at request time with what the
+service passes to `buildRouter`: an `Authenticator` that establishes the
+caller, and optionally a `PermissionMatcher` that replaces the default
+dotted-path coverage rule. A deployment's identity model, token format and
+service-to-service verification live in its own TypeScript package next to
+its provider, which supplies those two functions. D12 in
+`docs/DECISIONS.md` records the split.
 
 ## 9. What the core registers
 

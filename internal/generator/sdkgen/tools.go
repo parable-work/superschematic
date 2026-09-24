@@ -8,6 +8,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/nestedguard"
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
@@ -95,6 +96,10 @@ type ToolsNamespace struct {
 func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock codegen.Clock) (*ToolsOutput, error) {
 	if sdkOutput == nil || len(sdkOutput.Namespaces) == 0 {
 		return nil, nil
+	}
+	// nested-arrays guard: remove when toolsutil renders T[][].
+	if err := nestedguard.Check("toolsutil", apiOutput); err != nil {
+		return nil, err
 	}
 
 	output := &ToolsOutput{

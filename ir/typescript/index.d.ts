@@ -15,6 +15,9 @@ export interface Import {
 export interface TypeRef {
   name: string;
   isArray: boolean;
+  // T[][]: each element of the outer list is a list of `name`. Requires
+  // isArray; absent means false.
+  isArrayOfArrays?: boolean;
   elemNonNull: boolean;
 }
 

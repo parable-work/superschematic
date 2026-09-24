@@ -159,12 +159,13 @@ func (e *emitter) fieldTypeExpr(fd *ir.FieldDef, owner string, kind fieldKind) s
 		expr = fmt.Sprintf("%s<%s>", e.use("ManyToMany"), expr)
 		wrapsArray = true
 	}
-	if fd.TypeRef.IsArray {
+	switch {
+	case !wrapsArray:
+		expr += arraySuffix(fd.TypeRef)
+	case fd.TypeRef.IsArray:
 		// HasMany<T> / ManyToMany<T> already denote T[].
-		if !wrapsArray {
-			expr += "[]"
-		}
-	} else if wrapsArray {
+		expr += strings.Repeat("[]", fd.TypeRef.ArrayDepth()-1)
+	default:
 		e.failf("%s: hasMany/manyToMany fields must have an array type reference", owner)
 	}
 
@@ -199,9 +200,7 @@ func (e *emitter) argumentTypeExpr(arg *ir.ArgumentDef, owner string) string {
 	}); cfg != "" {
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Validate"), expr, cfg)
 	}
-	if arg.TypeRef.IsArray {
-		expr += "[]"
-	}
+	expr += arraySuffix(arg.TypeRef)
 	if !arg.Required {
 		expr = fmt.Sprintf("%s<%s>", e.use("Nullable"), expr)
 	}
@@ -209,6 +208,12 @@ func (e *emitter) argumentTypeExpr(arg *ir.ArgumentDef, owner string) string {
 		expr = fmt.Sprintf("%s<%s>", e.use("QueryParam"), expr)
 	}
 	return expr
+}
+
+// arraySuffix renders a reference's list depth: "" for T, "[]" for T[] and
+// "[][]" for T[][].
+func arraySuffix(ref ir.TypeRef) string {
+	return strings.Repeat("[]", ref.ArrayDepth())
 }
 
 // defaultLiteral renders the V in Default<T, V>. The literal form follows
