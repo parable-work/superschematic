@@ -15,6 +15,10 @@ rust_crate_prefix = "acme-"
 
 package_author = "acme"
 
+# The namespace of the metadata keys in the Arrow schemas generated for
+# projection views: acme.scalar.canonical_name, acme.projection.settings.
+metadata_key_prefix = "acme."
+
 # The auth provider the api generator renders with. "apikey" is registered
 # by the acme extension (ext/auth); the core-only binary does not know it
 # and refuses this file, which is one of the smoke's assertions.

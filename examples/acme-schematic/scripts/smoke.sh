@@ -22,7 +22,8 @@
 #   7. the manifest generator ran on every kind, core and acme, and the
 #      acmeInventory build-all hook merged the manifests from every service's
 #      output directories, again when every service is restored from the
-#      build cache;
+#      build cache; the sql generator wrote the storefront.stock view, its
+#      migration and its Arrow schema under acme's metadata key prefix;
 #   8. the API service compiles against the acme auth provider (go build);
 #   9. the core-only binary rejects the Catalog service with the registered
 #      kinds named, and rejects the naming file that selects apikey;
@@ -119,6 +120,14 @@ for service in shop-db shop-api shop-config shop-catalog; do
 done
 jq -e '.kind == "DB"' "$DIST/acme/manifest/shop-db/manifest.json" >/dev/null
 jq -e '.kind == "Catalog"' "$DIST/acme/manifest/shop-catalog/manifest.json" >/dev/null
+
+echo "==> the storefront.stock view: create.sql, its migration, its Arrow schema"
+STOCK_UP="$DIST/sql/shop-db/projections/migrations/20260923120000_storefront_stock_projection.up.sql"
+test -s "$STOCK_UP"
+grep -q "^WHERE base.shop = current_setting('acme.shop_id')::uuid$" "$STOCK_UP"
+grep -q '^CREATE VIEW storefront.stock WITH (security_barrier = true) AS$' "$DIST/sql/shop-db/create.sql"
+jq -e '.metadata["acme.projection.settings"] == "acme.shop_id" and ([.fields[].name] == ["sku", "name", "quantity", "price_cents", "in_stock"])' \
+  "$DIST/sql/shop-db/projections/storefront.stock.arrow.json" >/dev/null
 
 echo "==> build-all hook merged every manifest, also when every service comes from the cache"
 jq -e '[.services[].service] | sort == ["shop-api", "shop-catalog", "shop-config", "shop-db"]' "$DIST/acme/inventory.json" >/dev/null

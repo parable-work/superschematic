@@ -423,6 +423,9 @@ setting, not optional and without a `when` guard. `shop-db`'s
 `storefront.stock` view (`src/stock.projection.schema.ts`) passes; a view
 without the binding fails the load in any authoring form, while the
 core-only binary loads it (`TestProjectionPolicyRequiresTheShopScope`).
+The sql generator writes the view into `create.sql`, its migration pair
+under `dist/sql/shop-db/projections/migrations`, and its Arrow schema with
+the `acme.` metadata keys the naming file's `metadata_key_prefix` sets.
 
 ## A command
 
@@ -480,9 +483,10 @@ extension.
 command. The acme file sets `go_module_root`, `npm_scope`,
 `python_types_module_prefix`, `python_sdk_module_prefix`,
 `python_sdk_module_suffix`, `rust_crate_prefix`, `package_author`,
-`auth_provider`, `authoring_packages`, the `[paths]` and `[deps]` tables
-and `[extension.acme]`. `[deps] copy` makes `build-all` also write the
-dependency graph of the generated packages to `schemas/deps.json`, which is
-committed; each package in it names the service that produced it, and the
-smoke fails when the committed copy is stale. A key left out keeps the default from the naming file
+`metadata_key_prefix`, `auth_provider`, `authoring_packages`, the `[paths]`
+and `[deps]` tables and `[extension.acme]`. `[deps] copy` makes `build-all`
+also write the dependency graph of the generated packages to
+`schemas/deps.json`, which is committed; each package in it names the
+service that produced it, and the smoke fails when the committed copy is
+stale. A key left out keeps the default from the naming file
 at the repository root; the docs site's naming reference lists every key.
