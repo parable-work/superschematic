@@ -40,8 +40,14 @@ export type TargetOutputConfig = {
 
 export type TypesOutputConfig = Partial<Record<TargetLanguage, TargetOutputConfig>>;
 
+/**
+ * The REST API server language. GO (the default) emits the chi server module, RUST the axum crate, TYPESCRIPT the Hono package built on the TypeScript HTTP runtime (`<out>/api/<service>`, `<scope>/<service>-api`).
+ */
+export type ApiLanguage = "GO" | "RUST" | "TYPESCRIPT";
+
 export type ApiOutputConfig = {
   readonly enabled: boolean;
+  readonly language?: ApiLanguage;
   readonly scaffoldsOutputDir?: string;
 };
 
