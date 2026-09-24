@@ -355,6 +355,36 @@ of a generated artifact is always listed here with the bump it requires.
   `List[List[T]]` with element errors at `field[i][j]`, and the Python
   schema runtime reads, parses, validates, serializes, masks and merges
   lists of lists (`TypeRef.is_array_of_arrays`). Minor.
+- Arrays of arrays in the Go API and the tool schemas: the api generator
+  and `apigen.TypeOpenAPISchema` render `T[][]` as items of items, with
+  element constraints on the inner items and `minItems`/`maxItems` on the
+  outer array; the Go routes decode a `T[][]` body argument as `[][]T`,
+  refuse a null inner list at `name[i]`, validate each element at
+  `name[i][j]` and send a nil inner list of a `T[][]` response as `[]`.
+  `toolsutil` renders `T[][]` input fields, body arguments
+  (`ToolScalarArg.IsArray`, `IsArrayOfArrays`) and responses
+  (`BuildReturnSchemaAtDepth`). A list argument is no longer taken as a
+  path parameter or as the operation's input type, and a `T[]` body
+  argument is an array in the OpenAPI request body. Minor.
+- Arrays of arrays in SQL and the Go ORM: a `T[][]` column is `JSONB`,
+  never a native array, and the ORM writes it through its JSON codec with
+  nil inner lists stored as `[]`. Minor.
+- Arrays of arrays in Go types and the Go schema runtime: typegen renders
+  `T[][]` as `[][]T` (`InputField[[][]T]` for an optional input field) and
+  no longer refuses it; `Validate` reports a null inner list as required at
+  `field[i]`, checks each inner element at `field[i][j]` and applies list
+  bounds to the outer list; union elements decode through the union wrapper
+  at `[i][j]`, and `MaskSecrets` and `To<Type>` copy each inner list. The
+  runtime's parse, validate, mask, merge and serialize walk inner lists with
+  the same paths. A types module with enums and types but no scalars no
+  longer declares `ValidationError` twice. Minor.
+- Arrays of arrays in TypeScript: tsgen emits `T[][]`, and its validators
+  and the TypeScript schema runtime check every innermost element at
+  `field[i][j]`, apply list bounds to the outer list and reject an inner
+  list that is not an array at `field[i]` (`required`). Minor.
+- Rust types render a list of lists as `Vec<Vec<T>>` (`Option<Vec<Vec<T>>>`
+  when optional) with the serde attributes of `Vec<T>`; a null inner list
+  fails to decode. Minor.
 
 ### Changed
 
@@ -458,6 +488,41 @@ of a generated artifact is always listed here with the bump it requires.
   such a map's values through `additionalProperties`. Before, a TypeScript
   types package that used `Generic.StringMap` did not compile against the
   pinned superscalar, whose parser returns a map. Minor.
+- Go SDK: a path or query parameter typed with an integer, float or
+  boolean scalar (`Generic.Int64`, `Generic.Probability`) is `int64`,
+  `float64` or `bool`, as a bare `number` or `boolean` already was; before,
+  every named scalar was a `string`. A tool call's JSON arguments decode
+  into the query struct, so a numeric argument failed to decode into the
+  string field. A caller that passed such a parameter as a string passes
+  the number. Minor.
+- The loader takes each catalog scalar's TypeScript, Python and Rust types
+  (`TypeScriptType`, `PythonType` and `RustType` on its superscalar metadata
+  row) as the scalar's `typescript`, `python` and `rust` type mappings.
+  Before, only the Go, SQL and JSON Schema mappings came from the catalog,
+  and the other generators inferred a type from the primitive. A Rust type
+  that declares a struct rather than naming a type is skipped. For the core
+  catalog, generated output changes only for `Generic.JSON` in TypeScript:
+  - A field's type is `GenericJSON`, which is superscalar's `JSONValue`
+    (any JSON value), where it was `Record<string, any>`.
+  - `types/scalars.ts` re-exports `JSONValue`.
+  - The scalar validator skips string checks.
+  - A required `Generic.JSON` treats JSON `null` as present and only
+    `undefined` as missing, as Go and Python already did.
+
+  rustgen's special case for `Generic.StringMap` is gone, because its
+  `HashMap` now comes from the catalog. An extension that registers a
+  scalar catalog (`RegisterScalars`) sets these fields to choose each
+  language's type. Minor.
+- Rust types: a `Generic.JSON` field (direct, optional, list, map or map of
+  lists) decodes through the scalar crate's lossless adapter,
+  `<scalar_rust_crate>::scalars::json_scalar::serde::deserialize`, where
+  the crate name comes from the naming file. The field keeps every
+  number's digits, and an object whose key spells one of serde_json's
+  private marker names stays an object. A union that reaches
+  `Generic.JSON`, directly, through an imported member or through a
+  recursive type, reads its input through the adapter too; an untagged one
+  then tries each member in order. A crate with such a field or union
+  depends on the scalar crate and `serde_json`. Minor.
 
 ### Fixed
 
@@ -536,5 +601,48 @@ of a generated artifact is always listed here with the bump it requires.
   rejected requests the server accepts. The SDK now checks each item and
   counts the list it was given, in the JSON and the multipart methods.
   Patch.
+- Go types: a map field of a scalar or enum (`Record<string, Identity.UUID>`),
+  and a `minLength`, `maxLength`, `pattern`, `min` or `max` rule on a map
+  field, did not compile: `Validate` called the scalar's methods on the map
+  itself. `Validate` now checks each entry and reports its errors under
+  `name[key]`; a nil required map reports `required`, an optional map skips
+  a null entry, and an input map is checked when present and not null.
+  `MaskSecrets` on an optional map of a generated type, which did not
+  compile either, keeps a null entry null. Patch.
+- TypeScript types: `parse<Type>FromJSON` for a type with an optional map
+  of a nested type returned a null or absent entry as is, typed `unknown`,
+  so the package did not type-check against the map's `T | null` values.
+  It now maps such an entry to `null`. Patch.
+- Python types: a discriminated union whose discriminator is not already
+  snake_case (`eventKind`) named it as written in
+  `Field(discriminator=...)`. Pydantic resolves that name against the
+  members' Python field names (`event_kind`), so importing the package
+  failed. The union now names the Python field. Patch.
+- Rust types: a discriminated union failed to decode a member with a
+  floating-point field (`invalid type: map, expected f64`) whenever
+  serde_json's `arbitrary_precision` feature was on anywhere in the build.
+  Cargo unifies features, so any crate in the graph could turn it on. The
+  union now decodes through a `serde_json::Value` and picks the member by
+  its tag; a missing or unknown tag is an error that names the union. A
+  crate with a discriminated union depends on `serde_json`. Patch.
+- TypeScript loader: a class that extends a class from another service
+  failed to load (`references unknown type`) when an inherited field
+  referenced a type or enum declared in that service. The loader flattens
+  the base's fields into the class but did not record the types they
+  reference as imports. It now records them, so the generated code
+  imports them from the base's package. Patch.
+- TypeScript SDK: a file-upload endpoint with query parameters had no way
+  to pass them; the convenience and raw methods now take
+  `params?: { ... }` before `signal` and send them. A DELETE endpoint that
+  declares an input dropped it, and the Go API handler, which decodes the
+  body of every method with an input, answered "Invalid request body"; the
+  SDK now sends the input as the DELETE body. The Go, Python and Rust SDKs
+  already did both. Patch.
+- `superschematic format --to=ts` (the TypeScript writer): a schema that
+  referenced a catalog scalar with bounds (`Generic.Int64`,
+  `Temporal.Seconds`, `Ordering.Rank`) or with a hydrated TypeScript,
+  Python or Rust type failed with "declares metadata beyond its language
+  primitive". The writer now strips every bound and type mapping that
+  equals the catalog's before it checks a scalar reference. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main

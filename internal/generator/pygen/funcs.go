@@ -15,6 +15,7 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 	enumLookup := buildEnumLookup(output)
 	return template.FuncMap{
 		"snakeCase":          codegen.ToSnakeCase,
+		"pythonFieldName":    toPythonFieldName,
 		"pythonString":       pythonString,
 		"pythonRawString":    pythonRawString,
 		"pythonComment":      pythonComment,

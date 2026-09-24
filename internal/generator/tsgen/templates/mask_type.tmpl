@@ -48,6 +48,12 @@ export function maskSecrets{{.Type.Name}}(value: {{.Type.Name}}): {{.Type.Name}}
 {{- else}}
     {{.TSName}}: value.{{.TSName}},
 {{- end}}
+{{- else if and .IsArrayOfArrays (index $.MaskableTypeSet .Type)}}
+{{- if .Required}}
+    {{.TSName}}: Array.isArray(value.{{.TSName}}) ? value.{{.TSName}}.map((row: {{.Type}}[]) => Array.isArray(row) ? row.map((item: {{.Type}}) => maskSecrets{{.Type}}(item)) : row) : [],
+{{- else}}
+    {{.TSName}}: Array.isArray(value.{{.TSName}}) ? value.{{.TSName}}.map((row: {{.Type}}[]) => Array.isArray(row) ? row.map((item: {{.Type}}) => maskSecrets{{.Type}}(item)) : row) : null,
+{{- end}}
 {{- else if .IsArray}}
 {{- if index $.MaskableTypeSet .Type}}
 {{- if .Required}}

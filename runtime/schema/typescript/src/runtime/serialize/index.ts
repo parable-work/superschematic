@@ -200,12 +200,13 @@ function walkField(
 
   if (field.typeRef.isArray) {
     if (!Array.isArray(value)) return value;
-    const out: unknown[] = new Array(value.length);
-    for (let i = 0; i < value.length; i += 1) {
-      const elemPath = `${path}[${i}]`;
-      out[i] = walkElem(ctx, field, kind, value[i], errors, elemPath);
+    if (field.typeRef.isArrayOfArrays) {
+      // T[][]: walk the elements of every inner list, at path[i][j].
+      return value.map((inner, i) =>
+        Array.isArray(inner) ? walkElems(ctx, field, kind, inner, errors, `${path}[${i}]`) : inner
+      );
     }
-    return out;
+    return walkElems(ctx, field, kind, value, errors, path);
   }
 
   switch (kind) {
@@ -228,6 +229,22 @@ function walkField(
     default:
       return value;
   }
+}
+
+function walkElems(
+  ctx: Ctx,
+  field: FieldDef,
+  kind: RefKind,
+  elems: unknown[],
+  errors: ValidationErrors,
+  path: string
+): unknown[] {
+  const out: unknown[] = new Array(elems.length);
+  for (let i = 0; i < elems.length; i += 1) {
+    const elemPath = `${path}[${i}]`;
+    out[i] = walkElem(ctx, field, kind, elems[i], errors, elemPath);
+  }
+  return out;
 }
 
 function walkElem(
@@ -288,6 +305,16 @@ function writeFieldValue(ctx: Ctx, field: FieldDef, value: unknown): string {
   const kind = resolveRefKind(ctx.schema, field.typeRef);
   if (field.typeRef.isArray) {
     if (!Array.isArray(value)) return JSON.stringify(value);
+    if (field.typeRef.isArrayOfArrays) {
+      // T[][]: write every inner list; a non-list inner value (such as
+      // null) is written as it is.
+      const rows = value.map(inner => {
+        if (!Array.isArray(inner)) return JSON.stringify(inner ?? null);
+        const parts = inner.map(elem => writeElemValue(ctx, field, kind, elem));
+        return `[${parts.join(',')}]`;
+      });
+      return `[${rows.join(',')}]`;
+    }
     const parts = value.map(elem => writeElemValue(ctx, field, kind, elem));
     return `[${parts.join(',')}]`;
   }

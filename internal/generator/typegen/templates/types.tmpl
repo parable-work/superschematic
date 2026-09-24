@@ -324,7 +324,7 @@ func (t *{{.Name}}) MaskSecrets() *{{.Name}} {
 	masked := &{{.Name}}{}
 
 	{{range .Fields}}
-	{{if .UsesWrapper}}
+	{{if .IsArrayOfArrays}}{{template "nestedListMask" (nestedList $ .)}}{{else if .UsesWrapper}}
 	masked.{{.GoName}}.Set = t.{{.GoName}}.Set
 	masked.{{.GoName}}.Null = t.{{.GoName}}.Null
 	if t.{{.GoName}}.Set && !t.{{.GoName}}.Null {
@@ -356,9 +356,13 @@ func (t *{{.Name}}) MaskSecrets() *{{.Name}} {
 		{{if and (not .IsScalar) (isGeneratedType $.Types $.ImportedTypes .Type)}}
 		for key, item := range t.{{.GoName}} {
 			maskedValue := item.MaskSecrets()
+			{{if .Required}}
 			if maskedValue != nil {
 				masked.{{.GoName}}[key] = *maskedValue
 			}
+			{{else}}
+			masked.{{.GoName}}[key] = maskedValue
+			{{end}}
 		}
 		{{else}}
 		for key, item := range t.{{.GoName}} {
@@ -402,7 +406,31 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	errors := NewValidationErrors()
 
 	{{range .Fields}}
-	{{if or (isValidatableScalarField .) (isEnumType $.Enums $.ImportedEnums .Type)}}
+	{{if .IsArrayOfArrays}}{{template "nestedListValidate" (nestedList $ .)}}{{else}}{{if or (isValidatableScalarField .) (isEnumType $.Enums $.ImportedEnums .Type)}}
+	{{if .IsMap}}
+	// Validate {{.Name}} entries independently of the map container.
+	{{if .UsesWrapper}}
+	if t.{{.GoName}}.IsSet() && !t.{{.GoName}}.IsNull() {
+	{{else}}
+	{
+	{{end}}
+		{{if .Required}}
+		if t.{{.GoName}} == nil {
+			errors.AddFieldError("{{.Name}}", "required", "required field")
+		}
+		{{end}}
+		for key, item := range t.{{.GoName}}{{if .UsesWrapper}}.Value{{end}} {
+			{{if or (hasPrefix .GoType "map[string]*") (hasPrefix .GoType "InputField[map[string]*")}}
+			if item == nil {
+				continue
+			}
+			{{end}}
+			if valid, itemErrs := item.ValidateRequired(); !valid {
+				errors.SetFieldErrors(fmt.Sprintf("{{.Name}}[%s]", key), itemErrs)
+			}
+		}
+	}
+	{{else}}
 	{{if and .Required (not .HasDefault)}}
 	{{/* Skip validation for common audit fields that are auto-generated */}}
 	{{if and (not .InternalMetadata) (ne .Name "id") (ne .Name "createdAt") (ne .Name "createdBy") (ne .Name "updatedAt") (ne .Name "updatedBy")}}
@@ -479,6 +507,7 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 			errors.SetFieldErrors("{{.Name}}", fieldErrs)
 		}
 	}
+	{{end}}
 	{{end}}
 	{{end}}
 	{{end}}
@@ -569,7 +598,42 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	{{end}}
 	{{if hasEmittableValidations .Validations}}
 	{{$field := .}}
+	{{if .IsMap}}
+	{{/* A map's value rules apply to each entry, keyed by its map key. */}}
 	{{if .UsesWrapper}}
+	if t.{{.GoName}}.IsSet() && !t.{{.GoName}}.IsNull() {
+	{{end}}
+	{{range .Validations}}
+	{{if or (eq .Validator "minLength") (eq .Validator "maxLength") (eq .Validator "pattern") (eq .Validator "min") (eq .Validator "max")}}
+	for key, item := range t.{{$field.GoName}}{{if $field.UsesWrapper}}.Value{{end}} {
+		{{if or (hasPrefix $field.GoType "map[string]*") (hasPrefix $field.GoType "InputField[map[string]*")}}
+		if item == nil {
+			continue
+		}
+		value := *item
+		{{else}}
+		value := item
+		{{end}}
+		{{if eq .Validator "minLength"}}
+		if len({{validationStringExpr $field "value"}}) < {{printf "%v" .Value}} {
+		{{else if eq .Validator "maxLength"}}
+		if len({{validationStringExpr $field "value"}}) > {{printf "%v" .Value}} {
+		{{else if eq .Validator "pattern"}}
+		if matched, err := regexp.MatchString("{{escapeString (printf "%v" .Value)}}", {{validationStringExpr $field "value"}}); err != nil || !matched {
+		{{else if eq .Validator "min"}}
+		if float64(value) < {{printf "%v" .Value}} {
+		{{else if eq .Validator "max"}}
+		if float64(value) > {{printf "%v" .Value}} {
+		{{end}}
+			errors.AddFieldError(fmt.Sprintf("{{$field.Name}}[%s]", key), "{{.Validator}}", "{{escapeString .Message}}")
+		}
+	}
+	{{end}}
+	{{end}}
+	{{if .UsesWrapper}}
+	}
+	{{end}}
+	{{else if .UsesWrapper}}
 	if t.{{.GoName}}.IsSet() && !t.{{.GoName}}.IsNull() {
 		value := t.{{.GoName}}.Value
 		{{range .Validations}}
@@ -860,7 +924,7 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	}
 	{{end}}
 	{{end}}
-	{{end}}
+	{{end}}{{end}}
 	{{end}}
 
 	return errors
@@ -920,7 +984,7 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 	aux := &struct {
 {{- range .Fields}}
 {{- if .IsUnion}}
-		{{.GoName}} {{if .UsesWrapper}}json.RawMessage{{else if .IsMap}}map[string]{{if .IsArray}}[]{{end}}json.RawMessage{{else if .IsArray}}[]json.RawMessage{{else}}json.RawMessage{{end}} `json:"{{.Name}}{{if not .Required}},omitempty{{end}}"`
+		{{.GoName}} {{if .UsesWrapper}}json.RawMessage{{else if .IsMap}}map[string]{{if .IsArray}}[]{{end}}json.RawMessage{{else if .IsArrayOfArrays}}[][]json.RawMessage{{else if .IsArray}}[]json.RawMessage{{else}}json.RawMessage{{end}} `json:"{{.Name}}{{if not .Required}},omitempty{{end}}"`
 {{- end}}
 {{- end}}
 		*Alias
@@ -975,6 +1039,27 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 				{{- end}}
 			}
 			t.{{.GoName}}.Value = values
+			{{- else if .IsArrayOfArrays}}
+			var rawValues [][]json.RawMessage
+			if err := json.Unmarshal(aux.{{.GoName}}, &rawValues); err != nil {
+				return fmt.Errorf("decode {{.Name}}: %w", err)
+			}
+			values := make([][]{{.Type}}, len(rawValues))
+			for i, rawInner := range rawValues {
+				// A null inner list stays nil for Validate to reject.
+				if rawInner == nil {
+					continue
+				}
+				values[i] = make([]{{.Type}}, len(rawInner))
+				for j, raw := range rawInner {
+					var w {{unionWrapperType .Type $.ImportedUnions}}
+					if err := w.UnmarshalJSON(raw); err != nil {
+						return fmt.Errorf("decode {{.Name}}[%d][%d]: %w", i, j, err)
+					}
+					values[i][j] = w.Value
+				}
+			}
+			t.{{.GoName}}.Value = values
 			{{- else if .IsArray}}
 			var rawValues []json.RawMessage
 			if err := json.Unmarshal(aux.{{.GoName}}, &rawValues); err != nil {
@@ -1019,6 +1104,24 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 			}
 			t.{{.GoName}}[key] = w.Value
 			{{- end}}
+		}
+	}
+{{- else if .IsArrayOfArrays}}
+	if aux.{{.GoName}} != nil {
+		t.{{.GoName}} = make([][]{{.Type}}, len(aux.{{.GoName}}))
+		for i, rawInner := range aux.{{.GoName}} {
+			// A null inner list stays nil for Validate to reject.
+			if rawInner == nil {
+				continue
+			}
+			t.{{.GoName}}[i] = make([]{{.Type}}, len(rawInner))
+			for j, raw := range rawInner {
+				var w {{unionWrapperType .Type $.ImportedUnions}}
+				if err := w.UnmarshalJSON(raw); err != nil {
+					return fmt.Errorf("decode {{.Name}}[%d][%d]: %w", i, j, err)
+				}
+				t.{{.GoName}}[i][j] = w.Value
+			}
 		}
 	}
 {{- else if .IsArray}}
@@ -1249,7 +1352,21 @@ func (in *{{.InputName}}) To{{.OutputName}}() *{{.OutputName}} {
 {{- if .UsesWrapper}}
 	if in.{{.GoName}}.IsSet() && !in.{{.GoName}}.IsNull() {
 {{- if .IsPaired}}
-{{- if .IsArray}}
+{{- if .IsArrayOfArrays}}
+		converted := make([][]{{.PairedTypeName}}, len(in.{{.GoName}}.Value))
+		for i, inner := range in.{{.GoName}}.Value {
+			if inner == nil {
+				continue
+			}
+			converted[i] = make([]{{.PairedTypeName}}, len(inner))
+			for j, v := range inner {
+				if c := v.To{{.PairedTypeName}}(); c != nil {
+					converted[i][j] = *c
+				}
+			}
+		}
+		out.{{.GoName}} = converted
+{{- else if .IsArray}}
 		converted := make([]{{.PairedTypeName}}, len(in.{{.GoName}}.Value))
 		for i, v := range in.{{.GoName}}.Value {
 			if c := v.To{{.PairedTypeName}}(); c != nil {
@@ -1267,7 +1384,23 @@ func (in *{{.InputName}}) To{{.OutputName}}() *{{.OutputName}} {
 {{- end}}
 	}
 {{- else if .IsPaired}}
-{{- if .IsArray}}
+{{- if .IsArrayOfArrays}}
+	if len(in.{{.GoName}}) > 0 {
+		converted := make([][]{{.PairedTypeName}}, len(in.{{.GoName}}))
+		for i, inner := range in.{{.GoName}} {
+			if inner == nil {
+				continue
+			}
+			converted[i] = make([]{{.PairedTypeName}}, len(inner))
+			for j, v := range inner {
+				if c := v.To{{.PairedTypeName}}(); c != nil {
+					converted[i][j] = *c
+				}
+			}
+		}
+		out.{{.GoName}} = converted
+	}
+{{- else if .IsArray}}
 	if len(in.{{.GoName}}) > 0 {
 		converted := make([]{{.PairedTypeName}}, len(in.{{.GoName}}))
 		for i, v := range in.{{.GoName}} {
@@ -1301,4 +1434,120 @@ func {{.AccessorName}}() {{.Type}} {
 	}
 	return value
 }
+{{- end}}
+{{- /* The blocks below render a list-of-lists (T[][]) field; the file's
+  output ends above. They take the nestedList view of the field. */ -}}
+
+{{- define "nestedListMask"}}
+{{- $f := .Field}}
+{{- if $f.UsesWrapper}}
+	masked.{{$f.GoName}}.Set = t.{{$f.GoName}}.Set
+	masked.{{$f.GoName}}.Null = t.{{$f.GoName}}.Null
+{{- if not $f.Secret}}
+	if src := t.{{$f.GoName}}.Value; t.{{$f.GoName}}.Set && !t.{{$f.GoName}}.Null && src != nil {
+{{- template "nestedListCopy" .}}
+		masked.{{$f.GoName}}.Value = dst
+	}
+{{- end}}
+{{- else if $f.Secret}}
+	var zero{{$f.GoName}} {{$f.GoType}}
+	masked.{{$f.GoName}} = zero{{$f.GoName}}
+{{- else}}
+	if src := t.{{$f.GoName}}; src != nil {
+{{- template "nestedListCopy" .}}
+		masked.{{$f.GoName}} = dst
+	}
+{{- end}}
+{{- end}}
+
+{{- define "nestedListCopy"}}
+		dst := make({{.ListGoType}}, len(src))
+		for i, inner := range src {
+			if inner == nil {
+				continue
+			}
+			dst[i] = make({{.InnerGoType}}, len(inner))
+{{- if .ElemNested}}
+			for j := range inner {
+				if maskedValue := inner[j].MaskSecrets(); maskedValue != nil {
+					dst[i][j] = *maskedValue
+				}
+			}
+{{- else}}
+			copy(dst[i], inner)
+{{- end}}
+		}
+{{- end}}
+
+{{- define "nestedListValidate"}}
+{{- $f := .Field}}
+	// Validate {{$f.Name}} (list of lists; an inner list is never null)
+{{- if $f.UsesWrapper}}
+	if t.{{$f.GoName}}.IsSet() && !t.{{$f.GoName}}.IsNull() {
+		value := t.{{$f.GoName}}.Value
+{{- else if $f.Required}}
+	if t.{{$f.GoName}} == nil {
+		errors.AddFieldError("{{$f.Name}}", "required", "required field")
+	} else {
+		value := t.{{$f.GoName}}
+{{- else}}
+	if t.{{$f.GoName}} != nil {
+		value := t.{{$f.GoName}}
+{{- end}}
+{{- range .ListBounds}}
+{{- if eq .Validator "listMin"}}
+		if len(value) < {{printf "%v" .Value}} {
+			errors.AddFieldError("{{$f.Name}}", "listMin", "{{escapeString .Message}}")
+		}
+{{- else}}
+		if len(value) > {{printf "%v" .Value}} {
+			errors.AddFieldError("{{$f.Name}}", "listMax", "{{escapeString .Message}}")
+		}
+{{- end}}
+{{- end}}
+		for i, inner := range value {
+			if inner == nil {
+				errors.AddFieldError(fmt.Sprintf("{{$f.Name}}[%d]", i), "required", "required field")
+{{- if .ChecksElements}}
+				continue
+			}
+			for j, item := range inner {
+{{- if .ElemValidate}}
+				if valid, itemErrs := item.{{.ElemValidate}}(); !valid {
+					errors.SetFieldErrors(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), itemErrs)
+				}
+{{- else if .ElemNested}}
+				if itemErrs := item.Validate(); itemErrs.HasErrors() {
+					errors.AddNestedError(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), itemErrs)
+				}
+{{- end}}
+{{- range .ElemRules}}
+{{- if eq .Validator "minLength"}}
+				if len({{validationStringExpr $f "item"}}) < {{printf "%v" .Value}} {
+					errors.AddFieldError(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), "minLength", "{{escapeString .Message}}")
+				}
+{{- else if eq .Validator "maxLength"}}
+				if len({{validationStringExpr $f "item"}}) > {{printf "%v" .Value}} {
+					errors.AddFieldError(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), "maxLength", "{{escapeString .Message}}")
+				}
+{{- else if eq .Validator "pattern"}}
+				if matched, err := regexp.MatchString("{{escapeString (printf "%v" .Value)}}", {{validationStringExpr $f "item"}}); err != nil || !matched {
+					errors.AddFieldError(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), "pattern", "{{escapeString .Message}}")
+				}
+{{- else if eq .Validator "min"}}
+				if float64(item) < {{printf "%v" .Value}} {
+					errors.AddFieldError(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), "min", "{{escapeString .Message}}")
+				}
+{{- else if eq .Validator "max"}}
+				if float64(item) > {{printf "%v" .Value}} {
+					errors.AddFieldError(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), "max", "{{escapeString .Message}}")
+				}
+{{- end}}
+{{- end}}
+			}
+{{- else}}
+			}
+{{- end}}
+		}
+	}
 {{- end}}
