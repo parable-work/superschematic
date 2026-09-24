@@ -106,6 +106,9 @@ type EndpointInfo struct {
 	ScalarArgs  []Param
 
 	Description string
+	// Operation is the schema operation the endpoint is generated from.
+	Operation *ir.FieldDef `json:"-"`
+
 	// Docs is the operation's @docs record; nil without it.
 	Docs *ir.OperationDocs
 	// MCP is the operation's resolved @mcp record: for a visible tool, Name
@@ -212,7 +215,7 @@ type APIOutput struct {
 	// schemas render them as oneOf.
 	TypeUnions map[string]ToolUnionInfo
 	// ToolKeys are the vendor-extension keys the SDK tool documents are
-	// written with.
+	// written with: DefaultToolKeys, as the tool hooks left them.
 	ToolKeys ToolKeys
 
 	// EnvConfig holds environment-variable loader output when populated by
@@ -317,6 +320,11 @@ type Options struct {
 	// OpenAPIHooks edit the OpenAPI document before it is written, in
 	// order. The registry's OpenAPIHooks supplies them.
 	OpenAPIHooks []OpenAPIHook
+
+	// ToolHooks edit the tool vendor keys and the resolved @mcp records,
+	// in order, before the SDK generators read them. The registry's
+	// ToolHooks supplies them.
+	ToolHooks []ToolHook
 }
 
 // Generate extracts REST endpoints from the schema's operation sets and
@@ -472,7 +480,11 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	if err := validateHandlerNameCollisions(output.Endpoints); err != nil {
 		return nil, err
 	}
-	output.ToolKeys = DefaultToolKeys()
+	keys, err := applyToolHooks(schema, output.Endpoints, opts.ToolHooks)
+	if err != nil {
+		return nil, err
+	}
+	output.ToolKeys = keys
 	if err := validateMCPCollisions(output.Endpoints); err != nil {
 		return nil, err
 	}
@@ -628,6 +640,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		QueryParams:                  queryParams,
 		ScalarArgs:                   scalarArgs,
 		Description:                  codegen.DocText(op.Description, op.Comment),
+		Operation:                    op,
 		Docs:                         op.Docs,
 		MCP:                          mcp,
 		RequiresAuth:                 requiresAuth,

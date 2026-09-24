@@ -17,7 +17,7 @@ The extension adds one of each registration surface:
 | Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |
 | Auth provider | `apikey`, an `X-API-Key` header over the generic session runtime | `ext/auth/` |
 | Checks and an OpenAPI hook | policy over the core documentation decorators: acme's `@docs` audiences and `@icon` names only, and the `x-acme-docs` vendor key | `ext/docs.go` |
-| Check on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden | `ext/mcp.go` |
+| Check and a tool hook on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden; the SDK tool documents carry acme's vendor keys and icon variant | `ext/mcp.go` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
@@ -67,7 +67,7 @@ examples/acme-schematic/
     manifest.go               acmeManifest generator on every kind
     inventory.go              acmeInventory build-all hook
     docs.go                   audience and icon checks, x-acme-docs OpenAPI hook
-    mcp.go                    every shop-api operation declares @mcp
+    mcp.go                    every shop-api operation declares @mcp; acme tool keys and icon variant
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
@@ -415,9 +415,32 @@ r.RegisterCheck(registry.CheckSpec{
 `shop-api` classifies its three operations: `getProduct` and
 `createProduct` are visible tools with an `@icon` from acme's set,
 `listProducts` is hidden with a reason. `acmeIcons` covers operation
-icons as well as field icons. `ext/mcp_test.go` checks that an
-unclassified `shop-api` operation fails the load while another API and the
-core registry accept it; the smoke checks the classification in the IR.
+icons as well as field icons.
+
+The SDK generators write the tools of `shop-api` to `tools/schema.json`,
+`tools/mcp-audit.json` and the provider lists. How those documents spell
+their vendor keys, and which variant of acme's icon set a tool's icon is
+drawn from, is a tool hook in the same file:
+
+```go
+r.RegisterToolHook(registry.ToolHook{
+	Name:      "acmeTools",
+	Extension: Name,
+	Edit: func(_ *ir.Schema, tools *registry.ToolSet) error {
+		tools.Keys.Scalar = "x-acme-scalar"
+		tools.Keys.Guidance = "acme/operation-guidance"
+		tools.Keys.Parameters = append(tools.Keys.Parameters, registry.ToolKeyValue{Key: "x-acme-arguments", Value: 1})
+		// set Icon.Family and Icon.Style on every tool icon
+		return nil
+	},
+})
+```
+
+`ext/mcp_test.go` checks that an unclassified `shop-api` operation fails
+the load while another API and the core registry accept it, and that the
+tool documents carry acme's keys and icon variant while the core registry
+writes the core's. The smoke checks the classification in the IR and the
+tool documents from both binaries.
 
 ## A command
 

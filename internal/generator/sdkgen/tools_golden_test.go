@@ -18,7 +18,7 @@ var mcpClock = codegen.FixedClock(time.Date(2026, time.January, 2, 3, 4, 5, 0, t
 // loadMCPFixture generates the API output of fixture-mcp: visible, hidden
 // and unclassified operations, all three replay modes, a nested object, a
 // typed map and array query parameters.
-func loadMCPFixture(t *testing.T) (*apigen.APIOutput, map[string]bool) {
+func loadMCPFixture(t *testing.T, hooks ...apigen.ToolHook) (*apigen.APIOutput, map[string]bool) {
 	t.Helper()
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-mcp"))
 	if err != nil {
@@ -29,6 +29,7 @@ func loadMCPFixture(t *testing.T) (*apigen.APIOutput, map[string]bool) {
 		SchemaName:  "fixture-mcp",
 		ModulePath:  "example.com/schemas/api/fixture-mcp",
 		TypesModule: "example.com/schemas/types/go/fixture-mcp",
+		ToolHooks:   hooks,
 	})
 	if err != nil {
 		t.Fatalf("apigen.Generate: %v", err)
@@ -40,9 +41,9 @@ func loadMCPFixture(t *testing.T) (*apigen.APIOutput, map[string]bool) {
 	return apiOutput, tsgen.ParseableTypeNames(tsOutput)
 }
 
-func writeMCPTools(t *testing.T) string {
+func writeMCPTools(t *testing.T, hooks ...apigen.ToolHook) string {
 	t.Helper()
-	apiOutput, parseable := loadMCPFixture(t)
+	apiOutput, parseable := loadMCPFixture(t, hooks...)
 	sdkOutput, err := Generate(apiOutput, parseable, mcpClock)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)

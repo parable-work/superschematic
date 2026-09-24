@@ -227,6 +227,18 @@ of a generated artifact is always listed here with the bump it requires.
   `tools/mcp-binding.json`. A test decodes the rendered documents with
   unknown fields refused and checks the round trip. The TypeScript and Go
   SDK generators use `ir.ToolBinding` for the binding records. Minor.
+- Registry: `RegisterToolHook(ToolHook{Name, Extension, Edit})` lets an
+  extension edit what the SDK generators publish about an API's MCP tools:
+  the vendor keys of the tool documents (`ToolKeys`: the scalar key, the
+  `_meta` guidance key, and extra keys written at the root of every
+  argument schema) and each operation's resolved `@mcp` record (an icon's
+  family and style, `_meta` entries). Hooks run in registration order in
+  the `api` generator, before the collision checks; a hook error names the
+  hook. The public `registry` package exports `ToolHook`, `ToolSet`,
+  `Tool`, `ToolKeys`, `ToolKeyValue`, `DefaultToolScalarKey` and
+  `DefaultToolGuidanceKey`. The acme example writes its own keys and icon
+  variant with one. Minor.
+
 ### Changed
 
 - `tools/openai.json` and `tools/anthropic.json` list only the operations

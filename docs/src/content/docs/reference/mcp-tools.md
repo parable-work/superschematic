@@ -1,6 +1,6 @@
 ---
 title: MCP tools
-description: The @mcp and @icon decorators on operations, the tool documents the SDK generators write from them, and how an extension adds its rules.
+description: The @mcp and @icon decorators on operations, the tool documents the SDK generators write from them, and how an extension adds its rules and vendor keys.
 sidebar:
   order: 4
 ---
@@ -137,7 +137,8 @@ One entry per operation, with these keys in this order: `name`
 - `mcp` is `{ hidden, hiddenReason }` for a hidden operation. A visible
   tool's `_meta` is the declared `_meta` plus its `@docs` guidance under
   `superschematic/operation-guidance`; `icon` is present when the
-  operation has `@icon`, with `family` and `style` when they are set.
+  operation has `@icon`, with `family` and `style` when a tool hook set
+  them.
 - `guidance` is `{ useWhen, doNotUseWhen, success, errors }` from `@docs`,
   every member present (empty strings and `[]` without them).
 - `replay` is `{ mode, idempotencyKeyPointers, expectedRevisionPointers }`
@@ -214,5 +215,28 @@ guidance keys are a distribution's rules. It registers them with
 operations and reports what breaks the rule. A check runs on every loaded
 schema of its kinds, core kinds included, in every authoring form.
 
-`examples/acme-schematic/ext/mcp.go` requires `@mcp` on every operation of
-acme's shop API.
+How the tool documents spell their vendor keys, and what an icon set adds
+to an icon, is a tool hook: `Registry.RegisterToolHook` with a `ToolHook`
+whose `Edit` receives the API schema and a `ToolSet`. The set holds the
+keys (`ToolKeys`) and one `Tool` per operation: its namespace, the
+schema's operation, and the resolved `mcp` record, which the hook may edit
+or replace. Hooks run in registration order, after the api generator
+resolves the records and before it checks them for collisions, and every
+SDK language reads what they leave.
+
+| `ToolKeys` field | Default | Written as |
+| --- | --- | --- |
+| `Scalar` | `x-superschematic-scalar` | the key of a property's scalar name; empty leaves it out |
+| `Guidance` | `superschematic/operation-guidance` | the `_meta` key of a visible tool's guidance; empty leaves it out |
+| `Parameters` | none | key/value pairs at the root of every argument schema: first in the digest input, after `additionalProperties` in the documents, and as literal types in `tools/index.ts` |
+
+A `Parameters` key may not be empty, repeat, or reuse `type`,
+`additionalProperties`, `properties`, `required` or the scalar key; a hook
+that adds or removes tools fails the build, as does a hook error, which
+names the hook. The `ir` wire types spell the default keys: a distribution
+that renames them decodes its documents with its own types.
+
+`examples/acme-schematic/ext/mcp.go` does both: it requires `@mcp` on every
+operation of acme's shop API, and its hook writes `x-acme-scalar`,
+`acme/operation-guidance` and `x-acme-arguments: 1` and gives every tool
+icon acme's family and style.

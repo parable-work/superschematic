@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,13 +13,14 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
 
 // writeMCPTools writes the Rust SDK of fixture-mcp, whose operations cover
 // visible, hidden and unclassified tools and all three replay modes.
-func writeMCPTools(t *testing.T) string {
+func writeMCPTools(t *testing.T, hooks ...apigen.ToolHook) string {
 	t.Helper()
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-mcp"))
 	if err != nil {
@@ -29,6 +31,7 @@ func writeMCPTools(t *testing.T) string {
 		SchemaName:  "fixture-mcp",
 		ModulePath:  "example.com/schemas/api/fixture-mcp",
 		TypesModule: "example.com/schemas/types/go/fixture-mcp",
+		ToolHooks:   hooks,
 	})
 	if err != nil {
 		t.Fatalf("apigen.Generate: %v", err)
@@ -76,6 +79,39 @@ func TestWriteToolsGoldenMCP(t *testing.T) {
 		}
 		if string(got) != string(want) {
 			t.Errorf("%s differs from golden (run with -update to accept)", name)
+		}
+	}
+}
+
+// TestToolHookReachesTheRustDocuments: a hook's keys and icon edits are
+// what every Rust tool document carries.
+func TestToolHookReachesTheRustDocuments(t *testing.T) {
+	outDir := writeMCPTools(t, apigen.ToolHook{
+		Name: "vendor",
+		Edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Scalar = "x-vendor-scalar"
+			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: "x-vendor-version", Value: 1}}
+			for _, tool := range tools.Tools {
+				if tool.MCP != nil && tool.MCP.Icon != nil {
+					tool.MCP.Icon.Family = "line"
+				}
+			}
+			return nil
+		},
+	})
+	for _, name := range []string{"tools/schema.json", "tools/mcp-audit.json", "tools/openai.json", "tools/anthropic.json"} {
+		rendered, err := os.ReadFile(filepath.Join(outDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(rendered), apigen.DefaultToolScalarKey) {
+			t.Errorf("%s still carries the core scalar key", name)
+		}
+		if name != "tools/mcp-audit.json" && !strings.Contains(string(rendered), `"x-vendor-version": 1,`) {
+			t.Errorf("%s lacks the vendor parameter key", name)
+		}
+		if name != "tools/openai.json" && name != "tools/anthropic.json" && !strings.Contains(string(rendered), `"family": "line"`) {
+			t.Errorf("%s lacks the icon family", name)
 		}
 	}
 }

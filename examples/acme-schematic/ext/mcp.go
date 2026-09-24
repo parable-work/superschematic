@@ -10,10 +10,44 @@ import (
 // in and asks nothing of the rest.
 const ToolsAPI = "shop-api"
 
-// registerMCPPolicy lays acme's policy over the core @mcp decorator: a
-// check that fails the load when an operation of ToolsAPI has no MCP
-// classification.
+// The vendor keys acme's SDK tool documents carry in place of the core's.
+const (
+	ToolScalarKey   = "x-acme-scalar"
+	ToolGuidanceKey = "acme/operation-guidance"
+	// ToolArgumentsKey versions acme's reading of a tool's arguments; every
+	// argument schema carries it.
+	ToolArgumentsKey = "x-acme-arguments"
+)
+
+// IconFamily and IconStyle name the variant of acme's icon set every tool
+// icon is drawn from.
+const (
+	IconFamily = "acme"
+	IconStyle  = "outline"
+)
+
+// registerMCPPolicy lays acme's policy over the core MCP tools: a check that
+// fails the load when an operation of ToolsAPI has no MCP classification,
+// and a tool hook that writes acme's vendor keys and fills in each tool
+// icon's family and style. Neither needs a core option.
 func registerMCPPolicy(r *registry.Registry) error {
+	if err := r.RegisterToolHook(registry.ToolHook{
+		Name:      "acmeTools",
+		Extension: Name,
+		Edit: func(_ *ir.Schema, tools *registry.ToolSet) error {
+			tools.Keys.Scalar = ToolScalarKey
+			tools.Keys.Guidance = ToolGuidanceKey
+			tools.Keys.Parameters = append(tools.Keys.Parameters, registry.ToolKeyValue{Key: ToolArgumentsKey, Value: 1})
+			for _, tool := range tools.Tools {
+				if tool.MCP != nil && tool.MCP.Icon != nil {
+					tool.MCP.Icon.Family, tool.MCP.Icon.Style = IconFamily, IconStyle
+				}
+			}
+			return nil
+		},
+	}); err != nil {
+		return err
+	}
 	return r.RegisterCheck(registry.CheckSpec{
 		Name:      "acmeToolsClassified",
 		Extension: Name,

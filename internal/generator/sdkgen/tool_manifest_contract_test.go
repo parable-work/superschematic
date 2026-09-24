@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -157,6 +158,94 @@ func indentJSON(t *testing.T, value any) string {
 	return string(encoded)
 }
 
+// acmeStyleHook renames the core keys, adds a parameter key, fills in the
+// icon set's family and style and adds a _meta entry: every edit a
+// distribution's hook makes.
+var acmeStyleHook = apigen.ToolHook{
+	Name: "vendor",
+	Edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+		tools.Keys.Scalar = "x-vendor-scalar"
+		tools.Keys.Guidance = "vendor/guidance"
+		tools.Keys.Parameters = append(tools.Keys.Parameters, apigen.ToolKeyValue{Key: "x-vendor-version", Value: 1})
+		for _, tool := range tools.Tools {
+			if tool.MCP == nil || tool.MCP.Hidden {
+				continue
+			}
+			if tool.MCP.Icon != nil {
+				tool.MCP.Icon.Family, tool.MCP.Icon.Style = "line", "regular"
+			}
+			if tool.MCP.Meta == nil {
+				tool.MCP.Meta = map[string]any{}
+			}
+			tool.MCP.Meta["vendor/owner"] = tool.Namespace
+		}
+		return nil
+	},
+}
+
+// TestToolHookReachesEveryTypeScriptDocument: the keys and records a tool
+// hook leaves are what tools/index.ts and every JSON document carry; none
+// keeps a core key.
+func TestToolHookReachesEveryTypeScriptDocument(t *testing.T) {
+	outDir := writeMCPTools(t, acmeStyleHook)
+	for _, name := range []string{"tools/index.ts", "tools/schema.json", "tools/mcp-audit.json", "tools/openai.json", "tools/anthropic.json"} {
+		rendered := string(readRendered(t, outDir, name))
+		for _, core := range []string{apigen.DefaultToolScalarKey, apigen.DefaultToolGuidanceKey} {
+			if strings.Contains(rendered, core) {
+				t.Errorf("%s still carries the core key %s", name, core)
+			}
+		}
+	}
+	schema := string(readRendered(t, outDir, "tools/schema.json"))
+	for _, want := range []string{
+		`"x-vendor-scalar":"Identity.UUID"`,
+		`"additionalProperties": false,
+        "x-vendor-version": 1,
+        "properties": {`,
+		`"vendor/guidance":{"useWhen":"Use when you have an order identifier."`,
+		`"vendor/owner":"order"`,
+		`"name": "receipt",
+          "family": "line",
+          "style": "regular"`,
+	} {
+		if !strings.Contains(schema, want) {
+			t.Errorf("tools/schema.json lacks %s", want)
+		}
+	}
+	index := string(readRendered(t, outDir, "tools/index.ts"))
+	for _, want := range []string{
+		`'x-vendor-scalar'?: string;`,
+		`    additionalProperties: false;
+    'x-vendor-version': 1;`,
+		`      additionalProperties: false,
+      'x-vendor-version': 1,`,
+		`family: 'line'`,
+	} {
+		if !strings.Contains(index, want) {
+			t.Errorf("tools/index.ts lacks %s", want)
+		}
+	}
+	audit := string(readRendered(t, outDir, "tools/mcp-audit.json"))
+	if !strings.Contains(audit, `"family": "line"`) {
+		t.Error("tools/mcp-audit.json lacks the icon family")
+	}
+
+	// The digest hashes the vendor key first.
+	apiOutput, parseable := loadMCPFixture(t, acmeStyleHook)
+	sdkOutput, err := Generate(apiOutput, parseable, mcpClock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools, err := GenerateTools(sdkOutput, apiOutput, mcpClock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(tools.Tools[0].Parameters)
+	if !strings.HasPrefix(string(encoded), `{"x-vendor-version":1,"additionalProperties":false,`) {
+		t.Fatalf("the digest input does not start with the vendor key: %s", encoded)
+	}
+}
+
 // TestToolReplayContractFailsTheBuild: a replay pointer that does not
 // resolve to a required argument of the right type fails tool generation.
 func TestToolReplayContractFailsTheBuild(t *testing.T) {
@@ -168,7 +257,8 @@ func TestToolReplayContractFailsTheBuild(t *testing.T) {
 		{"/pickup/postalCode", `segment "postalCode" is optional`},
 		{"/reason/x", `segment "reason" is not a concrete object`},
 	} {
-		apiOutput, parseable := loadMCPFixture(t)
+		hook := apigen.ToolHook{Name: "noop", Edit: func(*ir.Schema, *apigen.ToolSet) error { return nil }}
+		apiOutput, parseable := loadMCPFixture(t, hook)
 		for i := range apiOutput.Endpoints {
 			if apiOutput.Endpoints[i].Name == "openReturn" {
 				docs := *apiOutput.Endpoints[i].Docs

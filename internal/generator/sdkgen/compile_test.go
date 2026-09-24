@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
@@ -138,7 +139,8 @@ func typecheckTools(t *testing.T, bunPath, sdkDir string) {
 
 // TestGeneratedMCPToolsCompile type-checks the fixture-mcp SDK, whose
 // tools/index.ts carries visible, hidden and unclassified MCP records and
-// replay contracts.
+// replay contracts, as the core writes it and as a tool hook with its own
+// keys leaves it.
 func TestGeneratedMCPToolsCompile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -150,9 +152,11 @@ func TestGeneratedMCPToolsCompile(t *testing.T) {
 	paths := testpaths.Local(t)
 
 	for _, tc := range []struct {
-		name string
+		name  string
+		hooks []apigen.ToolHook
 	}{
 		{name: "core keys"},
+		{name: "hook keys", hooks: []apigen.ToolHook{acmeStyleHook}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tempRoot, err := filepath.EvalSymlinks(t.TempDir())
@@ -188,7 +192,7 @@ func TestGeneratedMCPToolsCompile(t *testing.T) {
 				t.Fatalf("types package fixture-mcp does not type-check: %v\n%s", err, out)
 			}
 
-			apiOutput, parseable := loadMCPFixture(t)
+			apiOutput, parseable := loadMCPFixture(t, tc.hooks...)
 			sdkOutput, err := Generate(apiOutput, parseable, mcpClock)
 			if err != nil {
 				t.Fatalf("Generate: %v", err)
