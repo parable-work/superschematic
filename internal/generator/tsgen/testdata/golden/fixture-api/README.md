@@ -80,7 +80,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 - **Generic.JSON** - Any valid JSON value: object, array, primitive, or null
-  - TypeScript type: `Record<string, any>`
+  - TypeScript type: `JSONValue`
 
 
 - **Identity.Name** - An objects name

@@ -64,6 +64,11 @@ type FieldInfo struct {
 	IsUnion     bool
 	Doc         string
 
+	// PreserveJSON is true for a Generic.JSON field: it decodes through the
+	// scalar crate's lossless JSON adapter (JSONFieldAdapter), which keeps
+	// every number exactly as written.
+	PreserveJSON bool
+
 	// SkipSerializing is true for union discriminator fields with a
 	// renderable default. The enum wrapper writes the tag key, and the
 	// default reconstructs the member field during deserialization.
@@ -114,6 +119,11 @@ type UnionInfo struct {
 	// Members pairs each member type with its serde tag value. TagValue is
 	// the member's discriminator literal from @default.
 	Members []UnionMemberInfo
+
+	// PreserveJSON is true when a member reaches a Generic.JSON field. A
+	// union buffers its input before it picks a member, so it reads that
+	// buffer through the lossless JSON adapter too.
+	PreserveJSON bool
 }
 
 // UnionMemberInfo holds per-member serde tagging metadata.
@@ -314,6 +324,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if err := validateRenderedUnionDiscriminatorDefaults(output.Types, output.Unions); err != nil {
 		return nil, err
 	}
+	for i := range output.Unions {
+		output.Unions[i].PreserveJSON = containsGenericJSON(schema, output.Unions[i].Name, opts.Dependencies, map[string]bool{})
+	}
 
 	output.UsesHashMap = hasMapFields(output.Types)
 	output.UsesUnions = hasUnionFields(output.Types)
@@ -506,6 +519,8 @@ func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enu
 				IsScalar:    f.IsScalar,
 				IsUnion:     f.IsUnion,
 				Doc:         f.Doc(),
+				// The core's any-JSON scalar, as pygen's genericJSONScalar.
+				PreserveJSON: f.IsScalar && f.Type == "Generic.JSON",
 			}
 
 			if f.Default != nil {
@@ -632,16 +647,6 @@ func remapScalarLibType(targetType string, scalar codegen.ScalarInfo, scalarCrat
 	if scalar.Name == "Temporal.DateTime" {
 		return scalarCrate + "::DateTime"
 	}
-	// Generic.StringMap declares ("rust", "std::collections::HashMap<String, String>")
-	// in the superscalar catalog, but the loader only plumbs go/typescript/sql/
-	// json_schema TypeMappings through to codegen, so without this carve-out the
-	// alias degrades to the String primitive fallback and generated SDKs reject
-	// real map payloads (e.g. supportedAuthStrategies[].extraHeaders in the sync
-	// manifest) with "invalid type: map, expected a string". The durable fix is
-	// plumbing the catalog's rust type_mappings through ScalarMetadata + loader.
-	if scalar.Name == "Generic.StringMap" {
-		return "std::collections::HashMap<String, String>"
-	}
 	return targetType
 }
 
@@ -761,6 +766,11 @@ var hardcodedCrates = map[string]struct{}{
 }
 
 func usesScalarLib(output *ModuleOutput) bool {
+	for _, union := range output.Unions {
+		if union.PreserveJSON {
+			return true
+		}
+	}
 	marker := output.Naming.ScalarRustCrateIdent() + "::"
 	for _, scalar := range output.Scalars {
 		if strings.Contains(scalar.RustType, marker) {
@@ -769,7 +779,7 @@ func usesScalarLib(output *ModuleOutput) bool {
 	}
 	for _, typ := range output.Types {
 		for _, field := range typ.Fields {
-			if strings.Contains(field.RustType, marker) {
+			if field.PreserveJSON || strings.Contains(field.RustType, marker) {
 				return true
 			}
 		}
@@ -781,6 +791,14 @@ func collectExternalCrateDeps(output *ModuleOutput) []ExternalCrateDep {
 	crateNames := make(map[string]struct{})
 	if len(output.CompositeDefaults) > 0 {
 		crateNames["serde_json"] = struct{}{}
+	}
+	// A discriminated union, or one that reaches Generic.JSON, decodes
+	// through serde_json::Value (unions.tmpl).
+	for _, union := range output.Unions {
+		if union.Discriminator != "" || union.PreserveJSON {
+			crateNames["serde_json"] = struct{}{}
+			break
+		}
 	}
 
 	for _, scalar := range output.Scalars {

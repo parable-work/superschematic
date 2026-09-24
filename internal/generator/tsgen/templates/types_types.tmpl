@@ -8,7 +8,9 @@ import type {
   {{.Symbol}},
 {{- end}}
 {{- range $scalarLibTypes}}
+{{- if ne . "JSONValue"}}
   {{.}},
+{{- end}}
 {{- end}}
 } from './scalars';
 {{end}}
