@@ -299,6 +299,37 @@ of a generated artifact is always listed here with the bump it requires.
   every key of the projection Arrow schemas' metadata
   (`<prefix>scalar.canonical_name`, `<prefix>projection.settings`, ...).
   Minor.
+- TypeScript API server: `outputs.api.language: "TYPESCRIPT"` makes the
+  `api` generator write `<out>/api/<service>` as the npm package
+  `<npm_scope>/<service>-api` instead of the Go module. It holds
+  `interfaces.ts` (one implementation interface per operation namespace),
+  `router.ts` (`buildRouter` returns a Hono app; `operationSpecs` is the
+  operation table), `openapi.json`, a README, and `values-schema.json` for
+  an `@envVars` class. The router decodes path and query parameters through
+  the scalar library, parses bodies with the generated `parse<Input>Json`
+  decoders, and applies `@publicRoute`, `@auth`, `@requirePermission`,
+  `@bodyLimit`, `@rateLimit`, `@timeout` and `@manualRouteRegistration`. An
+  operation that uploads files without `@manualRouteRegistration` fails the
+  build. `schema-config` gains `ApiLanguage`, and an unknown API language is
+  now an error instead of the Go server. `apigen.EndpointInfo` gains
+  `PublicRoute`. The dependency graph collects the package as
+  `<service>-api`. Minor.
+- `runtime/http/typescript` (`@superschematic/http-runtime`): the runtime
+  the TypeScript router is built on. It holds the request context, the
+  success and RFC 9457 problem envelopes, parameter decoding, the 401/403
+  permission gate with a pluggable `PermissionMatcher` (default:
+  dotted-path coverage, no root permission, as in `runtime/http/go/session`),
+  a token-bucket rate limiter with a pluggable store, and the Hono adapter.
+  The service supplies an `Authenticator`; identity and token verification
+  stay out of the runtime (D12). It ships TypeScript sources and is packed
+  with the other npm packages on release. The naming key
+  `http_runtime_npm_package` (default `@superschematic/http-runtime`) names
+  it in generated code, and `Naming.NpmAPIPackage` names the generated
+  package. Minor.
+- `examples/acme-schematic`: `shop-storefront`, an API service on the
+  TypeScript server, and `storefront/`, the app that implements it with an
+  `X-API-Key` authenticator. The smoke type-checks both and drives the
+  generated router over HTTP.
 - Arrays of arrays, the IR and loader half (D12): a field, a request
   input field, a body argument or a response can be a list of lists of a
   scalar, enum, object type or union, one level of nesting only. The IR

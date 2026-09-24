@@ -27,6 +27,7 @@ schema_ir_go_module = "github.com/parable-work/superschematic/ir"
 schema_runtime_go_module = "github.com/parable-work/superschematic/runtime/schema/go"
 http_runtime_go_module = "github.com/parable-work/superschematic/runtime/http/go"
 http_runtime_rust_crate = "superschematic-http-runtime"
+http_runtime_npm_package = "@superschematic/http-runtime"
 ptr_go_module = "github.com/parable-work/superschematic/runtime/schema/go/ptr"
 
 # Prose the generated readmes and package manifests carry.

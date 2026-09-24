@@ -128,6 +128,9 @@ type EndpointInfo struct {
 	RequiresAuth     bool
 	RequiredPerms    []string
 	RequireOwnership bool
+	// PublicRoute marks an operation declared @publicRoute: intentionally
+	// unauthenticated, as opposed to one that merely declares no auth.
+	PublicRoute bool
 
 	// IsScopedEndpoint and ScopeParamName are filled by the auth provider's
 	// Endpoint hook; the SDK generators read them to hoist one path
@@ -678,6 +681,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		RequiresAuth:                 requiresAuth,
 		RequiredPerms:                op.Permissions,
 		RequireOwnership:             op.RequireOwnership,
+		PublicRoute:                  op.Public,
 		HasFileUpload:                len(fileUploadFields) > 0,
 		FileUploadFields:             fileUploadFields,
 		RateLimit:                    rateLimit,
