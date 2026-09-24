@@ -27,6 +27,12 @@ The schemas root under `schemas/` has one service per kind: `shop-db` (DB),
 `shop-catalog` (Catalog). Its `superschematic.toml` names the generated
 packages `example.com/acme/...`, `@acme/...`, `acme_types_...` and `acme-...`.
 
+A product's variants are a list of lists (`string[][]`, one inner list of
+option values per variant): a `JSONB` column of `shop-db`'s `Product`, a
+field of `shop-api`'s `ProductView` and `CreateProductInput`, and the body
+argument of `replaceVariants`, which makes it a tool argument. The smoke
+follows it into every output that renders it.
+
 ## Run it
 
 From the repository root, after `make setup`:

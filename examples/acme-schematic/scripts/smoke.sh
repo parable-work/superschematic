@@ -49,7 +49,13 @@
 #      variant through the acme tool hook, and the core keys when the
 #      core-only binary builds the same service; a visible tool carries
 #      acme's confirm policy at its default in the IR and the tool
-#      documents, and the core's invocationPolicy from the core-only binary.
+#      documents, and the core's invocationPolicy from the core-only binary;
+#  16. the list of lists (string[][]) in shop-db's Product.variants column,
+#      shop-api's ProductView and CreateProductInput types and the variants
+#      argument of replaceVariants reached the IR, the SQL (JSONB), the ORM's
+#      JSON codec, the Go and TypeScript types, the Go routes, the OpenAPI
+#      document and the tool documents as a list of lists, and the ORM and
+#      API modules that carry it compile.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -251,12 +257,53 @@ jq -e '[.. | objects | has("x-superschematic-scalar")] | any | not' "$TOOLS/sche
 jq -e '.tools[] | select(.name == "product.getProduct") | .mcp.confirm == "never"' "$TOOLS/schema.json" >/dev/null
 jq -e '[.. | objects | has("invocationPolicy")] | any | not' "$TOOLS/schema.json" >/dev/null
 jq -e '[.registryDigestInputs[] | select(.hidden | not) | .confirm] | unique == ["never"]' "$TOOLS/mcp-audit.json" >/dev/null
-jq -e '[.registryDigestInputs[] | select(.hidden | not) | .handle] | sort == ["create_product", "get_product"]' \
+jq -e '[.registryDigestInputs[] | select(.hidden | not) | .handle] | sort == ["create_product", "get_product", "replace_variants"]' \
   "$TOOLS/mcp-audit.json" >/dev/null
-jq -e '[.tools[].name] | sort == ["product.createProduct", "product.getProduct"]' "$TOOLS/anthropic.json" >/dev/null
+jq -e '[.tools[].name] | sort == ["product.createProduct", "product.getProduct", "product.replaceVariants"]' "$TOOLS/anthropic.json" >/dev/null
 jq -e '.tools[] | select(.name == "product.getProduct") | .parameters.properties.id["x-superschematic-scalar"] == "Identity.UUID"' \
   "$OUT/session-dist/sdk/typescript/shop-api/tools/schema.json" >/dev/null
 jq -e '.tools[] | select(.name == "product.getProduct") | .mcp.invocationPolicy == "auto" and (.mcp | has("confirm") | not)' \
   "$OUT/session-dist/sdk/typescript/shop-api/tools/schema.json" >/dev/null
+
+echo "==> arrays of arrays: a DB column, API types and a tool argument"
+# The IR carries the list of lists on the column, the view, the input type
+# and the body argument.
+NESTED='{"name": "string", "isArray": true, "isArrayOfArrays": true}'
+jq -e --argjson t "$NESTED" '.types.Product.fields[] | select(.name == "variants") | .typeRef == $t and .required' \
+  "$OUT/db-ir.json" >/dev/null
+jq -e --argjson t "$NESTED" '[.types.ProductView, .types.CreateProductInput | .fields[] | select(.name == "variants") | .typeRef == $t] == [true, true]' \
+  "$OUT/api-ir.json" >/dev/null
+jq -e --argjson t "$NESTED" '.operationSets[].operations[] | select(.name == "replaceVariants") | .arguments[] | select(.name == "variants") | .typeRef == $t' \
+  "$OUT/api-ir.json" >/dev/null
+# A list of lists is a JSONB column, never a native array, written through
+# the ORM's JSON codec.
+grep -q '^  variants JSONB NOT NULL,$' "$DIST/sql/shop-db/create.sql"
+grep -q 'marshalArrayOfArraysFieldValue(input.Variants)' "$DIST/orm/shop-db/repository_product.go"
+# [][]T in Go, T[][] in TypeScript, for the table type and the API types.
+for types in "$DIST/types/go/shop-db/types.go" "$DIST/types/go/shop-api/types.go"; do
+  grep -q 'Variants \[\]\[\]string `json:"variants"`' "$types"
+  grep -q 'errors.AddFieldError(fmt.Sprintf("variants\[%d\]", i), "required", "required field")' "$types"
+done
+grep -q '^  variants: string\[\]\[\];$' "$DIST/types/typescript/shop-db/types/types.ts"
+test "$(grep -c '^  variants: string\[\]\[\];$' "$DIST/types/typescript/shop-api/types/types.ts")" -eq 2
+# The Go route decodes the body argument as [][]string and refuses a null
+# inner list at variants[i].
+grep -q 'Variants \[\]\[\]string `json:"variants"`' "$DIST/api/shop-api/routes.go"
+grep -q 'validationErrors.AddFieldError(fmt.Sprintf("variants\[%d\]", i), "required", "required field")' "$DIST/api/shop-api/routes.go"
+# OpenAPI and the tool documents nest the items.
+jq -e '.components.schemas.ProductView.properties.variants == {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}' \
+  "$OPENAPI" >/dev/null
+jq -e '.paths["/api/products/{id}/variants"].put.requestBody.content["application/json"].schema.properties.variants.items.items.type == "string"' \
+  "$OPENAPI" >/dev/null
+jq -e '.tools[] | select(.name == "product.replaceVariants") | .parameters
+  | (.required | index("variants")) != null and .properties.variants.type == "array"
+    and .properties.variants.items.type == "array" and .properties.variants.items.items.type == "string"' \
+  "$TOOLS/schema.json" >/dev/null
+# createProduct's input type fields are the tool's parameters.
+jq -e '.tools[] | select(.name == "product.createProduct") | .parameters.properties.variants.items.items.type == "string"' \
+  "$TOOLS/schema.json" >/dev/null
+# The ORM module compiles with the JSONB column; the API module that
+# imports it compiled above.
+go_module_compiles "$DIST/orm/shop-db"
 
 echo "acme smoke: ok"

@@ -65,6 +65,11 @@ export abstract class Product extends Auditable {
   name: Identity.Name;
   priceCents: number;
   inStock: Default<boolean, true>;
+
+  // The option values of each variant the product comes in, one inner list
+  // per variant: [["red", "S"], ["red", "M"]]. A list of lists is stored
+  // as JSONB.
+  variants: string[][];
 }
 
 // How many units of a product one shop holds. A shop is identified by its

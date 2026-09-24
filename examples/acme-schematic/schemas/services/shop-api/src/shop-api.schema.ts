@@ -20,12 +20,15 @@ export abstract class ProductView {
   name: Identity.Name;
   priceCents: number;
   inStock: boolean;
+  variants: string[][];
 }
 
 export abstract class CreateProductInput {
   sku: Identity.Slug;
   name: Identity.Name;
   priceCents: number;
+  // One inner list of option values per variant.
+  variants: string[][];
 }
 
 // Every route in an Authenticated set sits behind Config.AuthMiddleware. With
@@ -81,6 +84,24 @@ export class ProductMutations extends Authenticated {
   @rest(HttpMethod.POST, "products")
   @requirePermission(["products.write"])
   createProduct(input: CreateProductInput): ProductView {
+    throw new Error("schema declaration only");
+  }
+
+  // A list of lists as a body argument, and so as a tool argument: the
+  // tool's variants parameter is an array of arrays of strings.
+  @docs({
+    title: "Replace a product's variants",
+    description: "Replaces the option values of every variant of one product.",
+    capability: "catalog.products.variants",
+    lifecycle: "active",
+    visibility: "internal",
+    audience: "staff"
+  })
+  @icon("tag")
+  @mcp({ handle: "replace_variants" })
+  @rest(HttpMethod.PUT, "products/{id}/variants")
+  @requirePermission(["products.write"])
+  replaceVariants(id: Identity.UUID, variants: string[][]): ProductView {
     throw new Error("schema declaration only");
   }
 }
