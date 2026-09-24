@@ -49,6 +49,7 @@ export interface ToolDefinition {
     name?: string;
     handle?: string;
     description?: string;
+    invocationPolicy?: 'auto' | 'ask';
     _meta?: Record<string, unknown>;
     icon?: {
       name: string;
@@ -189,6 +190,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
       name: `List orders`,
       handle: 'list_orders',
       description: `Lists orders by status.`,
+      invocationPolicy: 'auto',
       _meta: {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}},
       icon: {
         name: 'list'
@@ -304,6 +306,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
       name: `Get an order`,
       handle: 'get_order',
       description: `Returns one order by its identifier.`,
+      invocationPolicy: 'auto',
       _meta: {"superschematic/operation-guidance":{"useWhen":"Use when you have an order identifier.","doNotUseWhen":"Do not use to list orders; call list_orders.","success":"Returns the order with its status and total.","errors":[{"code":"order_not_found","description":"No order has that identifier.","commonCorrection":"Take the identifier from a list_orders result."}]},"ui":{"resourceUri":"ui://orders/detail"}},
       icon: {
         name: 'receipt'
@@ -349,6 +352,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
       name: `Update an order`,
       handle: 'update_order',
       description: `Changes an order's note when its revision still matches.`,
+      invocationPolicy: 'ask',
       _meta: {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}},
       icon: {
         name: 'pen'
@@ -396,6 +400,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
       name: `Open a return`,
       handle: 'open_return',
       description: `Opens a return for one delivered order.`,
+      invocationPolicy: 'auto',
       _meta: {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}},
       icon: {
         name: 'box'

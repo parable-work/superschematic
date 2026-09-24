@@ -697,6 +697,13 @@
         "icon": {
           "$ref": "#/$defs/MCPIcon"
         },
+        "invocationPolicy": {
+          "enum": [
+            "auto",
+            "ask"
+          ],
+          "type": "string"
+        },
         "name": {
           "type": "string"
         }

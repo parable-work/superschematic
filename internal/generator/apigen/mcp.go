@@ -10,11 +10,12 @@ import (
 
 // resolveOperationMCP returns a copy of the operation's @mcp record with the
 // generated presentation filled in. A visible tool takes its name and
-// description from @docs, which it must declare, and its icon from @icon
-// when it has one. A hidden record carries only its reason. The loader
-// checks the same rules; they are checked again here for IR that did not
-// come through it.
-func resolveOperationMCP(op *ir.FieldDef, namespace string) (*ir.OperationMCP, error) {
+// description from @docs, which it must declare, its icon from @icon when
+// it has one, and its invocation policy from the record, or the policy's
+// default when the record has none. A hidden record carries only its
+// reason. The loader checks the same rules and fills in the same default;
+// they are applied again here for IR that did not come through it.
+func resolveOperationMCP(op *ir.FieldDef, namespace string, invocation ToolInvocationPolicy) (*ir.OperationMCP, error) {
 	if op.MCP == nil {
 		return nil, nil
 	}
@@ -28,6 +29,11 @@ func resolveOperationMCP(op *ir.FieldDef, namespace string) (*ir.OperationMCP, e
 	if op.Docs == nil {
 		return nil, fmt.Errorf("apigen: visible @mcp tool %s.%s must also declare @docs", namespace, op.Name)
 	}
+	policy, err := invocation.Resolve(op.MCP.Invocation)
+	if err != nil {
+		return nil, fmt.Errorf("apigen: operation %s.%s has an invalid @mcp: %w", namespace, op.Name, err)
+	}
+	resolved.Invocation = policy
 	resolved.Meta = maps.Clone(op.MCP.Meta)
 	resolved.Name = op.Docs.Title
 	resolved.Description = op.Docs.Description
@@ -38,6 +44,24 @@ func resolveOperationMCP(op *ir.FieldDef, namespace string) (*ir.OperationMCP, e
 		resolved.Icon = &ir.MCPIcon{Name: op.Icon}
 	}
 	return &resolved, nil
+}
+
+// validateMCPInvocations checks the invocation policy of every visible tool
+// again once the tool hooks have run: a hook may change a tool's value, but
+// only to another value of the build's policy.
+func validateMCPInvocations(endpoints []EndpointInfo, invocation ToolInvocationPolicy) error {
+	for _, endpoint := range endpoints {
+		if endpoint.MCP == nil || endpoint.MCP.Hidden {
+			continue
+		}
+		if endpoint.MCP.Invocation.IsZero() {
+			return fmt.Errorf("apigen: visible @mcp tool %s.%s has no %s after the tool hooks ran", endpoint.Namespace, endpoint.Name, invocation.Key)
+		}
+		if _, err := invocation.Resolve(endpoint.MCP.Invocation); err != nil {
+			return fmt.Errorf("apigen: visible @mcp tool %s.%s after the tool hooks ran: %w", endpoint.Namespace, endpoint.Name, err)
+		}
+	}
+	return nil
 }
 
 // validateMCPCollisions rejects two visible tools in one API with the same

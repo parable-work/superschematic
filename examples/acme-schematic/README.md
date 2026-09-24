@@ -17,7 +17,7 @@ The extension adds one of each registration surface:
 | Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |
 | Auth provider | `apikey`, an `X-API-Key` header over the generic session runtime | `ext/auth/` |
 | Checks and an OpenAPI hook | policy over the core documentation decorators: acme's `@docs` audiences and `@icon` names only, and the `x-acme-docs` vendor key | `ext/docs.go` |
-| Check and a tool hook on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden; the SDK tool documents carry acme's vendor keys and icon variant | `ext/mcp.go` |
+| Check, a tool hook and an invocation policy on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden; the SDK tool documents carry acme's vendor keys and icon variant; `confirm` replaces the core's `invocationPolicy` | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Check on a core kind | policy over core projection views: every view in a DB schema binds `acme.shop_id` first | `ext/projection_policy.go` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
@@ -68,12 +68,13 @@ examples/acme-schematic/
     manifest.go               acmeManifest generator on every kind
     inventory.go              acmeInventory build-all hook
     docs.go                   audience and icon checks, x-acme-docs OpenAPI hook
-    mcp.go                    every shop-api operation declares @mcp; acme tool keys and icon variant
+    mcp.go                    every shop-api operation declares @mcp; acme tool keys and icon variant; the confirm policy
     projection_policy.go      projection policy: a check on DB views' first rule
+    testdata/services/returns-api  an API the tests load that declares confirm on @mcp
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
-  packages/schema/            @acme/schema, the authoring package @shelf is imported from
+  packages/schema/            @acme/schema, the authoring package @shelf is imported from, and the confirm key's type
   schemas/
     superschematic.toml       naming, auth_provider = "apikey", [paths], [deps], [extension.acme]
     deps.json                 the committed copy of the dependency graph ([deps] copy)
@@ -439,11 +440,41 @@ r.RegisterToolHook(registry.ToolHook{
 })
 ```
 
+A visible tool's invocation policy says whether a client runs it when a
+model calls it or asks the person first. The core spells it
+`invocationPolicy`, `"auto"` or `"ask"`. acme spells it its own way, in
+the same file:
+
+```go
+r.RegisterToolInvocationPolicy(registry.ToolInvocationPolicy{
+	Extension: Name,
+	Key:       "confirm",
+	Values:    []string{"never", "always"},
+	Default:   "never",
+})
+```
+
+Under acme, `@mcp({ handle: "approve_return", confirm: "always" })` is how
+a tool asks first; a tool without `confirm` gets `"never"`, and the IR and
+every tool document write `confirm` where the core writes
+`invocationPolicy`. The loader type-checks schema files, so the key must
+type-check too: `packages/schema/src/mcp.ts` adds it to the core's
+`MCPToolOptions` by module augmentation. An API schema cannot import
+`@acme/schema`, whose decorators are for Catalog schemas, so an API
+service lists that file in its `tsconfig.json`.
+
+`shop-api` does not declare `confirm`: the core-only binary builds
+`shop-api` in the smoke, and it rejects the key. Its tools get acme's
+default. `ext/testdata/services/returns-api` is the API that declares it,
+and the tests load and generate it.
+
 `ext/mcp_test.go` checks that an unclassified `shop-api` operation fails
-the load while another API and the core registry accept it, and that the
+the load while another API and the core registry accept it, that the
 tool documents carry acme's keys and icon variant while the core registry
-writes the core's. The smoke checks the classification in the IR and the
-tool documents from both binaries.
+writes the core's, and that `confirm` reaches the IR and the tool
+documents, fails with a value acme does not list, and is unknown to the
+core registry. The smoke checks the classification and the policy in the
+IR and the tool documents from both binaries.
 
 ## Policy on projection views
 
@@ -493,9 +524,9 @@ func (Extension) Commands() []*cobra.Command {
 `describe [<schemas-root>]` assembles the registry the way `build` does
 (`registry.LoadNaming` on the root, then `registry.Assemble(names,
 Extension{})`) and prints every kind with its pipeline, every document,
-every output key, every auth provider and every check. It is the
-first thing to run when a schema is rejected: it shows what the binary
-knows.
+every output key, every auth provider, every check and the tool
+invocation policy. It is the first thing to run when a schema is
+rejected: it shows what the binary knows.
 
 `fields <file.d.ts> <type>` is a command on TypeScript the schema frontend
 does not walk. It hands the file, and the other `.d.ts` files next to it,

@@ -17,6 +17,7 @@ import (
 
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	ir "github.com/parable-work/superschematic/ir"
@@ -46,6 +47,9 @@ type Registry struct {
 	checks         []CheckSpec
 	openAPIHooks   []OpenAPIHook
 	toolHooks      []ToolHook
+	// toolInvocation is the policy RegisterToolInvocationPolicy installed;
+	// nil means ToolInvocationPolicy returns the core's.
+	toolInvocation *ToolInvocationPolicy
 
 	// authoring is Naming.AuthoringPackages plus every registered
 	// decorator's Packages: the set IsAuthoringPackage answers from.
@@ -95,7 +99,7 @@ func New(n naming.Naming) *Registry {
 			panic("registry: core kinds: " + err.Error())
 		}
 	}
-	for _, spec := range coreDecorators() {
+	for _, spec := range coreDecorators(r) {
 		if err := r.RegisterDecorator(spec); err != nil {
 			panic("registry: core decorators: " + err.Error())
 		}
@@ -447,6 +451,44 @@ func (r *Registry) RegisterToolHook(h ToolHook) error {
 // ToolHooks returns the registered tool hooks in registration order.
 func (r *Registry) ToolHooks() []ToolHook {
 	return append([]ToolHook(nil), r.toolHooks...)
+}
+
+// RegisterToolInvocationPolicy replaces the core's invocation policy
+// (apigen.DefaultToolInvocationPolicy) with an extension's: the key @mcp
+// reads a visible tool's policy from and every output writes it under, the
+// values it allows and the default a tool that omits it gets. It needs the
+// registering Extension and a policy that passes Validate. One registry
+// holds one policy: a second registration is an error that names both
+// extensions, so two extensions that disagree fail at assembly.
+func (r *Registry) RegisterToolInvocationPolicy(p ToolInvocationPolicy) error {
+	if err := r.registrable("tool invocation policy " + p.Key); err != nil {
+		return err
+	}
+	if p.Extension == "" {
+		return fmt.Errorf("registry: tool invocation policy %q names no extension", p.Key)
+	}
+	if r.toolInvocation != nil {
+		return fmt.Errorf("registry: extension %s registered the tool invocation policy %q; extension %s cannot register %q as well",
+			r.toolInvocation.Extension, r.toolInvocation.Key, p.Extension, p.Key)
+	}
+	if err := p.Validate(); err != nil {
+		return fmt.Errorf("registry: tool invocation policy of extension %s: %w", p.Extension, err)
+	}
+	p.Values = append([]string(nil), p.Values...)
+	r.toolInvocation = &p
+	r.noteExtension(p.Extension)
+	return nil
+}
+
+// ToolInvocationPolicy returns the registered invocation policy, or the
+// core's when no extension registered one.
+func (r *Registry) ToolInvocationPolicy() ToolInvocationPolicy {
+	if r.toolInvocation == nil {
+		return apigen.DefaultToolInvocationPolicy()
+	}
+	p := *r.toolInvocation
+	p.Values = append([]string(nil), p.Values...)
+	return p
 }
 
 // Kind returns the spec registered under name.

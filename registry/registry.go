@@ -44,12 +44,16 @@ type (
 	// ToolHook edits the vendor keys of an API's SDK tool documents and the
 	// resolved @mcp records of its operations. It edits a ToolSet: the
 	// ToolKeys (with ToolKeyValue entries) and one Tool per operation.
-	ToolHook      = registry.ToolHook
-	ToolSet       = apigen.ToolSet
-	Tool          = apigen.Tool
-	ToolKeys      = apigen.ToolKeys
-	ToolKeyValue  = apigen.ToolKeyValue
-	ScalarCatalog = registry.ScalarCatalog
+	ToolHook     = registry.ToolHook
+	ToolSet      = apigen.ToolSet
+	Tool         = apigen.Tool
+	ToolKeys     = apigen.ToolKeys
+	ToolKeyValue = apigen.ToolKeyValue
+	// ToolInvocationPolicy is the key, values and default of a visible
+	// MCP tool's invocation policy; RegisterToolInvocationPolicy replaces
+	// the core's.
+	ToolInvocationPolicy = registry.ToolInvocationPolicy
+	ScalarCatalog        = registry.ScalarCatalog
 	// SchemaCatalogEntry is one discovered service's identity facts, the
 	// value type of LoadContext.Catalog.
 	SchemaCatalogEntry = registry.SchemaCatalogEntry
@@ -107,7 +111,18 @@ const (
 	// the SDK tool documents carry unless a ToolHook renames them.
 	DefaultToolScalarKey   = apigen.DefaultToolScalarKey
 	DefaultToolGuidanceKey = apigen.DefaultToolGuidanceKey
+
+	// DefaultToolInvocationKey, ToolInvocationAuto and ToolInvocationAsk
+	// are the core's invocation policy: the key, its values, and (auto)
+	// the default.
+	DefaultToolInvocationKey = apigen.DefaultToolInvocationKey
+	ToolInvocationAuto       = apigen.ToolInvocationAuto
+	ToolInvocationAsk        = apigen.ToolInvocationAsk
 )
+
+// DefaultToolInvocationPolicy returns the core's invocation policy:
+// invocationPolicy, auto or ask, auto by default.
+func DefaultToolInvocationPolicy() ToolInvocationPolicy { return apigen.DefaultToolInvocationPolicy() }
 
 // New returns a registry with the core kinds and decorators registered; see
 // internal/registry.New. Core generators are not included: call RegisterCore

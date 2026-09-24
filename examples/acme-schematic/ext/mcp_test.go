@@ -134,6 +134,10 @@ func TestShopAPIToolsCarryAcmeKeys(t *testing.T) {
 		t.Fatalf("core getProduct id = %+v", get.Parameters.Properties["id"])
 	}
 
+	if want := (ir.MCPInvocation{Key: registry.DefaultToolInvocationKey, Value: registry.ToolInvocationAuto}); get.MCP.Invocation != want {
+		t.Fatalf("core getProduct invocation = %+v, want %+v", get.MCP.Invocation, want)
+	}
+
 	schema, err := os.ReadFile(filepath.Join(acmeOut, tools, "schema.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -144,12 +148,13 @@ func TestShopAPIToolsCarryAcmeKeys(t *testing.T) {
 		`"acme/operation-guidance":`,
 		`"family": "acme"`,
 		`"style": "outline"`,
+		`"confirm": "never"`,
 	} {
 		if !strings.Contains(string(schema), want) {
 			t.Errorf("acme schema.json lacks %s", want)
 		}
 	}
-	for _, core := range []string{registry.DefaultToolScalarKey, registry.DefaultToolGuidanceKey} {
+	for _, core := range []string{registry.DefaultToolScalarKey, registry.DefaultToolGuidanceKey, registry.DefaultToolInvocationKey} {
 		if strings.Contains(string(schema), core) {
 			t.Errorf("acme schema.json still carries %s", core)
 		}
@@ -175,6 +180,120 @@ func TestShopAPIToolsCarryAcmeKeys(t *testing.T) {
 	}
 	if visible != 2 || len(audit.RegistryDigestInputs) != 3 {
 		t.Fatalf("audit = %+v", audit)
+	}
+}
+
+// returnsAPI is a test service that declares acme's confirm key on @mcp.
+const returnsAPI = "testdata/services/returns-api"
+
+// TestConfirmReplacesTheCoreInvocationPolicy: acme's confirm key is how a
+// visible tool declares its invocation policy under acme. The TypeScript
+// schema type-checks through acme's augmentation of the @mcp options, the
+// IR carries confirm with its value or acme's default, and the core
+// registry rejects the key.
+func TestConfirmReplacesTheCoreInvocationPolicy(t *testing.T) {
+	reg, names := assemble(t)
+	schema, err := loader.LoadService(returnsAPI, loader.WithRegistry(reg), loader.WithNaming(names))
+	if err != nil {
+		t.Fatalf("LoadService: %v", err)
+	}
+	policies := map[string]ir.MCPInvocation{}
+	for _, set := range schema.OperationSets {
+		for _, op := range set.Operations {
+			policies[op.Name] = op.MCP.Invocation
+		}
+	}
+	want := map[string]ir.MCPInvocation{
+		"openReturn":    {Key: ext.ConfirmKey, Value: ext.ConfirmNever},
+		"approveReturn": {Key: ext.ConfirmKey, Value: ext.ConfirmAlways},
+	}
+	if len(policies) != len(want) || policies["openReturn"] != want["openReturn"] || policies["approveReturn"] != want["approveReturn"] {
+		t.Fatalf("policies = %+v, want %+v", policies, want)
+	}
+
+	core, err := registry.Assemble(registry.DefaultNaming())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loader.LoadService(returnsAPI, loader.WithRegistry(core)); err == nil ||
+		!strings.Contains(err.Error(), `@mcp config has unknown key "confirm"`) {
+		t.Fatalf("core registry: err = %v, want the unknown confirm key", err)
+	}
+}
+
+// TestConfirmInTheDataForms: the data forms take confirm with acme's
+// values, and not the core key.
+func TestConfirmInTheDataForms(t *testing.T) {
+	reg, names := assemble(t)
+	schema, err := loader.LoadService(writeToolsService(t, "notes-api", `{"handle": "get_note", "hidden": false, "confirm": "always"}`, "key"),
+		loader.WithRegistry(reg), loader.WithNaming(names))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := schema.OperationSets[0].Operations[0].MCP.Invocation; got != (ir.MCPInvocation{Key: ext.ConfirmKey, Value: ext.ConfirmAlways}) {
+		t.Fatalf("invocation = %+v", got)
+	}
+	for mcp, want := range map[string]string{
+		`{"handle": "get_note", "hidden": false, "confirm": "sometimes"}`:      "/confirm",
+		`{"handle": "get_note", "hidden": false, "invocationPolicy": "ask"}`:   "additional properties 'invocationPolicy' not allowed",
+		`{"hidden": true, "hiddenReason": "Staff only.", "confirm": "always"}`: "a hidden operation must not declare confirm",
+	} {
+		_, err := loader.LoadService(writeToolsService(t, "notes-api", mcp, ""), loader.WithRegistry(reg), loader.WithNaming(names))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", mcp, err, want)
+		}
+	}
+}
+
+// TestReturnsAPIToolsCarryConfirm: the TypeScript SDK tool documents write
+// confirm where the core writes invocationPolicy, and tools/index.ts types
+// it with acme's values.
+func TestReturnsAPIToolsCarryConfirm(t *testing.T) {
+	reg, names := assemble(t)
+	schema, cfg, err := loader.LoadServiceWithConfig(returnsAPI, loader.WithRegistry(reg), loader.WithNaming(names))
+	if err != nil {
+		t.Fatalf("LoadServiceWithConfig: %v", err)
+	}
+	out := t.TempDir()
+	if _, err := registry.Generate(schema, cfg, registry.Options{
+		OutputRoot:  out,
+		ServicePath: returnsAPI,
+		Naming:      names,
+		Registry:    reg,
+		SkipFormat:  true,
+	}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	tools := filepath.Join(out, "sdk", "typescript", "returns-api", "tools")
+
+	var manifest ir.ToolManifest
+	readJSON(t, filepath.Join(tools, "schema.json"), &manifest)
+	if got := manifestTool(t, manifest, "return.approveReturn").MCP.Invocation; got != (ir.MCPInvocation{Key: ext.ConfirmKey, Value: ext.ConfirmAlways}) {
+		t.Fatalf("approveReturn invocation = %+v", got)
+	}
+	for file, wants := range map[string][]string{
+		"schema.json": {
+			"\"description\": \"Approves an open return and refunds the order.\",\n        \"confirm\": \"always\",",
+			"\"description\": \"Opens a return for one order.\",\n        \"confirm\": \"never\",",
+		},
+		"mcp-audit.json": {"\"hiddenReason\": \"\",\n      \"confirm\": \"always\","},
+		"index.ts": {
+			"description?: string;\n    confirm?: 'never' | 'always';",
+			"description: `Approves an open return and refunds the order.`,\n      confirm: 'always',",
+		},
+	} {
+		data, err := os.ReadFile(filepath.Join(tools, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(string(data), want) {
+				t.Errorf("%s lacks %q", file, want)
+			}
+		}
+		if strings.Contains(string(data), registry.DefaultToolInvocationKey) {
+			t.Errorf("%s carries the core key %s", file, registry.DefaultToolInvocationKey)
+		}
 	}
 }
 

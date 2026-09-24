@@ -31,6 +31,7 @@ export interface ToolDefinition {
     name?: string;
     handle?: string;
     description?: string;
+    {{$.Invocation.Key}}?: {{range $i, $value := $.Invocation.Values}}{{if $i}} | {{end}}'{{$value}}'{{end}};
     _meta?: Record<string, unknown>;
     icon?: {
       name: string;
@@ -178,6 +179,9 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
       name: `{{escapeBacktick .MCP.Name}}`,
       handle: '{{.MCP.Handle}}',
       description: `{{escapeBacktick .MCP.Description}}`
+{{- with .MCP.Invocation.Value}},
+      {{$.Invocation.Key}}: '{{.}}'
+{{- end}}
 {{- if .MCP.Meta}},
       _meta: {{jsonValue .MCP.Meta}}
 {{- end}}

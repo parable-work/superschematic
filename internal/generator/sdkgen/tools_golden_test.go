@@ -9,8 +9,10 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/toolsutil/toolstest"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 var mcpClock = codegen.FixedClock(time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC))
@@ -20,16 +22,27 @@ var mcpClock = codegen.FixedClock(time.Date(2026, time.January, 2, 3, 4, 5, 0, t
 // typed map and array query parameters.
 func loadMCPFixture(t *testing.T, hooks ...apigen.ToolHook) (*apigen.APIOutput, map[string]bool) {
 	t.Helper()
+	return loadMCPFixtureWith(t, apigen.ToolInvocationPolicy{}, nil, hooks...)
+}
+
+// loadMCPFixtureWith is loadMCPFixture under an invocation policy, with the
+// loaded schema's records rewritten first when rewrite is set.
+func loadMCPFixtureWith(t *testing.T, invocation apigen.ToolInvocationPolicy, rewrite func(*testing.T, *ir.Schema), hooks ...apigen.ToolHook) (*apigen.APIOutput, map[string]bool) {
+	t.Helper()
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-mcp"))
 	if err != nil {
 		t.Fatalf("load fixture-mcp: %v", err)
 	}
+	if rewrite != nil {
+		rewrite(t, schema)
+	}
 	apiOutput, err := apigen.Generate(schema, apigen.Options{
-		Provider:    sessionauth.Provider{},
-		SchemaName:  "fixture-mcp",
-		ModulePath:  "example.com/schemas/api/fixture-mcp",
-		TypesModule: "example.com/schemas/types/go/fixture-mcp",
-		ToolHooks:   hooks,
+		Provider:       sessionauth.Provider{},
+		SchemaName:     "fixture-mcp",
+		ModulePath:     "example.com/schemas/api/fixture-mcp",
+		TypesModule:    "example.com/schemas/types/go/fixture-mcp",
+		ToolHooks:      hooks,
+		ToolInvocation: invocation,
 	})
 	if err != nil {
 		t.Fatalf("apigen.Generate: %v", err)
@@ -43,7 +56,12 @@ func loadMCPFixture(t *testing.T, hooks ...apigen.ToolHook) (*apigen.APIOutput, 
 
 func writeMCPTools(t *testing.T, hooks ...apigen.ToolHook) string {
 	t.Helper()
-	apiOutput, parseable := loadMCPFixture(t, hooks...)
+	return writeMCPToolsWith(t, apigen.ToolInvocationPolicy{}, nil, hooks...)
+}
+
+func writeMCPToolsWith(t *testing.T, invocation apigen.ToolInvocationPolicy, rewrite func(*testing.T, *ir.Schema), hooks ...apigen.ToolHook) string {
+	t.Helper()
+	apiOutput, parseable := loadMCPFixtureWith(t, invocation, rewrite, hooks...)
 	sdkOutput, err := Generate(apiOutput, parseable, mcpClock)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -69,6 +87,22 @@ func TestWriteToolsGoldenMCP(t *testing.T) {
 		"tools/anthropic.json",
 	} {
 		compareGolden(t, outDir, filepath.Join("testdata", "golden", "fixture-mcp"), name)
+	}
+}
+
+// TestWriteToolsUnderAnExtensionsInvocationPolicy: under an extension's
+// invocation policy the TypeScript tool documents write its key and values
+// where they write the core's, and nothing else changes.
+func TestWriteToolsUnderAnExtensionsInvocationPolicy(t *testing.T) {
+	core := writeMCPTools(t)
+	review := writeMCPToolsWith(t, toolstest.ReviewPolicy, toolstest.UseReviewPolicy)
+	for _, name := range []string{"tools/index.ts", "tools/schema.json", "tools/mcp-audit.json"} {
+		toolstest.CompareUnderReviewPolicy(t, name, string(readRendered(t, core, name)), string(readRendered(t, review, name)))
+	}
+	for _, name := range []string{"tools/mcp-binding.json", "tools/openai.json", "tools/anthropic.json"} {
+		if string(readRendered(t, core, name)) != string(readRendered(t, review, name)) {
+			t.Errorf("%s changed under the review policy", name)
+		}
 	}
 }
 

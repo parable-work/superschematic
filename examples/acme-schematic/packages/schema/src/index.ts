@@ -6,6 +6,8 @@
 // registry validates the same argument against ShelfArgs (ext/decorator.go)
 // in both the TypeScript and the data form.
 
+export type { ConfirmPolicy } from "./mcp";
+
 // ShelfArgs is @shelf's argument: where a field's values are stocked.
 export interface ShelfArgs {
   readonly aisle: number;

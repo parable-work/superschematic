@@ -383,12 +383,14 @@ type GeneratorSpec struct {
 // imports for APIOutput) and aliased here so extensions register providers
 // through the registry vocabulary. See docs/extension-model.md section 8.
 // OpenAPIHook and ToolHook are declared there for the same reason: apigen
-// runs them.
+// runs them. ToolInvocationPolicy too: apigen resolves every visible tool
+// against it.
 type (
-	AuthProvider = apigen.AuthProvider
-	AuthModel    = apigen.AuthModel
-	OpenAPIHook  = apigen.OpenAPIHook
-	ToolHook     = apigen.ToolHook
+	AuthProvider         = apigen.AuthProvider
+	AuthModel            = apigen.AuthModel
+	OpenAPIHook          = apigen.OpenAPIHook
+	ToolHook             = apigen.ToolHook
+	ToolInvocationPolicy = apigen.ToolInvocationPolicy
 )
 
 // GenerateContext is the per-run state every generator in a pipeline shares.

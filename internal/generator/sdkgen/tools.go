@@ -67,16 +67,17 @@ type (
 
 // ToolsOutput contains all generated tool definitions
 type ToolsOutput struct {
-	SchemaName        string           // Schema name e.g., "orders-api"
-	APIID             string           // API identifier for MCP binding artifacts
-	SDKClassName      string           // SDK class name e.g., "OrdersApiSDK"
-	TypesPackage      string           // Types package name
-	Keys              apigen.ToolKeys  // vendor keys the documents are written with
-	Tools             []ToolDefinition // All tool definitions
-	VisibleTools      []ToolDefinition // Tools with a visible @mcp record: the provider tool lists
-	Namespaces        []ToolsNamespace // Tools grouped by namespace
-	Timestamp         string           // Generation timestamp
-	MCPBindingVersion string           // MCP binding manifest schema version
+	SchemaName        string                      // Schema name e.g., "orders-api"
+	APIID             string                      // API identifier for MCP binding artifacts
+	SDKClassName      string                      // SDK class name e.g., "OrdersApiSDK"
+	TypesPackage      string                      // Types package name
+	Keys              apigen.ToolKeys             // vendor keys the documents are written with
+	Invocation        apigen.ToolInvocationPolicy // the key and values the documents write a tool's invocation policy with
+	Tools             []ToolDefinition            // All tool definitions
+	VisibleTools      []ToolDefinition            // Tools with a visible @mcp record: the provider tool lists
+	Namespaces        []ToolsNamespace            // Tools grouped by namespace
+	Timestamp         string                      // Generation timestamp
+	MCPBindingVersion string                      // MCP binding manifest schema version
 }
 
 // ToolsNamespace groups tools by namespace for TypeScript generation
@@ -102,6 +103,7 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 		SDKClassName:      sdkOutput.SDKClassName,
 		TypesPackage:      sdkOutput.TypesPackage,
 		Keys:              apiOutput.ToolKeys,
+		Invocation:        apiOutput.ToolInvocation.OrDefault(),
 		Tools:             []ToolDefinition{},
 		VisibleTools:      []ToolDefinition{},
 		Namespaces:        []ToolsNamespace{},

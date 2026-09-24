@@ -48,6 +48,7 @@ export interface ToolDefinition {
     name?: string;
     handle?: string;
     description?: string;
+    invocationPolicy?: 'auto' | 'ask';
     _meta?: Record<string, unknown>;
     icon?: {
       name: string;

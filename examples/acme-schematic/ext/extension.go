@@ -16,7 +16,8 @@
 //     audience and the @icon name, and an OpenAPI hook that renames the
 //     vendor key (docs.go);
 //   - a policy over the core @mcp decorator: every operation of the shop
-//     API is classified (mcp.go);
+//     API is classified, the tool documents carry acme's vendor keys, and
+//     acme's confirm key replaces the core invocation policy (mcp.go);
 //   - two subcommands through cli.CommandProvider: describe (command.go) and
 //     fields, which type-checks a declaration file with the loader's
 //     compiler (fields.go).

@@ -43,8 +43,9 @@ func endpointNamed(t *testing.T, output *apigen.APIOutput, name string) apigen.E
 }
 
 // TestResolveOperationMCP: a visible tool's name and description come from
-// @docs and its icon from @icon; the schema's own record is not changed; a
-// hidden record keeps its reason; an unclassified operation has none.
+// @docs and its icon from @icon, and it keeps its invocation policy; the
+// schema's own record is not changed; a hidden record keeps its reason; an
+// unclassified operation has none.
 func TestResolveOperationMCP(t *testing.T) {
 	schema := loadMCPFixture(t)
 	output, err := generateMCP(schema)
@@ -55,6 +56,7 @@ func TestResolveOperationMCP(t *testing.T) {
 	get := endpointNamed(t, output, "getOrder")
 	want := &ir.OperationMCP{
 		Handle:      "get_order",
+		Invocation:  ir.MCPInvocation{Key: "invocationPolicy", Value: "auto"},
 		Meta:        map[string]any{"ui": map[string]any{"resourceUri": "ui://orders/detail"}},
 		Name:        "Get an order",
 		Description: "Returns one order by its identifier.",
@@ -71,12 +73,26 @@ func TestResolveOperationMCP(t *testing.T) {
 		}
 	}
 
+	if got := endpointNamed(t, output, "updateOrder").MCP.Invocation; got != (ir.MCPInvocation{Key: "invocationPolicy", Value: "ask"}) {
+		t.Fatalf("updateOrder invocation = %+v", got)
+	}
+
 	del := endpointNamed(t, output, "deleteOrder")
 	if !reflect.DeepEqual(del.MCP, &ir.OperationMCP{Hidden: true, HiddenReason: "Staff console only."}) {
 		t.Fatalf("deleteOrder MCP = %+v", del.MCP)
 	}
 	if export := endpointNamed(t, output, "exportOrders"); export.MCP != nil {
 		t.Fatalf("exportOrders MCP = %+v", export.MCP)
+	}
+
+	// IR that did not come through the loader gets the default too.
+	operationIn(schema, "getOrder").MCP.Invocation = ir.MCPInvocation{}
+	output, err = generateMCP(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := endpointNamed(t, output, "getOrder").MCP.Invocation; got != (ir.MCPInvocation{Key: "invocationPolicy", Value: "auto"}) {
+		t.Fatalf("getOrder without a policy resolves to %+v", got)
 	}
 
 	// An icon is optional in the core.
@@ -116,6 +132,20 @@ func TestMCPResolutionErrors(t *testing.T) {
 			name:   "invalid record",
 			mutate: func(s *ir.Schema) { operationIn(s, "getOrder").MCP.Handle = "Get" },
 			want:   "apigen: operation order.getOrder has an invalid @mcp: handle",
+		},
+		{
+			name: "policy value",
+			mutate: func(s *ir.Schema) {
+				operationIn(s, "getOrder").MCP.Invocation = ir.MCPInvocation{Key: "invocationPolicy", Value: "always"}
+			},
+			want: `apigen: operation order.getOrder has an invalid @mcp: invocationPolicy "always" is not one of "auto", "ask"`,
+		},
+		{
+			name: "policy key",
+			mutate: func(s *ir.Schema) {
+				operationIn(s, "getOrder").MCP.Invocation = ir.MCPInvocation{Key: "review", Value: "ask"}
+			},
+			want: `apigen: operation order.getOrder has an invalid @mcp: invocation policy key "review" is not this build's key "invocationPolicy"`,
 		},
 		{
 			name:   "handle collision",

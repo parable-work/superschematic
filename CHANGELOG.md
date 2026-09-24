@@ -236,6 +236,28 @@ of a generated artifact is always listed here with the bump it requires.
   `Tool`, `ToolKeys`, `ToolKeyValue`, `DefaultToolScalarKey` and
   `DefaultToolGuidanceKey`. The acme example writes its own keys and icon
   variant with one. Minor.
+- MCP invocation policy: a visible `@mcp` tool says whether a client runs
+  it when a model calls it or asks the person first, with
+  `invocationPolicy: "auto" | "ask"`; a tool that omits it gets `"auto"`
+  when it loads, from any authoring form. The IR carries it as
+  `OperationMCP.Invocation` (`ir.MCPInvocation`, the key with the value),
+  written right after `hiddenReason` in the `mcp` record; the data forms'
+  JSON Schema lists the key with its values. `tools/schema.json` writes it
+  after `description` in the `mcp` object, `tools/mcp-audit.json` after
+  `hiddenReason` (empty for a hidden or unclassified operation), and
+  `tools/index.ts` as a member typed with the values and as a literal,
+  both after `description`, in the TypeScript, Go and Rust SDKs.
+  `Registry.RegisterToolInvocationPolicy(ToolInvocationPolicy{Extension,
+  Key, Values, Default})` replaces the core's key, values and default; a
+  registry holds one, and a second registration fails assembly naming both
+  extensions. `@superschematic/api` exports `MCPToolOptions` for an
+  extension's authoring package to add its key by module augmentation,
+  and `MCPInvocationPolicy`. The public `registry` package exports
+  `ToolInvocationPolicy`, `DefaultToolInvocationPolicy`,
+  `DefaultToolInvocationKey`, `ToolInvocationAuto` and `ToolInvocationAsk`.
+  The acme example registers `confirm: "never" | "always"`, `"never"` by
+  default. Minor: IR, generated tool documents, public Go API and the
+  `@superschematic/api` types all gain the field; no key is removed.
 - Projection views: `@projection<Source>({ pool, name, migration, where?,
   collapse? })` and `@join<Table>(alias, on, kind?)` on a class and
   `@column("alias.field" | { function, args })` on its fields, from

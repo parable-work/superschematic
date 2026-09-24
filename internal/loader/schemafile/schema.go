@@ -91,6 +91,10 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 		}
 	}
 
+	if err := addMCPInvocationProperty(defs, reg.ToolInvocationPolicy()); err != nil {
+		return nil, err
+	}
+
 	if err := closeExtensionSlots(defs, reg); err != nil {
 		return nil, err
 	}
@@ -156,6 +160,25 @@ func constrainProperty(defs map[string]any, defName, property string, values []s
 		enum[i] = v
 	}
 	prop["enum"] = enum
+	return nil
+}
+
+// addMCPInvocationProperty adds the registry's invocation policy key to the
+// mcp record, with its values as the enum. The IR struct carries the policy
+// without a fixed key (ir.MCPInvocation), so the reflector cannot see it.
+func addMCPInvocationProperty(defs map[string]any, policy registry.ToolInvocationPolicy) error {
+	props, err := propertiesOf(defs, "OperationMCP")
+	if err != nil {
+		return err
+	}
+	if _, taken := props[policy.Key]; taken {
+		return fmt.Errorf("$defs/OperationMCP already has a %q property", policy.Key)
+	}
+	enum := make([]any, len(policy.Values))
+	for i, value := range policy.Values {
+		enum[i] = value
+	}
+	props[policy.Key] = map[string]any{"type": "string", "enum": enum}
 	return nil
 }
 

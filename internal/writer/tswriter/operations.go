@@ -231,13 +231,17 @@ func operationDocsLiteral(docs *ir.OperationDocs) string {
 }
 
 // operationMCPLiteral renders an @mcp record as the object literal the
-// decorator takes: { handle, _meta? } for a visible tool, { hidden: true,
-// reason } for a hidden one.
+// decorator takes: { handle, <policy key>?, _meta? } for a visible tool,
+// { hidden: true, reason } for a hidden one. The invocation policy is
+// written under the key the record carries.
 func operationMCPLiteral(mcp *ir.OperationMCP) string {
 	if mcp.Hidden {
 		return "{ hidden: true, reason: " + quote(mcp.HiddenReason) + " }"
 	}
 	parts := []string{"handle: " + quote(mcp.Handle)}
+	if mcp.Invocation.Value != "" {
+		parts = append(parts, mcp.Invocation.Key+": "+quote(mcp.Invocation.Value))
+	}
 	if len(mcp.Meta) > 0 {
 		parts = append(parts, "_meta: "+valueLiteral(mcp.Meta))
 	}

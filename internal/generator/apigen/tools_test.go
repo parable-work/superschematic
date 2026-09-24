@@ -114,6 +114,22 @@ func TestToolHookErrors(t *testing.T) {
 			}
 			return nil
 		}, want: `apigen: MCP handle collision: "same"`},
+		{name: "policy value after the hook", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			for _, tool := range tools.Tools {
+				if tool.MCP != nil && !tool.MCP.Hidden {
+					tool.MCP.Invocation.Value = "always"
+				}
+			}
+			return nil
+		}, want: `apigen: visible @mcp tool order.listOrders after the tool hooks ran: invocationPolicy "always" is not one of "auto", "ask"`},
+		{name: "policy dropped by the hook", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			for _, tool := range tools.Tools {
+				if tool.MCP != nil && !tool.MCP.Hidden {
+					tool.MCP.Invocation = ir.MCPInvocation{}
+				}
+			}
+			return nil
+		}, want: "apigen: visible @mcp tool order.listOrders has no invocationPolicy after the tool hooks ran"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := generateMCPWithHooks(t, apigen.ToolHook{Name: "vendor", Edit: test.edit})
@@ -146,5 +162,36 @@ func TestToolTypeFieldsCarryShapeAndBounds(t *testing.T) {
 	}
 	if output.Scalars["Identity.UUID"].CanonicalName != "Identity.UUID" || output.Scalars["string"].CanonicalName != "" {
 		t.Fatalf("scalar canonical names = %q, %q", output.Scalars["Identity.UUID"].CanonicalName, output.Scalars["string"].CanonicalName)
+	}
+}
+
+// TestToolHookMayChangeAPolicyValue: a hook may move a tool to another value
+// of the build's policy.
+func TestToolHookMayChangeAPolicyValue(t *testing.T) {
+	askAll := apigen.ToolHook{Name: "askAll", Edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+		for _, tool := range tools.Tools {
+			if tool.MCP != nil && !tool.MCP.Hidden {
+				tool.MCP.Invocation.Value = apigen.ToolInvocationAsk
+			}
+		}
+		return nil
+	}}
+	output, err := generateMCPWithHooks(t, askAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := endpointNamed(t, output, "getOrder").MCP.Invocation.Value; got != "ask" {
+		t.Fatalf("getOrder policy = %q, want ask", got)
+	}
+}
+
+func TestInvalidToolInvocationOption(t *testing.T) {
+	_, err := apigen.Generate(loadMCPFixture(t), apigen.Options{
+		Provider:       sessionauth.Provider{},
+		SchemaName:     "fixture-mcp",
+		ToolInvocation: apigen.ToolInvocationPolicy{Key: "review", Values: []string{"a"}, Default: "b"},
+	})
+	if want := `apigen: invocation policy review default "b" is not one of "a"`; err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
 	}
 }

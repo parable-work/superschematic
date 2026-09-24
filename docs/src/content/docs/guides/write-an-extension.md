@@ -316,6 +316,49 @@ r.RegisterToolHook(registry.ToolHook{
 })
 ```
 
+A visible tool's invocation policy, whether an MCP client runs it when a
+model calls it or asks the person first, is a core field whose key,
+values and default an extension can replace. The core's is
+`invocationPolicy`, `"auto"` or `"ask"`, `"auto"` by default. An extension
+registers its own; a registry holds one, and two extensions that each
+register one fail assembly:
+
+```go
+r.RegisterToolInvocationPolicy(registry.ToolInvocationPolicy{
+    Extension: Name,
+    Key:       "confirm",
+    Values:    []string{"never", "always"},
+    Default:   "never",
+})
+```
+
+`@mcp({ handle, confirm: "always" })` and the data forms' `mcp` record then
+take `confirm` with one of those values, a visible tool without it gets
+`"never"`, and the IR and every tool document write `confirm` where the
+core writes `invocationPolicy`. The core key becomes an unknown key.
+
+The TypeScript loader type-checks schema files, so the key must also
+type-check. `@superschematic/api` exports `MCPToolOptions`, the options a
+visible tool's `@mcp` takes besides its handle and `_meta`, for module
+augmentation. The extension's authoring package adds its key:
+
+```ts
+import "@superschematic/api";
+
+declare module "@superschematic/api" {
+  interface MCPToolOptions {
+    readonly confirm?: "never" | "always";
+  }
+}
+```
+
+A program sees the augmentation when it includes that file: through an
+import of the authoring package, or a `tsconfig.json` `include` entry.
+acme keeps it in `packages/schema/src/mcp.ts`; an API schema cannot import
+`@acme/schema`, whose decorators are for Catalog schemas, so an API
+service lists the file in its `tsconfig.json`
+(`ext/testdata/services/returns-api`).
+
 See [MCP tools](/superschematic/reference/mcp-tools/).
 
 acme also checks the core projection views (`ext/projection_policy.go`): a
@@ -337,8 +380,9 @@ func (Extension) Commands() []*cobra.Command {
 ```
 
 acme's `describe [<schemas-root>]` assembles the registry the way `build`
-does and prints every kind, document, output key, auth provider and check.
-Run it when a schema is rejected: it shows what the binary knows.
+does and prints every kind, document, output key, auth provider and check,
+and the tool invocation policy. Run it when a schema is rejected: it shows
+what the binary knows.
 
 A command that works on built output, such as one that pins consumers to
 generated packages, reads the dependency graph `build-all` wrote with the

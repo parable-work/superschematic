@@ -1,6 +1,7 @@
 // MCP tools: a visible tool takes its title and description from @docs and
 // its icon from @icon; a hidden operation says why it is not a tool; an
-// operation without @mcp is not classified and is not published.
+// operation without @mcp is not classified and is not published. A visible
+// tool runs without asking unless it declares invocationPolicy: "ask".
 import { Identity } from "superscalar";
 import { Nullable, Validate } from "@superschematic/schema";
 import { HttpMethod, QueryParam, docs, icon, mcp, rest } from "@superschematic/api";
@@ -116,7 +117,7 @@ export class OrderMutations {
     expectedRevisionPointers: ["/revision"]
   })
   @icon("pen")
-  @mcp({ handle: "update_order" })
+  @mcp({ handle: "update_order", invocationPolicy: "ask" })
   @rest(HttpMethod.PATCH, "orders/{id}")
   updateOrder(id: Identity.UUID, input: OrderUpdate): Order {
     throw new Error("schema declaration only");

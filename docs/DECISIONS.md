@@ -235,3 +235,39 @@ against its set, and `acmeDocsKey` and `acmeTools` write its own vendor
 keys. One item departs from the rule above: the prefix of the metadata keys
 in the projection Arrow schemas is the naming key `metadata_key_prefix`
 (default `superschematic.`), not an extension registration.
+
+## D11. The MCP invocation policy is core, with a key an extension renames
+
+A visible MCP tool carries an invocation policy: whether a client runs it
+when a model calls it or asks the person first. A distribution that built
+MCP tools on the source tree already writes such a policy under its own
+key, with its own values and default, and its readers depend on the key
+and on where it sits in each document. D10 would make the policy an
+extension's slot. It is a core field instead, because the question is
+generic and every MCP client asks it, and because the distribution's
+bytes must survive the move.
+
+- The core key is `invocationPolicy`, its values `auto` and `ask`, and its
+  default `auto`: a tool runs unless its author marks it. `ask` is the
+  exception a write with side effects opts into; defaulting to `ask` would
+  put a prompt in front of every read.
+- `Registry.RegisterToolInvocationPolicy` replaces the key, the values
+  and the default (`docs/extension-model.md`, section 3.15). It is a
+  registration and not a tool hook because the policy decides what the
+  loader accepts and fills in, and a tool hook runs only at generation. One policy per registry; a second is an
+  assembly error, as a second scalar catalog is.
+- The IR stores the key with the value (`ir.MCPInvocation`), and
+  `OperationMCP` encodes the pair under the key at a fixed position. The
+  IR has no registry (D1), and a fixed JSON key would make a
+  distribution's IR differ from what it writes today.
+- Every output writes the policy at the same position whatever the key:
+  after `hiddenReason` in the IR, after `description` in the `mcp` object
+  of `tools/schema.json` and `tools/index.ts`, and after `hiddenReason` in
+  `tools/mcp-audit.json`. `tools/index.ts` types the member as the union of
+  the values in registration order.
+- The TypeScript type is widened by module augmentation of
+  `MCPToolOptions` from the extension's authoring package. The core key
+  stays in the type and fails the load under another policy; removing it
+  would need a type the core cannot write for every registry.
+
+The names, values and default are reversible until the first release.

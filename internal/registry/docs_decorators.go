@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -14,7 +15,10 @@ import (
 // FieldDef.Title, Purpose and Icon. What values an extension accepts on top
 // of the shape checked here (an audience vocabulary, an icon set, which
 // operations must declare @mcp) is a CheckSpec the extension registers.
-func docsDecorators() []DecoratorSpec {
+// invocation returns the registry's tool invocation policy, which decides
+// the key and values @mcp accepts for a visible tool's policy and the
+// default it fills in.
+func docsDecorators(invocation func() ToolInvocationPolicy) []DecoratorSpec {
 	return []DecoratorSpec{{
 		Name: "docs", Packages: []string{pkgSchema}, Target: TargetField,
 		Apply: func(n Node, args []any, _ Site) error {
@@ -57,7 +61,7 @@ func docsDecorators() []DecoratorSpec {
 			if n.Field.MCP != nil {
 				return fmt.Errorf("operation %s has more than one @mcp decorator", n.Field.Name)
 			}
-			mcp, err := operationMCP(args)
+			mcp, err := operationMCP(args, invocation())
 			if err != nil {
 				return err
 			}
@@ -86,9 +90,11 @@ func docsDecorators() []DecoratorSpec {
 	}}
 }
 
-// operationMCP reads @mcp({ handle, _meta? }) for a visible tool or
-// @mcp({ hidden: true, reason }) for an operation that is not one.
-func operationMCP(args []any) (*ir.OperationMCP, error) {
+// operationMCP reads @mcp({ handle, <policy key>?, _meta? }) for a visible
+// tool or @mcp({ hidden: true, reason }) for an operation that is not one.
+// The policy key and its values are the invocation policy's; a visible tool
+// without the key gets the policy's default.
+func operationMCP(args []any, invocation ToolInvocationPolicy) (*ir.OperationMCP, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("@mcp takes exactly one config object")
 	}
@@ -122,9 +128,24 @@ func operationMCP(args []any) (*ir.OperationMCP, error) {
 				return nil, ArgErrorf(0, "@mcp _meta must be an object literal")
 			}
 			out.Meta = meta
+		case invocation.Key:
+			text, ok := value.(string)
+			if !ok {
+				return nil, ArgErrorf(0, "@mcp %s must be a string literal", key)
+			}
+			if err := invocation.CheckValue(text); err != nil {
+				return nil, ArgErrorf(0, "invalid @mcp config: %s", err)
+			}
+			out.Invocation = ir.MCPInvocation{Key: key, Value: text}
 		default:
+			if key == apigen.DefaultToolInvocationKey {
+				return nil, ArgErrorf(0, "@mcp config has unknown key %q; this build's invocation policy key is %q", key, invocation.Key)
+			}
 			return nil, ArgErrorf(0, "@mcp config has unknown key %q", key)
 		}
+	}
+	if !out.Hidden && out.Invocation.IsZero() {
+		out.Invocation = ir.MCPInvocation{Key: invocation.Key, Value: invocation.Default}
 	}
 	if err := ir.ValidateOperationMCP(out); err != nil {
 		return nil, ArgErrorf(0, "invalid @mcp config: %s", err)

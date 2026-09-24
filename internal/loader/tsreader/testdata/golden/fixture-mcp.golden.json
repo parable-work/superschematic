@@ -185,6 +185,7 @@
           "mcp": {
             "handle": "get_order",
             "hidden": false,
+            "invocationPolicy": "auto",
             "_meta": {
               "ui": {
                 "resourceUri": "ui://orders/detail"
@@ -221,7 +222,8 @@
           },
           "mcp": {
             "handle": "list_orders",
-            "hidden": false
+            "hidden": false,
+            "invocationPolicy": "auto"
           },
           "icon": "list",
           "typeRef": {
@@ -285,7 +287,8 @@
           },
           "mcp": {
             "handle": "open_return",
-            "hidden": false
+            "hidden": false,
+            "invocationPolicy": "auto"
           },
           "icon": "box",
           "typeRef": {
@@ -320,7 +323,8 @@
           },
           "mcp": {
             "handle": "update_order",
-            "hidden": false
+            "hidden": false,
+            "invocationPolicy": "ask"
           },
           "icon": "pen",
           "typeRef": {
