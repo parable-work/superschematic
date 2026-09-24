@@ -31,6 +31,9 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-db"},
 		{service: "fixture-api", deps: []string{"fixture-db"}},
 		{service: "fixture-general"},
+		{service: "fixture-nested-arrays"},
+		{service: "fixture-nested-arrays-db"},
+		{service: "fixture-nested-arrays-api"},
 	}
 
 	for _, tc := range cases {
@@ -510,6 +513,53 @@ func TestGenerateVersionedTypeMetadata(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("generated types.go missing %q", want)
+		}
+	}
+}
+
+// TestEnumsWithoutScalarsDeclareValidationErrorOnce: scalars.go carries the
+// ValidationError alias whenever the module has types, so enums.go declares
+// its own only when there is no scalars.go.
+func TestEnumsWithoutScalarsDeclareValidationErrorOnce(t *testing.T) {
+	const alias = "type ValidationError = scalars.ValidationError"
+	enumOnly := ir.NewSchema("enum-only", ir.SchemaKindGeneral)
+	enumOnly.Enums["Shade"] = &ir.EnumDef{Name: "Shade", Values: []ir.EnumValueDef{{Name: "Light", SerializedAs: "light"}}}
+	withType := ir.NewSchema("enum-and-type", ir.SchemaKindGeneral)
+	withType.Enums["Shade"] = enumOnly.Enums["Shade"]
+	withType.Types["Swatch"] = &ir.TypeDef{Name: "Swatch", Role: ir.RoleEmbeddedStruct, Fields: []*ir.FieldDef{
+		{Name: "shade", TypeRef: ir.TypeRef{Name: "Shade"}, Required: true},
+	}}
+
+	for _, tc := range []struct {
+		schema        *ir.Schema
+		enumsDeclares bool
+	}{{enumOnly, true}, {withType, false}} {
+		output, err := Generate(tc.schema, Options{SchemaName: tc.schema.Name, ModulePath: "example.com/" + tc.schema.Name})
+		if err != nil {
+			t.Fatalf("%s: generate: %v", tc.schema.Name, err)
+		}
+		outDir := filepath.Join(t.TempDir(), tc.schema.Name)
+		if err := WriteTypes(output, outDir); err != nil {
+			t.Fatalf("%s: write types: %v", tc.schema.Name, err)
+		}
+		declarations := 0
+		for _, file := range []string{"scalars.go", "enums.go"} {
+			source, err := os.ReadFile(filepath.Join(outDir, file))
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(source), alias) {
+				declarations++
+				if (file == "enums.go") != tc.enumsDeclares {
+					t.Errorf("%s: %s declares ValidationError", tc.schema.Name, file)
+				}
+			}
+		}
+		if declarations != 1 {
+			t.Errorf("%s: ValidationError declared %d times, want once", tc.schema.Name, declarations)
 		}
 	}
 }
