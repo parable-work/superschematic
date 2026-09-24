@@ -15,7 +15,7 @@
 #   2. `describe` lists the Catalog kind, the document, the apikey provider
 #      the checks (the icon and audience checks, the @mcp check on API and
 #      the projection check on DB) and acme's tool invocation policy;
-#   3. build-all over the schemas root builds all four services;
+#   3. build-all over the schemas root builds all five services;
 #   4. the catalog generator wrote catalog.json for the Catalog service;
 #   5. the @shelf payload reached the IR (--emit-ir + jq), and so did the
 #      shop-db projection that satisfies acme's projection policy;
@@ -49,7 +49,15 @@
 #      variant through the acme tool hook, and the core keys when the
 #      core-only binary builds the same service; a visible tool carries
 #      acme's confirm policy at its default in the IR and the tool
-#      documents, and the core's invocationPolicy from the core-only binary.
+#      documents, and the core's invocationPolicy from the core-only binary;
+#  16. shop-storefront's TypeScript API package carries the acme names,
+#      type-checks against the http runtime, and serves the storefront app
+#      (storefront/app.ts), whose Bun test drives the generated router over
+#      HTTP: the public probe, the auth gate, the strict body parser,
+#      parameter decoding and the manual event-stream route.
+#
+# Step 16 also needs bun and installs hono and the generated types package's
+# dependencies from the npm registry.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -123,7 +131,7 @@ test -s "$DIST/acme/catalog/shop-catalog/config.json"
 jq -e '.currency == "EUR"' "$DIST/acme/catalog/shop-catalog/config.json" >/dev/null
 
 echo "==> manifest generator ran on every kind"
-for service in shop-db shop-api shop-config shop-catalog; do
+for service in shop-db shop-api shop-config shop-catalog shop-storefront; do
   test -s "$DIST/acme/manifest/$service/manifest.json"
   jq -e --arg s "$service" '.service == $s and .region == "eu"' "$DIST/acme/manifest/$service/manifest.json" >/dev/null
 done
@@ -139,15 +147,15 @@ jq -e '.metadata["acme.projection.settings"] == "acme.shop_id" and ([.fields[].n
   "$DIST/sql/shop-db/projections/storefront.stock.arrow.json" >/dev/null
 
 echo "==> build-all hook merged every manifest, also when every service comes from the cache"
-jq -e '[.services[].service] | sort == ["shop-api", "shop-catalog", "shop-config", "shop-db"]' "$DIST/acme/inventory.json" >/dev/null
+jq -e '[.services[].service] | sort == ["shop-api", "shop-catalog", "shop-config", "shop-db", "shop-storefront"]' "$DIST/acme/inventory.json" >/dev/null
 cp "$DIST/acme/inventory.json" "$OUT/inventory.json"
 # The first cached run builds and stores every service. Removing dist drops
-# the outputs and the stamps, so the second restores all four from the cache
+# the outputs and the stamps, so the second restores all five from the cache
 # and builds none; the hook must still run and see the same manifests.
 "$OUT/acme-schematic" build-all "$SCHEMAS/services" --cache --cache-root "$OUT/cache" >/dev/null
 rm -rf "$DIST"
 "$OUT/acme-schematic" build-all "$SCHEMAS/services" --cache --cache-root "$OUT/cache" | tee "$OUT/restored.log"
-test "$(grep -c '(restored from cache)' "$OUT/restored.log")" -eq 4
+test "$(grep -c '(restored from cache)' "$OUT/restored.log")" -eq 5
 if grep -q '(built' "$OUT/restored.log"; then
   echo "ERROR: the all-restored build-all built a service" >&2
   exit 1
@@ -258,5 +266,36 @@ jq -e '.tools[] | select(.name == "product.getProduct") | .parameters.properties
   "$OUT/session-dist/sdk/typescript/shop-api/tools/schema.json" >/dev/null
 jq -e '.tools[] | select(.name == "product.getProduct") | .mcp.invocationPolicy == "auto" and (.mcp | has("confirm") | not)' \
   "$OUT/session-dist/sdk/typescript/shop-api/tools/schema.json" >/dev/null
+
+echo "==> TypeScript API: shop-storefront type-checks and serves the storefront app"
+RUNTIME="$REPO_ROOT/runtime/http/typescript"
+API_PKG="$DIST/api/shop-storefront"
+TYPES_PKG="$DIST/types/typescript/shop-storefront"
+APP="$EXAMPLE_DIR/storefront"
+grep -q '"name": "@acme/shop-storefront-api"' "$API_PKG/package.json"
+grep -q '"@acme/shop-storefront-types": "\*"' "$API_PKG/package.json"
+grep -q "from '@superschematic/http-runtime/hono'" "$API_PKG/router.ts"
+test ! -e "$API_PKG/go.mod"
+(cd "$RUNTIME" && bun install --frozen-lockfile >/dev/null && bun run link-deps >/dev/null)
+(cd "$TYPES_PKG" && bun install >/dev/null)
+# Resolve every package the generated router and the app import by name, the
+# way a consuming service's install would: hono comes from the runtime's own
+# install so the router, the runtime and the app share one copy.
+link_module() {
+  mkdir -p "$(dirname "$2")"
+  rm -rf "$2"
+  ln -s "$1" "$2"
+}
+for dir in "$API_PKG" "$APP"; do
+  link_module "$TYPES_PKG" "$dir/node_modules/@acme/shop-storefront-types"
+  link_module "$RUNTIME" "$dir/node_modules/@superschematic/http-runtime"
+  link_module "$REPO_ROOT/third_party/superscalar/bindings/typescript" "$dir/node_modules/superscalar"
+  for dep in hono typescript @types/node; do
+    link_module "$RUNTIME/node_modules/$dep" "$dir/node_modules/$dep"
+  done
+done
+link_module "$API_PKG" "$APP/node_modules/@acme/shop-storefront-api"
+(cd "$API_PKG" && "$RUNTIME/node_modules/.bin/tsc" --noEmit -p tsconfig.json)
+(cd "$APP" && "$RUNTIME/node_modules/.bin/tsc" --noEmit -p tsconfig.json && bun test)
 
 echo "acme smoke: ok"
