@@ -354,6 +354,16 @@ of a generated artifact is always listed here with the bump it requires.
 - Arrays of arrays in SQL and the Go ORM: a `T[][]` column is `JSONB`,
   never a native array, and the ORM writes it through its JSON codec with
   nil inner lists stored as `[]`. Minor.
+- Arrays of arrays in the SDKs and the Rust API: a `T[][]` body argument
+  or response is `[][]T` in the Go SDK, `T[][]` in the TypeScript SDK,
+  `list[list[T]]` in the Python SDK and `Vec<Vec<T>>` in the Rust SDK. The
+  Go, TypeScript and Python SDKs refuse a null inner list at `name[i]` and
+  an element that fails its type's validation at `name[i][j]` before
+  sending; the TypeScript and Python SDKs parse a list-of-lists response of
+  an object type row by row. The SDK tool documents carry the list shape of
+  body arguments (`T[]` and `T[][]` arguments were rendered as `T`) and
+  nest the return schema's items. The Rust API crate passes lists of lists
+  through its `serde_json::Value` handlers. Minor.
 
 ### Changed
 
