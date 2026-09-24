@@ -13,6 +13,7 @@
 # Asserts, in order:
 #   1. the acme module builds, vets and passes its tests;
 #   2. `describe` lists the Catalog kind, the document, the apikey provider
+#      and the checks: the icon and audience checks, the @mcp check on API
 #      and the projection check on DB;
 #   3. build-all over the schemas root builds all four services;
 #   4. the catalog generator wrote catalog.json for the Catalog service;
@@ -43,7 +44,7 @@
 #      x-acme-docs key through the acme OpenAPI hook, and under the core key
 #      when the core-only binary builds the same service; the shop-config
 #      field presentation (@docs title, @purpose, @icon) is in the IR;
-#  13. every shop-api operation carries its @mcp classification in the IR;
+#  15. every shop-api operation carries its @mcp classification in the IR;
 #      its TypeScript SDK tool documents carry acme's vendor keys and icon
 #      variant through the acme tool hook, and the core keys when the
 #      core-only binary builds the same service.
@@ -86,7 +87,7 @@ grep -q '^kinds: API, Catalog, DB, General$' "$OUT/describe.txt"
 grep -q '^  Catalog: types -> catalog -> acmeManifest$' "$OUT/describe.txt"
 grep -q '^documents: catalog.config (catalog.config.yaml)$' "$OUT/describe.txt"
 grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.txt"
-grep -q '^checks: acmeDocsAudience (every kind), acmeProjectionScope (DB)$' "$OUT/describe.txt"
+grep -q '^checks: acmeIcons (every kind), acmeDocsAudience (every kind), acmeToolsClassified (API), acmeProjectionScope (DB)$' "$OUT/describe.txt"
 
 echo "==> build-all over the schemas root"
 rm -rf "$DIST"
