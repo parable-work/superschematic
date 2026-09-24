@@ -74,7 +74,9 @@ func customTemplateFuncs() template.FuncMap {
 // are declared in superscalar's scalar-validators module and must be imported
 // from there.
 func scalarLibTypeName(s ScalarInfo) string {
-	if s.Primitive != ir.LanguageObject {
+	// JSONValue (Generic.JSON) is declared by superscalar whatever the
+	// scalar's primitive.
+	if s.Primitive != ir.LanguageObject && s.TSType != "JSONValue" {
 		return ""
 	}
 	if s.TSType == "" || !isImportableType(s.TSType) {
