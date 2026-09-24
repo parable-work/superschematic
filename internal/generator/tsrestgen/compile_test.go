@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/testpaths"
@@ -26,8 +27,8 @@ func requireOrSkipTSTooling(t *testing.T, reason string) {
 	t.Skipf("skipping TypeScript gate: %s", reason)
 }
 
-// generatedTree is the fixture-api API package materialized beside its type
-// packages and linked to the real runtime and the scalar library, the way a
+// generatedTree is an API package materialized beside its type packages
+// and linked to the real runtime and the scalar library, the way a
 // consuming service sees it.
 type generatedTree struct {
 	bun        string
@@ -76,12 +77,38 @@ func installRuntime(t *testing.T) (string, string, naming.LocalPaths) {
 	return bunPath, runtimeDir, paths
 }
 
-// materializeFixtureAPI generates fixture-db and fixture-api type packages,
-// installs them, generates the API package, and links every peer the API
-// package resolves by name: the type packages, the scalar library, the http
-// runtime, and hono (from the runtime's own install so both sides see one
-// copy of the framework).
-func materializeFixtureAPI(t *testing.T) *generatedTree {
+// apiFixture is one API schema a compile gate materializes: its type
+// packages are generated for the schema and for each dependency.
+type apiFixture struct {
+	name   string
+	schema *ir.Schema
+	deps   map[string]*ir.Schema
+	// endpoints is apigen's extraction for the schema.
+	endpoints *apigen.APIOutput
+}
+
+// fixtureAPI is fixture-api with its fixture-db dependency.
+func fixtureAPI(t *testing.T) apiFixture {
+	t.Helper()
+	apiSchema, dbSchema := loadFixtureAPI(t)
+	return apiFixture{
+		name:      "fixture-api",
+		schema:    apiSchema,
+		deps:      map[string]*ir.Schema{"fixture-db": dbSchema},
+		endpoints: extractEndpoints(t, apiSchema, dbSchema),
+	}
+}
+
+// materializeAPI generates the fixture's type packages (dependencies first)
+// under one Bun workspace root and installs them once at that root, then
+// generates the API package and links every peer it resolves by name: the
+// type packages, the scalar library, the http runtime, and hono (from the
+// runtime's own install so both sides see one copy of the framework).
+//
+// The install runs once, at the root: bun 1.4.0 and 1.4.2 each fail an
+// install inside a member in a case the other accepts (see tsgen's
+// buildTSPackages).
+func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 	t.Helper()
 	bunPath, runtimeDir, paths := installRuntime(t)
 
@@ -89,55 +116,60 @@ func materializeFixtureAPI(t *testing.T) *generatedTree {
 	if err != nil {
 		t.Fatalf("resolve temp dir: %v", err)
 	}
-	apiSchema, dbSchema := loadFixtureAPI(t)
 	names := naming.Default()
+	typesRoot := filepath.Join(tempRoot, "types", "typescript")
 
-	typesCases := []struct {
+	type typesCase struct {
 		name   string
 		schema *ir.Schema
 		deps   map[string]*ir.Schema
-	}{
-		{name: "fixture-db", schema: dbSchema},
-		{name: "fixture-api", schema: apiSchema, deps: map[string]*ir.Schema{"fixture-db": dbSchema}},
 	}
+	var typesCases []typesCase
+	depPackages := map[string]string{}
+	for _, name := range sortedKeys(fixture.deps) {
+		typesCases = append(typesCases, typesCase{name: name, schema: fixture.deps[name]})
+		depPackages[name] = names.NpmTypesPackage(name)
+	}
+	typesCases = append(typesCases, typesCase{name: fixture.name, schema: fixture.schema, deps: fixture.deps})
+
 	typesDirs := map[string]string{}
 	for _, tc := range typesCases {
 		tsOutput, err := tsgen.Generate(tc.schema, tsgen.Options{
 			SchemaName:         tc.name,
 			Dependencies:       tc.deps,
-			DependencyPackages: map[string]string{"fixture-db": names.NpmTypesPackage("fixture-db")},
+			DependencyPackages: depPackages,
 			Clock:              fixedClock,
 		})
 		if err != nil {
 			t.Fatalf("tsgen.Generate %s: %v", tc.name, err)
 		}
-		typesDir := filepath.Join(tempRoot, "types", "typescript", tc.name)
+		typesDir := filepath.Join(typesRoot, tc.name)
 		if err := tsgen.SetScalarLibSpec(tsOutput, paths, typesDir); err != nil {
 			t.Fatalf("set superscalar spec for %s: %v", tc.name, err)
 		}
 		if err := tsgen.WriteTypes(tsOutput, typesDir); err != nil {
 			t.Fatalf("write types %s: %v", tc.name, err)
 		}
-		if err := tsgen.WriteWorkspaceRoot(filepath.Dir(typesDir), naming.Naming{}); err != nil {
-			t.Fatalf("write workspace root: %v", err)
-		}
-		install := exec.Command(bunPath, "install")
-		install.Dir = typesDir
-		if out, err := install.CombinedOutput(); err != nil {
-			requireOrSkipTSTooling(t, fmt.Sprintf("bun install failed for types %s (likely offline): %v\n%s", tc.name, err, out))
-		}
 		typesDirs[names.NpmTypesPackage(tc.name)] = typesDir
 	}
+	if err := tsgen.WriteWorkspaceRoot(typesRoot, naming.Naming{}); err != nil {
+		t.Fatalf("write workspace root: %v", err)
+	}
+	install := exec.Command(bunPath, "install")
+	install.Dir = typesRoot
+	if out, err := install.CombinedOutput(); err != nil {
+		requireOrSkipTSTooling(t, fmt.Sprintf("bun install failed for the type packages of %s (likely offline): %v\n%s", fixture.name, err, out))
+	}
 
-	output, err := Generate(apiSchema, extractEndpoints(t, apiSchema, dbSchema), Options{
-		SchemaName:   "fixture-api",
-		Dependencies: map[string]*ir.Schema{"fixture-db": dbSchema},
+	output, err := Generate(fixture.schema, fixture.endpoints, Options{
+		SchemaName:   fixture.name,
+		Dependencies: fixture.deps,
 		Clock:        fixedClock,
 	})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	apiDir := filepath.Join(tempRoot, "api", "fixture-api")
+	apiDir := filepath.Join(tempRoot, "api", fixture.name)
 	if err := WriteAPI(output, apiDir); err != nil {
 		t.Fatalf("WriteAPI: %v", err)
 	}
@@ -154,12 +186,9 @@ func materializeFixtureAPI(t *testing.T) *generatedTree {
 	return &generatedTree{bun: bunPath, apiDir: apiDir, runtimeDir: runtimeDir}
 }
 
-// TestGeneratedAPICompiles type-checks the generated fixture-api package
-// against locally generated type packages, the real runtime, and Hono, so a
-// template that emits an invalid import or a signature the runtime does not
-// offer fails here rather than in a consuming service.
-func TestGeneratedAPICompiles(t *testing.T) {
-	tree := materializeFixtureAPI(t)
+// typeCheck runs tsc over the generated package.
+func (tree *generatedTree) typeCheck(t *testing.T) {
+	t.Helper()
 	tsc := filepath.Join(tree.runtimeDir, "node_modules", ".bin", "tsc")
 	check := exec.Command(tsc, "--noEmit", "-p", "tsconfig.json")
 	check.Dir = tree.apiDir
@@ -168,33 +197,46 @@ func TestGeneratedAPICompiles(t *testing.T) {
 	}
 }
 
-// TestGeneratedRouterRuntime boots the generated router with stub
-// implementations under bun and drives it over HTTP: envelopes, the strict
-// body parser, the auth gate, parameter decoding, and the manual-route hook.
-func TestGeneratedRouterRuntime(t *testing.T) {
-	tree := materializeFixtureAPI(t)
+// runTest stages testdata/<name> inside the generated package, so its
+// imports (hono, the runtime, the generated router) resolve like a
+// consumer's, and runs it under bun with API_DIR set to the package.
+func (tree *generatedTree) runTest(t *testing.T, name string) {
+	t.Helper()
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve current test file path")
 	}
-	// The test file runs from inside the generated package so its imports
-	// (hono, the runtime, the generated router) resolve like a consumer's.
-	source, err := os.ReadFile(filepath.Join(filepath.Dir(currentFile), "testdata", "router_runtime.test.ts"))
+	source, err := os.ReadFile(filepath.Join(filepath.Dir(currentFile), "testdata", name))
 	if err != nil {
-		t.Fatalf("read runtime test: %v", err)
+		t.Fatalf("read %s: %v", name, err)
 	}
-	testFile := filepath.Join(tree.apiDir, "router_runtime.test.ts")
+	testFile := filepath.Join(tree.apiDir, name)
 	if err := os.WriteFile(testFile, source, 0o644); err != nil {
-		t.Fatalf("stage runtime test: %v", err)
+		t.Fatalf("stage %s: %v", name, err)
 	}
 	cmd := exec.Command(tree.bun, "test", testFile)
 	cmd.Dir = tree.apiDir
 	cmd.Env = append(os.Environ(), "API_DIR="+tree.apiDir)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("generated router runtime test failed: %v\n%s", err, out)
+		t.Fatalf("%s failed: %v\n%s", name, err, out)
 	}
 	if !strings.Contains(string(out), " 0 fail") {
-		t.Fatalf("unexpected bun test summary:\n%s", out)
+		t.Fatalf("unexpected bun test summary for %s:\n%s", name, out)
 	}
+}
+
+// TestGeneratedAPICompiles type-checks the generated fixture-api package
+// against locally generated type packages, the real runtime, and Hono, so a
+// template that emits an invalid import or a signature the runtime does not
+// offer fails here rather than in a consuming service.
+func TestGeneratedAPICompiles(t *testing.T) {
+	materializeAPI(t, fixtureAPI(t)).typeCheck(t)
+}
+
+// TestGeneratedRouterRuntime boots the generated router with stub
+// implementations under bun and drives it over HTTP: envelopes, the strict
+// body parser, the auth gate, parameter decoding, and the manual-route hook.
+func TestGeneratedRouterRuntime(t *testing.T) {
+	materializeAPI(t, fixtureAPI(t)).runTest(t, "router_runtime.test.ts")
 }

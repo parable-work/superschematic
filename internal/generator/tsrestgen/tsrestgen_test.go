@@ -76,13 +76,20 @@ func generateFixtureAPI(t *testing.T) *APIOutput {
 }
 
 func TestWriteAPIGolden(t *testing.T) {
-	output := generateFixtureAPI(t)
+	checkGolden(t, generateFixtureAPI(t), "fixture-api")
+}
+
+// checkGolden writes the package and compares goldenFiles with
+// testdata/golden/<service> (rewriting them under -update); openapi.json
+// only has to be a JSON document with paths.
+func checkGolden(t *testing.T, output *APIOutput, service string) {
+	t.Helper()
 	outDir := t.TempDir()
 	if err := WriteAPI(output, outDir); err != nil {
 		t.Fatalf("write api: %v", err)
 	}
 
-	goldenDir := filepath.Join("testdata", "golden", "fixture-api")
+	goldenDir := filepath.Join("testdata", "golden", service)
 	for _, name := range goldenFiles {
 		got, err := os.ReadFile(filepath.Join(outDir, name))
 		if err != nil {
