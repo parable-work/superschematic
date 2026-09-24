@@ -111,8 +111,9 @@ r.RegisterGenerator(registry.GeneratorSpec{
 ```
 
 - `OutputKey` is the key under `outputs:` in `schema.config` that switches
-  the generator on. `OutputSchema` is the JSON Schema of that block.
-  `registry.DecodeOutput` reads it in `Enabled`.
+  the generator on. `OutputSchema` is the JSON Schema of that block; the
+  registry validates the block against it before any generator runs, in
+  every config form. `registry.DecodeOutput` reads it in `Enabled`.
 - `Dirs` lists every directory `Generate` writes to, so `build` can clean
   stale output and `build-all` can compute what changed.
 - `Generate` gets the loaded `ir.Schema`, the config, the naming and the

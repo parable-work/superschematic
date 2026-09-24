@@ -27,6 +27,8 @@ Version sites (relative to the repository root):
   packages/bun.lock                   the four workspace entries
   runtime/schema/typescript/package.json
                                       version
+  runtime/http/typescript/package.json
+                                      version
   runtime/schema/python/pyproject.toml
                                       [project] version, in PEP 440 form
   runtime/http/rust/Cargo.toml        [package] version
@@ -142,6 +144,13 @@ def sites():
     out.append(
         (
             ROOT / "runtime" / "schema" / "typescript" / "package.json",
+            [(r'(\n  "version": ")' + V + r'(",)', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "http" / "typescript" / "package.json",
             [(r'(\n  "version": ")' + V + r'(",)', 1)],
             "semver",
         )

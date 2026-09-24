@@ -84,6 +84,38 @@ func TestParseOutputsEmptyBlock(t *testing.T) {
 	}
 }
 
+// An OutputSchema is compiled when the generator registers, so a malformed
+// one fails assembly, and ParseOutputs checks the claimed section against it.
+func TestParseOutputsValidatesSectionsAgainstOutputSchema(t *testing.T) {
+	generate := func(GenerateContext) error { return nil }
+	reg := New(naming.Default())
+	if err := reg.RegisterGenerator(GeneratorSpec{Name: "broken", OutputKey: "broken", OutputSchema: []byte(`{"type": 3}`), Generate: generate}); err == nil {
+		t.Error("a malformed OutputSchema registered")
+	}
+	if err := reg.RegisterGenerator(GeneratorSpec{Name: "keyless", OutputSchema: []byte(`{}`), Generate: generate}); err == nil {
+		t.Error("an OutputSchema without an OutputKey registered")
+	}
+	if err := reg.RegisterGenerator(GeneratorSpec{
+		Name: "catalog", OutputKey: "catalog", Generate: generate,
+		OutputSchema: []byte(`{"type": "object", "properties": {"enabled": {"type": "boolean"}}, "additionalProperties": false}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseOutputs(map[string]any{"catalog": map[string]any{"enabled": true}}, reg); err != nil {
+		t.Errorf("a valid section: %v", err)
+	}
+	for _, section := range []any{
+		map[string]any{"enabled": "yes"},
+		map[string]any{"enabled": true, "shelves": 3},
+		true,
+	} {
+		_, err := ParseOutputs(map[string]any{"catalog": section}, reg)
+		if err == nil || !strings.HasPrefix(err.Error(), "outputs.catalog: ") {
+			t.Errorf("section %v: %v", section, err)
+		}
+	}
+}
+
 func TestParseOutputsReadsTheSQLSectionStrictly(t *testing.T) {
 	reg := New(naming.Default())
 	if err := reg.RegisterGenerator(GeneratorSpec{Name: "sql", OutputKey: "sql", Generate: func(GenerateContext) error { return nil }}); err != nil {

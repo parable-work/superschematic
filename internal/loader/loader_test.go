@@ -134,6 +134,56 @@ func TestHydrateScalarsFromRegistryPopulatesScalarLibMetadata(t *testing.T) {
 	}
 }
 
+// The TypeScript, Python and Rust types of a catalog scalar become its
+// typescript, python and rust mappings, over whatever the schema file
+// declared. A Rust type that is a declaration (Geo.Location's
+// `struct Location { ... }`) is not a type expression and is skipped.
+func TestHydrateTakesLanguageTypesFromCatalog(t *testing.T) {
+	headers := &scalars.ScalarMetadata{
+		CanonicalName:  "Acme.Headers",
+		Primitive:      "String",
+		TypeScriptType: "Record<string, string>",
+		PythonType:     "Dict[str, str]",
+		RustType:       "std::collections::HashMap<String, String>",
+		JSONSchemaType: "object",
+		HasCustomParse: true,
+	}
+	rows := map[string]*scalars.ScalarMetadata{"Acme.Headers": headers}
+	for _, name := range []string{"Generic.StringMap", "Generic.JSON", "Contact.Email", "Geo.Location"} {
+		row := scalars.ScalarMetadataByCanonical[name]
+		if row == nil || row.TypeScriptType == "" || row.PythonType == "" || row.RustType == "" {
+			t.Fatalf("the linked catalog must declare the TypeScript, Python and Rust types of %s", name)
+		}
+		rows[name] = row
+	}
+	schema := ir.NewSchema("temp-service", ir.SchemaKindGeneral)
+	for name := range rows {
+		schema.Scalars[name] = &ir.ScalarDef{
+			Name:         name,
+			TypeMappings: map[string]string{"typescript": "string", "python": "str"},
+		}
+	}
+	if err := hydrateScalarsFromRegistry(schema, registry.ScalarCatalogOf(rows)); err != nil {
+		t.Fatalf("hydrateScalarsFromRegistry: %v", err)
+	}
+	for name, want := range rows {
+		got := schema.Scalars[name].TypeMappings
+		if got["typescript"] != want.TypeScriptType || got["python"] != want.PythonType {
+			t.Errorf("%s: typescript = %q, python = %q; want %q, %q", name, got["typescript"], got["python"], want.TypeScriptType, want.PythonType)
+		}
+		wantRust := want.RustType
+		if name == "Geo.Location" {
+			wantRust = ""
+		}
+		if got["rust"] != wantRust {
+			t.Errorf("%s: rust = %q, want %q", name, got["rust"], wantRust)
+		}
+	}
+	if got := schema.Scalars["Generic.JSON"].TypeMappings["typescript"]; got != "JSONValue" {
+		t.Errorf("Generic.JSON typescript = %q, want JSONValue", got)
+	}
+}
+
 func TestLoadServiceRejectsDuplicateDefinitionsAcrossFiles(t *testing.T) {
 	dir := writeService(t, map[string]string{
 		"schema.config.json": minimalConfig,

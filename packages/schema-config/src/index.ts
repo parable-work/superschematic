@@ -40,8 +40,14 @@ export type TargetOutputConfig = {
 
 export type TypesOutputConfig = Partial<Record<TargetLanguage, TargetOutputConfig>>;
 
+/**
+ * The REST API server language. GO (the default) emits the chi server module, RUST the axum crate, TYPESCRIPT the Hono package built on the TypeScript HTTP runtime (`<out>/api/<service>`, `<scope>/<service>-api`).
+ */
+export type ApiLanguage = "GO" | "RUST" | "TYPESCRIPT";
+
 export type ApiOutputConfig = {
   readonly enabled: boolean;
+  readonly language?: ApiLanguage;
   readonly scaffoldsOutputDir?: string;
 };
 
@@ -66,6 +72,17 @@ export type SchemaOutputs = {
   readonly api?: ApiOutputConfig;
   readonly sdk?: SdkOutputConfig;
   readonly sql?: SqlOutputConfig;
+};
+
+/**
+ * The outputs block of the data forms: the core keys, plus the output key of
+ * any generator an extension registers. The authoring packages cannot see the
+ * registry, so an extension key is any name here; superschematic checks each
+ * key against the registered generators, and each section against its
+ * generator's OutputSchema, when it reads the config.
+ */
+export type SchemaOutputsDocument = SchemaOutputs & {
+  readonly [outputKey: string]: unknown;
 };
 
 export type SchemaConfig = {
@@ -102,7 +119,7 @@ export type SchemaConfigDocument = {
   readonly public?: boolean;
   readonly authDb?: string;
   readonly dependencies?: readonly ServiceDependencyRef[];
-  readonly outputs: SchemaOutputs;
+  readonly outputs: SchemaOutputsDocument;
 };
 
 export function defineConfig<TConfig extends SchemaConfig>(cfg: TConfig): TConfig {

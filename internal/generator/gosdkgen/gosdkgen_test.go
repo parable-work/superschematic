@@ -63,3 +63,37 @@ func TestWriteSDKGolden(t *testing.T) {
 		t.Fatal("expected non-empty sdk.go")
 	}
 }
+
+// TestEndpointParametersPreserveScalarWireTypes pins the Go SDK types of
+// path and query parameters: an integer, float or boolean scalar keeps its
+// JSON shape, so a tool call's numeric or boolean argument decodes into
+// the query struct, and every other scalar travels as a string.
+func TestEndpointParametersPreserveScalarWireTypes(t *testing.T) {
+	for _, test := range []struct {
+		param apigen.Param
+		want  string
+	}{
+		{apigen.Param{Type: "Generic.Int64", IsInt: true}, "int64"},
+		{apigen.Param{Type: "Generic.Probability", IsFloat: true}, "float64"},
+		{apigen.Param{Type: "Acme.Flag", IsBool: true}, "bool"},
+		{apigen.Param{Type: "Identity.UUID", IsUUID: true}, "string"},
+		{apigen.Param{Type: "Temporal.DateTime", IsDateTime: true}, "string"},
+		{apigen.Param{Type: "number"}, "float64"},
+		{apigen.Param{Type: "boolean"}, "bool"},
+		{apigen.Param{Type: "string"}, "string"},
+	} {
+		t.Run(test.param.Type, func(t *testing.T) {
+			test.param.Name = "value"
+			endpoint := convertEndpoint(apigen.EndpointInfo{
+				Path: "/items/{value}", Method: "GET",
+				PathParams: []apigen.Param{test.param}, QueryParams: []apigen.Param{test.param},
+			}, false, "", "Items")
+			if got := endpoint.PathParams[0].GoType; got != test.want {
+				t.Errorf("path parameter type = %s, want %s", got, test.want)
+			}
+			if got := endpoint.QueryParams[0]; got.GoType != test.want || !got.Pointer {
+				t.Errorf("optional query parameter = %+v, want *%s", got, test.want)
+			}
+		})
+	}
+}

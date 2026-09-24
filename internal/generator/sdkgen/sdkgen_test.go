@@ -356,3 +356,79 @@ func TestConvertEndpointUsesPathAndMethod(t *testing.T) {
 		t.Errorf("TSPath = %q", got.TSPath)
 	}
 }
+
+// renderNamespace executes namespace.tmpl for one endpoint.
+func renderNamespace(t *testing.T, endpoint EndpointInfo) string {
+	t.Helper()
+	tmpl, err := template.New("namespace.tmpl").Funcs(
+		codegen.MergeTemplateFuncs(tsutil.BaseTemplateFuncs(), customTemplateFuncs()),
+	).ParseFS(templatesFS, "templates/namespace.tmpl")
+	if err != nil {
+		t.Fatalf("parse namespace template: %v", err)
+	}
+	data := struct {
+		SDK       *SDKOutput
+		Namespace NamespaceInfo
+	}{
+		SDK:       &SDKOutput{TypesPackage: "@schemas/shop-api-types"},
+		Namespace: NamespaceInfo{Name: "archives", ClassName: "ArchivesNamespace", Endpoints: []EndpointInfo{endpoint}},
+	}
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "namespace.tmpl", data); err != nil {
+		t.Fatalf("execute namespace template: %v", err)
+	}
+	return buf.String()
+}
+
+// TestNamespaceMultipartPreservesQueryParams pins that a file-upload
+// endpoint with query parameters takes them in both the convenience and the
+// raw method and sends them with the request.
+func TestNamespaceMultipartPreservesQueryParams(t *testing.T) {
+	got := renderNamespace(t, EndpointInfo{
+		Name:          "importArchive",
+		Path:          "/api/stores/{storeId}/import",
+		TSPath:        "/api/stores/${storeId}/import",
+		Method:        "POST",
+		InputType:     "ImportArchiveInput",
+		OutputType:    "ImportArchiveResult",
+		HasInput:      true,
+		HasFileUpload: true,
+		PathParams:    []PathParam{{Name: "storeId", TSName: "storeId", TSType: "string"}},
+		QueryParams:   []QueryParam{{Name: "dryRun", TSName: "dryRun", TSType: "boolean"}},
+		FileUploadFields: []FileUploadField{{
+			Name: "file", TSName: "file", ScalarType: "File.Archive", Required: true,
+		}},
+	})
+	for _, snippet := range []string{
+		"files: {file: File; },\n    params?: { dryRun?: boolean },\n    signal?: AbortSignal",
+		"formData: FormData,\n    params?: { dryRun?: boolean },\n    signal?: AbortSignal",
+		"* @param params - Optional query parameters",
+	} {
+		if !strings.Contains(got, snippet) {
+			t.Fatalf("multipart namespace output is missing:\n%s\n\ngenerated:\n%s", snippet, got)
+		}
+	}
+	if count := strings.Count(got, "{ signal, params }"); count != 2 {
+		t.Fatalf("the convenience and raw multipart methods must both send the query parameters; found %d calls\n%s", count, got)
+	}
+}
+
+// TestNamespaceDeleteSendsDeclaredInput pins that a DELETE endpoint with an
+// input sends it as the request body; the Go API handler decodes the body
+// for every method that declares an input.
+func TestNamespaceDeleteSendsDeclaredInput(t *testing.T) {
+	got := renderNamespace(t, EndpointInfo{
+		Name:          "archiveStore",
+		Path:          "/api/stores/{storeId}",
+		TSPath:        "/api/stores/${storeId}",
+		Method:        "DELETE",
+		InputType:     "ArchiveStoreInput",
+		OutputType:    "ArchiveStoreResult",
+		HasInput:      true,
+		InputRequired: true,
+		PathParams:    []PathParam{{Name: "storeId", TSName: "storeId", TSType: "string"}},
+	})
+	if !strings.Contains(got, "this.client.delete<ArchiveStoreResult>(\n      `/api/stores/${storeId}`,\n      { signal, data: input }") {
+		t.Fatalf("DELETE does not send its input as the body:\n%s", got)
+	}
+}

@@ -99,6 +99,26 @@
       "path": "types/typescript/shop-db",
       "service": "shop-db",
       "deps": null
+    },
+    {
+      "id": "shop-storefront-api",
+      "language": "typescript",
+      "kind": "api",
+      "name": "@acme/shop-storefront-api",
+      "path": "api/shop-storefront",
+      "service": "shop-storefront",
+      "deps": [
+        "shop-storefront-types"
+      ]
+    },
+    {
+      "id": "shop-storefront-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-storefront-types",
+      "path": "types/typescript/shop-storefront",
+      "service": "shop-storefront",
+      "deps": null
     }
   ]
 }

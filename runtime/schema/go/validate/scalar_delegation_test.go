@@ -56,12 +56,11 @@ func par12Schema() *ir.Schema {
 	return s
 }
 
-// TestScalarDelegation_RegistryGovernsEveryName is the W8 contract: the
-// validator reaches the scalar core only through the injected registry. With
-// an empty registry the same deep-check values fall back to the generic IR
-// constraints (which the fixture leaves empty) and are accepted; the old
-// KnownScalar short-circuit would have rejected them behind the registry's
-// back.
+// TestScalarDelegation_RegistryGovernsEveryName: the validator reaches the
+// scalar core only through the injected registry. With an empty registry
+// the same deep-check values fall back to the generic IR constraints (which
+// the fixture leaves empty) and are accepted; the old KnownScalar
+// short-circuit would have rejected them behind the registry's back.
 func TestScalarDelegation_RegistryGovernsEveryName(t *testing.T) {
 	input := map[string]any{
 		"vector": "notavector",

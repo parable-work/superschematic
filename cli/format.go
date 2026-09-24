@@ -14,6 +14,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/loader/yamlreader"
+	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/writer"
 )
 
@@ -25,7 +26,10 @@ type formatFlags struct {
 }
 
 // newFormatCmd converts one schema file between the three authoring formats.
-func newFormatCmd() *cobra.Command {
+// The readers run with the registry the binary assembles, so a file that
+// uses an extension's kind, decorators or documents converts in a binary
+// that links the extension.
+func newFormatCmd(a *app) *cobra.Command {
 	flags := &formatFlags{}
 	cmd := &cobra.Command{
 		Use:   "format --to=ts|json|yaml <file>",
@@ -41,6 +45,10 @@ to the file convert, and service-level definitions that TypeScript cannot
 attribute to a file (enums, scalars) ride along with the service's first
 schema file.
 
+The file is read with the extensions this binary links. Extension data
+converts between JSON and YAML; the TypeScript writer cannot render it and
+fails with the slot's name.
+
 The converted file is written next to the input as <name>.schema.<format>.
 An existing file is not overwritten without --force. Use --stdout to print
 the conversion instead of writing it.
@@ -51,7 +59,7 @@ Examples:
   superschematic format --to=json ./src/orders.schema.ts --force`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFormat(cmd, flags, args[0])
+			return runFormat(cmd, a, flags, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&flags.to, "to", "", "target format: ts, json, or yaml (required)")
@@ -79,7 +87,7 @@ func schemaFileFormat(path string) (writer.Format, string, error) {
 	return "", "", fmt.Errorf("%s is not a schema file: expected a .schema.{ts,json,yaml} extension", path)
 }
 
-func runFormat(cmd *cobra.Command, flags *formatFlags, inputPath string) error {
+func runFormat(cmd *cobra.Command, a *app, flags *formatFlags, inputPath string) error {
 	target, err := writer.ParseFormat(flags.to)
 	if err != nil {
 		return err
@@ -102,8 +110,12 @@ func runFormat(cmd *cobra.Command, flags *formatFlags, inputPath string) error {
 		return err
 	}
 	naming.SetActive(names)
+	reg, err := a.resolveRegistry(names)
+	if err != nil {
+		return err
+	}
 
-	doc, err := readDocument(inputPath, inputFormat)
+	doc, err := readDocument(inputPath, inputFormat, reg)
 	if err != nil {
 		return err
 	}
@@ -129,14 +141,14 @@ func runFormat(cmd *cobra.Command, flags *formatFlags, inputPath string) error {
 }
 
 // readDocument reads one schema file into its per-file document.
-func readDocument(path string, format writer.Format) (*schemafile.Document, error) {
+func readDocument(path string, format writer.Format, reg *registry.Registry) (*schemafile.Document, error) {
 	switch format {
 	case writer.FormatJSON:
-		return jsonreader.ReadFile(path, filepath.Base(path))
+		return jsonreader.ReadFileWith(path, filepath.Base(path), reg)
 	case writer.FormatYAML:
-		return yamlreader.ReadFile(path, filepath.Base(path))
+		return yamlreader.ReadFileWith(path, filepath.Base(path), reg)
 	default:
-		return readTSDocument(path)
+		return readTSDocument(path, reg)
 	}
 }
 
@@ -144,7 +156,7 @@ func readDocument(path string, format writer.Format) (*schemafile.Document, erro
 // extracts the document owned by that file. TypeScript files cannot be read
 // standalone: decorators, wrappers, and type references resolve through the
 // service's compiler program.
-func readTSDocument(path string) (*schemafile.Document, error) {
+func readTSDocument(path string, reg *registry.Registry) (*schemafile.Document, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -153,7 +165,7 @@ func readTSDocument(path string) (*schemafile.Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	schema, _, err := tsreader.LoadService(root)
+	schema, _, _, err := tsreader.LoadServiceWithConfig(root, tsreader.WithRegistry(reg))
 	if err != nil {
 		return nil, err
 	}

@@ -44,6 +44,7 @@ pub struct Tenant {
     pub is_active: bool,
     #[serde(default = "default_tenant_seat_count", rename = "seatCount")]
     pub seat_count: f64,
+    #[serde(deserialize_with = "superscalar::scalars::json_scalar::serde::deserialize")]
     pub metadata: GenericJSON,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub users: Option<Vec<TenantUser>>,

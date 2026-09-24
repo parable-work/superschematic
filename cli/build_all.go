@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,7 +16,9 @@ import (
 
 	"github.com/parable-work/superschematic/internal/buildcache"
 	"github.com/parable-work/superschematic/internal/buildplan"
+	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
@@ -221,6 +224,9 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		if flags.profile {
 			profileTotals.print(cmd.OutOrStdout())
 		}
+		if err := writeTypeScriptWorkspaceRoot(outputRoot, services, activeNaming); err != nil {
+			return err
+		}
 		if err := emitSchemaDeps(cmd, outputRoot, depsCopy, services); err != nil {
 			return err
 		}
@@ -332,6 +338,22 @@ func hookServices(services []buildplan.Service) []registry.BuildAllService {
 		})
 	}
 	return out
+}
+
+// writeTypeScriptWorkspaceRoot writes the manifest that makes the generated
+// TypeScript types packages one Bun workspace (tsgen.WorkspaceRootManifest)
+// when any service has TypeScript types. The types generator writes it next
+// to the package it builds; a service restored from the cache or found up to
+// date brings back only its own package, so build-all writes it once every
+// service is in place, before the dependency graph reads the output root.
+func writeTypeScriptWorkspaceRoot(outputRoot string, services []buildplan.Service, n naming.Naming) error {
+	for _, service := range services {
+		dir := generator.TypesDir(outputRoot, registry.LangTypeScript, service.Name)
+		if slices.Contains(service.OutputDirs, dir) {
+			return tsgen.WriteWorkspaceRoot(filepath.Dir(dir), n)
+		}
+	}
+	return nil
 }
 
 // runBuildAllHooks runs the hooks in registration order and stops at the

@@ -140,6 +140,46 @@ func TestFinalizeChecksPipelinesAndOutputKeys(t *testing.T) {
 	}
 }
 
+// A Kinds list that names an unregistered kind fails assembly, for each spec
+// that has one; the registered core kinds pass.
+func TestFinalizeRejectsUnregisteredKindsInKindsLists(t *testing.T) {
+	verify := func(*ir.Schema, VerifyReporter) {}
+	for _, tc := range []struct {
+		what     string
+		register func(*Registry, []string) error
+	}{
+		{`generator "catalog"`, func(r *Registry, kinds []string) error {
+			return r.RegisterGenerator(GeneratorSpec{Name: "catalog", Kinds: kinds, Generate: noopGenerate})
+		}},
+		{"decorator @shelf", func(r *Registry, kinds []string) error {
+			return r.RegisterDecorator(DecoratorSpec{Name: "shelf", Extension: "acme", Packages: []string{"@acme/schema"}, Target: TargetField, Kinds: kinds, Apply: func(Node, []any, Site) error { return nil }})
+		}},
+		{`document "catalogConfig"`, func(r *Registry, kinds []string) error {
+			return r.RegisterDocument(DocumentSpec{Name: "catalogConfig", Extension: "acme", Kinds: kinds})
+		}},
+		{`check "acmeShelves"`, func(r *Registry, kinds []string) error {
+			return r.RegisterCheck(CheckSpec{Name: "acmeShelves", Extension: "acme", Kinds: kinds, Verify: verify})
+		}},
+	} {
+		reg := coreOutputRegistry(t)
+		if err := tc.register(reg, []string{"DB", "Catlog"}); err != nil {
+			t.Fatal(err)
+		}
+		want := tc.what + ` lists kind "Catlog", which is not registered`
+		if err := reg.Finalize(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Finalize = %v, want %q", err, want)
+		}
+
+		reg = coreOutputRegistry(t)
+		if err := tc.register(reg, []string{"DB", "API"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.Finalize(); err != nil {
+			t.Errorf("%s over registered kinds: %v", tc.what, err)
+		}
+	}
+}
+
 func TestUseIsFailClosed(t *testing.T) {
 	reg := New(naming.Default())
 	boom := errors.New("boom")

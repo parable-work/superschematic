@@ -25,6 +25,9 @@ func (e *emitter) emitOperationSet(set *ir.OperationSet) {
 	if set.Description != "" {
 		e.failf("%s: descriptions have no TypeScript authoring form", owner)
 	}
+	if len(set.Extensions) > 0 {
+		e.failf("%s: extension data (%s) has no TypeScript authoring form in this writer", owner, strings.Join(sortedKeys(set.Extensions), ", "))
+	}
 
 	auth := false
 	for i, op := range set.Operations {

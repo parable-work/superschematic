@@ -74,6 +74,9 @@ export class {{.Namespace.ClassName}} {
    {{- range .FileUploadFields}}
    * @param files.{{.TSName}} - {{if .Required}}Required{{else}}Optional{{end}} {{.ScalarType}} file
    {{- end}}
+   {{- if has_query_params .QueryParams}}
+   * @param params - Optional query parameters
+   {{- end}}
    * @param signal - Optional AbortSignal for request cancellation
    * @returns {{if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
    * @throws {ValidationError} if input validation fails
@@ -87,6 +90,9 @@ export class {{.Namespace.ClassName}} {
     input: Omit<{{.InputType}}, {{file_upload_field_union .FileUploadFields}}>,
     {{- end}}
     files: { {{- range $i, $field := .FileUploadFields}}{{if $i}} {{end}}{{$field.TSName}}{{if not $field.Required}}?{{end}}: File;{{end}} },
+    {{- if has_query_params .QueryParams}}
+    params?: {{query_params_type .QueryParams}},
+    {{- end}}
     signal?: AbortSignal
   ): Promise<{{.TSOutputType}}> {
     const formData = new FormData();
@@ -106,7 +112,7 @@ export class {{.Namespace.ClassName}} {
     const result = await this.client.{{multipart_method .Method}}<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       formData,
-      { signal }
+      { signal{{if has_query_params .QueryParams}}, params{{end}} }
     );
 
     {{- if $endpoint.HasOutputParser}}
@@ -144,6 +150,9 @@ export class {{.Namespace.ClassName}} {
    {{- end}}
    {{- end}}
    * @param formData - Pre-constructed FormData with input and files
+   {{- if has_query_params .QueryParams}}
+   * @param params - Optional query parameters
+   {{- end}}
    * @param signal - Optional AbortSignal for request cancellation
    * @returns {{if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
    * @throws {ApiError} if the API request fails
@@ -153,12 +162,15 @@ export class {{.Namespace.ClassName}} {
     {{join_params_filtered .PathParams $.Namespace.IsScopedNS $.Namespace.ScopeParamName}},
     {{- end}}
     formData: FormData,
+    {{- if has_query_params .QueryParams}}
+    params?: {{query_params_type .QueryParams}},
+    {{- end}}
     signal?: AbortSignal
   ): Promise<{{.TSOutputType}}> {
     const result = await this.client.{{multipart_method .Method}}<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
       formData,
-      { signal }
+      { signal{{if has_query_params .QueryParams}}, params{{end}} }
     );
 
     {{- if $endpoint.HasOutputParser}}
@@ -519,10 +531,10 @@ export class {{.Namespace.ClassName}} {
       { {{- if has_encrypted_body .Method .Encrypted}}signal: options?.signal{{- else}}signal{{if .ScalarArgs}}: requestSignal{{end}}{{- end}}{{if and (has_query_params .QueryParams) .Filterable}}, params: { ...params, ...filterParams }{{else if has_query_params .QueryParams}}, params{{else if .Filterable}}, params: filterParams{{end}} }
     );
     {{- else if eq .Method "DELETE"}}
-    // Make DELETE request
+    // Make DELETE request; Axios carries a declared body through config.data.
     const result = await this.client.delete<{{.TSOutputType}}>(
       `{{scoped_path (.TSPath) $.Namespace.IsScopedNS $.Namespace.ScopeParamName}}`,
-      { signal{{if .ScalarArgs}}: requestSignal{{end}}{{if and (has_query_params .QueryParams) .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if has_query_params .QueryParams}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}} }
+      { signal{{if .ScalarArgs}}: requestSignal{{end}}{{if .HasInput}}, data: input{{end}}{{if and (has_query_params .QueryParams) .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if has_query_params .QueryParams}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}} }
     );
     {{- end}}
 

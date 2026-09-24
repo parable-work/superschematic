@@ -1,6 +1,6 @@
 # superschematic (the schema compiler). Convenience targets for the Go
 # modules, the TypeScript authoring packages, the schema runtimes and the
-# Rust http runtime. Mirrors the CI workflow gates (.github/workflows/ci.yml).
+# TypeScript and Rust http runtimes. Mirrors the CI workflow gates (.github/workflows/ci.yml).
 #
 #   make setup && make all
 
@@ -29,6 +29,7 @@ setup:
 	scripts/superscalar-dep.sh
 	cd packages && bun install
 	cd runtime/schema/typescript && bun install
+	cd runtime/http/typescript && bun install
 	cd runtime/schema/python && uv sync
 
 build: go-build $(BIN)
@@ -67,6 +68,7 @@ catalog-check:
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
 	cd runtime/schema/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
+	cd runtime/http/typescript && bun install --frozen-lockfile && bun run test
 
 python:
 	cd runtime/schema/python && uv run pytest -q
@@ -88,7 +90,10 @@ cli-smoke: $(BIN)
 		$(BIN) build internal/loader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
 
 # The extraction scrub: the only allowed maintainer mentions are the license
-# holder, the GitHub org in module paths and the maintainer lines.
+# holder, the GitHub org in module paths and publisher registrations, and the
+# maintainer lines; source-tree identifiers and planning ids (wave, review and
+# phase numbers) fail it, and so do transform* field directives outside the
+# core IR allowlist.
 scrub:
 	scripts/scrub-check.sh
 

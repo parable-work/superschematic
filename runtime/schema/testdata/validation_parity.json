@@ -12,7 +12,10 @@
         "typeMappings": {
           "go": "NetworkUrl",
           "json_schema": "string",
-          "sql": "varchar(4096)"
+          "python": "str",
+          "rust": "String",
+          "sql": "varchar(4096)",
+          "typescript": "string"
         },
         "maxLength": 2048,
         "pattern": "^https?://[\\w\\-\\{\\}]+(\\.[\\w\\-\\{\\}]+)+([:/?#][\\w\\-\\._~:/?#\\[\\]@!\\$\u0026'\\(\\)\\*\\+,;=\\{\\}%]*)?$"

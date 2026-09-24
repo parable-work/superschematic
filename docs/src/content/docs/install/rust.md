@@ -93,6 +93,13 @@ Structs derive `Serialize` and `Deserialize`. JSON field names stay as the
 schema spelled them (`amountCents`); Rust fields are snake_case
 (`amount_cents`). Scalars are aliases onto the `superscalar` crate.
 
+A `Generic.JSON` field is a `serde_json::Value` that decodes through
+superscalar's lossless adapter
+(`superscalar::scalars::json_scalar::serde::deserialize`), so a number
+keeps the digits it was written with. For that, the superscalar crate turns
+on serde_json's `arbitrary_precision` feature, which Cargo applies to every
+crate in the build that uses serde_json.
+
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk` for Rust writes `schemas-<name>-sdk`.

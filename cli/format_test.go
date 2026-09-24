@@ -8,15 +8,26 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/parable-work/superschematic/internal/registry/registrytest"
+	"github.com/parable-work/superschematic/registry"
 )
 
 const tsTestdata = "../internal/loader/tsreader/testdata/services"
 
-// runFormatCommand executes the format command and returns its stdout.
+const acmeTestdata = "../internal/registry/registrytest/testdata"
+
+// runFormatCommand executes the format command of a binary that links exts
+// and returns its stdout.
 func runFormatCommand(t *testing.T, args ...string) (string, error) {
 	t.Helper()
+	return runFormatCommandWith(t, nil, args...)
+}
+
+func runFormatCommandWith(t *testing.T, exts []registry.Extension, args ...string) (string, error) {
+	t.Helper()
 	buf := new(bytes.Buffer)
-	root := New(Config{})
+	root := New(Config{}, exts...)
 	root.SetOut(buf)
 	root.SetArgs(append([]string{"format"}, args...))
 	err := root.Execute()
@@ -75,4 +86,30 @@ func TestFormatCommand_SameFormatRejected(t *testing.T) {
 		filepath.Join(loaderTestdata, "fixture-db-json/src/tenant.schema.json"))
 
 	require.ErrorContains(t, err, "already in the json format")
+}
+
+// A binary that links an extension converts a file that uses it: format reads
+// with the registry the binary assembles. The core binary rejects the same
+// file, and the TypeScript writer refuses extension data it cannot write
+// instead of dropping it.
+func TestFormatCommand_ReadsWithTheLinkedExtensions(t *testing.T) {
+	yamlInput := filepath.Join(acmeTestdata, "shop-yaml/src/product.schema.yaml")
+	acme := []registry.Extension{registrytest.Acme{}}
+
+	_, err := runFormatCommand(t, "--to=json", "--stdout", yamlInput)
+	require.ErrorContains(t, err, `unknown kind "Catalog"`)
+
+	out, err := runFormatCommandWith(t, acme, "--to=json", "--stdout", yamlInput)
+	require.NoError(t, err)
+	assert.Contains(t, out, `"kind": "Catalog"`)
+	assert.Contains(t, out, `"aisle": 3`)
+	assert.Contains(t, out, `"tagged": true`)
+
+	out, err = runFormatCommandWith(t, acme, "--to=yaml", "--stdout", filepath.Join(acmeTestdata, "shop/src/product.schema.ts"))
+	require.NoError(t, err)
+	assert.Contains(t, out, "kind: Catalog")
+	assert.Contains(t, out, "aisle: 3")
+
+	_, err = runFormatCommandWith(t, acme, "--to=ts", "--stdout", yamlInput)
+	require.ErrorContains(t, err, "extension data (acme) has no TypeScript authoring form")
 }

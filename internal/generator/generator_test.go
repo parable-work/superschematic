@@ -122,6 +122,69 @@ func TestRunAPISchemaSelectsAPIOutputs(t *testing.T) {
 	}
 }
 
+// TestRunAPISchemaSelectsTypeScriptAPI flips fixture-api to the TypeScript
+// server language and checks the Hono package lands in the api output dir,
+// the SDK still follows, and no Go server files are written.
+func TestRunAPISchemaSelectsTypeScriptAPI(t *testing.T) {
+	schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, "fixture-api"))
+	if err != nil {
+		t.Fatalf("LoadServiceWithConfig: %v", err)
+	}
+	cfg.Outputs["api"] = map[string]any{"enabled": true, "language": APILanguageTypeScript}
+
+	outputRoot := t.TempDir()
+	result, err := Run(schema, cfg, Options{
+		OutputRoot: outputRoot,
+		Naming:     naming.Default(),
+		LoadDependency: func(name string) (*ir.Schema, error) {
+			return loader.LoadService(filepath.Join(tsFixtures, name))
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	wantAPIDir := APIDir(outputRoot, "fixture-api")
+	if result.Outputs["api-typescript"] != wantAPIDir {
+		t.Errorf("expected api-typescript output at %q, got %q", wantAPIDir, result.Outputs["api-typescript"])
+	}
+	for _, name := range []string{"package.json", "interfaces.ts", "router.ts", "openapi.json"} {
+		if _, err := os.Stat(filepath.Join(wantAPIDir, name)); err != nil {
+			t.Errorf("expected generated %s: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(wantAPIDir, "routes.go")); err == nil {
+		t.Error("TypeScript API output must not carry the Go server")
+	}
+	// fixture-api declares no @envVars class: no values-schema.json.
+	if _, err := os.Stat(filepath.Join(wantAPIDir, "values-schema.json")); err == nil {
+		t.Error("unexpected values-schema.json for a schema without @envVars")
+	}
+	if result.Outputs["sdk-typescript"] != SDKDir(outputRoot, "typescript", "fixture-api") {
+		t.Errorf("expected the TypeScript SDK beside the TypeScript API, got %v", result.Outputs)
+	}
+}
+
+// TestRunRejectsUnknownAPILanguage pins the language switch: a typo is an
+// error, not a silent fall-through to the Go server.
+func TestRunRejectsUnknownAPILanguage(t *testing.T) {
+	schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, "fixture-api"))
+	if err != nil {
+		t.Fatalf("LoadServiceWithConfig: %v", err)
+	}
+	cfg.Outputs["api"] = map[string]any{"enabled": true, "language": "TYPESCRIPT2"}
+	_, err = Run(schema, cfg, Options{
+		OutputRoot: t.TempDir(),
+		Naming:     naming.Default(),
+		LoadDependency: func(name string) (*ir.Schema, error) {
+			return loader.LoadService(filepath.Join(tsFixtures, name))
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported API language") {
+		t.Fatalf("expected an unsupported-language error, got %v", err)
+	}
+}
+
 func TestExpectedOutputDirsIncludesStandaloneEnvConfigDir(t *testing.T) {
 	cfg := &schemaconfig.SchemaConfig{
 		Name: "fixture-env",

@@ -32,11 +32,10 @@ func writeServiceDir(t *testing.T, files map[string]string) string {
 }
 
 // TestTargetImportsSiblingSentinelsReadsTheKindSpec: the pre-load sentinel
-// sweep is decided by KindSpec.ImportsSiblingSentinels, read from the
-// data-form config directly and from the SchemaKind member named in a
-// TypeScript config, never from a kind literal. The data-form positive case
-// waits on @superschematic/schema-config widening its kind enum (W10): the JSON
-// Schema rejects a fixture kind before the registry sees it.
+// sweep is decided by KindSpec.ImportsSiblingSentinels, read from the kind a
+// data-form config states and from the kind a TypeScript config names, as a
+// SchemaKind member or a string. The data-form config schema admits any kind
+// name, so an extension kind reaches the registry from both forms.
 func TestTargetImportsSiblingSentinelsReadsTheKindSpec(t *testing.T) {
 	reg := siblingRegistry(t)
 
@@ -45,6 +44,18 @@ func TestTargetImportsSiblingSentinelsReadsTheKindSpec(t *testing.T) {
 	})
 	if targetImportsSiblingSentinels(dataFormDB, reg) {
 		t.Error("data-form DB config was detected as importing sibling sentinels")
+	}
+	dataFormFlagged := writeServiceDir(t, map[string]string{
+		"schema.config.json": `{"name": "grp", "kind": "Grouping", "outputs": {}}`,
+	})
+	if !targetImportsSiblingSentinels(dataFormFlagged, reg) {
+		t.Error("data-form config naming a flagged kind was not detected")
+	}
+	yamlFormFlagged := writeServiceDir(t, map[string]string{
+		"schema.config.yaml": "name: grp\nkind: Grouping\noutputs: {}\n",
+	})
+	if !targetImportsSiblingSentinels(yamlFormFlagged, reg) {
+		t.Error("YAML config naming a flagged kind was not detected")
 	}
 
 	tsForm := writeServiceDir(t, map[string]string{
