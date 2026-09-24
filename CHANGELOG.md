@@ -363,6 +363,13 @@ of a generated artifact is always listed here with the bump it requires.
   body arguments (`T[]` and `T[][]` arguments were rendered as `T`) and
   nest the return schema's items. The Rust API crate passes lists of lists
   through its `serde_json::Value` handlers. Minor.
+- Arrays of arrays on the docs site: a reference page for `T[][]` (the
+  TypeScript and data forms, what each generator writes, where a list of
+  lists is accepted and refused with each error, the list rules and the
+  error paths), and a note in the extension guide that a generator reads
+  `TypeRef.ArrayDepth()`. `examples/acme-schematic` declares a list of
+  lists as a DB column, in API types and as a tool argument, and its smoke
+  follows it into every output. No generated output changes.
 
 ### Changed
 
