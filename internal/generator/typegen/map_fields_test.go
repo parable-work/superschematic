@@ -558,3 +558,147 @@ func TestScalarMaps(t *testing.T) {
 `, "{"+strings.Join(valid, ",")+"}", "{"+strings.Join(nulls, ",")+"}", strings.Join(invalid, ",\n\t"))
 	runGeneratedModuleTest(t, output, "scalar_maps", code)
 }
+
+// receiptMapSchema declares Receipt, a JSON-field type with a required code
+// of at least two characters and a secret note, its input twin, and three holders of a required and
+// an optional map of it: ReceiptBook (output), ReceiptBookInput (its input
+// twin, over ReceiptInput) and ReceiptDraftInput (an input over Receipt).
+func receiptMapSchema(t *testing.T) *ir.Schema {
+	t.Helper()
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	minLength := 2
+	receiptFields := func() []*ir.FieldDef {
+		return []*ir.FieldDef{
+			{Name: "code", TypeRef: ir.TypeRef{Name: "string"}, Required: true, ValidateMinLength: &minLength},
+			{Name: "note", TypeRef: ir.TypeRef{Name: "string"}, Secret: true},
+		}
+	}
+	mapFields := func(value string) []*ir.FieldDef {
+		return []*ir.FieldDef{
+			{Name: "receipts", TypeRef: ir.TypeRef{Name: value, IsMap: true}, Required: true},
+			{Name: "optionalReceipts", TypeRef: ir.TypeRef{Name: value, IsMap: true}},
+		}
+	}
+	schema.Types["Receipt"] = &ir.TypeDef{Name: "Receipt", Role: ir.RoleEmbeddedStruct, JsonField: true, Fields: receiptFields()}
+	schema.Types["ReceiptInput"] = &ir.TypeDef{Name: "ReceiptInput", Role: ir.RoleAPIInput, Fields: receiptFields()}
+	schema.Types["ReceiptBook"] = &ir.TypeDef{Name: "ReceiptBook", Role: ir.RoleEmbeddedStruct, JsonField: true, Fields: mapFields("Receipt")}
+	schema.Types["ReceiptBookInput"] = &ir.TypeDef{Name: "ReceiptBookInput", Role: ir.RoleAPIInput, Fields: mapFields("ReceiptInput")}
+	schema.Types["ReceiptDraftInput"] = &ir.TypeDef{Name: "ReceiptDraftInput", Role: ir.RoleAPIInput, Fields: mapFields("Receipt")}
+	return schema
+}
+
+// TestOptionalObjectMapFieldsRoundTrip pins an optional map of a generated
+// type, whose null entries are valid, on an output type and on inputs: the
+// module builds and vets, a payload with a null entry decodes, validates
+// and re-encodes unchanged, an invalid entry is reported under name[key],
+// MaskSecrets keeps the null entry and masks the others, and an input over
+// the input twin converts to the output type.
+func TestOptionalObjectMapFieldsRoundTrip(t *testing.T) {
+	output, err := Generate(receiptMapSchema(t), Options{
+		SchemaName: "fixture-db",
+		ModulePath: "example.com/schemas/types/go/receipt-map",
+		Clock:      codegen.FixedClock(time.Unix(0, 0).UTC()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const code = `package types
+
+import (
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+const (
+	payload = ` + "`" + `{"receipts":{"a":{"code":"a1"}},"optionalReceipts":{"b":{"code":"b1","note":"private"},"none":null}}` + "`" + `
+	masked  = ` + "`" + `{"receipts":{"a":{"code":"a1"}},"optionalReceipts":{"b":{"code":"b1"},"none":null}}` + "`" + `
+	// A masked secret input field stays present with its value cleared.
+	maskedInput = ` + "`" + `{"receipts":{"a":{"code":"a1"}},"optionalReceipts":{"b":{"code":"b1","note":""},"none":null}}` + "`" + `
+	invalid = ` + "`" + `{"optionalReceipts":{"bad":{"code":"x"}}}` + "`" + `
+)
+
+type record interface {
+	Validate() ValidationErrors
+}
+
+func mentions(errors ValidationErrors, key string) bool {
+	return errors.HasErrors() && strings.Contains(fmt.Sprint(errors), key)
+}
+
+func sameJSON(t *testing.T, value any, want string) {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, expected any
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(want), &expected); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, expected) {
+		t.Fatalf("%T encoded %s, want %s", value, encoded, want)
+	}
+}
+
+// roundTrip decodes payload into value, validates it, checks it re-encodes
+// unchanged and that MaskSecrets keeps the null entry and clears the note,
+// then patches in an invalid entry and checks Validate reports its key.
+func roundTrip(t *testing.T, value record, mask func() any, masked string) {
+	t.Helper()
+	if err := json.Unmarshal([]byte(payload), value); err != nil {
+		t.Fatalf("decode %T: %v", value, err)
+	}
+	if errors := value.Validate(); errors.HasErrors() {
+		t.Fatalf("valid %T refused: %v", value, errors)
+	}
+	sameJSON(t, value, payload)
+	sameJSON(t, mask(), masked)
+	sameJSON(t, value, payload)
+	if err := json.Unmarshal([]byte(invalid), value); err != nil {
+		t.Fatalf("decode %T: %v", value, err)
+	}
+	if errors := value.Validate(); !mentions(errors, "optionalReceipts[bad]") {
+		t.Fatalf("%T: an invalid optional entry was not reported under its key: %v", value, errors)
+	}
+}
+
+func TestOptionalObjectMaps(t *testing.T) {
+	var book ReceiptBook
+	roundTrip(t, &book, func() any { return book.MaskSecrets() }, masked)
+	if entry, exists := book.OptionalReceipts["none"]; !exists || entry != nil {
+		t.Fatal("the null output entry was lost")
+	}
+
+	var draft ReceiptDraftInput
+	roundTrip(t, &draft, func() any { return draft.MaskSecrets() }, masked)
+
+	var input ReceiptBookInput
+	roundTrip(t, &input, func() any { return input.MaskSecrets() }, maskedInput)
+	input = ReceiptBookInput{}
+	if err := json.Unmarshal([]byte(payload), &input); err != nil {
+		t.Fatal(err)
+	}
+	sameJSON(t, input.ToReceiptBook(), payload)
+
+	for _, value := range []record{&ReceiptBookInput{}, &ReceiptDraftInput{}} {
+		if err := json.Unmarshal([]byte(` + "`" + `{"receipts":{},"optionalReceipts":null}` + "`" + `), value); err != nil {
+			t.Fatal(err)
+		}
+		if errors := value.Validate(); errors.HasErrors() {
+			t.Fatalf("a null optional %T map was refused: %v", value, errors)
+		}
+		sameJSON(t, value, ` + "`" + `{"receipts":{},"optionalReceipts":null}` + "`" + `)
+	}
+}
+`
+	runGeneratedModuleTest(t, output, "receipt_map", code)
+}

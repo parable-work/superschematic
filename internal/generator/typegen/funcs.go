@@ -130,7 +130,7 @@ func (n nestedList) ChecksElements() bool {
 func newNestedList(module *ModuleOutput, field FieldInfo) nestedList {
 	listType := field.GoType
 	if field.UsesWrapper {
-		listType = strings.TrimSuffix(strings.TrimPrefix(listType, "InputField["), "]")
+		listType = inputFieldValueType(listType)
 	}
 	list := nestedList{
 		Field:       field,
@@ -161,6 +161,12 @@ func newNestedList(module *ModuleOutput, field FieldInfo) nestedList {
 	return list
 }
 
+// inputFieldValueType returns T for the Go type InputField[T], the type an
+// optional input field's wrapper holds.
+func inputFieldValueType(goType string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(goType, "InputField["), "]")
+}
+
 // templateFuncs returns the typegen-specific template functions.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
@@ -171,6 +177,7 @@ func templateFuncs() template.FuncMap {
 		"isValidatableScalarField": isValidatableScalarField,
 		"isGeneratedType":          isGeneratedType,
 		"nestedList":               newNestedList,
+		"inputFieldValueType":      inputFieldValueType,
 		"hasUnionFields": func(fields []FieldInfo) bool {
 			for _, f := range fields {
 				if f.IsUnion {
