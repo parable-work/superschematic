@@ -409,6 +409,24 @@ of a generated artifact is always listed here with the bump it requires.
   into the query struct, so a numeric argument failed to decode into the
   string field. A caller that passed such a parameter as a string passes
   the number. Minor.
+- The loader takes each catalog scalar's TypeScript, Python and Rust types
+  (`TypeScriptType`, `PythonType` and `RustType` on its superscalar metadata
+  row) as the scalar's `typescript`, `python` and `rust` type mappings.
+  Before, only the Go, SQL and JSON Schema mappings came from the catalog,
+  and the other generators inferred a type from the primitive. A Rust type
+  that declares a struct rather than naming a type is skipped. For the core
+  catalog, generated output changes only for `Generic.JSON` in TypeScript:
+  - A field's type is `GenericJSON`, which is superscalar's `JSONValue`
+    (any JSON value), where it was `Record<string, any>`.
+  - `types/scalars.ts` re-exports `JSONValue`.
+  - The scalar validator skips string checks.
+  - A required `Generic.JSON` treats JSON `null` as present and only
+    `undefined` as missing, as Go and Python already did.
+
+  rustgen's special case for `Generic.StringMap` is gone, because its
+  `HashMap` now comes from the catalog. An extension that registers a
+  scalar catalog (`RegisterScalars`) sets these fields to choose each
+  language's type. Minor.
 
 ### Fixed
 

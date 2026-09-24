@@ -8,3 +8,5 @@ export type {
   IdentityUUID,
   TemporalDateTime,
 } from 'superscalar/scalars';
+
+export type { JSONValue } from 'superscalar/scalars';

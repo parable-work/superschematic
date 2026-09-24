@@ -134,45 +134,53 @@ func TestHydrateScalarsFromRegistryPopulatesScalarLibMetadata(t *testing.T) {
 	}
 }
 
-// A custom-parse scalar with an object JSON shape takes its TypeScript and
-// Python types from the catalog, over whatever the schema file declared,
-// because its parser returns a native map in both languages.
-func TestHydrateObjectParserUsesCatalogLanguageTypes(t *testing.T) {
-	stringMap := scalars.ScalarMetadataByCanonical["Generic.StringMap"]
-	if stringMap == nil || !stringMap.HasCustomParse || stringMap.TypeScriptType == "" || stringMap.PythonType == "" {
-		t.Fatal("the linked catalog must mark Generic.StringMap custom-parse and declare its TypeScript and Python types")
-	}
+// The TypeScript, Python and Rust types of a catalog scalar become its
+// typescript, python and rust mappings, over whatever the schema file
+// declared. A Rust type that is a declaration (Geo.Location's
+// `struct Location { ... }`) is not a type expression and is skipped.
+func TestHydrateTakesLanguageTypesFromCatalog(t *testing.T) {
 	headers := &scalars.ScalarMetadata{
 		CanonicalName:  "Acme.Headers",
 		Primitive:      "String",
 		TypeScriptType: "Record<string, string>",
 		PythonType:     "Dict[str, str]",
+		RustType:       "std::collections::HashMap<String, String>",
 		JSONSchemaType: "object",
 		HasCustomParse: true,
 	}
-	catalog := registry.ScalarCatalogOf(map[string]*scalars.ScalarMetadata{
-		"Generic.StringMap": stringMap,
-		"Acme.Headers":      headers,
-	})
+	rows := map[string]*scalars.ScalarMetadata{"Acme.Headers": headers}
+	for _, name := range []string{"Generic.StringMap", "Generic.JSON", "Contact.Email", "Geo.Location"} {
+		row := scalars.ScalarMetadataByCanonical[name]
+		if row == nil || row.TypeScriptType == "" || row.PythonType == "" || row.RustType == "" {
+			t.Fatalf("the linked catalog must declare the TypeScript, Python and Rust types of %s", name)
+		}
+		rows[name] = row
+	}
 	schema := ir.NewSchema("temp-service", ir.SchemaKindGeneral)
-	for _, name := range []string{"Generic.StringMap", "Acme.Headers"} {
+	for name := range rows {
 		schema.Scalars[name] = &ir.ScalarDef{
 			Name:         name,
 			TypeMappings: map[string]string{"typescript": "string", "python": "str"},
 		}
 	}
-	if err := hydrateScalarsFromRegistry(schema, catalog); err != nil {
+	if err := hydrateScalarsFromRegistry(schema, registry.ScalarCatalogOf(rows)); err != nil {
 		t.Fatalf("hydrateScalarsFromRegistry: %v", err)
 	}
-	for name, want := range map[string]*scalars.ScalarMetadata{"Generic.StringMap": stringMap, "Acme.Headers": headers} {
-		got := schema.Scalars[name]
-		if !got.HasCustomParse {
-			t.Errorf("%s: HasCustomParse was not hydrated", name)
+	for name, want := range rows {
+		got := schema.Scalars[name].TypeMappings
+		if got["typescript"] != want.TypeScriptType || got["python"] != want.PythonType {
+			t.Errorf("%s: typescript = %q, python = %q; want %q, %q", name, got["typescript"], got["python"], want.TypeScriptType, want.PythonType)
 		}
-		if got.TypeMappings["typescript"] != want.TypeScriptType || got.TypeMappings["python"] != want.PythonType {
-			t.Errorf("%s: typescript = %q, python = %q; want %q, %q", name,
-				got.TypeMappings["typescript"], got.TypeMappings["python"], want.TypeScriptType, want.PythonType)
+		wantRust := want.RustType
+		if name == "Geo.Location" {
+			wantRust = ""
 		}
+		if got["rust"] != wantRust {
+			t.Errorf("%s: rust = %q, want %q", name, got["rust"], wantRust)
+		}
+	}
+	if got := schema.Scalars["Generic.JSON"].TypeMappings["typescript"]; got != "JSONValue" {
+		t.Errorf("Generic.JSON typescript = %q, want JSONValue", got)
 	}
 }
 

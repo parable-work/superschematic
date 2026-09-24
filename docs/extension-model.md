@@ -432,6 +432,11 @@ The loader hydrates every scalar a schema references from the registry's
 `ScalarCatalog`: one superscalar `ScalarMetadata` row per canonical name.
 With no registration, `Scalars()` returns `CoreScalars()`, the catalog of
 the superscalar Go package the core links (D3, D4).
+A row's `Symbol`, `TypeScriptType`, `PythonType`, `RustType`, `SQLType` and
+`JSONSchemaType` become the scalar's `go`, `typescript`, `python`, `rust`,
+`sql` and `json_schema` type mappings, which the generators read. A
+`RustType` that declares a type (`struct Location { ... }`) instead of
+naming one is skipped, and rustgen maps that scalar itself.
 
 `RegisterScalars(owner, catalog)` replaces that catalog. It exists for a
 distribution that assembles its own scalar package over the generic set and

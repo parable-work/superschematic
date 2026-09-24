@@ -627,16 +627,6 @@ func remapScalarLibType(targetType string, scalar codegen.ScalarInfo, scalarCrat
 	if scalar.Name == "Temporal.DateTime" {
 		return scalarCrate + "::DateTime"
 	}
-	// Generic.StringMap declares ("rust", "std::collections::HashMap<String, String>")
-	// in the superscalar catalog, but the loader only plumbs go/typescript/sql/
-	// json_schema TypeMappings through to codegen, so without this carve-out the
-	// alias degrades to the String primitive fallback and generated SDKs reject
-	// real map payloads (e.g. supportedAuthStrategies[].extraHeaders in the sync
-	// manifest) with "invalid type: map, expected a string". The durable fix is
-	// plumbing the catalog's rust type_mappings through ScalarMetadata + loader.
-	if scalar.Name == "Generic.StringMap" {
-		return "std::collections::HashMap<String, String>"
-	}
 	return targetType
 }
 

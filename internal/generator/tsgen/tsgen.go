@@ -491,6 +491,12 @@ func fieldValueTypeMapperTS(typeName string, isArray bool, inMap bool, isRequire
 	var resolvedType string
 	if scalar, ok := scalarMap[typeName]; ok {
 		resolvedType = scalar.TargetType
+		// A field names Generic.JSON by the scalar's own alias (GenericJSON),
+		// which types/scalars.ts re-exports, rather than superscalar's
+		// JSONValue, so the type modules need no second import.
+		if resolvedType == "JSONValue" {
+			resolvedType = scalar.Tokens.Symbol
+		}
 	} else {
 		switch typeName {
 		case codegen.PrimitiveString:
