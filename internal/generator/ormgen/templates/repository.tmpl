@@ -29,7 +29,7 @@ import (
 
 {{- range .Fields }}
 {{- if and .IsJSONField .IsUnion }}
-func {{ .JSONUnionDecoder }}(raw []byte) ({{ if .IsMap }}map[string]{{ if .IsArray }}[]{{ end }}types.{{ .IRType }}{{ else if .IsArray }}[]types.{{ .IRType }}{{ else }}types.{{ .IRType }}{{ end }}, error) {
+func {{ .JSONUnionDecoder }}(raw []byte) ({{ .ValueGoType }}, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
 	}
@@ -57,6 +57,24 @@ func {{ .JSONUnionDecoder }}(raw []byte) ({{ if .IsMap }}map[string]{{ if .IsArr
 		}
 		decoded[key] = wrapper.Value
 		{{- end }}
+	}
+	return decoded, nil
+	{{- else if .IsArrayOfArrays }}
+	var encoded [][]json.RawMessage
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		return nil, err
+	}
+	decoded := make([][]types.{{ .IRType }}, len(encoded))
+	for index, list := range encoded {
+		values := make([]types.{{ .IRType }}, len(list))
+		for inner, item := range list {
+			var wrapper types.{{ .IRType }}Wrapper
+			if err := wrapper.UnmarshalJSON(item); err != nil {
+				return nil, fmt.Errorf("decode item [%d][%d]: %w", index, inner, err)
+			}
+			values[inner] = wrapper.Value
+		}
+		decoded[index] = values
 	}
 	return decoded, nil
 	{{- else if .IsArray }}
@@ -1865,7 +1883,7 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 	{{- if .IsJSONField }}
-	jsonValue{{ toGoName .Name }}, err := marshalJSONFieldValue(input.{{ toGoName .Name }})
+	jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(input.{{ toGoName .Name }})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
 	}
@@ -1889,7 +1907,7 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			{{- if .IsJSONField }}
-			jsonValue{{ toGoName .Name }}, err := marshalJSONFieldValue(input.{{ toGoName .Name }})
+			jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(input.{{ toGoName .Name }})
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
 			}
@@ -2119,7 +2137,7 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 		paramNum++
 		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 		{{- if .IsJSONField }}
-		jsonValue{{ toGoName .Name }}, err := marshalJSONFieldValue(input.{{ toGoName .Name }})
+		jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(input.{{ toGoName .Name }})
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
 		}
@@ -2141,7 +2159,7 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 				paramNum++
 				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 				{{- if .IsJSONField }}
-				jsonValue{{ toGoName .Name }}, err := marshalJSONFieldValue(input.{{ toGoName .Name }})
+				jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(input.{{ toGoName .Name }})
 				if err != nil {
 					return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
 				}
@@ -2303,7 +2321,7 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`{{ .QuotedDBName }} = $%d`, paramNum))
 		{{- if .IsJSONField }}
-		jsonValue{{ toGoName .Name }}, err := marshalJSONFieldValue(*update.{{ toGoName .Name }})
+		jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(*update.{{ toGoName .Name }})
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
 		}
@@ -2469,7 +2487,7 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`{{ .QuotedDBName }} = $%d`, paramNum))
 		{{- if .IsJSONField }}
-		jsonValue{{ toGoName .Name }}, err := marshalJSONFieldValue(*update.{{ toGoName .Name }})
+		jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(*update.{{ toGoName .Name }})
 		if err != nil {
 			return 0, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
 		}

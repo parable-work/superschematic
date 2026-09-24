@@ -18,56 +18,61 @@ var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
 
-// TestWriteDDLGolden generates DDL for the fixture-db service and compares
-// create.sql / drop.sql against their golden copies. Regenerate with:
+// TestWriteDDLGolden generates DDL for the fixture-db and
+// fixture-nested-arrays-db services and compares create.sql / drop.sql
+// against their golden copies. Regenerate with:
 // go test ./internal/generator/sqlgen -run TestWriteDDLGolden -update
 func TestWriteDDLGolden(t *testing.T) {
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
-	if err != nil {
-		t.Fatalf("load fixture-db: %v", err)
-	}
-
-	output, err := Generate(schema, Options{
-		SchemaName: "fixture-db",
-		Clock:      codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
-	})
-	if err != nil {
-		t.Fatalf("generate: %v", err)
-	}
-	if output == nil {
-		t.Fatal("expected DDL output for fixture-db")
-	}
-
-	outDir := t.TempDir()
-	if err := WriteDDL(output, outDir); err != nil {
-		t.Fatalf("write ddl: %v", err)
-	}
-
-	goldenDir := filepath.Join("testdata", "golden", "fixture-db")
-	for _, name := range []string{"create.sql", "drop.sql"} {
-		got, err := os.ReadFile(filepath.Join(outDir, name))
-		if err != nil {
-			t.Fatalf("read generated %s: %v", name, err)
-		}
-
-		goldenPath := filepath.Join(goldenDir, name)
-		if *update {
-			if err := os.MkdirAll(goldenDir, 0o755); err != nil {
-				t.Fatalf("create golden dir: %v", err)
+	for _, svc := range []string{"fixture-db", "fixture-nested-arrays-db"} {
+		t.Run(svc, func(t *testing.T) {
+			schema, err := loader.LoadService(filepath.Join(fixturesDir, svc))
+			if err != nil {
+				t.Fatalf("load %s: %v", svc, err)
 			}
-			if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
-				t.Fatalf("write golden %s: %v", name, err)
-			}
-			continue
-		}
 
-		want, err := os.ReadFile(goldenPath)
-		if err != nil {
-			t.Fatalf("read golden %s: %v", name, err)
-		}
-		if string(got) != string(want) {
-			t.Errorf("%s differs from golden (run with -update to accept):\n--- got ---\n%s", name, got)
-		}
+			output, err := Generate(schema, Options{
+				SchemaName: svc,
+				Clock:      codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+			})
+			if err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			if output == nil {
+				t.Fatalf("expected DDL output for %s", svc)
+			}
+
+			outDir := t.TempDir()
+			if err := WriteDDL(output, outDir); err != nil {
+				t.Fatalf("write ddl: %v", err)
+			}
+
+			goldenDir := filepath.Join("testdata", "golden", svc)
+			for _, name := range []string{"create.sql", "drop.sql"} {
+				got, err := os.ReadFile(filepath.Join(outDir, name))
+				if err != nil {
+					t.Fatalf("read generated %s: %v", name, err)
+				}
+
+				goldenPath := filepath.Join(goldenDir, name)
+				if *update {
+					if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+						t.Fatalf("create golden dir: %v", err)
+					}
+					if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
+						t.Fatalf("write golden %s: %v", name, err)
+					}
+					continue
+				}
+
+				want, err := os.ReadFile(goldenPath)
+				if err != nil {
+					t.Fatalf("read golden %s: %v", name, err)
+				}
+				if string(got) != string(want) {
+					t.Errorf("%s differs from golden (run with -update to accept):\n--- got ---\n%s", name, got)
+				}
+			}
+		})
 	}
 }
 

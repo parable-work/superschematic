@@ -351,6 +351,9 @@ of a generated artifact is always listed here with the bump it requires.
   arrays of arrays yet", and `apigen.Param` and `apigen.EndpointInfo`
   carry `IsArrayOfArrays` / `OutputIsArrayOfArrays` for the SDK
   generators. Minor.
+- Arrays of arrays in SQL and the Go ORM: a `T[][]` column is `JSONB`,
+  never a native array, and the ORM writes it through its JSON codec with
+  nil inner lists stored as `[]`. Minor.
 - Arrays of arrays in Go types and the Go schema runtime: typegen renders
   `T[][]` as `[][]T` (`InputField[[][]T]` for an optional input field) and
   no longer refuses it; `Validate` reports a null inner list as required at
