@@ -1,0 +1,181 @@
+[
+  {
+    "name": "grid.saveGrid",
+    "inputSchemaDigest": "sha256:536566a8571936c08eb74193e3e997c187df26d137493d61e6f921f246e93329",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "labels": {
+          "type": "array",
+          "description": "Array of arrays of string values",
+          "items": {
+            "type": "array",
+            "description": "Array of string values",
+            "items": {
+              "type": "string",
+              "description": "A string value"
+            }
+          }
+        },
+        "polygons": {
+          "type": "array",
+          "description": "Array of arrays of Point values",
+          "items": {
+            "type": "array",
+            "description": "Array of Point values",
+            "items": {
+              "additionalProperties": false,
+              "type": "object",
+              "description": "Point object",
+              "properties": {
+                "x": {
+                  "type": "number",
+                  "description": "A numeric value"
+                },
+                "y": {
+                  "type": "number",
+                  "description": "A numeric value"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ]
+            }
+          }
+        },
+        "shades": {
+          "type": "array",
+          "description": "Array of arrays of Shade values",
+          "items": {
+            "type": "array",
+            "description": "Array of Shade values",
+            "items": {
+              "type": "string",
+              "description": "A Shade value"
+            }
+          }
+        },
+        "weights": {
+          "description": "Array of arrays of number values",
+          "items": {
+            "type": "array",
+            "description": "Array of number values",
+            "items": {
+              "type": "number",
+              "description": "A numeric value"
+            }
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "labels",
+        "polygons",
+        "shades"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "GridView object"
+    }
+  },
+  {
+    "name": "grid.getGrid",
+    "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "GridView object"
+    }
+  },
+  {
+    "name": "grid.gridLabels",
+    "inputSchemaDigest": "sha256:3ba9b52f7397ab93b89d2332971bbd13ab11b6f60027ff97b66ee6d122c96f79",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "limit": {
+          "type": "number",
+          "description": "A numeric value"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "array",
+      "description": "Array of arrays of string",
+      "items": {
+        "type": "array",
+        "description": "Array of string",
+        "items": {
+          "type": "string",
+          "description": "A string value"
+        }
+      }
+    }
+  },
+  {
+    "name": "grid.replaceLabels",
+    "inputSchemaDigest": "sha256:18ce302660b90047cdb226467010fad5df1989bc262a5512e82cfb8303a820e6",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "labels": {
+          "type": "array",
+          "description": "Array of arrays of string values",
+          "items": {
+            "type": "array",
+            "description": "Array of string values",
+            "items": {
+              "type": "string",
+              "description": "A string value"
+            }
+          }
+        }
+      },
+      "required": [
+        "id",
+        "labels"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "GridView object"
+    }
+  }
+]

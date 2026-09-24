@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 )
 
 // JSONSchemaObject is the JSON Schema of one tool's arguments. It encodes
@@ -184,12 +185,16 @@ type ToolPathParam struct {
 	Type   string
 }
 
-// ToolScalarArg represents a scalar argument for tool invocation helpers.
+// ToolScalarArg is one body argument of an operation without an input
+// type, for tool invocation helpers. IsArray and IsArrayOfArrays carry its
+// list shape (apigen.Param): the argument schema is T, T[] or T[][].
 type ToolScalarArg struct {
-	Name     string
-	TSName   string
-	Type     string
-	Required bool
+	Name            string
+	TSName          string
+	Type            string
+	Required        bool
+	IsArray         bool
+	IsArrayOfArrays bool
 }
 
 // ToolQueryArg is one query parameter as a tool argument: its type,
@@ -297,8 +302,10 @@ func BuildParametersSchema(
 	}
 
 	for _, arg := range scalarArgs {
-		prop := ScalarToJSONSchemaProperty(arg.Type, scalars)
-		prop.Nullable = !arg.Required
+		prop := FieldToJSONSchemaProperty(apigen.Param{
+			Name: arg.Name, Type: arg.Type, Required: arg.Required,
+			IsArray: arg.IsArray, IsArrayOfArrays: arg.IsArrayOfArrays,
+		}, scalars, inputTypeFields, inputTypeUnions, nil)
 		key := paramKeyFn(arg.Name, arg.TSName)
 		schema.Properties[key] = prop
 		if arg.Required {
@@ -365,9 +372,12 @@ func ScalarToJSONSchemaProperty(typeName string, scalars map[string]apigen.Scala
 // FieldToJSONSchemaProperty converts a field to a JSON Schema property. An
 // object type expands to its fields (closed with additionalProperties
 // false), a union to oneOf with each member's discriminator pinned, an
-// array to items, a map to typed additionalProperties. A type already on
-// the expansion stack stays a plain reference, so recursive types end. A
-// field that is not required is nullable.
+// array to items (an array of arrays to items of items), a map to typed
+// additionalProperties. The field's value constraints go on the innermost
+// items and its list bounds on the outer array. A type already on the
+// expansion stack stays a plain reference, so recursive types end. A field
+// that is not required is nullable; the inner lists of an array of arrays
+// never are.
 func FieldToJSONSchemaProperty(
 	field apigen.Param,
 	scalars map[string]apigen.ScalarJSONSchemaInfo,
@@ -422,20 +432,16 @@ func FieldToJSONSchemaProperty(
 			}
 		}
 	}
-	if field.IsArray {
+	if depth := field.ArrayDepth(); depth > 0 {
 		itemField := field
 		itemField.ValidateListMin = nil
 		itemField.ValidateListMax = nil
 		itemField.IsArray = false
+		itemField.IsArrayOfArrays = false
 		applyFieldValidation(&value, itemField)
-		itemValue := value
-		value = JSONSchemaProperty{
-			Type:        "array",
-			Description: fmt.Sprintf("Array of %s values", field.Type),
-			Items:       &itemValue,
-			MinItems:    field.ValidateListMin,
-			MaxItems:    field.ValidateListMax,
-		}
+		value = wrapArrayProperty(value, depth, field.Type)
+		value.MinItems = field.ValidateListMin
+		value.MaxItems = field.ValidateListMax
 	} else {
 		applyFieldValidation(&value, field)
 	}
@@ -448,6 +454,30 @@ func FieldToJSONSchemaProperty(
 	}
 	value.Nullable = !field.Required
 	return value
+}
+
+// wrapArrayProperty wraps an item property in depth array levels. The
+// level around the items is an "Array of <type> values" and the one around
+// that an "Array of arrays of <type> values".
+func wrapArrayProperty(item JSONSchemaProperty, depth int, typeName string) JSONSchemaProperty {
+	level := 0
+	return codegen.WrapArray(item, depth, func(items JSONSchemaProperty) JSONSchemaProperty {
+		level++
+		return JSONSchemaProperty{
+			Type:        "array",
+			Description: arrayDescription(level, typeName, " values"),
+			Items:       &items,
+		}
+	})
+}
+
+// arrayDescription names the list level of an array schema: "Array of T"
+// around the items, "Array of arrays of T" one level out.
+func arrayDescription(level int, typeName, suffix string) string {
+	if level > 1 {
+		return fmt.Sprintf("Array of arrays of %s%s", typeName, suffix)
+	}
+	return fmt.Sprintf("Array of %s%s", typeName, suffix)
 }
 
 func closedObject() *JSONSchemaAdditionalProperties {
@@ -485,22 +515,43 @@ func applyFieldValidation(property *JSONSchemaProperty, field apigen.Param) {
 	}
 }
 
-// BuildReturnSchema builds the JSON Schema for the return type.
+// BuildReturnSchema builds the JSON Schema for a T or T[] return type. An
+// endpoint's T[][] response needs BuildReturnSchemaAtDepth.
 func BuildReturnSchema(typeName string, isArray bool, scalars map[string]apigen.ScalarJSONSchemaInfo) JSONSchemaReturn {
-	baseType := GetReturnTypeSchema(typeName, scalars)
+	depth := 0
 	if isArray {
+		depth = 1
+	}
+	return BuildReturnSchemaAtDepth(typeName, depth, scalars)
+}
+
+// BuildReturnSchemaAtDepth builds the JSON Schema for a return type wrapped
+// in arrayDepth list levels: 0 for T, 1 for T[], 2 for T[][]
+// (apigen.EndpointInfo.OutputArrayDepth).
+func BuildReturnSchemaAtDepth(typeName string, arrayDepth int, scalars map[string]apigen.ScalarJSONSchemaInfo) JSONSchemaReturn {
+	baseType := GetReturnTypeSchema(typeName, scalars)
+	if arrayDepth < 1 {
 		return JSONSchemaReturn{
-			Type:        "array",
-			Description: fmt.Sprintf("Array of %s", typeName),
-			Items: &JSONSchemaProperty{
-				Type:        baseType.Type,
-				Description: baseType.Description,
-			},
+			Type:        baseType.Type,
+			Description: baseType.Description,
 		}
 	}
-	return JSONSchemaReturn{
+	level := 0
+	items := codegen.WrapArray(JSONSchemaProperty{
 		Type:        baseType.Type,
 		Description: baseType.Description,
+	}, arrayDepth-1, func(inner JSONSchemaProperty) JSONSchemaProperty {
+		level++
+		return JSONSchemaProperty{
+			Type:        "array",
+			Description: arrayDescription(level, typeName, ""),
+			Items:       &inner,
+		}
+	})
+	return JSONSchemaReturn{
+		Type:        "array",
+		Description: arrayDescription(arrayDepth, typeName, ""),
+		Items:       &items,
 	}
 }
 
