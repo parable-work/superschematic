@@ -504,5 +504,11 @@ of a generated artifact is always listed here with the bump it requires.
   body of every method with an input, answered "Invalid request body"; the
   SDK now sends the input as the DELETE body. The Go, Python and Rust SDKs
   already did both. Patch.
+- `superschematic format --to=ts` (the TypeScript writer): a schema that
+  referenced a catalog scalar with bounds (`Generic.Int64`,
+  `Temporal.Seconds`, `Ordering.Rank`) or with a hydrated TypeScript,
+  Python or Rust type failed with "declares metadata beyond its language
+  primitive". The writer now strips every bound and type mapping that
+  equals the catalog's before it checks a scalar reference. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main
