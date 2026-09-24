@@ -35,6 +35,8 @@ export interface OperationSpec {
   /** Undecorated scalar arguments of a non-GET operation, read from the JSON body object. */
   readonly bodyParams: readonly ParamSpec[];
   readonly input?: OperationInput;
+  /** The result is a list of lists (T[][]): the adapter sends a nullish outer or inner list as []. */
+  readonly outputIsArrayOfArrays?: boolean;
   readonly auth: OperationAuth;
   /** @bodyLimit in bytes; the adapter's default applies when absent. */
   readonly bodyLimitBytes?: number;

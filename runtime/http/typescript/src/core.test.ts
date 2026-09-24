@@ -4,6 +4,7 @@ import {
   HttpProblem,
   authorize,
   covers,
+  decodeListOfLists,
   decodeParam,
   decodeParams,
   envelopeResponse,
@@ -120,6 +121,86 @@ describe('parameter decoding', () => {
       name === 'a' ? ['1'] : undefined
     );
     expect(decoded).toEqual({ a: 1 });
+  });
+});
+
+describe('list of lists decoding', () => {
+  const grid = (over: Partial<ParamSpec> = {}): ParamSpec => ({ name: 'rows', kind: 'string', required: true, isArray: true, isArrayOfArrays: true, ...over });
+  const refusedAt = (spec: ParamSpec, value: unknown, path: string, validator: string, message: string) => {
+    expect(() => decodeListOfLists('body', spec, value)).toThrow(
+      expect.objectContaining({
+        status: 400,
+        code: 'bad_request',
+        message: `Invalid body parameter ${path}: ${message}`,
+        details: { location: 'body', parameter: spec.name, path, reason: message, errors: [{ validator, message }] },
+      })
+    );
+  };
+
+  test('keeps ragged and empty inner lists, and an empty outer list', () => {
+    expect(decodeListOfLists('body', grid(), [['a', 'b'], [], ['c']])).toEqual([['a', 'b'], [], ['c']]);
+    expect(decodeListOfLists('body', grid(), [])).toEqual([]);
+  });
+
+  test('the outer list is the parameter: required, an array, within listMin and listMax', () => {
+    expect(() => decodeListOfLists('body', grid(), undefined)).toThrow(expect.objectContaining({ status: 400, details: expect.objectContaining({ parameter: 'rows', reason: 'required' }) }));
+    expect(() => decodeListOfLists('body', grid(), null)).toThrow(expect.objectContaining({ status: 400 }));
+    expect(decodeListOfLists('body', grid({ required: false }), undefined)).toBeUndefined();
+    expect(() => decodeListOfLists('body', grid(), 'a,b')).toThrow(
+      expect.objectContaining({ details: { location: 'body', parameter: 'rows', reason: 'expected an array', errors: [{ validator: 'type', message: 'expected an array' }] } })
+    );
+    const bounded = grid({ listMin: 1, listMax: 2 });
+    expect(() => decodeListOfLists('body', bounded, [])).toThrow(expect.objectContaining({ details: expect.objectContaining({ reason: 'expected at least 1 values' }) }));
+    expect(() => decodeListOfLists('body', bounded, [[], [], []])).toThrow(expect.objectContaining({ details: expect.objectContaining({ reason: 'expected at most 2 values' }) }));
+    // Bounds apply to the outer list only.
+    expect(decodeListOfLists('body', bounded, [['a', 'b', 'c', 'd']])).toEqual([['a', 'b', 'c', 'd']]);
+  });
+
+  test('an inner list is never null and must be an array, reported at name[i]', () => {
+    refusedAt(grid(), [['a'], null], 'rows[1]', 'required', 'required field');
+    refusedAt(grid(), [['a'], 'b'], 'rows[1]', 'type', 'expected an array');
+    refusedAt(grid(), [{ 0: 'a' }], 'rows[0]', 'type', 'expected an array');
+  });
+
+  test('elements are never null and arrive as their JSON type, reported at name[i][j]', () => {
+    refusedAt(grid(), [['a'], ['b', null]], 'rows[1][1]', 'required', 'required field');
+    refusedAt(grid(), [['a', 1]], 'rows[0][1]', 'type', 'expected a string');
+    refusedAt(grid({ kind: 'integer' }), [[1, '2']], 'rows[0][1]', 'type', 'expected an integer');
+    refusedAt(grid({ kind: 'number' }), [[true]], 'rows[0][0]', 'type', 'expected a number');
+    refusedAt(grid({ kind: 'boolean' }), [['true']], 'rows[0][0]', 'type', 'expected a boolean');
+  });
+
+  test('elements pass the checks of a T[] element, reported at name[i][j]', () => {
+    const shade = grid({ kind: 'enum', enumValues: ['light', 'dark'] });
+    expect(decodeListOfLists('body', shade, [['light'], ['dark', 'light']])).toEqual([['light'], ['dark', 'light']]);
+    expect(() => decodeListOfLists('body', shade, [['light'], ['dark', 'dim']])).toThrow(
+      expect.objectContaining({ message: 'Invalid body parameter rows[1][1]: expected one of light, dark', details: expect.objectContaining({ parameter: 'rows', path: 'rows[1][1]' }) })
+    );
+    expect(() => decodeListOfLists('body', grid({ kind: 'integer', max: 9 }), [[1], [2, 10]])).toThrow(
+      expect.objectContaining({ details: expect.objectContaining({ path: 'rows[1][1]', reason: 'must be at most 9' }) })
+    );
+    expect(() => decodeListOfLists('body', grid({ kind: 'integer' }), [[1.5]])).toThrow(expect.objectContaining({ details: expect.objectContaining({ path: 'rows[0][0]' }) }));
+    expect(() => decodeListOfLists('body', grid({ pattern: '^[a-z]+$' }), [['ok', 'A1']])).toThrow(expect.objectContaining({ details: expect.objectContaining({ path: 'rows[0][1]' }) }));
+    const id = '00000000-0000-4000-8000-0000000000AB';
+    expect(decodeListOfLists('body', grid({ kind: 'uuid' }), [[id]])).toEqual([[parseIdentityUUID(id)]]);
+    expect(decodeListOfLists('body', grid({ kind: 'datetime' }), [['2026-01-02T03:04:05Z']])).toEqual([[new Date('2026-01-02T03:04:05Z')]]);
+    expect(decodeListOfLists('body', grid({ kind: 'number' }), [[1.5, -2]])).toEqual([[1.5, -2]]);
+    expect(decodeListOfLists('body', grid({ kind: 'boolean' }), [[true, false]])).toEqual([[true, false]]);
+  });
+
+  test('object elements go through the generated parser the spec carries', () => {
+    const parse = (value: unknown) => {
+      const point = value as { x?: unknown };
+      if (typeof point.x !== 'number') throw new Error('parsePoint json validation failed');
+      return { ...point, parsed: true };
+    };
+    const points = grid({ kind: 'object', parse });
+    expect(decodeListOfLists('body', points, [[{ x: 1 }], []])).toEqual([[{ x: 1, parsed: true }], []]);
+    expect(() => decodeListOfLists('body', points, [[{ x: 1 }, { x: 'far' }]])).toThrow(
+      expect.objectContaining({ details: { location: 'body', parameter: 'rows', path: 'rows[0][1]', reason: 'does not match the declared type' } })
+    );
+    refusedAt(points, [[{ x: 1 }], [null]], 'rows[1][0]', 'required', 'required field');
+    refusedAt(points, [[[1]]], 'rows[0][0]', 'type', 'expected an object');
   });
 });
 
