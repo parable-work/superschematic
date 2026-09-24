@@ -17,6 +17,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	"github.com/parable-work/superschematic/internal/profile"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 //go:embed templates/*.tmpl
@@ -38,6 +39,11 @@ type NamespaceInfo struct {
 // EndpointInfo represents a single API endpoint for the SDK
 type EndpointInfo struct {
 	Name           string             // Method name (e.g., "sendMagicLink")
+	OperationID    string             // OpenAPI operation id (the handler name)
+	Title          string             // @docs title; "" without it
+	Docs           *ir.OperationDocs  // @docs record; nil without it
+	MCP            *ir.OperationMCP   // resolved @mcp record; nil without it
+	RequiredPerms  []string           // permissions the route requires
 	Path           string             // API path (e.g., "/api/auth/send-magic-link")
 	Method         string             // HTTP method (GET, POST, etc.)
 	InputType      string             // TypeScript input type (if any)
@@ -49,7 +55,7 @@ type EndpointInfo struct {
 	PathParams     []PathParam        // Path parameters
 	QueryParams    []QueryParam       // Query string parameters (from @query directive)
 	ScalarArgs     []apigen.ScalarArg // Scalar arguments (not input types)
-	Description    string             // Endpoint description
+	Description    string             // @docs description, else the operation's comment
 	TSPath         string             // TypeScript template literal path
 	ResourceTSPath string             // resource route path as TypeScript template literal
 	Encrypted      bool               // Whether endpoint payload must be encrypted
@@ -86,6 +92,8 @@ type QueryParam struct {
 	TSType   string // TypeScript type (e.g., "number")
 	IRType   string // Original IR type name (e.g., "number")
 	Required bool   // Whether parameter is required
+	IsArray  bool   // Whether the value is an array, sent as one comma-separated value
+	IsMap    bool   // Whether the value is a string-keyed object
 
 	ValidateMin       *float64 // Minimum numeric value allowed
 	ValidateMax       *float64 // Maximum numeric value allowed
@@ -294,12 +302,18 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 
 	tsQueryParams := make([]QueryParam, len(ep.QueryParams))
 	for i, param := range ep.QueryParams {
+		tsType := IRTypeToTSType(param.Type)
+		if param.IsArray {
+			tsType += "[]"
+		}
 		tsQueryParams[i] = QueryParam{
 			Name:     param.Name,
 			TSName:   tsutil.ToCamelCase(param.Name),
-			TSType:   IRTypeToTSType(param.Type),
+			TSType:   tsType,
 			IRType:   param.Type,
 			Required: param.Required,
+			IsArray:  param.IsArray,
+			IsMap:    param.IsMap,
 
 			ValidateMin:       param.ValidateMin,
 			ValidateMax:       param.ValidateMax,
@@ -317,8 +331,18 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 		!codegen.IsLanguagePrimitive(ep.OutputType) &&
 		parseableTypes[ep.OutputType]
 
+	description := ep.Description
+	if ep.Docs != nil {
+		description = ep.Docs.Description
+	}
+
 	return EndpointInfo{
 		Name:             tsutil.ToCamelCase(ep.Name),
+		OperationID:      ep.HandlerName,
+		Title:            ep.Title,
+		Docs:             ep.Docs,
+		MCP:              ep.MCP,
+		RequiredPerms:    append([]string(nil), ep.RequiredPerms...),
 		Path:             ep.Path,
 		Method:           strings.ToUpper(httpMethod),
 		InputType:        ep.InputType,
@@ -330,7 +354,7 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 		PathParams:       tsPathParams,
 		QueryParams:      tsQueryParams,
 		ScalarArgs:       ep.ScalarArgs,
-		Description:      ep.Description,
+		Description:      description,
 		TSPath:           tsPath,
 		Encrypted:        ep.Encrypted,
 		Filterable:       ep.Filterable,
@@ -479,6 +503,9 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 			// Generate generic JSON Schema format
 			if err := generateFile(toolsRenderer, "tools-schema.tmpl", filepath.Join(outputDir, "tools", "schema.json"), toolsOutput, toolsFuncs); err != nil {
 				return fmt.Errorf("failed to generate tools/schema.json: %w", err)
+			}
+			if err := generateFile(toolsRenderer, "tools-mcp-audit.tmpl", filepath.Join(outputDir, "tools", "mcp-audit.json"), toolsOutput, toolsFuncs); err != nil {
+				return fmt.Errorf("failed to generate tools/mcp-audit.json: %w", err)
 			}
 			if err := generateFile(toolsRenderer, "tools-mcp-binding.tmpl", filepath.Join(outputDir, "tools", "mcp-binding.json"), toolsOutput, toolsFuncs); err != nil {
 				return fmt.Errorf("failed to generate tools/mcp-binding.json: %w", err)
@@ -657,6 +684,8 @@ func isSDKValueImport(name string) bool {
 func toolsTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"escapeJSON": toolsutil.EscapeJSON,
+		"schemaJSON": toolsutil.JSONSchemaPropertyLiteral,
+		"jsonValue":  toolsutil.JSONLiteral,
 		"sortedKeys": func(m map[string]JSONSchemaProperty) []string {
 			keys := make([]string, 0, len(m))
 			for k := range m {
@@ -710,6 +739,9 @@ func toolsTemplateFuncs() template.FuncMap {
 				}
 				return "unknown[]"
 			case "object":
+				if prop.AdditionalProperties != nil && prop.AdditionalProperties.Schema != nil {
+					return "Record<string, " + mapValueTSType(*prop.AdditionalProperties.Schema) + ">"
+				}
 				if len(prop.Properties) > 0 {
 					fields := make([]string, 0, len(prop.Properties))
 					for name, nested := range prop.Properties {
@@ -759,6 +791,16 @@ func toolsTemplateFuncs() template.FuncMap {
 				// Build object with scalar args
 				args = append(args, fmt.Sprintf("params as %sParams", toPascalCaseToolName(tool.Name)))
 			}
+			if len(tool.QueryArgs) > 0 {
+				fields := make([]string, 0, len(tool.QueryArgs))
+				for _, query := range tool.QueryArgs {
+					fields = append(fields, fmt.Sprintf(
+						"%s: (params as %sParams).%s",
+						query.TSName, toPascalCaseToolName(tool.Name), query.TSName,
+					))
+				}
+				args = append(args, "{ "+strings.Join(fields, ", ")+" }")
+			}
 			if tool.Encrypted {
 				args = append(
 					args,
@@ -773,6 +815,22 @@ func toolsTemplateFuncs() template.FuncMap {
 			return strings.Join(args, ", ")
 		},
 	}
+}
+
+// mapValueTSType is the TypeScript type of a typed map's values: an enum
+// union, an array of a primitive, or the primitive.
+func mapValueTSType(value JSONSchemaProperty) string {
+	if len(value.Enum) > 0 {
+		members := make([]string, len(value.Enum))
+		for i, member := range value.Enum {
+			members[i] = fmt.Sprintf("'%s'", member)
+		}
+		return strings.Join(members, " | ")
+	}
+	if value.Type == "array" && value.Items != nil {
+		return jsonSchemaTypeToTS(value.Items.Type) + "[]"
+	}
+	return jsonSchemaTypeToTS(value.Type)
 }
 
 // jsonSchemaTypeToTS converts JSON Schema type to TypeScript type

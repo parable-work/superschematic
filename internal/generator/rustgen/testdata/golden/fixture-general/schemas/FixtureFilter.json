@@ -1,0 +1,34 @@
+{
+  "name": "fixture-general",
+  "kind": "General",
+  "rootType": "FixtureFilter",
+  "types": {
+    "FixtureFilter": {
+      "name": "FixtureFilter",
+      "owner": "src/config.schema.ts",
+      "comment": "JSON-persisted filter: exercises optional-list constraint gating.\nAbsent/null must skip listMin; an explicit [] must fail it (decode must\nnot normalize an absent optional list into an empty non-nil slice).",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "kind",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMaxLength": 32
+        },
+        {
+          "name": "values",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "validateMaxLength": 64,
+          "validateListMin": 1,
+          "validateListMax": 10
+        }
+      ],
+      "jsonField": true
+    }
+  }
+}

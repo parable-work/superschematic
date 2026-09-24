@@ -64,6 +64,69 @@ func typeFileName(name string) string {
 	return strings.ToLower(name)
 }
 
+// WorkspaceRootManifest returns the package.json written at the directory
+// that holds every generated TypeScript types package (the parent of each
+// WriteTypes output directory). Generated packages depend on each other with
+// sibling file:../<schema> specs and on the scalar library with a file: spec
+// that can point outside the output tree. Bun refuses a transitive file:
+// dependency whose path escapes the install root unless the declaring package
+// is the root or one of its workspaces, so an install inside one generated
+// package can fail once it depends on a sibling. Declaring the siblings as
+// workspaces of this root keeps the per-package manifests unchanged and lets
+// `bun install` in the root, or in any generated package, resolve the whole
+// tree.
+//
+// The root is named <npm_scope>/types-workspace. Every types package name
+// ends in -types (Naming.NpmTypesPackage), so the root cannot collide with
+// one of its workspaces.
+func WorkspaceRootManifest(n naming.Naming) string {
+	return fmt.Sprintf(`{
+  "name": %q,
+  "private": true,
+  "workspaces": [
+    "*"
+  ]
+}
+`, n.OrDefault().NpmScope+"/types-workspace")
+}
+
+// WriteWorkspaceRoot writes WorkspaceRootManifest into typesRoot. The write
+// is atomic and skipped when the file already has the same content, so
+// schema builds that run in parallel can each call it for their own package.
+func WriteWorkspaceRoot(typesRoot string, n naming.Naming) error {
+	manifest := WorkspaceRootManifest(n)
+	if err := os.MkdirAll(typesRoot, 0o755); err != nil {
+		return fmt.Errorf("failed to create types root %s: %w", typesRoot, err)
+	}
+	target := filepath.Join(typesRoot, "package.json")
+	if existing, err := os.ReadFile(target); err == nil && string(existing) == manifest {
+		return nil
+	}
+	tmp, err := os.CreateTemp(typesRoot, ".package.json-*")
+	if err != nil {
+		return fmt.Errorf("failed to stage workspace manifest: %w", err)
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.WriteString(manifest); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("failed to write workspace manifest: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("failed to close workspace manifest: %w", err)
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("failed to set workspace manifest mode: %w", err)
+	}
+	if err := os.Rename(tmpName, target); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("failed to publish workspace manifest: %w", err)
+	}
+	return nil
+}
+
 // WriteTypes writes the generated TypeScript package into outputDir using the
 // split structure: types/ (pure types), validators/ (per-scalar and
 // per-type), and mask/ (secret-masking helpers).

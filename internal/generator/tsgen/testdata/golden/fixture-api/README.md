@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericJSON, IdentityName, IdentitySlug, IdentityUUID, TemporalDateTime, TenantView, CreateTenantInput,  } from '@schemas/fixture-api-types/types';
+import type { GenericJSON, IdentityName, IdentitySlug, IdentityUUID, TemporalDateTime, TenantListStatus, TenantView, CreateTenantInput,  } from '@schemas/fixture-api-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-api-types';
@@ -107,6 +107,13 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
+
+
+### Enums (1)
+
+
+- **TenantListStatus** - Status filter for listTenants: an enum array query parameter.
+  - Values: `Active`, `Suspended`
 
 
 

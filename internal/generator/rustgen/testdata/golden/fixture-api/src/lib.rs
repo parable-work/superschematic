@@ -5,7 +5,9 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod scalars;
+pub mod enums;
 pub mod types;
 
 pub use scalars::*;
+pub use enums::*;
 pub use types::*;

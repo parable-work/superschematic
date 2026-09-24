@@ -278,6 +278,9 @@ func validateConfigExpr(fd *ir.FieldDef) string {
 	if fd.ValidateMax != nil {
 		add("max", formatFloat(*fd.ValidateMax))
 	}
+	if fd.ValidateUploadMaxBytes != nil {
+		add("uploadMaxBytes", strconv.FormatInt(*fd.ValidateUploadMaxBytes, 10))
+	}
 	if fd.ValidateMinLength != nil {
 		add("minLength", strconv.Itoa(*fd.ValidateMinLength))
 	}

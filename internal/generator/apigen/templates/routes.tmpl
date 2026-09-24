@@ -9,7 +9,7 @@ package {{ toPackageName .SchemaName }}
 {{- $hasPatternValidation := false }}
 {{- range .Endpoints }}
 {{- range .QueryParams }}
-{{- if and .ValidatePattern .IsString }}
+{{- if and .ValidatePattern (or .IsArray .IsString) }}
 {{- $hasPatternValidation = true }}
 {{- end }}
 {{- end }}
@@ -30,7 +30,7 @@ import (
 	"regexp"
 {{- end }}
 	"strconv"
-{{- if or .HasFileUpload .HasArrayScalarArgsOnGET }}
+{{- if or .HasFileUpload .HasArrayQueryParams .HasArrayScalarArgsOnGET }}
 	"strings"
 {{- end }}
 {{- if .HasMiddlewareDirectives }}
@@ -322,7 +322,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) gohttp.HandlerFunc {
 	{{- /* The predicates below mirror the MatchString call sites further down so we never emit an orphan regex declaration (Go error: "declared and not used"). */ -}}
 	{{- range .QueryParams }}
-	{{- if and .ValidatePattern .IsString }}
+	{{- if and .ValidatePattern (or .IsArray .IsString) }}
 	query{{ .GoName }}PatternRegex := regexp.MustCompile({{ printf "%q" .ValidatePattern }})
 	{{- end }}
 	{{- end }}
@@ -417,6 +417,155 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- if .QueryParams }}
 		// Extract query parameters
 		{{- range .QueryParams }}
+		{{- if .IsArray }}
+		// An array uses the form/explode=false wire format: ?{{ .Name }}=a,b.
+		// A nil slice means the optional parameter was absent; a present empty value is invalid.
+		var {{ .GoName }} []{{ .GoType }}
+		{{ .GoName }}Values, {{ .GoName }}Present, err := parseArrayQueryParam(r, "{{ .Name }}")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, err.Error())
+			return
+		}
+		{{- if .Required }}
+		if !{{ .GoName }}Present {
+			RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} is required")
+			return
+		}
+		{{- end }}
+		if {{ .GoName }}Present {
+			{{ .GoName }} = make([]{{ .GoType }}, 0, len({{ .GoName }}Values))
+			for _, rawValue := range {{ .GoName }}Values {
+				{{- if .IsInt }}
+				parsed, err := strconv.ParseInt(rawValue, 10, 64)
+				if err != nil {
+					RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} must contain valid integers")
+					return
+				}
+				elem := parsed
+				{{- else if .IsFloat }}
+				parsed, err := strconv.ParseFloat(rawValue, 64)
+				if err != nil {
+					RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} must contain valid numbers")
+					return
+				}
+				elem := parsed
+				{{- else if .IsBool }}
+				parsed, err := strconv.ParseBool(rawValue)
+				if err != nil {
+					RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} must contain valid booleans")
+					return
+				}
+				elem := parsed
+				{{- else if or .IsDateTime (eq .GoType "types.TemporalDateTime") }}
+				parsed, err := types.ParseTemporalDateTime(rawValue)
+				if err != nil {
+					RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} must contain valid datetimes")
+					return
+				}
+				elem := parsed
+				{{- else if .IsUUID }}
+				parsed, err := {{ .ParseFunc }}(rawValue)
+				if err != nil {
+					RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} must contain valid UUIDs")
+					return
+				}
+				elem := parsed
+				{{- else if .IsString }}
+				elem := rawValue
+				{{- else }}
+				elem := {{ .GoType }}(rawValue)
+				{{- end }}
+				{{- if and .ValidateMin .IsInt }}
+				if elem < int64({{ .ValidateMin }}) {
+					validationErrors := types.NewValidationErrors()
+					validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "min", Message: "each item must be at least {{ .ValidateMin }}"}})
+					RespondValidationErrors(w, r, validationErrors)
+					return
+				}
+				{{- end }}
+				{{- if and .ValidateMax .IsInt }}
+				if elem > int64({{ .ValidateMax }}) {
+					validationErrors := types.NewValidationErrors()
+					validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "max", Message: "each item must be at most {{ .ValidateMax }}"}})
+					RespondValidationErrors(w, r, validationErrors)
+					return
+				}
+				{{- end }}
+				{{- if and .ValidateMin .IsFloat }}
+				if elem < float64({{ .ValidateMin }}) {
+					validationErrors := types.NewValidationErrors()
+					validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "min", Message: "each item must be at least {{ .ValidateMin }}"}})
+					RespondValidationErrors(w, r, validationErrors)
+					return
+				}
+				{{- end }}
+				{{- if and .ValidateMax .IsFloat }}
+				if elem > float64({{ .ValidateMax }}) {
+					validationErrors := types.NewValidationErrors()
+					validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "max", Message: "each item must be at most {{ .ValidateMax }}"}})
+					RespondValidationErrors(w, r, validationErrors)
+					return
+				}
+				{{- end }}
+				{{- if .ValidateMinLength }}
+				if len(rawValue) < {{ .ValidateMinLength }} {
+					validationErrors := types.NewValidationErrors()
+					validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "min_length", Message: "each item must be at least {{ .ValidateMinLength }} characters"}})
+					RespondValidationErrors(w, r, validationErrors)
+					return
+				}
+				{{- end }}
+				{{- if .ValidateMaxLength }}
+				if len(rawValue) > {{ .ValidateMaxLength }} {
+					validationErrors := types.NewValidationErrors()
+					validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "max_length", Message: "each item must be at most {{ .ValidateMaxLength }} characters"}})
+					RespondValidationErrors(w, r, validationErrors)
+					return
+				}
+				{{- end }}
+				{{- if .ValidatePattern }}
+				if !query{{ .GoName }}PatternRegex.MatchString(rawValue) {
+					validationErrors := types.NewValidationErrors()
+					validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "pattern", Message: "invalid item format"}})
+					RespondValidationErrors(w, r, validationErrors)
+					return
+				}
+				{{- end }}
+				if validator, ok := interface{}(elem).(interface{ ValidateRequired() (bool, []types.ValidationError) }); ok {
+					if valid, fieldErrs := validator.ValidateRequired(); !valid {
+						validationErrors := types.NewValidationErrors()
+						validationErrors.SetFieldErrors("{{ .Name }}", fieldErrs)
+						RespondValidationErrors(w, r, validationErrors)
+						return
+					}
+				} else if validator, ok := interface{}(elem).(interface{ Validate() (bool, []types.ValidationError) }); ok {
+					if valid, fieldErrs := validator.Validate(); !valid {
+						validationErrors := types.NewValidationErrors()
+						validationErrors.SetFieldErrors("{{ .Name }}", fieldErrs)
+						RespondValidationErrors(w, r, validationErrors)
+						return
+					}
+				}
+				{{ .GoName }} = append({{ .GoName }}, elem)
+			}
+		}
+		{{- if .ValidateListMin }}
+		if {{ .GoName }}Present && len({{ .GoName }}) < {{ .ValidateListMin }} {
+			validationErrors := types.NewValidationErrors()
+			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "list_min", Message: "must contain at least {{ .ValidateListMin }} items"}})
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+		{{- end }}
+		{{- if .ValidateListMax }}
+		if {{ .GoName }}Present && len({{ .GoName }}) > {{ .ValidateListMax }} {
+			validationErrors := types.NewValidationErrors()
+			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "list_max", Message: "must contain at most {{ .ValidateListMax }} items"}})
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+		{{- end }}
+		{{- else }}
 		{{- if .Required }}
 		{{- if .IsInt }}
 		{{ .GoName }} := parseIntQueryParam(r, "{{ .Name }}", {{ if .DefaultValue }}{{ .DefaultValue }}{{ else }}0{{ end }})
@@ -605,6 +754,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}
+		{{- end }}
 		{{- end }}
 		{{- end }}
 		{{- end }}
@@ -1172,6 +1322,34 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 // =============================================================================
 // These functions parse query parameters from the URL and convert them to Go types.
 // They handle missing values gracefully by returning defaults or nil for pointer types.
+{{- if .HasArrayQueryParams }}
+
+// parseArrayQueryParam parses an array query parameter in the OpenAPI
+// form/explode=false representation (?name=a,b). It also accepts repeated
+// keys (?name=a&name=b); each value is still split on commas. present
+// distinguishes an omitted optional parameter (nil slice) from input.
+func parseArrayQueryParam(r *gohttp.Request, name string) (values []string, present bool, err error) {
+	rawValues, present := r.URL.Query()[name]
+	if !present {
+		return nil, false, nil
+	}
+
+	values = make([]string, 0)
+	for _, rawValue := range rawValues {
+		for _, candidate := range strings.Split(rawValue, ",") {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				return nil, true, fmt.Errorf("%s cannot contain empty values", name)
+			}
+			values = append(values, candidate)
+		}
+	}
+	if len(values) == 0 {
+		return nil, true, fmt.Errorf("%s cannot be empty", name)
+	}
+	return values, true, nil
+}
+{{- end }}
 
 // parseIntQueryParam parses an integer query parameter with a default value.
 // Returns the default if the parameter is missing or cannot be parsed.

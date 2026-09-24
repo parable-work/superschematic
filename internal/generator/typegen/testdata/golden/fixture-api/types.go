@@ -41,12 +41,12 @@ func normalizeNilSlices(v any) {
 	normalizeNilSlicesRec(rv.Elem())
 }
 
-func jsonTagHasOmitempty(sf reflect.StructField) bool {
+func jsonTagHasOption(sf reflect.StructField, name string) bool {
 	_, opts, _ := strings.Cut(sf.Tag.Get("json"), ",")
 	for opts != "" {
 		var opt string
 		opt, opts, _ = strings.Cut(opts, ",")
-		if opt == "omitempty" {
+		if opt == name {
 			return true
 		}
 	}
@@ -66,7 +66,11 @@ func normalizeNilSlicesRec(rv reflect.Value) {
 	case reflect.Struct:
 		for i := 0; i < rv.NumField(); i++ {
 			field := rv.Field(i)
-			if field.Kind() == reflect.Slice && field.IsNil() && jsonTagHasOmitempty(rv.Type().Field(i)) {
+			// An unset optional input field (omitzero InputField) stays absent.
+			if jsonTagHasOption(rv.Type().Field(i), "omitzero") && field.IsZero() {
+				continue
+			}
+			if field.Kind() == reflect.Slice && field.IsNil() && jsonTagHasOption(rv.Type().Field(i), "omitempty") {
 				continue
 			}
 			normalizeNilSlicesRec(field)

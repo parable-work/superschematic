@@ -75,7 +75,8 @@ func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 	owner := "type " + def.Name
 	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil ||
-		len(def.Indexes) > 0 || def.JsonField || def.EnvVars {
+		len(def.Indexes) > 0 || def.JsonField || def.EnvVars ||
+		def.DenyUnknownFields || def.StrictJSON {
 		e.failf("%s: embedded structs in a DB schema render as type aliases and cannot carry heritage or decorators", owner)
 		return
 	}
@@ -150,6 +151,12 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	}
 	if def.JsonField {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("jsonField"))
+	}
+	if def.DenyUnknownFields {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("denyUnknownFields"))
+	}
+	if def.StrictJSON {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("strictJSON"))
 	}
 	if def.Versioned {
 		fmt.Fprintf(&e.body, "@%s%s\n", e.use("versioned"), versionedConfigArgs(def.VersionedConfig))
@@ -285,6 +292,15 @@ func (e *emitter) emitSourceDecorator(def *ir.TypeDef) {
 // wrappers instead.
 func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 	var out []string
+	if fd.Title != "" {
+		out = append(out, e.useAs("@superschematic/schema", "docs", "schemaDocs")+fmt.Sprintf("({ title: %s })", quote(fd.Title)))
+	}
+	if fd.Purpose != "" {
+		out = append(out, e.use("purpose")+fmt.Sprintf("(%s)", quote(fd.Purpose)))
+	}
+	if fd.Icon != "" {
+		out = append(out, e.useAs("@superschematic/schema", "icon", "schemaIcon")+fmt.Sprintf("(%s)", quote(fd.Icon)))
+	}
 	if fd.Key {
 		out = append(out, e.use("key"))
 	}
@@ -317,8 +333,10 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 	rest.Comment = ""
 	rest.TypeRef = ir.TypeRef{}
 	rest.Required = false
+	rest.Title, rest.Purpose, rest.Icon = "", "", ""
 	rest.Default = nil
 	rest.ValidateMin, rest.ValidateMax = nil, nil
+	rest.ValidateUploadMaxBytes = nil
 	rest.ValidateMinLength, rest.ValidateMaxLength = nil, nil
 	rest.ValidateListMin, rest.ValidateListMax = nil, nil
 	rest.ValidatePattern = ""

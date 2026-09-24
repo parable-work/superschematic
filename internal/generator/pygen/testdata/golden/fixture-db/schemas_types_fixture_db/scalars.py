@@ -10,6 +10,8 @@ All scalars use Pydantic's Annotated types for validation.
 
 from typing import Annotated, Any, Dict
 from pydantic import Field, BeforeValidator, AfterValidator, PlainSerializer, PlainValidator
+import json
+import math
 import re
 from datetime import datetime
 
@@ -59,15 +61,48 @@ def _custom_parse_temporal_date_time(v: Any) -> Any:
 
 # Generic.JSON - A JSON object represented as a string
 
-# JSON scalar for arbitrary JSON tokens (object, array, or primitive).
-# `Any` rather than `Dict[str, Any]` because the JSON scalar accepts any
-# JSON value -- primitives (string/int/float/bool) included. Narrowing to
-# dict at the type-system level rejects valid primitive payloads.
+def _validate_generic_json(v: Any) -> Any:
+    """Reject host values JSON cannot represent without loss."""
+    ancestors: set[int] = set()
+
+    def visit(value: Any) -> None:
+        if value is None or isinstance(value, (str, bool, int)):
+            return
+        if isinstance(value, float):
+            if math.isfinite(value):
+                return
+            raise ValueError("JSON numbers must be finite")
+        if not isinstance(value, (list, dict)):
+            raise ValueError("value must contain only JSON-compatible types")
+
+        identity = id(value)
+        if identity in ancestors:
+            raise ValueError("JSON values cannot contain reference cycles")
+        ancestors.add(identity)
+        try:
+            if isinstance(value, list):
+                for child in value:
+                    visit(child)
+                return
+            for key, child in value.items():
+                if not isinstance(key, str):
+                    raise ValueError("JSON object keys must be strings")
+                visit(child)
+        finally:
+            ancestors.remove(identity)
+
+    visit(v)
+    return v
+
+# Any JSON value: object, array, string, number, boolean or null. `Any`
+# keeps the public Python type open; the validator keeps runtime values
+# inside the JSON domain.
 GenericJSON = Annotated[
     Any,
     Field(
         description="A JSON object represented as a string",
     ),
+    AfterValidator(_validate_generic_json),
 ]
 
 # Identity.Name - An objects name

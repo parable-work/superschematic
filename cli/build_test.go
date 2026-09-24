@@ -136,6 +136,8 @@ func TestBuildCommand_WithDepsBuildsClosureInOrder(t *testing.T) {
 	assert.DirExists(t, filepath.Join(outDir, "api", "fixture-api"))
 	assert.NoDirExists(t, filepath.Join(outDir, "types", "typescript", "fixture-general"))
 	assert.NoDirExists(t, filepath.Join(outDir, "types", "python", "fixture-general"))
+	// Stamps belong to build-all; --with-deps computes no input hashes.
+	assert.NoDirExists(t, filepath.Join(filepath.Dir(servicesRoot), "dist", ".build-stamps"))
 }
 
 func TestBuildCommand_WithDepsRejectsEmitIR(t *testing.T) {

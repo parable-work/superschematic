@@ -1,44 +1,22 @@
 {
   "tools": [
-{{- range $i, $tool := .Tools}}
+{{- range $i, $tool := .VisibleTools}}
 {{- if $i}},{{end}}
     {
       "name": "{{$tool.Name}}",
       "description": "{{escapeJSON $tool.Description}}",
       "input_schema": {
         "type": "object",
+        "additionalProperties": false,
+{{- range $.Keys.Parameters}}
+        "{{escapeJSON .Key}}": {{jsonValue .Value}},
+{{- end}}
         "properties": {
 {{- $props := $tool.Parameters.Properties}}
 {{- range $i, $propName := sortedKeys $props}}
 {{- $prop := index $props $propName}}
 {{- if $i}},{{end}}
-          "{{$propName}}": {
-            "type": "{{$prop.Type}}"
-{{- if $prop.Format}},
-            "format": "{{$prop.Format}}"
-{{- end}}
-{{- if $prop.Description}},
-            "description": "{{escapeJSON $prop.Description}}"
-{{- end}}
-{{- if $prop.Pattern}},
-            "pattern": "{{escapeJSON $prop.Pattern}}"
-{{- end}}
-{{- if $prop.Enum}},
-            "enum": [{{range $j, $e := $prop.Enum}}{{if $j}}, {{end}}"{{$e}}"{{end}}]
-{{- end}}
-{{- if $prop.MinLength}},
-            "minLength": {{$prop.MinLength}}
-{{- end}}
-{{- if $prop.MaxLength}},
-            "maxLength": {{$prop.MaxLength}}
-{{- end}}
-{{- if $prop.Minimum}},
-            "minimum": {{$prop.Minimum}}
-{{- end}}
-{{- if $prop.Maximum}},
-            "maximum": {{$prop.Maximum}}
-{{- end}}
-          }
+          "{{$propName}}": {{schemaJSON $prop}}
 {{- end}}
         }
 {{- if $tool.Parameters.Required}},

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
@@ -71,6 +72,12 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		if err := WriteTypes(output, outDir); err != nil {
 			t.Fatalf("write %s: %v", tc.name, err)
 		}
+	}
+	// Mirror the output layout: the directory holding the packages is a Bun
+	// workspace root, so fixture-api's file:../fixture-db dependency and
+	// fixture-db's file: superscalar spec resolve from either package.
+	if err := WriteWorkspaceRoot(tempRoot, naming.Naming{}); err != nil {
+		t.Fatalf("write workspace root: %v", err)
 	}
 
 	// Install and build in dependency order: fixture-api resolves the

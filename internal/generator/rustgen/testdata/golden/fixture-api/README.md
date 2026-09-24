@@ -7,7 +7,7 @@ This crate contains Rust types generated from the `fixture-api` schema.
 - `Cargo.toml` - crate manifest
 - `src/lib.rs` - module exports
 - `src/scalars.rs` - scalar aliases
-
+- `src/enums.rs` - enum definitions
 - `src/types.rs` - object/input structs and imported type aliases
 
 

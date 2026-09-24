@@ -769,6 +769,9 @@ func applyValidateConfig(cfg map[string]any, fd *ir.FieldDef) {
 	if v, ok := cfg["max"].(float64); ok {
 		fd.ValidateMax = &v
 	}
+	if v, ok := cfg["uploadMaxBytes"].(int64); ok {
+		fd.ValidateUploadMaxBytes = &v
+	}
 	if v, ok := cfg["minLength"].(float64); ok {
 		n := int(v)
 		fd.ValidateMinLength = &n
@@ -1058,6 +1061,9 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, *SchemaErro
 	if info.validate != nil {
 		fd := &ir.FieldDef{}
 		applyValidateConfig(info.validate, fd)
+		if fd.ValidateUploadMaxBytes != nil {
+			return nil, errorAtNode(p, "Validate uploadMaxBytes is only valid on object fields")
+		}
 		arg.ValidateMin = fd.ValidateMin
 		arg.ValidateMax = fd.ValidateMax
 		arg.ValidateMinLength = fd.ValidateMinLength

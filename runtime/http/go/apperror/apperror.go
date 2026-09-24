@@ -33,6 +33,10 @@ type AppError struct {
 	ErrorCode string // Standardized wire error code (e.g., "WA-AU-001")
 	Message   string
 	Err       error
+	// Details is structured, client-safe context for the error: the entity,
+	// name, path or count a client acts on. Respond writes it as the problem
+	// response's `details` member; nil leaves the member out.
+	Details any
 }
 
 func (e *AppError) Error() string {
@@ -47,6 +51,15 @@ func (e *AppError) Unwrap() error {
 func (e *AppError) WithCode(code string) *AppError {
 	errCopy := *e
 	errCopy.ErrorCode = code
+	return &errCopy
+}
+
+// WithDetails returns a shallow copy of the AppError carrying structured
+// details for the client. Details cross the wire verbatim, so they must
+// already be safe to show.
+func (e *AppError) WithDetails(details any) *AppError {
+	errCopy := *e
+	errCopy.Details = details
 	return &errCopy
 }
 
@@ -141,6 +154,10 @@ func Respond(w http.ResponseWriter, logger *zap.Logger, err error) {
 			}
 		}
 		logger.Error("request failed", fields...)
+		if appErr.Details != nil {
+			response.ErrorWithDetails(w, appErr.HTTPStatus(), appErr.Message, appErr.ErrorCode, appErr.Details)
+			return
+		}
 		response.Error(w, appErr.HTTPStatus(), appErr.Message, appErr.ErrorCode)
 		return
 	}

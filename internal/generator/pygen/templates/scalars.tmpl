@@ -10,6 +10,10 @@ All scalars use Pydantic's Annotated types for validation.
 
 from typing import Annotated, Any, Dict
 from pydantic import Field, BeforeValidator, AfterValidator, PlainSerializer, PlainValidator
+{{if .HasGenericJSON -}}
+import json
+import math
+{{end -}}
 import re
 {{if .HasDateTime -}}
 from datetime import datetime
@@ -19,13 +23,13 @@ from datetime import datetime
 try:
     from {{.Naming.ScalarPythonModule}} import (
         {{range $scalar := .Scalars}}{{if or $scalar.HasCustomNormalize $scalar.HasCustomValidate $scalar.HasCustomParse}}
-        {{- if $scalar.HasCustomNormalize}}
+        {{- if and $scalar.HasCustomNormalize (ne $scalar.Name "Generic.JSON")}}
         normalize_{{pythonScalarModule $scalar}},
         {{- end}}
         {{- if $scalar.HasCustomValidate}}
         validate_{{pythonScalarModule $scalar}},
         {{- end}}
-        {{- if $scalar.HasCustomParse}}
+        {{- if and $scalar.HasCustomParse (ne $scalar.Name "Generic.JSON")}}
         parse_{{pythonScalarModule $scalar}},
         {{- end}}
         {{end}}{{end}}
@@ -36,7 +40,7 @@ except ImportError:
     _SCALAR_LIB_AVAILABLE = False
 {{end}}
 
-{{range .Scalars}}{{if .HasCustomParse}}
+{{range .Scalars}}{{if and .HasCustomParse (ne .Name "Generic.JSON")}}
 def _custom_parse_{{pythonScalarModule .}}(v: Any) -> Any:
     """Custom parse wrapper for {{.Name}}.
 
@@ -59,7 +63,7 @@ def _custom_parse_{{pythonScalarModule .}}(v: Any) -> Any:
     {{- end}}
 {{end}}{{end}}
 
-{{range .Scalars}}{{if .HasCustomNormalize}}
+{{range .Scalars}}{{if and .HasCustomNormalize (ne .Name "Generic.JSON")}}
 def _custom_normalize_{{pythonScalarModule .}}(v: Any) -> Any:
     """Custom normalize wrapper for {{.Name}}.
 
@@ -82,7 +86,7 @@ def _custom_normalize_{{pythonScalarModule .}}(v: Any) -> Any:
     {{- end}}
 {{end}}{{end}}
 
-{{range .Scalars}}{{if .HasCustomValidate}}
+{{range .Scalars}}{{if and .HasCustomValidate (ne .Name "Generic.JSON")}}
 def _custom_validate_{{pythonScalarModule .}}(v: Any) -> Any:
     """Custom validation wrapper for {{.Name}}.
 
@@ -180,6 +184,58 @@ def _serialize_datetime(v: datetime) -> str:
     ),
     PlainValidator(_parse_datetime),
     PlainSerializer(_serialize_datetime, return_type=str, when_used="json"),
+]
+
+{{else if eq .Name "Generic.JSON" -}}
+def _validate_generic_json(v: Any) -> Any:
+    """Reject host values JSON cannot represent without loss."""
+    ancestors: set[int] = set()
+
+    def visit(value: Any) -> None:
+        if value is None or isinstance(value, (str, bool, int)):
+            return
+        if isinstance(value, float):
+            if math.isfinite(value):
+                return
+            raise ValueError("JSON numbers must be finite")
+        if not isinstance(value, (list, dict)):
+            raise ValueError("value must contain only JSON-compatible types")
+
+        identity = id(value)
+        if identity in ancestors:
+            raise ValueError("JSON values cannot contain reference cycles")
+        ancestors.add(identity)
+        try:
+            if isinstance(value, list):
+                for child in value:
+                    visit(child)
+                return
+            for key, child in value.items():
+                if not isinstance(key, str):
+                    raise ValueError("JSON object keys must be strings")
+                visit(child)
+        finally:
+            ancestors.remove(identity)
+
+    visit(v)
+    {{- if .HasCustomValidate}}
+    if _SCALAR_LIB_AVAILABLE:
+        errors = validate_{{pythonScalarModule .}}(json.dumps(v, allow_nan=False, separators=(",", ":")))
+        if errors:
+            raise ValueError("; ".join([e.message for e in errors]))
+    {{- end}}
+    return v
+
+
+# Any JSON value: object, array, string, number, boolean or null. `Any`
+# keeps the public Python type open; the validator keeps runtime values
+# inside the JSON domain.
+{{pythonScalarSymbol .}} = Annotated[
+    Any,
+    Field(
+        description="{{pythonString (scalarDoc .)}}",
+    ),
+    AfterValidator(_validate_generic_json),
 ]
 
 {{else if .Traits.IsJSONLike -}}

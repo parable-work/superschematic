@@ -282,7 +282,10 @@ impl {{.Namespace.StructName}} {
 {{- else}}
             if let Some(query_param_value) = &query.{{.RustName}} {
 {{- end}}
-{{- if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern .ValidateListMin .ValidateListMax}}
+{{- if .IsArray}}
+            // An array is one comma-separated query value (?name=a,b).
+            let query_param_text = query_param_value.iter().map(|value| value.to_string()).collect::<Vec<_>>().join(",");
+{{- else if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern .ValidateListMin .ValidateListMax}}
             let query_param_text = query_param_value.to_string();
 {{- end}}
 {{- if or .ValidateMin .ValidateMax}}
@@ -329,7 +332,7 @@ impl {{.Namespace.StructName}} {
                 return Err(SDKError::config("{{.Name}} must contain at most {{.ValidateListMax}} items"));
             }
 {{- end}}
-            query_params.push(("{{.Name}}".to_string(), query_param_value.to_string()));
+            query_params.push(("{{.Name}}".to_string(), {{if .IsArray}}query_param_text{{else}}query_param_value.to_string(){{end}}));
 {{- if not .Required}}
             }
 {{- end}}
@@ -505,7 +508,10 @@ impl {{.Namespace.StructName}} {
 {{- else}}
             if let Some(query_param_value) = &query.{{.RustName}} {
 {{- end}}
-{{- if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern .ValidateListMin .ValidateListMax}}
+{{- if .IsArray}}
+            // An array is one comma-separated query value (?name=a,b).
+            let query_param_text = query_param_value.iter().map(|value| value.to_string()).collect::<Vec<_>>().join(",");
+{{- else if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern .ValidateListMin .ValidateListMax}}
             let query_param_text = query_param_value.to_string();
 {{- end}}
 {{- if or .ValidateMin .ValidateMax}}
@@ -552,7 +558,7 @@ impl {{.Namespace.StructName}} {
                 return Err(SDKError::config("{{.Name}} must contain at most {{.ValidateListMax}} items"));
             }
 {{- end}}
-            query_params.push(("{{.Name}}".to_string(), query_param_value.to_string()));
+            query_params.push(("{{.Name}}".to_string(), {{if .IsArray}}query_param_text{{else}}query_param_value.to_string(){{end}}));
 {{- if not .Required}}
             }
 {{- end}}

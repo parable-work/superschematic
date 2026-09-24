@@ -10,6 +10,7 @@ This crate contains Rust types generated from the `fixture-general` schema.
 - `src/enums.rs` - enum definitions
 - `src/types.rs` - object/input structs and imported type aliases
 
+- `schemas/<Type>.json` - the schema IR of each `@jsonField` payload type and the definitions it reaches
 
 ## Notes
 

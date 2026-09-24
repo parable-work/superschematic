@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "apiId": "fixture-mcp",
+  "sdkClassName": "FixtureMcpSDK",
+  "tools": [
+    {
+      "toolName": "order.listOrders",
+      "apiId": "fixture-mcp",
+      "namespace": "order",
+      "methodName": "listOrders",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "statuses",
+          "required": true,
+          "kind": "query",
+          "target": "query.statuses"
+        },
+        {
+          "toolParameter": "limit",
+          "required": false,
+          "kind": "query",
+          "target": "query.limit"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "query",
+          "target": "query",
+          "sources": ["statuses", "limit"]
+        }
+      ]
+    },
+    {
+      "toolName": "order.exportOrders",
+      "apiId": "fixture-mcp",
+      "namespace": "order",
+      "methodName": "exportOrders",
+      "isScoped": false,
+      "arguments": [
+      ],
+      "methodArgs": [
+      ]
+    },
+    {
+      "toolName": "order.deleteOrder",
+      "apiId": "fixture-mcp",
+      "namespace": "order",
+      "methodName": "deleteOrder",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "order.getOrder",
+      "apiId": "fixture-mcp",
+      "namespace": "order",
+      "methodName": "getOrder",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "order.updateOrder",
+      "apiId": "fixture-mcp",
+      "namespace": "order",
+      "methodName": "updateOrder",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "revision",
+          "required": true,
+          "kind": "input",
+          "target": "input.revision"
+        },
+        {
+          "toolParameter": "note",
+          "required": false,
+          "kind": "input",
+          "target": "input.note"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["revision", "note"]
+        }
+      ]
+    },
+    {
+      "toolName": "order.openReturn",
+      "apiId": "fixture-mcp",
+      "namespace": "order",
+      "methodName": "openReturn",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "requestId",
+          "required": true,
+          "kind": "input",
+          "target": "input.requestId"
+        },
+        {
+          "toolParameter": "orderId",
+          "required": true,
+          "kind": "input",
+          "target": "input.orderId"
+        },
+        {
+          "toolParameter": "reason",
+          "required": true,
+          "kind": "input",
+          "target": "input.reason"
+        },
+        {
+          "toolParameter": "pickup",
+          "required": true,
+          "kind": "input",
+          "target": "input.pickup"
+        },
+        {
+          "toolParameter": "labels",
+          "required": true,
+          "kind": "input",
+          "target": "input.labels"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["requestId", "orderId", "reason", "pickup", "labels"]
+        }
+      ]
+    }
+  ]
+}

@@ -109,6 +109,9 @@ func TestDecodeTenantHistoryDataSnakeCaseRoundTrip(t *testing.T) {
 		"is_active": true,
 		"seat_count": 12,
 		"metadata": {"tier": "pro"},
+		"optional_metadata": null,
+		"metadata_list": [null, true],
+		"metadata_by_name": {"empty": null, "set": 42},
 		"_version": 2
 	}` + "`" + `)
 
@@ -131,10 +134,91 @@ func TestDecodeTenantHistoryDataSnakeCaseRoundTrip(t *testing.T) {
 	if len(got.Metadata) == 0 {
 		t.Fatal("Metadata was not decoded")
 	}
+	// A history row is to_jsonb(row), where a SQL NULL column and a JSONB
+	// null both read as null; a nullable field keeps the nil it had before.
+	if got.OptionalMetadata != nil {
+		t.Fatalf("OptionalMetadata = %#v, want nil for an ambiguous nullable history value", got.OptionalMetadata)
+	}
+	if len(got.MetadataList) != 2 || string(got.MetadataList[0]) != "null" || string(got.MetadataList[1]) != "true" {
+		t.Fatalf("MetadataList = %#v, want the [null,true] tokens", got.MetadataList)
+	}
+	if string(got.MetadataByName["empty"]) != "null" || string(got.MetadataByName["set"]) != "42" {
+		t.Fatalf("MetadataByName = %#v, want the null and 42 tokens", got.MetadataByName)
+	}
+
+	// A required Generic.JSON column cannot be SQL NULL, so null is the
+	// JSON null value.
+	nullRoot, err := decodeTenantHistoryData([]byte(` + "`" + `{"metadata":null}` + "`" + `))
+	if err != nil {
+		t.Fatalf("decode explicit-null history: %v", err)
+	}
+	if string(nullRoot.Metadata) != "null" {
+		t.Fatalf("null-root Metadata = %q, want the JSON null token", string(nullRoot.Metadata))
+	}
 }
 `
 	if err := os.WriteFile(filepath.Join(ormDir, "history_decoder_test.go"), []byte(historyDecoderTest), 0o644); err != nil {
 		t.Fatalf("write history decoder test: %v", err)
+	}
+	unionDecoderTest := `package orm
+
+import (
+	"testing"
+
+	types "example.com/schemas/types/go/fixture-db"
+)
+
+func TestJSONUnionDecoders(t *testing.T) {
+	created, err := decodeUnionRecordCreatedAgainstJSONUnion([]byte(` + "`" + `{"kind":"created","revision":7}` + "`" + `))
+	if err != nil {
+		t.Fatalf("decode required union: %v", err)
+	}
+	if value, ok := created.(types.CreatedRevision); !ok || value.Revision != 7 {
+		t.Fatalf("required union = %#v, want CreatedRevision revision 7", created)
+	}
+
+	optional, err := decodeUnionRecordSupersededByJSONUnion([]byte("null"))
+	if err != nil || optional != nil {
+		t.Fatalf("nullable union = %#v, %v; want nil, nil", optional, err)
+	}
+
+	events, err := decodeUnionRecordEventsJSONUnion([]byte(` + "`" + `[
+		{"kind":"created","revision":1},
+		{"kind":"updated","revision":2}
+	]` + "`" + `))
+	if err != nil {
+		t.Fatalf("decode union array: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("union array len = %d, want 2", len(events))
+	}
+	if _, ok := events[0].(types.CreatedRevision); !ok {
+		t.Fatalf("events[0] = %#v, want CreatedRevision", events[0])
+	}
+	if _, ok := events[1].(types.UpdatedRevision); !ok {
+		t.Fatalf("events[1] = %#v, want UpdatedRevision", events[1])
+	}
+
+	byName, err := decodeUnionRecordRevisionByNameJSONUnion([]byte(` + "`" + `{
+		"first":{"kind":"created","revision":1},
+		"last":{"kind":"updated","revision":2}
+	}` + "`" + `))
+	if err != nil {
+		t.Fatalf("decode union map: %v", err)
+	}
+	if _, ok := byName["first"].(types.CreatedRevision); !ok {
+		t.Fatalf("revisionByName[first] = %#v, want CreatedRevision", byName["first"])
+	}
+	if _, ok := byName["last"].(types.UpdatedRevision); !ok {
+		t.Fatalf("revisionByName[last] = %#v, want UpdatedRevision", byName["last"])
+	}
+	if _, err := decodeUnionRecordCreatedAgainstJSONUnion([]byte(` + "`" + `{"kind":"deleted"}` + "`" + `)); err == nil {
+		t.Fatal("an unknown union member was accepted")
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(ormDir, "json_union_decoder_test.go"), []byte(unionDecoderTest), 0o644); err != nil {
+		t.Fatalf("write JSON union decoder test: %v", err)
 	}
 	// ApplyTo covers the field shapes extendFixtureForCompileCoverage adds:
 	// an optional array, a nullable enum, a required relation and updatedBy.
@@ -253,7 +337,9 @@ func TestStrategyACompositeHistoryAsOf(t *testing.T) {
 	if cfg.ConnConfig.RuntimeParams == nil {
 		cfg.ConnConfig.RuntimeParams = map[string]string{}
 	}
-	cfg.ConnConfig.RuntimeParams["search_path"] = schemaName
+	// Generated DDL can use extension types installed in public (citext);
+	// keep the test schema first and public after it.
+	cfg.ConnConfig.RuntimeParams["search_path"] = schemaName + ",public"
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -284,12 +370,15 @@ func TestStrategyACompositeHistoryAsOf(t *testing.T) {
 	userOneID := mustUUID(t, "00000000-0000-0000-0000-000000000101")
 	userTwoID := mustUUID(t, "00000000-0000-0000-0000-000000000102")
 	userThreeID := mustUUID(t, "00000000-0000-0000-0000-000000000103")
+	jsonTenantID := mustUUID(t, "00000000-0000-0000-0000-000000000003")
 	// created_by / updated_by are NOT NULL on tenant_user (added by
 	// extendFixtureForCompileCoverage); raw inserts must supply an actor.
 	actorID := mustUUID(t, "00000000-0000-0000-0000-0000000000ff")
 
-	execStrategyASQL(t, pool, ` + "`" + `INSERT INTO tenant (id, name, slug, email, status, is_active, seat_count, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)` + "`" + `, tenantID.ToUUID(), "Acme", "acme", "admin@example.com", "active", true, 5, ` + "`" + `{"tier":"basic"}` + "`" + `)
+	execStrategyASQL(t, pool, ` + "`" + `INSERT INTO tenant (id, name, slug, email, status, is_active, seat_count, metadata, metadata_list, metadata_by_name)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)` + "`" + `,
+		tenantID.ToUUID(), "Acme", "acme", "admin@example.com", "active", true, 5,
+		` + "`" + `{"tier":"basic"}` + "`" + `, ` + "`" + `[]` + "`" + `, ` + "`" + `{}` + "`" + `)
 	execStrategyASQL(t, pool, ` + "`" + `INSERT INTO tenant_user (id, tenant_id, display_name, created_by, updated_by)
 VALUES ($1, $2, $3, $4, $5)` + "`" + `, userOneID.ToUUID(), tenantID.ToUUID(), "Alice", actorID.ToUUID(), actorID.ToUUID())
 	t0 := strategyADBTime(t, pool)
@@ -305,8 +394,10 @@ VALUES ($1, $2, $3, $4, $5)` + "`" + `, userTwoID.ToUUID(), tenantID.ToUUID(), "
 	execStrategyASQL(t, pool, ` + "`" + `DELETE FROM tenant_user WHERE id = $1` + "`" + `, userOneID.ToUUID())
 	t3 := strategyADBTime(t, pool)
 
-	execStrategyASQL(t, pool, ` + "`" + `INSERT INTO tenant (id, name, slug, email, status, is_active, seat_count, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)` + "`" + `, tenantTwoID.ToUUID(), "Other Corp", "other", "other@example.com", "active", true, 5, ` + "`" + `{"tier":"basic"}` + "`" + `)
+	execStrategyASQL(t, pool, ` + "`" + `INSERT INTO tenant (id, name, slug, email, status, is_active, seat_count, metadata, metadata_list, metadata_by_name)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)` + "`" + `,
+		tenantTwoID.ToUUID(), "Other Corp", "other", "other@example.com", "active", true, 5,
+		` + "`" + `{"tier":"basic"}` + "`" + `, ` + "`" + `[]` + "`" + `, ` + "`" + `{}` + "`" + `)
 	execStrategyASQL(t, pool, ` + "`" + `UPDATE tenant_user SET tenant_id = $1 WHERE id = $2` + "`" + `, tenantTwoID.ToUUID(), userTwoID.ToUUID())
 	t4 := strategyADBTime(t, pool)
 
@@ -356,6 +447,70 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)` + "`" + `, tenantTwoID.ToUUID(),
 	if len(snapshot4.Users) != 0 {
 		t.Fatalf("t4 users len = %d, want child moved to another tenant excluded", len(snapshot4.Users))
 	}
+
+	// Generic.JSON keeps the JSON null token as a value, apart from SQL NULL,
+	// through the full scan, a selected-field scan, the map result and the
+	// history decoder.
+	sqlNullTenant, err := db.Tenant.GetOne(context.Background(), tenantID, nil)
+	if err != nil {
+		t.Fatalf("get SQL-NULL tenant: %v", err)
+	}
+	if sqlNullTenant.OptionalMetadata != nil {
+		t.Fatalf("SQL-NULL OptionalMetadata = %#v, want nil", sqlNullTenant.OptionalMetadata)
+	}
+	execStrategyASQL(t, pool, ` + "`" + `INSERT INTO tenant (id, name, slug, email, status, is_active, seat_count, metadata, optional_metadata, metadata_list, metadata_by_name)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb)` + "`" + `,
+		jsonTenantID.ToUUID(), "JSON Corp", "json", "json@example.com", "active", true, 5,
+		"null", "null", ` + "`" + `[null,true]` + "`" + `, ` + "`" + `{"empty":null,"set":42}` + "`" + `)
+
+	assertJSONNulls := func(label string, got *types.Tenant, wantOptionalNull bool) {
+		t.Helper()
+		if got == nil || string(got.Metadata) != "null" {
+			t.Fatalf("%s required Metadata = %#v, want JSON null", label, got)
+		}
+		if wantOptionalNull {
+			if got.OptionalMetadata == nil || string(*got.OptionalMetadata) != "null" {
+				t.Fatalf("%s OptionalMetadata = %#v, want a present JSON null", label, got.OptionalMetadata)
+			}
+		} else if got.OptionalMetadata != nil {
+			t.Fatalf("%s OptionalMetadata = %#v, want nil for an ambiguous nullable history value", label, got.OptionalMetadata)
+		}
+		if len(got.MetadataList) != 2 || string(got.MetadataList[0]) != "null" || string(got.MetadataList[1]) != "true" {
+			t.Fatalf("%s MetadataList = %#v, want [null,true]", label, got.MetadataList)
+		}
+		if string(got.MetadataByName["empty"]) != "null" || string(got.MetadataByName["set"]) != "42" {
+			t.Fatalf("%s MetadataByName = %#v, want null/42", label, got.MetadataByName)
+		}
+	}
+
+	jsonTenant, err := db.Tenant.GetOne(context.Background(), jsonTenantID, nil)
+	if err != nil {
+		t.Fatalf("get JSON tenant: %v", err)
+	}
+	assertJSONNulls("GetOne", jsonTenant, true)
+
+	selectedJSONTenant, err := db.Tenant.GetOne(context.Background(), jsonTenantID, &TenantGetOptions{
+		Fields: TenantFields{Metadata: true, OptionalMetadata: true, MetadataList: true, MetadataByName: true},
+	})
+	if err != nil {
+		t.Fatalf("get selected JSON fields: %v", err)
+	}
+	assertJSONNulls("selected GetOne", selectedJSONTenant, true)
+
+	jsonTenantsByID, err := db.Tenant.GetManyByIDs(context.Background(), []types.IdentityUUID{jsonTenantID})
+	if err != nil {
+		t.Fatalf("get JSON tenant map: %v", err)
+	}
+	assertJSONNulls("GetManyByIDs", jsonTenantsByID[jsonTenantID], true)
+
+	jsonHistory, err := db.Tenant.ListVersions(context.Background(), jsonTenantID, nil)
+	if err != nil {
+		t.Fatalf("list JSON tenant history: %v", err)
+	}
+	if len(jsonHistory) != 1 || jsonHistory[0].Value == nil {
+		t.Fatalf("JSON tenant history = %#v, want one value", jsonHistory)
+	}
+	assertJSONNulls("history", jsonHistory[0].Value, false)
 
 	// Regression: hard delete of a versioned row must succeed and
 	// record a tombstone at OLD._version + 1. The buggy trigger wrote the
@@ -497,13 +652,51 @@ func findSnapshotUser(t *testing.T, users []types.TenantUser, id types.IdentityU
 }
 
 // extendFixtureForCompileCoverage mutates the loaded fixture-db IR to
-// exercise template branches the fixture schema does not reach:
-// createdBy/updatedBy user audit fields, scalar arrays, optional enums,
-// and optional non-audit datetime scalars. Soft-delete fields (deletedAt/
-// deletedBy) now live on the fixture's TenantUser itself. The mutation
-// reuses scalars the fixture already resolves so the generated types
-// module stays compilable.
+// exercise template branches the fixture schema does not reach: nullable,
+// list and map Generic.JSON columns, a table of closed-union JSON columns
+// (single, nullable, list and map), createdBy/updatedBy user audit fields,
+// scalar arrays, optional enums, and optional non-audit datetime scalars.
+// Soft-delete fields (deletedAt/deletedBy) live on the fixture's TenantUser
+// itself. The mutation reuses scalars the fixture already resolves so the
+// generated types module stays compilable.
 func extendFixtureForCompileCoverage(schema *ir.Schema) {
+	tenant := schema.Types["Tenant"]
+	tenant.Fields = append(tenant.Fields,
+		&ir.FieldDef{Name: "optionalMetadata", TypeRef: ir.TypeRef{Name: "Generic.JSON"}},
+		&ir.FieldDef{Name: "metadataList", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsArray: true}, Required: true, JsonField: true},
+		&ir.FieldDef{Name: "metadataByName", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsMap: true}, Required: true, JsonField: true},
+	)
+
+	createdKind, updatedKind := "created", "updated"
+	schema.Types["CreatedRevision"] = &ir.TypeDef{
+		Name: "CreatedRevision",
+		Role: ir.RoleEmbeddedStruct,
+		Fields: []*ir.FieldDef{
+			{Name: "kind", TypeRef: ir.TypeRef{Name: "string"}, Required: true, InternalMetadata: true, Default: &createdKind},
+			{Name: "revision", TypeRef: ir.TypeRef{Name: "number"}, Required: true},
+		},
+	}
+	schema.Types["UpdatedRevision"] = &ir.TypeDef{
+		Name: "UpdatedRevision",
+		Role: ir.RoleEmbeddedStruct,
+		Fields: []*ir.FieldDef{
+			{Name: "kind", TypeRef: ir.TypeRef{Name: "string"}, Required: true, InternalMetadata: true, Default: &updatedKind},
+			{Name: "revision", TypeRef: ir.TypeRef{Name: "number"}, Required: true},
+		},
+	}
+	schema.Unions["RevisionRef"] = &ir.UnionDef{Name: "RevisionRef", Types: []string{"CreatedRevision", "UpdatedRevision"}}
+	schema.Types["UnionRecord"] = &ir.TypeDef{
+		Name: "UnionRecord",
+		Role: ir.RoleDBTable,
+		Fields: []*ir.FieldDef{
+			{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, Key: true},
+			{Name: "createdAgainst", TypeRef: ir.TypeRef{Name: "RevisionRef"}, Required: true, JsonField: true},
+			{Name: "supersededBy", TypeRef: ir.TypeRef{Name: "RevisionRef"}, JsonField: true},
+			{Name: "events", TypeRef: ir.TypeRef{Name: "RevisionRef", IsArray: true}, Required: true, JsonField: true},
+			{Name: "revisionByName", TypeRef: ir.TypeRef{Name: "RevisionRef", IsMap: true}, Required: true, JsonField: true},
+		},
+	}
+
 	tenantUser := schema.Types["TenantUser"]
 	tenantUser.Fields = append(tenantUser.Fields,
 		&ir.FieldDef{Name: "createdBy", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},

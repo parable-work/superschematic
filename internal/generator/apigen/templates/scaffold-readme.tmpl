@@ -93,7 +93,7 @@ type {{ toGoName . }}Implementation interface {
 {{- $namespace := . }}
 {{- range $.Endpoints }}
 {{- if eq .Namespace $namespace }}
-    {{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .QueryParams }}, {{ .Name }} {{ if .Required }}{{ .GoType }}{{ else }}*{{ .GoType }}{{ end }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ if .IsArray }}[]{{ end }}{{ .GoType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}) ({{- if .OutputIsArray }}[]{{ .OutputGoType }}{{- else }}*{{ .OutputGoType }}{{- end }}, error)
+    {{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .QueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ if .IsArray }}[]{{ end }}{{ .GoType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}) ({{- if .OutputIsArray }}[]{{ .OutputGoType }}{{- else }}*{{ .OutputGoType }}{{- end }}, error)
 {{- end }}
 {{- end }}
 }

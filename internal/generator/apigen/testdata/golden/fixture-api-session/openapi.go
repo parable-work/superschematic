@@ -11,10 +11,15 @@ const openAPISpec = `{
         "properties": {
           "name": {
             "description": "An objects name",
+            "maxLength": 80,
+            "minLength": 2,
             "type": "string"
           },
           "slug": {
             "description": "A URL friendly version of a string",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
             "type": "string"
           }
         },
@@ -70,11 +75,20 @@ const openAPISpec = `{
         ],
         "type": "object"
       },
+      "TenantListStatus": {
+        "description": "Status filter for listTenants: an enum array query parameter.",
+        "enum": [
+          "active",
+          "suspended"
+        ],
+        "type": "string"
+      },
       "TenantView": {
         "description": "Customer-facing projection of the Tenant table.",
         "properties": {
           "id": {
             "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
             "type": "string"
           },
           "internalDebugLabel": {
@@ -82,6 +96,8 @@ const openAPISpec = `{
           },
           "name": {
             "description": "An objects name",
+            "maxLength": 80,
+            "minLength": 2,
             "type": "string"
           },
           "userCount": {
@@ -258,6 +274,7 @@ const openAPISpec = `{
     },
     "/api/tenants": {
       "get": {
+        "description": "Array query parameters: ?ids=a,b\u0026statuses=active,suspended.",
         "operationId": "TenantListTenantsHandler",
         "parameters": [
           {
@@ -270,6 +287,37 @@ const openAPISpec = `{
               "format": "uuid",
               "type": "string"
             }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "ids",
+            "required": true,
+            "schema": {
+              "items": {
+                "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "statuses",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/TenantListStatus"
+              },
+              "maxItems": 10,
+              "minItems": 0,
+              "type": "array"
+            },
+            "style": "form"
           }
         ],
         "responses": {

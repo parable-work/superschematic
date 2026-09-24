@@ -65,6 +65,31 @@ func TestConvertEndpointBindsQueryEmbeddedPathParams(t *testing.T) {
 	}
 }
 
+func TestConvertEndpointPreservesArrayQueryType(t *testing.T) {
+	ep := apigen.EndpointInfo{
+		Name: "listItems", Path: "/api/items", Method: "GET",
+		QueryParams: []apigen.Param{{Name: "stage", Type: "string", IsArray: true}},
+	}
+	converted := convertEndpoint(ep, false, "")
+	if len(converted.QueryParams) != 1 || converted.QueryParams[0].RustType != "Vec<String>" ||
+		!converted.QueryParams[0].IsArray {
+		t.Fatalf("array query type = %#v", converted.QueryParams)
+	}
+}
+
+func TestRuntimeListMinimumDropsZero(t *testing.T) {
+	zero, one := 0, 1
+	if runtimeListMinimum(&zero) != nil {
+		t.Fatal("a zero list minimum must not generate an unsigned comparison")
+	}
+	if got := runtimeListMinimum(&one); got == nil || *got != 1 {
+		t.Fatal("a positive list minimum was lost")
+	}
+	if runtimeListMinimum(nil) != nil {
+		t.Fatal("an absent list minimum must stay absent")
+	}
+}
+
 func TestConvertEndpointPathParamsTakePrecedenceOverQuery(t *testing.T) {
 	ep := apigen.EndpointInfo{
 		Name:   "tenantConnections",

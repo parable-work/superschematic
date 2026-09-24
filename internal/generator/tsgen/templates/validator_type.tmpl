@@ -21,7 +21,7 @@ import { validate{{.Name}}Required, validate{{.Name}} } from '{{.ImportPackage}}
 import { parse{{.Symbol}} as parse{{.Symbol}}FromLib } from '{{$.Naming.ScalarNpmPackage}}/scalars';
 {{end}}
 {{range .ParserNestedTypes}}
-import { parse{{.}}FromJSON } from './{{lower .}}';
+import { parse{{.}}FromJSON{{if $.Type.StrictJSON}}, validate{{.}}Required{{end}} } from './{{lower .}}';
 {{end}}
 
 /**
@@ -34,7 +34,47 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     return true;
   }
 
+  {{if .Type.StrictJSON}}
+  // @strictJSON: only an object with declared keys is valid.
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    addFieldError(errors, "$", "object", "expected an object");
+    return errors;
+  }
+  for (const key of Object.keys(value)) {
+    if (!{{.Type.Name}}KnownFields.has(key)) {
+      addFieldError(errors, key, "unknown", "unknown field");
+    }
+  }
+  {{end}}
+
   {{range .Type.Fields}}
+  {{if and $.Type.StrictJSON (not .IsScalar) (containsString $.ParserNestedTypes .Type)}}
+  if (value.{{.TSName}} !== null && value.{{.TSName}} !== undefined) {
+    const validateNested = (nested: unknown, path: string) => {
+      const [valid, fieldErrors] = validate{{.Type}}Required(nested as {{.Type}});
+      if (!valid && fieldErrors) setFieldErrors(errors, path, fieldErrors);
+    };
+    {{if .IsMap}}
+    if (typeof value.{{.TSName}} !== 'object' || Array.isArray(value.{{.TSName}})) {
+      addFieldError(errors, "{{.TSName}}", "object", "expected a map");
+    } else {
+      for (const [key, nested] of Object.entries(value.{{.TSName}})) {
+        {{if .IsArray}}
+        if (!Array.isArray(nested)) addFieldError(errors, `{{.TSName}}.${key}`, "array", "expected an array");
+        else nested.forEach((item, index) => validateNested(item, `{{.TSName}}.${key}[${index}]`));
+        {{else}}
+        validateNested(nested, `{{.TSName}}.${key}`);
+        {{end}}
+      }
+    }
+    {{else if .IsArray}}
+    if (!Array.isArray(value.{{.TSName}})) addFieldError(errors, "{{.TSName}}", "array", "expected an array");
+    else value.{{.TSName}}.forEach((item, index) => validateNested(item, `{{.TSName}}[${index}]`));
+    {{else}}
+    validateNested(value.{{.TSName}}, "{{.TSName}}");
+    {{end}}
+  }
+  {{end}}
   {{if .IsScalar}}
   {{if .IsMap}}
   if (value.{{.TSName}} !== null && value.{{.TSName}} !== undefined && typeof value.{{.TSName}} === 'object' && !Array.isArray(value.{{.TSName}})) {
@@ -494,7 +534,7 @@ function parse{{.Type.Name}}Input(
   // Apply @default values from the schema for keys absent from the payload.
   {{range .Type.Fields}}
   {{if .HasDefault}}
-  if (candidate[{{jsonString .Name}}] === undefined || candidate[{{jsonString .Name}}] === null) {
+  if (candidate[{{jsonString .Name}}] === undefined{{if not $.Type.StrictJSON}} || candidate[{{jsonString .Name}}] === null{{end}}) {
     candidate[{{jsonString .Name}}] = {{.DefaultLiteral}};
   }
   {{end}}
@@ -544,10 +584,10 @@ export function parse{{.Type.Name}}YamlNonStrict(input: string | unknown): {{.Ty
 {{if .NeedsJSONParse}}
 export function parse{{.Type.Name}}FromJSON(input: unknown): {{.Type.Name}} {
   if (input == null || typeof input !== 'object') {
-    return input as {{.Type.Name}};
+    {{if .Type.StrictJSON}}return parse{{.Type.Name}}Json(input);{{else}}return input as {{.Type.Name}};{{end}}
   }
   const obj = input as Record<string, unknown>;
-  return {
+  {{if .Type.StrictJSON}}const result = { {{else}}return { {{end}}
     ...(obj as unknown as {{.Type.Name}}),
     {{range .Type.Fields}}
     {{if and .IsScalar .ScalarInfo (eq .ScalarInfo.TSType "JSDate") .ScalarInfo.HasParseFromJSON}}
@@ -608,10 +648,11 @@ export function parse{{.Type.Name}}FromJSON(input: unknown): {{.Type.Name}} {
     {{end}}
     {{end}}
     {{end}}
-  };
+  };{{if .Type.StrictJSON}}
+  return parse{{.Type.Name}}Json(result);{{end}}
 }
 {{else}}
 export function parse{{.Type.Name}}FromJSON(input: unknown): {{.Type.Name}} {
-  return input as {{.Type.Name}};
+  {{if .Type.StrictJSON}}return parse{{.Type.Name}}Json(input);{{else}}return input as {{.Type.Name}};{{end}}
 }
 {{end}}

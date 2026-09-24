@@ -17,6 +17,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/sdkgen"
+	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/profile"
 )
 
@@ -616,6 +617,9 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 			if err := generateFile(toolsRenderer, "tools-schema.tmpl", filepath.Join(toolsDir, "schema.json"), toolsOutput, toolsFuncs); err != nil {
 				return fmt.Errorf("failed to generate tools/schema.json: %w", err)
 			}
+			if err := generateFile(toolsRenderer, "tools-mcp-audit.tmpl", filepath.Join(toolsDir, "mcp-audit.json"), toolsOutput, toolsFuncs); err != nil {
+				return fmt.Errorf("failed to generate tools/mcp-audit.json: %w", err)
+			}
 			if err := generateFile(toolsRenderer, "tools-mcp-binding.tmpl", filepath.Join(toolsDir, "mcp-binding.json"), toolsOutput, toolsFuncs); err != nil {
 				return fmt.Errorf("failed to generate tools/mcp-binding.json: %w", err)
 			}
@@ -774,6 +778,8 @@ func toolsTemplateFuncs() template.FuncMap {
 			s = strings.ReplaceAll(s, "\t", "\\t")
 			return s
 		},
+		"schemaJSON": toolsutil.JSONSchemaPropertyLiteral,
+		"jsonValue":  toolsutil.JSONLiteral,
 		"sortedKeys": func(m map[string]sdkgen.JSONSchemaProperty) []string {
 			keys := make([]string, 0, len(m))
 			for k := range m {

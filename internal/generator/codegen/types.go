@@ -241,6 +241,10 @@ type TypeInfo struct {
 	// generated Rust deserializer rejects a key the type does not declare.
 	DenyUnknownFields bool
 
+	// StrictJSON indicates the type carries @strictJSON: every generated
+	// decoder rejects an undeclared key and an absent or null required field.
+	StrictJSON bool
+
 	// EnvVars indicates the type declares the service's environment-variable
 	// configuration surface.
 	EnvVars bool

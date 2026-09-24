@@ -122,6 +122,12 @@ type TypeDef struct {
 	// contract and breaks a payload that must survive a newer producer.
 	DenyUnknownFields bool `json:"denyUnknownFields,omitempty" yaml:"denyUnknownFields,omitempty"`
 
+	// StrictJSON (@strictJSON) makes every generated decoder of this type,
+	// in Go, TypeScript, Python and Rust, reject a key the type does not
+	// declare and a required field that is absent or null. It applies to
+	// this object only; a nested object type opts in on its own.
+	StrictJSON bool `json:"strictJSON,omitempty" yaml:"strictJSON,omitempty"`
+
 	// Extensions holds extension decorator data keyed by extension name; see
 	// [Schema.Extensions].
 	Extensions map[string]json.RawMessage `json:"extensions,omitempty" yaml:"extensions,omitempty"`
@@ -225,8 +231,14 @@ type FieldDef struct {
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 
 	// Title is the human-facing label for form rendering (JSON Schema
-	// standard `title` key in the legacy form). Empty means derive from Name.
+	// standard `title` key in the legacy form), declared with
+	// @docs({ title }). Empty means derive from Name.
 	Title string `json:"title,omitempty" yaml:"title,omitempty"`
+
+	// Purpose is longer-form Markdown explaining what the field is for,
+	// declared with @purpose (`x-purpose` in the legacy form). Empty means
+	// none.
+	Purpose string `json:"purpose,omitempty" yaml:"purpose,omitempty"`
 
 	// Placeholder is the input placeholder hint for form rendering
 	// (`x-placeholder` in the legacy form). Empty means no hint.
@@ -234,6 +246,20 @@ type FieldDef struct {
 
 	// Comment stores the node-attached comment for the field declaration.
 	Comment string `json:"comment,omitempty" yaml:"comment,omitempty"`
+
+	// Docs is the reader-facing documentation of an operation, declared with
+	// @docs. Nil on data fields and on operations without @docs.
+	Docs *OperationDocs `json:"docs,omitempty" yaml:"docs,omitempty"`
+
+	// MCP is an operation's MCP classification, declared with @mcp. Nil on
+	// data fields and on operations without @mcp.
+	MCP *OperationMCP `json:"mcp,omitempty" yaml:"mcp,omitempty"`
+
+	// Icon names the glyph a UI shows for the field or operation, declared
+	// with @icon (`x-icon` in the legacy form). On an operation it is the
+	// MCP tool's icon. The core accepts any name; an icon set is an
+	// extension's check. Empty means none.
+	Icon string `json:"icon,omitempty" yaml:"icon,omitempty"`
 
 	// TypeRef references the field's type (scalar, enum, object, etc.).
 	TypeRef TypeRef `json:"typeRef" yaml:"typeRef"`
@@ -270,6 +296,12 @@ type FieldDef struct {
 	// ValidateMax is the maximum numeric value allowed for this field
 	// (@validateMax). Nil means no maximum.
 	ValidateMax *float64 `json:"validateMax,omitempty" yaml:"validateMax,omitempty"`
+
+	// ValidateUploadMaxBytes is the largest multipart upload, in bytes, the
+	// generated API accepts for this field (Validate<T, { uploadMaxBytes }>).
+	// Only valid on a single file-upload scalar field. Nil keeps the
+	// scalar's own upload limit.
+	ValidateUploadMaxBytes *int64 `json:"validateUploadMaxBytes,omitempty" yaml:"validateUploadMaxBytes,omitempty"`
 
 	// ValidateMinLength is the minimum character length for string-like fields
 	// (@validateMinLength). Nil means no minimum.

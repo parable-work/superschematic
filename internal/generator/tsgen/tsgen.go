@@ -95,6 +95,11 @@ type TypeInfo struct {
 	Doc    string
 	Fields []FieldInfo
 
+	// StrictJSON is set by @strictJSON: the validator rejects an undeclared
+	// key and validates nested object fields, and parse<Type>FromJSON runs
+	// the strict JSON parser.
+	StrictJSON bool
+
 	// HasDefaults is true when at least one field has a usable
 	// DefaultLiteral. Templates use this flag to decide whether to emit a
 	// make<Type>() factory and merge defaults during JSON parsing.
@@ -385,6 +390,7 @@ func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, enumLoo
 			Role:        t.Role,
 			Doc:         t.Doc(),
 			Fields:      fields,
+			StrictJSON:  t.StrictJSON,
 			HasDefaults: hasDefaults,
 		}
 	}

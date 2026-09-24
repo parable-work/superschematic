@@ -12,6 +12,7 @@ pub trait SessionImplementation: Send + Sync + 'static {
 #[async_trait]
 pub trait TenantImplementation: Send + Sync + 'static {
     async fn custom_handler(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError>;
+    /// Array query parameters: ?ids=a,b&statuses=active,suspended.
     async fn list_tenants(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError>;
     async fn create_tenant(&self, ctx: RequestContext, payload: Value) -> Result<Value, ApiError>;
     /// Fetch one tenant by id.

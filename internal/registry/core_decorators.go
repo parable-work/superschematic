@@ -55,6 +55,7 @@ func coreDecorators() []DecoratorSpec {
 	marker(TargetType, "versioned", []string{pkgDB})
 	flag(TargetType, "jsonField", []string{pkgDB, pkgSchema}, func(n Node) { n.Type.JsonField = true })
 	flag(TargetType, "denyUnknownFields", []string{pkgSchema}, func(n Node) { n.Type.DenyUnknownFields = true })
+	flag(TargetType, "strictJSON", []string{pkgSchema}, func(n Node) { n.Type.StrictJSON = true })
 	specs = append(specs, DecoratorSpec{
 		Name: "index", Packages: []string{pkgDB}, Target: TargetType,
 		Apply: func(n Node, args []any, _ Site) error {
@@ -159,6 +160,7 @@ func coreDecorators() []DecoratorSpec {
 			return nil
 		},
 	})
+	specs = append(specs, docsDecorators()...)
 	return specs
 }
 

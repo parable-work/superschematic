@@ -8,6 +8,9 @@ import type {
   IdentityUUID,
   TemporalDateTime,
 } from './scalars';
+import type {
+  TenantListStatus,
+} from './enums';
 
 /**
  * TenantView - Customer-facing projection of the Tenant table.

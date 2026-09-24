@@ -71,7 +71,7 @@ func TestTypeDef_JSONFieldNamesVerbatim(t *testing.T) {
 	}
 
 	// Zero-valued optional fields must be omitted.
-	for _, key := range []string{"owner", "description", "isTrait", "traitConfig", "jsonField", "versioned", "envVars", "denyUnknownFields"} {
+	for _, key := range []string{"owner", "description", "isTrait", "traitConfig", "jsonField", "versioned", "envVars", "denyUnknownFields", "strictJSON"} {
 		if _, ok := raw[key]; ok {
 			t.Errorf("marshaled TypeDef should omit zero-valued key %q", key)
 		}

@@ -130,6 +130,8 @@ function parseIRField(raw: unknown, path: string): FieldDef {
   const name = asString(field.name);
   const argumentsRaw = Array.isArray(field.arguments) ? field.arguments : [];
   const title = asString(field.title);
+  const purpose = asString(field.purpose);
+  const icon = asString(field.icon);
   const placeholder = asString(field.placeholder);
 
   const fieldDef: FieldDef = {
@@ -183,6 +185,12 @@ function parseIRField(raw: unknown, path: string): FieldDef {
   // Wire form omits empty metadata (Go omitempty); mirror that absence.
   if (title) {
     fieldDef.title = title;
+  }
+  if (purpose) {
+    fieldDef.purpose = purpose;
+  }
+  if (icon) {
+    fieldDef.icon = icon;
   }
   if (placeholder) {
     fieldDef.placeholder = placeholder;

@@ -55,6 +55,10 @@ This package includes custom scalar types with built-in validation:
 - `TemporalDateTime` (canonical: `Temporal.DateTime`): ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
 
 
+## Enums
+
+- `TenantListStatus`
+
 ---
 
 Generated at 2026-01-02T03:04:05Z.

@@ -68,6 +68,22 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 		}},
 		{"FieldDef", "httpMethod", []string{"GET", "POST", "PUT", "PATCH", "DELETE"}},
 		{"FieldDef", "paramType", []string{"query"}},
+		{"OperationDocs", "lifecycle", []string{
+			string(ir.DocsLifecycleDraft), string(ir.DocsLifecycleExperimental),
+			string(ir.DocsLifecycleActive), string(ir.DocsLifecycleDeprecated),
+			string(ir.DocsLifecycleRetired),
+		}},
+		{"OperationDocs", "visibility", []string{
+			string(ir.DocsVisibilityPublic), string(ir.DocsVisibilityInternal),
+			string(ir.DocsVisibilityPreview),
+		}},
+		{"OperationDocs", "mappingStatus", []string{
+			string(ir.DocsMappingStatusMapped), string(ir.DocsMappingStatusUncertain),
+		}},
+		{"OperationDocs", "replayMode", []string{
+			string(ir.DocsReplayModeReadOnly), string(ir.DocsReplayModeIdempotent),
+			string(ir.DocsReplayModeCompareAndSwap),
+		}},
 	}
 	for _, p := range patches {
 		if err := constrainProperty(defs, p.def, p.property, p.values); err != nil {

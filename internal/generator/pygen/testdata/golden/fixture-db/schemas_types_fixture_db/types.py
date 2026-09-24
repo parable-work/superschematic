@@ -316,8 +316,11 @@ class Tenant(BaseModel):
             errors.add_field_error("seat_count", "required", "required field")
 
         # Validate metadata
-        if self.metadata is None:
-            errors.add_field_error("metadata", "required", "required field")
+        # None is the JSON null root, a present value, not a missing field.
+        try:
+            TypeAdapter(GenericJSON).validate_python(self.metadata)
+        except PydanticValidationError as e:
+            errors.add_field_error("metadata", "invalid", str(e))
 
         # Validate users
         if self.users is not None:

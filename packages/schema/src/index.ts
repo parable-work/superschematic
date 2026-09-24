@@ -1,8 +1,12 @@
 export {
   denyUnknownFields,
+  docs,
+  icon,
   internalMetadata,
   jsonField,
+  purpose,
   source,
+  strictJSON,
   temporalFormat,
   uiHidden,
   virtual,

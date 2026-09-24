@@ -1,6 +1,8 @@
 package sdkgen
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -8,71 +10,70 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 type ToolPathParam = toolsutil.ToolPathParam
 type ToolScalarArg = toolsutil.ToolScalarArg
+type ToolQueryArg = toolsutil.ToolQueryArg
 type JSONSchemaObject = toolsutil.JSONSchemaObject
 type JSONSchemaProperty = toolsutil.JSONSchemaProperty
 type JSONSchemaReturn = toolsutil.JSONSchemaReturn
 
-// ToolDefinition represents a single tool for LLM function cOsalling
+// ToolDefinition represents a single tool for LLM function calling
 type ToolDefinition struct {
-	Name         string           // Namespaced name e.g., "auth.sendMagicLink"
-	APIID        string           // API identifier e.g., "web-api"
-	MethodName   string           // SDK method name e.g., "sendMagicLink"
-	HTTPMethod   string           // HTTP method e.g., "GET", "POST"
-	HTTPPath     string           // HTTP path template e.g., "/api/auth/send-magic-link"
-	Description  string           // From GraphQL @description, includes auth note if required
-	RequiresAuth bool             // Whether authentication is required
-	Namespace    string           // Namespace for grouping e.g., "auth"
-	IsScopedNS   bool             // Whether the endpoint's namespace hoists a scope parameter
-	Parameters   JSONSchemaObject // JSON Schema for parameters
-	Returns      JSONSchemaReturn // JSON Schema for return type
-	PathParams   []ToolPathParam  // Path parameters for invocation
-	HasInput     bool             // Whether endpoint has input type
-	InputType    string           // Input type name if HasInput
-	ScalarArgs   []ToolScalarArg  // Scalar arguments (not path params)
-	QueryArgs    []ToolScalarArg  // Query arguments
-	Encrypted    bool             // Whether endpoint payload must be encrypted
-	MCPBinding   MCPToolBinding   // Explicit MCP invocation binding metadata
+	Name                     string                   // Namespaced name e.g., "auth.sendMagicLink"
+	OperationID              string                   // OpenAPI operation id
+	Title                    string                   // @docs title
+	MCP                      *ir.OperationMCP         // resolved @mcp record, _meta with the guidance; nil without @mcp
+	Capability               string                   // @docs capability
+	Lifecycle                string                   // @docs lifecycle
+	Visibility               string                   // @docs visibility
+	Audience                 string                   // @docs audience
+	Guidance                 ir.ToolOperationGuidance // @docs guidance
+	ReplayMode               string                   // @docs replay mode
+	IdempotencyKeyPointers   []string                 // pointers into Parameters
+	ExpectedRevisionPointers []string                 // pointers into Parameters
+	RequiredPerms            []string                 // permissions the route requires
+	APIID                    string                   // API identifier e.g., "orders-api"
+	MethodName               string                   // SDK method name e.g., "sendMagicLink"
+	HTTPMethod               string                   // HTTP method e.g., "GET", "POST"
+	HTTPPath                 string                   // HTTP path template e.g., "/api/auth/send-magic-link"
+	Description              string                   // @docs description, else the comment with an auth note
+	RequiresAuth             bool                     // Whether authentication is required
+	Namespace                string                   // Namespace for grouping e.g., "auth"
+	IsScopedNS               bool                     // Whether the endpoint's namespace hoists a scope parameter
+	Parameters               JSONSchemaObject         // JSON Schema for parameters
+	Returns                  JSONSchemaReturn         // JSON Schema for return type
+	PathParams               []ToolPathParam          // Path parameters for invocation
+	HasInput                 bool                     // Whether endpoint has input type
+	InputType                string                   // Input type name if HasInput
+	ScalarArgs               []ToolScalarArg          // Scalar arguments (not path params)
+	QueryArgs                []ToolQueryArg           // Query arguments, with shape and bounds
+	Encrypted                bool                     // Whether endpoint payload must be encrypted
+	BindingStatus            string                   // ready, or unsupported_multipart for a file upload
+	InputSchemaDigest        string                   // sha256 of the encoded Parameters
+	MCPBinding               MCPToolBinding           // Explicit MCP invocation binding metadata
 }
 
-// MCPToolBinding describes deterministic runtime invocation bindings.
-type MCPToolBinding struct {
-	ToolName   string                     `json:"toolName"`
-	APIID      string                     `json:"apiId"`
-	Namespace  string                     `json:"namespace"`
-	MethodName string                     `json:"methodName"`
-	IsScopedNS bool                       `json:"isScoped"`
-	ScopeParam string                     `json:"scopeParam,omitempty"`
-	Arguments  []MCPToolArgumentBinding   `json:"arguments"`
-	MethodArgs []MCPMethodArgumentBinding `json:"methodArgs"`
-}
-
-// MCPToolArgumentBinding maps one tool parameter to an invocation target.
-type MCPToolArgumentBinding struct {
-	ToolParameter string `json:"toolParameter"`
-	Required      bool   `json:"required"`
-	Kind          string `json:"kind"`
-	Target        string `json:"target"`
-}
-
-// MCPMethodArgumentBinding defines SDK method argument order and sources.
-type MCPMethodArgumentBinding struct {
-	Position int      `json:"position"`
-	Kind     string   `json:"kind"`
-	Target   string   `json:"target"`
-	Sources  []string `json:"sources,omitempty"`
-}
+// MCPToolBinding, MCPToolArgumentBinding and MCPMethodArgumentBinding are
+// the ir wire types, so tools/mcp-binding.json and its Go consumers share
+// one field list.
+type (
+	MCPToolBinding           = ir.ToolBinding
+	MCPToolArgumentBinding   = ir.ToolArgumentBinding
+	MCPMethodArgumentBinding = ir.ToolMethodArgumentBinding
+)
 
 // ToolsOutput contains all generated tool definitions
 type ToolsOutput struct {
-	SchemaName        string           // Schema name e.g., "web-api"
+	SchemaName        string           // Schema name e.g., "orders-api"
 	APIID             string           // API identifier for MCP binding artifacts
-	SDKClassName      string           // SDK class name e.g., "WebApiSDK"
+	SDKClassName      string           // SDK class name e.g., "OrdersApiSDK"
 	TypesPackage      string           // Types package name
+	Keys              apigen.ToolKeys  // vendor keys the documents are written with
 	Tools             []ToolDefinition // All tool definitions
+	VisibleTools      []ToolDefinition // Tools with a visible @mcp record: the provider tool lists
 	Namespaces        []ToolsNamespace // Tools grouped by namespace
 	Timestamp         string           // Generation timestamp
 	MCPBindingVersion string           // MCP binding manifest schema version
@@ -87,7 +88,9 @@ type ToolsNamespace struct {
 	ScopeParam string           // Name of the hoisted scope parameter if IsScopedNS
 }
 
-// GenerateTools generates tool calling bindings from SDK and API output
+// GenerateTools generates tool calling bindings from SDK and API output. It
+// fails when an operation's @docs replay pointers do not resolve against
+// its tool arguments.
 func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock codegen.Clock) (*ToolsOutput, error) {
 	if sdkOutput == nil || len(sdkOutput.Namespaces) == 0 {
 		return nil, nil
@@ -98,19 +101,17 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 		APIID:             sdkOutput.SchemaName,
 		SDKClassName:      sdkOutput.SDKClassName,
 		TypesPackage:      sdkOutput.TypesPackage,
+		Keys:              apiOutput.ToolKeys,
 		Tools:             []ToolDefinition{},
+		VisibleTools:      []ToolDefinition{},
 		Namespaces:        []ToolsNamespace{},
 		Timestamp:         clock.RFC3339(),
 		MCPBindingVersion: "1.0",
 	}
 
-	// Build a map of input types for field expansion
 	inputTypeFields := toolsutil.BuildInputTypeFieldsMap(apiOutput)
-
-	// Get scalars from API output (dynamically extracted from schema)
 	scalars := apiOutput.Scalars
 
-	// Process each namespace
 	for _, ns := range sdkOutput.Namespaces {
 		toolsNS := ToolsNamespace{
 			Name:       ns.Name,
@@ -121,9 +122,15 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 		}
 
 		for _, endpoint := range ns.Endpoints {
-			tool := endpointToTool(output.APIID, endpoint, ns, inputTypeFields, scalars)
+			tool := endpointToTool(output.APIID, endpoint, ns, inputTypeFields, apiOutput.TypeUnions, scalars, apiOutput.ToolKeys)
+			if err := toolsutil.ValidateReplayContract(tool.Parameters, tool.ReplayMode, tool.IdempotencyKeyPointers, tool.ExpectedRevisionPointers); err != nil {
+				return nil, fmt.Errorf("operation %s replay contract: %w", tool.OperationID, err)
+			}
 			toolsNS.Tools = append(toolsNS.Tools, tool)
 			output.Tools = append(output.Tools, tool)
+			if tool.MCP != nil && !tool.MCP.Hidden {
+				output.VisibleTools = append(output.VisibleTools, tool)
+			}
 		}
 
 		output.Namespaces = append(output.Namespaces, toolsNS)
@@ -133,20 +140,25 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 }
 
 // endpointToTool converts an SDK endpoint to a tool definition
-func endpointToTool(apiID string, endpoint EndpointInfo, ns NamespaceInfo, inputTypeFields map[string][]apigen.Param, scalars map[string]apigen.ScalarJSONSchemaInfo) ToolDefinition {
-	// Build namespaced tool name
+func endpointToTool(
+	apiID string,
+	endpoint EndpointInfo,
+	ns NamespaceInfo,
+	inputTypeFields map[string][]apigen.Param,
+	inputTypeUnions map[string]apigen.ToolUnionInfo,
+	scalars map[string]apigen.ScalarJSONSchemaInfo,
+	keys apigen.ToolKeys,
+) ToolDefinition {
 	toolName := fmt.Sprintf("%s.%s", ns.Name, endpoint.Name)
 
-	// Build description with auth note if required
 	description := endpoint.Description
 	if description == "" {
 		description = fmt.Sprintf("%s endpoint", endpoint.Name)
 	}
-	if endpoint.RequiresAuth {
+	if endpoint.Docs == nil && endpoint.RequiresAuth {
 		description = fmt.Sprintf("%s (Requires authentication)", description)
 	}
 
-	// Build path params for invocation
 	pathParams := make([]ToolPathParam, len(endpoint.PathParams))
 	for i, p := range endpoint.PathParams {
 		pathParams[i] = ToolPathParam{
@@ -156,7 +168,6 @@ func endpointToTool(apiID string, endpoint EndpointInfo, ns NamespaceInfo, input
 		}
 	}
 
-	// Build scalar args for invocation
 	scalarArgs := make([]ToolScalarArg, len(endpoint.ScalarArgs))
 	for i, arg := range endpoint.ScalarArgs {
 		scalarArgs[i] = ToolScalarArg{
@@ -167,44 +178,74 @@ func endpointToTool(apiID string, endpoint EndpointInfo, ns NamespaceInfo, input
 		}
 	}
 
-	// Build query args for invocation
-	queryArgs := make([]ToolScalarArg, len(endpoint.QueryParams))
+	queryArgs := make([]ToolQueryArg, len(endpoint.QueryParams))
 	for i, arg := range endpoint.QueryParams {
-		queryArgs[i] = ToolScalarArg{
-			Name:     arg.Name,
-			TSName:   tsutil.ToCamelCase(arg.Name),
-			Required: arg.Required,
+		queryArgs[i] = ToolQueryArg{
+			Name: arg.Name, TSName: tsutil.ToCamelCase(arg.Name), Type: arg.IRType,
+			Required: arg.Required, IsArray: arg.IsArray, IsMap: arg.IsMap,
+			ValidateMin: arg.ValidateMin, ValidateMax: arg.ValidateMax,
+			ValidateMinLength: arg.ValidateMinLength, ValidateMaxLength: arg.ValidateMaxLength,
+			ValidateListMin: arg.ValidateListMin, ValidateListMax: arg.ValidateListMax,
+			ValidatePattern: arg.ValidatePattern,
 		}
 	}
 
-	// Build parameters JSON Schema
-	parameters := buildParametersSchema(endpoint, inputTypeFields, scalars, pathParams, scalarArgs)
+	parameters := toolsutil.BuildParametersSchema(
+		pathParams, queryArgs, endpoint.HasInput, endpoint.InputType, inputTypeFields, inputTypeUnions,
+		scalarArgs, endpoint.Encrypted, scalars,
+		func(name, tsName string) string {
+			if tsName != "" {
+				return tsName
+			}
+			return tsutil.ToCamelCase(name)
+		},
+		keys,
+	)
+	parametersJSON, _ := json.Marshal(parameters)
 
-	// Build return type schema
-	returns := buildReturnSchema(endpoint, scalars)
-
-	mcpBinding := buildMCPToolBinding(apiID, toolName, endpoint, ns, inputTypeFields, parameters)
-
-	return ToolDefinition{
-		Name:         toolName,
-		APIID:        apiID,
-		MethodName:   endpoint.Name,
-		HTTPMethod:   endpoint.Method,
-		HTTPPath:     endpoint.Path,
-		Description:  description,
-		RequiresAuth: endpoint.RequiresAuth,
-		Namespace:    ns.Name,
-		IsScopedNS:   ns.IsScopedNS,
-		Parameters:   parameters,
-		Returns:      returns,
-		PathParams:   pathParams,
-		HasInput:     endpoint.HasInput,
-		InputType:    endpoint.InputType,
-		ScalarArgs:   scalarArgs,
-		QueryArgs:    queryArgs,
-		Encrypted:    endpoint.Encrypted,
-		MCPBinding:   mcpBinding,
+	bindingStatus := "ready"
+	if endpoint.HasFileUpload {
+		bindingStatus = "unsupported_multipart"
 	}
+	guidance := toolsutil.OperationGuidance(endpoint.Docs)
+
+	tool := ToolDefinition{
+		Name:                     toolName,
+		OperationID:              endpoint.OperationID,
+		Title:                    endpoint.Title,
+		MCP:                      toolsutil.MCPWithGuidance(endpoint.MCP, guidance, keys.Guidance),
+		Guidance:                 guidance,
+		ReplayMode:               toolsutil.ReplayMode(endpoint.Docs),
+		IdempotencyKeyPointers:   toolsutil.IdempotencyKeyPointers(endpoint.Docs),
+		ExpectedRevisionPointers: toolsutil.ExpectedRevisionPointers(endpoint.Docs),
+		RequiredPerms:            append([]string(nil), endpoint.RequiredPerms...),
+		APIID:                    apiID,
+		MethodName:               endpoint.Name,
+		HTTPMethod:               endpoint.Method,
+		HTTPPath:                 endpoint.Path,
+		Description:              description,
+		RequiresAuth:             endpoint.RequiresAuth,
+		Namespace:                ns.Name,
+		IsScopedNS:               ns.IsScopedNS,
+		Parameters:               parameters,
+		Returns:                  toolsutil.BuildReturnSchema(endpoint.OutputType, endpoint.OutputIsArray, scalars),
+		PathParams:               pathParams,
+		HasInput:                 endpoint.HasInput,
+		InputType:                endpoint.InputType,
+		ScalarArgs:               scalarArgs,
+		QueryArgs:                queryArgs,
+		Encrypted:                endpoint.Encrypted,
+		BindingStatus:            bindingStatus,
+		InputSchemaDigest:        fmt.Sprintf("sha256:%x", sha256.Sum256(parametersJSON)),
+		MCPBinding:               buildMCPToolBinding(apiID, toolName, endpoint, ns, inputTypeFields, parameters),
+	}
+	if docs := endpoint.Docs; docs != nil {
+		tool.Capability = docs.Capability
+		tool.Lifecycle = string(docs.Lifecycle)
+		tool.Visibility = string(docs.Visibility)
+		tool.Audience = string(docs.Audience)
+	}
+	return tool
 }
 
 func buildMCPToolBinding(
@@ -261,15 +302,6 @@ func buildMCPToolBinding(
 		})
 		querySources = append(querySources, paramName)
 	}
-	if len(querySources) > 0 {
-		methodArgs = append(methodArgs, MCPMethodArgumentBinding{
-			Position: position,
-			Kind:     "query",
-			Target:   "query",
-			Sources:  querySources,
-		})
-		position++
-	}
 
 	inputSources := make([]string, 0)
 	inputKind := ""
@@ -311,6 +343,16 @@ func buildMCPToolBinding(
 		})
 		position++
 	}
+	// The generated method takes its query object after the input.
+	if len(querySources) > 0 {
+		methodArgs = append(methodArgs, MCPMethodArgumentBinding{
+			Position: position,
+			Kind:     "query",
+			Target:   "query",
+			Sources:  querySources,
+		})
+		position++
+	}
 
 	if endpoint.Encrypted {
 		_, isRequired := required["publicEncryptionKey"]
@@ -338,39 +380,11 @@ func buildMCPToolBinding(
 		APIID:      apiID,
 		Namespace:  ns.Name,
 		MethodName: endpoint.Name,
-		IsScopedNS: ns.IsScopedNS,
+		IsScoped:   ns.IsScopedNS,
 		ScopeParam: scopeParam,
 		Arguments:  arguments,
 		MethodArgs: methodArgs,
 	}
-}
-
-func buildParametersSchema(
-	endpoint EndpointInfo,
-	inputTypeFields map[string][]apigen.Param,
-	scalars map[string]apigen.ScalarJSONSchemaInfo,
-	pathParams []ToolPathParam,
-	scalarArgs []ToolScalarArg,
-) JSONSchemaObject {
-	return toolsutil.BuildParametersSchema(
-		pathParams,
-		endpoint.HasInput,
-		endpoint.InputType,
-		inputTypeFields,
-		scalarArgs,
-		endpoint.Encrypted,
-		scalars,
-		func(name, tsName string) string {
-			if tsName != "" {
-				return tsName
-			}
-			return tsutil.ToCamelCase(name)
-		},
-	)
-}
-
-func buildReturnSchema(endpoint EndpointInfo, scalars map[string]apigen.ScalarJSONSchemaInfo) JSONSchemaReturn {
-	return toolsutil.BuildReturnSchema(endpoint.OutputType, endpoint.OutputIsArray, scalars)
 }
 
 // GetToolByName returns a tool definition by its namespaced name

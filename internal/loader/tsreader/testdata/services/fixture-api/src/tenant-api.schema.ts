@@ -1,5 +1,5 @@
 import { Identity } from "superscalar";
-import { Secret } from "@superschematic/schema";
+import { Nullable, Secret, Validate } from "@superschematic/schema";
 import {
   Authenticated,
   Encrypted,
@@ -19,6 +19,12 @@ import {
   virtual
 } from "@superschematic/api";
 import { Tenant } from "@schemas/fixture-db";
+
+// Status filter for listTenants: an enum array query parameter.
+export enum TenantListStatus {
+  Active = "active",
+  Suspended = "suspended"
+}
 
 // Customer-facing projection of the Tenant table.
 @source(Tenant)
@@ -50,9 +56,13 @@ export class TenantQueries extends Authenticated {
     throw new Error("schema declaration only");
   }
 
+  // Array query parameters: ?ids=a,b&statuses=active,suspended.
   @rest(HttpMethod.GET, "tenants")
   @requirePermission(["tenants.read"])
-  listTenants(): TenantView[] {
+  listTenants(
+    ids: QueryParam<Validate<Identity.UUID[], { listMin: 1; listMax: 100 }>>,
+    statuses: QueryParam<Nullable<Validate<TenantListStatus[], { listMin: 0; listMax: 10 }>>>
+  ): TenantView[] {
     throw new Error("schema declaration only");
   }
 }

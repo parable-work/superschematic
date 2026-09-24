@@ -130,6 +130,7 @@ func ExtractTypes(schema *ir.Schema, scalars []ScalarInfo, config ExtractionConf
 			Fields:            make([]FieldInfo, 0, len(typeDef.Fields)),
 			JsonField:         typeDef.JsonField,
 			DenyUnknownFields: typeDef.DenyUnknownFields,
+			StrictJSON:        typeDef.StrictJSON,
 			EnvVars:           typeDef.EnvVars,
 			Versioned:         typeDef.Versioned,
 			VersionedConfig:   typeDef.VersionedConfig,

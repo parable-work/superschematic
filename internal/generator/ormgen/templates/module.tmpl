@@ -18,6 +18,10 @@ require (
 )
 
 replace {{ .TypesModule }} => ../../types/go/{{ .SchemaName }}
+{{- range .ModuleDependencyReplaces }}
+
+replace {{ .Module }} => {{ .RelPath }}
+{{- end }}
 {{- if .ScalarLibReplacePath }}
 
 replace {{ .Naming.ScalarGoModule }} => {{ .ScalarLibReplacePath }}

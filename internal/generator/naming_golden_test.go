@@ -113,6 +113,7 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 
 	manifests := []string{
 		"types/go/fixture-db/go.mod",
+		"types/typescript/package.json",
 		"types/typescript/fixture-db/package.json",
 		"types/python/fixture-db/pyproject.toml",
 		"types/rust/fixture-db/Cargo.toml",

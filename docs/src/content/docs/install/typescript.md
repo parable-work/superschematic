@@ -78,6 +78,13 @@ TypeScript types land under `schemas/dist/types/typescript/catalog` as
 your app at that directory with a workspace dependency or a `file:`
 specifier until you publish the generated package.
 
+`schemas/dist/types/typescript/package.json` is a private Bun workspace
+root (`@schemas/types-workspace`) that lists every generated types package.
+Types packages depend on each other with `file:../<schema>` specs, and Bun
+only follows a transitive `file:` path outside the install root for the
+root package or one of its workspaces, so run `bun install` in that
+directory or in any package under it.
+
 ## Consume generated types
 
 ```ts

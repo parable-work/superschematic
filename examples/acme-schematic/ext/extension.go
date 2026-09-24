@@ -10,6 +10,11 @@
 //     inventory (inventory.go);
 //   - an auth provider, "apikey", that the api generator renders with when
 //     superschematic.toml selects it (auth/);
+//   - a policy over the core documentation decorators: checks on the @docs
+//     audience and the @icon name, and an OpenAPI hook that renames the
+//     vendor key (docs.go);
+//   - a policy over the core @mcp decorator: every operation of the shop
+//     API is classified (mcp.go);
 //   - two subcommands through cli.CommandProvider: describe (command.go) and
 //     fields, which type-checks a declaration file with the loader's
 //     compiler (fields.go).
@@ -71,6 +76,12 @@ func (Extension) Register(r *registry.Registry) error {
 		return err
 	}
 	if err := registerInventory(r); err != nil {
+		return err
+	}
+	if err := registerDocsPolicy(r); err != nil {
+		return err
+	}
+	if err := registerMCPPolicy(r); err != nil {
 		return err
 	}
 	return r.RegisterAuthProvider(auth.Provider{})

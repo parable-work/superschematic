@@ -95,7 +95,8 @@ type TypeInfo struct {
 	// whether to emit a Default impl alongside the struct.
 	HasDefaults bool
 
-	// DenyUnknownFields emits #[serde(deny_unknown_fields)] on the struct.
+	// DenyUnknownFields emits #[serde(deny_unknown_fields)] on the struct,
+	// for @denyUnknownFields and for @strictJSON.
 	DenyUnknownFields bool
 }
 
@@ -153,6 +154,10 @@ type ExternalCrateDep struct {
 
 // ModuleOutput contains all generated code for a Rust types crate.
 type ModuleOutput struct {
+	// RuntimeSchemas holds, per @jsonField payload type, the IR document
+	// with that type as root and every definition it reaches, written as
+	// schemas/<Type>.json next to the crate's sources.
+	RuntimeSchemas    map[string][]byte
 	CrateName         string
 	SchemaName        string
 	Scalars           []ScalarInfo
@@ -309,6 +314,10 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	output.UsesUnions = hasUnionFields(output.Types)
 	output.ExternalCrateDeps = collectExternalCrateDeps(output)
 	output.UsesScalarLib = usesScalarLib(output)
+	output.RuntimeSchemas, err = runtimeSchemas(schema, opts.Dependencies)
+	if err != nil {
+		return nil, err
+	}
 
 	return output, nil
 }
@@ -449,12 +458,14 @@ func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enu
 	types := make([]TypeInfo, len(codegenTypes))
 	for i, t := range codegenTypes {
 		types[i] = TypeInfo{
-			Name:              t.Name,
-			Owner:             t.Owner,
-			Role:              t.Role,
-			Doc:               t.Doc(),
-			Fields:            make([]FieldInfo, len(t.Fields)),
-			DenyUnknownFields: t.DenyUnknownFields,
+			Name:   t.Name,
+			Owner:  t.Owner,
+			Role:   t.Role,
+			Doc:    t.Doc(),
+			Fields: make([]FieldInfo, len(t.Fields)),
+			// @strictJSON rejects undeclared keys in every language; in Rust
+			// that is the attribute @denyUnknownFields sets.
+			DenyUnknownFields: t.DenyUnknownFields || t.StrictJSON,
 		}
 
 		hasDefaults := false
