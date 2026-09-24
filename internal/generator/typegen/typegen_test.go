@@ -31,6 +31,9 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-db"},
 		{service: "fixture-api", deps: []string{"fixture-db"}},
 		{service: "fixture-general"},
+		{service: "fixture-nested-arrays"},
+		{service: "fixture-nested-arrays-db"},
+		{service: "fixture-nested-arrays-api"},
 	}
 
 	for _, tc := range cases {
