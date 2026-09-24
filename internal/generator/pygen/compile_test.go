@@ -44,14 +44,22 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		t.Fatalf("load fixture-general: %v", err)
 	}
 
-	cases := []struct {
+	type fixtureCase struct {
 		name   string
 		schema *ir.Schema
 		deps   map[string]*ir.Schema
-	}{
+	}
+	cases := []fixtureCase{
 		{name: "fixture-db", schema: dbSchema},
 		{name: "fixture-api", schema: apiSchema, deps: map[string]*ir.Schema{"fixture-db": dbSchema}},
 		{name: "fixture-general", schema: generalSchema},
+	}
+	for _, name := range []string{"fixture-nested-arrays", "fixture-nested-arrays-db", "fixture-nested-arrays-api"} {
+		schema, err := loader.LoadService(filepath.Join(fixturesDir, name))
+		if err != nil {
+			t.Fatalf("load %s: %v", name, err)
+		}
+		cases = append(cases, fixtureCase{name: name, schema: schema})
 	}
 
 	var importPaths []string
