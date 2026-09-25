@@ -64,7 +64,7 @@ type {{.ScalarInputStructName}} struct {
 	{{- range .ScalarArgs}}
 	{{- if .IsArray}}
 	{{- if not .Required}}
-	{{.GoName}} {{.GoType}} `json:"{{.Name}},omitempty"`
+	{{.GoName}} {{.GoType}} `json:"{{.Name}},omitzero"`
 	{{- else}}
 	{{.GoName}} {{.GoType}} `json:"{{.Name}}"`
 	{{- end}}

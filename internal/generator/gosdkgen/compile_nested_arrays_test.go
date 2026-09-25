@@ -15,9 +15,9 @@ import (
 // SDK of fixture-nested-arrays-api, with grid.paint added, into a temp tree
 // laid out as a build writes it, then runs go mod tidy, go build, go vet and
 // go test on the SDK module with nestedArraysSDKTest: [][]T arguments and
-// responses cross an httptest server as nested JSON arrays, and a nil inner
+// responses cross an httptest server as nested JSON arrays, a nil inner
 // list or a bad element fails validation at its index path before any
-// request.
+// request, and an optional list argument is sent only when it is not nil.
 func TestNestedArraysSDKBuildsAndRuns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -219,6 +219,24 @@ func TestPaintValidatesElements(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, [][]types.Point{{{X: 1, Y: 2}}, {}}) {
 		t.Errorf("polygons = %v", got)
+	}
+}
+
+func TestPaintSendsAnOptionalListOnlyWhenSet(t *testing.T) {
+	client, calls := serve(t, ` + "`" + `[]` + "`" + `)
+	for _, polygons := range [][][]types.Point{nil, {}} {
+		if _, err := client.GridNamespace.Paint(context.Background(), gridID, namespaces.GridPaintInput{
+			Shades:   [][]types.Shade{},
+			Polygons: polygons,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := decode(t, ` + "`" + `{"shades":[]}` + "`" + `); !reflect.DeepEqual((*calls)[0].body, want) {
+		t.Errorf("nil polygons: body = %v, want %v", (*calls)[0].body, want)
+	}
+	if want := decode(t, ` + "`" + `{"shades":[],"polygons":[]}` + "`" + `); !reflect.DeepEqual((*calls)[1].body, want) {
+		t.Errorf("empty polygons: body = %v, want %v", (*calls)[1].body, want)
 	}
 }
 `
