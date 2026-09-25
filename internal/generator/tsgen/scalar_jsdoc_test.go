@@ -114,3 +114,38 @@ func TestScalarJSDocTagFollowsNaming(t *testing.T) {
 		})
 	}
 }
+
+// TestScalarJSDocTagOnArraysOfArrays: a T[][] field of a scalar carries the
+// tag of its element scalar, as a T[] field does.
+func TestScalarJSDocTagOnArraysOfArrays(t *testing.T) {
+	cases := loadNestedArraysEdges(t)
+	edges := cases[1]
+	output, err := Generate(edges.schema, Options{
+		SchemaName:   edges.name,
+		Dependencies: edges.deps,
+		Naming:       naming.Naming{ScalarJSDocTag: "fixtureScalar"},
+		Clock:        codegen.FixedClock(time.Unix(0, 0).UTC()),
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	outDir := filepath.Join(t.TempDir(), edges.name)
+	if err := WriteTypes(output, outDir); err != nil {
+		t.Fatalf("write types: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(outDir, "types", "types.ts"))
+	if err != nil {
+		t.Fatalf("read generated types.ts: %v", err)
+	}
+	for _, want := range []string{
+		"  /** @fixtureScalar Identity.UUID */\n  ids: string[][];\n",
+		"  /** @fixtureScalar Temporal.DateTime */\n  stamps?: JSDate[][] | null;\n",
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("types.ts is missing\n%s\ngot:\n%s", want, got)
+		}
+	}
+	if strings.Contains(string(got), "@fixtureScalar Tone") || strings.Contains(string(got), "@fixtureScalar Cell") {
+		t.Errorf("an enum or object T[][] field must carry no scalar tag:\n%s", got)
+	}
+}

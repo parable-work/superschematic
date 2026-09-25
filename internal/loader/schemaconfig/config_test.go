@@ -96,9 +96,21 @@ outputs:
 	if _, ok := cfg.Outputs["catalog"]; !ok {
 		t.Errorf("outputs = %+v, want the catalog section kept", cfg.Outputs)
 	}
-	bad := writeConfig(t, "schema.config.json", `{"name": "shop", "kind": "DB", "outputs": {"types": {"go": {"enabled": "yes"}}}}`)
-	if _, err := ReadFile(bad, coreKinds); err == nil {
-		t.Error("a malformed core section was accepted")
+	// Opening outputs to extension keys leaves the core sections closed,
+	// the API server language included.
+	for _, outputs := range []string{
+		`{"types": {"go": {"enabled": "yes"}}}`,
+		`{"api": {"enabled": true, "language": "TYPESCRIPT2"}}`,
+		`{"api": {"enabled": true, "langauge": "TYPESCRIPT"}}`,
+	} {
+		bad := writeConfig(t, "schema.config.json", `{"name": "shop", "kind": "API", "outputs": `+outputs+`}`)
+		if _, err := ReadFile(bad, coreKinds); err == nil {
+			t.Errorf("a malformed core section was accepted: %s", outputs)
+		}
+	}
+	good := writeConfig(t, "schema.config.json", `{"name": "shop", "kind": "API", "outputs": {"api": {"enabled": true, "language": "TYPESCRIPT"}}}`)
+	if _, err := ReadFile(good, coreKinds); err != nil {
+		t.Errorf("the TypeScript API server: %v", err)
 	}
 }
 

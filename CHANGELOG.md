@@ -332,7 +332,7 @@ of a generated artifact is always listed here with the bump it requires.
   dotted-path coverage, no root permission, as in `runtime/http/go/session`),
   a token-bucket rate limiter with a pluggable store, and the Hono adapter.
   The service supplies an `Authenticator`; identity and token verification
-  stay out of the runtime (D12). It ships TypeScript sources and is packed
+  stay out of the runtime (D15). It ships TypeScript sources and is packed
   with the other npm packages on release. The naming key
   `http_runtime_npm_package` (default `@superschematic/http-runtime`) names
   it in generated code, and `Naming.NpmAPIPackage` names the generated
