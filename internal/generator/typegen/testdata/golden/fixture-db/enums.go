@@ -33,6 +33,15 @@ func (e TenantStatus) IsValid() bool {
 	return false
 }
 
+// Values returns every TenantStatus member in schema declaration order.
+// Each call returns a new slice.
+func (TenantStatus) Values() []TenantStatus {
+	return []TenantStatus{
+		TenantStatus_Active,
+		TenantStatus_Suspended,
+	}
+}
+
 // Validate and returns whether validation passed along with any errors.
 func (e TenantStatus) Validate() (bool, []ValidationError) {
 	var errs []ValidationError

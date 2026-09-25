@@ -13,6 +13,10 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- Go types: every generated enum has a `Values()` method that returns its
+  members in schema declaration order, as a new slice on each call. It is
+  the Go counterpart of Rust's `ALL`, and it works through the alias a
+  module that imports the enum declares. Minor.
 - `runtime/http/go/bodyargs`: decodes the body arguments of an operation
   without an input type from a JSON object body, each from its own JSON
   value, with the list rules and the value rules, recording every failure

@@ -62,6 +62,16 @@ func (e {{.Name}}) IsValid() bool {
 	return false
 }
 
+// Values returns every {{.Name}} member in schema declaration order.
+// Each call returns a new slice.
+func ({{.Name}}) Values() []{{.Name}} {
+	return []{{.Name}}{
+	{{- range .Values}}
+		{{$enumName}}_{{.Name}},
+	{{- end}}
+	}
+}
+
 // Validate and returns whether validation passed along with any errors.
 func (e {{.Name}}) Validate() (bool, []ValidationError) {
 	var errs []ValidationError

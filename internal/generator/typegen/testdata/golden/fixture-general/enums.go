@@ -33,6 +33,15 @@ func (e FixtureEnvironment) IsValid() bool {
 	return false
 }
 
+// Values returns every FixtureEnvironment member in schema declaration order.
+// Each call returns a new slice.
+func (FixtureEnvironment) Values() []FixtureEnvironment {
+	return []FixtureEnvironment{
+		FixtureEnvironment_Development,
+		FixtureEnvironment_Production,
+	}
+}
+
 // Validate and returns whether validation passed along with any errors.
 func (e FixtureEnvironment) Validate() (bool, []ValidationError) {
 	var errs []ValidationError
