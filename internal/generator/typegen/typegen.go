@@ -149,7 +149,7 @@ type UnionInfo struct {
 	// matching its value against each member's DiscriminatorValue. Requires
 	// a non-empty Discriminator and a non-empty DiscriminatorValue on every
 	// member. Otherwise the generated wrapper falls back to shape-based
-	// dispatch (strict-only, no lenient fallback).
+	// dispatch over each member's Fields and Tags.
 	DispatchByDiscriminator bool
 }
 
@@ -157,6 +157,11 @@ type UnionInfo struct {
 type UnionMemberInfo struct {
 	Name               string
 	DiscriminatorValue string
+
+	// Fields and Tags are set only for shape-dispatched unions; see
+	// annotateShapeDispatch. Fields lists the member's JSON field names.
+	Fields []string
+	Tags   []codegen.UnionTag
 }
 
 // TypePairField describes how to convert one field from input to output type.
@@ -244,6 +249,7 @@ type ModuleOutput struct {
 	CompositeDefaults        []CompositeDefaultInfo
 	HasInputFieldWrappers    bool
 	HasVersionedTypes        bool
+	HasShapeDispatchedUnions bool
 	HasInt64ScalarParsers    bool
 	HasJSONScalarParsers     bool
 
@@ -382,6 +388,10 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		}
 	}
 	output.TypePairs = buildTypePairs(output.Types, output.ImportedTypes)
+	output.HasShapeDispatchedUnions, err = annotateShapeDispatch(output.Unions, append(append([]codegen.TypeInfo{}, objectTypes...), inputTypes...), enumLookup)
+	if err != nil {
+		return nil, err
+	}
 
 	for _, typeInfo := range output.Types {
 		if typeInfo.Role == ir.RoleDBTable {
@@ -665,6 +675,38 @@ func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, isInput
 		}
 	}
 	return types
+}
+
+// annotateShapeDispatch fills Fields and Tags on every member of a union
+// without a member-keyed discriminator, from codegen.UnionShapes over the
+// member types this module generates, and reports whether any union needs
+// them.
+func annotateShapeDispatch(unions []UnionInfo, types []codegen.TypeInfo, enumLookup codegen.EnumLookup) (bool, error) {
+	fieldsByType := make(map[string][]codegen.FieldInfo, len(types))
+	for _, typeInfo := range types {
+		fieldsByType[typeInfo.Name] = typeInfo.Fields
+	}
+	shapeDispatched := false
+	for u := range unions {
+		union := &unions[u]
+		if union.DispatchByDiscriminator {
+			continue
+		}
+		shapeDispatched = true
+		members := make([][]codegen.FieldInfo, len(union.Members))
+		for i, member := range union.Members {
+			fields, ok := fieldsByType[member.Name]
+			if !ok {
+				return false, fmt.Errorf("union %s member %s is not a generated type of this module", union.Name, member.Name)
+			}
+			members[i] = fields
+		}
+		for i, shape := range codegen.UnionShapes(members, enumLookup) {
+			union.Members[i].Fields = shape.Fields
+			union.Members[i].Tags = shape.Tags
+		}
+	}
+	return shapeDispatched, nil
 }
 
 // buildEnumLookup returns a closure that reports whether a type name refers

@@ -801,6 +801,40 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Go types: a union field is validated, and a union without an
+  `@internalMetadata` discriminator decodes to the member the payload
+  describes. `Validate` emitted nothing for a union field, so an absent
+  required union passed, and so did a member missing its own required
+  fields; a generated Go API route, which validates its input before the
+  implementation runs, let both through. Each `<Union>Wrapper` now has
+  `Validate`, which validates the member it holds, by value or by pointer.
+  A containing type's `Validate` reports an absent required union
+  (`required`), a nil union element of a list, a list of lists or a map
+  (`required` at its path), and nests the member's errors under the
+  field's path, including a union imported from a dependency. A union
+  without a discriminator tried each member's `FromMapStrict` in turn, but
+  a member's `UnmarshalJSON` ignores keys it does not declare, so the first
+  member took every payload. The wrapper now takes the first member whose
+  fields include every payload key and whose tags the payload does not
+  contradict. A tag is a field that two or more members declare with
+  distinct string or enum defaults, such as
+  `kind: Default<TriggerKind, TriggerKind.NewMessage>`. When no member
+  declares every key, the wrapper tolerates the unknown keys and takes the
+  first member whose tags the payload allows. A Go server now answers 400
+  to a union input without the member's required fields, which it used to
+  accept. Unions with a discriminator decode as before. Minor.
+- Rust types: an untagged union (one without an `@internalMetadata`
+  discriminator) decodes to the member the payload describes. serde's
+  untagged derive tried each member in turn, and a member's derived
+  `Deserialize` ignores keys it does not declare, so the first member whose
+  required fields were present took the payload: of two members with the
+  same fields, told apart by a defaulted `kind`, the second never decoded,
+  and a payload with an unknown key went to the first member it fit. The
+  union now decodes through a `serde_json::Value` and picks its member by
+  the Go types' rule above, which both generators take from one place. A
+  payload that is not a JSON object is refused; serde used to read a JSON
+  array as a member struct. A crate with an untagged union now depends on
+  `serde_json`. Patch.
 - TypeScript types and the Go, TypeScript and Python schema runtimes: a
   value of the wrong JSON type in a field typed `string`, `number` or
   `boolean`, required or optional, single, a `T[]` or `T[][]` element or

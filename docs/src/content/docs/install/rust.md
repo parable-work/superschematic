@@ -100,6 +100,15 @@ keeps the digits it was written with. For that, the superscalar crate turns
 on serde_json's `arbitrary_precision` feature, which Cargo applies to every
 crate in the build that uses serde_json.
 
+A union is an enum with one variant per member. When every member marks
+the same field `@internalMetadata`, serde reads that field as the enum's
+tag. Otherwise the enum is untagged and decodes by shape, as the Go types
+do: the first member whose fields include every payload key wins, unless
+the payload contradicts one of the member's tags, a field that two or more
+members declare with distinct string or enum defaults. When no member
+declares every key, the first member whose tags the payload allows wins.
+Either way the payload must be a JSON object.
+
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk` for Rust writes `schemas-<name>-sdk`.

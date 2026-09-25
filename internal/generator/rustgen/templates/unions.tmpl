@@ -54,36 +54,72 @@ impl<'de> Deserialize<'de> for {{.Name}} {
     }
 }
 {{- else}}
-{{- if .PreserveJSON}}
 #[derive(Debug, Clone, PartialEq, Serialize)]
-{{- else}}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-{{- end}}
 #[serde(untagged)]
 pub enum {{.Name}} {
 {{- range .Types}}
     {{.}}({{.}}),
 {{- end}}
 }
-{{- if .PreserveJSON}}
 
-// Use the shared JSON adapter before trying schema-owned members. Serde's
-// untagged Content buffer cannot preserve RawValue or exact JSON numbers.
+// A member's derived Deserialize ignores keys the member does not declare, so
+// serde's untagged derive, which tries each member in turn, let the first
+// member whose required fields are present take every payload. Pick the first
+// member whose fields include every payload key and whose tag values the
+// payload does not contradict; when no member declares every key, tolerate
+// the unknown keys and pick the first member whose tags the payload allows.
+{{- if .PreserveJSON}}
+// Read the payload through the shared JSON adapter: serde's untagged Content
+// buffer cannot preserve RawValue or exact JSON numbers.
+{{- end}}
 impl<'de> Deserialize<'de> for {{.Name}} {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
+{{- if .PreserveJSON}}
         let value: serde_json::Value = {{$.JSONFieldAdapter}}(deserializer)?;
-{{- range .Types}}
-        if let Ok(member) = serde_json::from_value::<{{.}}>(value.clone()) {
-            return Ok(Self::{{.}}(member));
+{{- else}}
+        let value = serde_json::Value::deserialize(deserializer)?;
+{{- end}}
+        let payload = value.as_object().ok_or_else(|| {
+            serde::de::Error::custom("{{escapeString .Name}} requires a JSON object")
+        })?;
+{{- range .Members}}
+        if union_payload_keys_within(payload, &[{{range $i, $field := .Fields}}{{if $i}}, {{end}}"{{escapeString $field}}"{{end}}])
+            && union_payload_tags_allow(payload, &[{{range $i, $tag := .Tags}}{{if $i}}, {{end}}("{{escapeString $tag.Field}}", "{{escapeString $tag.Value}}"){{end}}])
+        {
+            if let Ok(member) = serde_json::from_value::<{{.Name}}>(value.clone()) {
+                return Ok(Self::{{.Name}}(member));
+            }
+        }
+{{- end}}
+{{- range .Members}}
+        if union_payload_tags_allow(payload, &[{{range $i, $tag := .Tags}}{{if $i}}, {{end}}("{{escapeString $tag.Field}}", "{{escapeString $tag.Value}}"){{end}}]) {
+            if let Ok(member) = serde_json::from_value::<{{.Name}}>(value.clone()) {
+                return Ok(Self::{{.Name}}(member));
+            }
         }
 {{- end}}
         Err(serde::de::Error::custom("data did not match any variant of untagged enum {{escapeString .Name}}"))
     }
 }
 {{- end}}
-{{- end}}
 
 {{end -}}
+{{- if .HasUntaggedUnions}}
+
+/// Reports whether every payload key is one of `fields`.
+fn union_payload_keys_within(payload: &serde_json::Map<String, serde_json::Value>, fields: &[&str]) -> bool {
+    payload.keys().all(|key| fields.contains(&key.as_str()))
+}
+
+/// Takes (field, value) pairs and reports whether the payload leaves each
+/// field absent or sets it to that string value.
+fn union_payload_tags_allow(payload: &serde_json::Map<String, serde_json::Value>, tags: &[(&str, &str)]) -> bool {
+    tags.iter().all(|(field, value)| match payload.get(*field) {
+        None => true,
+        Some(raw) => raw.as_str() == Some(*value),
+    })
+}
+{{- end}}

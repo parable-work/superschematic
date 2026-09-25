@@ -129,6 +129,19 @@ Decoding refuses a null list element, since a list element is never null:
 type's zero value in its place. A null list itself still decodes, to a nil
 list or a null `InputField`.
 
+A union field decodes through its `<Union>Wrapper`. When every member
+marks the same field `@internalMetadata`, the wrapper picks the member by
+that field's value. Otherwise it picks by shape, because a member's decoder
+ignores keys the member does not declare: the first member whose fields
+include every payload key wins, unless the payload contradicts one of the
+member's tags. A tag is a field that two or more members declare with
+distinct string or enum defaults, such as
+`kind: Default<TriggerKind, TriggerKind.NewMessage>`. When no member
+declares every key, the wrapper tolerates the unknown keys and takes the
+first member whose tags the payload allows. `Validate` checks the member a
+union field holds, so a member without its required fields fails, and so
+does an absent required union or a nil union element of a list or map.
+
 Encoding keeps an empty list apart from an absent one. An optional list is
 left out when it is nil and written when it is `[]`, so a decoded payload
 re-encodes with the same keys. A required list encodes nil as `[]`.
