@@ -42,6 +42,9 @@ import (
 {{- if .HasFilterableEndpoints }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
 {{- end }}
+{{- if .HasBodyArgs }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/bodyargs"
+{{- end }}
 	runtimemiddleware "{{ $.Naming.HTTPRuntimeGoModule }}/middleware"
 	runtimerouting "{{ $.Naming.HTTPRuntimeGoModule }}/routing"
 {{- if .IsPublic }}
@@ -331,6 +334,13 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 	{{- if and .ValidatePattern (or .IsArray (not (or .IsInt .IsFloat .IsBool .IsUUID))) }}
 	scalar{{ .GoName }}PatternRegex := regexp.MustCompile({{ printf "%q" .ValidatePattern }})
 	{{- end }}
+	{{- end }}
+	{{- end }}
+	{{- if .BodyArgs }}
+	// Body arguments: the JSON type of each value, then its rules in the
+	// order they are checked (the scalar type's own, then the argument's).
+	{{- range .BodyArgs }}
+	body{{ .GoName }}Arg := {{ .NewArg }}
 	{{- end }}
 	{{- end }}
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
@@ -1233,70 +1243,28 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- end }}
 		{{- end }}
 		{{- else }}
-		// Parse scalar arguments from request body (non-GET endpoints)
-		var requestBody struct {
-			{{- range .ScalarArgs }}
-			{{ .GoName }} {{ .GoListType }} `json:"{{ .Name }}"`
-			{{- end }}
-		}
-		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		// Parse body arguments (non-GET endpoints). The body is one JSON
+		// object; each argument is decoded from its own JSON value and
+		// checked by the list and value rules, and every failure is reported
+		// at the argument's path (name, name[i], name[i][j]).
+		body, err := bodyargs.ReadObject(r.Body)
+		if err != nil {
 			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
 			return
 		}
-		{{- range .ScalarArgs }}
-
-		// Validate {{ .Name }}
-		{{- if .IsArrayOfArrays }}
-		// An array of arrays: an inner list is never null, reported at
-		// {{ .Name }}[i]; an empty one is valid.
-		{{- if not .IsGoPrimitive }} Each element runs its own
-		// validation, reported at {{ .Name }}[i][j].
-		{{- end }}
-		{
-			validationErrors := types.NewValidationErrors()
-			{{- if .Required }}
-			if requestBody.{{ .GoName }} == nil {
-				validationErrors.AddFieldError("{{ .Name }}", "required", "required field")
-			}
+		var requestBody struct {
+			{{- range .BodyArgs }}
+			{{ .GoName }} {{ .GoListType }}
 			{{- end }}
-			for i, row := range requestBody.{{ .GoName }} {
-				if row == nil {
-					validationErrors.AddFieldError(fmt.Sprintf("{{ .Name }}[%d]", i), "required", "required field")
-					{{- if not .IsGoPrimitive }}
-					continue
-					{{- end }}
-				}
-				{{- if not .IsGoPrimitive }}
-				for j := range row {
-					validateListElement(validationErrors, fmt.Sprintf("{{ .Name }}[%d][%d]", i, j), &row[j])
-				}
-				{{- end }}
-			}
-			if validationErrors.HasErrors() {
-				RespondValidationErrors(w, r, validationErrors)
-				return
-			}
 		}
-		{{- else if .Required }}
-		if validator, ok := interface{}(requestBody.{{ .GoName }}).(interface{ ValidateRequired() (bool, []types.ValidationError) }); ok {
-			if valid, fieldErrs := validator.ValidateRequired(); !valid {
-				validationErrors := types.NewValidationErrors()
-				validationErrors.SetFieldErrors("{{ .Name }}", fieldErrs)
-				RespondValidationErrors(w, r, validationErrors)
-				return
-			}
-		}
-		{{- else }}
-		if validator, ok := interface{}(requestBody.{{ .GoName }}).(interface{ Validate() (bool, []types.ValidationError) }); ok {
-			if valid, fieldErrs := validator.Validate(); !valid {
-				validationErrors := types.NewValidationErrors()
-				validationErrors.SetFieldErrors("{{ .Name }}", fieldErrs)
-				RespondValidationErrors(w, r, validationErrors)
-				return
-			}
-		}
+		validationErrors := types.NewValidationErrors()
+		{{- range .BodyArgs }}
+		requestBody.{{ .GoName }} = bodyargs.{{ .Decoder }}[{{ .GoType }}](validationErrors, body, body{{ .GoName }}Arg)
 		{{- end }}
-		{{- end }}
+		if validationErrors.HasErrors() {
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
 		{{- end }}
 		{{- end }}
 
@@ -1331,30 +1299,6 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- else }}
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
 		{{- end }}
-	}
-}
-{{- end }}
-
-{{- if .ValidatesListElements }}
-
-// validateListElement runs the validation of one element of a list argument
-// when its type has one, and records the errors under path
-// ("rows[2][5]"). item points at the element, so object types, whose
-// Validate has a pointer receiver, qualify.
-func validateListElement(validationErrors types.ValidationErrors, path string, item any) {
-	switch validator := item.(type) {
-	case interface{ ValidateRequired() (bool, []types.ValidationError) }:
-		if valid, itemErrs := validator.ValidateRequired(); !valid {
-			validationErrors.SetFieldErrors(path, itemErrs)
-		}
-	case interface{ Validate() (bool, []types.ValidationError) }:
-		if valid, itemErrs := validator.Validate(); !valid {
-			validationErrors.SetFieldErrors(path, itemErrs)
-		}
-	case interface{ Validate() types.ValidationErrors }:
-		if itemErrs := validator.Validate(); itemErrs.HasErrors() {
-			validationErrors.AddNestedError(path, itemErrs)
-		}
 	}
 }
 {{- end }}

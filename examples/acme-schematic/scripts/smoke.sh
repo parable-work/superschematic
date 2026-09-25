@@ -358,10 +358,12 @@ for types in "$DIST/types/go/shop-db/types.go" "$DIST/types/go/shop-api/types.go
 done
 grep -q '^  variants: string\[\]\[\];$' "$DIST/types/typescript/shop-db/types/types.ts"
 test "$(grep -c '^  variants: string\[\]\[\];$' "$DIST/types/typescript/shop-api/types/types.ts")" -eq 2
-# The Go route decodes the body argument as [][]string and refuses a null
-# inner list at variants[i].
-grep -q 'Variants \[\]\[\]string `json:"variants"`' "$DIST/api/shop-api/routes.go"
-grep -q 'validationErrors.AddFieldError(fmt.Sprintf("variants\[%d\]", i), "required", "required field")' "$DIST/api/shop-api/routes.go"
+# The Go route decodes the body argument as [][]string through the HTTP
+# runtime's bodyargs.ListOfLists, which refuses a null inner list at
+# variants[i].
+grep -q 'Variants \[\]\[\]string$' "$DIST/api/shop-api/routes.go"
+grep -q 'bodyVariantsArg := bodyargs.NewArg("variants", bodyargs.String, bodyargs.Required())' "$DIST/api/shop-api/routes.go"
+grep -q 'requestBody.Variants = bodyargs.ListOfLists\[string\](validationErrors, body, bodyVariantsArg)' "$DIST/api/shop-api/routes.go"
 # OpenAPI and the tool documents nest the items.
 jq -e '.components.schemas.ProductView.properties.variants == {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}' \
   "$OPENAPI" >/dev/null

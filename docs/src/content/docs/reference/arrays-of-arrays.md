@@ -70,7 +70,7 @@ schema-file JSON Schema (`superschematic json-schema`) has the key.
 | OpenAPI and MCP tool documents | `{"type": "array", "items": T}` | `{"type": "array", "items": {"type": "array", "items": T}}`. `minItems` and `maxItems` sit on the outer array; every other constraint sits on the innermost items. |
 | Postgres column | native `T[]` for a scalar | `JSONB`, `NOT NULL` when required. Postgres multi-dimensional arrays must be rectangular, and lists of lists are often ragged. |
 | Go ORM | native array scan and encode | the JSON codec that maps and `@jsonField` columns use. A nil inner list is stored as `[]`; a union element is decoded through the union's wrapper. |
-| Go API routes | `[]T` | `[][]T` for a body argument and a response. A nil inner list of a response is sent as `[]`. |
+| Go API routes | `[]T` | `[][]T` for a body argument and a response. Body decoding (`runtime/http/go/bodyargs`) applies the list rules below, and a nil inner list of a response is sent as `[]`. |
 | TypeScript API server | `T[]` | `T[][]` for a body argument and a response. Body decoding applies the list rules below, and a null or missing inner list of a response is sent as `[]`. |
 | SDKs | `[]T`, `T[]`, `list[T]`, `Vec<T>` | `[][]T` (Go), `T[][]` (TypeScript), `list[list[T]]` (Python), `Vec<Vec<T>>` (Rust) |
 
@@ -113,9 +113,9 @@ argument.
 
 ## List rules
 
-The generated Go, TypeScript and Python validators and the Go, TypeScript
-and Python schema runtimes apply one set of rules, to `T[]` and to the
-outer list of `T[][]` alike:
+The generated Go, TypeScript and Python validators, the Go, TypeScript
+and Python schema runtimes and the Go API routes' body arguments apply one
+set of rules, to `T[]` and to the outer list of `T[][]` alike:
 
 - **Required means present, not non-empty.** `[]` satisfies a required
   list, and so does an empty outer list. Declare non-emptiness with
@@ -158,9 +158,10 @@ The same paths appear where each target checks a payload:
 - The Go API routes answer `400` with these paths for a request body. A
   null element in a list of the operation's input type fails to decode
   (below), and the route answers `400` (`Invalid request body`) before the
-  implementation runs. A list argument of an operation without an input
-  type is decoded into the route's own struct, without that check, so a
-  null element there reaches the implementation as its type's zero value.
+  implementation runs. A body argument of an operation without an input
+  type, a `T[]` and a `T[][]` alike, is read from its JSON value by
+  `runtime/http/go/bodyargs`, which answers `400` with these paths: a null
+  element is `required` and an element of the wrong JSON type is `type`.
 - The TypeScript API server answers `400` with these paths for a body
   argument, a `T[]` and a `T[][]` alike, of a scalar, enum, object or
   `Generic.JSON` type. It reads each element as its JSON value, so a

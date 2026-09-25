@@ -14,6 +14,7 @@ depends on a generated type.
 | `routing` | route registration and handler adapter scaffolding |
 | `session` | the core auth provider's runtime: session store, middleware and permission checks |
 | `filterparse` | list-endpoint filter expression parsing |
+| `bodyargs` | decoding the body arguments of an operation without an input type: each from its JSON value, with the list rules and the value rules, every failure at its path |
 
 The generated API package keeps `Config`, `Implementations`, the route table,
 per-endpoint decode and validate wiring, and anything that names a generated
