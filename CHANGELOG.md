@@ -574,11 +574,14 @@ of a generated artifact is always listed here with the bump it requires.
   one comma-separated value. Before, the handler parsed the parameter as a
   single scalar. The Rust SDK also drops a zero `listMin` check, which
   compared an unsigned length with zero. Minor.
-- The superscalar pin moves to `79a8e6a` (`superscalar.pin` and every
+- The superscalar pin moves to `1be340a` (`superscalar.pin` and every
   `go.mod`), and the TypeScript and Python scalar catalogs are regenerated
   from it. Generated output changes where a scalar changed:
   - Four new scalars are available to schemas: `AgentSkill.Name`,
     `Git.PathPattern`, `Ordering.Rank` and `Version.SemVer`.
+    `Git.PathPattern` reads escapes by the parity of each backslash run:
+    `/a\\[b]` (an escaped backslash, then a class) is accepted, and
+    `/a\\ ` (a bare trailing space) is rejected.
   - `Generic.JSON` is any JSON value. Its description changes in every
     generated scalar comment and readme; its `json_schema` type mapping is
     `any` (was `object`), which the projection Arrow metadata key

@@ -19,7 +19,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/parable-work/superscalar/go v0.0.0-20260924135511-79a8e6a73504 // indirect
+	github.com/parable-work/superscalar/go v0.0.0-20260924221754-1be340a36ae1 // indirect
 	github.com/parable-work/superschematic/ir v0.0.0 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
