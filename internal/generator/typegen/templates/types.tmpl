@@ -332,6 +332,19 @@ func (t *{{.Name}}) MaskSecrets() *{{.Name}} {
 		// Keep wrapper metadata but clear secret value.
 		{{else if .IsArray}}
 		masked.{{.GoName}}.Value = append(masked.{{.GoName}}.Value, t.{{.GoName}}.Value...)
+		{{else if and .IsMap (not .IsScalar) (isGeneratedType $.Types $.ImportedTypes .Type)}}
+		if t.{{.GoName}}.Value != nil {
+			masked.{{.GoName}}.Value = make({{inputFieldValueType .GoType}}, len(t.{{.GoName}}.Value))
+			for key, item := range t.{{.GoName}}.Value {
+				{{if hasPrefix .GoType "InputField[map[string]*"}}
+				masked.{{.GoName}}.Value[key] = item.MaskSecrets()
+				{{else}}
+				if maskedValue := item.MaskSecrets(); maskedValue != nil {
+					masked.{{.GoName}}.Value[key] = *maskedValue
+				}
+				{{end}}
+			}
+		}
 		{{else if and (not .IsScalar) (isGeneratedType $.Types $.ImportedTypes .Type)}}
 		{{if hasPrefix .GoType "InputField[*"}}
 		if t.{{.GoName}}.Value != nil {
@@ -559,6 +572,18 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 				errors.AddNestedError(fieldKey, itemErrs)
 			}
 		}
+		{{else if .IsMap}}
+		for key, item := range value {
+			{{if hasPrefix .GoType "InputField[map[string]*"}}
+			if item == nil {
+				continue
+			}
+			{{end}}
+			if itemErrs := item.Validate(); itemErrs.HasErrors() {
+				fieldKey := fmt.Sprintf("{{.Name}}[%s]", key)
+				errors.AddNestedError(fieldKey, itemErrs)
+			}
+		}
 		{{else}}
 		if value != nil {
 			if fieldErrs := value.Validate(); fieldErrs.HasErrors() {
@@ -571,6 +596,11 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	{{if .IsMap}}
 	if t.{{.GoName}} != nil {
 		for key, item := range t.{{.GoName}} {
+			{{if hasPrefix .GoType "map[string]*"}}
+			if item == nil {
+				continue
+			}
+			{{end}}
 			if itemErrs := item.Validate(); itemErrs.HasErrors() {
 				fieldKey := fmt.Sprintf("{{.Name}}[%s]", key)
 				errors.AddNestedError(fieldKey, itemErrs)
@@ -1374,6 +1404,12 @@ func (in *{{.InputName}}) To{{.OutputName}}() *{{.OutputName}} {
 			}
 		}
 		out.{{.GoName}} = converted
+{{- else if .IsMap}}
+		converted := make({{.GoType}}, len(in.{{.GoName}}.Value))
+		for key, v := range in.{{.GoName}}.Value {
+{{- template "pairedMapEntry" .}}
+		}
+		out.{{.GoName}} = converted
 {{- else}}
 		out.{{.GoName}} = in.{{.GoName}}.Value.To{{.PairedTypeName}}()
 {{- end}}
@@ -1410,6 +1446,14 @@ func (in *{{.InputName}}) To{{.OutputName}}() *{{.OutputName}} {
 		}
 		out.{{.GoName}} = converted
 	}
+{{- else if .IsMap}}
+	if in.{{.GoName}} != nil {
+		converted := make({{.GoType}}, len(in.{{.GoName}}))
+		for key, v := range in.{{.GoName}} {
+{{- template "pairedMapEntry" .}}
+		}
+		out.{{.GoName}} = converted
+	}
 {{- else}}
 	if c := in.{{.GoName}}.To{{.PairedTypeName}}(); c != nil {
 		out.{{.GoName}} = *c
@@ -1435,8 +1479,21 @@ func {{.AccessorName}}() {{.Type}} {
 	return value
 }
 {{- end}}
-{{- /* The blocks below render a list-of-lists (T[][]) field; the file's
-  output ends above. They take the nestedList view of the field. */ -}}
+{{- /* The blocks below are called from above; the file's output ends
+  above. pairedMapEntry converts entry v of a map of a paired input type
+  into converted[key]: a map whose output values are pointers keeps a null
+  entry null, since To<Type> returns nil for it. The nestedList blocks
+  render a list-of-lists (T[][]) field from its nestedList view. */ -}}
+
+{{- define "pairedMapEntry"}}
+{{- if hasPrefix .GoType "map[string]*"}}
+			converted[key] = v.To{{.PairedTypeName}}()
+{{- else}}
+			if c := v.To{{.PairedTypeName}}(); c != nil {
+				converted[key] = *c
+			}
+{{- end}}
+{{- end}}
 
 {{- define "nestedListMask"}}
 {{- $f := .Field}}

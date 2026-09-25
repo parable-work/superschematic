@@ -741,5 +741,15 @@ of a generated artifact is always listed here with the bump it requires.
   Python or Rust type failed with "declares metadata beyond its language
   primitive". The writer now strips every bound and type mapping that
   equals the catalog's before it checks a scalar reference. Patch.
+- Go types: an optional map of a generated type (`map[string]*T`) on an
+  input type did not compile: `MaskSecrets` and `Validate` called the
+  type's methods on the map itself. They now mask and validate each entry,
+  keep a null entry null and report an entry's errors under `name[key]`.
+  On an output type, `Validate` called `Validate` on a null entry, which
+  panics when the type checks any field; it now skips the entry. An input
+  whose map values are the input twin of a paired type
+  (`Record<string, TInput>` on the input of a `@jsonField` type) rendered
+  `To<Type>` as `Tomap[string]T()` and the module failed to format; it now
+  converts each entry and keeps a null entry null. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main

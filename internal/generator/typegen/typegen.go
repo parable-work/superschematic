@@ -162,6 +162,7 @@ type TypePairField struct {
 	UsesWrapper     bool
 	IsArray         bool
 	IsArrayOfArrays bool
+	IsMap           bool
 	IsScalar        bool
 	IsPaired        bool
 	PairedTypeName  string
@@ -875,6 +876,7 @@ func buildTypePairs(types []TypeInfo, importedTypes []ImportedTypeInfo) []TypePa
 				UsesWrapper:     inputField.UsesWrapper,
 				IsArray:         inputField.IsArray,
 				IsArrayOfArrays: inputField.IsArrayOfArrays,
+				IsMap:           inputField.IsMap,
 				IsScalar:        inputField.IsScalar,
 			}
 
@@ -905,7 +907,8 @@ func buildTypePairs(types []TypeInfo, importedTypes []ImportedTypeInfo) []TypePa
 	return pairs
 }
 
-// unwrapGoType strips pointer, slice, and InputField wrappers from a Go type string.
+// unwrapGoType strips pointer, slice, map, and InputField wrappers from a Go
+// type string.
 func unwrapGoType(goType string) string {
 	s := goType
 	if strings.HasPrefix(s, "InputField[") {
@@ -914,6 +917,7 @@ func unwrapGoType(goType string) string {
 	}
 	for {
 		prev := s
+		s = strings.TrimPrefix(s, "map[string]")
 		s = strings.TrimPrefix(s, "[]")
 		s = strings.TrimPrefix(s, "*")
 		if s == prev {
