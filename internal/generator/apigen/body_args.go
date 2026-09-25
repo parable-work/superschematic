@@ -25,9 +25,15 @@ type BodyArg struct {
 	Options []string
 }
 
-// Decoder is the bodyargs function that decodes the argument: Value, List
-// or ListOfLists.
+// Decoder is the bodyargs function that decodes the argument: Value, List,
+// ListOfLists, Map or MapOfLists.
 func (a BodyArg) Decoder() string {
+	if a.IsMap {
+		if a.IsArray {
+			return "MapOfLists"
+		}
+		return "Map"
+	}
 	switch a.ArrayDepth() {
 	case 2:
 		return "ListOfLists"
@@ -56,10 +62,12 @@ func (m *typeMapper) bodyArgs(args []Param) []BodyArg {
 		if arg.Required {
 			options = append(options, "bodyargs.Required()")
 		}
-		if arg.IsArray && arg.ValidateListMin != nil {
+		// List bounds bound a list argument; as in the generated types, a
+		// map has none.
+		if arg.IsArray && !arg.IsMap && arg.ValidateListMin != nil {
 			options = append(options, fmt.Sprintf("bodyargs.ListMin(%d)", *arg.ValidateListMin))
 		}
-		if arg.IsArray && arg.ValidateListMax != nil {
+		if arg.IsArray && !arg.IsMap && arg.ValidateListMax != nil {
 			options = append(options, fmt.Sprintf("bodyargs.ListMax(%d)", *arg.ValidateListMax))
 		}
 		if scalarDef, ok := m.findScalarDef(arg.Type); ok {

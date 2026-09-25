@@ -419,13 +419,11 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			required := []string{}
 
 			for _, arg := range endpoint.ScalarArgs {
-				argSchema := codegen.WrapJSONSchemaArray(typeToOpenAPISchema(arg.Type, scalarExamples, scalarDescriptions, scalarMap), arg.ArrayDepth())
+				typeRef := ir.TypeRef{Name: arg.Type, IsArray: arg.IsArray, IsArrayOfArrays: arg.IsArrayOfArrays, IsMap: arg.IsMap}
 				if arg.Required {
 					required = append(required, arg.Name)
-				} else {
-					argSchema = nullableOpenAPISchema(argSchema, openAPIRefType(arg.Type, schema, dependencies))
 				}
-				properties[arg.Name] = argSchema
+				properties[arg.Name] = typeRefToOpenAPISchema(typeRef, !arg.Required, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
 			}
 
 			schemaObj := map[string]interface{}{

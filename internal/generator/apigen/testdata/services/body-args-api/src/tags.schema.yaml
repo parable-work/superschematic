@@ -1,9 +1,10 @@
 # Body arguments of operations without an input type: lists of strings,
 # numbers, an integer scalar, an enum, a string scalar, a UUID and an object
-# type, required single values of each builtin type, and Generic.JSON values
-# alone, in a list and in a list of lists. The Go route tests in apigen load
-# it. saveTags and storeDocument match the TypeScript server's scalar list
-# fixture, so both servers answer the same vectors.
+# type, required single values of each builtin type, Generic.JSON values
+# alone, in a list and in a list of lists, and maps of an enum, of lists of
+# a string scalar and of an object type. The Go route tests in apigen load
+# it. saveTags, storeDocument and findTags match the TypeScript server's
+# scalar list fixture, so both servers answer the same vectors.
 name: body-args-api
 kind: API
 scalars:
@@ -128,6 +129,38 @@ operationSets:
             typeRef: { name: Generic.JSON, isArray: true }
           - name: grid
             typeRef: { name: Generic.JSON, isArray: true, isArrayOfArrays: true }
+      # Name the shades and links of a post: maps of an enum and of lists.
+      - name: nameShades
+        typeRef: { name: boolean }
+        required: true
+        httpMethod: PUT
+        restPath: "posts/{id}/shade-names"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          # A shade per name.
+          - name: shadeByName
+            typeRef: { name: Shade, isMap: true }
+            required: true
+          # Links per locale, each on https.
+          - name: linksByLocale
+            typeRef: { name: Network.Url, isMap: true, isArray: true }
+            validatePattern: "^https://"
+      # Place named points on a post's cover image: a map of an object type
+      # is a body argument, not the operation's input type.
+      - name: placePoints
+        typeRef: { name: boolean }
+        required: true
+        httpMethod: PUT
+        restPath: "posts/{id}/points"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: pointByName
+            typeRef: { name: Point, isMap: true }
+            required: true
   - name: TagQueries
     operations:
       # Find posts by label; the labels travel in the query string.

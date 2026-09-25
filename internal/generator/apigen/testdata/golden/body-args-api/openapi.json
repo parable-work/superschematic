@@ -377,6 +377,195 @@
         ]
       }
     },
+    "/api/posts/{id}/points": {
+      "put": {
+        "description": "Place named points on a post's cover image: a map of an object type\nis a body argument, not the operation's input type.",
+        "operationId": "TagPlacePointsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "pointByName": {
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/Point"
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "pointByName"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "type": "boolean"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "placePoints",
+        "tags": [
+          "tag"
+        ]
+      }
+    },
+    "/api/posts/{id}/shade-names": {
+      "put": {
+        "description": "Name the shades and links of a post: maps of an enum and of lists.",
+        "operationId": "TagNameShadesHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "linksByLocale": {
+                    "additionalProperties": {
+                      "items": {
+                        "description": "Valid HTTP/HTTPS URL",
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "nullable": true,
+                    "type": "object"
+                  },
+                  "shadeByName": {
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/Shade"
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "shadeByName"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "type": "boolean"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "nameShades",
+        "tags": [
+          "tag"
+        ]
+      }
+    },
     "/api/posts/{id}/tags": {
       "put": {
         "description": "Replace a post's tags; returns the labels as stored.",

@@ -19,8 +19,8 @@ of a generated artifact is always listed here with the bump it requires.
   in a `ValidationErrors` at its path. `ReadObject` reads the body;
   `NewArg` with `Required`, `ListMin`, `ListMax`, `MinLength`,
   `MaxLength`, `Pattern`, `Min` and `Max` describes one argument; the
-  generic `Value`, `List` and `ListOfLists` decode it. Generated Go API
-  routes call it. Minor.
+  generic `Value`, `List`, `ListOfLists`, `Map` and `MapOfLists` decode
+  it. Generated Go API routes call it. Minor.
 - Python SDK: the generated client retries a `GET`, `HEAD` or `OPTIONS`
   request that fails with a `NetworkError`, up to
   `ClientConfig.max_network_retries` times (default 3), sleeping 1, 2, 4
@@ -459,6 +459,28 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- Go API: a map body argument (`Record<string, T>`, or `Record<string,
+  T[]>`) is decoded as a map. The route read it as one `T` (or `[]T`), so
+  `{"toneByName": {"a": "warm"}}` failed as "Invalid request body" while
+  `{"toneByName": "warm"}` was accepted, and the implementation took a
+  `T`. The implementation now takes `map[string]T` (`map[string][]T`), the
+  body must hold a JSON object there (`type`, "expected an object"), and
+  each value is checked as a list element at `name[key]` (a list value's
+  elements at `name[key][i]`): never null (`required`), then the scalar's
+  and the argument's rules and the type's own `Validate`. A
+  `Record<string, T>` argument whose `T` is an object type was taken for
+  the operation's input type, so the body had to be one `T` and the
+  implementation took `input *types.T`; it is a body argument like any
+  other map. `openapi.json` describes a map body argument as an object
+  with `additionalProperties`, where it wrote the value's schema alone. A
+  map argument of a `GET` operation, and a map path or query parameter,
+  fail the build with the argument named: the query string has no
+  encoding for a map. An implementation of an operation with a map body
+  argument changes its signature. Minor.
+- Go API: a list argument of a `GET` operation reads every occurrence of
+  its query key, each split on commas, as a `QueryParam<T[]>` and the
+  TypeScript server already did: `?labels=a,b&labels=c` is `["a", "b",
+  "c"]`, where it was `["a", "b"]`. Patch.
 - Go API: a route reads each body argument (an argument of an operation
   that is not `GET` and has no input type, other than a path or query
   parameter) from its own JSON value through `runtime/http/go/bodyargs`,

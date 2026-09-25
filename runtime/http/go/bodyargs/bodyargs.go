@@ -27,9 +27,14 @@
 //     Then the type's own Validate runs: a scalar's core check, an enum's
 //     membership ("enum"), an object's field validation, whose errors nest
 //     under the element's path.
+//   - A map (Record<string, T>) is a JSON object whose values follow the
+//     rules of a list element at name[key]: never null, and checked as a T.
+//     A map of lists (Record<string, T[]>) has a list at each key, checked
+//     as a list argument's elements at name[key][i].
 //
 // A generated route builds one Arg per body argument when it is created
-// and decodes a request's arguments with Value, List or ListOfLists.
+// and decodes a request's arguments with Value, List, ListOfLists, Map or
+// MapOfLists.
 package bodyargs
 
 import (
@@ -289,6 +294,83 @@ func ListOfLists[T any](errs validate.ValidationErrors, body Body, arg *Arg) [][
 		}
 	}
 	return values
+}
+
+// Map decodes a map argument (Record<string, T>): a JSON object ("type",
+// "expected an object" otherwise) whose values are never null ("required"
+// at name[key]) and pass the checks of a list element, at name[key]. An
+// absent or null map is nil, and "required" when the argument is required;
+// {} is an empty, non-nil map. List bounds do not apply to a map.
+func Map[T any](errs validate.ValidationErrors, body Body, arg *Arg) map[string]T {
+	entries, ok := arg.object(errs, body)
+	if !ok {
+		return nil
+	}
+	values := make(map[string]T, len(entries))
+	for key, entry := range entries {
+		path := fmt.Sprintf("%s[%s]", arg.name, key)
+		if isNull(entry) {
+			errs.AddFieldError(path, "required", "required field")
+			continue
+		}
+		var value T
+		decode(errs, arg, path, entry, &value)
+		values[key] = value
+	}
+	return values
+}
+
+// MapOfLists decodes a map whose values are lists (Record<string, T[]>):
+// the map as Map does, then each value as a list that is never null
+// ("required" at name[key]), is an array ("type" at name[key]) and whose
+// elements are checked at name[key][i].
+func MapOfLists[T any](errs validate.ValidationErrors, body Body, arg *Arg) map[string][]T {
+	entries, ok := arg.object(errs, body)
+	if !ok {
+		return nil
+	}
+	values := make(map[string][]T, len(entries))
+	for key, entry := range entries {
+		path := fmt.Sprintf("%s[%s]", arg.name, key)
+		if isNull(entry) {
+			errs.AddFieldError(path, "required", "required field")
+			continue
+		}
+		var elements []json.RawMessage
+		if !Array.matches(bytes.TrimSpace(entry)) || json.Unmarshal(entry, &elements) != nil {
+			errs.AddFieldError(path, "type", Array.typeMessage())
+			continue
+		}
+		list := make([]T, len(elements))
+		for i, element := range elements {
+			elementPath := fmt.Sprintf("%s[%d]", path, i)
+			if isNull(element) {
+				errs.AddFieldError(elementPath, "required", "required field")
+				continue
+			}
+			decode(errs, arg, elementPath, element, &list[i])
+		}
+		values[key] = list
+	}
+	return values
+}
+
+// object reads a map argument: absent or null is "required" when the
+// argument is required, and anything but a JSON object is "type". ok is
+// false when there is no map to decode.
+func (a *Arg) object(errs validate.ValidationErrors, body Body) (entries map[string]json.RawMessage, ok bool) {
+	raw := present(body, a.name)
+	if raw == nil {
+		if a.required {
+			errs.AddFieldError(a.name, "required", "required field")
+		}
+		return nil, false
+	}
+	if !Object.matches(raw) || json.Unmarshal(raw, &entries) != nil {
+		errs.AddFieldError(a.name, "type", Object.typeMessage())
+		return nil, false
+	}
+	return entries, true
 }
 
 // list reads the outer list of a list argument: absent or null is "required"

@@ -51,6 +51,18 @@ func (s *tags) StoreDocument(_ context.Context, document types.GenericJSON, note
 	return &document, nil
 }
 
+func (s *tags) NameShades(_ context.Context, id string, shadeByName map[string]types.Shade, linksByLocale map[string][]types.NetworkUrl) (*bool, error) {
+	s.record(map[string]any{"id": id, "shadeByName": shadeByName, "linksByLocale": linksByLocale})
+	named := true
+	return &named, nil
+}
+
+func (s *tags) PlacePoints(_ context.Context, id string, pointByName map[string]types.Point) (*bool, error) {
+	s.record(map[string]any{"id": id, "pointByName": pointByName})
+	placed := true
+	return &placed, nil
+}
+
 func (s *tags) FindTags(_ context.Context, labels []string) ([]string, error) {
 	s.record(map[string]any{"labels": labels})
 	return labels, nil
@@ -104,6 +116,9 @@ const (
 	saveTagsPath      = "/api/posts/p1/tags"
 	setFlagsPath      = "/api/posts/p1/flags"
 	storeDocumentPath = "/api/documents"
+	nameShadesPath    = "/api/posts/p1/shade-names"
+	placePointsPath   = "/api/posts/p1/points"
+	findTagsPath      = "/api/posts/tags"
 )
 
 // accepted sends body and checks the implementation was called with it.
@@ -423,4 +438,66 @@ func TestAGenericJSONListTakesAnyElementButNull(t *testing.T) {
 	refusedWith(t, server, impl, http.MethodPost, storeDocumentPath, `{"document": 1, "grid": [[null]]}`, fieldError{"grid[0][0]", "required", "required field"})
 	refusedWith(t, server, impl, http.MethodPost, storeDocumentPath, `{"document": 1, "grid": [null]}`, fieldError{"grid[0]", "required", "required field"})
 	refusedWith(t, server, impl, http.MethodPost, storeDocumentPath, `{"document": 1, "grid": [{}]}`, fieldError{"grid[0]", "type", "expected an array"})
+}
+
+func TestAMapArgumentIsAJSONObject(t *testing.T) {
+	server, impl := serve(t)
+	accepted(t, server, impl, http.MethodPut, nameShadesPath, `{"shadeByName": {"a": "light", "b": "dark"}, "linksByLocale": {"en": ["https://a.test"], "fr": []}}`)
+	if want := map[string]types.Shade{"a": types.Shade_Light, "b": types.Shade_Dark}; !reflect.DeepEqual(impl.last["shadeByName"], want) {
+		t.Errorf("shadeByName = %#v, want %#v", impl.last["shadeByName"], want)
+	}
+	if want := map[string][]types.NetworkUrl{"en": {"https://a.test"}, "fr": {}}; !reflect.DeepEqual(impl.last["linksByLocale"], want) {
+		t.Errorf("linksByLocale = %#v, want %#v", impl.last["linksByLocale"], want)
+	}
+	accepted(t, server, impl, http.MethodPut, nameShadesPath, `{"shadeByName": {}}`)
+	if shades := impl.last["shadeByName"].(map[string]types.Shade); shades == nil || len(shades) != 0 {
+		t.Errorf("{} = %#v, want an empty, non-nil map", shades)
+	}
+	if links := impl.last["linksByLocale"].(map[string][]types.NetworkUrl); links != nil {
+		t.Errorf("an absent optional map = %#v, want nil", links)
+	}
+	for _, body := range []string{`{}`, `{"shadeByName": null}`} {
+		refusedWith(t, server, impl, http.MethodPut, nameShadesPath, body, fieldError{"shadeByName", "required", "required field"})
+	}
+	for _, body := range []string{`{"shadeByName": "light"}`, `{"shadeByName": ["light"]}`} {
+		refusedWith(t, server, impl, http.MethodPut, nameShadesPath, body, fieldError{"shadeByName", "type", "expected an object"})
+	}
+}
+
+func TestEachMapValueIsCheckedAtItsKey(t *testing.T) {
+	server, impl := serve(t)
+	refusedWith(t, server, impl, http.MethodPut, nameShadesPath, `{"shadeByName": {"a": "dim", "b": null, "c": 5}}`,
+		fieldError{"shadeByName[a]", "enum", ""},
+		fieldError{"shadeByName[b]", "required", "required field"},
+		fieldError{"shadeByName[c]", "type", "expected a string"},
+	)
+	refusedWith(t, server, impl, http.MethodPut, nameShadesPath, `{"shadeByName": {}, "linksByLocale": {"en": ["http://a.test", null], "fr": "https://a.test", "de": null}}`,
+		fieldError{"linksByLocale[en][0]", "pattern", "invalid format"},
+		fieldError{"linksByLocale[en][1]", "required", "required field"},
+		fieldError{"linksByLocale[fr]", "type", "expected an array"},
+		fieldError{"linksByLocale[de]", "required", "required field"},
+	)
+}
+
+func TestAMapOfAnObjectTypeIsABodyArgument(t *testing.T) {
+	server, impl := serve(t)
+	accepted(t, server, impl, http.MethodPut, placePointsPath, `{"pointByName": {"a": {"x": 1, "y": 2}}}`)
+	if want := map[string]types.Point{"a": {X: 1, Y: 2}}; !reflect.DeepEqual(impl.last["pointByName"], want) {
+		t.Errorf("pointByName = %#v, want %#v", impl.last["pointByName"], want)
+	}
+	refusedWith(t, server, impl, http.MethodPut, placePointsPath, `{"pointByName": {"a": {"x": -1, "y": 0}, "b": null}}`,
+		fieldError{"pointByName[a].x", "min", ""},
+		fieldError{"pointByName[b]", "required", "required field"},
+	)
+	// The body is not a Point: the map is the argument named pointByName.
+	refusedWith(t, server, impl, http.MethodPut, placePointsPath, `{"x": 1, "y": 2}`, fieldError{"pointByName", "required", "required field"})
+}
+
+func TestAGETListReadsEveryQueryKey(t *testing.T) {
+	server, impl := serve(t)
+	accepted(t, server, impl, http.MethodGet, findTagsPath+"?labels=a,b&labels=c", "")
+	if want := []string{"a", "b", "c"}; !reflect.DeepEqual(impl.last["labels"], want) {
+		t.Errorf("labels = %#v, want %#v", impl.last["labels"], want)
+	}
+	refused(t, server, impl, http.MethodGet, findTagsPath, "")
 }
