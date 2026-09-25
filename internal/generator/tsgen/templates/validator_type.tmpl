@@ -637,6 +637,29 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   }
   {{end}}
   {{end}}
+  {{if and .IsArray (not .IsMap)}}
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.{{.TSName}})) {
+    {{- if .IsArrayOfArrays}}
+    value.{{.TSName}}.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `{{.TSName}}[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
+    {{- else}}
+    value.{{.TSName}}.forEach((item, index) => {
+      if (item === null || item === undefined) {
+        setFieldErrors(errors, `{{.TSName}}[${index}]`, [{ validator: "required", message: "required field" }]);
+      }
+    });
+    {{- end}}
+  }
+  {{end}}
   {{end}}
 
   return Object.keys(errors).length > 0 ? errors : true;

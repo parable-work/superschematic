@@ -342,8 +342,8 @@ var vectors = []parityVector{
 		want:    map[string][]string{"optNum": {"min"}},
 	},
 	{
-		// A list element is never null, in an optional list too. Go and
-		// TypeScript accept it today; see knownDivergences.
+		// A list element is never null, in an optional list too. The
+		// generated Go validator cannot see it; see knownDivergences.
 		name:    "opt_list_null_element",
 		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optList": ["a", null]}`,
 		want:    map[string][]string{"optList[1]": {"required"}},
@@ -571,19 +571,6 @@ var knownDivergences = map[string]map[string]map[string][]string{
 			"numGrid[0][0]":         {"min"},
 			"pointGrid[0][0].shade": {"required"},
 			"reqUrlGrid[0][0]":      {"required"},
-		},
-	},
-	"typescript": {
-		// An optional list's elements are checked with String(item), and
-		// String(null) passes maxLength 5.
-		"opt_list_null_element": {},
-		"req_list_null_element": {},
-		// A null object element is skipped, and a null innermost number
-		// is checked as Number(null), which is 0.
-		"list_null_object_element": {},
-		"grid_innermost_null_every_kind": {
-			"numGrid[0][0]":    {"min"},
-			"reqUrlGrid[0][0]": {"required"},
 		},
 	},
 }

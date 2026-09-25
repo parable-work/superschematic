@@ -38,6 +38,20 @@ export function validateDrawing(value: Drawing | null | undefined): ValidationRe
     addFieldError(errors, "labels", "required", "required field");
   }
 
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.labels)) {
+    value.labels.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `labels[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
+  }
+
   if (Array.isArray(value.shades)) {
     value.shades.forEach((row, rowIndex) => {
       if (row === null || row === undefined) {
@@ -57,6 +71,20 @@ export function validateDrawing(value: Drawing | null | undefined): ValidationRe
     });
   } else {
     addFieldError(errors, "shades", "required", "required field");
+  }
+
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.shades)) {
+    value.shades.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `shades[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
   }
 
   {
@@ -96,6 +124,20 @@ export function validateDrawing(value: Drawing | null | undefined): ValidationRe
     addFieldError(errors, "polygons", "required", "required field");
   }
 
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.polygons)) {
+    value.polygons.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `polygons[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
+  }
+
   if (Array.isArray(value.samples)) {
     value.samples.forEach((row, rowIndex) => {
       if (row === null || row === undefined) {
@@ -113,6 +155,20 @@ export function validateDrawing(value: Drawing | null | undefined): ValidationRe
       addFieldError(errors, "samples", "listMax", "must contain at most 64 items");
     }
 
+  }
+
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.samples)) {
+    value.samples.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `samples[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
   }
 
   return Object.keys(errors).length > 0 ? errors : true;

@@ -72,8 +72,9 @@ writeFileSync(process.env.NESTED_RESULTS as string, JSON.stringify(results, null
 // TestNestedObjectsValidatedForEveryType runs validateNode for a type that
 // is not @strictJSON: a nested object is validated as its own type, as a
 // field, a list or list-of-lists element, a map value and through the type
-// itself, with its errors at dotted paths. A value that is not an object is
-// left alone, as the schema runtimes do.
+// itself, with its errors at dotted paths. A null list element is
+// "required"; any other value that is not an object is left alone, as the
+// schema runtimes leave it.
 func TestNestedObjectsValidatedForEveryType(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping generated-validator check in -short mode")
@@ -128,6 +129,10 @@ func TestNestedObjectsValidatedForEveryType(t *testing.T) {
 		"map_value": {
 			payload: `{"label": "a", "leafMap": {"k": {}}}`,
 			want:    map[string][]string{"leafMap.k.name": {"required"}},
+		},
+		"null_element": {
+			payload: `{"label": "a", "children": [null, {"label": "b"}], "leafGrid": [[{"name": "x"}, null]]}`,
+			want:    map[string][]string{"children[0]": {"required"}, "leafGrid[0][1]": {"required"}},
 		},
 		"not_an_object": {
 			payload: `{"label": "a", "leaf": "text", "children": [7]}`,

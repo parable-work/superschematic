@@ -47,6 +47,20 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     addFieldError(errors, "labels", "required", "required field");
   }
 
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.labels)) {
+    value.labels.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `labels[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
+  }
+
   if (Array.isArray(value.states)) {
     value.states.forEach((row, rowIndex) => {
       if (row === null || row === undefined) {
@@ -66,6 +80,20 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     });
   } else {
     addFieldError(errors, "states", "required", "required field");
+  }
+
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.states)) {
+    value.states.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `states[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
   }
 
   {
@@ -105,12 +133,40 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     addFieldError(errors, "walls", "required", "required field");
   }
 
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.walls)) {
+    value.walls.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `walls[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
+  }
+
   if (Array.isArray(value.scores)) {
     value.scores.forEach((row, rowIndex) => {
       if (row === null || row === undefined) {
         addFieldError(errors, `scores[${rowIndex}]`, "required", "required field");
       } else if (!Array.isArray(row)) {
         addFieldError(errors, `scores[${rowIndex}]`, "type", "expected an array");
+      }
+    });
+  }
+
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.scores)) {
+    value.scores.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `scores[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
       }
     });
   }

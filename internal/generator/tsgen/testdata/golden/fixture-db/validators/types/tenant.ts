@@ -129,6 +129,16 @@ export function validateTenant(value: Tenant | null | undefined): ValidationResu
     addFieldError(errors, "users", "required", "required field");
   }
 
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.users)) {
+    value.users.forEach((item, index) => {
+      if (item === null || item === undefined) {
+        setFieldErrors(errors, `users[${index}]`, [{ validator: "required", message: "required field" }]);
+      }
+    });
+  }
+
   return Object.keys(errors).length > 0 ? errors : true;
 }
 
