@@ -944,7 +944,7 @@ service passes to `buildRouter`: an `Authenticator` that establishes the
 caller, and optionally a `PermissionMatcher` that replaces the default
 dotted-path coverage rule. A deployment's identity model, token format and
 service-to-service verification live in its own TypeScript package next to
-its provider, which supplies those two functions. D12 in
+its provider, which supplies those two functions. D15 in
 `docs/DECISIONS.md` records the split.
 
 ## 9. What the core registers
@@ -1100,4 +1100,4 @@ a candidate for a change with its own test.
 | `cli/cli.go` | `cli.New`, `CommandProvider` |
 | `loader/loader.go` | the public loader package |
 | `examples/acme-schematic/` | the worked example and its acceptance scripts |
-| `docs/DECISIONS.md` | the decisions this design rests on (D1, D2, D3, D4, D6, D10, D11, D13) |
+| `docs/DECISIONS.md` | the decisions this design rests on (D1, D2, D3, D4, D6, D10, D11, D13, D15) |
