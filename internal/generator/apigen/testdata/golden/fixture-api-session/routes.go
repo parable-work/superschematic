@@ -225,15 +225,6 @@ func createSessionCurrentTenantHandler(impl SessionImplementation) gohttp.Handle
 			RespondAppError(w, logger, err)
 			return
 		}
-		// Validate output (if validation method exists)
-		if validator, ok := interface{}(result).(interface {
-			Validate() interface{ HasErrors() bool }
-		}); ok {
-			if validationErrors := validator.Validate(); validationErrors.HasErrors() {
-				RespondError(w, r, gohttp.StatusInternalServerError, "Invalid response from implementation")
-				return
-			}
-		}
 
 		// Respond with result
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
@@ -261,15 +252,6 @@ func createTenantCustomHandlerHandler(impl TenantImplementation) gohttp.HandlerF
 			logger := LoggerFromContext(r.Context())
 			RespondAppError(w, logger, err)
 			return
-		}
-		// Validate output (if validation method exists)
-		if validator, ok := interface{}(result).(interface {
-			Validate() interface{ HasErrors() bool }
-		}); ok {
-			if validationErrors := validator.Validate(); validationErrors.HasErrors() {
-				RespondError(w, r, gohttp.StatusInternalServerError, "Invalid response from implementation")
-				return
-			}
 		}
 
 		// Respond with result
@@ -400,17 +382,6 @@ func createTenantListTenantsHandler(impl TenantImplementation) gohttp.HandlerFun
 			RespondAppError(w, logger, err)
 			return
 		}
-		// Validate output array (if validation method exists on elements)
-		for i, item := range result {
-			if validator, ok := interface{}(item).(interface {
-				Validate() interface{ HasErrors() bool }
-			}); ok {
-				if validationErrors := validator.Validate(); validationErrors.HasErrors() {
-					RespondError(w, r, gohttp.StatusInternalServerError, "Invalid response from implementation at index "+strconv.Itoa(i))
-					return
-				}
-			}
-		}
 
 		// Respond with result
 		RespondCollectionEnvelope(w, gohttp.StatusOK, result, r)
@@ -457,15 +428,6 @@ func createTenantCreateTenantHandler(impl TenantImplementation) gohttp.HandlerFu
 			RespondAppError(w, logger, err)
 			return
 		}
-		// Validate output (if validation method exists)
-		if validator, ok := interface{}(result).(interface {
-			Validate() interface{ HasErrors() bool }
-		}); ok {
-			if validationErrors := validator.Validate(); validationErrors.HasErrors() {
-				RespondError(w, r, gohttp.StatusInternalServerError, "Invalid response from implementation")
-				return
-			}
-		}
 
 		// Respond with result
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
@@ -505,15 +467,6 @@ func createTenantGetTenantHandler(impl TenantImplementation) gohttp.HandlerFunc 
 			logger := LoggerFromContext(r.Context())
 			RespondAppError(w, logger, err)
 			return
-		}
-		// Validate output (if validation method exists)
-		if validator, ok := interface{}(result).(interface {
-			Validate() interface{ HasErrors() bool }
-		}); ok {
-			if validationErrors := validator.Validate(); validationErrors.HasErrors() {
-				RespondError(w, r, gohttp.StatusInternalServerError, "Invalid response from implementation")
-				return
-			}
 		}
 
 		// Respond with result
@@ -570,15 +523,6 @@ func createTenantUpdateSecretHandler(impl TenantImplementation) gohttp.HandlerFu
 			logger := LoggerFromContext(r.Context())
 			RespondAppError(w, logger, err)
 			return
-		}
-		// Validate output (if validation method exists)
-		if validator, ok := interface{}(result).(interface {
-			Validate() interface{ HasErrors() bool }
-		}); ok {
-			if validationErrors := validator.Validate(); validationErrors.HasErrors() {
-				RespondError(w, r, gohttp.StatusInternalServerError, "Invalid response from implementation")
-				return
-			}
 		}
 
 		// Respond with result

@@ -191,15 +191,6 @@ func createGridSaveGridHandler(impl GridImplementation) gohttp.HandlerFunc {
 			RespondAppError(w, logger, err)
 			return
 		}
-		// Validate output (if validation method exists)
-		if validator, ok := interface{}(result).(interface {
-			Validate() interface{ HasErrors() bool }
-		}); ok {
-			if validationErrors := validator.Validate(); validationErrors.HasErrors() {
-				RespondError(w, r, gohttp.StatusInternalServerError, "Invalid response from implementation")
-				return
-			}
-		}
 
 		// Respond with result
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
@@ -235,15 +226,6 @@ func createGridGetGridHandler(impl GridImplementation) gohttp.HandlerFunc {
 			logger := LoggerFromContext(r.Context())
 			RespondAppError(w, logger, err)
 			return
-		}
-		// Validate output (if validation method exists)
-		if validator, ok := interface{}(result).(interface {
-			Validate() interface{ HasErrors() bool }
-		}); ok {
-			if validationErrors := validator.Validate(); validationErrors.HasErrors() {
-				RespondError(w, r, gohttp.StatusInternalServerError, "Invalid response from implementation")
-				return
-			}
 		}
 
 		// Respond with result
@@ -285,22 +267,10 @@ func createGridGridLabelsHandler(impl GridImplementation) gohttp.HandlerFunc {
 			RespondAppError(w, logger, err)
 			return
 		}
-		// Validate output rows (if validation method exists on elements). An
-		// inner list is never null on the wire: a nil one is sent as [].
+		// An inner list is never null on the wire: a nil one is sent as [].
 		for i, row := range result {
 			if row == nil {
 				result[i] = []string{}
-				continue
-			}
-			for j, item := range row {
-				if validator, ok := interface{}(item).(interface {
-					Validate() interface{ HasErrors() bool }
-				}); ok {
-					if validationErrors := validator.Validate(); validationErrors.HasErrors() {
-						RespondError(w, r, gohttp.StatusInternalServerError, fmt.Sprintf("Invalid response from implementation at index [%d][%d]", i, j))
-						return
-					}
-				}
 			}
 		}
 
@@ -367,15 +337,6 @@ func createGridReplaceLabelsHandler(impl GridImplementation) gohttp.HandlerFunc 
 			logger := LoggerFromContext(r.Context())
 			RespondAppError(w, logger, err)
 			return
-		}
-		// Validate output (if validation method exists)
-		if validator, ok := interface{}(result).(interface {
-			Validate() interface{ HasErrors() bool }
-		}); ok {
-			if validationErrors := validator.Validate(); validationErrors.HasErrors() {
-				RespondError(w, r, gohttp.StatusInternalServerError, "Invalid response from implementation")
-				return
-			}
 		}
 
 		// Respond with result
