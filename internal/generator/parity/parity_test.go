@@ -92,7 +92,8 @@ const schemaConfigJSON = `{
 // element; an inner list is never null ("required" at field[i]) and any
 // other non-list inner value is "type" at field[i]; a list element is never
 // null ("required" at field[i] or field[i][j]). Its enum, scalar and object
-// element types cover the element checks at both depths.
+// element types cover the element checks at both depths; flags and payloads
+// add boolean and Generic.JSON elements to T[].
 const parityMatrixSchemaJSON = `{
   "scalars": {
     "Network.Url": {
@@ -114,6 +115,10 @@ const parityMatrixSchemaJSON = `{
     "Generic.Probability": {
       "name": "Generic.Probability",
       "languagePrimitive": "number"
+    },
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "languagePrimitive": "object"
     }
   },
   "enums": {
@@ -256,6 +261,14 @@ const parityMatrixSchemaJSON = `{
         {
           "name": "pointList",
           "typeRef": { "name": "ParityPoint", "isArray": true }
+        },
+        {
+          "name": "flags",
+          "typeRef": { "name": "boolean", "isArray": true }
+        },
+        {
+          "name": "payloads",
+          "typeRef": { "name": "Generic.JSON", "isArray": true }
         }
       ]
     }
@@ -402,6 +415,13 @@ var vectors = []parityVector{
 		decodeRejects: []string{"go"},
 	},
 	{
+		// A scalar list element is never null either.
+		name:          "scalar_list_null_element",
+		payload:       `{"reqScalarList": ["https://a.test", null], "reqStr": "ok", "reqList": ["a"], "names": [null], "ranks": [null, 2]}`,
+		want:          map[string][]string{"reqScalarList[1]": {"required"}, "names[0]": {"required"}, "ranks[0]": {"required"}},
+		decodeRejects: []string{"go"},
+	},
+	{
 		// A malformed scalar value is one "pattern" error, for a single
 		// field and a list element alike.
 		name:    "url_bad_format",
@@ -476,6 +496,15 @@ var vectors = []parityVector{
 		decodeRejects: []string{"go"},
 	},
 	{
+		// Nor is a boolean element, or a Generic.JSON element: JSON null is
+		// a Generic.JSON value of a field, not of a list element.
+		name:          "list_null_element_every_kind",
+		typeName:      "ListMatrix",
+		payload:       listMatrix(`"flags": [true, null], "payloads": [{"a": 1}, null]`),
+		want:          map[string][]string{"flags[1]": {"required"}, "payloads[1]": {"required"}},
+		decodeRejects: []string{"go"},
+	},
+	{
 		// A null object element is "required", not an object whose own
 		// required fields are missing.
 		name:          "list_null_object_element",
@@ -505,7 +534,8 @@ var vectors = []parityVector{
 		typeName: "ListMatrix",
 		payload: listMatrix(`"reqGrid": [["a", "b", "c"], [], ["d"]], "optGrid": [["e"], []], "numGrid": [[1, 2.5], [10]],
 			"reqUrlGrid": [["https://a.test"], []], "reqShadeGrid": [["light"], ["dark", "light"]],
-			"pointGrid": [[{"shade": "light"}], []], "reqShadeList": ["dark"], "pointList": [{"shade": "light"}]`),
+			"pointGrid": [[{"shade": "light"}], []], "reqShadeList": ["dark"], "pointList": [{"shade": "light"}],
+			"flags": [true, false], "payloads": [{"a": 1}, [1, 2], {}]`),
 		want: map[string][]string{},
 	},
 	{

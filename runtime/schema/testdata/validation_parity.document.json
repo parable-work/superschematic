@@ -176,13 +176,15 @@
     "Generic_JSON": {
       "description": "Any valid JSON value: object, array, primitive, or null",
       "type": "string",
-      "x-example": "{\"k\":1}",
       "x-hasCustomValidate": true,
       "x-scalar": "Generic_JSON",
       "x-typeMapping": {
         "go": "GenericJSON",
         "json_schema": "any",
-        "sql": "JSONB"
+        "python": "Any",
+        "rust": "serde_json::Value",
+        "sql": "JSONB",
+        "typescript": "JSONValue"
       }
     },
     "Generic_Probability": {
@@ -295,6 +297,12 @@
     },
     "ListMatrix": {
       "properties": {
+        "flags": {
+          "items": {
+            "$ref": "#/definitions/boolean"
+          },
+          "type": "array"
+        },
         "numGrid": {
           "items": {
             "items": {
@@ -317,6 +325,12 @@
           "x-validateListMax": 2,
           "x-validateListMin": 1,
           "x-validateMaxLength": 5
+        },
+        "payloads": {
+          "items": {
+            "$ref": "#/definitions/scalars/Generic_JSON"
+          },
+          "type": "array"
         },
         "pointGrid": {
           "items": {
