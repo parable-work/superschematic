@@ -87,8 +87,12 @@ func (r *Registry) MissingValidators(schema *ir.Schema) []string {
 
 // NewDispatchRegistry returns a Registry that routes every name in names
 // through validate, the name-keyed entry point of a scalar core (superscalar's
-// Validate). A non-nil error becomes a single ValidationError tagged "scalar"
-// carrying the core's message; nil means the value is valid.
+// Validate). A non-nil error becomes a single ValidationError tagged "pattern",
+// the name every validator gives a malformed scalar value, carrying the core's
+// message, so a failure other than a regex mismatch (a custom check or a
+// parse failure) still says why. nil means the value is valid. The Validator
+// hands a registered validator only values the scalar's IR constraints
+// accept, so a length or range failure keeps its own name.
 //
 // This is how a scalar core, or an extension assembled over one, hands the
 // runtime its whole scalar set without a hand-maintained name -> func mirror.
@@ -98,7 +102,7 @@ func NewDispatchRegistry(names []string, validate func(canonical, value string) 
 		canonical := name
 		r.Register(canonical, func(value string) []ValidationError {
 			if err := validate(canonical, value); err != nil {
-				return []ValidationError{{Validator: "scalar", Message: err.Error()}}
+				return []ValidationError{{Validator: "pattern", Message: err.Error()}}
 			}
 			return nil
 		})
@@ -108,12 +112,12 @@ func NewDispatchRegistry(names []string, validate func(canonical, value string) 
 
 // DefaultRegistry returns the registry of the scalar core this module links:
 // every canonical name in superscalar's table, dispatched through
-// [scalarlib.Validate]. The Validator consults it for every registered name
-// regardless of HasCustomValidate, so it carries the core's custom checks
-// (Embedding.Vector / Generic.StringMap serde, min_length rules) that the
-// generic IR constraints cannot express.
+// [scalarlib.Validate]. The Validator consults it, after the IR constraints
+// pass, for every registered name regardless of HasCustomValidate, so it
+// carries the core's custom checks (Embedding.Vector / Generic.StringMap
+// serde, min_length rules) that the generic IR constraints cannot express.
 //
-// Names the registry lacks fall back to the IR constraints, so a schema's
+// Names the registry lacks get the IR constraints alone, so a schema's
 // inline scalars keep working without an entry.
 func DefaultRegistry() *Registry {
 	return NewDispatchRegistry(scalarcore.Names(), scalarlib.Validate)

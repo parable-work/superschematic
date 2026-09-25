@@ -4,6 +4,7 @@ import {
   newValidationErrors,
   addFieldError,
   setFieldErrors,
+  addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { load as loadYaml } from 'js-yaml';
@@ -13,7 +14,7 @@ import { validateIdentityUUIDRequired, validateIdentityUUID } from '../scalars/i
 
 import { validateCellStateRequired, validateCellState } from '../enums';
 
-import { parseBoardPointFromJSON } from './boardpoint';
+import { parseBoardPointFromJSON, validateBoardPoint } from './boardpoint';
 
 /**
  * Validates a Board object
@@ -46,6 +47,20 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     addFieldError(errors, "labels", "required", "required field");
   }
 
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.labels)) {
+    value.labels.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `labels[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
+  }
+
   if (Array.isArray(value.states)) {
     value.states.forEach((row, rowIndex) => {
       if (row === null || row === undefined) {
@@ -67,6 +82,43 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     addFieldError(errors, "states", "required", "required field");
   }
 
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.states)) {
+    value.states.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `states[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
+  }
+
+  {
+    // A nested object is validated as its own type, its errors under the
+    // field's path; any other value is left to the field's other checks.
+    const validateNested = (nested: unknown, path: string) => {
+      if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) {
+        return;
+      }
+      const nestedErrors = validateBoardPoint(nested as BoardPoint);
+      if (nestedErrors !== true) {
+        addNestedErrors(errors, path, nestedErrors);
+      }
+    };
+
+    if (Array.isArray(value.walls)) {
+      value.walls.forEach((row, rowIndex) => {
+        if (Array.isArray(row)) {
+          row.forEach((item, index) => validateNested(item, `walls[${rowIndex}][${index}]`));
+        }
+      });
+    }
+
+  }
+
   if (Array.isArray(value.walls)) {
     value.walls.forEach((row, rowIndex) => {
       if (row === null || row === undefined) {
@@ -81,12 +133,40 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     addFieldError(errors, "walls", "required", "required field");
   }
 
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.walls)) {
+    value.walls.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `walls[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
+  }
+
   if (Array.isArray(value.scores)) {
     value.scores.forEach((row, rowIndex) => {
       if (row === null || row === undefined) {
         addFieldError(errors, `scores[${rowIndex}]`, "required", "required field");
       } else if (!Array.isArray(row)) {
         addFieldError(errors, `scores[${rowIndex}]`, "type", "expected an array");
+      }
+    });
+  }
+
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.scores)) {
+    value.scores.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `scores[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
       }
     });
   }

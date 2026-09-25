@@ -164,7 +164,9 @@ def _validate_string_constraints(
                 )
             )
 
-    if scalar.has_custom_validate or registry.has(scalar.name):
+    # The scalar core checks the same pattern and lengths again, so it runs
+    # only when the constraints above pass: one failing value, one error.
+    if not errors and (scalar.has_custom_validate or registry.has(scalar.name)):
         scalar_fn = registry.get(scalar.name)
         if scalar_fn is not None:
             custom_errors = scalar_fn(value) or []

@@ -26,6 +26,8 @@ from .errors import APIError, AuthenticationError, AuthorizationError, NetworkEr
 
 # Upper bound for Retry-After and fallback sleeps so a hostile or misconfigured server cannot stall a thread indefinitely.
 _MAX_RATE_LIMIT_SLEEP_SECONDS = 300
+# Methods retried after a network failure. A write may have reached the server before the connection dropped, so only these safe reads are retried.
+_NETWORK_RETRY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 @dataclass(slots=True)
@@ -103,6 +105,7 @@ class ClientConfig:
     debug: bool = False
     logger: Logger | None = None
     max_rate_limit_retries: int = 3
+    max_network_retries: int = 3
 
 
 class SyncHTTPClient:
@@ -119,6 +122,7 @@ class SyncHTTPClient:
         self._debug = config.debug
         self._logger = config.logger or logging.getLogger(__name__)
         self._max_rate_limit_retries = config.max_rate_limit_retries
+        self._max_network_retries = config.max_network_retries
         self._default_headers.setdefault("Accept", "application/json")
 
     def set_token(self, token: str) -> None:
@@ -299,6 +303,7 @@ class SyncHTTPClient:
         is_multipart: bool,
         is_retry: bool = False,
         _rate_limit_attempt: int = 0,
+        _network_attempt: int = 0,
     ) -> Any:
         request_context = self._apply_request_interceptor(
             RequestContext(
@@ -349,6 +354,7 @@ class SyncHTTPClient:
                     is_multipart=is_multipart,
                     is_retry=True,
                     _rate_limit_attempt=_rate_limit_attempt,
+                    _network_attempt=_network_attempt,
                 )
             raise
         except RateLimitError as err:
@@ -375,6 +381,34 @@ class SyncHTTPClient:
                 is_multipart=is_multipart,
                 is_retry=is_retry,
                 _rate_limit_attempt=_rate_limit_attempt + 1,
+                _network_attempt=_network_attempt,
+            )
+        except NetworkError:
+            if (
+                request_context.method not in _NETWORK_RETRY_METHODS
+                or _network_attempt >= self._max_network_retries
+            ):
+                raise
+            wait = 2 ** _network_attempt
+            self._log_debug(
+                "Network request failed, retrying",
+                attempt=_network_attempt + 1,
+                wait_seconds=wait,
+                path=path,
+            )
+            time.sleep(wait)
+            return self._request_with_retry(
+                method=method,
+                path=path,
+                body=body,
+                query_params=query_params,
+                requires_auth=requires_auth,
+                timeout_seconds=timeout_seconds,
+                extra_headers=extra_headers,
+                is_multipart=is_multipart,
+                is_retry=is_retry,
+                _rate_limit_attempt=_rate_limit_attempt,
+                _network_attempt=_network_attempt + 1,
             )
 
     def _extract_multipart_payload(self, body: Any) -> tuple[Mapping[str, Any], Mapping[str, FilePart]]:

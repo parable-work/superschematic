@@ -22,7 +22,7 @@ pub fn build_router(implementations: Implementations) -> Router {
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
 {{- range .Endpoints }}
-    router = router.route("{{ .Path }}", {{ .Method }}(handle_{{ .Namespace }}_{{ .FunctionName }}));
+    router = router.route("{{ .Path }}", {{ .Method }}(handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}));
 {{- end }}
     router.with_state(state)
 }
@@ -52,7 +52,7 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
 }
 
 {{- range .Endpoints }}
-async fn handle_{{ .Namespace }}_{{ .FunctionName }}(
+async fn handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
 {{- if .PathParams }}

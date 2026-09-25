@@ -829,6 +829,7 @@ func TestOptionalMapFieldsAreNilable(t *testing.T) {
 // without @hasMany or @manyToMany is rejected.
 func TestHasManyWithoutDirectiveFails(t *testing.T) {
 	schema := ir.NewSchema("synthetic", ir.SchemaKindDB)
+	schema.Scalars["Identity.UUID"] = &ir.ScalarDef{Name: "Identity.UUID"}
 	schema.Types["Parent"] = &ir.TypeDef{
 		Name: "Parent",
 		Role: ir.RoleDBTable,
@@ -994,5 +995,36 @@ func TestJSONUnionFieldsUseWrapperDispatch(t *testing.T) {
 	}
 	if !strings.Contains(string(module), "replace example.com/schemas/types/go/contracts => ../../types/go/contracts") {
 		t.Fatalf("go.mod lacks the dependency replace:\n%s", module)
+	}
+}
+
+// TestGenerateRefusesTablesWithoutAUUIDScalar: the ORM keys rows, filters
+// and its user context by a UUID scalar's Go type. A schema whose tables
+// reach no UUID scalar has no such type in its types package, so Generate
+// refuses it by name instead of writing an ORM that does not compile.
+func TestGenerateRefusesTablesWithoutAUUIDScalar(t *testing.T) {
+	schema := ir.NewSchema("slugs-only", ir.SchemaKindDB)
+	schema.Scalars["Identity.Slug"] = &ir.ScalarDef{Name: "Identity.Slug"}
+	schema.Types["Page"] = &ir.TypeDef{
+		Name: "Page",
+		Role: ir.RoleDBTable,
+		Fields: []*ir.FieldDef{
+			{Name: "slug", TypeRef: ir.TypeRef{Name: "Identity.Slug"}, Required: true, Key: true},
+			{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		},
+	}
+
+	output, err := Generate(schema, Options{
+		SchemaName:  "slugs-only",
+		ModulePath:  "example.com/orm/slugs-only",
+		TypesModule: "example.com/types/slugs-only",
+	})
+	if err == nil {
+		t.Fatalf("Generate accepted a schema without a UUID scalar (UUIDGoType %q)", output.UUIDGoType)
+	}
+	for _, want := range []string{"slugs-only", "UUID scalar"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
 	}
 }

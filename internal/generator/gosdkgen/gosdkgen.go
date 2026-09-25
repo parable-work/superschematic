@@ -210,6 +210,7 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 		Version:   "1.0.0",
 	}
 
+	symbols := scalarSymbols(apiOutput.Scalars)
 	namespaceMap := make(map[string]*NamespaceInfo)
 	for _, endpoint := range apiOutput.Endpoints {
 		if endpoint.IsWebhook {
@@ -236,7 +237,7 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 			ns.ScopeFieldGoName = goutil.GoPublicIdentifier(endpoint.ScopeParamName)
 		}
 
-		converted := convertEndpoint(endpoint, ns.IsScopedNS, ns.ScopeParamName, goutil.GoPublicIdentifier(nsName))
+		converted := convertEndpoint(endpoint, ns.IsScopedNS, ns.ScopeParamName, goutil.GoPublicIdentifier(nsName), symbols)
 		if endpointUsesTypes(converted) {
 			ns.RequiresTypes = true
 		}
@@ -302,7 +303,7 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 	return output, nil
 }
 
-func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName string, nsPrefix string) EndpointInfo {
+func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName string, nsPrefix string, scalarSymbols map[string]string) EndpointInfo {
 	sdkPath := ep.Path
 	sdkHTTPMethod := ep.Method
 	pathFormat, pathArgs := convertPathToGoFormat(sdkPath, isScopedNS, scopeParamName)
@@ -340,7 +341,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 
 	scalarArgs := make([]ScalarArg, 0, len(ep.ScalarArgs))
 	for _, arg := range ep.ScalarArgs {
-		goType := qualifyType(arg.Type)
+		goType := qualifyType(arg.Type, scalarSymbols)
 		isArray := arg.IsArray
 		pointer := !arg.Required
 		if isArray {
@@ -383,9 +384,9 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		HTTPMethod:            strings.ToUpper(sdkHTTPMethod),
 		PathFormat:            pathFormat,
 		PathArgs:              pathArgs,
-		InputType:             qualifyType(ep.InputType),
+		InputType:             qualifyType(ep.InputType, scalarSymbols),
 		OutputType:            ep.OutputType,
-		OutputGoType:          outputType(ep.OutputType, ep.OutputArrayDepth()),
+		OutputGoType:          outputType(ep.OutputType, ep.OutputArrayDepth(), scalarSymbols),
 		HasInput:              ep.HasInput,
 		RequiresAuth:          ep.RequiresAuth,
 		PathParams:            pathParams,
@@ -407,8 +408,8 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 
 // outputType is the Go type of a response: the qualified output type in
 // arrayDepth slice levels.
-func outputType(typeName string, arrayDepth int) string {
-	return goListType(qualifyType(typeName), arrayDepth)
+func outputType(typeName string, arrayDepth int, scalarSymbols map[string]string) string {
+	return goListType(qualifyType(typeName, scalarSymbols), arrayDepth)
 }
 
 // goListType wraps a Go element type in depth slice levels: "T", "[]T" or
@@ -820,7 +821,33 @@ func generateFile(generator *codegen.FileGenerator, templateName, outputPath str
 	)
 }
 
-func qualifyType(typeName string) string {
+// scalarSymbols maps each scalar the API schema declares, by canonical name
+// ("Identity.UserID"), to the name its generated Go types package declares
+// for it ("IdentityUserID"). typegen and apigen derive that name the same
+// way, from codegen.BuildScalarTokens.
+func scalarSymbols(scalars map[string]apigen.ScalarJSONSchemaInfo) map[string]string {
+	symbols := make(map[string]string, len(scalars))
+	for name, info := range scalars {
+		if info.CanonicalName == "" {
+			continue // the string, number and boolean primitives
+		}
+		symbol := strings.TrimSpace(codegen.BuildScalarTokens(name).Symbol)
+		if symbol == "" {
+			symbol = name
+		}
+		symbols[name] = symbol
+	}
+	return symbols
+}
+
+// qualifyType returns the Go type expression for a schema type name. A
+// scalar resolves to the name its types package declares; the last segment
+// of its canonical name ("UserID") is not declared there. An object type,
+// enum or union keeps its own name.
+func qualifyType(typeName string, scalarSymbols map[string]string) string {
+	if symbol, ok := scalarSymbols[typeName]; ok {
+		return "types." + symbol
+	}
 	typeName = normalizeTypeName(typeName)
 	switch typeName {
 	case "", codegen.PrimitiveString:

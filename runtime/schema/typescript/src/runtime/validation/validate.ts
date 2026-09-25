@@ -177,8 +177,10 @@ function validateStringConstraints(
     }
   }
 
+  // The scalar core checks the same pattern and lengths again, so it runs
+  // only when the constraints above pass: one failing value, one error.
   const registry = options?.scalarRegistry ?? getDefaultScalarRegistry();
-  if (scalar.hasCustomValidate || registry.has(scalar.name)) {
+  if (errors.length === 0 && (scalar.hasCustomValidate || registry.has(scalar.name))) {
     const scalarFn = registry.get(scalar.name);
     if (scalarFn) {
       const customErrors = scalarFn(value);

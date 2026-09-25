@@ -48,14 +48,18 @@ func (v *Validator) validateScalarValue(scalar *ir.ScalarDef, value any) []Valid
 
 // validateScalarConstraints validates a value against a scalar definition.
 //
-// The registry governs every name it holds: when a validator is registered
-// for scalar.Name the value goes to it and the result is returned as-is,
-// regardless of HasCustomValidate. [DefaultRegistry] registers the linked
-// scalar core's dispatch for every name it knows, which carries the deep
-// custom validators (Embedding.Vector / Generic.StringMap deep serde,
-// Asset.FilePath / Text.Markdown min_length 1) that the generic IR
-// pattern/min/max logic below cannot express. An injected registry decides
-// the set for itself; the validator never consults the core directly.
+// The IR constraints (length, pattern, reserved words, range) run first, and
+// a failure is reported by their names (maxLength, pattern, min, ...), as
+// every other validator reports it. Only a value they accept goes to the
+// registry: when a validator is registered for scalar.Name, regardless of
+// HasCustomValidate, its result is returned as-is. [DefaultRegistry]
+// registers the linked scalar core's dispatch for every name it knows,
+// which carries the deep custom validators (Embedding.Vector /
+// Generic.StringMap deep serde, Asset.FilePath / Text.Markdown min_length 1)
+// that the IR constraints cannot express. The core checks the IR
+// constraints again, so running it only after they pass reports one error
+// per failing value. An injected registry decides the set for itself; the
+// validator never consults the core directly.
 //
 // The empty-string contract is handled by the callers (validateScalarValue skips
 // empty optional strings; validateScalarRequired emits "required" for empty
@@ -64,19 +68,25 @@ func (v *Validator) validateScalarValue(scalar *ir.ScalarDef, value any) []Valid
 // optional field.
 //
 // Names with no registered validator (inline schema scalars, test fixtures)
-// fall back to the generic IR constraint logic.
+// get the IR constraints alone.
 func (v *Validator) validateScalarConstraints(scalar *ir.ScalarDef, value any) []ValidationError {
 	switch scalar.Primitive {
 	case "String", "":
+		if errs := v.validateStringConstraints(scalar, value); len(errs) > 0 {
+			return errs
+		}
 		if fn, ok := v.registry.Get(scalar.Name); ok {
 			return validateStringVia(fn, value)
 		}
-		return v.validateStringConstraints(scalar, value)
+		return nil
 	case "Int":
+		if errs := v.validateIntConstraints(scalar, value); len(errs) > 0 {
+			return errs
+		}
 		if fn, ok := v.registry.Get(scalar.Name); ok {
 			return validateIntVia(fn, value)
 		}
-		return v.validateIntConstraints(scalar, value)
+		return nil
 	case "Float":
 		return v.validateFloatConstraints(scalar, value)
 	default:

@@ -423,7 +423,7 @@ func detectUnionDiscriminator(memberTypeNames []string, schema *ir.Schema) strin
 
 // buildValidations creates validation rules from required/scalar/field
 // constraints. Rule ordering is stable and deterministic: required,
-// scalar-derived rules, then field-derived rules.
+// scalar-derived rules (FromScalar), then field-derived rules.
 func buildValidations(scalar *ScalarInfo, field *ir.FieldDef, required bool) []ValidationRule {
 	var rules []ValidationRule
 
@@ -437,41 +437,46 @@ func buildValidations(scalar *ScalarInfo, field *ir.FieldDef, required bool) []V
 	if scalar != nil {
 		if scalar.MaxLength > 0 {
 			rules = append(rules, ValidationRule{
-				Validator: "maxLength",
-				Message:   fmt.Sprintf("must be at most %d characters", scalar.MaxLength),
-				Value:     scalar.MaxLength,
+				Validator:  "maxLength",
+				Message:    fmt.Sprintf("must be at most %d characters", scalar.MaxLength),
+				Value:      scalar.MaxLength,
+				FromScalar: true,
 			})
 		}
 
 		if scalar.MinLength > 0 {
 			rules = append(rules, ValidationRule{
-				Validator: "minLength",
-				Message:   fmt.Sprintf("must be at least %d characters", scalar.MinLength),
-				Value:     scalar.MinLength,
+				Validator:  "minLength",
+				Message:    fmt.Sprintf("must be at least %d characters", scalar.MinLength),
+				Value:      scalar.MinLength,
+				FromScalar: true,
 			})
 		}
 
 		if scalar.Pattern != "" {
 			rules = append(rules, ValidationRule{
-				Validator: "pattern",
-				Message:   "invalid format",
-				Value:     scalar.Pattern,
+				Validator:  "pattern",
+				Message:    "invalid format",
+				Value:      scalar.Pattern,
+				FromScalar: true,
 			})
 		}
 
 		if scalar.Minimum != nil {
 			rules = append(rules, ValidationRule{
-				Validator: "min",
-				Message:   fmt.Sprintf("must be at least %d", *scalar.Minimum),
-				Value:     *scalar.Minimum,
+				Validator:  "min",
+				Message:    fmt.Sprintf("must be at least %d", *scalar.Minimum),
+				Value:      *scalar.Minimum,
+				FromScalar: true,
 			})
 		}
 
 		if scalar.Maximum != nil {
 			rules = append(rules, ValidationRule{
-				Validator: "max",
-				Message:   fmt.Sprintf("must be at most %d", *scalar.Maximum),
-				Value:     *scalar.Maximum,
+				Validator:  "max",
+				Message:    fmt.Sprintf("must be at most %d", *scalar.Maximum),
+				Value:      *scalar.Maximum,
+				FromScalar: true,
 			})
 		}
 	}

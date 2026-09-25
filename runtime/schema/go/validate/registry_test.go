@@ -179,7 +179,7 @@ func TestDefaultRegistry_Contents(t *testing.T) {
 	assert.False(t, r.Has("Custom.Missing"))
 }
 
-func TestNewDispatchRegistry_MapsCoreErrorToScalarTag(t *testing.T) {
+func TestNewDispatchRegistry_MapsCoreErrorToPatternTag(t *testing.T) {
 	r := NewDispatchRegistry([]string{"Contact.Email"}, scalarlib.Validate)
 	require.Equal(t, []string{"Contact.Email"}, r.Names())
 
@@ -189,7 +189,7 @@ func TestNewDispatchRegistry_MapsCoreErrorToScalarTag(t *testing.T) {
 
 	errs := fn("not-an-email")
 	require.Len(t, errs, 1)
-	assert.Equal(t, "scalar", errs[0].Validator)
+	assert.Equal(t, "pattern", errs[0].Validator)
 	assert.NotEmpty(t, errs[0].Message)
 }
 

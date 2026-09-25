@@ -71,7 +71,7 @@ func TestScalarDelegation_RegistryGovernsEveryName(t *testing.T) {
 
 	viaDefault := New(par12Schema(), WithRegistry(DefaultRegistry())).ValidateType("Doc", input)
 	assert.True(t, viaDefault.HasErrors(), "DefaultRegistry dispatches Embedding.Vector to the core")
-	assert.Equal(t, "scalar", viaDefault.GetFieldErrors("vector")[0].Validator)
+	assert.Equal(t, "pattern", viaDefault.GetFieldErrors("vector")[0].Validator)
 
 	viaEmpty := New(par12Schema(), WithRegistry(NewRegistry())).ValidateType("Doc", input)
 	assert.False(t, viaEmpty.HasErrors(), "an empty registry must not reach the core, got: %v", viaEmpty)
@@ -121,7 +121,7 @@ func TestScalarDelegation_RequiredEmptyStrings(t *testing.T) {
 	assert.NotEmpty(t, pathErrs, "empty required Asset.FilePath must error")
 	assert.NotEmpty(t, bodyErrs, "empty required Text.Markdown must error")
 	// Required-empty semantics are preserved by validateScalarRequired before
-	// delegation, so the tag stays "required" rather than the core's "scalar".
+	// delegation, so the tag stays "required" rather than the core's "pattern".
 	assert.Equal(t, "required", pathErrs[0].Validator)
 	assert.Equal(t, "required", bodyErrs[0].Validator)
 }
@@ -172,4 +172,40 @@ func TestScalarDelegation_AcceptsValidDeepChecks(t *testing.T) {
 	})
 
 	assert.False(t, errs.HasErrors(), "valid deep-check values should pass, got: %v", errs)
+}
+
+// TestScalarDelegation_IRConstraintsNameTheFailure asserts the IR constraints
+// run before the registry: a length or range failure is reported by its own
+// name (minLength, maxLength, min), once, and never reaches the registered
+// validator, which would name it "pattern". A value the constraints accept
+// still goes to the registry.
+func TestScalarDelegation_IRConstraintsNameTheFailure(t *testing.T) {
+	minimum := int64(1)
+	s := ir.NewSchema("bounds", ir.SchemaKindGeneral)
+	s.Scalars["Identity.Name"] = &ir.ScalarDef{Name: "Identity.Name", Primitive: "String", MinLength: 2, MaxLength: 80}
+	s.Scalars["Ordering.Rank"] = &ir.ScalarDef{Name: "Ordering.Rank", Primitive: "Int", Minimum: &minimum}
+	s.Types["Entry"] = &ir.TypeDef{
+		Name: "Entry",
+		Kind: ir.TypeKindObject,
+		Fields: []*ir.FieldDef{
+			{Name: "name", TypeRef: ir.TypeRef{Name: "Identity.Name"}},
+			{Name: "rank", TypeRef: ir.TypeRef{Name: "Ordering.Rank"}},
+		},
+	}
+
+	var calls []string
+	registry := NewDispatchRegistry([]string{"Identity.Name", "Ordering.Rank"}, func(canonical, value string) error {
+		calls = append(calls, canonical+"="+value)
+		return scalarlib.Validate(canonical, value)
+	})
+	v := New(s, WithRegistry(registry))
+
+	errs := v.ValidateType("Entry", map[string]any{"name": "a", "rank": float64(-3)})
+	assert.Equal(t, []ValidationError{{Validator: "minLength", Message: "must be at least 2 characters"}}, errs.GetFieldErrors("name"))
+	assert.Equal(t, []ValidationError{{Validator: "min", Message: "must be at least 1"}}, errs.GetFieldErrors("rank"))
+	assert.Empty(t, calls, "a value the IR constraints reject must not reach the registry")
+
+	errs = v.ValidateType("Entry", map[string]any{"name": "Ada", "rank": float64(2)})
+	assert.False(t, errs.HasErrors(), "got: %v", errs)
+	assert.Equal(t, []string{"Identity.Name=Ada", "Ordering.Rank=2"}, calls)
 }
