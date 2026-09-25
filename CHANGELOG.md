@@ -429,6 +429,12 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- Go API: a route no longer emits the response check after the
+  implementation call. It asserted `Validate() interface{ HasErrors() bool }`,
+  which no generated type satisfies (their `Validate` returns
+  `ValidationErrors`), so it never ran and no response was ever checked.
+  Responses are sent as before, and a nil inner list of an array-of-arrays
+  response is still sent as `[]`. Patch.
 - IR: a type's `strictJSON` key is written after `jsonField` instead of
   after `denyUnknownFields`, the position the source tree's IR uses, so a
   persisted schema from either compares byte for byte. The key is written

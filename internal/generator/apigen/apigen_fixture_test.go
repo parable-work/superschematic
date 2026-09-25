@@ -4,7 +4,6 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -144,28 +143,6 @@ func checkFixtureAPIGolden(t *testing.T, provider apigen.AuthProvider, golden st
 		if string(got) != string(want) {
 			t.Errorf("%s differs from golden (run with -update to accept)", name)
 		}
-	}
-}
-
-func TestGeneratedRoutesValidateImplementationResponses(t *testing.T) {
-	output := generateFixtureAPI(t)
-	outDir := t.TempDir()
-
-	if err := apigen.WriteAPI(output, outDir); err != nil {
-		t.Fatalf("write api: %v", err)
-	}
-
-	routes, err := os.ReadFile(filepath.Join(outDir, "routes.go"))
-	if err != nil {
-		t.Fatalf("read generated routes: %v", err)
-	}
-
-	content := string(routes)
-	if !strings.Contains(content, "Invalid response from implementation") {
-		t.Fatal("generated handlers must reject invalid route-impl responses")
-	}
-	if !strings.Contains(content, "Validate output") {
-		t.Fatal("generated handlers must run output validation")
 	}
 }
 
