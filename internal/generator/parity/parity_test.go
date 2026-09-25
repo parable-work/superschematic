@@ -101,6 +101,12 @@ const schemaConfigJSON = `{
 // null ("required" at field[i] or field[i][j]). Its enum, scalar, object
 // and builtin element types cover the element checks at both depths; flags
 // and payloads add boolean and Generic.JSON elements to T[].
+//
+// JsonMatrix holds Generic.JSON, whose value is any JSON value but null: an
+// object, an array, a string (JSON text or not), a number or a boolean, with
+// no type or pattern check on it. A null or missing required one is
+// "required", a null optional one is absent, and a null element of
+// Generic.JSON[] or Generic.JSON[][] is "required" at its index (D12).
 const parityMatrixSchemaJSON = `{
   "scalars": {
     "Network.Url": {
@@ -298,6 +304,30 @@ const parityMatrixSchemaJSON = `{
         {
           "name": "payloads",
           "typeRef": { "name": "Generic.JSON", "isArray": true }
+        }
+      ]
+    },
+    "JsonMatrix": {
+      "name": "JsonMatrix",
+      "role": "EmbeddedStruct",
+      "jsonField": true,
+      "fields": [
+        {
+          "name": "reqJson",
+          "typeRef": { "name": "Generic.JSON" },
+          "required": true
+        },
+        {
+          "name": "optJson",
+          "typeRef": { "name": "Generic.JSON" }
+        },
+        {
+          "name": "jsonList",
+          "typeRef": { "name": "Generic.JSON", "isArray": true }
+        },
+        {
+          "name": "jsonGrid",
+          "typeRef": { "name": "Generic.JSON", "isArray": true, "isArrayOfArrays": true }
         }
       ]
     }
@@ -629,14 +659,11 @@ var vectors = []parityVector{
 		decodeRejects: []string{"go"},
 	},
 	{
-		// Nor is a boolean element, or a Generic.JSON element: JSON null is
-		// a Generic.JSON value of a field, not of a list element. The
-		// Generic.JSON elements here are JSON text in strings because the
-		// runtimes check a Generic.JSON value as a string, an open
-		// difference (D12, amended).
+		// Nor is a boolean element, or a Generic.JSON element: null is a
+		// missing Generic.JSON value (D14, amended).
 		name:          "list_null_element_every_kind",
 		typeName:      "ListMatrix",
-		payload:       listMatrix(`"flags": [true, null], "payloads": ["{}", null]`),
+		payload:       listMatrix(`"flags": [true, null], "payloads": [{"a": 1}, null]`),
 		want:          map[string][]string{"flags[1]": {"required"}, "payloads[1]": {"required"}},
 		decodeRejects: []string{"go"},
 	},
@@ -671,7 +698,7 @@ var vectors = []parityVector{
 		payload: listMatrix(`"reqGrid": [["a", "b", "c"], [], ["d"]], "optGrid": [["e"], []], "numGrid": [[1, 2.5], [10]],
 			"reqUrlGrid": [["https://a.test"], []], "reqShadeGrid": [["light"], ["dark", "light"]],
 			"pointGrid": [[{"shade": "light"}], []], "reqShadeList": ["dark"], "pointList": [{"shade": "light"}],
-			"flags": [true, false], "payloads": ["{}", "[1, 2]"]`),
+			"flags": [true, false], "payloads": [{"a": 1}, [1, 2], "{}"]`),
 		want: map[string][]string{},
 	},
 	{
@@ -828,6 +855,75 @@ var vectors = []parityVector{
 		payload:       listMatrix(`"pointGrid": [[{"shade": "light"}, {"shade": "purple"}]]`),
 		want:          map[string][]string{"pointGrid[0][1].shade": {"enum"}},
 		decodeRejects: []string{"python"},
+	},
+
+	// Generic.JSON: any JSON value but null. A value of every JSON type is
+	// valid in a required field, an optional one and a list element, and a
+	// null nested inside an object or array is part of the value.
+	{
+		name:     "json_object",
+		typeName: "JsonMatrix",
+		payload:  `{"reqJson": {"k": 1, "none": null}, "optJson": {}, "jsonList": [{"k": [1, null]}], "jsonGrid": [[{"k": 1}], []]}`,
+		want:     map[string][]string{},
+	},
+	{
+		name:     "json_array",
+		typeName: "JsonMatrix",
+		payload:  `{"reqJson": [1, "two", null], "optJson": [], "jsonList": [[1, 2], []], "jsonGrid": [[[1], []]]}`,
+		want:     map[string][]string{},
+	},
+	{
+		// A string need not be JSON text: "not json" is the JSON string
+		// "not json", not a malformed value.
+		name:     "json_string",
+		typeName: "JsonMatrix",
+		payload:  `{"reqJson": "not json", "optJson": "", "jsonList": ["s", ""], "jsonGrid": [["{"]]}`,
+		want:     map[string][]string{},
+	},
+	{
+		name:     "json_number",
+		typeName: "JsonMatrix",
+		payload:  `{"reqJson": 42, "optJson": -1.5, "jsonList": [0, 3.25], "jsonGrid": [[1e3]]}`,
+		want:     map[string][]string{},
+	},
+	{
+		name:     "json_boolean",
+		typeName: "JsonMatrix",
+		payload:  `{"reqJson": true, "optJson": false, "jsonList": [false, true], "jsonGrid": [[false]]}`,
+		want:     map[string][]string{},
+	},
+	{
+		name:     "json_required_null",
+		typeName: "JsonMatrix",
+		payload:  `{"reqJson": null}`,
+		want:     map[string][]string{"reqJson": {"required"}},
+	},
+	{
+		name:     "json_required_absent",
+		typeName: "JsonMatrix",
+		payload:  `{"optJson": {"k": 1}}`,
+		want:     map[string][]string{"reqJson": {"required"}},
+	},
+	{
+		name:     "json_optional_null",
+		typeName: "JsonMatrix",
+		payload:  `{"reqJson": 1, "optJson": null, "jsonList": null, "jsonGrid": null}`,
+		want:     map[string][]string{},
+	},
+	{
+		name:     "json_optional_absent",
+		typeName: "JsonMatrix",
+		payload:  `{"reqJson": 1}`,
+		want:     map[string][]string{},
+	},
+	{
+		// The generated Go decoder refuses a null list element of every
+		// type, Generic.JSON included (D12, amended).
+		name:          "json_list_null_element",
+		typeName:      "JsonMatrix",
+		payload:       `{"reqJson": 1, "jsonList": [1, null], "jsonGrid": [[null, 1]]}`,
+		want:          map[string][]string{"jsonList[1]": {"required"}, "jsonGrid[0][0]": {"required"}},
+		decodeRejects: []string{"go"},
 	},
 }
 
@@ -1005,6 +1101,8 @@ func newParityValue(typeName string) parityValidatable {
 		return &ParityMatrix{}
 	case "ListMatrix":
 		return &ListMatrix{}
+	case "JsonMatrix":
+		return &JsonMatrix{}
 	}
 	return nil
 }
@@ -1071,7 +1169,7 @@ func TestValidationParityDriver(t *testing.T) {
 `
 
 const tsDriver = `import { readFileSync, writeFileSync } from 'node:fs';
-import { validateListMatrix, validateParityMatrix } from './validators/types';
+import { validateJsonMatrix, validateListMatrix, validateParityMatrix } from './validators/types';
 
 type Errors = { [key: string]: { validator: string }[] | Errors };
 
@@ -1090,6 +1188,7 @@ function flatten(errors: Errors, prefix: string, out: Record<string, string[]>):
 const validators: Record<string, (value: never) => true | Errors> = {
   ParityMatrix: validateParityMatrix as never,
   ListMatrix: validateListMatrix as never,
+  JsonMatrix: validateJsonMatrix as never,
 };
 const vectors = JSON.parse(readFileSync(process.env.PARITY_VECTORS as string, 'utf8'));
 const results: Record<string, Record<string, string[]>> = {};

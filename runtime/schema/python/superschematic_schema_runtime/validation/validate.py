@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -243,12 +244,55 @@ def _validate_bytes_scalar_value(
     return [ValidationError(validator="type", message=f"{scalar.name} must be bytes.")]
 
 
+def _is_json_value(value: Any, ancestors: set[int]) -> bool:
+    if value is None or isinstance(value, (str, bool, int)):
+        return True
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if not isinstance(value, (list, dict)) or id(value) in ancestors:
+        return False
+    ancestors.add(id(value))
+    try:
+        if isinstance(value, list):
+            return all(_is_json_value(item, ancestors) for item in value)
+        return all(
+            isinstance(key, str) and _is_json_value(item, ancestors)
+            for key, item in value.items()
+        )
+    finally:
+        ancestors.discard(id(value))
+
+
+def _validate_any_json_value(
+    scalar: ScalarDef, value: Any, required: bool
+) -> list[ValidationError]:
+    """Validate a value of an any-JSON scalar (``ScalarDef.is_any_json``).
+
+    A dict, a list, a string (JSON text or not), a number and a bool are all
+    values, so no type, length or pattern check applies and the string-typed
+    validator registry is not consulted. None is a missing value. A value no
+    JSON document can carry (a set, a tuple, NaN, a non-string key, a cycle)
+    is "type".
+    """
+    if value is None:
+        return (
+            [ValidationError(validator="required", message=f"{scalar.name} is required.")]
+            if required
+            else []
+        )
+    if not _is_json_value(value, set()):
+        return [ValidationError(validator="type", message=f"{scalar.name} must be a JSON value.")]
+    return []
+
+
 def _validate_scalar_value(
     scalar: ScalarDef,
     value: Any,
     required: bool,
     registry: ScalarValidatorRegistry,
 ) -> list[ValidationError]:
+    if scalar.is_any_json():
+        return _validate_any_json_value(scalar, value, required)
     if scalar.primitive == "Int":
         return _validate_int_constraints(scalar, value)
     if scalar.primitive == "Float":

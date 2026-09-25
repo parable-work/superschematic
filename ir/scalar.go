@@ -103,6 +103,20 @@ type ScalarDef struct {
 	HasCustomParse bool `json:"hasCustomParse,omitempty" yaml:"hasCustomParse,omitempty"`
 }
 
+// JSONSchemaAnyType is the json_schema type mapping of a scalar whose value
+// is any JSON value (Generic.JSON in the core catalog).
+const JSONSchemaAnyType = "any"
+
+// IsAnyJSON reports whether the scalar's value is any JSON value, which its
+// json_schema type mapping declares as "any". The scalar catalog gives such a
+// scalar the String primitive, but its value is not a string: an object, an
+// array, a string, a number and a boolean are all values, and only JSON null
+// stands for a missing one. Validators key the rule off this mapping, not the
+// scalar's name or primitive.
+func (s *ScalarDef) IsAnyJSON() bool {
+	return s != nil && s.TypeMappings["json_schema"] == JSONSchemaAnyType
+}
+
 // FileUploadConfig defines upload constraints for file-type scalars
 // (File, Image, LogoImage, etc.).
 type FileUploadConfig struct {

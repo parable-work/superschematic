@@ -13,6 +13,7 @@ import {
   setFieldErrors,
   type ValidationErrors,
 } from 'superscalar/validation';
+import { isAnyJSONScalar } from '../validation/types';
 import type { FieldDef, ScalarDef, Schema, TypeDef, TypeRef } from '../validation/types';
 import { coerceBool, coerceFloat, coerceInt } from './coerce';
 import { applyDefault } from './defaults';
@@ -282,6 +283,9 @@ function applyScalar(
   scalar: ScalarDef,
   value: unknown
 ): [unknown, boolean] {
+  // Any JSON value is one, whatever the scalar's primitive; validation
+  // checks it.
+  if (isAnyJSONScalar(scalar)) return [value, true];
   switch (scalar.primitive) {
     case 'Int':
       return coerceInt(value, ctx.strict);

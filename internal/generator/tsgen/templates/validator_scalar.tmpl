@@ -34,7 +34,7 @@ export function validate{{.Scalar.Symbol}}(
     return [true, null];
   }
 
-  {{if and (eq .Scalar.Primitive "string") (not .Scalar.HasJSONParse) (ne .Scalar.TSType "JSONValue")}}
+  {{if and (eq .Scalar.Primitive "string") (not .Scalar.HasJSONParse) (not .Scalar.IsAnyJSON)}}
   {{if eq .Scalar.TSType "string"}}
   // A value of another JSON type is "type", and its length and format are
   // not checked.
@@ -134,12 +134,7 @@ export function validate{{.Scalar.Symbol}}(
 export function validate{{.Scalar.Symbol}}Required(
   value: {{.Scalar.TSType}} | null | undefined
 ): ScalarValidationResult {
-  {{if eq .Scalar.TSType "JSONValue"}}
-  // JSON null is a present Generic.JSON value; only undefined means absent.
-  if (value === undefined) {
-    return [false, [{ validator: "required", message: "required field" }]];
-  }
-  {{else if eq .Scalar.TSType "string"}}
+  {{if eq .Scalar.TSType "string"}}
   if (value === null || value === undefined || value === "") {
     return [false, [{ validator: "required", message: "required field" }]];
   }

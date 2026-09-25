@@ -59,19 +59,28 @@ func customTemplateFuncs() template.FuncMap {
 		"elementValidations": elementValidations,
 		"primitiveCheck":     primitiveCheck,
 		"ruleApplies":        ruleApplies,
+		// A map value of an any-JSON scalar (Generic.JSON) may be null: the
+		// rule that null is a missing Generic.JSON value covers a field and a
+		// list element, and no validator in the other languages checks map
+		// values for null.
 		"mapScalarValueRequired": func(field FieldInfo) bool {
-			if !field.IsMap || field.IsArray {
+			if !field.IsMap || field.IsArray || isAnyJSONField(field) {
 				return false
 			}
 			return !strings.Contains(field.TSType, "| null")
 		},
 		"mapArrayElementRequired": func(field FieldInfo) bool {
-			if !field.IsMap || !field.IsArray {
+			if !field.IsMap || !field.IsArray || isAnyJSONField(field) {
 				return false
 			}
 			return !strings.Contains(field.TSType, "| null")
 		},
 	}
+}
+
+// isAnyJSONField reports whether field's scalar holds any JSON value.
+func isAnyJSONField(field FieldInfo) bool {
+	return field.IsScalar && field.ScalarInfo != nil && field.ScalarInfo.IsAnyJSON
 }
 
 // listValidations returns a field's list-size rules (listMin, listMax). On a

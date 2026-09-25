@@ -81,6 +81,20 @@ func (o *ModuleOutput) HasListFields() bool {
 	return false
 }
 
+// NeedsJSONValueMissing reports whether types.go's Validate checks a
+// required any-JSON field (requiredAnyJSONField), which calls the
+// jsonValueMissing helper.
+func (o *ModuleOutput) NeedsJSONValueMissing() bool {
+	for _, typeInfo := range o.Types {
+		for _, field := range typeInfo.Fields {
+			if requiredAnyJSONField(field) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ScalarValueCheck is one validate<Symbol>Value function in types.go: the
 // scalar's own rules, checked before the scalar core's verdict is taken.
 type ScalarValueCheck struct {

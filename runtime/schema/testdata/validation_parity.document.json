@@ -295,6 +295,36 @@
         "sql": "UUID"
       }
     },
+    "JsonMatrix": {
+      "properties": {
+        "jsonGrid": {
+          "items": {
+            "items": {
+              "$ref": "#/definitions/scalars/Generic_JSON"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "jsonList": {
+          "items": {
+            "$ref": "#/definitions/scalars/Generic_JSON"
+          },
+          "type": "array"
+        },
+        "optJson": {
+          "$ref": "#/definitions/scalars/Generic_JSON"
+        },
+        "reqJson": {
+          "$ref": "#/definitions/scalars/Generic_JSON"
+        }
+      },
+      "required": [
+        "reqJson"
+      ],
+      "type": "object",
+      "x-kind": "type"
+    },
     "ListMatrix": {
       "properties": {
         "boolGrid": {

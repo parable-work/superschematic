@@ -64,6 +64,17 @@ class ScalarDef:
     has_custom_parse: bool = False
     type_mappings: dict[str, str] = field(default_factory=dict)
 
+    def is_any_json(self) -> bool:
+        """Whether the scalar's value is any JSON value.
+
+        The json_schema type mapping declares it as "any" (Generic.JSON in
+        the core catalog). The catalog gives such a scalar the String
+        primitive, but a dict, a list, a string, a number and a bool are all
+        values, and only None stands for a missing one. Parse and validation
+        key the rule off this mapping, not the scalar's name or primitive.
+        """
+        return self.type_mappings.get("json_schema") == "any"
+
 
 @dataclass
 class MiddlewareConfig:

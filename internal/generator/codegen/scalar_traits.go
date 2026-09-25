@@ -37,6 +37,7 @@ func BuildScalarTraits(scalarDef *ir.ScalarDef, tokens ScalarTokens, targetType 
 	if scalarDef.FileUpload != nil {
 		traits.IsPathLike = true
 	}
+	traits.IsAnyJSON = scalarDef.IsAnyJSON()
 	return traits
 }
 

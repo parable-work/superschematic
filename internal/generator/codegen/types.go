@@ -112,6 +112,12 @@ type ScalarTraits struct {
 	IsDateTimeLike bool
 	IsDurationLike bool
 	IsJSONLike     bool
+	// IsAnyJSON marks a scalar whose value is any JSON value, from its
+	// json_schema type mapping (ir.ScalarDef.IsAnyJSON): every JSON type is
+	// a value, and JSON null is a missing one. Generic.JSON is one; an
+	// object- or array-shaped scalar (Generic.StringMap) is JSON-like but
+	// not any JSON.
+	IsAnyJSON      bool
 	IsLocationLike bool
 	IsEmailLike    bool
 	IsURLLike      bool

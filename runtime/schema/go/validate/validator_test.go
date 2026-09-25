@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -1053,4 +1054,52 @@ func TestFieldStringConstraints_CountsCodePoints(t *testing.T) {
 	codeErrs := errs.GetFieldErrors("code")
 	require.Len(t, codeErrs, 1)
 	assert.Equal(t, "maxLength", codeErrs[0].Validator)
+}
+
+// TestValidateType_AnyJSONScalar: a scalar whose json_schema type mapping is
+// "any" holds any JSON value but null, whatever its name and its String
+// primitive. No type, length, pattern or registered string validator
+// applies to the value; a null or missing required one is "required".
+func TestValidateType_AnyJSONScalar(t *testing.T) {
+	s := ir.NewSchema("test", ir.SchemaKindGeneral)
+	s.Scalars["Blob"] = &ir.ScalarDef{
+		Name:              "Blob",
+		Primitive:         "String",
+		HasCustomValidate: true,
+		TypeMappings:      map[string]string{"json_schema": "any"},
+	}
+	s.Types["Doc"] = &ir.TypeDef{
+		Name: "Doc",
+		Kind: ir.TypeKindObject,
+		Fields: []*ir.FieldDef{
+			{Name: "body", TypeRef: ir.TypeRef{Name: "Blob"}, Required: true},
+			{Name: "extra", TypeRef: ir.TypeRef{Name: "Blob"}},
+			{Name: "parts", TypeRef: ir.TypeRef{Name: "Blob", IsArray: true}},
+		},
+	}
+	reg := NewRegistry()
+	reg.Register("Blob", func(string) []ValidationError {
+		return []ValidationError{{Validator: "pattern", Message: "a string validator ran"}}
+	})
+	v := New(s, WithRegistry(reg))
+
+	for _, value := range []any{
+		map[string]any{"k": 1.0, "none": nil}, []any{1.0, "two", nil}, "not json", "", 42.0, false,
+	} {
+		errs := v.ValidateType("Doc", map[string]any{"body": value, "extra": value, "parts": []any{value}})
+		assert.False(t, errs.HasErrors(), "value %#v: %v", value, errs)
+	}
+
+	errs := v.ValidateType("Doc", map[string]any{"body": nil, "extra": nil, "parts": []any{1.0, nil}})
+	assert.Equal(t, "required", errs.GetFieldErrors("body")[0].Validator)
+	assert.Nil(t, errs.GetFieldErrors("extra"))
+	assert.Equal(t, "required", errs.GetFieldErrors("parts[1]")[0].Validator)
+
+	errs = v.ValidateType("Doc", map[string]any{})
+	assert.Equal(t, "required", errs.GetFieldErrors("body")[0].Validator)
+
+	// A value no JSON document carries is "type".
+	errs = v.ValidateType("Doc", map[string]any{"body": map[string]any{"k": math.NaN()}})
+	require.Len(t, errs.GetFieldErrors("body"), 1)
+	assert.Equal(t, "type", errs.GetFieldErrors("body")[0].Validator)
 }

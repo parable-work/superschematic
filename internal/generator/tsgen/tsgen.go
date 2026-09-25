@@ -66,6 +66,11 @@ type ScalarInfo struct {
 	// implementation; parseFromJSON helpers convert their wire strings into
 	// runtime Date values.
 	HasParseFromJSON bool
+
+	// IsAnyJSON marks a scalar whose value is any JSON value (its json_schema
+	// type mapping is "any"; Generic.JSON): the validator skips string checks,
+	// and null is a missing value like undefined, except as a map value.
+	IsAnyJSON bool
 }
 
 // FieldInfo holds information about a struct field for TypeScript generation.
@@ -363,6 +368,7 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 			HasJSONParse:                 s.HasCustomParse && s.Traits.IsJSONLike,
 			IsIntegerLike:                s.Traits.IsIntegerLike,
 			HasParseFromJSON:             s.HasCustomParse && s.TargetType == "JSDate",
+			IsAnyJSON:                    s.Traits.IsAnyJSON,
 		}
 	}
 	return scalars
