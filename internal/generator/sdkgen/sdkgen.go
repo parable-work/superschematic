@@ -734,50 +734,106 @@ func toolsTemplateFuncs() template.FuncMap {
 			}
 			return false
 		},
-		"buildInvocationArgs": func(tool ToolDefinition, ns ToolsNamespace) string {
-			var args []string
-
-			// A scoped namespace takes its scope parameter in the factory,
-			// so the invocation skips it.
-			for _, param := range tool.PathParams {
-				if ns.IsScopedNS && param.Name == ns.ScopeParam {
-					continue
-				}
-				args = append(args, fmt.Sprintf("(params as %sParams).%s", toPascalCaseToolName(tool.Name), param.TSName))
-			}
-
-			// Handle input type or scalar args
-			if tool.HasInput {
-				// Pass the entire params object minus path params
-				args = append(args, fmt.Sprintf("params as %sParams", toPascalCaseToolName(tool.Name)))
-			} else if len(tool.ScalarArgs) > 0 {
-				// Build object with scalar args
-				args = append(args, fmt.Sprintf("params as %sParams", toPascalCaseToolName(tool.Name)))
-			}
-			if len(tool.QueryArgs) > 0 {
-				fields := make([]string, 0, len(tool.QueryArgs))
-				for _, query := range tool.QueryArgs {
-					fields = append(fields, fmt.Sprintf(
-						"%s: (params as %sParams).%s",
-						query.TSName, toPascalCaseToolName(tool.Name), query.TSName,
-					))
-				}
-				args = append(args, "{ "+strings.Join(fields, ", ")+" }")
-			}
-			if tool.Encrypted {
-				args = append(
-					args,
-					fmt.Sprintf(
-						"(params as %sParams).publicEncryptionKey ? { publicEncryptionKey: (params as %sParams).publicEncryptionKey as { publicKey: string; algorithm: string; keyId: string } } : undefined",
-						toPascalCaseToolName(tool.Name),
-						toPascalCaseToolName(tool.Name),
-					),
-				)
-			}
-
-			return strings.Join(args, ", ")
-		},
+		"buildInvocationArgs": buildInvocationArgs,
 	}
+}
+
+// buildInvocationArgs is the argument list invokeTool passes to a tool's
+// SDK method, in the order the method declares its parameters: the path
+// parameters (a scoped namespace takes its scope in the factory); the input
+// type's fields under their names in the types package, or the body
+// arguments as one object; the query parameters as one object; and the
+// options of an encrypted operation.
+//
+// The SDK method takes body arguments as positional parameters, or all of
+// them as one object in the first (the object call, which also works when
+// the first argument is itself an object). invokeTool makes the object
+// call, which puts the query object in the second parameter, and passes
+// undefined for the remaining parameters the method requires, so the call
+// type-checks, and before the options of an encrypted operation, which stay
+// in their declared place.
+func buildInvocationArgs(tool ToolDefinition, ns ToolsNamespace) string {
+	params := fmt.Sprintf("(params as %sParams)", toPascalCaseToolName(tool.Name))
+	var args []string
+	for _, param := range tool.PathParams {
+		if ns.IsScopedNS && param.Name == ns.ScopeParam {
+			continue
+		}
+		args = append(args, params+"."+param.TSName)
+	}
+	bodyStart := len(args)
+
+	var query string
+	if len(tool.QueryArgs) > 0 {
+		fields := make([]string, 0, len(tool.QueryArgs))
+		for _, arg := range tool.QueryArgs {
+			fields = append(fields, fmt.Sprintf("%s: %s.%s", arg.TSName, params, arg.TSName))
+		}
+		query = "{ " + strings.Join(fields, ", ") + " }"
+	}
+
+	switch {
+	case tool.HasInput:
+		fields := make([]string, 0, len(tool.InputFields))
+		for _, field := range tool.InputFields {
+			fields = append(fields, fmt.Sprintf("%s: %s.%s", tsPropertyName(field.Name), params, field.Key))
+		}
+		args = append(args, "{ "+strings.Join(fields, ", ")+" }")
+		if query != "" {
+			args = append(args, query)
+		}
+	case len(tool.ScalarArgs) > 0:
+		fields := make([]string, 0, len(tool.ScalarArgs))
+		required := 0
+		for i, arg := range tool.ScalarArgs {
+			fields = append(fields, fmt.Sprintf("%s: %s.%s", arg.TSName, params, arg.TSName))
+			if arg.Required {
+				required = i + 1
+			}
+		}
+		args = append(args, "{ "+strings.Join(fields, ", ")+" }")
+		if query != "" {
+			args = append(args, query)
+		}
+		// The parameters up to the options: every body argument, then
+		// the query object.
+		declared := required
+		if tool.Encrypted {
+			declared = len(tool.ScalarArgs)
+			if query != "" {
+				declared++
+			}
+		}
+		for len(args)-bodyStart < declared {
+			args = append(args, "undefined")
+		}
+	case query != "":
+		args = append(args, query)
+	}
+
+	if tool.Encrypted {
+		args = append(args, fmt.Sprintf(
+			"%s.publicEncryptionKey ? { publicEncryptionKey: %s.publicEncryptionKey as { publicKey: string; algorithm: string; keyId: string } } : undefined",
+			params, params,
+		))
+	}
+	return strings.Join(args, ", ")
+}
+
+// tsPropertyName is name as a TypeScript object literal key: bare when it
+// is an identifier, else quoted.
+func tsPropertyName(name string) string {
+	for i, r := range name {
+		if r == '_' || r == '$' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (i > 0 && r >= '0' && r <= '9') {
+			continue
+		}
+		quoted, _ := json.Marshal(name)
+		return string(quoted)
+	}
+	if name == "" {
+		return `""`
+	}
+	return name
 }
 
 // jsonSchemaToTSType is the TypeScript type of a tool parameter read from
