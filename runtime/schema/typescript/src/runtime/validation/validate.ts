@@ -10,6 +10,7 @@ import {
 } from 'superscalar/validation';
 import { createDefaultScalarValidatorRegistry } from './registry';
 import { parseSchema, parseSchemaJson } from '../json/reader';
+import { isAnyJSONScalar } from './types';
 import type { FieldDef, SchemaInput, ScalarDef, Schema, TypeDef, ValidationOptions } from './types';
 
 const builtinScalars = new Set(['String', 'Int', 'Float', 'Boolean', 'ID']);
@@ -243,6 +244,9 @@ function validateScalarValue(
   required: boolean,
   options?: ValidationOptions
 ): ValidationError[] {
+  if (isAnyJSONScalar(scalar)) {
+    return validateAnyJSONScalarValue(scalar, value, required);
+  }
   switch (scalar.primitive) {
     case 'Int':
       return validateIntConstraints(scalar, value);
@@ -259,7 +263,54 @@ function validateScalarValue(
 }
 
 /**
- * Object-valued scalars (primitive: "Type", e.g. Generic_JSON, Geo_Location).
+ * Any-JSON scalars (isAnyJSONScalar): an object, an array, a string (JSON
+ * text or not), a number and a boolean are all values, so no type, length or
+ * pattern check applies, and the string-typed scalar validator registry is
+ * not consulted. Null or undefined is a missing value. A value no JSON
+ * document can carry (NaN, undefined inside an object, a function, a class
+ * instance, a cycle) is "type".
+ */
+function validateAnyJSONScalarValue(
+  scalar: ScalarDef,
+  value: unknown,
+  required: boolean
+): ValidationError[] {
+  if (value === undefined || value === null) {
+    return required ? [{ validator: 'required', message: `${scalar.name} is required.` }] : [];
+  }
+  if (!isJSONValue(value, new Set())) {
+    return [{ validator: 'type', message: `${scalar.name} must be a JSON value.` }];
+  }
+  return [];
+}
+
+function isJSONValue(value: unknown, ancestors: Set<object>): boolean {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return true;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value);
+  }
+  if (typeof value !== 'object' || ancestors.has(value)) {
+    return false;
+  }
+  if (!Array.isArray(value)) {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      return false;
+    }
+  }
+  ancestors.add(value);
+  const items: unknown[] = Array.isArray(value) ? value : Object.values(value);
+  const valid = items.every(item => isJSONValue(item, ancestors));
+  ancestors.delete(value);
+  return valid;
+}
+
+/**
+ * Object-valued scalars (primitive: "Type"). No scalar in the core catalog
+ * has it: Generic_JSON is any JSON value (validateAnyJSONScalarValue), and
+ * the other object-shaped scalars carry the String primitive.
  * Only the primitive shape (object, non-array, non-null) is checked here. The
  * string-typed scalar validator registry is deliberately not consulted --
  * ScalarValidateFn is `(value: string) => ...`, meaningless for object scalars.

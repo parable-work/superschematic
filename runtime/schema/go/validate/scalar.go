@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"regexp"
@@ -14,6 +15,9 @@ import (
 // generated ValidateRequired() method. For string primitives, an empty string produces
 // a "required" error. For all primitives, IR constraints are then applied.
 func (v *Validator) validateScalarRequired(scalar *ir.ScalarDef, value any) []ValidationError {
+	if scalar.IsAnyJSON() {
+		return validateAnyJSON(value)
+	}
 	if isStringPrimitive(scalar.Primitive) {
 		s, ok := value.(string)
 		if !ok {
@@ -33,6 +37,9 @@ func (v *Validator) validateScalarRequired(scalar *ir.ScalarDef, value any) []Va
 // (matching generated behavior for optional fields), and a value of another
 // JSON type is "type", as it is for a required field.
 func (v *Validator) validateScalarValue(scalar *ir.ScalarDef, value any) []ValidationError {
+	if scalar.IsAnyJSON() {
+		return validateAnyJSON(value)
+	}
 	if isStringPrimitive(scalar.Primitive) {
 		s, ok := value.(string)
 		if !ok {
@@ -45,6 +52,55 @@ func (v *Validator) validateScalarValue(scalar *ir.ScalarDef, value any) []Valid
 	}
 
 	return v.validateScalarConstraints(scalar, value)
+}
+
+// validateAnyJSON validates a value of a scalar whose value is any JSON value
+// (ir.ScalarDef.IsAnyJSON; Generic.JSON in the core catalog). The catalog
+// gives it the String primitive, but an object, an array, a string, a number
+// and a boolean are all values, so no type, length or pattern check applies,
+// and a string need not be JSON text. The callers report a null or missing
+// required value as "required" before this runs. A value no JSON document can
+// carry, such as a NaN, is "type".
+func validateAnyJSON(value any) []ValidationError {
+	if !isJSONValue(value, 0) {
+		return []ValidationError{{Validator: "type", Message: "expected a JSON value"}}
+	}
+	return nil
+}
+
+// maxJSONDepth is encoding/json's nesting limit. No decoded value is deeper,
+// so a deeper one (a map that holds itself) is not a JSON value.
+const maxJSONDepth = 10000
+
+// isJSONValue reports whether value is a JSON value: what encoding/json
+// decodes into an any, or another Go value it can encode. A NaN or an
+// infinite number is not.
+func isJSONValue(value any, depth int) bool {
+	if depth > maxJSONDepth {
+		return false
+	}
+	switch v := value.(type) {
+	case nil, bool, string:
+		return true
+	case float64:
+		return !math.IsNaN(v) && !math.IsInf(v, 0)
+	case []any:
+		for _, elem := range v {
+			if !isJSONValue(elem, depth+1) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		for _, elem := range v {
+			if !isJSONValue(elem, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	_, err := json.Marshal(value)
+	return err == nil
 }
 
 // validateScalarConstraints validates a value against a scalar definition.

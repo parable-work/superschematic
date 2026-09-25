@@ -70,3 +70,25 @@ func TestLanguagePrimitive_String(t *testing.T) {
 		}
 	}
 }
+
+// TestScalarDef_IsAnyJSON keys the any-JSON rule off the json_schema type
+// mapping: the catalog's primitive for Generic.JSON is String, and an
+// object-shaped scalar (json_schema "object" or "array") is not any JSON.
+func TestScalarDef_IsAnyJSON(t *testing.T) {
+	cases := []struct {
+		name   string
+		scalar *ScalarDef
+		want   bool
+	}{
+		{"any", &ScalarDef{Name: "Generic.JSON", Primitive: "String", TypeMappings: map[string]string{"json_schema": "any"}}, true},
+		{"object", &ScalarDef{Name: "Generic.StringMap", Primitive: "String", TypeMappings: map[string]string{"json_schema": "object"}}, false},
+		{"array", &ScalarDef{Name: "Embedding.Vector", Primitive: "String", TypeMappings: map[string]string{"json_schema": "array"}}, false},
+		{"no mappings", &ScalarDef{Name: "Generic.JSON"}, false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		if got := tc.scalar.IsAnyJSON(); got != tc.want {
+			t.Errorf("%s: IsAnyJSON() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

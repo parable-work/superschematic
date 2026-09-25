@@ -378,3 +378,34 @@ func TestParseType_RecursesIntoNestedDefaults(t *testing.T) {
 	owner := out["owner"].(map[string]any)
 	assert.Equal(t, int64(30), owner["timeoutSeconds"])
 }
+
+// TestParseType_AnyJSONScalar: a scalar whose json_schema type mapping is
+// "any" keeps its value as it is, whatever its String primitive, in the
+// lenient and the strict parse.
+func TestParseType_AnyJSONScalar(t *testing.T) {
+	s := ir.NewSchema("parse-test", ir.SchemaKindGeneral)
+	s.Scalars["Blob"] = &ir.ScalarDef{
+		Name:         "Blob",
+		Primitive:    "String",
+		TypeMappings: map[string]string{"json_schema": "any"},
+	}
+	s.Types["Doc"] = &ir.TypeDef{
+		Name: "Doc",
+		Kind: ir.TypeKindObject,
+		Fields: []*ir.FieldDef{
+			{Name: "body", TypeRef: ir.TypeRef{Name: "Blob"}, Required: true},
+			{Name: "parts", TypeRef: ir.TypeRef{Name: "Blob", IsArray: true}},
+		},
+	}
+	raw := map[string]any{
+		"body":  map[string]any{"k": []any{1.0, nil}},
+		"parts": []any{[]any{1.0}, "s", 2.0, true},
+	}
+	for _, strict := range []bool{false, true} {
+		p := New(s, WithStrict(strict))
+		out, errs := p.ParseType("Doc", raw)
+		require.False(t, errs.HasErrors(), "strict=%v errs=%v", strict, errs)
+		assert.Equal(t, raw["body"], out["body"])
+		assert.Equal(t, raw["parts"], out["parts"])
+	}
+}

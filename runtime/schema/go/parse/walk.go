@@ -265,7 +265,9 @@ func (p *Parser) applyCustomParse(scalar *ir.ScalarDef, value any) (any, []Valid
 // Returns the resulting value (possibly typed as int64/float64/bool/string)
 // and true on success.
 func (p *Parser) applyScalar(scalar *ir.ScalarDef, value any, strict bool) (any, bool) {
-	if scalar == nil {
+	// Any JSON value is one, whatever the scalar's primitive; validation
+	// checks it.
+	if scalar == nil || scalar.IsAnyJSON() {
 		return value, true
 	}
 	switch scalar.Primitive {

@@ -68,6 +68,10 @@ def _type_mismatch_message(scalar: ScalarDef) -> str:
 
 
 def _apply_scalar(ctx: WalkContext, scalar: ScalarDef, value: Any) -> tuple[Any, bool]:
+    # Any JSON value is one, whatever the scalar's primitive; validation
+    # checks it.
+    if scalar.is_any_json():
+        return value, True
     primitive = scalar.primitive
     if primitive == "Int":
         return coerce_int(value, ctx.strict)

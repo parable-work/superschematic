@@ -6,6 +6,7 @@ const assert = require('node:assert');
 
 const {
   ScalarValidatorRegistry,
+  loadType,
   parseSchemaIR,
   validateSchemaType,
 } = require('../dist/runtime/index.js');
@@ -79,6 +80,76 @@ test('a value the pattern accepts goes to the registered validator', () => {
   const result = verdicts({ code: 'abc' });
   assert.deepStrictEqual(result.code, [{ validator: 'pattern', message: 'core rejects abc' }]);
   assert.deepStrictEqual(calls, ['abc']);
+});
+
+// A scalar whose json_schema type mapping is "any" holds any JSON value but
+// null, whatever its name and its String primitive: no type or pattern
+// check, and no registered string validator, sees the value.
+const anyJSONSchema = parseSchemaIR({
+  name: 'scalar-errors-any-json',
+  kind: 'General',
+  scalars: {
+    'Mystery.Blob': {
+      name: 'Mystery.Blob',
+      primitive: 'String',
+      languagePrimitive: 'string',
+      pattern: '^[a-z]+$',
+      typeMappings: { json_schema: 'any' },
+    },
+  },
+  types: {
+    Doc: {
+      name: 'Doc',
+      role: 'EmbeddedStruct',
+      fields: [
+        { name: 'body', typeRef: { name: 'Mystery.Blob' }, required: true },
+        { name: 'parts', typeRef: { name: 'Mystery.Blob', isArray: true } },
+      ],
+    },
+  },
+});
+const blobCalls = [];
+const blobRegistry = new ScalarValidatorRegistry({
+  'Mystery.Blob': (value) => {
+    blobCalls.push(value);
+    return [{ validator: 'pattern', message: 'a string validator ran' }];
+  },
+});
+
+function anyJSONVerdicts(data) {
+  const result = validateSchemaType(anyJSONSchema, 'Doc', data, { scalarRegistry: blobRegistry });
+  if (result === true) return {};
+  return Object.fromEntries(Object.entries(result).map(([k, v]) => [k, v.map((e) => e.validator)]));
+}
+
+test('an any-JSON scalar accepts every JSON value but null', () => {
+  blobCalls.length = 0;
+  for (const value of [{ k: 1, none: null }, [1, 'two', null], 'NOT JSON', '', 42, false]) {
+    assert.deepStrictEqual(anyJSONVerdicts({ body: value, parts: [value] }), {}, JSON.stringify(value));
+  }
+  assert.deepStrictEqual(blobCalls, []);
+  assert.deepStrictEqual(anyJSONVerdicts({ body: null, parts: [1, null] }), {
+    body: ['required'],
+    'parts[1]': ['required'],
+  });
+  assert.deepStrictEqual(anyJSONVerdicts({}), { body: ['required'] });
+});
+
+test('an any-JSON scalar refuses a value JSON cannot carry', () => {
+  const cyclic = {};
+  cyclic.self = cyclic;
+  for (const value of [Number.NaN, { k: undefined }, () => 1, new Date(0), cyclic]) {
+    assert.deepStrictEqual(anyJSONVerdicts({ body: value }), { body: ['type'] });
+  }
+});
+
+test('loading an any-JSON scalar keeps the value as it is', () => {
+  const payload = '{"body": {"k": [1, null]}, "parts": [[1], "s", 2, true]}';
+  for (const strict of [false, true]) {
+    const result = loadType(anyJSONSchema, 'Doc', payload, { strict });
+    assert.deepStrictEqual(result.errors, {});
+    assert.deepStrictEqual(result.data, JSON.parse(payload));
+  }
 });
 
 if (failures > 0) {

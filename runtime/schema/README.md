@@ -51,6 +51,14 @@ go run ./internal/tools/scalarcatalog
 go run ./internal/tools/scalarcatalog -check   # CI: fail when stale
 ```
 
+A row's `primitive` decides how parse and validation check a value, with
+one exception. A scalar whose `json_schema` type mapping is `any`
+(`Generic.JSON`) holds any JSON value but null, although its row says
+`String`: each runtime keys that off the mapping (`ir.ScalarDef.IsAnyJSON`,
+`isAnyJSONScalar`, `ScalarDef.is_any_json`), passes the value through
+parse, and validates only that it is a JSON value. A null or missing
+required one is `required`.
+
 ## Local development
 
 `scripts/superscalar-dep.sh` (repository root) checks superscalar out under
