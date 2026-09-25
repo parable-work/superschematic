@@ -321,7 +321,9 @@ export type ToolParams = {
 };
 
 /**
- * Invokes a tool by name using the SDK
+ * Invokes a tool by name using the SDK. A tool whose bindingStatus is
+ * unsupported_multipart uploads a file, which tool parameters cannot carry;
+ * invokeTool throws for it without sending a request.
  *
  * @param sdk - The initialized SDK instance
  * @param toolName - The namespaced tool name (e.g., "auth.sendMagicLink")
@@ -345,7 +347,9 @@ export async function invokeTool<T extends ToolName>(
 {{- $ns := .}}
 {{- range .Tools}}
     case {{formatToolName .Name}}:
-{{- if $ns.IsScopedNS}}
+{{- if eq .BindingStatus "unsupported_multipart"}}
+      throw new Error("{{.Name}} uploads a file, which tool parameters cannot carry (bindingStatus unsupported_multipart); call sdk.{{toCamelCase $ns.Name}}{{if $ns.IsScopedNS}}(...){{end}}.{{.MethodName}} with the files");
+{{- else if $ns.IsScopedNS}}
       return sdk.{{toCamelCase $ns.Name}}((params as {{toPascalCase .Name}}Params).{{$ns.ScopeParam}}).{{.MethodName}}({{buildInvocationArgs . $ns}});
 {{- else}}
       return sdk.{{toCamelCase $ns.Name}}.{{.MethodName}}({{buildInvocationArgs . $ns}});

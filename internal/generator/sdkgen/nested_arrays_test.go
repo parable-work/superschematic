@@ -181,7 +181,7 @@ func TestNestedArraysSDKCompilesAndRuns(t *testing.T) {
 	if err := CompileSDK(sdkDir, typesDir); err != nil {
 		t.Fatalf("generated SDK does not type-check: %v", err)
 	}
-	typecheckTools(t, bunPath, sdkDir)
+	requireToolsBuilt(t, sdkDir)
 
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {

@@ -562,7 +562,9 @@ export type ToolParams = {
 };
 
 /**
- * Invokes a tool by name using the SDK
+ * Invokes a tool by name using the SDK. A tool whose bindingStatus is
+ * unsupported_multipart uploads a file, which tool parameters cannot carry;
+ * invokeTool throws for it without sending a request.
  *
  * @param sdk - The initialized SDK instance
  * @param toolName - The namespaced tool name (e.g., "auth.sendMagicLink")
@@ -589,11 +591,11 @@ export async function invokeTool<T extends ToolName>(
     case TENANT_LIST_TENANTS:
       return sdk.tenant.listTenants({ ids: (params as TenantListTenantsParams).ids, statuses: (params as TenantListTenantsParams).statuses });
     case TENANT_CREATE_TENANT:
-      return sdk.tenant.createTenant(params as TenantCreateTenantParams, (params as TenantCreateTenantParams).publicEncryptionKey ? { publicEncryptionKey: (params as TenantCreateTenantParams).publicEncryptionKey as { publicKey: string; algorithm: string; keyId: string } } : undefined);
+      return sdk.tenant.createTenant({ name: (params as TenantCreateTenantParams).name, slug: (params as TenantCreateTenantParams).slug }, (params as TenantCreateTenantParams).publicEncryptionKey ? { publicEncryptionKey: (params as TenantCreateTenantParams).publicEncryptionKey as { publicKey: string; algorithm: string; keyId: string } } : undefined);
     case TENANT_GET_TENANT:
       return sdk.tenant.getTenant((params as TenantGetTenantParams).id, { includeArchived: (params as TenantGetTenantParams).includeArchived });
     case TENANT_UPDATE_SECRET:
-      return sdk.tenant.updateSecret((params as TenantUpdateSecretParams).id, params as TenantUpdateSecretParams, (params as TenantUpdateSecretParams).publicEncryptionKey ? { publicEncryptionKey: (params as TenantUpdateSecretParams).publicEncryptionKey as { publicKey: string; algorithm: string; keyId: string } } : undefined);
+      return sdk.tenant.updateSecret((params as TenantUpdateSecretParams).id, { secret: (params as TenantUpdateSecretParams).secret }, (params as TenantUpdateSecretParams).publicEncryptionKey ? { publicEncryptionKey: (params as TenantUpdateSecretParams).publicEncryptionKey as { publicKey: string; algorithm: string; keyId: string } } : undefined);
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }

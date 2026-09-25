@@ -651,7 +651,9 @@ export type ToolParams = {
 };
 
 /**
- * Invokes a tool by name using the SDK
+ * Invokes a tool by name using the SDK. A tool whose bindingStatus is
+ * unsupported_multipart uploads a file, which tool parameters cannot carry;
+ * invokeTool throws for it without sending a request.
  *
  * @param sdk - The initialized SDK instance
  * @param toolName - The namespaced tool name (e.g., "auth.sendMagicLink")
@@ -674,15 +676,15 @@ export async function invokeTool<T extends ToolName>(
     case PAINT_LIST_PAINT:
       return sdk.paint.listPaint({ tone: (params as PaintListPaintParams).tone, tones: (params as PaintListPaintParams).tones });
     case PAINT_PAINT:
-      return sdk.paint.paint(params as PaintPaintParams);
+      return sdk.paint.paint({ tone: (params as PaintPaintParams).tone, maybeTone: (params as PaintPaintParams).maybeTone, tones: (params as PaintPaintParams).tones, toneRows: (params as PaintPaintParams).toneRows, maybeTones: (params as PaintPaintParams).maybeTones, swatch: (params as PaintPaintParams).swatch, maybeSwatch: (params as PaintPaintParams).maybeSwatch, swatches: (params as PaintPaintParams).swatches, swatchRows: (params as PaintPaintParams).swatchRows, toneByName: (params as PaintPaintParams).toneByName, tonesByName: (params as PaintPaintParams).tonesByName, swatchByName: (params as PaintPaintParams).swatchByName, labels: (params as PaintPaintParams).labels, ref: (params as PaintPaintParams).ref, at: (params as PaintPaintParams).at, maybeAt: (params as PaintPaintParams).maybeAt, extra: (params as PaintPaintParams).extra, palette: (params as PaintPaintParams).palette, count: (params as PaintPaintParams).count, tags: (params as PaintPaintParams).tags, fill: (params as PaintPaintParams).fill });
     case PAINT_PAINT_BY_TONE:
       return sdk.paint.paintByTone((params as PaintPaintByToneParams).tone);
     case PAINT_SET_LABELS:
-      return sdk.paint.setLabels((params as PaintSetLabelsParams).id, params as PaintSetLabelsParams);
+      return sdk.paint.setLabels((params as PaintSetLabelsParams).id, { labelsByLocale: (params as PaintSetLabelsParams).labelsByLocale });
     case PAINT_SET_TONE:
-      return sdk.paint.setTone((params as PaintSetToneParams).id, params as PaintSetToneParams);
+      return sdk.paint.setTone((params as PaintSetToneParams).id, { tone: (params as PaintSetToneParams).tone });
     case PAINT_NAME_TONES:
-      return sdk.paint.nameTones((params as PaintNameTonesParams).id, params as PaintNameTonesParams);
+      return sdk.paint.nameTones((params as PaintNameTonesParams).id, { toneByName: (params as PaintNameTonesParams).toneByName });
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }

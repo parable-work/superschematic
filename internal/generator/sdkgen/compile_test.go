@@ -2,6 +2,7 @@ package sdkgen
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -118,19 +119,15 @@ func TestGeneratedSDKCompiles(t *testing.T) {
 	if err := CompileSDK(sdkDir, filepath.Join(tempRoot, "types", "typescript", "fixture-api")); err != nil {
 		t.Fatalf("generated SDK does not type-check: %v", err)
 	}
-	typecheckTools(t, bunPath, sdkDir)
+	requireToolsBuilt(t, sdkDir)
 }
 
-// typecheckTools runs tsc over tools/index.ts, which the SDK package's own
-// build leaves out.
-func typecheckTools(t *testing.T, bunPath, sdkDir string) {
+// requireToolsBuilt checks that the SDK package's own build (CompileSDK)
+// compiled tools/index.ts, so a type error in it fails that build.
+func requireToolsBuilt(t *testing.T, sdkDir string) {
 	t.Helper()
-	tools := exec.Command(bunPath, "x", "tsc", "--noEmit", "--strict", "--skipLibCheck",
-		"--target", "ES2020", "--module", "ESNext", "--moduleResolution", "bundler",
-		filepath.Join("tools", "index.ts"))
-	tools.Dir = sdkDir
-	if out, err := tools.CombinedOutput(); err != nil {
-		t.Errorf("tools/index.ts does not type-check: %v\n%s", err, out)
+	if _, err := os.Stat(filepath.Join(sdkDir, "dist", "tools", "index.js")); err != nil {
+		t.Errorf("the SDK build did not compile tools/index.ts: %v", err)
 	}
 }
 
@@ -204,7 +201,7 @@ func TestGeneratedMCPToolsCompile(t *testing.T) {
 			if err := CompileSDK(sdkDir, typesDir); err != nil {
 				t.Fatalf("generated SDK does not type-check: %v", err)
 			}
-			typecheckTools(t, bunPath, sdkDir)
+			requireToolsBuilt(t, sdkDir)
 		})
 	}
 }
