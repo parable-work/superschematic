@@ -19,6 +19,8 @@ import (
 // generated TypeScript and Python validators. Regression test for the
 // normalizeNilSlices bug that turned absent optional lists into empty non-nil
 // slices, making every decode-then-validate of an omitted list fail listMin.
+// Encoding keeps the same distinction: nil is left out and [] is written.
+// It also pins that normalizeNilSlices leaves non-wire fields alone.
 const optionalListBehaviorTest = `package types
 
 import (
@@ -36,8 +38,8 @@ func TestOptionalListDecodeValidate(t *testing.T) {
 	}{
 		{name: "absent", payload: ` + "`" + `{"kind": "x"}` + "`" + `, wantNil: true, wantListMin: false, wantMarshalKey: false},
 		{name: "explicit null", payload: ` + "`" + `{"kind": "x", "values": null}` + "`" + `, wantNil: true, wantListMin: false, wantMarshalKey: false},
-		// omitempty drops the empty list on marshal even though it decodes non-nil.
-		{name: "explicit empty", payload: ` + "`" + `{"kind": "x", "values": []}` + "`" + `, wantNil: false, wantListMin: true, wantMarshalKey: false},
+		// omitzero leaves out only a nil list, so an explicit [] is written back.
+		{name: "explicit empty", payload: ` + "`" + `{"kind": "x", "values": []}` + "`" + `, wantNil: false, wantListMin: true, wantMarshalKey: true},
 		{name: "one item", payload: ` + "`" + `{"kind": "x", "values": ["a"]}` + "`" + `, wantNil: false, wantListMin: false, wantMarshalKey: true},
 	}
 
@@ -72,7 +74,43 @@ func TestOptionalListDecodeValidate(t *testing.T) {
 			if _, present := round["values"]; present != tc.wantMarshalKey {
 				t.Errorf("marshaled values key present = %v, want %v (out: %s)", present, tc.wantMarshalKey, out)
 			}
+			var decoded FixtureFilter
+			if err := json.Unmarshal(out, &decoded); err != nil {
+				t.Fatalf("decode marshaled output: %v", err)
+			}
+			if (decoded.Values == nil) != tc.wantNil {
+				t.Errorf("round trip changed list presence (out: %s)", out)
+			}
 		})
+	}
+}
+
+type listMetadata struct {
+	Imports []string ` + "`" + `json:"-"` + "`" + `
+	Wire    []string ` + "`" + `json:"wire"` + "`" + `
+}
+
+// normalizeNilSlices fills only list fields that go on the wire. A field
+// tagged json:"-" and an unexported field are left nil, at any depth; a
+// field named "-" (json:"-,") is on the wire.
+func TestNormalizeNilSlicesSkipsNonWireFields(t *testing.T) {
+	value := struct {
+		Meta     listMetadata
+		Required []string
+		Ignored  []string ` + "`" + `json:"-"` + "`" + `
+		Dash     []string ` + "`" + `json:"-,"` + "`" + `
+		private  []string
+		hidden   *listMetadata
+	}{hidden: &listMetadata{}}
+	normalizeNilSlices(&value)
+	if value.Required == nil || value.Dash == nil || value.Meta.Wire == nil {
+		t.Fatal("a nil wire list was not filled")
+	}
+	if value.Ignored != nil || value.Meta.Imports != nil {
+		t.Fatal("a json:\"-\" list was filled")
+	}
+	if value.private != nil || value.hidden.Wire != nil || value.hidden.Imports != nil {
+		t.Fatal("an unexported field was filled")
 	}
 }
 

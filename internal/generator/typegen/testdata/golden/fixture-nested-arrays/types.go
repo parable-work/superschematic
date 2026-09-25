@@ -29,9 +29,8 @@ func toMapValue(value any) (map[string]any, error) {
 // emits [] instead of null for list fields (Go nil slices marshal to JSON null).
 // Only call during serialization: decoding must preserve required-list presence.
 // []byte is skipped so nil and empty stay distinct for RawMessage-style payloads.
-// Optional (omitempty) list fields are skipped so nil keeps meaning "absent":
-// omitempty omits nil and empty identically on marshal, and Validate gates
-// optional list constraints (listMin) on nil-ness.
+// Optional list fields preserve nil as absent and explicit [] as present.
+// Validate gates optional list constraints (listMin) on nil-ness.
 func normalizeNilSlices(v any) {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
@@ -64,12 +63,17 @@ func normalizeNilSlicesRec(rv reflect.Value) {
 		}
 	case reflect.Struct:
 		for i := 0; i < rv.NumField(); i++ {
-			field := rv.Field(i)
-			// An unset optional input field (omitzero InputField) stays absent.
-			if jsonTagHasOption(rv.Type().Field(i), "omitzero") && field.IsZero() {
+			sf := rv.Type().Field(i)
+			// Internal scalar/runtime metadata is not part of the wire contract.
+			if !sf.IsExported() || sf.Tag.Get("json") == "-" {
 				continue
 			}
-			if field.Kind() == reflect.Slice && field.IsNil() && jsonTagHasOption(rv.Type().Field(i), "omitempty") {
+			field := rv.Field(i)
+			// Preserve absence for both nullable input fields and optional slices.
+			if jsonTagHasOption(sf, "omitzero") && field.IsZero() {
+				continue
+			}
+			if field.Kind() == reflect.Slice && field.IsNil() && jsonTagHasOption(sf, "omitempty") {
 				continue
 			}
 			normalizeNilSlicesRec(field)
@@ -159,7 +163,7 @@ type Drawing struct {
 
 	Polygons [][]Point `json:"polygons"`
 
-	Samples [][]float64 `json:"samples,omitempty"`
+	Samples [][]float64 `json:"samples,omitzero"`
 }
 
 // MaskSecrets returns a copy of Drawing with secret fields cleared.

@@ -611,6 +611,13 @@ of a generated artifact is always listed here with the bump it requires.
   table type (`Table[][]`) with one error naming the field, instead of
   failing later in the sql and orm generators, which keep their check.
   Patch.
+- Go types and the Go SDK: an optional list field (`T[]` or `T[][]`, not a
+  map) of an output type, and an optional list argument of a Go SDK
+  request, is tagged `omitzero` instead of `omitempty`. A nil list is
+  still left out, and an explicit `[]` is now written, so decoding and
+  re-encoding a payload keeps an empty list present, as the TypeScript,
+  Python and Rust types already do. Before, `[]` was dropped on encode and
+  came back as absent. Minor.
 
 ### Fixed
 
@@ -751,5 +758,9 @@ of a generated artifact is always listed here with the bump it requires.
   (`Record<string, TInput>` on the input of a `@jsonField` type) rendered
   `To<Type>` as `Tomap[string]T()` and the module failed to format; it now
   converts each entry and keeps a null entry null. Patch.
+- Go types: encoding a value (`MarshalJSON`) set every nil list it
+  reached to `[]`, including a field tagged `json:"-"`, which is not on the
+  wire, so encoding changed a value's in-memory metadata. It now skips
+  fields tagged `json:"-"` and unexported fields. Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main
