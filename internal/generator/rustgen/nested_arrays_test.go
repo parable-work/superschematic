@@ -10,6 +10,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -123,9 +124,23 @@ func TestListsOfListsSerde(t *testing.T) {
 
 // cargoTestGeneratedCrate writes output as a crate, adds serde_json as a
 // dev-dependency and source as tests/<name>.rs, and runs cargo test on it.
+// A crate that uses the scalar crate depends on the local superscalar
+// checkout by path, since superscalar is not on crates.io; the test is
+// skipped when that checkout is missing.
 func cargoTestGeneratedCrate(t *testing.T, cargoPath string, output *ModuleOutput, targetDir, name, source string) {
 	t.Helper()
-	outDir := filepath.Join(t.TempDir(), output.CrateName)
+	// Resolve symlinks (macOS /var -> /private/var) so the relative crate
+	// path in Cargo.toml resolves from the real directory.
+	tempDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(tempDir, output.CrateName)
+	if output.UsesScalarLib {
+		if err := SetScalarLibPath(output, testpaths.Local(t), outDir); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := WriteTypes(output, outDir); err != nil {
 		t.Fatalf("write types: %v", err)
 	}
