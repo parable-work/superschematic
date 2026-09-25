@@ -33,6 +33,15 @@ func (e CellState) IsValid() bool {
 	return false
 }
 
+// Values returns every CellState member in schema declaration order.
+// Each call returns a new slice.
+func (CellState) Values() []CellState {
+	return []CellState{
+		CellState_Empty,
+		CellState_Filled,
+	}
+}
+
 // Validate and returns whether validation passed along with any errors.
 func (e CellState) Validate() (bool, []ValidationError) {
 	var errs []ValidationError

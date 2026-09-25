@@ -133,6 +133,13 @@ Encoding keeps an empty list apart from an absent one. An optional list is
 left out when it is nil and written when it is `[]`, so a decoded payload
 re-encodes with the same keys. A required list encodes nil as `[]`.
 
+A generated enum lists its members with `Values()`, which returns a new
+slice in schema declaration order. It is a method, so it also works through
+the alias a module that imports the enum declares: `Stage("").Values()`
+returns the same list in both modules. It matches Rust's `ALL`,
+TypeScript's `Object.values`, and iterating a Python enum. `IsValid()`
+checks membership.
+
 ## Serve a generated API
 
 An API schema with a Go API output writes the module

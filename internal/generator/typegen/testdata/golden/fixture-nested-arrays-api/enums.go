@@ -33,6 +33,15 @@ func (e Shade) IsValid() bool {
 	return false
 }
 
+// Values returns every Shade member in schema declaration order.
+// Each call returns a new slice.
+func (Shade) Values() []Shade {
+	return []Shade{
+		Shade_Light,
+		Shade_Dark,
+	}
+}
+
 // Validate and returns whether validation passed along with any errors.
 func (e Shade) Validate() (bool, []ValidationError) {
 	var errs []ValidationError
