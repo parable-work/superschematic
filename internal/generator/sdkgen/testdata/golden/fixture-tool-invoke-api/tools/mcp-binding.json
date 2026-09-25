@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "apiId": "fixture-tool-invoke-api",
+  "sdkClassName": "FixtureToolInvokeApiSDK",
+  "tools": [
+    {
+      "toolName": "note.createNote",
+      "apiId": "fixture-tool-invoke-api",
+      "namespace": "note",
+      "methodName": "createNote",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "title",
+          "required": true,
+          "kind": "input",
+          "target": "input.title"
+        },
+        {
+          "toolParameter": "createdBy",
+          "required": true,
+          "kind": "input",
+          "target": "input.created_by"
+        },
+        {
+          "toolParameter": "dueAt",
+          "required": false,
+          "kind": "input",
+          "target": "input.due_at"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["title", "createdBy", "dueAt"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.attach",
+      "apiId": "fixture-tool-invoke-api",
+      "namespace": "note",
+      "methodName": "attach",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "file",
+          "required": true,
+          "kind": "input",
+          "target": "input.file"
+        },
+        {
+          "toolParameter": "caption",
+          "required": true,
+          "kind": "input",
+          "target": "input.caption"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["file", "caption"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.configureNotes",
+      "apiId": "fixture-tool-invoke-api",
+      "namespace": "note",
+      "methodName": "configureNotes",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "settings",
+          "required": true,
+          "kind": "scalar",
+          "target": "input.settings"
+        },
+        {
+          "toolParameter": "reason",
+          "required": true,
+          "kind": "scalar",
+          "target": "input.reason"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "scalar",
+          "target": "input",
+          "sources": ["settings", "reason"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.moveNote",
+      "apiId": "fixture-tool-invoke-api",
+      "namespace": "note",
+      "methodName": "moveNote",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "dryRun",
+          "required": false,
+          "kind": "query",
+          "target": "query.dryRun"
+        },
+        {
+          "toolParameter": "title",
+          "required": true,
+          "kind": "scalar",
+          "target": "input.title"
+        },
+        {
+          "toolParameter": "folder",
+          "required": true,
+          "kind": "scalar",
+          "target": "input.folder"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "scalar",
+          "target": "input",
+          "sources": ["title", "folder"]
+        },
+        {
+          "position": 1,
+          "kind": "query",
+          "target": "query",
+          "sources": ["dryRun"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.sealNote",
+      "apiId": "fixture-tool-invoke-api",
+      "namespace": "note",
+      "methodName": "sealNote",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "dryRun",
+          "required": false,
+          "kind": "query",
+          "target": "query.dryRun"
+        },
+        {
+          "toolParameter": "title",
+          "required": true,
+          "kind": "scalar",
+          "target": "input.title"
+        },
+        {
+          "toolParameter": "body",
+          "required": true,
+          "kind": "scalar",
+          "target": "input.body"
+        },
+        {
+          "toolParameter": "publicEncryptionKey",
+          "required": false,
+          "kind": "option",
+          "target": "options.publicEncryptionKey"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "scalar",
+          "target": "input",
+          "sources": ["title", "body"]
+        },
+        {
+          "position": 1,
+          "kind": "query",
+          "target": "query",
+          "sources": ["dryRun"]
+        },
+        {
+          "position": 3,
+          "kind": "option",
+          "target": "options",
+          "sources": ["publicEncryptionKey"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.tagNote",
+      "apiId": "fixture-tool-invoke-api",
+      "namespace": "note",
+      "methodName": "tagNote",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "label",
+          "required": true,
+          "kind": "scalar",
+          "target": "input.label"
+        },
+        {
+          "toolParameter": "weight",
+          "required": true,
+          "kind": "scalar",
+          "target": "input.weight"
+        },
+        {
+          "toolParameter": "comment",
+          "required": false,
+          "kind": "scalar",
+          "target": "input.comment"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "scalar",
+          "target": "input",
+          "sources": ["label", "weight", "comment"]
+        }
+      ]
+    }
+  ]
+}

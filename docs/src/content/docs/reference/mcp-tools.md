@@ -272,6 +272,31 @@ the SDK method. A parameter has the type that method takes:
 The file imports the types it names from the types package, as the SDK's
 namespaces do.
 
+A parameter key is the argument's name in camelCase, while the types
+package keeps a field's own name, so `invokeTool` builds each SDK call
+from the parameters, in the order the method declares its arguments:
+
+- the path parameters, one argument each (a scoped namespace takes its
+  scope in the factory);
+- the input type as an object of its fields under their own names:
+  `created_by: params.createdBy`;
+- or, without an input type, the body arguments as one object in the
+  first body position, which the SDK method accepts in place of its
+  positional body arguments;
+- the query parameters as one object, in the next position;
+- `undefined` for each remaining position the method requires, as in
+  `tagNote(params.id, { label, weight, comment }, undefined)`, and, for an
+  encrypted operation, `{ publicEncryptionKey }` in the options position
+  the method declares.
+
+`tools/mcp-binding.json` lists the same positions. A tool whose
+`bindingStatus` is `unsupported_multipart` uploads a file, which tool
+parameters cannot carry; `invokeTool` throws for it without sending a
+request, and the other documents list it as they list any tool.
+
+The SDK package's `tsconfig.json` includes `tools/`, so its build
+(`bun run build`) type-checks `tools/index.ts`.
+
 ### The replay contract
 
 When the SDK generators build a tool whose `@docs` declares replay

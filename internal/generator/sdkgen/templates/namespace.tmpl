@@ -498,7 +498,7 @@ export class {{.Namespace.ClassName}} {
       {{- else}}
       undefined,
       {{- end}}
-      { {{- if has_encrypted_body .Method .Encrypted}}signal: options?.signal{{- else}}signal{{if .ScalarArgs}}: requestSignal{{end}}{{- end}}{{if and (has_query_params .QueryParams) .Filterable}}, params: { ...params, ...filterParams }{{else if has_query_params .QueryParams}}, params{{else if .Filterable}}, params: filterParams{{end}} }
+      { {{- if has_encrypted_body .Method .Encrypted}}signal: options?.signal{{- else}}signal{{if .ScalarArgs}}: requestSignal{{end}}{{- end}}{{if and (has_query_params .QueryParams) .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if has_query_params .QueryParams}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}} }
     );
     {{- else if eq .Method "PUT"}}
     // Make PUT request
@@ -513,7 +513,7 @@ export class {{.Namespace.ClassName}} {
       {{- else}}
       undefined,
       {{- end}}
-      { {{- if has_encrypted_body .Method .Encrypted}}signal: options?.signal{{- else}}signal{{if .ScalarArgs}}: requestSignal{{end}}{{- end}}{{if and (has_query_params .QueryParams) .Filterable}}, params: { ...params, ...filterParams }{{else if has_query_params .QueryParams}}, params{{else if .Filterable}}, params: filterParams{{end}} }
+      { {{- if has_encrypted_body .Method .Encrypted}}signal: options?.signal{{- else}}signal{{if .ScalarArgs}}: requestSignal{{end}}{{- end}}{{if and (has_query_params .QueryParams) .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if has_query_params .QueryParams}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}} }
     );
     {{- else if eq .Method "PATCH"}}
     // Make PATCH request
@@ -528,7 +528,7 @@ export class {{.Namespace.ClassName}} {
       {{- else}}
       undefined,
       {{- end}}
-      { {{- if has_encrypted_body .Method .Encrypted}}signal: options?.signal{{- else}}signal{{if .ScalarArgs}}: requestSignal{{end}}{{- end}}{{if and (has_query_params .QueryParams) .Filterable}}, params: { ...params, ...filterParams }{{else if has_query_params .QueryParams}}, params{{else if .Filterable}}, params: filterParams{{end}} }
+      { {{- if has_encrypted_body .Method .Encrypted}}signal: options?.signal{{- else}}signal{{if .ScalarArgs}}: requestSignal{{end}}{{- end}}{{if and (has_query_params .QueryParams) .Filterable}}, params: { ...{{if .ScalarArgs}}requestParams{{else}}params{{end}}, ...filterParams }{{else if has_query_params .QueryParams}}, params{{if .ScalarArgs}}: requestParams{{end}}{{else if .Filterable}}, params: filterParams{{end}} }
     );
     {{- else if eq .Method "DELETE"}}
     // Make DELETE request; Axios carries a declared body through config.data.

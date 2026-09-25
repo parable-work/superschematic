@@ -765,6 +765,25 @@ of a generated artifact is always listed here with the bump it requires.
   argument or a map body argument changes; other digests do not.
   `JSONSchemaProperty.enum` in `tools/index.ts` is `Array<string | null>`.
   Patch.
+- TypeScript SDK: `invokeTool` in `tools/index.ts` did not type-check or
+  call some SDK methods correctly. A tool with two or more required body
+  arguments and no input type passed one object where the method requires
+  more arguments (TS2555); `invokeTool` now passes the body arguments as
+  one object and `undefined` for the remaining required positions. A
+  file-upload tool called the method without its `files` argument (TS2554);
+  `invokeTool` now throws for a tool whose `bindingStatus` is
+  `unsupported_multipart`. An input type was passed as the parameters
+  object, whose keys are camelCase, so a snake_case field such as
+  `created_by` was missing (TS2345) and the path parameters went into the
+  body; the input is now built from its fields under their own names, and
+  body arguments no longer carry the path parameters either. An encrypted
+  operation with two or more body arguments got its key in the wrong
+  position, in `invokeTool` and in `tools/mcp-binding.json`. A `POST`,
+  `PUT` or `PATCH` SDK method with two or more body arguments, called with
+  them as one object, dropped the query parameters; it now sends them. The
+  SDK package's `tsconfig.json` no longer excludes `tools/`, so its build
+  type-checks `tools/index.ts` and emits `dist/tools/`. Minor: a type
+  error in `tools/index.ts` now fails the SDK build.
 - Go ORM: `GetManyByIDs` keyed its result map on a hard-coded `entity.Id`
   and took UUID keys. A table keyed on a UUID field with another name did
   not compile, and a table keyed on a string `id` always returned an empty
