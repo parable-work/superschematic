@@ -43,14 +43,16 @@
       "maxLength": 255,
       "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
       "type": "string",
-      "x-example": "test@example.com",
       "x-hasCustomNormalize": true,
       "x-hasCustomValidate": true,
       "x-scalar": "Contact_Email",
       "x-typeMapping": {
         "go": "ContactEmail",
         "json_schema": "string",
-        "sql": "CITEXT"
+        "python": "str",
+        "rust": "String",
+        "sql": "CITEXT",
+        "typescript": "string"
       }
     },
     "Contact_PhoneNumber": {
@@ -466,6 +468,9 @@
     },
     "ParityMatrix": {
       "properties": {
+        "email": {
+          "$ref": "#/definitions/scalars/Contact_Email"
+        },
         "optList": {
           "items": {
             "$ref": "#/definitions/string"

@@ -4,6 +4,24 @@
     "name": "parity-fixture",
     "kind": "General",
     "scalars": {
+      "Contact.Email": {
+        "name": "Contact.Email",
+        "description": "An email address",
+        "languagePrimitive": "string",
+        "primitive": "String",
+        "typeMappings": {
+          "go": "ContactEmail",
+          "json_schema": "string",
+          "python": "str",
+          "rust": "String",
+          "sql": "CITEXT",
+          "typescript": "string"
+        },
+        "maxLength": 255,
+        "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+        "hasCustomNormalize": true,
+        "hasCustomValidate": true
+      },
       "Network.Url": {
         "name": "Network.Url",
         "description": "Valid HTTP/HTTPS URL",
@@ -111,6 +129,12 @@
             "name": "url",
             "typeRef": {
               "name": "Network.Url"
+            }
+          },
+          {
+            "name": "email",
+            "typeRef": {
+              "name": "Contact.Email"
             }
           },
           {
@@ -454,6 +478,82 @@
       }
     },
     {
+      "name": "req_list_null_element",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          null,
+          "a"
+        ]
+      },
+      "want": {
+        "reqList[0]": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "url_bad_format",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "url": "not a url"
+      },
+      "want": {
+        "url": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "email_bad_format",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "email": "not an email"
+      },
+      "want": {
+        "email": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "req_scalar_list_bad_format",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test",
+          "not a url"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ]
+      },
+      "want": {
+        "reqScalarList[1]": [
+          "pattern"
+        ]
+      }
+    },
+    {
       "name": "req_scalar_list_bad_element",
       "type": "ParityMatrix",
       "payload": {
@@ -486,6 +586,27 @@
       },
       "want": {
         "reqShadeList[1]": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "list_null_object_element",
+      "type": "ListMatrix",
+      "payload": {
+        "pointList": [
+          {
+            "shade": "dark"
+          },
+          null
+        ],
+        "reqGrid": [],
+        "reqShadeGrid": [],
+        "reqShadeList": [],
+        "reqUrlGrid": []
+      },
+      "want": {
+        "pointList[1]": [
           "required"
         ]
       }
@@ -761,6 +882,78 @@
       "want": {
         "reqShadeGrid[0][1]": [
           "required"
+        ]
+      }
+    },
+    {
+      "name": "grid_innermost_null_every_kind",
+      "type": "ListMatrix",
+      "payload": {
+        "numGrid": [
+          [
+            null,
+            2
+          ]
+        ],
+        "optGrid": [
+          [
+            "a",
+            null
+          ]
+        ],
+        "pointGrid": [
+          [
+            null
+          ]
+        ],
+        "reqGrid": [
+          [
+            null
+          ]
+        ],
+        "reqShadeGrid": [],
+        "reqShadeList": [],
+        "reqUrlGrid": [
+          [
+            null
+          ]
+        ]
+      },
+      "want": {
+        "numGrid[0][0]": [
+          "required"
+        ],
+        "optGrid[0][1]": [
+          "required"
+        ],
+        "pointGrid[0][0]": [
+          "required"
+        ],
+        "reqGrid[0][0]": [
+          "required"
+        ],
+        "reqUrlGrid[0][0]": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "grid_bad_scalar_format",
+      "type": "ListMatrix",
+      "payload": {
+        "reqGrid": [],
+        "reqShadeGrid": [],
+        "reqShadeList": [],
+        "reqUrlGrid": [
+          [
+            "https://a.test",
+            "not a url"
+          ]
+        ]
+      },
+      "want": {
+        "reqUrlGrid[0][1]": [
+          "pattern"
         ]
       }
     },

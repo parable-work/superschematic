@@ -70,8 +70,10 @@ const schemaConfigJSON = `{
 
 // The validation matrix: every combination of required/optional x scalar/list
 // the generated validators gate differently, with one constraint per axis.
-// The url field exists only to pull in a scalar so typegen emits scalars.go
-// (the ValidationErrors alias lives there).
+// The url and email fields are scalars: every validator names a malformed
+// scalar value "pattern" and reports it once, whether the scalar's pattern or
+// the scalar core finds it (Contact.Email also has a custom validator in the
+// core).
 //
 // ListMatrix holds the list rules for T[] and T[][] (D12): a required list
 // means present, not non-empty; listMin and listMax bound the outer list; a
@@ -84,6 +86,10 @@ const parityMatrixSchemaJSON = `{
   "scalars": {
     "Network.Url": {
       "name": "Network.Url",
+      "languagePrimitive": "string"
+    },
+    "Contact.Email": {
+      "name": "Contact.Email",
       "languagePrimitive": "string"
     }
   },
@@ -105,6 +111,10 @@ const parityMatrixSchemaJSON = `{
         {
           "name": "url",
           "typeRef": { "name": "Network.Url" }
+        },
+        {
+          "name": "email",
+          "typeRef": { "name": "Contact.Email" }
         },
         {
           "name": "reqStr",
@@ -339,9 +349,33 @@ var vectors = []parityVector{
 		want:    map[string][]string{"optList[1]": {"required"}},
 	},
 	{
-		// A string scalar's element must be a string. The scalar's own
-		// format check reports a different validator name per language
-		// today, so the element check is exercised with a type mismatch.
+		name:    "req_list_null_element",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": [null, "a"]}`,
+		want:    map[string][]string{"reqList[0]": {"required"}},
+	},
+	{
+		// A malformed scalar value is one "pattern" error, for a single
+		// field and a list element alike.
+		name:    "url_bad_format",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "url": "not a url"}`,
+		want:    map[string][]string{"url": {"pattern"}},
+	},
+	{
+		// Contact.Email is checked by its pattern and by the scalar core's
+		// custom validator; the value is still reported once.
+		name:    "email_bad_format",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "email": "not an email"}`,
+		want:    map[string][]string{"email": {"pattern"}},
+	},
+	{
+		name:    "req_scalar_list_bad_format",
+		payload: `{"reqScalarList": ["https://a.test", "not a url"], "reqStr": "ok", "reqList": ["a"]}`,
+		want:    map[string][]string{"reqScalarList[1]": {"pattern"}},
+	},
+	{
+		// A string scalar's element must be a string: a number is a type
+		// error, not a format error. Go's json.Unmarshal and pydantic's
+		// strict parse refuse the payload first.
 		name:          "req_scalar_list_bad_element",
 		payload:       `{"reqScalarList": ["https://a.test", 42], "reqStr": "ok", "reqList": ["a"]}`,
 		want:          map[string][]string{"reqScalarList[1]": {"type"}},
@@ -355,6 +389,14 @@ var vectors = []parityVector{
 		typeName: "ListMatrix",
 		payload:  listMatrix(`"reqShadeList": ["dark", null]`),
 		want:     map[string][]string{"reqShadeList[1]": {"required"}},
+	},
+	{
+		// A null object element is "required", not an object whose own
+		// required fields are missing.
+		name:     "list_null_object_element",
+		typeName: "ListMatrix",
+		payload:  listMatrix(`"pointList": [{"shade": "dark"}, null]`),
+		want:     map[string][]string{"pointList[1]": {"required"}},
 	},
 	{
 		name:          "list_bad_enum_element",
@@ -439,6 +481,25 @@ var vectors = []parityVector{
 		want:     map[string][]string{"reqShadeGrid[0][1]": {"required"}},
 	},
 	{
+		// An innermost element is never null, whatever its type.
+		name:     "grid_innermost_null_every_kind",
+		typeName: "ListMatrix",
+		payload:  listMatrix(`"reqGrid": [[null]], "optGrid": [["a", null]], "numGrid": [[null, 2]], "reqUrlGrid": [[null]], "pointGrid": [[null]]`),
+		want: map[string][]string{
+			"reqGrid[0][0]":    {"required"},
+			"optGrid[0][1]":    {"required"},
+			"numGrid[0][0]":    {"required"},
+			"reqUrlGrid[0][0]": {"required"},
+			"pointGrid[0][0]":  {"required"},
+		},
+	},
+	{
+		name:     "grid_bad_scalar_format",
+		typeName: "ListMatrix",
+		payload:  listMatrix(`"reqUrlGrid": [["https://a.test", "not a url"]]`),
+		want:     map[string][]string{"reqUrlGrid[0][1]": {"pattern"}},
+	},
+	{
 		// listMin and listMax bound the outer list only.
 		name:     "grid_outer_over_listmax",
 		typeName: "ListMatrix",
@@ -502,11 +563,37 @@ var knownDivergences = map[string]map[string]map[string][]string{
 		// Go decodes a null element of []string into "", which the
 		// element rules accept.
 		"opt_list_null_element": {},
+		"req_list_null_element": {},
+		// The scalar's Validate reports the malformed value and the
+		// inline copy of the scalar's pattern reports it again.
+		"url_bad_format":             {"url": {"pattern", "pattern"}},
+		"email_bad_format":           {"email": {"pattern", "pattern"}},
+		"req_scalar_list_bad_format": {"reqScalarList[1]": {"pattern", "pattern"}},
+		"grid_bad_scalar_format":     {"reqUrlGrid[0][1]": {"pattern", "pattern"}},
+		// A null object element decodes to the zero value, whose own
+		// required fields fail.
+		"list_null_object_element": {"pointList[1].shade": {"required"}},
+		"grid_innermost_null_every_kind": {
+			"numGrid[0][0]":         {"min"},
+			"pointGrid[0][0].shade": {"required"},
+			"reqUrlGrid[0][0]":      {"pattern", "required"},
+		},
 	},
 	"typescript": {
 		// An optional list's elements are checked with String(item), and
 		// String(null) passes maxLength 5.
 		"opt_list_null_element": {},
+		"req_list_null_element": {},
+		// A null object element is skipped, and a null innermost number
+		// is checked as Number(null), which is 0.
+		"list_null_object_element": {},
+		"grid_innermost_null_every_kind": {
+			"numGrid[0][0]":    {"min"},
+			"reqUrlGrid[0][0]": {"required"},
+		},
+		// The scalar's pattern and the core's custom validator both
+		// report the malformed value.
+		"email_bad_format": {"email": {"pattern", "pattern"}},
 		// validate<Type> recurses into nested object values only for a
 		// @strictJSON type, for T, T[] and T[][] alike.
 		"list_bad_object_element": {},
@@ -515,6 +602,13 @@ var knownDivergences = map[string]map[string]map[string][]string{
 		// and reports the pattern it fails, for T, T[] and T[][] alike.
 		"req_scalar_list_bad_element": {"reqScalarList[1]": {"pattern"}},
 		"grid_bad_scalar_element":     {"reqUrlGrid[1][1]": {"pattern"}},
+	},
+	"python": {
+		// validate_all type-checks an optional field with the scalar's
+		// pydantic type, which reports the malformed value as invalid
+		// before the pattern rule reports it again.
+		"url_bad_format":   {"url": {"invalid", "pattern"}},
+		"email_bad_format": {"email": {"invalid", "pattern"}},
 	},
 }
 
