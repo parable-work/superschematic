@@ -144,6 +144,19 @@ RFC 9457 problem envelopes. It is built on `@superschematic/http-runtime`
 (the `http_runtime_npm_package` naming key) and Hono, which are its peer
 dependencies.
 
+An operation without an input type reads its other arguments from the JSON
+body object (on `GET`, from the query string). A body argument of an object
+type, alone or as a list (`T[]`) or list of lists (`T[][]`) of one, goes
+through that type's generated `parse<T>Json` decoder, so the
+implementation receives objects. A list follows the
+[list rules](/superschematic/reference/arrays-of-arrays/#list-rules):
+`[]` satisfies a required list, `listMin` and `listMax` bound the list,
+and each element is checked at `name[i]`. A null element answers 400 with
+`required`, a non-object element with `type`, and an element the decoder
+refuses with "does not match the declared type"; the problem `details`
+carry the `path`. A body argument whose type is a union has no generated
+decoder, and the build refuses it.
+
 ```ts
 import { Hono } from "hono";
 import { errorHandler, notFoundHandler } from "@superschematic/http-runtime/hono";

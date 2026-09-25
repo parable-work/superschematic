@@ -768,5 +768,16 @@ of a generated artifact is always listed here with the bump it requires.
   reached to `[]`, including a field tagged `json:"-"`, which is not on the
   wire, so encoding changed a value's in-memory metadata. It now skips
   fields tagged `json:"-"` and unexported fields. Patch.
+- TypeScript API server: a body argument that is a list of an object type
+  (`points: Point[]`) was typed `string[]`, and the runtime turned each
+  element into a string, so the implementation received
+  `"[object Object]"`. It is now typed `Point[]`, and each element goes
+  through the generated `parse<T>Json` with the list rules: a null element
+  is refused at `name[i]` (`required`), a non-object one (`type`), and one
+  the parser refuses ("does not match the declared type"). A single
+  object-typed body argument that is not the input (a DB table type) is
+  parsed the same way. A union-typed body argument, alone or in a list,
+  now fails the build ("tsrestgen cannot decode body argument"). The
+  runtime exports `decodeJsonParam`. Minor.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main
