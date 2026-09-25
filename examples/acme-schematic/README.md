@@ -83,9 +83,9 @@ examples/acme-schematic/
     auth/                     apikey auth provider + its snippet templates
   packages/schema/            @acme/schema, the authoring package @shelf is imported from, and the confirm key's type
   schemas/
-    superschematic.toml       naming, auth_provider = "apikey", [paths], [deps], [extension.acme]
+    superschematic.toml       naming, auth_provider = "apikey", [package_aliases], [paths], [deps], [extension.acme]
     deps.json                 the committed copy of the dependency graph ([deps] copy)
-    tsconfig.base.json        path aliases for @superschematic/*, @acme/*, superscalar
+    tsconfig.base.json        path aliases for @superschematic/*, @acme/* (@acme/schema-config included), superscalar
     services/shop-db          DB: User, Session, ApiKey, Product, StockLevel
                               tables and the storefront.stock projection
     services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs, @mcp, @icon
@@ -603,8 +603,13 @@ command. The acme file sets `go_module_root`, `npm_scope`,
 `python_types_module_prefix`, `python_sdk_module_prefix`,
 `python_sdk_module_suffix`, `rust_crate_prefix`, `package_author`,
 `metadata_key_prefix`, `scalar_jsdoc_tag`, `auth_provider`,
-`authoring_packages`, the `[paths]` and `[deps]` tables and
-`[extension.acme]`. `[deps] copy` makes `build-all` also write the
+`authoring_packages`, the `[package_aliases]`, `[paths]` and `[deps]`
+tables and `[extension.acme]`. `[package_aliases]` maps
+`@acme/schema-config` onto `@superschematic/schema-config`: every
+`schema.config.ts` imports `defineConfig` under acme's own name, the way a
+distribution that republishes the config package would, and `build-all`
+and `build --with-deps` accept that import and write sentinels that use it.
+`[deps] copy` makes `build-all` also write the
 dependency graph of the generated packages to `schemas/deps.json`, which is
 committed; each package in it names the service that produced it, and the
 smoke fails when the committed copy is stale. `scalar_jsdoc_tag = "acmeScalar"`

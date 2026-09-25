@@ -762,5 +762,13 @@ of a generated artifact is always listed here with the bump it requires.
   reached to `[]`, including a field tagged `json:"-"`, which is not on the
   wire, so encoding changed a value's in-memory metadata. It now skips
   fields tagged `json:"-"` and unexported fields. Patch.
+- `build-all` and `build --with-deps`: a `schema.config.ts` that imported
+  the config package under a specifier `[package_aliases]` maps onto
+  `@superschematic/schema-config` failed discovery with "schema.config.ts
+  may import only @superschematic/schema-config", so a distribution that
+  republishes the authoring packages under its own names could build none
+  of its services with either command. The check resolves each import
+  through the alias table, and its error names every accepted specifier.
+  Patch.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main

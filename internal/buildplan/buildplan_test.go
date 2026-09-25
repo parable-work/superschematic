@@ -3,11 +3,14 @@ package buildplan
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/parable-work/superschematic/internal/generator"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -221,14 +224,112 @@ func TestCheckConfigPurity(t *testing.T) {
 export default defineConfig({ name: "x", kind: SchemaKind.General, outputs: {} });
 `
 	require.NoError(t, os.WriteFile(path, []byte(clean), 0o644))
-	require.NoError(t, checkConfigPurity(path))
+	require.NoError(t, checkConfigPurity(path, naming.Default()))
 
 	impure := `import { defineConfig } from "@superschematic/schema-config";
 import { webDb } from "../platform-deploy/model";
 export default defineConfig({ name: "x", kind: "General", outputs: {} });
 `
 	require.NoError(t, os.WriteFile(path, []byte(impure), 0o644))
-	err := checkConfigPurity(path)
+	err := checkConfigPurity(path, naming.Default())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "may import only @superschematic/schema-config")
+}
+
+// TestCheckConfigPurityHonoursPackageAliases: a specifier [package_aliases]
+// maps onto the config package is the config package; an alias onto any
+// other authoring package is not.
+func TestCheckConfigPurityHonoursPackageAliases(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "schema.config.ts")
+	n := naming.Default()
+	n.AuthoringPackages = []string{"@acme/db", "@acme/schema-config"}
+	n.PackageAliases = map[string]string{
+		"@acme/db":            "@superschematic/db",
+		"@acme/schema-config": "@superschematic/schema-config",
+	}
+
+	aliased := `import { defineConfig, SchemaKind } from "@acme/schema-config";
+export default defineConfig({ name: "x", kind: SchemaKind.General, outputs: {} });
+`
+	require.NoError(t, os.WriteFile(path, []byte(aliased), 0o644))
+	require.NoError(t, checkConfigPurity(path, n))
+	// The declaring package's own name stays accepted next to its alias.
+	require.NoError(t, os.WriteFile(path, []byte(`import { defineConfig } from "@superschematic/schema-config";
+import { SchemaKind } from "@acme/schema-config";
+export default defineConfig({ name: "x", kind: SchemaKind.General, outputs: {} });
+`), 0o644))
+	require.NoError(t, checkConfigPurity(path, n))
+
+	otherAlias := `import { defineConfig } from "@acme/schema-config";
+import { table } from "@acme/db";
+export default defineConfig({ name: "x", kind: "General", outputs: {} });
+`
+	require.NoError(t, os.WriteFile(path, []byte(otherAlias), 0o644))
+	err := checkConfigPurity(path, n)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `imports "@acme/db"; schema.config.ts may import only @acme/schema-config or @superschematic/schema-config`)
+}
+
+// aliasedConfigService writes a TypeScript-form service whose
+// schema.config.ts imports the config package under a distribution's own
+// name, @acme/schema-config, which its tsconfig resolves to this checkout's
+// @superschematic/schema-config sources.
+func aliasedConfigService(t *testing.T, servicesRoot string) {
+	t.Helper()
+	configPackage, err := filepath.Abs("../../packages/schema-config/src/index.ts")
+	require.NoError(t, err)
+	dir := filepath.Join(servicesRoot, "aliased")
+	writeFile(t, filepath.Join(dir, "tsconfig.json"), `{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "paths": {"@acme/schema-config": [`+strconv.Quote(filepath.ToSlash(configPackage))+`]}
+  },
+  "include": ["schema.config.ts"]
+}
+`)
+	writeFile(t, filepath.Join(dir, "package.json"), `{"name": "@acme/aliased", "private": true}`)
+	writeFile(t, filepath.Join(dir, "schema.config.ts"), `import { defineConfig, SchemaKind, TargetLanguage } from "@acme/schema-config";
+
+export default defineConfig({
+  name: "aliased",
+  kind: SchemaKind.General,
+  outputs: { types: { [TargetLanguage.TypeScript]: { enabled: true } } }
+});
+`)
+}
+
+// TestDiscoverAcceptsAliasedConfigImport: a distribution that republishes
+// the config package under its own name maps that name onto the declaring
+// package in [package_aliases]. Discovery (build-all, build --with-deps)
+// accepts a schema.config.ts that imports the aliased name and reads the
+// config through it.
+func TestDiscoverAcceptsAliasedConfigImport(t *testing.T) {
+	root := t.TempDir()
+	servicesRoot := filepath.Join(root, "services")
+	aliasedConfigService(t, servicesRoot)
+
+	n := naming.Default()
+	n.PackageAliases = map[string]string{"@acme/schema-config": "@superschematic/schema-config"}
+	services, err := DiscoverWith(servicesRoot, filepath.Join(root, "dist"), generator.CoreRegistry(n))
+	require.NoError(t, err)
+	require.Len(t, services, 1)
+	assert.Equal(t, "aliased", services[0].Name)
+	assert.Equal(t, ir.SchemaKindGeneral, services[0].Config.Kind)
+}
+
+// TestDiscoverRejectsUnaliasedConfigImport: without the alias the same
+// import is foreign to the config package and fails the purity check.
+func TestDiscoverRejectsUnaliasedConfigImport(t *testing.T) {
+	root := t.TempDir()
+	servicesRoot := filepath.Join(root, "services")
+	aliasedConfigService(t, servicesRoot)
+
+	_, err := DiscoverWith(servicesRoot, filepath.Join(root, "dist"), generator.CoreRegistry(naming.Default()))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `imports "@acme/schema-config"; schema.config.ts may import only @superschematic/schema-config`)
 }

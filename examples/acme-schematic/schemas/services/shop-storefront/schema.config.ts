@@ -1,4 +1,4 @@
-import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema-config";
+import { defineConfig, SchemaKind, TargetLanguage } from "@acme/schema-config";
 
 // An API schema served by the TypeScript server: the api generator emits a
 // Hono router package (@acme/shop-storefront-api) instead of the Go module.

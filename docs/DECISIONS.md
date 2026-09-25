@@ -99,12 +99,14 @@ under `superschematic/build`.
 
 A distribution that republishes the authoring packages under its own scope
 lists them in `authoring_packages` and maps each to the declaring package in
-`[package_aliases]`. The alias map has three consumers: the TypeScript writer
+`[package_aliases]`. The alias map has four consumers: the TypeScript writer
 picks the preferred specifier when it emits an import, the registry's
 forbidden-package check resolves an import to its declaring package before
-looking it up, and the resolver's "type from package" diagnostic names the
-specifier the author wrote. `sentinel.Content` emits the `schema-config`
-specifier through the same map.
+looking it up, the resolver's "type from package" diagnostic names the
+specifier the author wrote, and the build plan's config check (`build-all`,
+`build --with-deps`) accepts a `schema.config.ts` import of any specifier
+that maps onto `@superschematic/schema-config`. `sentinel.Content` emits the
+`schema-config` specifier through the same map.
 
 ## D6. The HTTP runtime carries only provider-neutral packages
 

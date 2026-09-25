@@ -15,7 +15,10 @@
 #   2. `describe` lists the Catalog kind, the document, the apikey provider
 #      the checks (the icon and audience checks, the @mcp check on API and
 #      the projection check on DB) and acme's tool invocation policy;
-#   3. build-all over the schemas root builds all five services;
+#   3. build-all over the schemas root builds all five services, whose
+#      schema.config.ts files import the config package under acme's own
+#      name ([package_aliases] "@acme/schema-config"), and the sentinels it
+#      writes import that name too;
 #   4. the catalog generator wrote catalog.json for the Catalog service;
 #   5. the @shelf payload reached the IR (--emit-ir + jq), and so did the
 #      shop-db projection that satisfies acme's projection policy;
@@ -109,9 +112,13 @@ grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.tx
 grep -q '^checks: acmeIcons (every kind), acmeDocsAudience (every kind), acmeToolsClassified (API), acmeProjectionScope (DB)$' "$OUT/describe.txt"
 grep -q '^tool invocation policy: confirm (never, always; default never)$' "$OUT/describe.txt"
 
-echo "==> build-all over the schemas root"
+echo "==> build-all over the schemas root, every config importing the aliased config package"
 rm -rf "$DIST"
 "$OUT/acme-schematic" build-all "$SCHEMAS/services"
+for service in shop-db shop-api shop-config shop-catalog shop-storefront; do
+  grep -q '^import { .* } from "@acme/schema-config";$' "$SCHEMAS/services/$service/schema.config.ts"
+  grep -q '^import { .* } from "@acme/schema-config";$' "$SCHEMAS/services/$service/src/service.generated.ts"
+done
 
 echo "==> catalog generator wrote the Catalog service's file"
 test -s "$DIST/acme/catalog/shop-catalog/catalog.json"

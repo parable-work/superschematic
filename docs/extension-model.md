@@ -473,6 +473,10 @@ Three core keys exist for extensions: `auth_provider` selects a provider,
 `authoring_packages` lists npm packages whose exports the TypeScript
 frontend accepts, and `[package_aliases]` maps a distribution's
 republished package names onto the core packages that declare the symbols.
+`build-all` and `build --with-deps` accept a `schema.config.ts` that imports
+the config package under any name the table maps onto
+`@superschematic/schema-config`; acme's configs import
+`@acme/schema-config`.
 A distribution also sets `metadata_key_prefix` (default `superschematic.`),
 the namespace of every metadata key in the Arrow schemas the `sql`
 generator writes for projection views; `scalar_jsdoc_tag` (default unset),
@@ -967,7 +971,7 @@ surface:
 | Check and a tool hook | `acmeToolsClassified` requires `@mcp` on every `shop-api` operation; `acmeTools` writes acme's tool keys and icon variant | `ext/mcp.go` |
 | Check on a core kind | `acmeProjectionScope`: every projection view in a DB schema binds the scope setting first | `ext/projection_policy.go` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
-| Configuration | `[extension.acme] region` and `projection_scope_setting`; `metadata_key_prefix`, `scalar_jsdoc_tag` and `[deps] copy` | `ext/extension.go`, `schemas/superschematic.toml` |
+| Configuration | `[extension.acme] region` and `projection_scope_setting`; `metadata_key_prefix`, `scalar_jsdoc_tag`, `[package_aliases]` (`@acme/schema-config`) and `[deps] copy` | `ext/extension.go`, `schemas/superschematic.toml` |
 | Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Binary | `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
