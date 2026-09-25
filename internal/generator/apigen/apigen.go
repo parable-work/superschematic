@@ -262,6 +262,9 @@ type APIOutput struct {
 	// TypeUnions holds every union a tool argument can reach; the tool
 	// schemas render them as oneOf.
 	TypeUnions map[string]ToolUnionInfo
+	// TypeEnums holds every enum a tool argument can reach; the tool
+	// schemas list their values.
+	TypeEnums map[string]ToolEnumInfo
 	// ToolKeys are the vendor-extension keys the SDK tool documents are
 	// written with: DefaultToolKeys, as the tool hooks left them.
 	ToolKeys ToolKeys
@@ -462,6 +465,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	types := newTypeMapper(schema, opts.Dependencies)
 	output.TypeFields = types.allTypeFields()
 	output.TypeUnions = types.allTypeUnions()
+	output.TypeEnums = types.allTypeEnums()
 
 	for _, set := range schema.OperationSets {
 		namespace := extractNamespace(set.Name)

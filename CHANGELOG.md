@@ -681,6 +681,19 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- SDK tool documents (TypeScript, Go and Rust): an enum argument or field
+  was written as a plain string, so a model was never told the allowed
+  values. Its schema now carries `enum` with the serialized values at every
+  depth: a path, query or body argument, an input field, a list item at
+  either depth, a map value and a field of a nested object or union member;
+  a nullable one lists `null` too. A body argument of a map type (an
+  operation without an input type) lost its map shape and was written as
+  its value type; it is now an object whose `additionalProperties` is the
+  value schema, a list for a map of lists, and `tools/index.ts` types it
+  `Record<string, T>`. The `inputSchemaDigest` of every tool with an enum
+  argument or a map body argument changes; other digests do not.
+  `JSONSchemaProperty.enum` in `tools/index.ts` is `Array<string | null>`.
+  Patch.
 - Go ORM: `GetManyByIDs` keyed its result map on a hard-coded `entity.Id`
   and took UUID keys. A table keyed on a UUID field with another name did
   not compile, and a table keyed on a string `id` always returned an empty

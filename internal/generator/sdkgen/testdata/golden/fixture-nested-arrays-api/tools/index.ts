@@ -98,7 +98,7 @@ export interface JSONSchemaProperty {
   format?: string;
   description?: string;
   pattern?: string;
-  enum?: string[];
+  enum?: Array<string | null>;
   minLength?: number;
   maxLength?: number;
   minimum?: number;
@@ -188,14 +188,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:536566a8571936c08eb74193e3e997c187df26d137493d61e6f921f246e93329',
+    inputSchemaDigest: 'sha256:deb35542dbb844674affc6afe14047cb21fc10c8373e433e6025eca6ff936018',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         labels: {"description":"Array of arrays of string values","items":{"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},"type":"array"},
         polygons: {"description":"Array of arrays of Point values","items":{"description":"Array of Point values","items":{"additionalProperties":false,"description":"Point object","properties":{"x":{"description":"A numeric value","type":"number"},"y":{"description":"A numeric value","type":"number"}},"required":["x","y"],"type":"object"},"type":"array"},"type":"array"},
-        shades: {"description":"Array of arrays of Shade values","items":{"description":"Array of Shade values","items":{"description":"A Shade value","type":"string"},"type":"array"},"type":"array"},
+        shades: {"description":"Array of arrays of Shade values","items":{"description":"Array of Shade values","items":{"description":"A Shade value","enum":["light","dark"],"type":"string"},"type":"array"},"type":"array"},
         weights: {"description":"Array of arrays of number values","items":{"description":"Array of number values","items":{"description":"A numeric value","type":"number"},"type":"array"},"type":["array","null"]},
       },
       required: ['labels', 'polygons', 'shades']
@@ -327,7 +327,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       properties: {
         labels: {"description":"Array of arrays of string values","items":{"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},"type":"array"},
         polygons: {"description":"Array of arrays of Point values","items":{"description":"Array of Point values","items":{"additionalProperties":false,"description":"Point object","properties":{"x":{"description":"A numeric value","type":"number"},"y":{"description":"A numeric value","type":"number"}},"required":["x","y"],"type":"object"},"type":"array"},"type":"array"},
-        shades: {"description":"Array of arrays of Shade values","items":{"description":"Array of Shade values","items":{"description":"A Shade value","type":"string"},"type":"array"},"type":"array"},
+        shades: {"description":"Array of arrays of Shade values","items":{"description":"Array of Shade values","items":{"description":"A Shade value","enum":["light","dark"],"type":"string"},"type":"array"},"type":"array"},
         weights: {"description":"Array of arrays of number values","items":{"description":"Array of number values","items":{"description":"A numeric value","type":"number"},"type":"array"},"type":["array","null"]},
       },
       required: ['labels', 'polygons', 'shades']
@@ -387,7 +387,7 @@ export const anthropicTools: AnthropicTool[] = [
       properties: {
         labels: {"description":"Array of arrays of string values","items":{"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},"type":"array"},
         polygons: {"description":"Array of arrays of Point values","items":{"description":"Array of Point values","items":{"additionalProperties":false,"description":"Point object","properties":{"x":{"description":"A numeric value","type":"number"},"y":{"description":"A numeric value","type":"number"}},"required":["x","y"],"type":"object"},"type":"array"},"type":"array"},
-        shades: {"description":"Array of arrays of Shade values","items":{"description":"Array of Shade values","items":{"description":"A Shade value","type":"string"},"type":"array"},"type":"array"},
+        shades: {"description":"Array of arrays of Shade values","items":{"description":"Array of Shade values","items":{"description":"A Shade value","enum":["light","dark"],"type":"string"},"type":"array"},"type":"array"},
         weights: {"description":"Array of arrays of number values","items":{"description":"Array of number values","items":{"description":"A numeric value","type":"number"},"type":"array"},"type":["array","null"]},
       },
       required: ['labels', 'polygons', 'shades']
