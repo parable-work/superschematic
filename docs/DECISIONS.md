@@ -401,12 +401,13 @@ is absent, and a null element of `Generic.JSON[]` (or an innermost one of
 `Generic.JSON[][]`) is `required` at its index. Any other JSON value is
 accepted and reaches the implementation as it is. Two differences are
 open. The runtimes check a `Generic.JSON` value as a string, because the
-scalar catalog gives it the `String` primitive, so they report `type` for
-an object, array, number or boolean that superscalar, every generated type
-and the server accept. And the generated Go, TypeScript and Python
-validators accept a JSON null for a required `Generic.JSON` field, which
-the runtimes and the server refuse; the generated Go validator also
-accepts an absent one and a null element of `Generic.JSON[]`.
+scalar catalog gives it the `String` primitive: a required field holding an
+object, array, number or boolean is `type` there, while superscalar, every
+generated type and the server accept it. And the generated Go, TypeScript
+and Python validators accept a JSON null for a required `Generic.JSON`
+field, which the runtimes and the server refuse; the generated Go
+validator also accepts an absent one and a null element of
+`Generic.JSON[]`.
 
 ## D13. The scalar JSDoc tag is a naming key, unset by default
 
