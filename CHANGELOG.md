@@ -678,6 +678,18 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- TypeScript types and the Go, TypeScript and Python schema runtimes: a
+  value of the wrong JSON type in a field typed `string`, `number` or
+  `boolean`, required or optional, single, a `T[]` or `T[][]` element or
+  (TypeScript types only) a map value, is one `type` error at its path,
+  and its length, pattern and range are not checked. So is a non-string
+  value of an optional string scalar, and, in the TypeScript validator, a
+  string where a number scalar belongs. Before, `parse<Type>Json` accepted
+  `{"x": "far"}` for a number `x`, and a missing required string with a
+  `maxLength` below 9 was `required` and `maxLength`, because the
+  validator measured `String(undefined)`. A required list given a value
+  that is not a list is `required` in the TypeScript validator, as in the
+  runtimes (D14). Minor.
 - Go ORM: `GetManyByIDs` keyed its result map on a hard-coded `entity.Id`
   and took UUID keys. A table keyed on a UUID field with another name did
   not compile, and a table keyed on a string `id` always returned an empty
