@@ -13,6 +13,14 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- `runtime/http/go/bodyargs`: decodes the body arguments of an operation
+  without an input type from a JSON object body, each from its own JSON
+  value, with the list rules and the value rules, recording every failure
+  in a `ValidationErrors` at its path. `ReadObject` reads the body;
+  `NewArg` with `Required`, `ListMin`, `ListMax`, `MinLength`,
+  `MaxLength`, `Pattern`, `Min` and `Max` describes one argument; the
+  generic `Value`, `List` and `ListOfLists` decode it. Generated Go API
+  routes call it. Minor.
 - Python SDK: the generated client retries a `GET`, `HEAD` or `OPTIONS`
   request that fails with a `NetworkError`, up to
   `ClientConfig.max_network_retries` times (default 3), sleeping 1, 2, 4
@@ -451,6 +459,36 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- Go API: a route reads each body argument (an argument of an operation
+  that is not `GET` and has no input type, other than a path or query
+  parameter) from its own JSON value through `runtime/http/go/bodyargs`,
+  and answers 400 with field errors at the argument's path, in the
+  `errors` object an input type's field errors use. Before, the body
+  decoded into an anonymous struct, and an argument was checked only when
+  its Go type had a `Validate` method, which a list and a builtin do not.
+  A required argument that was absent or null was accepted as nil or its
+  zero value; it is `required`, and `[]` still satisfies a required list.
+  A null list element became its type's zero value; it is `required` at
+  `name[i]` (or `name[i][j]`). A value or element of the wrong JSON type
+  failed the request as "Invalid request body"; it is `type` at its path
+  ("expected a string", "expected an array", ...). `listMin` and
+  `listMax`, and the scalar's own lengths, pattern and range, were not
+  checked for a list or a builtin, and the argument's own constraints for
+  no body argument; they apply to every value and element, one error per
+  value named by its rule (D14). An enum element outside the enum is
+  `enum`, an object element's field errors nest under `name[i]`, and a
+  string its type's decoder refuses (a malformed UUID) is `pattern`. A
+  `Generic.JSON` argument accepted null when required and a null element,
+  and an optional one could not be left out (its zero value failed with
+  `parse`); it is any JSON value but null, and an optional one that is
+  absent or null reaches the implementation empty. The body must be one
+  JSON object: `null`, an array or a scalar is 400 "Invalid request body",
+  as an empty or malformed body already was. Keys match exactly, where
+  `encoding/json` matched a struct field case-insensitively
+  (`{"Labels": []}` set `labels`). `routes.go` imports
+  `runtime/http/go/bodyargs` and no longer carries `validateListElement`.
+  A client that left out a required argument, sent null elements, or sent
+  numbers or booleans as strings sends the declared JSON values. Minor.
 - `runtime/http/go`: OpenTelemetry `otel`, `otel/sdk`, `otel/trace` and
   `otel/metric` 1.45.0 to 1.46.0. A module that requires the runtime
   resolves 1.46.0 or later. Patch.
@@ -496,9 +534,8 @@ of a generated artifact is always listed here with the bump it requires.
   element another writer stored (`failed to decode JSON field <column>:
   decode <Type>: <field>[i]: null element`). Such stored values stop
   decoding until the nulls are removed. Not checked: a map whose values are
-  lists, a list argument of an operation without an input type, and a list
-  or list-of-lists column the ORM reads, which still decode a null element
-  to its zero value. Minor.
+  lists, and a list or list-of-lists column the ORM reads, which still
+  decode a null element to its zero value. Minor.
 - TypeScript types: `validate<Type>` rejects a null list element of every
   `T[]` and `T[][]` field as `required` ("required field") at `field[i]`
   or `field[i][j]`, in an optional list too, as the schema runtimes and

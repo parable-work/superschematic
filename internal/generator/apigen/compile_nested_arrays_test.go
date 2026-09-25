@@ -2,19 +2,11 @@ package apigen_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
-	"github.com/parable-work/superschematic/internal/generator/apigen"
-	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sdkgen/sdktest"
-	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader"
-	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
 // TestNestedArraysAPIServesNestedJSON generates the Go types module and the
@@ -32,9 +24,6 @@ func TestNestedArraysAPIServesNestedJSON(t *testing.T) {
 		t.Skip("skipping compile check in -short mode")
 	}
 	const service = "fixture-nested-arrays-api"
-	const typesModule = "example.com/schemas/types/go/" + service
-	paths := testpaths.Local(t)
-
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, service))
 	if err != nil {
 		t.Fatalf("load %s: %v", service, err)
@@ -42,64 +31,11 @@ func TestNestedArraysAPIServesNestedJSON(t *testing.T) {
 	if err := sdktest.AddPaintOperation(schema); err != nil {
 		t.Fatal(err)
 	}
-	clock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
-	root := t.TempDir()
-	typesDir := filepath.Join(root, "types", "go", service)
-	apiDir := filepath.Join(root, "api", service)
-
-	typesOutput, err := typegen.Generate(schema, typegen.Options{
-		SchemaName: service,
-		ModulePath: typesModule,
-		Clock:      clock,
-	})
-	if err != nil {
-		t.Fatalf("typegen.Generate: %v", err)
-	}
-	if err := typegen.SetReplacePaths(typesOutput, paths, typesDir); err != nil {
-		t.Fatalf("typegen.SetReplacePaths: %v", err)
-	}
-	if err := typegen.WriteTypes(typesOutput, typesDir); err != nil {
-		t.Fatalf("typegen.WriteTypes: %v", err)
-	}
-
-	apiOutput, err := apigen.Generate(schema, apigen.Options{
-		Provider:    sessionauth.Provider{},
-		SchemaName:  service,
-		ModulePath:  "example.com/schemas/api/" + service,
-		TypesModule: typesModule,
-		Clock:       clock,
-	})
-	if err != nil {
-		t.Fatalf("apigen.Generate: %v", err)
-	}
-	if err := apigen.SetReplacePaths(apiOutput, paths, apiDir); err != nil {
-		t.Fatalf("apigen.SetReplacePaths: %v", err)
-	}
-	if err := apigen.WriteAPI(apiOutput, apiDir); err != nil {
-		t.Fatalf("apigen.WriteAPI: %v", err)
-	}
+	apiDir := writeGoAPIModule(t, schema, service)
 	if err := os.WriteFile(filepath.Join(apiDir, "nested_arrays_server_test.go"), []byte(nestedArraysAPIServerTest), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	for _, args := range [][]string{
-		{"mod", "tidy"},
-		{"build", "./..."},
-		{"vet", "./..."},
-		{"test", "-count=1", "-v", "./..."},
-	} {
-		// No cmd.Env: exec then sets PWD to cmd.Dir, which keeps the
-		// module's relative replace paths valid under a symlinked temp dir.
-		cmd := exec.Command("go", args...)
-		cmd.Dir = apiDir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("go %s in the generated API module: %v\n%s", strings.Join(args, " "), err, out)
-		}
-		if args[0] == "test" {
-			t.Logf("generated API tests:\n%s", out)
-		}
-	}
+	runGoAPIModule(t, apiDir)
 }
 
 // nestedArraysAPIServerTest runs in the generated API module. It registers

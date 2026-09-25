@@ -3,15 +3,16 @@
 // This file provides RegisterRoutes() to wire up API routes with your implementations.
 // Import this module and call RegisterRoutes() with a chi router and Config struct.
 
-package fixturenestedarraysapi
+package bodyargsapi
 
 import (
 	"encoding/json"
 	"fmt"
 	gohttp "net/http"
 	"strconv"
+	"strings"
 
-	types "example.com/schemas/types/go/fixture-nested-arrays-api"
+	types "example.com/schemas/types/go/body-args-api"
 	"github.com/go-chi/chi/v5"
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
@@ -65,10 +66,10 @@ func (c *Config) Validate() error {
 //	r.Use(middleware.RealIP)
 //	r.Use(middleware.Recoverer)
 //
-//	fixturenestedarraysapi.RegisterRoutes(r, fixturenestedarraysapi.Config{
+//	bodyargsapi.RegisterRoutes(r, bodyargsapi.Config{
 //		Logger: logger,
-//		Implementations: fixturenestedarraysapi.Implementations{
-//			Grid: &myGridImpl{},
+//		Implementations: bodyargsapi.Implementations{
+//			Tag: &myTagImpl{},
 //		},
 //	})
 func RegisterRoutes(r chi.Router, cfg Config) error {
@@ -114,28 +115,29 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 
 func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
-		// Store a grid from a request body.
+		// Store a JSON document with optional notes; returns the document.
 		{
 			Method:  "POST",
-			Path:    "/grids",
-			Handler: createGridSaveGridHandler(cfg.Implementations.Grid),
+			Path:    "/documents",
+			Handler: createTagStoreDocumentHandler(cfg.Implementations.Tag),
 		},
+		// Find posts by label; the labels travel in the query string.
 		{
 			Method:  "GET",
-			Path:    "/grids/{id}",
-			Handler: createGridGetGridHandler(cfg.Implementations.Grid),
+			Path:    "/posts/tags",
+			Handler: createTagFindTagsHandler(cfg.Implementations.Tag),
 		},
-		// One grid's labels as a bare list of lists, at most `limit` rows.
+		// Set a post's flags; every argument is required.
 		{
-			Method:  "GET",
-			Path:    "/grids/{id}/labels",
-			Handler: createGridGridLabelsHandler(cfg.Implementations.Grid),
+			Method:  "POST",
+			Path:    "/posts/{id}/flags",
+			Handler: createTagSetFlagsHandler(cfg.Implementations.Tag),
 		},
-		// Replace a grid's labels; the body argument is a list of lists.
+		// Replace a post's tags; returns the labels as stored.
 		{
 			Method:  "PUT",
-			Path:    "/grids/{id}/labels",
-			Handler: createGridReplaceLabelsHandler(cfg.Implementations.Grid),
+			Path:    "/posts/{id}/tags",
+			Handler: createTagSaveTagsHandler(cfg.Implementations.Tag),
 		},
 	}
 }
@@ -150,155 +152,17 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 // Each handler factory creates a handler that calls the corresponding
 // implementation method. This allows for dependency injection and testing.
 
-// createGridSaveGridHandler creates a handler for POST /api/grids
+// createTagStoreDocumentHandler creates a handler for POST /api/documents
 //
-// Store a grid from a request body.
-func createGridSaveGridHandler(impl GridImplementation) gohttp.HandlerFunc {
-	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Parse and validate input
-		var input types.SaveGridInput
-		var rawInput json.RawMessage
-		if err := json.NewDecoder(r.Body).Decode(&rawInput); err != nil {
-			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
-			return
-		}
-		if string(rawInput) == "null" {
-			RespondError(w, r, gohttp.StatusBadRequest, "input is required")
-			return
-		}
-		if err := json.Unmarshal(rawInput, &input); err != nil {
-			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
-			return
-		}
-
-		// Validate input
-		if validationErrors := input.Validate(); validationErrors.HasErrors() {
-			RespondValidationErrors(w, r, validationErrors)
-			return
-		}
-
-		// Ensure request context is still valid before entering implementation logic.
-		if err := CheckContext(r.Context()); err != nil {
-			logger := LoggerFromContext(r.Context())
-			RespondAppError(w, logger, err)
-			return
-		}
-
-		// Call implementation
-		result, err := impl.SaveGrid(r.Context(), &input)
-		if err != nil {
-			// Get logger from context and use proper error handling
-			logger := LoggerFromContext(r.Context())
-			RespondAppError(w, logger, err)
-			return
-		}
-
-		// Respond with result
-		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
-	}
-}
-
-// createGridGetGridHandler creates a handler for GET /api/grids/{id}
-func createGridGetGridHandler(impl GridImplementation) gohttp.HandlerFunc {
-	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
-		if IdStr == "" {
-			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
-			return
-		}
-		Id, err := types.ParseIdentityUUID(IdStr)
-		if err != nil {
-			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
-			return
-		}
-
-		// Ensure request context is still valid before entering implementation logic.
-		if err := CheckContext(r.Context()); err != nil {
-			logger := LoggerFromContext(r.Context())
-			RespondAppError(w, logger, err)
-			return
-		}
-
-		// Call implementation
-		result, err := impl.GetGrid(r.Context(), Id)
-		if err != nil {
-			// Get logger from context and use proper error handling
-			logger := LoggerFromContext(r.Context())
-			RespondAppError(w, logger, err)
-			return
-		}
-
-		// Respond with result
-		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
-	}
-}
-
-// createGridGridLabelsHandler creates a handler for GET /api/grids/{id}/labels
-//
-// One grid's labels as a bare list of lists, at most `limit` rows.
-func createGridGridLabelsHandler(impl GridImplementation) gohttp.HandlerFunc {
-	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
-		if IdStr == "" {
-			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
-			return
-		}
-		Id, err := types.ParseIdentityUUID(IdStr)
-		if err != nil {
-			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
-			return
-		}
-		// Extract query parameters
-		Limit := parseFloat64QueryParamPtr(r, "limit")
-
-		// Ensure request context is still valid before entering implementation logic.
-		if err := CheckContext(r.Context()); err != nil {
-			logger := LoggerFromContext(r.Context())
-			RespondAppError(w, logger, err)
-			return
-		}
-
-		// Call implementation
-		result, err := impl.GridLabels(r.Context(), Id, Limit)
-		if err != nil {
-			// Get logger from context and use proper error handling
-			logger := LoggerFromContext(r.Context())
-			RespondAppError(w, logger, err)
-			return
-		}
-		// An inner list is never null on the wire: a nil one is sent as [].
-		for i, row := range result {
-			if row == nil {
-				result[i] = []string{}
-			}
-		}
-
-		// Respond with result
-		RespondCollectionEnvelope(w, gohttp.StatusOK, result, r)
-	}
-}
-
-// createGridReplaceLabelsHandler creates a handler for PUT /api/grids/{id}/labels
-//
-// Replace a grid's labels; the body argument is a list of lists.
-func createGridReplaceLabelsHandler(impl GridImplementation) gohttp.HandlerFunc {
+// Store a JSON document with optional notes; returns the document.
+func createTagStoreDocumentHandler(impl TagImplementation) gohttp.HandlerFunc {
 	// Body arguments: the JSON type of each value, then its rules in the
 	// order they are checked (the scalar type's own, then the argument's).
-	bodyLabelsArg := bodyargs.NewArg("labels", bodyargs.String, bodyargs.Required())
+	bodyDocumentArg := bodyargs.NewArg("document", bodyargs.Any, bodyargs.Required())
+	bodyNoteArg := bodyargs.NewArg("note", bodyargs.Any)
+	bodyExtrasArg := bodyargs.NewArg("extras", bodyargs.Any)
+	bodyGridArg := bodyargs.NewArg("grid", bodyargs.Any)
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
-		if IdStr == "" {
-			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
-			return
-		}
-		Id, err := types.ParseIdentityUUID(IdStr)
-		if err != nil {
-			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
-			return
-		}
 		// Parse body arguments (non-GET endpoints). The body is one JSON
 		// object; each argument is decoded from its own JSON value and
 		// checked by the list and value rules, and every failure is reported
@@ -309,10 +173,16 @@ func createGridReplaceLabelsHandler(impl GridImplementation) gohttp.HandlerFunc 
 			return
 		}
 		var requestBody struct {
-			Labels [][]string
+			Document types.GenericJSON
+			Note     types.GenericJSON
+			Extras   []types.GenericJSON
+			Grid     [][]types.GenericJSON
 		}
 		validationErrors := types.NewValidationErrors()
-		requestBody.Labels = bodyargs.ListOfLists[string](validationErrors, body, bodyLabelsArg)
+		requestBody.Document = bodyargs.Value[types.GenericJSON](validationErrors, body, bodyDocumentArg)
+		requestBody.Note = bodyargs.Value[types.GenericJSON](validationErrors, body, bodyNoteArg)
+		requestBody.Extras = bodyargs.List[types.GenericJSON](validationErrors, body, bodyExtrasArg)
+		requestBody.Grid = bodyargs.ListOfLists[types.GenericJSON](validationErrors, body, bodyGridArg)
 		if validationErrors.HasErrors() {
 			RespondValidationErrors(w, r, validationErrors)
 			return
@@ -326,7 +196,7 @@ func createGridReplaceLabelsHandler(impl GridImplementation) gohttp.HandlerFunc 
 		}
 
 		// Call implementation
-		result, err := impl.ReplaceLabels(r.Context(), Id, requestBody.Labels)
+		result, err := impl.StoreDocument(r.Context(), requestBody.Document, requestBody.Note, requestBody.Extras, requestBody.Grid)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -336,6 +206,222 @@ func createGridReplaceLabelsHandler(impl GridImplementation) gohttp.HandlerFunc 
 
 		// Respond with result
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createTagFindTagsHandler creates a handler for GET /api/posts/tags
+//
+// Find posts by label; the labels travel in the query string.
+func createTagFindTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Parse scalar arguments from query string (GET endpoint)
+
+		// Parse labels from query string (comma-separated: ?labels=a,b) per the API format conventions.
+		// Each provided element is validated individually — if present, it must be a valid
+		// value regardless of whether the array argument itself is required or optional.
+		var Labels []string
+		{
+			rawVal := r.URL.Query().Get(`labels`)
+			if rawVal != "" {
+				for _, v := range strings.Split(rawVal, ",") {
+					v = strings.TrimSpace(v)
+					if v == "" {
+						continue
+					}
+					elem := string(v)
+					if validator, ok := interface{}(elem).(interface {
+						ValidateRequired() (bool, []types.ValidationError)
+					}); ok {
+						if valid, fieldErrs := validator.ValidateRequired(); !valid {
+							validationErrors := types.NewValidationErrors()
+							validationErrors.SetFieldErrors("labels", fieldErrs)
+							RespondValidationErrors(w, r, validationErrors)
+							return
+						}
+					} else if validator, ok := interface{}(elem).(interface {
+						Validate() (bool, []types.ValidationError)
+					}); ok {
+						if valid, fieldErrs := validator.Validate(); !valid {
+							validationErrors := types.NewValidationErrors()
+							validationErrors.SetFieldErrors("labels", fieldErrs)
+							RespondValidationErrors(w, r, validationErrors)
+							return
+						}
+					}
+					Labels = append(Labels, elem)
+				}
+			}
+		}
+		if len(Labels) == 0 {
+			if r.URL.Query().Has("labels") {
+				RespondError(w, r, gohttp.StatusBadRequest, "labels cannot be empty")
+			} else {
+				RespondError(w, r, gohttp.StatusBadRequest, "labels is required")
+			}
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.FindTags(r.Context(), Labels)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondCollectionEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createTagSetFlagsHandler creates a handler for POST /api/posts/{id}/flags
+//
+// Set a post's flags; every argument is required.
+func createTagSetFlagsHandler(impl TagImplementation) gohttp.HandlerFunc {
+	// Body arguments: the JSON type of each value, then its rules in the
+	// order they are checked (the scalar type's own, then the argument's).
+	bodyPinnedArg := bodyargs.NewArg("pinned", bodyargs.Boolean, bodyargs.Required())
+	bodyScoreArg := bodyargs.NewArg("score", bodyargs.Number, bodyargs.Required(), bodyargs.Max(10))
+	bodyCaptionArg := bodyargs.NewArg("caption", bodyargs.String, bodyargs.Required(), bodyargs.MinLength(2))
+	bodyRankArg := bodyargs.NewArg("rank", bodyargs.Integer, bodyargs.Required(), bodyargs.Min(1), bodyargs.Max(9007199254740991))
+	bodyRelatedArg := bodyargs.NewArg("related", bodyargs.String, bodyargs.Pattern(`^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`))
+	bodyPointsArg := bodyargs.NewArg("points", bodyargs.Object)
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters
+		IdStr := chi.URLParam(r, "id")
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id := IdStr
+		// Parse body arguments (non-GET endpoints). The body is one JSON
+		// object; each argument is decoded from its own JSON value and
+		// checked by the list and value rules, and every failure is reported
+		// at the argument's path (name, name[i], name[i][j]).
+		body, err := bodyargs.ReadObject(r.Body)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+			return
+		}
+		var requestBody struct {
+			Pinned  bool
+			Score   float64
+			Caption string
+			Rank    int64
+			Related []types.IdentityUUID
+			Points  []types.Point
+		}
+		validationErrors := types.NewValidationErrors()
+		requestBody.Pinned = bodyargs.Value[bool](validationErrors, body, bodyPinnedArg)
+		requestBody.Score = bodyargs.Value[float64](validationErrors, body, bodyScoreArg)
+		requestBody.Caption = bodyargs.Value[string](validationErrors, body, bodyCaptionArg)
+		requestBody.Rank = bodyargs.Value[int64](validationErrors, body, bodyRankArg)
+		requestBody.Related = bodyargs.List[types.IdentityUUID](validationErrors, body, bodyRelatedArg)
+		requestBody.Points = bodyargs.List[types.Point](validationErrors, body, bodyPointsArg)
+		if validationErrors.HasErrors() {
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.SetFlags(r.Context(), Id, requestBody.Pinned, requestBody.Score, requestBody.Caption, requestBody.Rank, requestBody.Related, requestBody.Points)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createTagSaveTagsHandler creates a handler for PUT /api/posts/{id}/tags
+//
+// Replace a post's tags; returns the labels as stored.
+func createTagSaveTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
+	// Body arguments: the JSON type of each value, then its rules in the
+	// order they are checked (the scalar type's own, then the argument's).
+	bodyLabelsArg := bodyargs.NewArg("labels", bodyargs.String, bodyargs.Required(), bodyargs.ListMax(3))
+	bodyWeightsArg := bodyargs.NewArg("weights", bodyargs.Number)
+	bodyRanksArg := bodyargs.NewArg("ranks", bodyargs.Integer, bodyargs.Min(1), bodyargs.Max(9007199254740991))
+	bodyShadesArg := bodyargs.NewArg("shades", bodyargs.String)
+	bodyLinksArg := bodyargs.NewArg("links", bodyargs.String, bodyargs.ListMin(1), bodyargs.ListMax(2), bodyargs.MaxLength(2048), bodyargs.Pattern(`^https?://[\w\-\{\}]+(\.[\w\-\{\}]+)+([:/?#][\w\-\._~:/?#\[\]@!\$&'\(\)\*\+,;=\{\}%]*)?$`), bodyargs.Pattern(`^https://`))
+	bodyTitleArg := bodyargs.NewArg("title", bodyargs.String)
+	bodyPriorityArg := bodyargs.NewArg("priority", bodyargs.Number)
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters
+		IdStr := chi.URLParam(r, "id")
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id := IdStr
+		// Parse body arguments (non-GET endpoints). The body is one JSON
+		// object; each argument is decoded from its own JSON value and
+		// checked by the list and value rules, and every failure is reported
+		// at the argument's path (name, name[i], name[i][j]).
+		body, err := bodyargs.ReadObject(r.Body)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+			return
+		}
+		var requestBody struct {
+			Labels   []string
+			Weights  []float64
+			Ranks    []int64
+			Shades   []types.Shade
+			Links    []types.NetworkUrl
+			Title    string
+			Priority float64
+		}
+		validationErrors := types.NewValidationErrors()
+		requestBody.Labels = bodyargs.List[string](validationErrors, body, bodyLabelsArg)
+		requestBody.Weights = bodyargs.List[float64](validationErrors, body, bodyWeightsArg)
+		requestBody.Ranks = bodyargs.List[int64](validationErrors, body, bodyRanksArg)
+		requestBody.Shades = bodyargs.List[types.Shade](validationErrors, body, bodyShadesArg)
+		requestBody.Links = bodyargs.List[types.NetworkUrl](validationErrors, body, bodyLinksArg)
+		requestBody.Title = bodyargs.Value[string](validationErrors, body, bodyTitleArg)
+		requestBody.Priority = bodyargs.Value[float64](validationErrors, body, bodyPriorityArg)
+		if validationErrors.HasErrors() {
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.SaveTags(r.Context(), Id, requestBody.Labels, requestBody.Weights, requestBody.Ranks, requestBody.Shades, requestBody.Links, requestBody.Title, requestBody.Priority)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondCollectionEnvelope(w, gohttp.StatusOK, result, r)
 	}
 }
 
