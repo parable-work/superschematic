@@ -7,6 +7,9 @@ import {
   addNestedErrors,{{end}}
 } from '{{$.Naming.ScalarNpmPackage}}/validation';
 import type { ScalarValidationResult, ValidationResult } from '{{$.Naming.ScalarNpmPackage}}/validation';
+{{- if .PrimitiveHelpers}}
+import { {{join .PrimitiveHelpers ", "}} } from '../primitives';
+{{- end}}
 import { load as loadYaml } from 'js-yaml';
 import type { {{.Type.Name}}{{if .ParserScalarsUsed}}, JSDate{{end}}{{range .ParserNestedTypes}}, {{.}}{{end}}{{range .EnumDefaultsUsed}}, {{.}}{{end}} } from '../../types';
 {{range .ScalarsUsed}}
@@ -281,9 +284,43 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   {{end}}
   {{else}}
   {{if and .Required (not .InternalMetadata)}}
+  {{if and .IsArray (not .IsMap)}}
+  if (!Array.isArray(value.{{.TSName}})) {
+  {{- else}}
   if (value.{{.TSName}} === null || value.{{.TSName}} === undefined) {
+  {{- end}}
     addFieldError(errors, "{{.TSName}}", "required", "required field");
   }
+  {{end}}
+  {{$check := primitiveCheck .}}
+  {{if $check}}
+  {{if .IsMap}}
+  if (value.{{.TSName}} !== null && value.{{.TSName}} !== undefined && typeof value.{{.TSName}} === 'object' && !Array.isArray(value.{{.TSName}})) {
+    for (const [key, val] of Object.entries(value.{{.TSName}})) {
+      {{if .IsArray}}
+      if (Array.isArray(val)) {
+        val.forEach((item, index) => {{$check}}(errors, `{{.TSName}}.${key}[${index}]`, item));
+      }
+      {{else}}
+      {{$check}}(errors, `{{.TSName}}.${key}`, val);
+      {{end}}
+    }
+  }
+  {{else if .IsArrayOfArrays}}
+  if (Array.isArray(value.{{.TSName}})) {
+    value.{{.TSName}}.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {{$check}}(errors, `{{.TSName}}[${rowIndex}][${index}]`, item));
+      }
+    });
+  }
+  {{else if .IsArray}}
+  if (Array.isArray(value.{{.TSName}})) {
+    value.{{.TSName}}.forEach((item, index) => {{$check}}(errors, `{{.TSName}}[${index}]`, item));
+  }
+  {{else}}
+  {{$check}}(errors, "{{.TSName}}", value.{{.TSName}});
+  {{end}}
   {{end}}
   {{end}}
   {{end}}
@@ -312,30 +349,24 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
         const path = `{{$field.TSName}}[${rowIndex}][${index}]`;
         {{range .}}
         {{if eq .Validator "minLength"}}
-        if (String(item).length < {{.Value}}) {
+        if (typeof item === "string" && item.length < {{.Value}}) {
           addFieldError(errors, path, "minLength", "{{escapeString .Message}}");
         }
         {{else if eq .Validator "maxLength"}}
-        if (String(item).length > {{.Value}}) {
+        if (typeof item === "string" && item.length > {{.Value}}) {
           addFieldError(errors, path, "maxLength", "{{escapeString .Message}}");
         }
         {{else if eq .Validator "pattern"}}
-        if (!(new RegExp({{jsonString .Value}})).test(String(item))) {
+        if (typeof item === "string" && !(new RegExp({{jsonString .Value}})).test(item)) {
           addFieldError(errors, path, "pattern", "{{escapeString .Message}}");
         }
         {{else if eq .Validator "min"}}
-        {
-          const numericValue = Number(item);
-          if (!Number.isNaN(numericValue) && numericValue < {{.Value}}) {
-            addFieldError(errors, path, "min", "{{escapeString .Message}}");
-          }
+        if (isFiniteNumber(item) && item < {{.Value}}) {
+          addFieldError(errors, path, "min", "{{escapeString .Message}}");
         }
         {{else if eq .Validator "max"}}
-        {
-          const numericValue = Number(item);
-          if (!Number.isNaN(numericValue) && numericValue > {{.Value}}) {
-            addFieldError(errors, path, "max", "{{escapeString .Message}}");
-          }
+        if (isFiniteNumber(item) && item > {{.Value}}) {
+          addFieldError(errors, path, "max", "{{escapeString .Message}}");
         }
         {{end}}
         {{end}}
@@ -347,7 +378,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   if (value.{{.TSName}} !== null && value.{{.TSName}} !== undefined && typeof value.{{.TSName}} === 'object' && !Array.isArray(value.{{.TSName}})) {
     const fieldValue = value.{{.TSName}};
     {{range .Validations}}
-    {{if and (ne .Validator "required") (or (not $field.IsScalar) (eq .Validator "listMin") (eq .Validator "listMax"))}}
+    {{if and (ne .Validator "required") (or (not $field.IsScalar) (eq .Validator "listMin") (eq .Validator "listMax")) (ruleApplies $field .Validator)}}
     {{if eq .Validator "listMin"}}
     if (Object.keys(fieldValue).length < {{.Value}}) {
       addFieldError(errors, "{{$field.TSName}}", "listMin", "{{escapeString .Message}}");
@@ -361,7 +392,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     for (const [mapKey, mapVal] of Object.entries(fieldValue)) {
       if (Array.isArray(mapVal)) {
         mapVal.forEach((item, index) => {
-          if (String(item).length < {{.Value}}) {
+          if (typeof item === "string" && item.length < {{.Value}}) {
             addFieldError(errors, `{{$field.TSName}}.${mapKey}[${index}]`, "minLength", "{{escapeString .Message}}");
           }
         });
@@ -369,7 +400,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     }
     {{else}}
     for (const [mapKey, mapVal] of Object.entries(fieldValue)) {
-      if (String(mapVal).length < {{.Value}}) {
+      if (typeof mapVal === "string" && mapVal.length < {{.Value}}) {
         addFieldError(errors, `{{$field.TSName}}.${mapKey}`, "minLength", "{{escapeString .Message}}");
       }
     }
@@ -379,7 +410,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     for (const [mapKey, mapVal] of Object.entries(fieldValue)) {
       if (Array.isArray(mapVal)) {
         mapVal.forEach((item, index) => {
-          if (String(item).length > {{.Value}}) {
+          if (typeof item === "string" && item.length > {{.Value}}) {
             addFieldError(errors, `{{$field.TSName}}.${mapKey}[${index}]`, "maxLength", "{{escapeString .Message}}");
           }
         });
@@ -387,7 +418,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     }
     {{else}}
     for (const [mapKey, mapVal] of Object.entries(fieldValue)) {
-      if (String(mapVal).length > {{.Value}}) {
+      if (typeof mapVal === "string" && mapVal.length > {{.Value}}) {
         addFieldError(errors, `{{$field.TSName}}.${mapKey}`, "maxLength", "{{escapeString .Message}}");
       }
     }
@@ -397,7 +428,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     for (const [mapKey, mapVal] of Object.entries(fieldValue)) {
       if (Array.isArray(mapVal)) {
         mapVal.forEach((item, index) => {
-          if (!(new RegExp({{jsonString .Value}})).test(String(item))) {
+          if (typeof item === "string" && !(new RegExp({{jsonString .Value}})).test(item)) {
             addFieldError(errors, `{{$field.TSName}}.${mapKey}[${index}]`, "pattern", "{{escapeString .Message}}");
           }
         });
@@ -405,7 +436,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     }
     {{else}}
     for (const [mapKey, mapVal] of Object.entries(fieldValue)) {
-      if (!(new RegExp({{jsonString .Value}})).test(String(mapVal))) {
+      if (typeof mapVal === "string" && !(new RegExp({{jsonString .Value}})).test(mapVal)) {
         addFieldError(errors, `{{$field.TSName}}.${mapKey}`, "pattern", "{{escapeString .Message}}");
       }
     }
@@ -415,8 +446,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     for (const [mapKey, mapVal] of Object.entries(fieldValue)) {
       if (Array.isArray(mapVal)) {
         mapVal.forEach((item, index) => {
-          const numericValue = Number(item);
-          if (!Number.isNaN(numericValue) && numericValue < {{.Value}}) {
+          if (isFiniteNumber(item) && item < {{.Value}}) {
             addFieldError(errors, `{{$field.TSName}}.${mapKey}[${index}]`, "min", "{{escapeString .Message}}");
           }
         });
@@ -424,8 +454,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     }
     {{else}}
     for (const [mapKey, mapVal] of Object.entries(fieldValue)) {
-      const numericValue = Number(mapVal);
-      if (!Number.isNaN(numericValue) && numericValue < {{.Value}}) {
+      if (isFiniteNumber(mapVal) && mapVal < {{.Value}}) {
         addFieldError(errors, `{{$field.TSName}}.${mapKey}`, "min", "{{escapeString .Message}}");
       }
     }
@@ -435,8 +464,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     for (const [mapKey, mapVal] of Object.entries(fieldValue)) {
       if (Array.isArray(mapVal)) {
         mapVal.forEach((item, index) => {
-          const numericValue = Number(item);
-          if (!Number.isNaN(numericValue) && numericValue > {{.Value}}) {
+          if (isFiniteNumber(item) && item > {{.Value}}) {
             addFieldError(errors, `{{$field.TSName}}.${mapKey}[${index}]`, "max", "{{escapeString .Message}}");
           }
         });
@@ -444,8 +472,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     }
     {{else}}
     for (const [mapKey, mapVal] of Object.entries(fieldValue)) {
-      const numericValue = Number(mapVal);
-      if (!Number.isNaN(numericValue) && numericValue > {{.Value}}) {
+      if (isFiniteNumber(mapVal) && mapVal > {{.Value}}) {
         addFieldError(errors, `{{$field.TSName}}.${mapKey}`, "max", "{{escapeString .Message}}");
       }
     }
@@ -460,7 +487,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   {
     const fieldValue = value.{{.TSName}};
     {{range .Validations}}
-    {{if and (ne .Validator "required") (or (not $field.IsScalar) (eq .Validator "listMin") (eq .Validator "listMax"))}}
+    {{if and (ne .Validator "required") (or (not $field.IsScalar) (eq .Validator "listMin") (eq .Validator "listMax")) (ruleApplies $field .Validator)}}
     {{if eq .Validator "listMin"}}
     if (Array.isArray(fieldValue) && fieldValue.length < {{.Value}}) {
       addFieldError(errors, "{{$field.TSName}}", "listMin", "{{escapeString .Message}}");
@@ -473,13 +500,13 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     {{if $field.IsArray}}
     if (Array.isArray(fieldValue)) {
       fieldValue.forEach((item, index) => {
-        if (String(item).length < {{.Value}}) {
+        if (typeof item === "string" && item.length < {{.Value}}) {
           addFieldError(errors, `{{$field.TSName}}[${index}]`, "minLength", "{{escapeString .Message}}");
         }
       });
     }
     {{else}}
-    if (String(fieldValue).length < {{.Value}}) {
+    if (typeof fieldValue === "string" && fieldValue.length < {{.Value}}) {
       addFieldError(errors, "{{$field.TSName}}", "minLength", "{{escapeString .Message}}");
     }
     {{end}}
@@ -487,13 +514,13 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     {{if $field.IsArray}}
     if (Array.isArray(fieldValue)) {
       fieldValue.forEach((item, index) => {
-        if (String(item).length > {{.Value}}) {
+        if (typeof item === "string" && item.length > {{.Value}}) {
           addFieldError(errors, `{{$field.TSName}}[${index}]`, "maxLength", "{{escapeString .Message}}");
         }
       });
     }
     {{else}}
-    if (String(fieldValue).length > {{.Value}}) {
+    if (typeof fieldValue === "string" && fieldValue.length > {{.Value}}) {
       addFieldError(errors, "{{$field.TSName}}", "maxLength", "{{escapeString .Message}}");
     }
     {{end}}
@@ -501,13 +528,13 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     {{if $field.IsArray}}
     if (Array.isArray(fieldValue)) {
       fieldValue.forEach((item, index) => {
-        if (!(new RegExp({{jsonString .Value}})).test(String(item))) {
+        if (typeof item === "string" && !(new RegExp({{jsonString .Value}})).test(item)) {
           addFieldError(errors, `{{$field.TSName}}[${index}]`, "pattern", "{{escapeString .Message}}");
         }
       });
     }
     {{else}}
-    if (!(new RegExp({{jsonString .Value}})).test(String(fieldValue))) {
+    if (typeof fieldValue === "string" && !(new RegExp({{jsonString .Value}})).test(fieldValue)) {
       addFieldError(errors, "{{$field.TSName}}", "pattern", "{{escapeString .Message}}");
     }
     {{end}}
@@ -515,36 +542,28 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     {{if $field.IsArray}}
     if (Array.isArray(fieldValue)) {
       fieldValue.forEach((item, index) => {
-        const numericValue = Number(item);
-        if (!Number.isNaN(numericValue) && numericValue < {{.Value}}) {
+        if (isFiniteNumber(item) && item < {{.Value}}) {
           addFieldError(errors, `{{$field.TSName}}[${index}]`, "min", "{{escapeString .Message}}");
         }
       });
     }
     {{else}}
-    {
-      const numericValue = Number(fieldValue);
-      if (!Number.isNaN(numericValue) && numericValue < {{.Value}}) {
-        addFieldError(errors, "{{$field.TSName}}", "min", "{{escapeString .Message}}");
-      }
+    if (isFiniteNumber(fieldValue) && fieldValue < {{.Value}}) {
+      addFieldError(errors, "{{$field.TSName}}", "min", "{{escapeString .Message}}");
     }
     {{end}}
     {{else if eq .Validator "max"}}
     {{if $field.IsArray}}
     if (Array.isArray(fieldValue)) {
       fieldValue.forEach((item, index) => {
-        const numericValue = Number(item);
-        if (!Number.isNaN(numericValue) && numericValue > {{.Value}}) {
+        if (isFiniteNumber(item) && item > {{.Value}}) {
           addFieldError(errors, `{{$field.TSName}}[${index}]`, "max", "{{escapeString .Message}}");
         }
       });
     }
     {{else}}
-    {
-      const numericValue = Number(fieldValue);
-      if (!Number.isNaN(numericValue) && numericValue > {{.Value}}) {
-        addFieldError(errors, "{{$field.TSName}}", "max", "{{escapeString .Message}}");
-      }
+    if (isFiniteNumber(fieldValue) && fieldValue > {{.Value}}) {
+      addFieldError(errors, "{{$field.TSName}}", "max", "{{escapeString .Message}}");
     }
     {{end}}
     {{end}}
@@ -555,7 +574,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   if (Array.isArray(value.{{.TSName}})) {
     const fieldValue = value.{{.TSName}};
     {{range .Validations}}
-    {{if and (ne .Validator "required") (or (not $field.IsScalar) (eq .Validator "listMin") (eq .Validator "listMax"))}}
+    {{if and (ne .Validator "required") (or (not $field.IsScalar) (eq .Validator "listMin") (eq .Validator "listMax")) (ruleApplies $field .Validator)}}
     {{if eq .Validator "listMin"}}
     if (fieldValue.length < {{.Value}}) {
       addFieldError(errors, "{{$field.TSName}}", "listMin", "{{escapeString .Message}}");
@@ -566,33 +585,31 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     }
     {{else if eq .Validator "minLength"}}
     fieldValue.forEach((item, index) => {
-      if (String(item).length < {{.Value}}) {
+      if (typeof item === "string" && item.length < {{.Value}}) {
         addFieldError(errors, `{{$field.TSName}}[${index}]`, "minLength", "{{escapeString .Message}}");
       }
     });
     {{else if eq .Validator "maxLength"}}
     fieldValue.forEach((item, index) => {
-      if (String(item).length > {{.Value}}) {
+      if (typeof item === "string" && item.length > {{.Value}}) {
         addFieldError(errors, `{{$field.TSName}}[${index}]`, "maxLength", "{{escapeString .Message}}");
       }
     });
     {{else if eq .Validator "pattern"}}
     fieldValue.forEach((item, index) => {
-      if (!(new RegExp({{jsonString .Value}})).test(String(item))) {
+      if (typeof item === "string" && !(new RegExp({{jsonString .Value}})).test(item)) {
         addFieldError(errors, `{{$field.TSName}}[${index}]`, "pattern", "{{escapeString .Message}}");
       }
     });
     {{else if eq .Validator "min"}}
     fieldValue.forEach((item, index) => {
-      const numericValue = Number(item);
-      if (!Number.isNaN(numericValue) && numericValue < {{.Value}}) {
+      if (isFiniteNumber(item) && item < {{.Value}}) {
         addFieldError(errors, `{{$field.TSName}}[${index}]`, "min", "{{escapeString .Message}}");
       }
     });
     {{else if eq .Validator "max"}}
     fieldValue.forEach((item, index) => {
-      const numericValue = Number(item);
-      if (!Number.isNaN(numericValue) && numericValue > {{.Value}}) {
+      if (isFiniteNumber(item) && item > {{.Value}}) {
         addFieldError(errors, `{{$field.TSName}}[${index}]`, "max", "{{escapeString .Message}}");
       }
     });
@@ -604,32 +621,26 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   if (value.{{.TSName}} !== null && value.{{.TSName}} !== undefined) {
     const fieldValue = value.{{.TSName}};
     {{range .Validations}}
-    {{if and (ne .Validator "required") (or (not $field.IsScalar) (eq .Validator "listMin") (eq .Validator "listMax"))}}
+    {{if and (ne .Validator "required") (or (not $field.IsScalar) (eq .Validator "listMin") (eq .Validator "listMax")) (ruleApplies $field .Validator)}}
     {{if eq .Validator "minLength"}}
-    if (String(fieldValue).length < {{.Value}}) {
+    if (typeof fieldValue === "string" && fieldValue.length < {{.Value}}) {
       addFieldError(errors, "{{$field.TSName}}", "minLength", "{{escapeString .Message}}");
     }
     {{else if eq .Validator "maxLength"}}
-    if (String(fieldValue).length > {{.Value}}) {
+    if (typeof fieldValue === "string" && fieldValue.length > {{.Value}}) {
       addFieldError(errors, "{{$field.TSName}}", "maxLength", "{{escapeString .Message}}");
     }
     {{else if eq .Validator "pattern"}}
-    if (!(new RegExp({{jsonString .Value}})).test(String(fieldValue))) {
+    if (typeof fieldValue === "string" && !(new RegExp({{jsonString .Value}})).test(fieldValue)) {
       addFieldError(errors, "{{$field.TSName}}", "pattern", "{{escapeString .Message}}");
     }
     {{else if eq .Validator "min"}}
-    {
-      const numericValue = Number(fieldValue);
-      if (!Number.isNaN(numericValue) && numericValue < {{.Value}}) {
-        addFieldError(errors, "{{$field.TSName}}", "min", "{{escapeString .Message}}");
-      }
+    if (isFiniteNumber(fieldValue) && fieldValue < {{.Value}}) {
+      addFieldError(errors, "{{$field.TSName}}", "min", "{{escapeString .Message}}");
     }
     {{else if eq .Validator "max"}}
-    {
-      const numericValue = Number(fieldValue);
-      if (!Number.isNaN(numericValue) && numericValue > {{.Value}}) {
-        addFieldError(errors, "{{$field.TSName}}", "max", "{{escapeString .Message}}");
-      }
+    if (isFiniteNumber(fieldValue) && fieldValue > {{.Value}}) {
+      addFieldError(errors, "{{$field.TSName}}", "max", "{{escapeString .Message}}");
     }
     {{end}}
     {{end}}

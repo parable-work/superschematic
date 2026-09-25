@@ -35,7 +35,16 @@ export function validate{{.Scalar.Symbol}}(
   }
 
   {{if and (eq .Scalar.Primitive "string") (not .Scalar.HasJSONParse) (ne .Scalar.TSType "JSONValue")}}
+  {{if eq .Scalar.TSType "string"}}
+  // A value of another JSON type is "type", and its length and format are
+  // not checked.
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected string value" }]];
+  }
+  const s = value;
+  {{else}}
   const s = String(value);
+  {{end}}
 
   {{if .Scalar.MinLength}}
   if (s.length < {{.Scalar.MinLength}}) {
@@ -73,17 +82,18 @@ export function validate{{.Scalar.Symbol}}(
   {{end}}
 
   {{if eq .Scalar.Primitive "number"}}
-  const n = Number(value);
-
+  // A value of another JSON type, or a non-integer for an integer scalar,
+  // is "type", and its range is not checked.
   {{if .Scalar.IsIntegerLike}}
-  if (!Number.isInteger(n)) {
-    errors.push({ validator: "type", message: "must be an integer" });
+  if (!Number.isInteger(value)) {
+    return [false, [{ validator: "type", message: "must be an integer" }]];
   }
   {{else}}
-  if (isNaN(n)) {
-    errors.push({ validator: "type", message: "must be a number" });
+  if (!Number.isFinite(value)) {
+    return [false, [{ validator: "type", message: "must be a number" }]];
   }
   {{end}}
+  const n = value;
 
   {{if .Scalar.Minimum}}
   if (n < {{.Scalar.Minimum}}) {
@@ -132,9 +142,6 @@ export function validate{{.Scalar.Symbol}}Required(
   {{else if eq .Scalar.TSType "string"}}
   if (value === null || value === undefined || value === "") {
     return [false, [{ validator: "required", message: "required field" }]];
-  }
-  if (typeof value !== "string") {
-    return [false, [{ validator: "type", message: "expected string value" }]];
   }
   {{else}}
   if (value === null || value === undefined) {

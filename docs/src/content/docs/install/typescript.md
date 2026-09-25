@@ -104,8 +104,10 @@ const loose = parseMoneyJsonNonStrict(payload);
 ```
 
 Every object type gets `parse<Type>Json`, `parse<Type>JsonNonStrict`,
-`parse<Type>Yaml` and `parse<Type>YamlNonStrict`. Type-only imports (no
-runtime) come from `@schemas/catalog-types/types`.
+`parse<Type>Yaml` and `parse<Type>YamlNonStrict`. Each runs
+`validate<Type>`, which rejects a field value of the wrong JSON type, such
+as `"5"` in a `number` field, with `type` at the field's path. Type-only
+imports (no runtime) come from `@schemas/catalog-types/types`.
 
 ## Consume a generated SDK
 

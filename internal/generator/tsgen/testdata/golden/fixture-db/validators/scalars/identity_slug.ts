@@ -16,7 +16,12 @@ export function validateIdentitySlug(
     return [true, null];
   }
 
-  const s = String(value);
+  // A value of another JSON type is "type", and its length and format are
+  // not checked.
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected string value" }]];
+  }
+  const s = value;
 
   if (s.length < 1) {
     errors.push({ validator: "minLength", message: "must be at least 1 characters" });
@@ -42,9 +47,6 @@ export function validateIdentitySlugRequired(
 
   if (value === null || value === undefined || value === "") {
     return [false, [{ validator: "required", message: "required field" }]];
-  }
-  if (typeof value !== "string") {
-    return [false, [{ validator: "type", message: "expected string value" }]];
   }
 
   return validateIdentitySlug(value);

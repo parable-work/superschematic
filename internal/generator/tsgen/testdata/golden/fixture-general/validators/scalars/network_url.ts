@@ -16,7 +16,12 @@ export function validateNetworkUrl(
     return [true, null];
   }
 
-  const s = String(value);
+  // A value of another JSON type is "type", and its length and format are
+  // not checked.
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected string value" }]];
+  }
+  const s = value;
 
   if (s.length > 2048) {
     errors.push({ validator: "maxLength", message: "must be at most 2048 characters" });
@@ -38,9 +43,6 @@ export function validateNetworkUrlRequired(
 
   if (value === null || value === undefined || value === "") {
     return [false, [{ validator: "required", message: "required field" }]];
-  }
-  if (typeof value !== "string") {
-    return [false, [{ validator: "type", message: "expected string value" }]];
   }
 
   return validateNetworkUrl(value);

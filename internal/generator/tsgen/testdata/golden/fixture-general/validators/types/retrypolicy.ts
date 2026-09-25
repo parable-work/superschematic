@@ -6,6 +6,7 @@ import {
   setFieldErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
+import { expectNumber } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import type { RetryPolicy } from '../../types';
 
@@ -22,6 +23,10 @@ export function validateRetryPolicy(value: RetryPolicy | null | undefined): Vali
   if (value.maxAttempts === null || value.maxAttempts === undefined) {
     addFieldError(errors, "maxAttempts", "required", "required field");
   }
+
+  expectNumber(errors, "maxAttempts", value.maxAttempts);
+
+  expectNumber(errors, "backoffSeconds", value.backoffSeconds);
 
   return Object.keys(errors).length > 0 ? errors : true;
 }

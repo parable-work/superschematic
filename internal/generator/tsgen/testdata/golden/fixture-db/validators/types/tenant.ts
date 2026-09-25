@@ -7,6 +7,7 @@ import {
   addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
+import { expectBoolean, expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import type { Tenant, JSDate, TenantUser, TenantStatus } from '../../types';
 
@@ -75,10 +76,12 @@ export function validateTenant(value: Tenant | null | undefined): ValidationResu
     addFieldError(errors, "email", "required", "required field");
   }
 
+  expectString(errors, "email", value.email);
+
   {
     const fieldValue = value.email;
 
-    if (!(new RegExp("@")).test(String(fieldValue))) {
+    if (typeof fieldValue === "string" && !(new RegExp("@")).test(fieldValue)) {
       addFieldError(errors, "email", "pattern", "invalid format");
     }
 
@@ -95,9 +98,13 @@ export function validateTenant(value: Tenant | null | undefined): ValidationResu
     addFieldError(errors, "isActive", "required", "required field");
   }
 
+  expectBoolean(errors, "isActive", value.isActive);
+
   if (value.seatCount === null || value.seatCount === undefined) {
     addFieldError(errors, "seatCount", "required", "required field");
   }
+
+  expectNumber(errors, "seatCount", value.seatCount);
 
   {
     const [valid, fieldErrors] = validateGenericJSONRequired(value.metadata);
@@ -125,7 +132,7 @@ export function validateTenant(value: Tenant | null | undefined): ValidationResu
 
   }
 
-  if (value.users === null || value.users === undefined) {
+  if (!Array.isArray(value.users)) {
     addFieldError(errors, "users", "required", "required field");
   }
 
@@ -138,6 +145,8 @@ export function validateTenant(value: Tenant | null | undefined): ValidationResu
       }
     });
   }
+
+  expectNumber(errors, "_version", value._version);
 
   return Object.keys(errors).length > 0 ? errors : true;
 }

@@ -117,10 +117,10 @@ function validateStringConstraints(
   applyRequired: boolean,
   options?: ValidationOptions
 ): ValidationError[] {
+  // A value of another JSON type is "type", required or not, and its
+  // length and format are not checked.
   if (typeof value !== 'string') {
-    return applyRequired
-      ? [{ validator: 'type', message: `${scalar.name} must be a string.` }]
-      : [];
+    return [{ validator: 'type', message: `${scalar.name} must be a string.` }];
   }
 
   if (value === '' && applyRequired) {
@@ -354,6 +354,35 @@ function validateFieldLevelNumericConstraints(field: FieldDef, value: number): V
   return fieldErrors;
 }
 
+/**
+ * The "type" error for a builtin field value of the wrong JSON type, or null.
+ * The IR's string, number and boolean are checked, and so are the GraphQL
+ * names the JSON Schema reader gives them; any other name is not. The
+ * field's own constraints are checked only on a value that passes.
+ */
+function builtinTypeError(field: FieldDef, value: unknown): ValidationError | null {
+  switch (field.typeRef.name) {
+    case 'string':
+    case 'String':
+    case 'ID':
+      return typeof value === 'string' ? null : { validator: 'type', message: 'expected a string' };
+    case 'number':
+    case 'Float':
+      return toNumber(value) !== null ? null : { validator: 'type', message: 'expected a number' };
+    case 'Int': {
+      const parsed = toNumber(value);
+      return parsed !== null && Number.isInteger(parsed)
+        ? null
+        : { validator: 'type', message: 'expected an integer' };
+    }
+    case 'boolean':
+    case 'Boolean':
+      return typeof value === 'boolean' ? null : { validator: 'type', message: 'expected a boolean' };
+    default:
+      return null;
+  }
+}
+
 function hasFieldLevelConstraints(field: FieldDef): boolean {
   return (
     field.validateMin !== null ||
@@ -423,6 +452,11 @@ function validateSingleField(
   }
 
   if (kind === 'builtin') {
+    const typeError = builtinTypeError(field, value);
+    if (typeError) {
+      setFieldErrors(errors, key, [typeError]);
+      return;
+    }
     if (
       field.required &&
       (field.typeRef.name === 'String' || field.typeRef.name === 'ID') &&
@@ -513,7 +547,10 @@ function validateArrayElements(
     }
 
     if (kind === 'builtin') {
-      if (hasFieldLevelConstraints(field)) {
+      const typeError = builtinTypeError(field, element);
+      if (typeError) {
+        setFieldErrors(errors, elementKey, [typeError]);
+      } else if (hasFieldLevelConstraints(field)) {
         setFieldErrors(errors, elementKey, applyFieldLevelConstraints(field, element));
       }
       continue;
