@@ -138,12 +138,18 @@ func fileSHA256(path string) (sum string, err error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// ToolchainFingerprint returns versions of external tools that shape outputs.
 // SchemasDir is the schemas root's directory name under the repository root
 // ("<repoRoot>/<SchemasDir>/services", "<repoRoot>/<SchemasDir>/dist").
-// build-all sets it from the services root it is given; the default matches
-// the layout the README describes.
+// Every command that builds a service sets it with SetSchemasRoot from the
+// schemas root it resolved; the default matches the layout the README
+// describes.
 var SchemasDir = "schemas"
+
+// SetSchemasRoot points the stamps, the authoring-import depfiles and the
+// workspace inputs at schemasRoot, whose parent is the repository root.
+func SetSchemasRoot(schemasRoot string) {
+	SchemasDir = filepath.Base(filepath.Clean(schemasRoot))
+}
 
 // toolDigestOverride lets a binary that embeds its own source digest (or a
 // test) pin the tool component of every cache key. Empty means the running
@@ -173,6 +179,7 @@ var (
 	toolDigestValue string
 )
 
+// ToolchainFingerprint returns versions of external tools that shape outputs.
 func ToolchainFingerprint() string {
 	toolchainFingerprintOnce.Do(func() {
 		toolchainFingerprintValue = computeToolchainFingerprint()

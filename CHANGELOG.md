@@ -649,6 +649,15 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Build cache: the authoring-import depfile of a service with sidecar
+  documents went to `<repo>/schemas/dist/.authoring-imports/` on a single
+  `build` or `build --with-deps` whose schemas root had another name,
+  because only `build-all` set the schemas directory. Each command also
+  derived the location from the output root, so with `--out` the depfile
+  went beside the output (and a build failed when the directory above
+  `--out` did not exist), where the input hash never read it. Every
+  command now sets the schemas root it resolved, and the depfile goes
+  under `<schemas-root>/dist/` whatever `--out` is. Patch.
 - Python schema runtime: `parse_schema` named the schema from the root
   `title` only, so a document that carries its identifier in `name` and a
   display title in `title` got the display title as its name. It now reads

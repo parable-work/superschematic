@@ -104,6 +104,13 @@ service. With `--cache`, a service whose input hash matches a stamp and
 whose outputs still exist is skipped; a miss restores from the cache or
 rebuilds.
 
+A service with sidecar documents also gets
+`<schemas-root>/dist/.authoring-imports/<service>.json`, which lists the
+files elsewhere under the schemas root that its documents import. The
+input hash covers those files' contents. `build`, `build --with-deps` and
+`build-all` all write it under the schemas root they resolved, whatever the
+schemas root is named and wherever `--out` points.
+
 ## `json-schema`
 
 Print the JSON Schema the JSON and YAML readers validate against. The

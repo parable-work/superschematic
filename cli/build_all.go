@@ -109,8 +109,9 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 	if err != nil {
 		return fmt.Errorf("resolving output root: %w", err)
 	}
-	repoRoot := filepath.Clean(filepath.Join(servicesRoot, "..", ".."))
-	buildcache.SchemasDir = filepath.Base(filepath.Clean(filepath.Join(servicesRoot, "..")))
+	schemasRoot := filepath.Dir(servicesRoot)
+	repoRoot := filepath.Dir(schemasRoot)
+	buildcache.SetSchemasRoot(schemasRoot)
 
 	// Resolved before any schema loads: the loader and generators take it as
 	// an option; schemadeps (EmitFromDist, below) reads the active value.
@@ -272,6 +273,7 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		for _, task := range remaining {
 			if err := executeBuildAllTask(cmd, task, buildAllTaskContext{
 				outputRoot:     outputRoot,
+				schemasRoot:    schemasRoot,
 				repoRoot:       repoRoot,
 				cacheRoot:      cacheRoot,
 				loadOpts:       loadOpts,
@@ -302,6 +304,7 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Phase %d/%d: %s\n", i+1, len(phases), strings.Join(phaseNames, ", "))
 			if err := executeBuildAllPhase(cmd, phase, taskByName, buildAllTaskContext{
 				outputRoot:     outputRoot,
+				schemasRoot:    schemasRoot,
 				repoRoot:       repoRoot,
 				cacheRoot:      cacheRoot,
 				loadOpts:       loadOpts,
@@ -485,6 +488,7 @@ func outputDirsExist(dirs []string) bool {
 
 type buildAllTaskContext struct {
 	outputRoot     string
+	schemasRoot    string
 	repoRoot       string
 	cacheRoot      string
 	loadOpts       []loader.Option
@@ -537,6 +541,7 @@ func executeBuildAllTask(cmd *cobra.Command, task buildAllTask, ctx buildAllTask
 	result, err := buildService(buildServiceOptions{
 		ServicePath: service.Dir,
 		OutputRoot:  ctx.outputRoot,
+		SchemasRoot: ctx.schemasRoot,
 		Paths:       ctx.naming.LocalPaths(ctx.repoRoot),
 		LoadOptions: buildAllTaskLoadOptions(ctx),
 		LoadDependency: func(name string) (*ir.Schema, error) {
