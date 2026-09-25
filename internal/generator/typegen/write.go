@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/profile"
@@ -43,7 +44,7 @@ func (o *ModuleOutput) WritesScalars() bool {
 func (o *ModuleOutput) NeedsRegexp() bool {
 	for _, typeInfo := range o.Types {
 		for _, field := range typeInfo.Fields {
-			for _, rule := range field.Validations {
+			for _, rule := range append(append([]codegen.ValidationRule(nil), field.Validations...), field.ScalarRules...) {
 				if rule.Validator == "pattern" {
 					return true
 				}
@@ -51,6 +52,41 @@ func (o *ModuleOutput) NeedsRegexp() bool {
 		}
 	}
 	return false
+}
+
+// ScalarValueCheck is one validate<Symbol>Value function in types.go: the
+// scalar's own rules, checked before the scalar core's verdict is taken.
+type ScalarValueCheck struct {
+	Symbol string
+	Name   string
+	// Field is one field of the scalar, for validationStringExpr.
+	Field FieldInfo
+	Rules []codegen.ValidationRule
+}
+
+// ScalarValueChecks returns one ScalarValueCheck per scalar whose values
+// Validate hands to the scalar and that has rules of its own, in symbol
+// order.
+func (o *ModuleOutput) ScalarValueChecks() []ScalarValueCheck {
+	bySymbol := map[string]ScalarValueCheck{}
+	for _, typeInfo := range o.Types {
+		for _, field := range typeInfo.Fields {
+			if len(field.ScalarRules) == 0 || field.ScalarInfo == nil {
+				continue
+			}
+			symbol := scalarSymbol(field)
+			if _, seen := bySymbol[symbol]; seen {
+				continue
+			}
+			bySymbol[symbol] = ScalarValueCheck{Symbol: symbol, Name: field.ScalarInfo.Name, Field: field, Rules: field.ScalarRules}
+		}
+	}
+	checks := make([]ScalarValueCheck, 0, len(bySymbol))
+	for _, check := range bySymbol {
+		checks = append(checks, check)
+	}
+	sort.Slice(checks, func(i, j int) bool { return checks[i].Symbol < checks[j].Symbol })
+	return checks
 }
 
 func (o *ModuleOutput) filterImports(usedAliases map[string]bool) []ModuleImport {

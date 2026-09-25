@@ -89,6 +89,12 @@ type FieldInfo struct {
 	ScalarInfo       *ScalarInfo
 	Validations      []codegen.ValidationRule
 
+	// ScalarRules are the rules copied from the field's scalar type (its
+	// lengths, pattern and range) when Validate hands the field's values to
+	// the scalar. validate<Symbol>Value checks them there and reports a
+	// failure by their name, so they are not in Validations as well.
+	ScalarRules []codegen.ValidationRule
+
 	// IsArrayOfArrays marks T[][]; IsArray is then true too. GoType is
 	// [][]T, or InputField[[][]T] for an optional input field. An inner list
 	// is never null, so Validate rejects a nil inner slice, and list bounds
@@ -739,6 +745,10 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 					field.DefaultLiteral = literal
 				}
 			}
+		}
+		if scalarValidates(field) {
+			field.ScalarRules = scalarRules(field.Validations)
+			field.Validations = withoutScalarRules(field.Validations)
 		}
 
 		fields[i] = field

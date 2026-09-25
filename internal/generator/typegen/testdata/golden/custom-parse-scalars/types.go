@@ -155,6 +155,270 @@ func mapFromYAMLValue(data []byte) (map[string]any, error) {
 	return result, nil
 }
 
+// validateFinanceMoneyValue validates one Finance.Money value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateFinanceMoneyValue(value FinanceMoney, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if float64(value) < 0 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "min", Message: "must be at least 0"})
+	}
+	if float64(value) > 9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 9007199254740991"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateGenericInt64Value validates one Generic.Int64 value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateGenericInt64Value(value GenericInt64, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if float64(value) < -9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "min", Message: "must be at least -9007199254740991"})
+	}
+	if float64(value) > 9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 9007199254740991"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateIdentityUUIDValue validates one Identity.UUID value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateIdentityUUIDValue(value IdentityUUID, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateIdentityUserIDValue validates one Identity.UserID value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateIdentityUserIDValue(value IdentityUserID, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if matched, err := regexp.MatchString("^[0-9A-Za-z]{1,22}$", value.String()); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateTemporalDaysValue validates one Temporal.Days value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateTemporalDaysValue(value TemporalDays, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if float64(value) < -9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "min", Message: "must be at least -9007199254740991"})
+	}
+	if float64(value) > 9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 9007199254740991"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateTemporalDurationValue validates one Temporal.Duration value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateTemporalDurationValue(value TemporalDuration, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if len(value.String()) > 32 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 32 characters"})
+	}
+	if matched, err := regexp.MatchString("^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$", value.String()); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateTemporalHoursValue validates one Temporal.Hours value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateTemporalHoursValue(value TemporalHours, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if float64(value) < -9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "min", Message: "must be at least -9007199254740991"})
+	}
+	if float64(value) > 9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 9007199254740991"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateTemporalMillisecondsValue validates one Temporal.Milliseconds value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateTemporalMillisecondsValue(value TemporalMilliseconds, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if float64(value) < -9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "min", Message: "must be at least -9007199254740991"})
+	}
+	if float64(value) > 9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 9007199254740991"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateTemporalMinutesValue validates one Temporal.Minutes value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateTemporalMinutesValue(value TemporalMinutes, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if float64(value) < -9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "min", Message: "must be at least -9007199254740991"})
+	}
+	if float64(value) > 9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 9007199254740991"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateTemporalSecondsValue validates one Temporal.Seconds value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateTemporalSecondsValue(value TemporalSeconds, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if float64(value) < -9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "min", Message: "must be at least -9007199254740991"})
+	}
+	if float64(value) > 9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 9007199254740991"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
 // CustomParseScalars
 type CustomParseScalars struct {
 	FinanceMoney FinanceMoney `json:"financeMoney"`
@@ -223,70 +487,26 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 
 	// Validate financeMoney (required)
 
-	if valid, fieldErrs := t.FinanceMoney.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateFinanceMoneyValue(t.FinanceMoney, true); !valid {
 		errors.SetFieldErrors("financeMoney", fieldErrs)
-	}
-
-	{
-		value := t.FinanceMoney
-
-		if float64(value) < 0 {
-			errors.AddFieldError("financeMoney", "min", "must be at least 0")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("financeMoney", "max", "must be at most 9007199254740991")
-		}
-
 	}
 
 	// Validate genericInt64 (required)
 
-	if valid, fieldErrs := t.GenericInt64.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateGenericInt64Value(t.GenericInt64, true); !valid {
 		errors.SetFieldErrors("genericInt64", fieldErrs)
-	}
-
-	{
-		value := t.GenericInt64
-
-		if float64(value) < -9007199254740991 {
-			errors.AddFieldError("genericInt64", "min", "must be at least -9007199254740991")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("genericInt64", "max", "must be at most 9007199254740991")
-		}
-
 	}
 
 	// Validate identityUUID (required)
 
-	if valid, fieldErrs := t.IdentityUUID.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateIdentityUUIDValue(t.IdentityUUID, true); !valid {
 		errors.SetFieldErrors("identityUUID", fieldErrs)
-	}
-
-	{
-		value := t.IdentityUUID
-
-		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
-			errors.AddFieldError("identityUUID", "pattern", "invalid format")
-		}
-
 	}
 
 	// Validate identityUserID (required)
 
-	if valid, fieldErrs := t.IdentityUserID.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateIdentityUserIDValue(t.IdentityUserID, true); !valid {
 		errors.SetFieldErrors("identityUserID", fieldErrs)
-	}
-
-	{
-		value := t.IdentityUserID
-
-		if matched, err := regexp.MatchString("^[0-9A-Za-z]{1,22}$", value.String()); err != nil || !matched {
-			errors.AddFieldError("identityUserID", "pattern", "invalid format")
-		}
-
 	}
 
 	// Validate temporalDateTime (required)
@@ -297,116 +517,38 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 
 	// Validate temporalDays (required)
 
-	if valid, fieldErrs := t.TemporalDays.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateTemporalDaysValue(t.TemporalDays, true); !valid {
 		errors.SetFieldErrors("temporalDays", fieldErrs)
-	}
-
-	{
-		value := t.TemporalDays
-
-		if float64(value) < -9007199254740991 {
-			errors.AddFieldError("temporalDays", "min", "must be at least -9007199254740991")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("temporalDays", "max", "must be at most 9007199254740991")
-		}
-
 	}
 
 	// Validate temporalDuration (required)
 
-	if valid, fieldErrs := t.TemporalDuration.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateTemporalDurationValue(t.TemporalDuration, true); !valid {
 		errors.SetFieldErrors("temporalDuration", fieldErrs)
-	}
-
-	{
-		value := t.TemporalDuration
-
-		if len(value.String()) > 32 {
-			errors.AddFieldError("temporalDuration", "maxLength", "must be at most 32 characters")
-		}
-
-		if matched, err := regexp.MatchString("^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$", value.String()); err != nil || !matched {
-			errors.AddFieldError("temporalDuration", "pattern", "invalid format")
-		}
-
 	}
 
 	// Validate temporalHours (required)
 
-	if valid, fieldErrs := t.TemporalHours.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateTemporalHoursValue(t.TemporalHours, true); !valid {
 		errors.SetFieldErrors("temporalHours", fieldErrs)
-	}
-
-	{
-		value := t.TemporalHours
-
-		if float64(value) < -9007199254740991 {
-			errors.AddFieldError("temporalHours", "min", "must be at least -9007199254740991")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("temporalHours", "max", "must be at most 9007199254740991")
-		}
-
 	}
 
 	// Validate temporalMilliseconds (required)
 
-	if valid, fieldErrs := t.TemporalMilliseconds.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateTemporalMillisecondsValue(t.TemporalMilliseconds, true); !valid {
 		errors.SetFieldErrors("temporalMilliseconds", fieldErrs)
-	}
-
-	{
-		value := t.TemporalMilliseconds
-
-		if float64(value) < -9007199254740991 {
-			errors.AddFieldError("temporalMilliseconds", "min", "must be at least -9007199254740991")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("temporalMilliseconds", "max", "must be at most 9007199254740991")
-		}
-
 	}
 
 	// Validate temporalMinutes (required)
 
-	if valid, fieldErrs := t.TemporalMinutes.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateTemporalMinutesValue(t.TemporalMinutes, true); !valid {
 		errors.SetFieldErrors("temporalMinutes", fieldErrs)
-	}
-
-	{
-		value := t.TemporalMinutes
-
-		if float64(value) < -9007199254740991 {
-			errors.AddFieldError("temporalMinutes", "min", "must be at least -9007199254740991")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("temporalMinutes", "max", "must be at most 9007199254740991")
-		}
-
 	}
 
 	// Validate temporalSeconds (required)
 
-	if valid, fieldErrs := t.TemporalSeconds.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateTemporalSecondsValue(t.TemporalSeconds, true); !valid {
 		errors.SetFieldErrors("temporalSeconds", fieldErrs)
-	}
-
-	{
-		value := t.TemporalSeconds
-
-		if float64(value) < -9007199254740991 {
-			errors.AddFieldError("temporalSeconds", "min", "must be at least -9007199254740991")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("temporalSeconds", "max", "must be at most 9007199254740991")
-		}
-
 	}
 
 	return errors

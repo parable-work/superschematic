@@ -282,6 +282,25 @@ func typeParserNestedTypes(t *TypeInfo, generatedTypeNames map[string]bool) []st
 	return names
 }
 
+// typeValidatesNestedObjects reports whether validate<Type> of a type that is
+// not @strictJSON validates a nested object field: one whose type is a local
+// generated type (parserNestedTypes) or the type itself. A @strictJSON type
+// validates its nested fields through validate<Nested>Required instead.
+func typeValidatesNestedObjects(t *TypeInfo, parserNestedTypes []string) bool {
+	if t.StrictJSON {
+		return false
+	}
+	if len(parserNestedTypes) > 0 {
+		return true
+	}
+	for _, f := range t.Fields {
+		if !f.IsScalar && f.Type == t.Name {
+			return true
+		}
+	}
+	return false
+}
+
 // typeNeedsJSONParse returns true if the type has any fields that need
 // runtime transformation when parsing from JSON: DateTime-like scalars that
 // must be converted from string to Date, or nested object types that need

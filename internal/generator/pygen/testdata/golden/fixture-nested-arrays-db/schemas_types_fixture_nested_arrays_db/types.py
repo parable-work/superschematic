@@ -81,13 +81,17 @@ class Board(BaseModel):
 
         # Validate id
         if self.id is not None:
-            try:
-                TypeAdapter(IdentityUUID).validate_python(self.id)
-            except PydanticValidationError as e:
-                errors.add_field_error("id", "invalid", str(e))
 
             if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "id" or key.startswith("id[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.id)
+                except PydanticValidationError as e:
+                    errors.add_field_error("id", "invalid", str(e))
 
         # Validate labels
         if self.labels is None:

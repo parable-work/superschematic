@@ -444,6 +444,35 @@ of a generated artifact is always listed here with the bump it requires.
   `ValidationErrors`), so it never ran and no response was ever checked.
   Responses are sent as before, and a nil inner list of an array-of-arrays
   response is still sent as `[]`. Patch.
+- Go schema runtime: a scalar value is checked against the scalar's IR
+  constraints (lengths, pattern, reserved words, range) before the
+  registered validator, and a failure is named by them (`minLength`,
+  `maxLength`, `pattern`, `min`, `max`); only a value they accept reaches
+  the registry. `validate.NewDispatchRegistry`, and so `DefaultRegistry`,
+  tags what the scalar core rejects `pattern` instead of `scalar`, with the
+  core's message (D14). A too-short `Identity.Name` was `scalar` and is
+  `minLength`; code that matches the validator name `scalar` must match
+  `pattern` or the constraint's name. Major.
+- Go types: `Validate` checks a scalar field once, through a generated
+  `validate<Scalar>Value`: a failure of the scalar's own length, pattern
+  or range is named by that rule, and the scalar's `Validate` (the scalar
+  core) decides only for a value they accept. A malformed URL was
+  `pattern` twice and is `pattern` once; a too-long one was `length` and
+  `maxLength` and is `maxLength`. A field's own constraints
+  (`validateMaxLength`, `validatePattern`, ...) are still checked inline.
+  Minor.
+- TypeScript types: `validate<Type>` rejects a null list element of every
+  `T[]` and `T[][]` field as `required` ("required field") at `field[i]`
+  or `field[i][j]`, in an optional list too, as the schema runtimes and
+  the Python types do (D12). Before, an optional list and a list of
+  strings, numbers or objects accepted it. Minor.
+- TypeScript types: `validate<Type>` of a type that is not `@strictJSON`
+  validates each nested object (a field, a list or list-of-lists element,
+  a map value, or the type itself) with `validate<Nested>` and reports its
+  errors under the field's path (`points[1].shade`). Before, only a
+  `@strictJSON` type validated nested objects, so a bad value inside one
+  passed. Minor.
+
 - IR: a type's `strictJSON` key is written after `jsonField` instead of
   after `denyUnknownFields`, the position the source tree's IR uses, so a
   persisted schema from either compares byte for byte. The key is written
@@ -657,6 +686,21 @@ of a generated artifact is always listed here with the bump it requires.
   TypeScript gates in `go test` now fail instead of skipping under
   `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`, and the CI `go` job installs
   `packages/` so the schema-config JSON Schema drift test runs. Minor.
+- TypeScript and Python schema runtimes: a scalar value the IR constraints
+  reject is no longer also handed to the registered scalar validator, which
+  checks the same pattern again; a malformed URL was `pattern` twice in the
+  TypeScript runtime and is `pattern` once (D14). Patch.
+- TypeScript types: `validate<Scalar>Required` reports a non-string value
+  of a string scalar as `type` ("expected string value"), as the schema
+  runtimes do, instead of formatting it and reporting the pattern it
+  fails. A scalar with a custom validator in the scalar core runs it only
+  when its own pattern and length checks pass, so a malformed email is
+  `pattern` once. Patch.
+- Python types: `validate_all` reports a malformed optional scalar value
+  once, as `pattern`. The type check with the scalar's pydantic type runs
+  after the field's rules and reports `invalid` only for a failure they
+  did not find. Patch.
+
 - Go API: a field is a multipart upload only when its scalar carries
   `fileUpload` metadata. Before, four scalar names (`Artifact.File`,
   `Asset.File`, `Asset.Image`, `Asset.LogoImage`) were treated as uploads

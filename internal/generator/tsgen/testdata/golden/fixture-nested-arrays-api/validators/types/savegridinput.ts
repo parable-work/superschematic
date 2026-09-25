@@ -4,6 +4,7 @@ import {
   newValidationErrors,
   addFieldError,
   setFieldErrors,
+  addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { load as loadYaml } from 'js-yaml';
@@ -11,7 +12,7 @@ import type { SaveGridInput, Point } from '../../types';
 
 import { validateShadeRequired, validateShade } from '../enums';
 
-import { parsePointFromJSON } from './point';
+import { parsePointFromJSON, validatePoint } from './point';
 
 /**
  * Validates a SaveGridInput object
@@ -37,6 +38,20 @@ export function validateSaveGridInput(value: SaveGridInput | null | undefined): 
     addFieldError(errors, "labels", "required", "required field");
   }
 
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.labels)) {
+    value.labels.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `labels[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
+  }
+
   if (Array.isArray(value.shades)) {
     value.shades.forEach((row, rowIndex) => {
       if (row === null || row === undefined) {
@@ -58,6 +73,43 @@ export function validateSaveGridInput(value: SaveGridInput | null | undefined): 
     addFieldError(errors, "shades", "required", "required field");
   }
 
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.shades)) {
+    value.shades.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `shades[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
+  }
+
+  {
+    // A nested object is validated as its own type, its errors under the
+    // field's path; any other value is left to the field's other checks.
+    const validateNested = (nested: unknown, path: string) => {
+      if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) {
+        return;
+      }
+      const nestedErrors = validatePoint(nested as Point);
+      if (nestedErrors !== true) {
+        addNestedErrors(errors, path, nestedErrors);
+      }
+    };
+
+    if (Array.isArray(value.polygons)) {
+      value.polygons.forEach((row, rowIndex) => {
+        if (Array.isArray(row)) {
+          row.forEach((item, index) => validateNested(item, `polygons[${rowIndex}][${index}]`));
+        }
+      });
+    }
+
+  }
+
   if (Array.isArray(value.polygons)) {
     value.polygons.forEach((row, rowIndex) => {
       if (row === null || row === undefined) {
@@ -72,12 +124,40 @@ export function validateSaveGridInput(value: SaveGridInput | null | undefined): 
     addFieldError(errors, "polygons", "required", "required field");
   }
 
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.polygons)) {
+    value.polygons.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `polygons[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
+      }
+    });
+  }
+
   if (Array.isArray(value.weights)) {
     value.weights.forEach((row, rowIndex) => {
       if (row === null || row === undefined) {
         addFieldError(errors, `weights[${rowIndex}]`, "required", "required field");
       } else if (!Array.isArray(row)) {
         addFieldError(errors, `weights[${rowIndex}]`, "type", "expected an array");
+      }
+    });
+  }
+
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.weights)) {
+    value.weights.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => {
+          if (item === null || item === undefined) {
+            setFieldErrors(errors, `weights[${rowIndex}][${index}]`, [{ validator: "required", message: "required field" }]);
+          }
+        });
       }
     });
   }

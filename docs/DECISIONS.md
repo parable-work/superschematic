@@ -388,19 +388,28 @@ suite asserts.
 | Python `validate_all` skips the whole-value check of an optional list when a `None` entry is reported at its index, so each problem is reported once. | Reporting `field: invalid` next to `field[i]: required` |
 | Verification refuses a DB table column that is an array of arrays of another table (`Table[][]`) with one error that names the field; sqlgen and ormgen keep their check as a backstop. | Leaving the refusal to the generators |
 
-Known gaps, each pinned in the harness's `knownDivergences`:
+One gap is open, pinned in the harness's `knownDivergences`: the
+generated Go validator sees a null element of `T[]` or `T[][]` only as its
+type's zero value, since `json.Unmarshal` decodes it so. A string or number
+element passes or fails its own rules, a string scalar or enum element of a
+required list is `required`, and an object element reports its own
+required fields. Closing it changes the generated Go type, not only its
+validator: the decoder would have to record the null elements for
+`Validate`, or the elements would become pointers. Neither is decided.
 
-- The generated Go validator sees a null element only as its type's zero
-  value, since `json.Unmarshal` decodes it so. It reports `required` for a
-  string scalar or enum element of a required list and nothing for a
-  builtin element.
-- The generated TypeScript validator accepts a null element of an optional
-  list, recurses into a nested object element only for a `@strictJSON`
-  type, and reports a non-string scalar element by the scalar's pattern.
+The generated TypeScript validator rejects a null element, validates a
+nested object element of every type, and reports a non-string element of a
+string scalar as `type`, as the runtimes do; it no longer has a pin.
 
-Some payloads never reach a generated validator: `json.Unmarshal` refuses a
-non-list inner value, and pydantic's strict parse refuses a bad enum or
-nested object element. For those vectors the harness asserts the refusal.
+Some payloads never reach a generated validator, and that is expected. In
+Go and Python the typed decoder is the first check, and a payload it
+refuses never becomes a value to validate. `json.Unmarshal` refuses a
+non-list inner value and an element of the wrong JSON type (a number where
+a string scalar belongs); pydantic's strict parse refuses an element of the
+wrong type, a bad enum element and a nested object element with a bad
+field. For those vectors the harness asserts the refusal (`decodeRejects`)
+instead of verdicts; the runtimes, which validate the raw payload, return
+the expected column.
 
 ## D13. The scalar JSDoc tag is a naming key, unset by default
 
@@ -433,3 +442,45 @@ its spelling are part of that distribution's output.
 
 The key name and the unset default are reversible until the first
 release.
+
+## D14. A failing scalar value is one error, named by the rule it breaks
+
+A scalar value its scalar rejects is one validation error in every
+validator: the Go, TypeScript and Python schema runtimes and the generated
+Go, TypeScript and Python validators, for a single field and a list
+element alike. The error is named by the scalar's rule the value breaks:
+`pattern` for a malformed value such as `not a url` for `Network.Url`,
+`minLength` or `maxLength` for one outside the scalar's length bounds,
+`min` or `max` for one outside its range.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A malformed value is `pattern`. The generated Go, TypeScript and Python validators, the TypeScript runtime and the error example in the generated TypeScript README already used it; only the Go runtime's dispatch registry said `scalar`. | `scalar`, which only the Go runtime used |
+| The scalar's IR constraints (lengths, pattern, reserved words, range) come first and name a failure. The scalar core's verdict counts only for a value they accept. The generated Go validator asks the core first, which is also how it recognises a missing required value, and drops the core's errors when a rule fails; the others run the core only after the rules pass. | The scalar core's own names (`length`, `range`), which the generated Go validator and the Go runtime reported for a length or range failure; consumers that map validator names to messages know `minLength`, `maxLength`, `min` and `max`, not these |
+| One error per failing value. | Reporting the IR constraint and the core both, which gave `pattern` twice (the generated Go validator, the TypeScript runtime, the generated TypeScript validator for a scalar with a custom validator), `invalid` next to `pattern` (the generated Python validator) or `length` next to `maxLength` (the generated Go validator) |
+| A failure only the scalar core finds is `pattern` in the Go runtime, whose registry receives a plain `name -> error` function, with the core's message, so it still says why. | A fixed `invalid format` message |
+
+A non-string value of a string scalar is not malformed but mistyped: the
+runtimes and the generated TypeScript validator report `type` for a
+required one, and the Go and Python decoders refuse it (D12, amended).
+
+Still different, and not in the parity matrix: a value the scalar's IR
+constraints accept but the scalar core rejects (a core-only check, such as
+the JSON shape of `Embedding.Vector`). The Go runtime says `pattern` with
+the core's message. The generated Go validator, the TypeScript runtime and
+the generated TypeScript validator (for a scalar with a custom validator;
+it does not call the core for any other) use the name the scalar core's
+binding gives (`pattern`, `custom`, `parse`, ...). The generated Python
+validator says `invalid`, and checks it for an optional field only. The
+Python runtime reaches the core only through a registry keyed by the
+schema's scalar names, which its default registry is not, and says
+`custom`.
+
+The parity matrix holds the rule for a malformed value as a single field,
+a list element and a list-of-lists element (`Network.Url`, and
+`Contact.Email`, which the core also checks with a custom validator), and
+for length and range failures as a single field and a list element
+(`Network.Url` and `Identity.Name` for length, `Ordering.Rank`, an
+integer, and `Generic.Probability`, a float, for range).
+
+The names and the one-error rule are reversible until the first release.
