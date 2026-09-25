@@ -133,7 +133,7 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 		}
 
 		for _, endpoint := range ns.Endpoints {
-			tool := endpointToTool(output.APIID, endpoint, ns, inputTypeFields, apiOutput.TypeUnions, scalars, apiOutput.ToolKeys)
+			tool := endpointToTool(output.APIID, endpoint, ns, inputTypeFields, apiOutput.TypeUnions, apiOutput.TypeEnums, scalars, apiOutput.ToolKeys)
 			if err := toolsutil.ValidateReplayContract(tool.Parameters, tool.ReplayMode, tool.IdempotencyKeyPointers, tool.ExpectedRevisionPointers); err != nil {
 				return nil, fmt.Errorf("operation %s replay contract: %w", tool.OperationID, err)
 			}
@@ -164,6 +164,7 @@ func endpointToTool(
 	ns NamespaceInfo,
 	inputTypeFields map[string][]apigen.Param,
 	inputTypeUnions map[string]apigen.ToolUnionInfo,
+	inputTypeEnums map[string]apigen.ToolEnumInfo,
 	scalars map[string]apigen.ScalarJSONSchemaInfo,
 	keys apigen.ToolKeys,
 ) ToolDefinition {
@@ -193,9 +194,11 @@ func endpointToTool(
 			TSName:   tsutil.ToCamelCase(arg.Name),
 			Type:     arg.Type,
 			Required: arg.Required,
-			// The list shape: the argument schema is T, T[] or T[][].
+			// The shape: the argument schema is T, T[] or T[][], or a map
+			// of T or T[].
 			IsArray:         arg.IsArray,
 			IsArrayOfArrays: arg.IsArrayOfArrays,
+			IsMap:           arg.IsMap,
 		}
 	}
 
@@ -212,7 +215,7 @@ func endpointToTool(
 	}
 
 	parameters := toolsutil.BuildParametersSchema(
-		pathParams, queryArgs, endpoint.HasInput, endpoint.InputType, inputTypeFields, inputTypeUnions,
+		pathParams, queryArgs, endpoint.HasInput, endpoint.InputType, inputTypeFields, inputTypeUnions, inputTypeEnums,
 		scalarArgs, endpoint.Encrypted, scalars,
 		func(name, tsName string) string {
 			if tsName != "" {
@@ -332,7 +335,7 @@ func toolParamTSTypes(
 		}
 	}
 	for _, arg := range endpoint.ScalarArgs {
-		nameType(tsutil.ToCamelCase(arg.Name), arg.Type, arg.ArrayDepth(), false)
+		nameType(tsutil.ToCamelCase(arg.Name), arg.Type, arg.ArrayDepth(), arg.IsMap)
 	}
 	return types, sortedSet(imports)
 }

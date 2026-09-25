@@ -204,7 +204,7 @@ describe('mountOperation', () => {
     expect(JSON.stringify(body)).not.toContain('secret internals');
   });
 
-  test('a list-of-lists body parameter is decoded from its JSON value, other body parameters as before', async () => {
+  test('every body parameter is decoded from its JSON value: lists of lists, lists and single values', async () => {
     const replaceRows: OperationSpec = {
       ...health,
       name: 'replaceRows',
@@ -213,6 +213,7 @@ describe('mountOperation', () => {
       bodyParams: [
         { name: 'rows', kind: 'enum', required: true, isArray: true, isArrayOfArrays: true, enumValues: ['light', 'dark'] },
         { name: 'note', kind: 'string', required: false },
+        { name: 'tags', kind: 'string', required: false, isArray: true },
       ],
     };
     const app = build(a => {
@@ -236,6 +237,15 @@ describe('mountOperation', () => {
     const missing = await put({ note: 'n' });
     expect(missing.status).toBe(400);
     expect(await missing.json()).toMatchObject({ details: { location: 'body', parameter: 'rows', reason: 'required' } });
+    const tagged = await put({ rows: [], tags: ['a,b', ''] });
+    expect(tagged.status).toBe(200);
+    expect((await tagged.json()).data).toEqual({ rows: [], tags: ['a,b', ''] });
+    const numericNote = await put({ rows: [], note: 5 });
+    expect(numericNote.status).toBe(400);
+    expect(await numericNote.json()).toMatchObject({ details: { location: 'body', parameter: 'note', errors: [{ validator: 'type', message: 'expected a string' }] } });
+    const nullTag = await put({ rows: [], tags: ['a', null] });
+    expect(nullTag.status).toBe(400);
+    expect(await nullTag.json()).toMatchObject({ details: { location: 'body', parameter: 'tags', path: 'tags[1]', errors: [{ validator: 'required', message: 'required field' }] } });
   });
 
   test('an object-typed body parameter is decoded from its JSON value and reaches the handler as objects', async () => {

@@ -106,7 +106,7 @@ export interface JSONSchemaProperty {
   format?: string;
   description?: string;
   pattern?: string;
-  enum?: string[];
+  enum?: Array<string | null>;
   minLength?: number;
   maxLength?: number;
   minimum?: number;
@@ -263,13 +263,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:5bf0b823cb8dce1f31570933eb8b7c29c70e722981a791b7b73a43ab3a7595e4',
+    inputSchemaDigest: 'sha256:c511dc67fca04fbcbb2df49dd6d1e956bd95db8fbafe4b5ddd8044f57283bda1',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":100,"minItems":1,"type":"array"},
-        statuses: {"description":"Array of TenantListStatus values","items":{"description":"A TenantListStatus value","type":"string"},"maxItems":10,"minItems":0,"type":"array"},
+        statuses: {"description":"Array of TenantListStatus values","items":{"description":"A TenantListStatus value","enum":["active","suspended"],"type":"string"},"maxItems":10,"minItems":0,"type":"array"},
       },
       required: ['ids']
     },
@@ -419,7 +419,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       additionalProperties: false,
       properties: {
         ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":100,"minItems":1,"type":"array"},
-        statuses: {"description":"Array of TenantListStatus values","items":{"description":"A TenantListStatus value","type":"string"},"maxItems":10,"minItems":0,"type":"array"},
+        statuses: {"description":"Array of TenantListStatus values","items":{"description":"A TenantListStatus value","enum":["active","suspended"],"type":"string"},"maxItems":10,"minItems":0,"type":"array"},
       },
       required: ['ids']
     }
@@ -501,7 +501,7 @@ export const anthropicTools: AnthropicTool[] = [
       additionalProperties: false,
       properties: {
         ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":100,"minItems":1,"type":"array"},
-        statuses: {"description":"Array of TenantListStatus values","items":{"description":"A TenantListStatus value","type":"string"},"maxItems":10,"minItems":0,"type":"array"},
+        statuses: {"description":"Array of TenantListStatus values","items":{"description":"A TenantListStatus value","enum":["active","suspended"],"type":"string"},"maxItems":10,"minItems":0,"type":"array"},
       },
       required: ['ids']
     }

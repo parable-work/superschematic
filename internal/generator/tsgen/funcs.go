@@ -2,6 +2,7 @@ package tsgen
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -38,10 +39,11 @@ func customTemplateFuncs() template.FuncMap {
 		"hasFieldLevelValidations": func(field FieldInfo) bool {
 			// Required checks are emitted separately; scalar constraints are
 			// covered by the scalar validators. Field-level blocks are only
-			// needed for explicit @validate rules (any rule on non-scalars,
-			// list-size rules on scalars).
+			// needed for explicit @validate rules (any rule on non-scalars
+			// that can fail for the field's type, list-size rules on
+			// scalars).
 			for _, v := range field.Validations {
-				if v.Validator == "required" {
+				if v.Validator == "required" || !ruleApplies(field, v.Validator) {
 					continue
 				}
 				if !field.IsScalar {
@@ -55,6 +57,8 @@ func customTemplateFuncs() template.FuncMap {
 		},
 		"listValidations":    listValidations,
 		"elementValidations": elementValidations,
+		"primitiveCheck":     primitiveCheck,
+		"ruleApplies":        ruleApplies,
 		"mapScalarValueRequired": func(field FieldInfo) bool {
 			if !field.IsMap || field.IsArray {
 				return false
@@ -96,9 +100,83 @@ func elementValidations(field FieldInfo) []codegen.ValidationRule {
 		case "required", "listMin", "listMax":
 			continue
 		}
-		rules = append(rules, v)
+		if ruleApplies(field, v.Validator) {
+			rules = append(rules, v)
+		}
 	}
 	return rules
+}
+
+// Helpers of the generated validators/primitives.ts module.
+const (
+	expectStringHelper  = "expectString"
+	expectNumberHelper  = "expectNumber"
+	expectBooleanHelper = "expectBoolean"
+	finiteNumberHelper  = "isFiniteNumber"
+)
+
+// primitiveCheck returns the validators/primitives.ts helper that reports
+// "type" for a value of the wrong JSON type in a field typed with a builtin
+// primitive (string, number, boolean), or "" for any other field.
+func primitiveCheck(field FieldInfo) string {
+	if field.IsScalar {
+		return ""
+	}
+	switch field.Type {
+	case codegen.PrimitiveString:
+		return expectStringHelper
+	case codegen.PrimitiveNumber:
+		return expectNumberHelper
+	case codegen.PrimitiveBoolean:
+		return expectBooleanHelper
+	}
+	return ""
+}
+
+// ruleApplies reports whether a field's @validate rule can fail for a value
+// the validator checks it on. A builtin primitive field's value of the
+// wrong JSON type is "type" and no rule checks it, so a string rule
+// (minLength, maxLength, pattern) applies only to a string field and a range
+// rule (min, max) only to a number field, as in the schema runtimes. Every
+// rule applies to any other field.
+func ruleApplies(field FieldInfo, validator string) bool {
+	stringRule := validator == "minLength" || validator == "maxLength" || validator == "pattern"
+	rangeRule := validator == "min" || validator == "max"
+	switch primitiveCheck(field) {
+	case expectStringHelper:
+		return !rangeRule
+	case expectNumberHelper:
+		return !stringRule
+	case expectBooleanHelper:
+		return !stringRule && !rangeRule
+	}
+	return true
+}
+
+// typePrimitiveHelpers returns the validators/primitives.ts helpers a
+// type's validator calls, sorted: a type check per builtin primitive field
+// and isFiniteNumber for a range rule.
+func typePrimitiveHelpers(t *TypeInfo) []string {
+	used := map[string]bool{}
+	for _, f := range t.Fields {
+		if check := primitiveCheck(f); check != "" {
+			used[check] = true
+		}
+		if f.IsScalar {
+			continue
+		}
+		for _, v := range f.Validations {
+			if (v.Validator == "min" || v.Validator == "max") && ruleApplies(f, v.Validator) {
+				used[finiteNumberHelper] = true
+			}
+		}
+	}
+	helpers := make([]string, 0, len(used))
+	for helper := range used {
+		helpers = append(helpers, helper)
+	}
+	sort.Strings(helpers)
+	return helpers
 }
 
 // scalarLibTypeName returns the structured superscalar type name a scalar's

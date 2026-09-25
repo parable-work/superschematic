@@ -1,7 +1,8 @@
 // Tool arguments that name generated types: enums and object types alone,
 // optional, in lists, lists of lists and maps, in an input type next to
-// scalars and primitives; and enums as a body argument, as query parameters
-// and as a path parameter. The SDK generator tests add a union.
+// scalars and primitives; enums as a body argument, as query parameters
+// and as a path parameter; and maps as body arguments. The SDK generator
+// tests add a union.
 import { Generic, Identity, Temporal } from "superscalar";
 import { Nullable } from "@superschematic/schema";
 import { HttpMethod, QueryParam, rest } from "@superschematic/api";
@@ -62,6 +63,18 @@ export class PaintMutations {
   // A body argument that is an enum.
   @rest(HttpMethod.PUT, "paint/{id}/tone")
   setTone(id: Identity.UUID, tone: Tone): PaintView {
+    throw new Error("schema declaration only");
+  }
+
+  // A body argument that is a map of enums.
+  @rest(HttpMethod.PUT, "paint/{id}/tone-names")
+  nameTones(id: Identity.UUID, toneByName: Record<string, Tone>): PaintView {
+    throw new Error("schema declaration only");
+  }
+
+  // A body argument that is a map of lists.
+  @rest(HttpMethod.PUT, "paint/{id}/labels")
+  setLabels(id: Identity.UUID, labelsByLocale: Record<string, string[]>): PaintView {
     throw new Error("schema declaration only");
   }
 }

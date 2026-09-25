@@ -47,8 +47,10 @@ type ParamInfo struct {
 	TSName string // argument key in the implementation's args object
 	TSType string // TypeScript type of the decoded value
 	// Kind is the runtime ParamKind. A body argument of an object type (T,
-	// T[] or T[][]) has Kind "object": the runtime reads it from its JSON
-	// value and parses each value with the generated strict parser of T.
+	// T[] or T[][]) has Kind "object": the runtime parses each value with
+	// the generated strict parser of T. A body argument of a JSON-valued
+	// scalar (Generic.JSON) has Kind "json": any JSON value but null. The
+	// runtime reads every body argument from its JSON value.
 	Kind     string
 	Required bool
 	IsArray  bool
@@ -396,8 +398,11 @@ const (
 // arrives as a JSON value, so its type may also be an object type, alone
 // or as the element of T[] or T[][] (apigen admits an array of arrays only
 // in the body); the runtime parses each value with the generated strict
-// parser of that type. param fails for a body argument of any other type
-// that is not a scalar or an enum: a union has no parser.
+// parser of that type. A body argument of a JSON-valued scalar
+// (Generic.JSON) is taken as the JSON value it is. param fails for a body
+// argument of any other type that is not a scalar or an enum: a union has
+// no parser. A scalar-typed parameter carries the scalar's own lengths,
+// pattern and range, which the runtime checks on every value.
 func (b *builder) param(p apigen.Param, place paramPlace) (ParamInfo, error) {
 	info := ParamInfo{
 		Name:            p.Name,
@@ -434,8 +439,11 @@ func (b *builder) param(p apigen.Param, place paramPlace) (ParamInfo, error) {
 				}
 				enumValues = append(enumValues, serialized)
 			}
-		} else if _, isScalar := b.findScalar(p.Type); isScalar || place != inBody {
+		} else if scalar, isScalar := b.findScalar(p.Type); isScalar || place != inBody {
 			info.Kind, info.TSType = "string", b.scalarType(p.Type)
+			if place == inBody && isJSONValued(scalar) {
+				info.Kind = "json"
+			}
 		} else {
 			pkg, ok := b.ownerPackage(p.Type)
 			if !ok {
@@ -497,8 +505,52 @@ func (b *builder) param(p apigen.Param, place paramPlace) (ParamInfo, error) {
 	if valueParser != "" {
 		fields = append(fields, "parse: "+valueParser)
 	}
+	if scalar, ok := b.findScalar(p.Type); ok {
+		if constraints := scalarConstraints(scalar, info.Kind); constraints != "" {
+			fields = append(fields, "scalar: "+constraints)
+		}
+	}
 	info.SpecLiteral = "{ " + strings.Join(fields, ", ") + " }"
 	return info, nil
+}
+
+// isJSONValued reports whether a scalar holds any JSON value
+// (Generic.JSON): its TypeScript type is superscalar's JSONValue.
+func isJSONValued(scalar *ir.ScalarDef) bool {
+	return scalar != nil && scalar.TypeMappings["typescript"] == "JSONValue"
+}
+
+// scalarConstraints renders the ScalarConstraints literal of a scalar's
+// own lengths and pattern (kind "string") or range (kinds "integer" and
+// "number"), or "" when the scalar has none for the kind. The runtime
+// checks them on every value, before the argument's own constraints, and
+// names a failure by its rule (D14). UUID and timestamp kinds are parsed
+// by the scalar library instead.
+func scalarConstraints(scalar *ir.ScalarDef, kind string) string {
+	var fields []string
+	switch kind {
+	case "string":
+		if scalar.MinLength > 0 {
+			fields = append(fields, fmt.Sprintf("minLength: %d", scalar.MinLength))
+		}
+		if scalar.MaxLength > 0 {
+			fields = append(fields, fmt.Sprintf("maxLength: %d", scalar.MaxLength))
+		}
+		if scalar.Pattern != "" {
+			fields = append(fields, "pattern: "+tsString(scalar.Pattern))
+		}
+	case "integer", "number":
+		if scalar.Minimum != nil {
+			fields = append(fields, fmt.Sprintf("min: %d", *scalar.Minimum))
+		}
+		if scalar.Maximum != nil {
+			fields = append(fields, fmt.Sprintf("max: %d", *scalar.Maximum))
+		}
+	}
+	if len(fields) == 0 {
+		return ""
+	}
+	return "{ " + strings.Join(append([]string{"name: " + tsString(scalar.Name)}, fields...), ", ") + " }"
 }
 
 // tsListType wraps a TypeScript element type in depth list levels: "T",

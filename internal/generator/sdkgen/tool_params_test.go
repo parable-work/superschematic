@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/toolsutil/toolstest"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/testpaths"
@@ -48,11 +49,10 @@ func loadToolParamsAPI(t *testing.T) (*ir.Schema, *apigen.APIOutput, map[string]
 	return schema, apiOutput, tsgen.ParseableTypeNames(tsOutput)
 }
 
-// TestWriteToolsGoldenToolParams pins tools/index.ts of
-// fixture-tool-params-api: every tool parameter typed as the SDK method it
-// is passed to takes it. Regenerate with:
-// go test ./internal/generator/sdkgen -run TestWriteToolsGoldenToolParams -update
-func TestWriteToolsGoldenToolParams(t *testing.T) {
+// writeToolParamsTools writes the TypeScript SDK of fixture-tool-params-api
+// with its tool documents and returns the directory.
+func writeToolParamsTools(t *testing.T) string {
+	t.Helper()
 	_, apiOutput, parseable := loadToolParamsAPI(t)
 	sdkOutput, err := Generate(apiOutput, parseable, toolParamsClock)
 	if err != nil {
@@ -62,7 +62,26 @@ func TestWriteToolsGoldenToolParams(t *testing.T) {
 	if err := WriteSDKWithTools(sdkOutput, apiOutput, outDir, toolParamsClock); err != nil {
 		t.Fatalf("WriteSDKWithTools: %v", err)
 	}
-	compareGolden(t, outDir, filepath.Join("testdata", "golden", "fixture-tool-params-api"), "tools/index.ts")
+	return outDir
+}
+
+// TestWriteToolsGoldenToolParams pins tools/index.ts of
+// fixture-tool-params-api, where every tool parameter is typed as the SDK
+// method it is passed to takes it, and tools/schema.json, where every enum
+// lists its values and every map keeps its shape. Regenerate with:
+// go test ./internal/generator/sdkgen -run TestWriteToolsGoldenToolParams -update
+func TestWriteToolsGoldenToolParams(t *testing.T) {
+	outDir := writeToolParamsTools(t)
+	for _, name := range []string{"tools/index.ts", "tools/schema.json"} {
+		compareGolden(t, outDir, filepath.Join("testdata", "golden", "fixture-tool-params-api"), name)
+	}
+}
+
+// TestToolParamsSchema: a tool argument schema lists an enum's values at
+// every depth, and a map body argument is an object whose
+// additionalProperties is the value schema.
+func TestToolParamsSchema(t *testing.T) {
+	toolstest.CheckToolParamsSchema(t, readRendered(t, writeToolParamsTools(t), "tools/schema.json"))
 }
 
 // TestToolParamsSDKCompiles type-checks the TypeScript SDK of

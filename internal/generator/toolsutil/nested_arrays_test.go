@@ -77,7 +77,7 @@ func TestToolSchemasGoldenNestedArrays(t *testing.T) {
 			})
 		}
 		parameters := toolsutil.BuildParametersSchema(
-			pathParams, queryArgs, endpoint.HasInput, endpoint.InputType, inputTypeFields, output.TypeUnions,
+			pathParams, queryArgs, endpoint.HasInput, endpoint.InputType, inputTypeFields, output.TypeUnions, output.TypeEnums,
 			scalarArgs, endpoint.Encrypted, output.Scalars,
 			func(name, tsName string) string {
 				if tsName != "" {

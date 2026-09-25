@@ -396,6 +396,33 @@ field. For those vectors the harness asserts the refusal (`decodeRejects`)
 instead of verdicts; the runtimes, which validate the raw payload, return
 the expected column.
 
+The TypeScript API server decodes every body argument from its JSON value
+with these rules, for a scalar, enum, object or `Generic.JSON` type, alone,
+as `T[]` and as `T[][]`. Before, a list of a scalar or enum went through
+the query-string decoder: it split each element on commas and dropped
+empty ones, turned a null element into `"null"` and an object into
+`"[object Object]"`, accepted `"5"` for a number, and refused `[]` for a
+required list. Now a value of the wrong JSON type is `type`, a null element
+is `required` at `name[i]` or `name[i][j]`, `[]` satisfies a required list,
+and `listMin` and `listMax` bound the outer list. A scalar's own lengths,
+pattern and range apply to each value, and a failure is named by the rule
+it breaks (D14). A list in the query string is still read from repeated
+keys and comma-separated values.
+
+For `Generic.JSON` the server follows the three schema runtimes, which
+agree: a null value of a required field is `required`, a null optional one
+is absent, and a null element of `Generic.JSON[]` (or an innermost one of
+`Generic.JSON[][]`) is `required` at its index. Any other JSON value is
+accepted and reaches the implementation as it is. Two differences are
+open. The runtimes check a `Generic.JSON` value as a string, because the
+scalar catalog gives it the `String` primitive: a required field holding an
+object, array, number or boolean is `type` there, while superscalar, every
+generated type and the server accept it. And the generated Go, TypeScript
+and Python validators accept a JSON null for a required `Generic.JSON`
+field, which the runtimes and the server refuse; the generated Go
+validator also accepts an absent one. The Go decoder refuses a null
+element of `Generic.JSON[]`, as it does any null list element (above).
+
 ## D13. The scalar JSDoc tag is a naming key, unset by default
 
 The TypeScript types generator can write a JSDoc line above every
@@ -479,7 +506,9 @@ element alike. The error is named by the scalar's rule the value breaks:
 
 A non-string value of a string scalar is not malformed but mistyped: the
 runtimes and the generated TypeScript validator report `type` for a
-required one, and the Go and Python decoders refuse it (D12, amended).
+required one, and the Go and Python decoders refuse it (D12, amended). An
+optional one is `type` too, and so is a value of the wrong JSON type in a
+field typed `string`, `number` or `boolean` (D14, amended).
 
 Still different, and not in the parity matrix: a value the scalar's IR
 constraints accept but the scalar core rejects (a core-only check, such as
@@ -501,3 +530,38 @@ for length and range failures as a single field and a list element
 integer, and `Generic.Probability`, a float, for range).
 
 The names and the one-error rule are reversible until the first release.
+
+### D14, amended: a value of the wrong JSON type is one `type` error
+
+A value whose JSON type is not the field's is mistyped, not malformed or
+out of range. Every validator that sees it reports one `type` error at its
+path (`field`, `field[i]`, `field[i][j]`, and `field.key` for a map value
+in the generated TypeScript validator), and the field's own length,
+pattern and range rules do not check it. Before, the generated TypeScript
+validator checked a field typed `string`, `number` or `boolean` for
+presence only and applied its rules to `String(value)` or `Number(value)`,
+and the runtimes skipped the rules without an error: `{"x": "far"}` passed
+for a number `x`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A field typed with a builtin primitive holds a string, a finite number or a boolean, required or optional, single or as a `T[]` or `T[][]` element. The message is "expected a string", "expected a number" or "expected a boolean" in the three runtimes and the generated TypeScript validator, which calls one helper per primitive from its `validators/primitives.ts`. The runtimes also check the GraphQL names their JSON Schema readers produce, and an `Int` is "expected an integer". | Checking presence only; inlining the check in every field |
+| An optional string scalar given a non-string is `type`, as a required one is. | Nothing in the runtimes and the scalar's pattern or length in the generated TypeScript validator, as before |
+| A number scalar given a non-number, and an integer scalar given a non-integer such as `1.5`, is `type` in the generated TypeScript validator as in the runtimes. | `Number(value)`, which let `"3"` through an integer scalar |
+| Presence, then type, then the rules: a missing required string is `required` alone, and a rule checks only a value of its own type (a string for `minLength`, `maxLength` and `pattern`, a finite number for `min` and `max`). | Measuring `String(undefined)`, 9 characters, which added `maxLength` next to `required` |
+| A required list given a value that is not a list is `required` in the generated TypeScript validator, as in the runtimes. | Checking it for null only |
+
+The typed decoders refuse these payloads before the generated Go and
+Python validators run (D12, amended). The runtimes do not walk maps, so
+the parity matrix has no map field; `internal/generator/tsgen` tests the
+map shapes of the generated TypeScript validator.
+
+One gap is open, pinned in `knownDivergences`: `json.Unmarshal` decodes a
+missing required string field into `""`, which the generated Go validator
+cannot tell from a present empty string, and a present `""` satisfies a
+required `string` field in every validator.
+
+The runtimes' lenient parse coerces a numeric or boolean string only for
+the GraphQL names (`Int`, `Float`, `Boolean`), not for the IR's `number`
+and `boolean`, so a `"5"` in a `number` field is `type` after a lenient
+parse too.

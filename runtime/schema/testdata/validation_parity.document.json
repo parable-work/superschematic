@@ -297,6 +297,15 @@
     },
     "ListMatrix": {
       "properties": {
+        "boolGrid": {
+          "items": {
+            "items": {
+              "$ref": "#/definitions/boolean"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
         "flags": {
           "items": {
             "$ref": "#/definitions/boolean"
@@ -344,6 +353,15 @@
         "pointList": {
           "items": {
             "$ref": "#/definitions/ParityPoint"
+          },
+          "type": "array"
+        },
+        "rankGrid": {
+          "items": {
+            "items": {
+              "$ref": "#/definitions/scalars/Ordering_Rank"
+            },
+            "type": "array"
           },
           "type": "array"
         },
@@ -500,6 +518,15 @@
           },
           "type": "array"
         },
+        "optBool": {
+          "$ref": "#/definitions/boolean"
+        },
+        "optBools": {
+          "items": {
+            "$ref": "#/definitions/boolean"
+          },
+          "type": "array"
+        },
         "optList": {
           "items": {
             "$ref": "#/definitions/string"
@@ -511,6 +538,14 @@
         },
         "optNum": {
           "$ref": "#/definitions/number",
+          "x-validateMax": 10,
+          "x-validateMin": 1
+        },
+        "optNums": {
+          "items": {
+            "$ref": "#/definitions/number"
+          },
+          "type": "array",
           "x-validateMax": 10,
           "x-validateMin": 1
         },
