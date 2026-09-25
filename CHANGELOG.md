@@ -649,6 +649,12 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- JSON and YAML readers: the keys that mark a multi-definition schema
+  file without a `kind` or `role` included six that the document form does
+  not have. A file whose only top-level key was one of them was read as a
+  document and failed on an unknown key; it now fails with the "cannot
+  determine schema file shape" error. A test keeps the list equal to the
+  document's collection fields. Patch.
 - Go API, `session` auth provider: when the upstream DB has a `Session`
   table, the provider's `middlewareStdImports` snippet imported `"time"`,
   which `middleware.go` already imports. go/format drops the duplicate, so
