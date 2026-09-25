@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
@@ -44,6 +45,8 @@ type ToolDefinition struct {
 	Namespace                string                   // Namespace for grouping e.g., "auth"
 	IsScopedNS               bool                     // Whether the endpoint's namespace hoists a scope parameter
 	Parameters               JSONSchemaObject         // JSON Schema for parameters
+	ParamTypes               map[string]string        // TypeScript type of each parameter, keyed like Parameters.Properties
+	TypeImports              []string                 // types-package types ParamTypes names, sorted
 	Returns                  JSONSchemaReturn         // JSON Schema for return type
 	PathParams               []ToolPathParam          // Path parameters for invocation
 	HasInput                 bool                     // Whether endpoint has input type
@@ -74,6 +77,7 @@ type ToolsOutput struct {
 	Keys              apigen.ToolKeys             // vendor keys the documents are written with
 	Invocation        apigen.ToolInvocationPolicy // the key and values the documents write a tool's invocation policy with
 	Tools             []ToolDefinition            // All tool definitions
+	TypeImports       []string                    // types-package types tools/index.ts imports, sorted
 	VisibleTools      []ToolDefinition            // Tools with a visible @mcp record: the provider tool lists
 	Namespaces        []ToolsNamespace            // Tools grouped by namespace
 	Timestamp         string                      // Generation timestamp
@@ -117,6 +121,7 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 
 	inputTypeFields := toolsutil.BuildInputTypeFieldsMap(apiOutput)
 	scalars := apiOutput.Scalars
+	typeImports := map[string]bool{}
 
 	for _, ns := range sdkOutput.Namespaces {
 		toolsNS := ToolsNamespace{
@@ -134,6 +139,9 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 			}
 			toolsNS.Tools = append(toolsNS.Tools, tool)
 			output.Tools = append(output.Tools, tool)
+			for _, name := range tool.TypeImports {
+				typeImports[name] = true
+			}
 			if tool.Returns.Items != nil && tool.Returns.Items.Items != nil {
 				output.HasListOfListsReturns = true
 			}
@@ -144,6 +152,7 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 
 		output.Namespaces = append(output.Namespaces, toolsNS)
 	}
+	output.TypeImports = sortedSet(typeImports)
 
 	return output, nil
 }
@@ -214,6 +223,7 @@ func endpointToTool(
 		keys,
 	)
 	parametersJSON, _ := json.Marshal(parameters)
+	paramTypes, typeImports := toolParamTSTypes(endpoint, parameters, inputTypeFields, scalars)
 
 	bindingStatus := "ready"
 	if endpoint.HasFileUpload {
@@ -240,6 +250,8 @@ func endpointToTool(
 		Namespace:                ns.Name,
 		IsScopedNS:               ns.IsScopedNS,
 		Parameters:               parameters,
+		ParamTypes:               paramTypes,
+		TypeImports:              typeImports,
 		Returns:                  toolsutil.BuildReturnSchemaAtDepth(endpoint.OutputType, endpoint.OutputArrayDepth(), scalars),
 		PathParams:               pathParams,
 		HasInput:                 endpoint.HasInput,
@@ -258,6 +270,91 @@ func endpointToTool(
 		tool.Audience = string(docs.Audience)
 	}
 	return tool
+}
+
+// toolParamTSTypes returns the TypeScript type tools/index.ts gives each
+// parameter of a tool, keyed like its JSON Schema properties, and the
+// types-package types those name. invokeTool passes the parameters to the
+// SDK method, which takes the types package's types, so they must match:
+// an argument of an enum, object type or union names that type at its list
+// and map shape (Shade, Point[][], Record<string, Swatch>), and a field of
+// the input type whose type is a scalar takes the input type's own field
+// type (PaintInput['at']), because a scalar's TypeScript type is the
+// types package's choice (JSDate for a date-time). Anything else is typed
+// from its JSON Schema.
+func toolParamTSTypes(
+	endpoint EndpointInfo,
+	parameters JSONSchemaObject,
+	inputTypeFields map[string][]apigen.Param,
+	scalars map[string]apigen.ScalarJSONSchemaInfo,
+) (map[string]string, []string) {
+	types := make(map[string]string, len(parameters.Properties))
+	for key, prop := range parameters.Properties {
+		types[key] = jsonSchemaToTSType(prop)
+	}
+	imports := map[string]bool{}
+	nameType := func(key, typeName string, depth int, isMap bool) bool {
+		if _, ok := types[key]; !ok || codegen.IsLanguagePrimitive(typeName) || isScalarType(typeName, scalars) {
+			return false
+		}
+		named := normalizeTSTypeIdentifier(typeName)
+		tsType := codegen.WrapArray(named, depth, func(inner string) string { return inner + "[]" })
+		if isMap {
+			tsType = "Record<string, " + tsType + ">"
+		}
+		types[key] = tsType
+		imports[named] = true
+		return true
+	}
+
+	// The order BuildParametersSchema adds the properties in.
+	for _, param := range endpoint.PathParams {
+		nameType(param.TSName, param.IRType, 0, false)
+	}
+	for _, param := range endpoint.QueryParams {
+		depth := 0
+		if param.IsArray {
+			depth = 1
+		}
+		nameType(tsutil.ToCamelCase(param.Name), param.IRType, depth, param.IsMap)
+	}
+	if endpoint.HasInput && endpoint.InputType != "" {
+		input := normalizeTSTypeIdentifier(endpoint.InputType)
+		for _, field := range inputTypeFields[endpoint.InputType] {
+			key := tsutil.ToCamelCase(field.Name)
+			if nameType(key, field.Type, field.ArrayDepth(), field.IsMap) {
+				continue
+			}
+			if _, ok := types[key]; ok && isScalarType(field.Type, scalars) {
+				types[key] = fmt.Sprintf("%s['%s']", input, field.Name)
+				imports[input] = true
+			}
+		}
+	}
+	for _, arg := range endpoint.ScalarArgs {
+		nameType(tsutil.ToCamelCase(arg.Name), arg.Type, arg.ArrayDepth(), false)
+	}
+	return types, sortedSet(imports)
+}
+
+// isScalarType reports whether typeName is a schema scalar, as opposed to a
+// language primitive or a generated enum, object type or union. A dotted
+// name is a scalar even when the API's scalar table misses it.
+func isScalarType(typeName string, scalars map[string]apigen.ScalarJSONSchemaInfo) bool {
+	if codegen.IsLanguagePrimitive(typeName) {
+		return false
+	}
+	_, ok := scalars[typeName]
+	return ok || strings.Contains(typeName, ".")
+}
+
+func sortedSet(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func buildMCPToolBinding(

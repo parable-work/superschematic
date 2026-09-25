@@ -621,6 +621,15 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- TypeScript SDK: `tools/index.ts` typed a tool parameter from its JSON
+  Schema, so an enum was `string`, an object `Record<string, unknown>` or an
+  inline shape, a union `Record<string, unknown>` and a date-time or JSON
+  scalar field `string` or `unknown`, and `invokeTool` did not type-check
+  against an SDK method taking an input type with such a field. A
+  parameter now has the type the SDK method takes: the generated enum,
+  object type or union, imported from the types package, and a scalar
+  field of the input type as `<Input>['<field>']`. A caller that passed a
+  string where an enum is taken passes the enum member. Minor.
 - Go API: a field is a multipart upload only when its scalar carries
   `fileUpload` metadata. Before, four scalar names (`Artifact.File`,
   `Asset.File`, `Asset.Image`, `Asset.LogoImage`) were treated as uploads
