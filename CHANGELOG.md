@@ -13,6 +13,12 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- Python SDK: the generated client retries a `GET`, `HEAD` or `OPTIONS`
+  request that fails with a `NetworkError`, up to
+  `ClientConfig.max_network_retries` times (default 3), sleeping 1, 2, 4
+  seconds between attempts. Other methods are not retried, since a write
+  may have reached the server before the connection dropped. Set
+  `max_network_retries=0` for the old behaviour. Minor.
 - `schema.config.json` and `schema.config.yaml` accept an extension
   generator's output key, as `schema.config.ts` already did. The embedded
   config schema checks the core sections and admits any other key
