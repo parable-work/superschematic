@@ -4,6 +4,7 @@ import {
   HttpProblem,
   authorize,
   covers,
+  decodeJsonParam,
   decodeListOfLists,
   decodeParam,
   decodeParams,
@@ -201,6 +202,71 @@ describe('list of lists decoding', () => {
     );
     refusedAt(points, [[{ x: 1 }], [null]], 'rows[1][0]', 'required', 'required field');
     refusedAt(points, [[[1]]], 'rows[0][0]', 'type', 'expected an object');
+  });
+});
+
+describe('JSON body parameters of an object type', () => {
+  const parse = (value: unknown) => {
+    const point = value as { x?: unknown };
+    if (typeof point.x !== 'number') throw new Error('parsePoint json validation failed');
+    return { ...point, parsed: true };
+  };
+  const points = (over: Partial<ParamSpec> = {}): ParamSpec => ({ name: 'points', kind: 'object', required: true, isArray: true, parse, ...over });
+  const refusedAt = (spec: ParamSpec, value: unknown, path: string, validator: string, message: string) => {
+    expect(() => decodeJsonParam('body', spec, value)).toThrow(
+      expect.objectContaining({
+        status: 400,
+        code: 'bad_request',
+        message: `Invalid body parameter ${path}: ${message}`,
+        details: { location: 'body', parameter: spec.name, path, reason: message, errors: [{ validator, message }] },
+      })
+    );
+  };
+
+  test('a T[] element goes through the parser the spec carries and stays an object', () => {
+    expect(decodeJsonParam('body', points(), [{ x: 1 }, { x: 2 }])).toEqual([{ x: 1, parsed: true }, { x: 2, parsed: true }]);
+    expect(decodeJsonParam('body', points(), [])).toEqual([]);
+  });
+
+  test('the list is the parameter: required means present, listMin and listMax bound it', () => {
+    expect(() => decodeJsonParam('body', points(), undefined)).toThrow(expect.objectContaining({ details: { location: 'body', parameter: 'points', reason: 'required' } }));
+    expect(() => decodeJsonParam('body', points(), null)).toThrow(expect.objectContaining({ details: { location: 'body', parameter: 'points', reason: 'required' } }));
+    expect(decodeJsonParam('body', points({ required: false }), undefined)).toBeUndefined();
+    expect(decodeJsonParam('body', points({ required: false }), null)).toBeUndefined();
+    expect(() => decodeJsonParam('body', points(), { x: 1 })).toThrow(
+      expect.objectContaining({ details: { location: 'body', parameter: 'points', reason: 'expected an array', errors: [{ validator: 'type', message: 'expected an array' }] } })
+    );
+    const bounded = points({ listMin: 1, listMax: 2 });
+    expect(() => decodeJsonParam('body', bounded, [])).toThrow(expect.objectContaining({ details: expect.objectContaining({ reason: 'expected at least 1 values' }) }));
+    expect(() => decodeJsonParam('body', bounded, [{ x: 1 }, { x: 2 }, { x: 3 }])).toThrow(expect.objectContaining({ details: expect.objectContaining({ reason: 'expected at most 2 values' }) }));
+  });
+
+  test('an element is never null, must be an object and must parse, reported at name[i]', () => {
+    refusedAt(points(), [{ x: 1 }, null], 'points[1]', 'required', 'required field');
+    refusedAt(points({ required: false }), [null], 'points[0]', 'required', 'required field');
+    refusedAt(points(), [{ x: 1 }, 'p'], 'points[1]', 'type', 'expected an object');
+    refusedAt(points(), [[1, 2]], 'points[0]', 'type', 'expected an object');
+    expect(() => decodeJsonParam('body', points(), [{ x: 1 }, { x: 'far' }])).toThrow(
+      expect.objectContaining({ message: 'Invalid body parameter points[1]: does not match the declared type', details: { location: 'body', parameter: 'points', path: 'points[1]', reason: 'does not match the declared type' } })
+    );
+  });
+
+  test('a single object value is parsed, and refused without a path', () => {
+    const origin = points({ name: 'origin', isArray: false });
+    expect(decodeJsonParam('body', origin, { x: 1 })).toEqual({ x: 1, parsed: true });
+    expect(() => decodeJsonParam('body', origin, null)).toThrow(expect.objectContaining({ details: { location: 'body', parameter: 'origin', reason: 'required' } }));
+    expect(() => decodeJsonParam('body', origin, 'p')).toThrow(
+      expect.objectContaining({ details: { location: 'body', parameter: 'origin', reason: 'expected an object', errors: [{ validator: 'type', message: 'expected an object' }] } })
+    );
+    expect(() => decodeJsonParam('body', origin, { x: 'far' })).toThrow(
+      expect.objectContaining({ details: { location: 'body', parameter: 'origin', reason: 'does not match the declared type' } })
+    );
+  });
+
+  test('a list of lists goes through decodeListOfLists', () => {
+    const polygons = points({ name: 'polygons', isArrayOfArrays: true });
+    expect(decodeJsonParam('body', polygons, [[{ x: 1 }], []])).toEqual([[{ x: 1, parsed: true }], []]);
+    refusedAt(polygons, [[{ x: 1 }], null], 'polygons[1]', 'required', 'required field');
   });
 });
 

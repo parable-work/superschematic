@@ -40,20 +40,21 @@ const (
 	TypeScriptVersion = "5.9.3"
 )
 
-// ParamInfo is one path, query, or scalar body parameter as the generated
+// ParamInfo is one path, query, or body argument as the generated
 // TypeScript sees it.
 type ParamInfo struct {
-	Name     string // wire name
-	TSName   string // argument key in the implementation's args object
-	TSType   string // TypeScript type of the decoded value
-	Kind     string // runtime ParamKind
+	Name   string // wire name
+	TSName string // argument key in the implementation's args object
+	TSType string // TypeScript type of the decoded value
+	// Kind is the runtime ParamKind. A body argument of an object type (T,
+	// T[] or T[][]) has Kind "object": the runtime reads it from its JSON
+	// value and parses each value with the generated strict parser of T.
+	Kind     string
 	Required bool
 	IsArray  bool
 	// IsArrayOfArrays marks a T[][] body argument (IsArray is also set). The
 	// runtime decodes it from the JSON body with the list rules: an inner
-	// list is never null and each element is checked at name[i][j]. An
-	// object element type has Kind "object" and is parsed by the generated
-	// strict parser of that type.
+	// list is never null and each element is checked at name[i][j].
 	IsArrayOfArrays bool
 	// SpecLiteral is the ParamSpec object literal the router carries.
 	SpecLiteral string
@@ -333,24 +334,28 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 	endpoint.OutputIsArrayOfArrays = ep.OutputIsArrayOfArrays
 	endpoint.DocLines = docLines(endpoint)
 
-	// b.param fails only for an array of arrays whose element it cannot
-	// decode; the error names the argument.
-	param := func(p apigen.Param, isPath bool) (ParamInfo, error) {
-		info, err := b.param(p, isPath)
-		if err != nil {
+	// b.param fails only for a body argument whose type it cannot decode;
+	// the error names the argument.
+	param := func(p apigen.Param, place paramPlace) (ParamInfo, error) {
+		info, err := b.param(p, place)
+		switch {
+		case err == nil:
+			return info, nil
+		case p.IsArrayOfArrays:
 			return info, fmt.Errorf("tsrestgen does not support arrays of arrays yet (%s.%s(%s)): %w", ep.Namespace, ep.Name, p.Name, err)
+		default:
+			return info, fmt.Errorf("tsrestgen cannot decode body argument %s.%s(%s): %w", ep.Namespace, ep.Name, p.Name, err)
 		}
-		return info, nil
 	}
 	for _, p := range ep.PathParams {
-		info, err := param(p, true)
+		info, err := param(p, inPath)
 		if err != nil {
 			return endpoint, err
 		}
 		endpoint.PathParams = append(endpoint.PathParams, info)
 	}
 	for _, p := range ep.QueryParams {
-		info, err := param(p, false)
+		info, err := param(p, inQuery)
 		if err != nil {
 			return endpoint, err
 		}
@@ -358,12 +363,16 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 	}
 	// Undecorated scalar arguments travel in the query string on GET (the Go
 	// router's rule) and as fields of the JSON body object otherwise.
+	scalarArgPlace := inBody
+	if endpoint.Method == "GET" {
+		scalarArgPlace = inQuery
+	}
 	for _, p := range ep.ScalarArgs {
-		info, err := param(p, false)
+		info, err := param(p, scalarArgPlace)
 		if err != nil {
 			return endpoint, err
 		}
-		if endpoint.Method == "GET" {
+		if scalarArgPlace == inQuery {
 			endpoint.QueryParams = append(endpoint.QueryParams, info)
 		} else {
 			endpoint.BodyParams = append(endpoint.BodyParams, info)
@@ -372,21 +381,33 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 	return endpoint, nil
 }
 
+// paramPlace is where a parameter travels: the path, the query string, or
+// a field of the JSON body object.
+type paramPlace int
+
+const (
+	inPath paramPlace = iota
+	inQuery
+	inBody
+)
+
 // param resolves the runtime kind, the TypeScript type, and the ParamSpec
-// literal of one parameter from apigen's parse flags. apigen admits an
-// array of arrays only as a body argument; its element may also be an
-// object type, which the runtime parses with the generated strict parser.
-// It fails for any other element type (a union has no parser).
-func (b *builder) param(p apigen.Param, isPath bool) (ParamInfo, error) {
+// literal of one parameter from apigen's parse flags. A body argument
+// arrives as a JSON value, so its type may also be an object type, alone
+// or as the element of T[] or T[][] (apigen admits an array of arrays only
+// in the body); the runtime parses each value with the generated strict
+// parser of that type. param fails for a body argument of any other type
+// that is not a scalar or an enum: a union has no parser.
+func (b *builder) param(p apigen.Param, place paramPlace) (ParamInfo, error) {
 	info := ParamInfo{
 		Name:            p.Name,
 		TSName:          tsutil.ToCamelCase(p.Name),
-		Required:        p.Required || isPath,
+		Required:        p.Required || place == inPath,
 		IsArray:         p.IsArray,
 		IsArrayOfArrays: p.IsArrayOfArrays,
 	}
 	var enumValues []string
-	var elementParser string
+	var valueParser string
 	switch {
 	case p.IsInt:
 		info.Kind, info.TSType = "integer", "number"
@@ -413,10 +434,16 @@ func (b *builder) param(p apigen.Param, isPath bool) (ParamInfo, error) {
 				}
 				enumValues = append(enumValues, serialized)
 			}
-		} else if _, isScalar := b.findScalar(p.Type); p.IsArrayOfArrays && !isScalar {
+		} else if _, isScalar := b.findScalar(p.Type); isScalar || place != inBody {
+			info.Kind, info.TSType = "string", b.scalarType(p.Type)
+		} else {
 			pkg, ok := b.ownerPackage(p.Type)
 			if !ok {
-				return info, fmt.Errorf("element type %s is not a scalar, enum or object type", p.Type)
+				what := "type"
+				if p.IsArray {
+					what = "element type"
+				}
+				return info, fmt.Errorf("%s %s is not a scalar, enum or object type", what, p.Type)
 			}
 			info.Kind, info.TSType = "object", p.Type
 			b.addImport(b.typeImports, pkg, p.Type)
@@ -424,9 +451,7 @@ func (b *builder) param(p apigen.Param, isPath bool) (ParamInfo, error) {
 			validator, parser := "parse"+p.Type+"Json", "parse"+p.Type+"FromJSON"
 			b.addImport(b.validatorImports, pkg, validator)
 			b.addImport(b.validatorImports, pkg, parser)
-			elementParser = fmt.Sprintf("(value: unknown) => %s(%s(value))", parser, validator)
-		} else {
-			info.Kind, info.TSType = "string", b.scalarType(p.Type)
+			valueParser = fmt.Sprintf("(value: unknown) => %s(%s(value))", parser, validator)
 		}
 	}
 	info.TSType = tsListType(info.TSType, p.ArrayDepth())
@@ -469,8 +494,8 @@ func (b *builder) param(p apigen.Param, isPath bool) (ParamInfo, error) {
 	if p.ValidatePattern != "" {
 		fields = append(fields, "pattern: "+tsString(p.ValidatePattern))
 	}
-	if elementParser != "" {
-		fields = append(fields, "parse: "+elementParser)
+	if valueParser != "" {
+		fields = append(fields, "parse: "+valueParser)
 	}
 	info.SpecLiteral = "{ " + strings.Join(fields, ", ") + " }"
 	return info, nil
