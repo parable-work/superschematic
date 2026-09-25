@@ -28,21 +28,22 @@ import (
 // AFTER the build wrote the depfile -- storing under the pre-build hash
 // would let a later worktree with different import contents false-hit.
 
-func authoringImportsPath(repoRoot, name string) string {
-	return filepath.Join(repoRoot, SchemasDir, "dist", ".authoring-imports", name+".json")
+func authoringImportsPath(schemasRoot, name string) string {
+	return filepath.Join(schemasRoot, "dist", ".authoring-imports", name+".json")
 }
 
-// WriteAuthoringImports persists the schema's authoring-import depfile.
-// imports are absolute paths as reported by the harness; only files under
-// the schemas root but outside the schema's own directory are recorded
-// (the schema directory has its own tree digest, and the tool is covered by
-// ToolDigest). hasDocs distinguishes "no sidecar
-// documents" (any stale depfile is removed) from "documents with no
-// external imports" (an empty list is written, replacing stale content).
-func WriteAuthoringImports(distRoot, name, servicePath string, imports []string, hasDocs bool) error {
-	schemasRoot := filepath.Dir(distRoot)
-	repoRoot := filepath.Dir(schemasRoot)
-	path := authoringImportsPath(repoRoot, name)
+// WriteAuthoringImports persists the schema's authoring-import depfile
+// under <schemasRoot>/dist, where ReadAuthoringImports looks for it,
+// whatever output root the build writes to. schemasRoot is the schemas root
+// the command resolved; its parent is the repository root. imports are
+// absolute paths as reported by the harness; only files under the schemas
+// root but outside the schema's own directory are recorded (the schema
+// directory has its own tree digest, and the tool is covered by
+// ToolDigest). hasDocs distinguishes "no sidecar documents" (any stale
+// depfile is removed) from "documents with no external imports" (an empty
+// list is written, replacing stale content).
+func WriteAuthoringImports(schemasRoot, name, servicePath string, imports []string, hasDocs bool) error {
+	path := authoringImportsPath(schemasRoot, name)
 
 	if !hasDocs {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -101,7 +102,7 @@ func WriteAuthoringImports(distRoot, name, servicePath string, imports []string,
 // schema, or nil when no depfile exists (fresh worktree, or a schema without
 // deploy documents).
 func ReadAuthoringImports(repoRoot, name string) []string {
-	data, err := os.ReadFile(authoringImportsPath(repoRoot, name))
+	data, err := os.ReadFile(authoringImportsPath(filepath.Join(repoRoot, SchemasDir), name))
 	if err != nil {
 		return nil
 	}

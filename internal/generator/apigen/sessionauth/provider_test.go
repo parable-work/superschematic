@@ -81,8 +81,10 @@ func TestStoresParseStringIDsIntoScalarUUIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render middlewareStdImports: %v", err)
 	}
-	if !strings.Contains(std, `"time"`) {
-		t.Fatalf("middlewareStdImports = %q, want time for ExpiresAt", std)
+	// middleware.go imports "time" for every provider; a second import
+	// from the snippet would not compile without go/format removing it.
+	if !strings.Contains(std, `"errors"`) || strings.Contains(std, `"time"`) {
+		t.Fatalf("middlewareStdImports = %q, want errors and not time", std)
 	}
 	none, err := snippet("middlewareImports", map[string]any{"Auth": &apigen.AuthModel{}, "Naming": data["Naming"]})
 	if err != nil {

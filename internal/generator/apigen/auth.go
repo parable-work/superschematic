@@ -69,13 +69,15 @@ type AuthModel struct {
 // is the APIOutput except where noted. Each non-empty snippet starts with
 // the newline that separates it from the line before, so an empty snippet
 // leaves no blank line behind. Imports are sorted by gofmt afterwards, so an
-// import snippet only has to land in the right group.
+// import snippet only has to land in the right group. It must not repeat an
+// import the core template writes: under --skip-format nothing removes the
+// duplicate, and the file does not compile.
 var AuthSnippets = []string{
 	// context.tmpl
 	"contextImports", // imports the auth context shims need, in the runtime import group
 	"contextAuth",    // the auth context shims, after the logger and request helpers
 	// middleware.tmpl
-	"middlewareStdImports", // standard-library imports the store adapters need
+	"middlewareStdImports", // standard-library imports the store adapters need beyond context, net/http and time
 	"middlewareImports",    // runtime and scalar imports, in the runtime import group
 	"middlewareAliases",    // type aliases over the provider's runtime packages
 	"middlewareAuthz",      // the RequireAuth / RequirePermissions var block

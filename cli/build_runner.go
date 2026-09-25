@@ -19,8 +19,11 @@ import (
 )
 
 type buildServiceOptions struct {
-	ServicePath    string
-	OutputRoot     string
+	ServicePath string
+	OutputRoot  string
+	// SchemasRoot is the schemas root the command resolved. The
+	// authoring-import depfile goes under it, not under OutputRoot.
+	SchemasRoot    string
 	Paths          naming.LocalPaths
 	LoadOptions    []loader.Option
 	LoadDependency func(name string) (*ir.Schema, error)
@@ -116,7 +119,7 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 	// too, so a direct `superschematic build` refreshes the depfile.
 	if err := prof.Measure("build.authoring-imports", func() error {
 		hasDocs := len(schema.Documents) > 0
-		return buildcache.WriteAuthoringImports(absOutputRoot, schema.Name, opts.ServicePath, schema.AuthoringImports, hasDocs)
+		return buildcache.WriteAuthoringImports(opts.SchemasRoot, schema.Name, opts.ServicePath, schema.AuthoringImports, hasDocs)
 	}); err != nil {
 		return nil, err
 	}

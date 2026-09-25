@@ -6,7 +6,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Method};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
-use {{ .RuntimeCrateIdent }}::{
+use superschematic_http_runtime::{
     error_response, request_id_from_headers, wrap_envelope, RequestContext,
 };
 use serde_json::Value;
@@ -21,9 +21,8 @@ pub struct RouterState {
 pub fn build_router(implementations: Implementations) -> Router {
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
-{{- range .Endpoints }}
-    router = router.route("{{ .Path }}", {{ .Method }}(handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}));
-{{- end }}
+    router = router.route("/api/pool-search/indexes", post(handle_pool_search_rebuild_index));
+    router = router.route("/api/pool-search/indexes/{id}", get(handle_pool_search_get_index));
     router.with_state(state)
 }
 
@@ -50,43 +49,47 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
     }
     out
 }
-
-{{- range .Endpoints }}
-async fn handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}(
+async fn handle_pool_search_rebuild_index(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
-{{- if .PathParams }}
-    Path(path_params): Path<HashMap<String, String>>,
-{{- end }}
-{{- if isGetMethod .Method }}
-    Query(query): Query<HashMap<String, String>>,
-{{- else }}
     Json(payload): Json<Value>,
-{{- end }}
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let request_id = request_id_from_headers(&headers);
-    let mut ctx = RequestContext::new(method_from_str("{{ .Method }}"), "{{ .Path }}".to_string());
+    let mut ctx = RequestContext::new(method_from_str("post"), "/api/pool-search/indexes".to_string());
     ctx.headers = headers_to_map(&headers);
-{{- if .PathParams }}
-    for (key, value) in path_params {
-        ctx.path_params.insert(key, value);
-    }
-{{- end }}
-{{- if isGetMethod .Method }}
-    for (key, value) in query {
-        ctx.query_params.insert(key, value);
-    }
-    let payload = Value::Null;
-{{- end }}
     let result = state
         .implementations
-        .{{ toSnakeCase .Namespace }}
-        .{{ .FunctionName }}(ctx, payload)
+        .pool_search
+        .rebuild_index(ctx, payload)
         .await;
     match result {
         Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
         Err(err) => Err(error_response(err)),
     }
 }
-
-{{- end }}
+async fn handle_pool_search_get_index(
+    State(state): State<Arc<RouterState>>,
+    headers: HeaderMap,
+    Path(path_params): Path<HashMap<String, String>>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let request_id = request_id_from_headers(&headers);
+    let mut ctx = RequestContext::new(method_from_str("get"), "/api/pool-search/indexes/{id}".to_string());
+    ctx.headers = headers_to_map(&headers);
+    for (key, value) in path_params {
+        ctx.path_params.insert(key, value);
+    }
+    for (key, value) in query {
+        ctx.query_params.insert(key, value);
+    }
+    let payload = Value::Null;
+    let result = state
+        .implementations
+        .pool_search
+        .get_index(ctx, payload)
+        .await;
+    match result {
+        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
+        Err(err) => Err(error_response(err)),
+    }
+}

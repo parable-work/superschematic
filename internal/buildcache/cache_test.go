@@ -140,12 +140,12 @@ func TestAuthoringImportsInvalidateInputHash(t *testing.T) {
 	services := []buildplan.Service{
 		{Name: "env", Dir: envDir, Config: &schemaconfig.SchemaConfig{Name: "env", Kind: ir.SchemaKindGeneral}},
 	}
-	distRoot := filepath.Join(repo, "schemas", "dist")
+	schemasRoot := filepath.Join(repo, "schemas")
 
 	// The depfile records only schemas files outside the service
 	// directory: the service's own files and the tool are covered
 	// by the service and toolchain digests.
-	require.NoError(t, WriteAuthoringImports(distRoot, "env", envDir, []string{modelFile, ownFile, outsideFile}, true))
+	require.NoError(t, WriteAuthoringImports(schemasRoot, "env", envDir, []string{modelFile, ownFile, outsideFile}, true))
 	assert.Equal(t, []string{"schemas/services/model/workloads.ts"}, ReadAuthoringImports(repo, "env"))
 
 	before, err := ComputeInputHashes(services, repo, naming.Naming{})
@@ -157,7 +157,7 @@ func TestAuthoringImportsInvalidateInputHash(t *testing.T) {
 
 	// A schema without deploy documents removes its stale depfile, and the
 	// hash returns to the import-free form.
-	require.NoError(t, WriteAuthoringImports(distRoot, "env", envDir, nil, false))
+	require.NoError(t, WriteAuthoringImports(schemasRoot, "env", envDir, nil, false))
 	assert.Nil(t, ReadAuthoringImports(repo, "env"))
 	writeFile(t, modelFile, "export const a = 3")
 	first, err := ComputeInputHashes(services, repo, naming.Naming{})

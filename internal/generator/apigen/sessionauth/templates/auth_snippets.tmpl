@@ -63,11 +63,9 @@ func GetRoles(ctx context.Context) []runtimesession.Role {
 {{- end }}
 
 {{ define "middlewareStdImports" }}
+{{- /* middleware.tmpl imports "time" itself; the session store's ExpiresAt uses that import. */}}
 {{- if or .Auth.HasSessionStore .Auth.HasPrincipalStore }}
 	"errors"
-{{- end }}
-{{- if .Auth.HasSessionStore }}
-	"time"
 {{- end }}
 {{- end }}
 

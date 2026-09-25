@@ -13,6 +13,12 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- Python SDK: the generated client retries a `GET`, `HEAD` or `OPTIONS`
+  request that fails with a `NetworkError`, up to
+  `ClientConfig.max_network_retries` times (default 3), sleeping 1, 2, 4
+  seconds between attempts. Other methods are not retried, since a write
+  may have reached the server before the connection dropped. Set
+  `max_network_retries=0` for the old behaviour. Minor.
 - `schema.config.json` and `schema.config.yaml` accept an extension
   generator's output key, as `schema.config.ts` already did. The embedded
   config schema checks the core sections and admits any other key
@@ -438,6 +444,9 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- `runtime/http/go`: OpenTelemetry `otel`, `otel/sdk`, `otel/trace` and
+  `otel/metric` 1.45.0 to 1.46.0. A module that requires the runtime
+  resolves 1.46.0 or later. Patch.
 - Go API: a route no longer emits the response check after the
   implementation call. It asserted `Validate() interface{ HasErrors() bool }`,
   which no generated type satisfies (their `Validate` returns
@@ -669,6 +678,48 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Go ORM: a DB schema whose tables use no UUID scalar got an ORM whose id
+  lookups, UUID filter and user context were typed `types.UUID`. The Go
+  types package declares only the scalars the schema uses, and never that
+  name, so the ORM did not compile. Generation now fails with an error that
+  names the schema and asks for a key field of a UUID scalar. Patch.
+- Go SDK: a body argument or response whose type is a scalar was typed
+  with the last segment of the scalar's name (`types.UserID` for
+  `Identity.UserID`, `types.JSON` for `Generic.JSON`). The Go types package
+  does not declare those names, so the SDK did not compile. It now uses the
+  name the types package declares (`types.IdentityUserID`,
+  `types.GenericJSON`). Patch.
+- JSON and YAML readers: the keys that mark a multi-definition schema
+  file without a `kind` or `role` included six that the document form does
+  not have. A file whose only top-level key was one of them was read as a
+  document and failed on an unknown key; it now fails with the "cannot
+  determine schema file shape" error. A test keeps the list equal to the
+  document's collection fields. Patch.
+- Go API, `session` auth provider: when the upstream DB has a `Session`
+  table, the provider's `middlewareStdImports` snippet imported `"time"`,
+  which `middleware.go` already imports. go/format drops the duplicate, so
+  a normal build compiled, but a `--skip-format` build wrote `"time"` twice
+  and `middleware.go` did not compile. The snippet no longer imports it.
+  Patch.
+- Build cache: the authoring-import depfile of a service with sidecar
+  documents went to `<repo>/schemas/dist/.authoring-imports/` on a single
+  `build` or `build --with-deps` whose schemas root had another name,
+  because only `build-all` set the schemas directory. Each command also
+  derived the location from the output root, so with `--out` the depfile
+  went beside the output (and a build failed when the directory above
+  `--out` did not exist), where the input hash never read it. Every
+  command now sets the schemas root it resolved, and the depfile goes
+  under `<schemas-root>/dist/` whatever `--out` is. Patch.
+- Python schema runtime: `parse_schema` named the schema from the root
+  `title` only, so a document that carries its identifier in `name` and a
+  display title in `title` got the display title as its name. It now reads
+  `name` first and falls back to `title`. Patch.
+- Rust API server: an operation set with a multi-word name
+  (`PoolSearchMutations`, namespace `pool-search`) put the kebab-case
+  namespace into its handler names (`handle_pool-search_...`), and the
+  crate did not compile. The router now snake-cases the namespace in
+  handler names, as the implementations struct already did. A single-word
+  namespace renders the same bytes as before. Patch.
 - TypeScript SDK: `tools/index.ts` typed a tool parameter from its JSON
   Schema, so an enum was `string`, an object `Record<string, unknown>` or an
   inline shape, a union `Record<string, unknown>` and a date-time or JSON
