@@ -22,6 +22,38 @@
         "hasCustomNormalize": true,
         "hasCustomValidate": true
       },
+      "Generic.Probability": {
+        "name": "Generic.Probability",
+        "description": "Probability value from 0.0 to 1.0 inclusive",
+        "languagePrimitive": "number",
+        "primitive": "Float",
+        "typeMappings": {
+          "go": "GenericProbability",
+          "json_schema": "number",
+          "python": "float",
+          "rust": "f64",
+          "sql": "DOUBLE PRECISION",
+          "typescript": "number"
+        },
+        "minimum": 0,
+        "maximum": 1
+      },
+      "Identity.Name": {
+        "name": "Identity.Name",
+        "description": "An objects name",
+        "languagePrimitive": "string",
+        "primitive": "String",
+        "typeMappings": {
+          "go": "IdentityName",
+          "json_schema": "string",
+          "python": "str",
+          "rust": "String",
+          "sql": "VARCHAR(80)",
+          "typescript": "string"
+        },
+        "maxLength": 80,
+        "minLength": 2
+      },
       "Network.Url": {
         "name": "Network.Url",
         "description": "Valid HTTP/HTTPS URL",
@@ -37,6 +69,22 @@
         },
         "maxLength": 2048,
         "pattern": "^https?://[\\w\\-\\{\\}]+(\\.[\\w\\-\\{\\}]+)+([:/?#][\\w\\-\\._~:/?#\\[\\]@!\\$\u0026'\\(\\)\\*\\+,;=\\{\\}%]*)?$"
+      },
+      "Ordering.Rank": {
+        "name": "Ordering.Rank",
+        "description": "Positive JavaScript-safe ordering rank",
+        "languagePrimitive": "number",
+        "primitive": "Int",
+        "typeMappings": {
+          "go": "OrderingRank",
+          "json_schema": "integer",
+          "python": "int",
+          "rust": "i64",
+          "sql": "BIGINT",
+          "typescript": "number"
+        },
+        "minimum": 1,
+        "maximum": 9007199254740991
       }
     },
     "types": {
@@ -135,6 +183,38 @@
             "name": "email",
             "typeRef": {
               "name": "Contact.Email"
+            }
+          },
+          {
+            "name": "name",
+            "typeRef": {
+              "name": "Identity.Name"
+            }
+          },
+          {
+            "name": "names",
+            "typeRef": {
+              "name": "Identity.Name",
+              "isArray": true
+            }
+          },
+          {
+            "name": "rank",
+            "typeRef": {
+              "name": "Ordering.Rank"
+            }
+          },
+          {
+            "name": "ranks",
+            "typeRef": {
+              "name": "Ordering.Rank",
+              "isArray": true
+            }
+          },
+          {
+            "name": "share",
+            "typeRef": {
+              "name": "Generic.Probability"
             }
           },
           {
@@ -550,6 +630,126 @@
       "want": {
         "reqScalarList[1]": [
           "pattern"
+        ]
+      }
+    },
+    {
+      "name": "url_too_long",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "url": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.test"
+      },
+      "want": {
+        "url": [
+          "maxLength"
+        ]
+      }
+    },
+    {
+      "name": "name_too_short",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "name": "a"
+      },
+      "want": {
+        "name": [
+          "minLength"
+        ]
+      }
+    },
+    {
+      "name": "names_element_too_long",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "names": [
+          "Ada",
+          "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+        ]
+      },
+      "want": {
+        "names[1]": [
+          "maxLength"
+        ]
+      }
+    },
+    {
+      "name": "rank_below_min",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "rank": -3
+      },
+      "want": {
+        "rank": [
+          "min"
+        ]
+      }
+    },
+    {
+      "name": "ranks_element_below_min",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "ranks": [
+          2,
+          -1
+        ]
+      },
+      "want": {
+        "ranks[1]": [
+          "min"
+        ]
+      }
+    },
+    {
+      "name": "share_above_max",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "share": 1.5
+      },
+      "want": {
+        "share": [
+          "max"
         ]
       }
     },

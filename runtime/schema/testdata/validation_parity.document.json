@@ -190,12 +190,14 @@
       "maximum": 1,
       "minimum": 0,
       "type": "number",
-      "x-example": "0.75",
       "x-scalar": "Generic_Probability",
       "x-typeMapping": {
         "go": "GenericProbability",
         "json_schema": "number",
-        "sql": "DOUBLE PRECISION"
+        "python": "float",
+        "rust": "f64",
+        "sql": "DOUBLE PRECISION",
+        "typescript": "number"
       }
     },
     "Generic_StringMap": {
@@ -241,12 +243,14 @@
       "maxLength": 80,
       "minLength": 2,
       "type": "string",
-      "x-example": "A Name",
       "x-scalar": "Identity_Name",
       "x-typeMapping": {
         "go": "IdentityName",
         "json_schema": "string",
-        "sql": "VARCHAR(80)"
+        "python": "str",
+        "rust": "String",
+        "sql": "VARCHAR(80)",
+        "typescript": "string"
       }
     },
     "Identity_Slug": {
@@ -458,18 +462,29 @@
       "maximum": 9007199254740991,
       "minimum": 1,
       "type": "integer",
-      "x-example": "1",
       "x-scalar": "Ordering_Rank",
       "x-typeMapping": {
         "go": "OrderingRank",
         "json_schema": "integer",
-        "sql": "BIGINT"
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
       }
     },
     "ParityMatrix": {
       "properties": {
         "email": {
           "$ref": "#/definitions/scalars/Contact_Email"
+        },
+        "name": {
+          "$ref": "#/definitions/scalars/Identity_Name"
+        },
+        "names": {
+          "items": {
+            "$ref": "#/definitions/scalars/Identity_Name"
+          },
+          "type": "array"
         },
         "optList": {
           "items": {
@@ -489,6 +504,15 @@
           "$ref": "#/definitions/string",
           "x-validateMaxLength": 5
         },
+        "rank": {
+          "$ref": "#/definitions/scalars/Ordering_Rank"
+        },
+        "ranks": {
+          "items": {
+            "$ref": "#/definitions/scalars/Ordering_Rank"
+          },
+          "type": "array"
+        },
         "reqList": {
           "items": {
             "$ref": "#/definitions/string"
@@ -507,6 +531,9 @@
         "reqStr": {
           "$ref": "#/definitions/string",
           "x-validateMaxLength": 5
+        },
+        "share": {
+          "$ref": "#/definitions/scalars/Generic_Probability"
         },
         "url": {
           "$ref": "#/definitions/scalars/Network_Url"

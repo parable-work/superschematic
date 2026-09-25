@@ -46,6 +46,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,10 +75,14 @@ const schemaConfigJSON = `{
 
 // The validation matrix: every combination of required/optional x scalar/list
 // the generated validators gate differently, with one constraint per axis.
-// The url and email fields are scalars: every validator names a malformed
-// scalar value "pattern" and reports it once, whether the scalar's pattern or
-// the scalar core finds it (Contact.Email also has a custom validator in the
-// core).
+// The url, email, name, names, rank, ranks and share fields are scalars
+// (D14): every validator reports a failing scalar value once, by the name of
+// the scalar's rule it breaks. A malformed value is "pattern", whether the
+// scalar's pattern or the scalar core finds it (Contact.Email also has a
+// custom validator in the core); a value out of the scalar's length bounds
+// (Network.Url, Identity.Name) is "minLength" or "maxLength", and one out
+// of its range (Ordering.Rank, an integer; Generic.Probability, a float) is
+// "min" or "max".
 //
 // ListMatrix holds the list rules for T[] and T[][] (D12): a required list
 // means present, not non-empty; listMin and listMax bound the outer list; a
@@ -95,6 +100,18 @@ const parityMatrixSchemaJSON = `{
     "Contact.Email": {
       "name": "Contact.Email",
       "languagePrimitive": "string"
+    },
+    "Identity.Name": {
+      "name": "Identity.Name",
+      "languagePrimitive": "string"
+    },
+    "Ordering.Rank": {
+      "name": "Ordering.Rank",
+      "languagePrimitive": "number"
+    },
+    "Generic.Probability": {
+      "name": "Generic.Probability",
+      "languagePrimitive": "number"
     }
   },
   "enums": {
@@ -119,6 +136,26 @@ const parityMatrixSchemaJSON = `{
         {
           "name": "email",
           "typeRef": { "name": "Contact.Email" }
+        },
+        {
+          "name": "name",
+          "typeRef": { "name": "Identity.Name" }
+        },
+        {
+          "name": "names",
+          "typeRef": { "name": "Identity.Name", "isArray": true }
+        },
+        {
+          "name": "rank",
+          "typeRef": { "name": "Ordering.Rank" }
+        },
+        {
+          "name": "ranks",
+          "typeRef": { "name": "Ordering.Rank", "isArray": true }
+        },
+        {
+          "name": "share",
+          "typeRef": { "name": "Generic.Probability" }
         },
         {
           "name": "reqStr",
@@ -377,6 +414,42 @@ var vectors = []parityVector{
 		name:    "req_scalar_list_bad_format",
 		payload: `{"reqScalarList": ["https://a.test", "not a url"], "reqStr": "ok", "reqList": ["a"]}`,
 		want:    map[string][]string{"reqScalarList[1]": {"pattern"}},
+	},
+	{
+		// A scalar value out of its length bounds is "maxLength" or
+		// "minLength", as a single field and a list element alike, not the
+		// scalar core's own name for it.
+		name:    "url_too_long",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "url": "https://` + strings.Repeat("a", 2050) + `.test"}`,
+		want:    map[string][]string{"url": {"maxLength"}},
+	},
+	{
+		name:    "name_too_short",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "name": "a"}`,
+		want:    map[string][]string{"name": {"minLength"}},
+	},
+	{
+		name:    "names_element_too_long",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "names": ["Ada", "` + strings.Repeat("n", 81) + `"]}`,
+		want:    map[string][]string{"names[1]": {"maxLength"}},
+	},
+	{
+		// A scalar value out of its range is "min" or "max". The rank is
+		// negative, not 0: the Go type leaves an optional integer scalar
+		// that is 0 unchecked, as unset.
+		name:    "rank_below_min",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "rank": -3}`,
+		want:    map[string][]string{"rank": {"min"}},
+	},
+	{
+		name:    "ranks_element_below_min",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "ranks": [2, -1]}`,
+		want:    map[string][]string{"ranks[1]": {"min"}},
+	},
+	{
+		name:    "share_above_max",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "share": 1.5}`,
+		want:    map[string][]string{"share": {"max"}},
 	},
 	{
 		// A string scalar's element must be a string: a number is a type
