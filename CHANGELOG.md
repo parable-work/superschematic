@@ -678,6 +678,29 @@ of a generated artifact is always listed here with the bump it requires.
   `Schema.ValidateHydrated` does, and the loader runs it once the scalars
   are hydrated, in every form. A caller that relied on `Validate` for the
   check calls `ValidateHydrated` on a hydrated schema. Minor.
+- TypeScript API server: every body argument is decoded from its JSON
+  value, as an object-typed or list-of-lists one already was (D12). A list
+  of a string, number, boolean, enum or scalar type (`string[]`,
+  `number[]`, `E[]`, `Network.Url[]`) went through the query-string
+  decoder: it split each element on commas and dropped empty strings,
+  turned a null element into `"null"` and an object into
+  `"[object Object]"`, accepted `"5"` for a number, and refused `[]` for a
+  required list. Now a list is its JSON array, a null element is refused
+  at `name[i]` (`required`), an element of the wrong JSON type as `type`,
+  and `[]` satisfies a required list. A single value must arrive as its
+  JSON type too: `"5"` is no longer a number, `5` no longer a string and
+  `"true"` no longer a boolean. A `Generic.JSON` argument (`ParamKind`
+  `json`) is any JSON value but null, as the schema runtimes decide for
+  null, and reaches the implementation as that value; before, it was
+  stringified. A scalar-typed parameter, in the path, the query or the
+  body, carries the scalar's lengths, pattern and range (`ParamSpec.scalar`,
+  type `ScalarConstraints`), which the runtime checks on every value before
+  the argument's own; a constraint refusal names its rule in
+  `details.errors` (`pattern`, `minLength`, `maxLength`, `min`, `max`;
+  D14). A list in the query string is still read from repeated keys and
+  comma-separated values. A client that sent numbers or booleans as
+  strings, or several values in one comma-separated string, sends JSON
+  values of the declared type. Minor.
 
 ### Fixed
 

@@ -151,17 +151,34 @@ RFC 9457 problem envelopes. It is built on `@superschematic/http-runtime`
 dependencies.
 
 An operation without an input type reads its other arguments from the JSON
-body object (on `GET`, from the query string). A body argument of an object
-type, alone or as a list (`T[]`) or list of lists (`T[][]`) of one, goes
-through that type's generated `parse<T>Json` decoder, so the
-implementation receives objects. A list follows the
+body object (on `GET`, from the query string). Each body argument is the
+JSON value it holds, alone, as a list (`T[]`) or as a list of lists
+(`T[][]`):
+
+- A string, enum, UUID or timestamp argument takes a JSON string, a
+  number or integer argument a JSON number, and a boolean argument a JSON
+  boolean. Any other JSON type answers 400 with `type`: `"5"` is not a
+  number, and `5` is not a string.
+- A `Generic.JSON` argument takes any JSON value but null, and the
+  implementation receives that value.
+- An argument of an object type goes through that type's generated
+  `parse<T>Json` decoder, so the implementation receives objects. An
+  element the decoder refuses answers "does not match the declared type".
+- A list is its JSON array. A comma inside an element stays there, and an
+  empty string is an element. Only a list in the query string is read from
+  repeated keys and comma-separated values.
+
+A list follows the
 [list rules](/superschematic/reference/arrays-of-arrays/#list-rules):
 `[]` satisfies a required list, `listMin` and `listMax` bound the list,
 and each element is checked at `name[i]`. A null element answers 400 with
-`required`, a non-object element with `type`, and an element the decoder
-refuses with "does not match the declared type"; the problem `details`
-carry the `path`. A body argument whose type is a union has no generated
-decoder, and the build refuses it.
+`required`, and an element of the wrong JSON type with `type`. A
+scalar-typed argument, in the path, the query or the body, is checked
+against the scalar's own length, pattern and range, and a value that fails
+answers with the rule it breaks (`pattern`, `minLength`, `maxLength`,
+`min`, `max`). The problem `details` carry the `path` and the rule in
+`errors`. A body argument whose type is a union has no generated decoder,
+and the build refuses it.
 
 ```ts
 import { Hono } from "hono";
