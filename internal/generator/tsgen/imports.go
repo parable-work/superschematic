@@ -138,9 +138,11 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 					Path:           pkgName + "/types",
 					DependencyName: depName,
 				})
+				// The dependency is a sibling workspace of the types root, so
+				// it is named by workspace:* (see WorkspaceRootManifest).
 				result.packageDependencies = append(result.packageDependencies, PackageDependency{
 					Name: pkgName,
-					Spec: "file:../" + depName,
+					Spec: "workspace:*",
 				})
 			}
 		}

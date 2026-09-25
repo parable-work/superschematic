@@ -5,12 +5,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
 func requireBun(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("bun"); err != nil {
-		t.Skip("bun not on PATH; execution tests need it")
+		testpaths.RequireOrSkipTS(t, "bun not on PATH; execution tests need it")
 	}
 }
 

@@ -66,15 +66,18 @@ func typeFileName(name string) string {
 
 // WorkspaceRootManifest returns the package.json written at the directory
 // that holds every generated TypeScript types package (the parent of each
-// WriteTypes output directory). Generated packages depend on each other with
-// sibling file:../<schema> specs and on the scalar library with a file: spec
-// that can point outside the output tree. Bun refuses a transitive file:
-// dependency whose path escapes the install root unless the declaring package
-// is the root or one of its workspaces, so an install inside one generated
-// package can fail once it depends on a sibling. Declaring the siblings as
-// workspaces of this root keeps the per-package manifests unchanged and lets
-// `bun install` in the root, or in any generated package, resolve the whole
-// tree.
+// WriteTypes output directory). Every generated package is a workspace of
+// this root, so `bun install` in the root or in any package installs the
+// whole tree into one lockfile at the root.
+//
+// A package depends on the scalar library with a file: spec relative to the
+// package, which can point outside the output tree; Bun follows such a path
+// only for the root or one of its workspaces. A package depends on a sibling
+// types package with workspace:*, not file:../<schema>. With a file: spec on
+// a sibling, Bun 1.4.0 re-resolves the tree on every install after the
+// first, and Bun 1.4.2 on the install after a manifest gains such a spec;
+// that pass reads the scalar path the lockfile stores relative to the root
+// as if it were relative to the member, and the install fails.
 //
 // The root is named <npm_scope>/types-workspace. Every types package name
 // ends in -types (Naming.NpmTypesPackage), so the root cannot collide with

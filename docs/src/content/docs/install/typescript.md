@@ -74,16 +74,22 @@ superschematic build schemas/services/catalog
 ```
 
 TypeScript types land under `schemas/dist/types/typescript/catalog` as
-`@schemas/catalog-types` (the default `npm_scope` is `@schemas`). Point
-your app at that directory with a workspace dependency or a `file:`
-specifier until you publish the generated package.
+`@schemas/catalog-types` (the default `npm_scope` is `@schemas`). Until you
+publish the generated package, consume it from a Bun workspace that
+contains it: the types workspace below, or your own workspace root with
+the generated directories in its `workspaces`. A `file:` specifier from an
+app outside a workspace does not install a types package that has a
+`file:` or `workspace:` dependency of its own.
 
 `schemas/dist/types/typescript/package.json` is a private Bun workspace
-root (`@schemas/types-workspace`) that lists every generated types package.
-Types packages depend on each other with `file:../<schema>` specs, and Bun
-only follows a transitive `file:` path outside the install root for the
-root package or one of its workspaces, so run `bun install` in that
-directory or in any package under it.
+root (`@schemas/types-workspace`) whose workspaces are the generated types
+packages next to it. A types package depends on the scalar library with a
+`file:` path when
+[`paths.scalar_typescript`](/superschematic/reference/naming/#pathsscalar_typescript)
+is set, and on another schema's types package with `workspace:*`. Run
+`bun install` in that directory or in any package under it, and again
+after each build. Every install writes the one `bun.lock` at the root.
+Install with Bun: npm rejects the `workspace:` protocol.
 
 ## Consume generated types
 
