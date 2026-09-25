@@ -270,6 +270,93 @@ describe('JSON body parameters of an object type', () => {
   });
 });
 
+describe('JSON body parameters of a scalar, enum or JSON type', () => {
+  const p = (over: Partial<ParamSpec>): ParamSpec => ({ name: 'x', kind: 'string', required: true, ...over });
+  const refusedAt = (spec: ParamSpec, value: unknown, path: string | undefined, validator: string, message: string) => {
+    expect(() => decodeJsonParam('body', spec, value)).toThrow(
+      expect.objectContaining({
+        status: 400,
+        code: 'bad_request',
+        message: `Invalid body parameter ${path ?? spec.name}: ${message}`,
+        details: { location: 'body', parameter: spec.name, ...(path !== undefined ? { path } : {}), reason: message, errors: [{ validator, message }] },
+      })
+    );
+  };
+
+  test('a list element is one JSON value: never split on commas, an empty string kept', () => {
+    expect(decodeJsonParam('body', p({ isArray: true }), ['a,b', '', ' c '])).toEqual(['a,b', '', ' c ']);
+    expect(decodeJsonParam('body', p({ isArray: true }), [])).toEqual([]);
+    expect(decodeJsonParam('body', p({ kind: 'number', isArray: true }), [1.5, -2, 0])).toEqual([1.5, -2, 0]);
+    expect(decodeJsonParam('body', p({ kind: 'integer', isArray: true }), [1, 2.0])).toEqual([1, 2]);
+    expect(decodeJsonParam('body', p({ kind: 'boolean', isArray: true }), [true, false])).toEqual([true, false]);
+    expect(decodeJsonParam('body', p({ kind: 'enum', enumValues: ['light', 'dark'], isArray: true }), ['dark'])).toEqual(['dark']);
+  });
+
+  test('a list element is never null and must arrive as its JSON type, reported at name[i]', () => {
+    refusedAt(p({ isArray: true }), ['a', null], 'x[1]', 'required', 'required field');
+    refusedAt(p({ isArray: true, required: false }), [null], 'x[0]', 'required', 'required field');
+    refusedAt(p({ isArray: true }), ['a', 5], 'x[1]', 'type', 'expected a string');
+    refusedAt(p({ isArray: true }), [{ a: 1 }], 'x[0]', 'type', 'expected a string');
+    refusedAt(p({ kind: 'number', isArray: true }), [1, '5'], 'x[1]', 'type', 'expected a number');
+    refusedAt(p({ kind: 'integer', isArray: true }), [1.5], 'x[0]', 'type', 'expected an integer');
+    refusedAt(p({ kind: 'integer', isArray: true }), ['5'], 'x[0]', 'type', 'expected an integer');
+    refusedAt(p({ kind: 'boolean', isArray: true }), ['true'], 'x[0]', 'type', 'expected a boolean');
+    refusedAt(p({ kind: 'enum', enumValues: ['light'], isArray: true }), [1], 'x[0]', 'type', 'expected a string');
+    expect(() => decodeJsonParam('body', p({ kind: 'integer', isArray: true }), [2 ** 60])).toThrow(
+      expect.objectContaining({ details: expect.objectContaining({ path: 'x[0]', reason: 'integer out of range' }) })
+    );
+    expect(() => decodeJsonParam('body', p({ kind: 'enum', enumValues: ['light'], isArray: true }), ['dim'])).toThrow(
+      expect.objectContaining({ details: expect.objectContaining({ path: 'x[0]', reason: 'expected one of light' }) })
+    );
+  });
+
+  test('a single value must arrive as its JSON type; absent or null is required or undefined, or its default', () => {
+    expect(decodeJsonParam('body', p({}), 'a,b')).toBe('a,b');
+    refusedAt(p({}), 5, undefined, 'type', 'expected a string');
+    refusedAt(p({ kind: 'number' }), '5', undefined, 'type', 'expected a number');
+    refusedAt(p({ kind: 'boolean' }), 1, undefined, 'type', 'expected a boolean');
+    expect(() => decodeJsonParam('body', p({}), null)).toThrow(expect.objectContaining({ details: { location: 'body', parameter: 'x', reason: 'required' } }));
+    expect(decodeJsonParam('body', p({ required: false }), null)).toBeUndefined();
+    expect(decodeJsonParam('body', p({ required: false, kind: 'integer', defaultValue: '7' }), undefined)).toBe(7);
+    expect(decodeJsonParam('body', p({ required: false, isArray: true, defaultValue: 'a,b' }), null)).toEqual(['a', 'b']);
+  });
+
+  test('a JSON value is any JSON value but null, and a null list element is required', () => {
+    const json = p({ kind: 'json' });
+    for (const value of [{ a: [1, null] }, [1, 'a'], 'text', '', 0, false]) {
+      expect(decodeJsonParam('body', json, value)).toEqual(value);
+    }
+    expect(() => decodeJsonParam('body', json, null)).toThrow(expect.objectContaining({ details: { location: 'body', parameter: 'x', reason: 'required' } }));
+    expect(decodeJsonParam('body', p({ kind: 'json', required: false }), null)).toBeUndefined();
+    const list = p({ kind: 'json', isArray: true });
+    expect(decodeJsonParam('body', list, [1, 'a', { b: 2 }, [3, null], true])).toEqual([1, 'a', { b: 2 }, [3, null], true]);
+    refusedAt(list, [1, null], 'x[1]', 'required', 'required field');
+    refusedAt(p({ kind: 'json', isArray: true, isArrayOfArrays: true }), [[{}], null], 'x[1]', 'required', 'required field');
+    refusedAt(p({ kind: 'json', isArray: true, isArrayOfArrays: true }), [[{}, null]], 'x[0][1]', 'required', 'required field');
+  });
+
+  test("a scalar's own constraints apply to every value, each failure one error named by its rule", () => {
+    const url = { name: 'Network.Url', maxLength: 24, pattern: '^https?://[a-z.]+$' };
+    const urls = p({ isArray: true, scalar: url, listMin: 1, listMax: 2 });
+    expect(decodeJsonParam('body', urls, ['https://a.test'])).toEqual(['https://a.test']);
+    refusedAt(urls, ['https://a.test', 'not a url'], 'x[1]', 'pattern', 'is not a valid Network.Url');
+    refusedAt(urls, [`https://${'a'.repeat(20)}.test`], 'x[0]', 'maxLength', 'must be at most 24 characters');
+    expect(() => decodeJsonParam('body', urls, [])).toThrow(expect.objectContaining({ details: expect.objectContaining({ reason: 'expected at least 1 values' }) }));
+    // Lengths count code points: one emoji is one character, as in the schema runtimes.
+    refusedAt(p({ scalar: { name: 'Identity.Name', minLength: 2 } }), '\u{1F600}', undefined, 'minLength', 'must be at least 2 characters');
+    const ranks = p({ kind: 'integer', isArray: true, scalar: { name: 'Ordering.Rank', min: 1 } });
+    refusedAt(ranks, [2, -1], 'x[1]', 'min', 'must be at least 1');
+    refusedAt(p({ kind: 'number', scalar: { name: 'Generic.Probability', min: 0, max: 1 } }), 1.5, undefined, 'max', 'must be at most 1');
+    // The argument's own constraints apply after the scalar's, and name their rule too.
+    refusedAt(p({ isArray: true, scalar: url, pattern: '^https://' }), ['http://a.test'], 'x[0]', 'pattern', 'does not match the required pattern');
+    refusedAt(p({ maxLength: 2 }), 'abc', undefined, 'maxLength', 'must be at most 2 characters');
+    // A path or query value is checked against its scalar too.
+    expect(() => decodeParam('query', p({ scalar: url }), ['nope'])).toThrow(
+      expect.objectContaining({ details: expect.objectContaining({ parameter: 'x', reason: 'is not a valid Network.Url', errors: [{ validator: 'pattern', message: 'is not a valid Network.Url' }] }) })
+    );
+  });
+});
+
 describe('permission gate', () => {
   test('mirrors the Go session runtime: exact and dotted prefix cover, no root permission', () => {
     expect(covers('reports', 'reports.export')).toBe(true);

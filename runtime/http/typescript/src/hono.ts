@@ -6,7 +6,7 @@ import { timeout } from 'hono/timeout';
 import { authorize, type Authenticator, type PermissionMatcher } from './auth';
 import { OperationResult, envelopeResponse, requestIdOf } from './envelope';
 import type { OperationSpec, RequestContext } from './operation';
-import { decodeJsonParam, decodeParams, type ParamSpec } from './params';
+import { decodeJsonParam, decodeParams } from './params';
 import {
   HttpProblem,
   badRequest,
@@ -319,7 +319,7 @@ async function decode(ctx: RequestContext, spec: OperationSpec): Promise<Decoded
       }
     }
   }
-  let body: Record<string, unknown> = {};
+  const body: Record<string, unknown> = {};
   if (spec.bodyParams.length > 0) {
     if (raw === undefined && spec.bodyParams.some(param => param.required)) {
       throw badRequest('Request body is required');
@@ -328,16 +328,10 @@ async function decode(ctx: RequestContext, spec: OperationSpec): Promise<Decoded
       throw badRequest('Request body must be a JSON object');
     }
     const object = (raw ?? {}) as Record<string, unknown>;
-    // A list of lists and an object-typed parameter (T, T[] or T[][]) are
-    // decoded from their JSON value; the other body parameters go through
-    // the string decoding that path and query use.
-    const fromJson = (param: ParamSpec) => param.isArrayOfArrays === true || param.kind === 'object';
-    body = decodeParams('body', spec.bodyParams.filter(param => !fromJson(param)), name => {
-      const value = object[name];
-      if (value === undefined || value === null) return undefined;
-      return Array.isArray(value) ? value.map(item => String(item)) : [String(value)];
-    });
-    for (const param of spec.bodyParams.filter(fromJson)) {
+    // Every body parameter is decoded from its JSON value, never through
+    // the string decoding of path and query values: a list element is not
+    // split on commas, and a value of the wrong JSON type is refused.
+    for (const param of spec.bodyParams) {
       const value = decodeJsonParam('body', param, object[param.name]);
       if (value !== undefined) body[param.name] = value;
     }
