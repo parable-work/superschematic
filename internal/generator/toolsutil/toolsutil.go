@@ -186,8 +186,9 @@ type ToolPathParam struct {
 }
 
 // ToolScalarArg is one body argument of an operation without an input
-// type, for tool invocation helpers. IsArray and IsArrayOfArrays carry its
-// list shape (apigen.Param): the argument schema is T, T[] or T[][].
+// type, for tool invocation helpers. IsArray, IsArrayOfArrays and IsMap
+// carry its shape (apigen.Param): the argument schema is T, T[] or T[][],
+// or a map of T or T[].
 type ToolScalarArg struct {
 	Name            string
 	TSName          string
@@ -195,6 +196,7 @@ type ToolScalarArg struct {
 	Required        bool
 	IsArray         bool
 	IsArrayOfArrays bool
+	IsMap           bool
 }
 
 // ToolQueryArg is one query parameter as a tool argument: its type,
@@ -242,8 +244,9 @@ func BuildInputTypeFieldsMap(apiOutput *apigen.APIOutput) map[string][]apigen.Pa
 
 // BuildParametersSchema builds the JSON Schema for tool parameters: path
 // parameters, query parameters, the input type's fields (nested objects
-// expanded, unions as oneOf) or the scalar arguments, and the encryption
-// key of an encrypted endpoint. keys supplies the vendor keys.
+// expanded, unions as oneOf, enums with their values) or the scalar
+// arguments, and the encryption key of an encrypted endpoint. keys supplies
+// the vendor keys.
 func BuildParametersSchema(
 	pathParams []ToolPathParam,
 	queryArgs []ToolQueryArg,
@@ -251,6 +254,7 @@ func BuildParametersSchema(
 	inputType string,
 	inputTypeFields map[string][]apigen.Param,
 	inputTypeUnions map[string]apigen.ToolUnionInfo,
+	inputTypeEnums map[string]apigen.ToolEnumInfo,
 	scalarArgs []ToolScalarArg,
 	encrypted bool,
 	scalars map[string]apigen.ScalarJSONSchemaInfo,
@@ -265,7 +269,7 @@ func BuildParametersSchema(
 	}
 
 	for _, param := range pathParams {
-		prop := ScalarToJSONSchemaProperty(param.Type, scalars)
+		prop := typeToJSONSchemaProperty(param.Type, scalars, inputTypeEnums)
 		prop.Description = fmt.Sprintf("%s parameter", param.Name)
 		key := paramKeyFn(param.Name, param.TSName)
 		schema.Properties[key] = prop
@@ -280,7 +284,7 @@ func BuildParametersSchema(
 			ValidateMinLength: arg.ValidateMinLength, ValidateMaxLength: arg.ValidateMaxLength,
 			ValidateListMin: arg.ValidateListMin, ValidateListMax: arg.ValidateListMax,
 			ValidatePattern: arg.ValidatePattern,
-		}, scalars, inputTypeFields, inputTypeUnions, nil)
+		}, scalars, inputTypeFields, inputTypeUnions, inputTypeEnums, nil)
 		key := paramKeyFn(arg.Name, arg.TSName)
 		schema.Properties[key] = prop
 		if arg.Required {
@@ -291,7 +295,7 @@ func BuildParametersSchema(
 	if hasInput && inputType != "" {
 		if fields, ok := inputTypeFields[inputType]; ok {
 			for _, field := range fields {
-				prop := FieldToJSONSchemaProperty(field, scalars, inputTypeFields, inputTypeUnions, nil)
+				prop := FieldToJSONSchemaProperty(field, scalars, inputTypeFields, inputTypeUnions, inputTypeEnums, nil)
 				key := paramKeyFn(field.Name, "")
 				schema.Properties[key] = prop
 				if field.Required {
@@ -304,8 +308,8 @@ func BuildParametersSchema(
 	for _, arg := range scalarArgs {
 		prop := FieldToJSONSchemaProperty(apigen.Param{
 			Name: arg.Name, Type: arg.Type, Required: arg.Required,
-			IsArray: arg.IsArray, IsArrayOfArrays: arg.IsArrayOfArrays,
-		}, scalars, inputTypeFields, inputTypeUnions, nil)
+			IsArray: arg.IsArray, IsArrayOfArrays: arg.IsArrayOfArrays, IsMap: arg.IsMap,
+		}, scalars, inputTypeFields, inputTypeUnions, inputTypeEnums, nil)
 		key := paramKeyFn(arg.Name, arg.TSName)
 		schema.Properties[key] = prop
 		if arg.Required {
@@ -369,23 +373,40 @@ func ScalarToJSONSchemaProperty(typeName string, scalars map[string]apigen.Scala
 	}
 }
 
+// typeToJSONSchemaProperty is ScalarToJSONSchemaProperty for a type name
+// that may also be an enum, which lists its values.
+func typeToJSONSchemaProperty(
+	typeName string,
+	scalars map[string]apigen.ScalarJSONSchemaInfo,
+	enums map[string]apigen.ToolEnumInfo,
+) JSONSchemaProperty {
+	property := ScalarToJSONSchemaProperty(typeName, scalars)
+	if _, scalar := scalars[typeName]; !scalar {
+		if enum, ok := enums[typeName]; ok && len(enum.Values) > 0 {
+			property.Enum = append([]string(nil), enum.Values...)
+		}
+	}
+	return property
+}
+
 // FieldToJSONSchemaProperty converts a field to a JSON Schema property. An
 // object type expands to its fields (closed with additionalProperties
-// false), a union to oneOf with each member's discriminator pinned, an
-// array to items (an array of arrays to items of items), a map to typed
-// additionalProperties. The field's value constraints go on the innermost
-// items and its list bounds on the outer array. A type already on the
-// expansion stack stays a plain reference, so recursive types end. A field
-// that is not required is nullable; the inner lists of an array of arrays
-// never are.
+// false), a union to oneOf with each member's discriminator pinned, an enum
+// to a string listing its values, an array to items (an array of arrays to
+// items of items), a map to typed additionalProperties. The field's value
+// constraints go on the innermost items and its list bounds on the outer
+// array. A type already on the expansion stack stays a plain reference, so
+// recursive types end. A field that is not required is nullable; the inner
+// lists of an array of arrays never are.
 func FieldToJSONSchemaProperty(
 	field apigen.Param,
 	scalars map[string]apigen.ScalarJSONSchemaInfo,
 	typeFields map[string][]apigen.Param,
 	typeUnions map[string]apigen.ToolUnionInfo,
+	typeEnums map[string]apigen.ToolEnumInfo,
 	stack map[string]bool,
 ) JSONSchemaProperty {
-	value := ScalarToJSONSchemaProperty(field.Type, scalars)
+	value := typeToJSONSchemaProperty(field.Type, scalars, typeEnums)
 	if _, scalar := scalars[field.Type]; !scalar {
 		if stack == nil {
 			stack = make(map[string]bool)
@@ -400,7 +421,7 @@ func FieldToJSONSchemaProperty(
 				oneOf := make([]JSONSchemaProperty, 0, len(union.Members))
 				for _, member := range union.Members {
 					memberValue := FieldToJSONSchemaProperty(
-						apigen.Param{Type: member.Name, Required: true}, scalars, typeFields, typeUnions, nextStack,
+						apigen.Param{Type: member.Name, Required: true}, scalars, typeFields, typeUnions, typeEnums, nextStack,
 					)
 					if union.Discriminator != "" && member.DiscriminatorValue != "" && memberValue.Properties != nil {
 						discriminator := memberValue.Properties[union.Discriminator]
@@ -418,7 +439,7 @@ func FieldToJSONSchemaProperty(
 				properties := make(map[string]JSONSchemaProperty, len(fields))
 				required := make([]string, 0, len(fields))
 				for _, nested := range fields {
-					properties[nested.Name] = FieldToJSONSchemaProperty(nested, scalars, typeFields, typeUnions, nextStack)
+					properties[nested.Name] = FieldToJSONSchemaProperty(nested, scalars, typeFields, typeUnions, typeEnums, nextStack)
 					if nested.Required {
 						required = append(required, nested.Name)
 					}

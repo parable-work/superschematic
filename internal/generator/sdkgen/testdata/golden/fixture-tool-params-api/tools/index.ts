@@ -46,9 +46,19 @@ export interface PaintPaintByToneParams {
   tone: Tone;
 }
 
+export interface PaintSetLabelsParams {
+  id: string;
+  labelsByLocale: Record<string, string[]>;
+}
+
 export interface PaintSetToneParams {
   id: string;
   tone: Tone;
+}
+
+export interface PaintNameTonesParams {
+  id: string;
+  toneByName: Record<string, Tone>;
 }
 
 /**
@@ -118,7 +128,7 @@ export interface JSONSchemaProperty {
   format?: string;
   description?: string;
   pattern?: string;
-  enum?: string[];
+  enum?: Array<string | null>;
   minLength?: number;
   maxLength?: number;
   minimum?: number;
@@ -165,7 +175,9 @@ export interface AnthropicTool {
 export const PAINT_LIST_PAINT = 'paint.listPaint' as const;
 export const PAINT_PAINT = 'paint.paint' as const;
 export const PAINT_PAINT_BY_TONE = 'paint.paintByTone' as const;
+export const PAINT_SET_LABELS = 'paint.setLabels' as const;
 export const PAINT_SET_TONE = 'paint.setTone' as const;
+export const PAINT_NAME_TONES = 'paint.nameTones' as const;
 
 /**
  * Union type of all tool names
@@ -174,7 +186,9 @@ export type ToolName =
   | typeof PAINT_LIST_PAINT
   | typeof PAINT_PAINT
   | typeof PAINT_PAINT_BY_TONE
-  | typeof PAINT_SET_TONE;
+  | typeof PAINT_SET_LABELS
+  | typeof PAINT_SET_TONE
+  | typeof PAINT_NAME_TONES;
 
 /**
  * All available tools as an array of names
@@ -183,7 +197,9 @@ export const TOOL_NAMES: ToolName[] = [
   PAINT_LIST_PAINT,
   PAINT_PAINT,
   PAINT_PAINT_BY_TONE,
+  PAINT_SET_LABELS,
   PAINT_SET_TONE,
+  PAINT_NAME_TONES,
 ];
 
 /**
@@ -208,13 +224,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:cc371988009e6bf347a1bd7f372706a961c35db9164e98739c70af824d1266ae',
+    inputSchemaDigest: 'sha256:8ca68d2f55205414c615387939696065dfd767aa909bea3428196b2de840a5d6',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        tone: {"description":"A Tone value","type":"string"},
-        tones: {"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},
+        tone: {"description":"A Tone value","enum":["warm","cool"],"type":"string"},
+        tones: {"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},
       },
       required: ['tones']
     },
@@ -245,7 +261,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f17ebff37409cf5ab66a9289e374c3cbf614a3b2b29af6ced9f4310ad7d38658',
+    inputSchemaDigest: 'sha256:873b26d3f3d38089b92b813633d44c83e8585adf2e09ab757996dba46359a0bb',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -253,24 +269,24 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
         at: {"description":"ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.","format":"date-time","type":"string","x-superschematic-scalar":"Temporal.DateTime"},
         count: {"description":"A numeric value","type":"number"},
         extra: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
-        fill: {"description":"A swatch or a palette.","oneOf":[{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},{"additionalProperties":false,"description":"Palette object","properties":{"name":{"description":"A string value","type":"string"},"parent":{"description":"A Palette value","type":["string","null"]}},"required":["name"],"type":"object"}],"type":"object"},
+        fill: {"description":"A swatch or a palette.","oneOf":[{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},{"additionalProperties":false,"description":"Palette object","properties":{"name":{"description":"A string value","type":"string"},"parent":{"description":"A Palette value","type":["string","null"]}},"required":["name"],"type":"object"}],"type":"object"},
         labels: {"additionalProperties":{"description":"A string value","type":"string"},"description":"Map of string values","type":"object"},
         maybeAt: {"description":"ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.","format":"date-time","type":["string","null"],"x-superschematic-scalar":"Temporal.DateTime"},
-        maybeSwatch: {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":["object","null"]},
-        maybeTone: {"description":"A Tone value","type":["string","null"]},
-        maybeTones: {"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":["array","null"]},
+        maybeSwatch: {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":["object","null"]},
+        maybeTone: {"description":"A Tone value","enum":["warm","cool",null],"type":["string","null"]},
+        maybeTones: {"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":["array","null"]},
         palette: {"additionalProperties":false,"description":"Palette object","properties":{"name":{"description":"A string value","type":"string"},"parent":{"description":"A Palette value","type":["string","null"]}},"required":["name"],"type":"object"},
         ref: {"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        swatch: {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},
-        swatchByName: {"additionalProperties":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},"description":"Map of Swatch values","type":"object"},
-        swatchRows: {"description":"Array of arrays of Swatch values","items":{"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},"type":"array"},
-        swatches: {"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},
+        swatch: {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},
+        swatchByName: {"additionalProperties":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},"description":"Map of Swatch values","type":"object"},
+        swatchRows: {"description":"Array of arrays of Swatch values","items":{"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},"type":"array"},
+        swatches: {"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},
         tags: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},
-        tone: {"description":"A Tone value","type":"string"},
-        toneByName: {"additionalProperties":{"description":"A Tone value","type":"string"},"description":"Map of Tone values","type":"object"},
-        toneRows: {"description":"Array of arrays of Tone values","items":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"type":"array"},
-        tones: {"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},
-        tonesByName: {"additionalProperties":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"description":"Map of Tone values","type":"object"},
+        tone: {"description":"A Tone value","enum":["warm","cool"],"type":"string"},
+        toneByName: {"additionalProperties":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"description":"Map of Tone values","type":"object"},
+        toneRows: {"description":"Array of arrays of Tone values","items":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"type":"array"},
+        tones: {"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},
+        tonesByName: {"additionalProperties":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"description":"Map of Tone values","type":"object"},
       },
       required: ['at', 'count', 'extra', 'fill', 'labels', 'palette', 'ref', 'swatch', 'swatchByName', 'swatchRows', 'swatches', 'tags', 'tone', 'toneByName', 'toneRows', 'tones', 'tonesByName']
     },
@@ -297,12 +313,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:5869081597696e8c1ac6c707309975ebeb5049c92322bd913aaad551cc31940e',
+    inputSchemaDigest: 'sha256:7840da09f19cb20960c05e5b7278b6fd89d2c8f9b0ed890319a90e66ae179f07',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        tone: {"description":"tone parameter","type":"string"},
+        tone: {"description":"tone parameter","enum":["warm","cool"],"type":"string"},
       },
       required: ['tone']
     },
@@ -313,6 +329,39 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
         type: 'object',
         description: `PaintView object`
       }
+    }
+  },
+  [PAINT_SET_LABELS]: {
+    name: 'paint.setLabels',
+    operationId: 'PaintSetLabelsHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: [],
+    replay: null,
+    description: `A body argument that is a map of lists.`,
+    namespace: 'paint',
+    methodName: 'setLabels',
+    requiresAuth: false,
+    isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:d9389e9980fbf48e903479aa416c59cfe5a0933bb4991bd87b87f88bbc27ba6c',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        labelsByLocale: {"additionalProperties":{"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},"description":"Map of string values","type":"object"},
+      },
+      required: ['id', 'labelsByLocale']
+    },
+    returns: {
+      type: 'object',
+      description: `PaintView object`
     }
   },
   [PAINT_SET_TONE]: {
@@ -333,15 +382,48 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:049923c7bdefcdcae41b209e898c74b09fd6b497355c54243b112c738e8d011e',
+    inputSchemaDigest: 'sha256:f91544eb2697ac65fa524d327c926ddf0c06da3b50994e2a471989c4bbde442a',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        tone: {"description":"A Tone value","type":"string"},
+        tone: {"description":"A Tone value","enum":["warm","cool"],"type":"string"},
       },
       required: ['id', 'tone']
+    },
+    returns: {
+      type: 'object',
+      description: `PaintView object`
+    }
+  },
+  [PAINT_NAME_TONES]: {
+    name: 'paint.nameTones',
+    operationId: 'PaintNameTonesHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: [],
+    replay: null,
+    description: `A body argument that is a map of enums.`,
+    namespace: 'paint',
+    methodName: 'nameTones',
+    requiresAuth: false,
+    isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:ddd43d09afa8b9c8ea246ef8a76f77be6d1242967841f4cd231192263f0dec71',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        toneByName: {"additionalProperties":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"description":"Map of Tone values","type":"object"},
+      },
+      required: ['id', 'toneByName']
     },
     returns: {
       type: 'object',
@@ -362,8 +444,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        tone: {"description":"A Tone value","type":"string"},
-        tones: {"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},
+        tone: {"description":"A Tone value","enum":["warm","cool"],"type":"string"},
+        tones: {"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},
       },
       required: ['tones']
     }
@@ -378,24 +460,24 @@ export const openAIFunctions: OpenAIFunction[] = [
         at: {"description":"ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.","format":"date-time","type":"string","x-superschematic-scalar":"Temporal.DateTime"},
         count: {"description":"A numeric value","type":"number"},
         extra: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
-        fill: {"description":"A swatch or a palette.","oneOf":[{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},{"additionalProperties":false,"description":"Palette object","properties":{"name":{"description":"A string value","type":"string"},"parent":{"description":"A Palette value","type":["string","null"]}},"required":["name"],"type":"object"}],"type":"object"},
+        fill: {"description":"A swatch or a palette.","oneOf":[{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},{"additionalProperties":false,"description":"Palette object","properties":{"name":{"description":"A string value","type":"string"},"parent":{"description":"A Palette value","type":["string","null"]}},"required":["name"],"type":"object"}],"type":"object"},
         labels: {"additionalProperties":{"description":"A string value","type":"string"},"description":"Map of string values","type":"object"},
         maybeAt: {"description":"ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.","format":"date-time","type":["string","null"],"x-superschematic-scalar":"Temporal.DateTime"},
-        maybeSwatch: {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":["object","null"]},
-        maybeTone: {"description":"A Tone value","type":["string","null"]},
-        maybeTones: {"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":["array","null"]},
+        maybeSwatch: {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":["object","null"]},
+        maybeTone: {"description":"A Tone value","enum":["warm","cool",null],"type":["string","null"]},
+        maybeTones: {"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":["array","null"]},
         palette: {"additionalProperties":false,"description":"Palette object","properties":{"name":{"description":"A string value","type":"string"},"parent":{"description":"A Palette value","type":["string","null"]}},"required":["name"],"type":"object"},
         ref: {"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        swatch: {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},
-        swatchByName: {"additionalProperties":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},"description":"Map of Swatch values","type":"object"},
-        swatchRows: {"description":"Array of arrays of Swatch values","items":{"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},"type":"array"},
-        swatches: {"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},
+        swatch: {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},
+        swatchByName: {"additionalProperties":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},"description":"Map of Swatch values","type":"object"},
+        swatchRows: {"description":"Array of arrays of Swatch values","items":{"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},"type":"array"},
+        swatches: {"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},
         tags: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},
-        tone: {"description":"A Tone value","type":"string"},
-        toneByName: {"additionalProperties":{"description":"A Tone value","type":"string"},"description":"Map of Tone values","type":"object"},
-        toneRows: {"description":"Array of arrays of Tone values","items":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"type":"array"},
-        tones: {"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},
-        tonesByName: {"additionalProperties":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"description":"Map of Tone values","type":"object"},
+        tone: {"description":"A Tone value","enum":["warm","cool"],"type":"string"},
+        toneByName: {"additionalProperties":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"description":"Map of Tone values","type":"object"},
+        toneRows: {"description":"Array of arrays of Tone values","items":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"type":"array"},
+        tones: {"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},
+        tonesByName: {"additionalProperties":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"description":"Map of Tone values","type":"object"},
       },
       required: ['at', 'count', 'extra', 'fill', 'labels', 'palette', 'ref', 'swatch', 'swatchByName', 'swatchRows', 'swatches', 'tags', 'tone', 'toneByName', 'toneRows', 'tones', 'tonesByName']
     }
@@ -407,9 +489,22 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        tone: {"description":"tone parameter","type":"string"},
+        tone: {"description":"tone parameter","enum":["warm","cool"],"type":"string"},
       },
       required: ['tone']
+    }
+  },
+  {
+    name: 'paint.setLabels',
+    description: `A body argument that is a map of lists.`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        labelsByLocale: {"additionalProperties":{"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},"description":"Map of string values","type":"object"},
+      },
+      required: ['id', 'labelsByLocale']
     }
   },
   {
@@ -420,9 +515,22 @@ export const openAIFunctions: OpenAIFunction[] = [
       additionalProperties: false,
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        tone: {"description":"A Tone value","type":"string"},
+        tone: {"description":"A Tone value","enum":["warm","cool"],"type":"string"},
       },
       required: ['id', 'tone']
+    }
+  },
+  {
+    name: 'paint.nameTones',
+    description: `A body argument that is a map of enums.`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        toneByName: {"additionalProperties":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"description":"Map of Tone values","type":"object"},
+      },
+      required: ['id', 'toneByName']
     }
   }
 ];
@@ -439,8 +547,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        tone: {"description":"A Tone value","type":"string"},
-        tones: {"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},
+        tone: {"description":"A Tone value","enum":["warm","cool"],"type":"string"},
+        tones: {"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},
       },
       required: ['tones']
     }
@@ -455,24 +563,24 @@ export const anthropicTools: AnthropicTool[] = [
         at: {"description":"ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.","format":"date-time","type":"string","x-superschematic-scalar":"Temporal.DateTime"},
         count: {"description":"A numeric value","type":"number"},
         extra: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
-        fill: {"description":"A swatch or a palette.","oneOf":[{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},{"additionalProperties":false,"description":"Palette object","properties":{"name":{"description":"A string value","type":"string"},"parent":{"description":"A Palette value","type":["string","null"]}},"required":["name"],"type":"object"}],"type":"object"},
+        fill: {"description":"A swatch or a palette.","oneOf":[{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},{"additionalProperties":false,"description":"Palette object","properties":{"name":{"description":"A string value","type":"string"},"parent":{"description":"A Palette value","type":["string","null"]}},"required":["name"],"type":"object"}],"type":"object"},
         labels: {"additionalProperties":{"description":"A string value","type":"string"},"description":"Map of string values","type":"object"},
         maybeAt: {"description":"ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.","format":"date-time","type":["string","null"],"x-superschematic-scalar":"Temporal.DateTime"},
-        maybeSwatch: {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":["object","null"]},
-        maybeTone: {"description":"A Tone value","type":["string","null"]},
-        maybeTones: {"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":["array","null"]},
+        maybeSwatch: {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":["object","null"]},
+        maybeTone: {"description":"A Tone value","enum":["warm","cool",null],"type":["string","null"]},
+        maybeTones: {"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":["array","null"]},
         palette: {"additionalProperties":false,"description":"Palette object","properties":{"name":{"description":"A string value","type":"string"},"parent":{"description":"A Palette value","type":["string","null"]}},"required":["name"],"type":"object"},
         ref: {"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        swatch: {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},
-        swatchByName: {"additionalProperties":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},"description":"Map of Swatch values","type":"object"},
-        swatchRows: {"description":"Array of arrays of Swatch values","items":{"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},"type":"array"},
-        swatches: {"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},
+        swatch: {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},
+        swatchByName: {"additionalProperties":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},"description":"Map of Swatch values","type":"object"},
+        swatchRows: {"description":"Array of arrays of Swatch values","items":{"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},"type":"array"},
+        swatches: {"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},
         tags: {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},
-        tone: {"description":"A Tone value","type":"string"},
-        toneByName: {"additionalProperties":{"description":"A Tone value","type":"string"},"description":"Map of Tone values","type":"object"},
-        toneRows: {"description":"Array of arrays of Tone values","items":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"type":"array"},
-        tones: {"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},
-        tonesByName: {"additionalProperties":{"description":"Array of Tone values","items":{"description":"A Tone value","type":"string"},"type":"array"},"description":"Map of Tone values","type":"object"},
+        tone: {"description":"A Tone value","enum":["warm","cool"],"type":"string"},
+        toneByName: {"additionalProperties":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"description":"Map of Tone values","type":"object"},
+        toneRows: {"description":"Array of arrays of Tone values","items":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"type":"array"},
+        tones: {"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},
+        tonesByName: {"additionalProperties":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"description":"Map of Tone values","type":"object"},
       },
       required: ['at', 'count', 'extra', 'fill', 'labels', 'palette', 'ref', 'swatch', 'swatchByName', 'swatchRows', 'swatches', 'tags', 'tone', 'toneByName', 'toneRows', 'tones', 'tonesByName']
     }
@@ -484,9 +592,22 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        tone: {"description":"tone parameter","type":"string"},
+        tone: {"description":"tone parameter","enum":["warm","cool"],"type":"string"},
       },
       required: ['tone']
+    }
+  },
+  {
+    name: 'paint.setLabels',
+    description: `A body argument that is a map of lists.`,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        labelsByLocale: {"additionalProperties":{"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},"description":"Map of string values","type":"object"},
+      },
+      required: ['id', 'labelsByLocale']
     }
   },
   {
@@ -497,9 +618,22 @@ export const anthropicTools: AnthropicTool[] = [
       additionalProperties: false,
       properties: {
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
-        tone: {"description":"A Tone value","type":"string"},
+        tone: {"description":"A Tone value","enum":["warm","cool"],"type":"string"},
       },
       required: ['id', 'tone']
+    }
+  },
+  {
+    name: 'paint.nameTones',
+    description: `A body argument that is a map of enums.`,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+        toneByName: {"additionalProperties":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"description":"Map of Tone values","type":"object"},
+      },
+      required: ['id', 'toneByName']
     }
   }
 ];
@@ -511,7 +645,9 @@ export type ToolParams = {
   [PAINT_LIST_PAINT]: PaintListPaintParams;
   [PAINT_PAINT]: PaintPaintParams;
   [PAINT_PAINT_BY_TONE]: PaintPaintByToneParams;
+  [PAINT_SET_LABELS]: PaintSetLabelsParams;
   [PAINT_SET_TONE]: PaintSetToneParams;
+  [PAINT_NAME_TONES]: PaintNameTonesParams;
 };
 
 /**
@@ -541,8 +677,12 @@ export async function invokeTool<T extends ToolName>(
       return sdk.paint.paint(params as PaintPaintParams);
     case PAINT_PAINT_BY_TONE:
       return sdk.paint.paintByTone((params as PaintPaintByToneParams).tone);
+    case PAINT_SET_LABELS:
+      return sdk.paint.setLabels((params as PaintSetLabelsParams).id, params as PaintSetLabelsParams);
     case PAINT_SET_TONE:
       return sdk.paint.setTone((params as PaintSetToneParams).id, params as PaintSetToneParams);
+    case PAINT_NAME_TONES:
+      return sdk.paint.nameTones((params as PaintNameTonesParams).id, params as PaintNameTonesParams);
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }

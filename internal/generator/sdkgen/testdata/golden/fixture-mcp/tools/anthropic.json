@@ -8,7 +8,7 @@
         "additionalProperties": false,
         "properties": {
           "limit": {"description":"A numeric value","maximum":100,"minimum":1,"type":"number"},
-          "statuses": {"description":"Array of OrderStatus values","items":{"description":"A OrderStatus value","type":"string"},"maxItems":2,"minItems":1,"type":"array"}
+          "statuses": {"description":"Array of OrderStatus values","items":{"description":"A OrderStatus value","enum":["open","shipped"],"type":"string"},"maxItems":2,"minItems":1,"type":"array"}
         },
         "required": ["statuses"]
       }

@@ -149,7 +149,7 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 		}
 
 		for _, endpoint := range endpoints {
-			tool := endpointToTool(endpoint, toolsNS, inputTypeFields, apiOutput.TypeUnions, scalars, apiOutput.ToolKeys)
+			tool := endpointToTool(endpoint, toolsNS, inputTypeFields, apiOutput.TypeUnions, apiOutput.TypeEnums, scalars, apiOutput.ToolKeys)
 			tool.APIID = output.APIID
 			if err := toolsutil.ValidateReplayContract(tool.Parameters, tool.ReplayMode, tool.IdempotencyKeyPointers, tool.ExpectedRevisionPointers); err != nil {
 				return nil, fmt.Errorf("operation %s replay contract: %w", tool.OperationID, err)
@@ -173,6 +173,7 @@ func endpointToTool(
 	ns ToolsNamespace,
 	inputTypeFields map[string][]apigen.FieldArgument,
 	inputTypeUnions map[string]apigen.ToolUnionInfo,
+	inputTypeEnums map[string]apigen.ToolEnumInfo,
 	scalars map[string]apigen.ScalarJSONSchemaInfo,
 	keys apigen.ToolKeys,
 ) ToolDefinition {
@@ -204,9 +205,11 @@ func endpointToTool(
 			TSName:   tsutil.ToCamelCase(arg.Name),
 			Type:     arg.Type,
 			Required: arg.Required,
-			// The list shape: the argument schema is T, T[] or T[][].
+			// The shape: the argument schema is T, T[] or T[][], or a map
+			// of T or T[].
 			IsArray:         arg.IsArray,
 			IsArrayOfArrays: arg.IsArrayOfArrays,
+			IsMap:           arg.IsMap,
 		}
 	}
 	queryArgs := make([]ToolQueryArg, len(endpoint.QueryParams))
@@ -222,7 +225,7 @@ func endpointToTool(
 	}
 
 	parameters := toolsutil.BuildParametersSchema(
-		pathParams, queryArgs, endpoint.HasInput, endpoint.InputType, inputTypeFields, inputTypeUnions,
+		pathParams, queryArgs, endpoint.HasInput, endpoint.InputType, inputTypeFields, inputTypeUnions, inputTypeEnums,
 		scalarArgs, endpoint.Encrypted, scalars,
 		func(name, _ string) string {
 			return tsutil.ToCamelCase(name)

@@ -49,7 +49,7 @@ func TestParametersSchemaPreservesNestedObjectsAndListBounds(t *testing.T) {
 		},
 	}
 	nameMin, nameMax := 1, 80
-	schema := BuildParametersSchema(nil, nil, true, "CreateProfileInput", fields, unions, nil, false,
+	schema := BuildParametersSchema(nil, nil, true, "CreateProfileInput", fields, unions, nil, nil, false,
 		map[string]apigen.ScalarJSONSchemaInfo{
 			"string": {Type: "string"},
 			"number": {Type: "number"},
@@ -101,7 +101,7 @@ func TestParametersSchemaIncludesRequiredAndArrayQueryArguments(t *testing.T) {
 			ValidateMin: &min, ValidateMax: &max,
 		},
 	}
-	schema := BuildParametersSchema(nil, query, false, "", nil, nil, nil, false,
+	schema := BuildParametersSchema(nil, query, false, "", nil, nil, nil, nil, false,
 		map[string]apigen.ScalarJSONSchemaInfo{
 			"Identity.Name": {Type: "string"},
 			"Count":         {Type: "integer"},
@@ -161,7 +161,7 @@ func TestToolSchemaCarriesScalarProvenanceAndClosesOnlyStructuralObjects(t *test
 		},
 		"Settings": {{Name: "label", Type: "string", Required: true}},
 	}
-	schema := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, false,
+	schema := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, nil, false,
 		map[string]apigen.ScalarJSONSchemaInfo{
 			"Identity.UUID": {CanonicalName: "Identity.UUID", Type: "string"},
 			"Generic.JSON":  {CanonicalName: "Generic.JSON", Type: "any"},
@@ -202,7 +202,7 @@ func TestToolKeysRenameAndAddVendorKeys(t *testing.T) {
 		Scalar:     "x-acme-scalar",
 		Parameters: []apigen.ToolKeyValue{{Key: "x-acme-version", Value: 2}, {Key: "x-acme-owner", Value: "shop"}},
 	}
-	schema := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, false, scalars, byName, keys)
+	schema := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, nil, false, scalars, byName, keys)
 	encoded, err := json.Marshal(schema)
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +223,7 @@ func TestToolKeysRenameAndAddVendorKeys(t *testing.T) {
 		t.Fatalf("the core scalar key survived a rename: %s", encoded)
 	}
 
-	unkeyed := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, false, scalars, byName, apigen.ToolKeys{})
+	unkeyed := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, nil, false, scalars, byName, apigen.ToolKeys{})
 	if encoded, _ := json.Marshal(unkeyed); strings.Contains(string(encoded), `:"Identity.UUID"`) {
 		t.Fatalf("an empty scalar key still wrote the name: %s", encoded)
 	}
@@ -242,7 +242,7 @@ func TestParametersSchemaRendersTypedMapsAsObjects(t *testing.T) {
 			{Name: "itemKey", Type: "Identity.Name", Required: true},
 		},
 	}
-	schema := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, false,
+	schema := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, nil, false,
 		map[string]apigen.ScalarJSONSchemaInfo{
 			"string":        {Type: "string"},
 			"Identity.Name": {Type: "string", CanonicalName: "Identity.Name"},
@@ -305,6 +305,7 @@ func TestNullableBodyFieldsPreserveContainerAndUnionContracts(t *testing.T) {
 	}
 	schema := BuildParametersSchema(nil, []ToolQueryArg{{Name: "limit", Type: "Count"}}, true, "Input", fields,
 		map[string]apigen.ToolUnionInfo{"Choice": {Discriminator: "kind", Members: []apigen.ToolUnionMemberInfo{{Name: "ChoiceA", DiscriminatorValue: "a"}, {Name: "ChoiceB", DiscriminatorValue: "b"}}}},
+		nil,
 		[]ToolScalarArg{{Name: "reason", Type: "string"}}, false,
 		map[string]apigen.ScalarJSONSchemaInfo{"Identity.UUID": {Type: "string", CanonicalName: "Identity.UUID"}, "Generic.JSON": {Type: "any", CanonicalName: "Generic.JSON"}, "Count": {Type: "integer"}, "string": {Type: "string"}},
 		byName, apigen.DefaultToolKeys())
@@ -359,7 +360,7 @@ func TestValidateReplayContract(t *testing.T) {
 			{Name: "id", Type: "Identity.UUID", Required: true},
 		},
 	}
-	schema := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, false,
+	schema := BuildParametersSchema(nil, nil, true, "Input", fields, nil, nil, nil, false,
 		map[string]apigen.ScalarJSONSchemaInfo{
 			"Identity.UUID": {CanonicalName: "Identity.UUID", Type: "string"},
 			"string":        {Type: "string"},

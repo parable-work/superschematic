@@ -28,7 +28,7 @@
         "idempotencyKeyPointers": [],
         "expectedRevisionPointers": []
       },
-      "inputSchemaDigest": "sha256:0908611e4289a8ae0e89cb020c06b4c09b92865c0dded660c09230d951a12216",
+      "inputSchemaDigest": "sha256:c5964090c62f067eeb77c9b0dcc81bbe7449e3b48480b88daf635263613d1808",
       "bindingStatus": "ready"
     },
     {
