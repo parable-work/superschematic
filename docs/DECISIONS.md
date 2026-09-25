@@ -443,7 +443,7 @@ its spelling are part of that distribution's output.
 The key name and the unset default are reversible until the first
 release.
 
-## D14. A malformed scalar value is one `pattern` error
+## D14. A failing scalar value is one error, named by the rule it breaks
 
 A scalar value its scalar rejects is one validation error in every
 validator: the Go, TypeScript and Python schema runtimes and the generated

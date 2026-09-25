@@ -147,7 +147,7 @@ A malformed scalar element, such as `not a url` in a `Network.Url[][]`,
 is one `pattern` error at `field[i][j]`, as a malformed scalar field is at
 `field`, and an element outside the scalar's length bounds or range is one
 `minLength`, `maxLength`, `min` or `max` error
-([D14](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-a-malformed-scalar-value-is-one-pattern-error)).
+([D14](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-a-failing-scalar-value-is-one-error-named-by-the-rule-it-breaks)).
 An element of the wrong JSON type, such as a number in a list of a string
 scalar, is `type`.
 
