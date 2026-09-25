@@ -649,6 +649,12 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Go API, `session` auth provider: when the upstream DB has a `Session`
+  table, the provider's `middlewareStdImports` snippet imported `"time"`,
+  which `middleware.go` already imports. go/format drops the duplicate, so
+  a normal build compiled, but a `--skip-format` build wrote `"time"` twice
+  and `middleware.go` did not compile. The snippet no longer imports it.
+  Patch.
 - Build cache: the authoring-import depfile of a service with sidecar
   documents went to `<repo>/schemas/dist/.authoring-imports/` on a single
   `build` or `build --with-deps` whose schemas root had another name,
