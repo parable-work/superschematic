@@ -164,6 +164,22 @@
               "name": "ParityPoint",
               "isArray": true
             }
+          },
+          {
+            "name": "boolGrid",
+            "typeRef": {
+              "name": "boolean",
+              "isArray": true,
+              "isArrayOfArrays": true
+            }
+          },
+          {
+            "name": "rankGrid",
+            "typeRef": {
+              "name": "Ordering.Rank",
+              "isArray": true,
+              "isArrayOfArrays": true
+            }
           }
         ],
         "jsonField": true
@@ -268,6 +284,28 @@
             },
             "validateMin": 1,
             "validateMax": 10
+          },
+          {
+            "name": "optNums",
+            "typeRef": {
+              "name": "number",
+              "isArray": true
+            },
+            "validateMin": 1,
+            "validateMax": 10
+          },
+          {
+            "name": "optBool",
+            "typeRef": {
+              "name": "boolean"
+            }
+          },
+          {
+            "name": "optBools",
+            "typeRef": {
+              "name": "boolean",
+              "isArray": true
+            }
           }
         ],
         "jsonField": true
@@ -773,6 +811,297 @@
       }
     },
     {
+      "name": "req_str_absent",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqList": [
+          "a"
+        ]
+      },
+      "want": {
+        "reqStr": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "req_str_wrong_type",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": 1234567,
+        "reqList": [
+          "a"
+        ]
+      },
+      "want": {
+        "reqStr": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "opt_str_wrong_type",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "optStr": 42
+      },
+      "want": {
+        "optStr": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "opt_num_wrong_type",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "optNum": "50"
+      },
+      "want": {
+        "optNum": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "opt_bool_wrong_type",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "optBool": "true"
+      },
+      "want": {
+        "optBool": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "rank_not_integer",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "rank": 1.5
+      },
+      "want": {
+        "rank": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "rank_wrong_type",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "rank": "3"
+      },
+      "want": {
+        "rank": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "share_wrong_type",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "share": "0.5"
+      },
+      "want": {
+        "share": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "url_wrong_type",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "url": 42
+      },
+      "want": {
+        "url": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "req_list_not_a_list",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": "a"
+      },
+      "want": {
+        "reqList": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "req_list_wrong_type_element",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a",
+          1234567
+        ]
+      },
+      "want": {
+        "reqList[1]": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "opt_nums_wrong_type_element",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "optNums": [
+          5,
+          "50"
+        ]
+      },
+      "want": {
+        "optNums[1]": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "opt_bools_wrong_type_element",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "optBools": [
+          true,
+          "true"
+        ]
+      },
+      "want": {
+        "optBools[1]": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "ranks_element_not_integer",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "ranks": [
+          2,
+          1.5
+        ]
+      },
+      "want": {
+        "ranks[1]": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "names_wrong_type_element",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "names": [
+          "Ada",
+          42
+        ]
+      },
+      "want": {
+        "names[1]": [
+          "type"
+        ]
+      }
+    },
+    {
       "name": "list_null_element",
       "type": "ListMatrix",
       "payload": {
@@ -934,6 +1263,21 @@
         "reqUrlGrid": [],
         "reqShadeGrid": [],
         "reqShadeList": []
+      },
+      "want": {
+        "reqGrid": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "grid_required_outer_not_a_list",
+      "type": "ListMatrix",
+      "payload": {
+        "reqGrid": "a",
+        "reqShadeGrid": [],
+        "reqShadeList": [],
+        "reqUrlGrid": []
       },
       "want": {
         "reqGrid": [
@@ -1305,6 +1649,53 @@
       },
       "want": {
         "reqUrlGrid[1][1]": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "grid_wrong_type_innermost",
+      "type": "ListMatrix",
+      "payload": {
+        "boolGrid": [
+          [
+            true,
+            "true"
+          ]
+        ],
+        "numGrid": [
+          [
+            5,
+            "50"
+          ]
+        ],
+        "rankGrid": [
+          [
+            1,
+            1.5
+          ]
+        ],
+        "reqGrid": [
+          [
+            "a",
+            1234567
+          ]
+        ],
+        "reqShadeGrid": [],
+        "reqShadeList": [],
+        "reqUrlGrid": []
+      },
+      "want": {
+        "boolGrid[0][1]": [
+          "type"
+        ],
+        "numGrid[0][1]": [
+          "type"
+        ],
+        "rankGrid[0][1]": [
+          "type"
+        ],
+        "reqGrid[0][1]": [
           "type"
         ]
       }

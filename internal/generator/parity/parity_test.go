@@ -28,9 +28,10 @@
 // driver asserts the refusal instead. That is expected, not a divergence
 // to close: in Go and Python the typed decoder is the first check, and the
 // payload never becomes a value to validate. Go's json.Unmarshal refuses a
-// non-list inner value and a wrong-type element (a number where a string
-// scalar belongs); pydantic's strict parse refuses a wrong-type element, a
-// bad enum element and a nested object element with a bad field.
+// non-list inner value and a value or element of the wrong JSON type (a
+// number where a string belongs); pydantic's strict parse refuses a value
+// or element of the wrong type, a bad enum element and a nested object
+// element with a bad field.
 //
 // Verdict comparison is about semantics, not field-name idiom: the Python
 // driver maps validate_all's snake_case attribute keys back to wire names
@@ -84,13 +85,19 @@ const schemaConfigJSON = `{
 // of its range (Ordering.Rank, an integer; Generic.Probability, a float) is
 // "min" or "max".
 //
+// The builtin primitive fields (reqStr, optStr, reqList, optList, optNum,
+// optNums, optBool, optBools) and the scalar fields also cover a value of
+// the wrong JSON type (D14, amended): it is one "type" error at its path,
+// required or optional, and the field's length, pattern and range rules do
+// not check it.
+//
 // ListMatrix holds the list rules for T[] and T[][] (D12): a required list
 // means present, not non-empty; listMin and listMax bound the outer list; a
 // field's own constraints apply to every element and every innermost
 // element; an inner list is never null ("required" at field[i]) and any
 // other non-list inner value is "type" at field[i]; a list element is never
-// null ("required" at field[i] or field[i][j]). Its enum, scalar and object
-// element types cover the element checks at both depths.
+// null ("required" at field[i] or field[i][j]). Its enum, scalar, object
+// and builtin element types cover the element checks at both depths.
 const parityMatrixSchemaJSON = `{
   "scalars": {
     "Network.Url": {
@@ -193,6 +200,20 @@ const parityMatrixSchemaJSON = `{
           "typeRef": { "name": "number" },
           "validateMin": 1,
           "validateMax": 10
+        },
+        {
+          "name": "optNums",
+          "typeRef": { "name": "number", "isArray": true },
+          "validateMin": 1,
+          "validateMax": 10
+        },
+        {
+          "name": "optBool",
+          "typeRef": { "name": "boolean" }
+        },
+        {
+          "name": "optBools",
+          "typeRef": { "name": "boolean", "isArray": true }
         }
       ]
     },
@@ -254,6 +275,14 @@ const parityMatrixSchemaJSON = `{
         {
           "name": "pointList",
           "typeRef": { "name": "ParityPoint", "isArray": true }
+        },
+        {
+          "name": "boolGrid",
+          "typeRef": { "name": "boolean", "isArray": true, "isArrayOfArrays": true }
+        },
+        {
+          "name": "rankGrid",
+          "typeRef": { "name": "Ordering.Rank", "isArray": true, "isArrayOfArrays": true }
         }
       ]
     }
@@ -461,6 +490,110 @@ var vectors = []parityVector{
 		decodeRejects: []string{"go", "python"},
 	},
 
+	// A present value of the wrong JSON type is "type", whatever the field's
+	// rules: the type check comes before length, pattern and range, so the
+	// value is reported once. It applies to a builtin (string, number,
+	// boolean) and a scalar field, required or optional. Go's
+	// json.Unmarshal and pydantic's strict parse refuse the payload first.
+	{
+		// A missing required string is "required" only: its length is not
+		// measured.
+		name:    "req_str_absent",
+		payload: `{"reqScalarList": ["https://a.test"], "reqList": ["a"]}`,
+		want:    map[string][]string{"reqStr": {"required"}},
+	},
+	{
+		name:          "req_str_wrong_type",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": 1234567, "reqList": ["a"]}`,
+		want:          map[string][]string{"reqStr": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "opt_str_wrong_type",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optStr": 42}`,
+		want:          map[string][]string{"optStr": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "opt_num_wrong_type",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optNum": "50"}`,
+		want:          map[string][]string{"optNum": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "opt_bool_wrong_type",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optBool": "true"}`,
+		want:          map[string][]string{"optBool": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		// An integer scalar given a non-integer number is "type".
+		name:          "rank_not_integer",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "rank": 1.5}`,
+		want:          map[string][]string{"rank": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "rank_wrong_type",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "rank": "3"}`,
+		want:          map[string][]string{"rank": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "share_wrong_type",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "share": "0.5"}`,
+		want:          map[string][]string{"share": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		// An optional string scalar given a number is "type", as a
+		// required one is.
+		name:          "url_wrong_type",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "url": 42}`,
+		want:          map[string][]string{"url": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		// A required list given a value that is not a list is "required",
+		// as a missing one is.
+		name:          "req_list_not_a_list",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": "a"}`,
+		want:          map[string][]string{"reqList": {"required"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "req_list_wrong_type_element",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a", 1234567]}`,
+		want:          map[string][]string{"reqList[1]": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "opt_nums_wrong_type_element",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optNums": [5, "50"]}`,
+		want:          map[string][]string{"optNums[1]": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "opt_bools_wrong_type_element",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optBools": [true, "true"]}`,
+		want:          map[string][]string{"optBools[1]": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "ranks_element_not_integer",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "ranks": [2, 1.5]}`,
+		want:          map[string][]string{"ranks[1]": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		// An element of an optional string scalar list given a number is
+		// "type", as one of a required list is.
+		name:          "names_wrong_type_element",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "names": ["Ada", 42]}`,
+		want:          map[string][]string{"names[1]": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+
 	// T[] element types beyond builtins and scalars.
 	{
 		// A list element is never null.
@@ -513,6 +646,13 @@ var vectors = []parityVector{
 		typeName: "ListMatrix",
 		payload:  `{"reqUrlGrid": [], "reqShadeGrid": [], "reqShadeList": []}`,
 		want:     map[string][]string{"reqGrid": {"required"}},
+	},
+	{
+		name:          "grid_required_outer_not_a_list",
+		typeName:      "ListMatrix",
+		payload:       listMatrix(`"reqGrid": "a"`),
+		want:          map[string][]string{"reqGrid": {"required"}},
+		decodeRejects: []string{"go", "python"},
 	},
 	{
 		name:     "grid_required_outer_null",
@@ -624,6 +764,20 @@ var vectors = []parityVector{
 		decodeRejects: []string{"go", "python"},
 	},
 	{
+		// An innermost element of the wrong JSON type is "type", once.
+		name:     "grid_wrong_type_innermost",
+		typeName: "ListMatrix",
+		payload: listMatrix(`"reqGrid": [["a", 1234567]], "numGrid": [[5, "50"]], "boolGrid": [[true, "true"]],
+			"rankGrid": [[1, 1.5]]`),
+		want: map[string][]string{
+			"reqGrid[0][1]":  {"type"},
+			"numGrid[0][1]":  {"type"},
+			"boolGrid[0][1]": {"type"},
+			"rankGrid[0][1]": {"type"},
+		},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
 		name:          "grid_bad_object_element",
 		typeName:      "ListMatrix",
 		payload:       listMatrix(`"pointGrid": [[{"shade": "light"}, {"shade": "purple"}]]`),
@@ -655,6 +809,12 @@ var knownDivergences = map[string]map[string]map[string][]string{
 			"pointGrid[0][0].shade": {"required"},
 			"reqUrlGrid[0][0]":      {"required"},
 		},
+		// json.Unmarshal decodes a missing required string field into "",
+		// which Validate cannot tell from a present empty string, and a
+		// present "" satisfies a required builtin string in every
+		// validator. Closing this changes the generated type as the null
+		// element gap does; D12's amendment lists both.
+		"req_str_absent": {},
 	},
 }
 
