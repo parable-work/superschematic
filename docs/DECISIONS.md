@@ -445,30 +445,42 @@ release.
 
 ## D14. A malformed scalar value is one `pattern` error
 
-A scalar value its scalar rejects, such as `not a url` for `Network.Url`,
-is one validation error named `pattern` in every validator: the Go,
-TypeScript and Python schema runtimes and the generated Go, TypeScript and
-Python validators, for a single field and a list element alike.
+A scalar value its scalar rejects is one validation error in every
+validator: the Go, TypeScript and Python schema runtimes and the generated
+Go, TypeScript and Python validators, for a single field and a list
+element alike. The error is named by the scalar's rule the value breaks:
+`pattern` for a malformed value such as `not a url` for `Network.Url`,
+`minLength` or `maxLength` for one outside the scalar's length bounds,
+`min` or `max` for one outside its range.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| The name is `pattern`. The generated Go, TypeScript and Python validators, the TypeScript runtime and the error example in the generated TypeScript README already used it; only the Go runtime's dispatch registry said `scalar`. | `scalar`, which only the Go runtime used; the scalar core's own name for each failure kind (`pattern`, `length`, `range`), which the Go runtime's registry, a plain `name -> error` function, does not receive |
-| The Go runtime keeps the scalar core's message, so a failure that is not a pattern mismatch (a length, a range or a parse failure) still says why. | A fixed `invalid format` message |
-| One error per failing value. Where a validator checks a value against the scalar's IR constraints and through the scalar core, only one of them reports it. The generated Go validator leaves a scalar field to the scalar's `Validate`, which runs the core; the TypeScript and Python runtimes and the generated TypeScript and Python validators run the core only when the IR constraints pass. | Reporting both, which gave `pattern` twice (the generated Go validator, the TypeScript runtime, the generated TypeScript validator for a scalar with a custom validator) or `invalid` next to `pattern` (the generated Python validator) |
+| A malformed value is `pattern`. The generated Go, TypeScript and Python validators, the TypeScript runtime and the error example in the generated TypeScript README already used it; only the Go runtime's dispatch registry said `scalar`. | `scalar`, which only the Go runtime used |
+| The scalar's IR constraints (lengths, pattern, reserved words, range) come first and name a failure. The scalar core's verdict counts only for a value they accept. The generated Go validator asks the core first, which is also how it recognises a missing required value, and drops the core's errors when a rule fails; the others run the core only after the rules pass. | The scalar core's own names (`length`, `range`), which the generated Go validator and the Go runtime reported for a length or range failure; consumers that map validator names to messages know `minLength`, `maxLength`, `min` and `max`, not these |
+| One error per failing value. | Reporting the IR constraint and the core both, which gave `pattern` twice (the generated Go validator, the TypeScript runtime, the generated TypeScript validator for a scalar with a custom validator), `invalid` next to `pattern` (the generated Python validator) or `length` next to `maxLength` (the generated Go validator) |
+| A failure only the scalar core finds is `pattern` in the Go runtime, whose registry receives a plain `name -> error` function, with the core's message, so it still says why. | A fixed `invalid format` message |
 
 A non-string value of a string scalar is not malformed but mistyped: the
 runtimes and the generated TypeScript validator report `type` for a
 required one, and the Go and Python decoders refuse it (D12, amended).
 
-Still different, and not yet in the parity matrix: a core scalar that
-fails a length or range bound is `pattern` in the Go runtime (with the
-core's message), `length` or `range` in the generated Go validator (the
-names the scalar core's Go binding gives), and `maxLength`, `minLength`,
-`min` or `max` in the others.
+Still different, and not in the parity matrix: a value the scalar's IR
+constraints accept but the scalar core rejects (a core-only check, such as
+the JSON shape of `Embedding.Vector`). The Go runtime says `pattern` with
+the core's message. The generated Go validator, the TypeScript runtime and
+the generated TypeScript validator (for a scalar with a custom validator;
+it does not call the core for any other) use the name the scalar core's
+binding gives (`pattern`, `custom`, `parse`, ...). The generated Python
+validator says `invalid`, and checks it for an optional field only. The
+Python runtime reaches the core only through a registry keyed by the
+schema's scalar names, which its default registry is not, and says
+`custom`.
 
-The parity matrix holds the rule for a single field, a list element and a
-list-of-lists element, for a scalar checked by its pattern
-(`Network.Url`) and one the core also checks with a custom validator
-(`Contact.Email`).
+The parity matrix holds the rule for a malformed value as a single field,
+a list element and a list-of-lists element (`Network.Url`, and
+`Contact.Email`, which the core also checks with a custom validator), and
+for length and range failures as a single field and a list element
+(`Network.Url` and `Identity.Name` for length, `Ordering.Rank`, an
+integer, and `Generic.Probability`, a float, for range).
 
-The name and the one-error rule are reversible until the first release.
+The names and the one-error rule are reversible until the first release.

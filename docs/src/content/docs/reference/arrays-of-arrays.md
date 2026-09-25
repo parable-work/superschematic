@@ -145,7 +145,8 @@ A validation error names the field and both indexes:
 
 A malformed scalar element, such as `not a url` in a `Network.Url[][]`,
 is one `pattern` error at `field[i][j]`, as a malformed scalar field is at
-`field`
+`field`, and an element outside the scalar's length bounds or range is one
+`minLength`, `maxLength`, `min` or `max` error
 ([D14](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-a-malformed-scalar-value-is-one-pattern-error)).
 An element of the wrong JSON type, such as a number in a list of a string
 scalar, is `type`.

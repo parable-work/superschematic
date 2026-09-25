@@ -444,18 +444,23 @@ of a generated artifact is always listed here with the bump it requires.
   `ValidationErrors`), so it never ran and no response was ever checked.
   Responses are sent as before, and a nil inner list of an array-of-arrays
   response is still sent as `[]`. Patch.
-- Go schema runtime: `validate.NewDispatchRegistry`, and so
-  `DefaultRegistry`, tags a value the scalar core rejects `pattern`
-  instead of `scalar`, with the core's message, as every other validator
-  names a malformed scalar value (D14). Code that matches the validator
-  name `scalar` must match `pattern`. Major.
-- Go types: `Validate` leaves a scalar field to the scalar's own
-  `Validate` or `ValidateRequired` and no longer repeats the scalar's
-  pattern, length and range checks inline, so a malformed value is one
-  error. A malformed URL was `pattern` twice and is `pattern` once; a
-  too-long one was `length` and `maxLength` and is `length`. A field's own
-  constraints (`validateMaxLength`, `validatePattern`, ...) are still
-  checked. Minor.
+- Go schema runtime: a scalar value is checked against the scalar's IR
+  constraints (lengths, pattern, reserved words, range) before the
+  registered validator, and a failure is named by them (`minLength`,
+  `maxLength`, `pattern`, `min`, `max`); only a value they accept reaches
+  the registry. `validate.NewDispatchRegistry`, and so `DefaultRegistry`,
+  tags what the scalar core rejects `pattern` instead of `scalar`, with the
+  core's message (D14). A too-short `Identity.Name` was `scalar` and is
+  `minLength`; code that matches the validator name `scalar` must match
+  `pattern` or the constraint's name. Major.
+- Go types: `Validate` checks a scalar field once, through a generated
+  `validate<Scalar>Value`: a failure of the scalar's own length, pattern
+  or range is named by that rule, and the scalar's `Validate` (the scalar
+  core) decides only for a value they accept. A malformed URL was
+  `pattern` twice and is `pattern` once; a too-long one was `length` and
+  `maxLength` and is `maxLength`. A field's own constraints
+  (`validateMaxLength`, `validatePattern`, ...) are still checked inline.
+  Minor.
 - TypeScript types: `validate<Type>` rejects a null list element of every
   `T[]` and `T[][]` field as `required` ("required field") at `field[i]`
   or `field[i][j]`, in an optional list too, as the schema runtimes and
