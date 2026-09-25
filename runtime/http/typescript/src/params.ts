@@ -336,11 +336,11 @@ export function decodeListOfLists(location: ParamLocation, spec: ParamSpec, valu
  * for a boolean (`type`, "expected a string", ...). An object value must be
  * a JSON object (`type`, "expected an object") and pass the spec's parser
  * ("does not match the declared type"). A 'json' value is any JSON value
- * but null. A parameter with a default that is absent or null decodes the
- * default as a path or query value would.
+ * but null. A parameter of any other kind with a default that is absent or
+ * null decodes the default as a path or query value would.
  */
 export function decodeJsonParam(location: ParamLocation, spec: ParamSpec, value: unknown): unknown {
-  if ((value === undefined || value === null) && spec.defaultValue !== undefined && !spec.isArrayOfArrays) {
+  if ((value === undefined || value === null) && spec.defaultValue !== undefined && !spec.isArrayOfArrays && spec.kind !== 'object') {
     return decodeParam(location, spec, undefined);
   }
   if (spec.isArrayOfArrays) return decodeListOfLists(location, spec, value);

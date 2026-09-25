@@ -319,6 +319,7 @@ describe('JSON body parameters of a scalar, enum or JSON type', () => {
     expect(decodeJsonParam('body', p({ required: false }), null)).toBeUndefined();
     expect(decodeJsonParam('body', p({ required: false, kind: 'integer', defaultValue: '7' }), undefined)).toBe(7);
     expect(decodeJsonParam('body', p({ required: false, isArray: true, defaultValue: 'a,b' }), null)).toEqual(['a', 'b']);
+    expect(decodeJsonParam('body', p({ required: false, kind: 'object', parse: value => value, defaultValue: '{}' }), undefined)).toBeUndefined();
   });
 
   test('a JSON value is any JSON value but null, and a null list element is required', () => {
