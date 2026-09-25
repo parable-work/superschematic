@@ -585,10 +585,6 @@ var knownDivergences = map[string]map[string]map[string][]string{
 			"numGrid[0][0]":    {"min"},
 			"reqUrlGrid[0][0]": {"required"},
 		},
-		// validate<Type> recurses into nested object values only for a
-		// @strictJSON type, for T, T[] and T[][] alike.
-		"list_bad_object_element": {},
-		"grid_bad_object_element": {},
 	},
 }
 

@@ -4,6 +4,7 @@ import {
   newValidationErrors,
   addFieldError,
   setFieldErrors,
+  addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { load as loadYaml } from 'js-yaml';
@@ -13,7 +14,7 @@ import { validateIdentityUUIDRequired, validateIdentityUUID } from '../scalars/i
 
 import { validateCellStateRequired, validateCellState } from '../enums';
 
-import { parseBoardPointFromJSON } from './boardpoint';
+import { parseBoardPointFromJSON, validateBoardPoint } from './boardpoint';
 
 /**
  * Validates a Board object
@@ -65,6 +66,29 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     });
   } else {
     addFieldError(errors, "states", "required", "required field");
+  }
+
+  {
+    // A nested object is validated as its own type, its errors under the
+    // field's path; any other value is left to the field's other checks.
+    const validateNested = (nested: unknown, path: string) => {
+      if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) {
+        return;
+      }
+      const nestedErrors = validateBoardPoint(nested as BoardPoint);
+      if (nestedErrors !== true) {
+        addNestedErrors(errors, path, nestedErrors);
+      }
+    };
+
+    if (Array.isArray(value.walls)) {
+      value.walls.forEach((row, rowIndex) => {
+        if (Array.isArray(row)) {
+          row.forEach((item, index) => validateNested(item, `walls[${rowIndex}][${index}]`));
+        }
+      });
+    }
+
   }
 
   if (Array.isArray(value.walls)) {

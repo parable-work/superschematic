@@ -4,6 +4,7 @@ import {
   newValidationErrors,
   addFieldError,
   setFieldErrors,
+  addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { load as loadYaml } from 'js-yaml';
@@ -11,7 +12,7 @@ import type { SaveGridInput, Point } from '../../types';
 
 import { validateShadeRequired, validateShade } from '../enums';
 
-import { parsePointFromJSON } from './point';
+import { parsePointFromJSON, validatePoint } from './point';
 
 /**
  * Validates a SaveGridInput object
@@ -56,6 +57,29 @@ export function validateSaveGridInput(value: SaveGridInput | null | undefined): 
     });
   } else {
     addFieldError(errors, "shades", "required", "required field");
+  }
+
+  {
+    // A nested object is validated as its own type, its errors under the
+    // field's path; any other value is left to the field's other checks.
+    const validateNested = (nested: unknown, path: string) => {
+      if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) {
+        return;
+      }
+      const nestedErrors = validatePoint(nested as Point);
+      if (nestedErrors !== true) {
+        addNestedErrors(errors, path, nestedErrors);
+      }
+    };
+
+    if (Array.isArray(value.polygons)) {
+      value.polygons.forEach((row, rowIndex) => {
+        if (Array.isArray(row)) {
+          row.forEach((item, index) => validateNested(item, `polygons[${rowIndex}][${index}]`));
+        }
+      });
+    }
+
   }
 
   if (Array.isArray(value.polygons)) {

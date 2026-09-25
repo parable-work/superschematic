@@ -3,7 +3,8 @@
 import {
   newValidationErrors,
   addFieldError,
-  setFieldErrors,
+  setFieldErrors,{{if .ValidatesNestedObjects}}
+  addNestedErrors,{{end}}
 } from '{{$.Naming.ScalarNpmPackage}}/validation';
 import type { ScalarValidationResult, ValidationResult } from '{{$.Naming.ScalarNpmPackage}}/validation';
 import { load as loadYaml } from 'js-yaml';
@@ -21,7 +22,7 @@ import { validate{{.Name}}Required, validate{{.Name}} } from '{{.ImportPackage}}
 import { parse{{.Symbol}} as parse{{.Symbol}}FromLib } from '{{$.Naming.ScalarNpmPackage}}/scalars';
 {{end}}
 {{range .ParserNestedTypes}}
-import { parse{{.}}FromJSON{{if $.Type.StrictJSON}}, validate{{.}}Required{{end}} } from './{{lower .}}';
+import { parse{{.}}FromJSON, validate{{.}}{{if $.Type.StrictJSON}}Required{{end}} } from './{{lower .}}';
 {{end}}
 
 /**
@@ -75,6 +76,48 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     {{else if .IsArray}}
     if (!Array.isArray(value.{{.TSName}})) addFieldError(errors, "{{.TSName}}", "array", "expected an array");
     else value.{{.TSName}}.forEach((item, index) => validateNested(item, `{{.TSName}}[${index}]`));
+    {{else}}
+    validateNested(value.{{.TSName}}, "{{.TSName}}");
+    {{end}}
+  }
+  {{end}}
+  {{if and (not $.Type.StrictJSON) (not .IsScalar) (or (containsString $.ParserNestedTypes .Type) (eq .Type $.Type.Name))}}
+  {
+    // A nested object is validated as its own type, its errors under the
+    // field's path; any other value is left to the field's other checks.
+    const validateNested = (nested: unknown, path: string) => {
+      if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) {
+        return;
+      }
+      const nestedErrors = validate{{.Type}}(nested as {{.Type}});
+      if (nestedErrors !== true) {
+        addNestedErrors(errors, path, nestedErrors);
+      }
+    };
+    {{if .IsMap}}
+    if (value.{{.TSName}} !== null && value.{{.TSName}} !== undefined && typeof value.{{.TSName}} === 'object' && !Array.isArray(value.{{.TSName}})) {
+      for (const [key, nested] of Object.entries(value.{{.TSName}})) {
+        {{if .IsArray}}
+        if (Array.isArray(nested)) {
+          nested.forEach((item, index) => validateNested(item, `{{.TSName}}.${key}[${index}]`));
+        }
+        {{else}}
+        validateNested(nested, `{{.TSName}}.${key}`);
+        {{end}}
+      }
+    }
+    {{else if .IsArrayOfArrays}}
+    if (Array.isArray(value.{{.TSName}})) {
+      value.{{.TSName}}.forEach((row, rowIndex) => {
+        if (Array.isArray(row)) {
+          row.forEach((item, index) => validateNested(item, `{{.TSName}}[${rowIndex}][${index}]`));
+        }
+      });
+    }
+    {{else if .IsArray}}
+    if (Array.isArray(value.{{.TSName}})) {
+      value.{{.TSName}}.forEach((item, index) => validateNested(item, `{{.TSName}}[${index}]`));
+    }
     {{else}}
     validateNested(value.{{.TSName}}, "{{.TSName}}");
     {{end}}
