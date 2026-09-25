@@ -103,6 +103,42 @@
       }
     },
     "types": {
+      "JsonMatrix": {
+        "name": "JsonMatrix",
+        "owner": "src/parity-matrix.schema.json",
+        "role": "EmbeddedStruct",
+        "fields": [
+          {
+            "name": "reqJson",
+            "typeRef": {
+              "name": "Generic.JSON"
+            },
+            "required": true
+          },
+          {
+            "name": "optJson",
+            "typeRef": {
+              "name": "Generic.JSON"
+            }
+          },
+          {
+            "name": "jsonList",
+            "typeRef": {
+              "name": "Generic.JSON",
+              "isArray": true
+            }
+          },
+          {
+            "name": "jsonGrid",
+            "typeRef": {
+              "name": "Generic.JSON",
+              "isArray": true,
+              "isArrayOfArrays": true
+            }
+          }
+        ],
+        "jsonField": true
+      },
       "ListMatrix": {
         "name": "ListMatrix",
         "owner": "src/parity-matrix.schema.json",
@@ -1189,7 +1225,9 @@
           null
         ],
         "payloads": [
-          "{}",
+          {
+            "a": 1
+          },
           null
         ],
         "reqGrid": [],
@@ -1292,8 +1330,14 @@
           []
         ],
         "payloads": [
-          "{}",
-          "[1, 2]"
+          {
+            "a": 1
+          },
+          [
+            1,
+            2
+          ],
+          "{}"
         ],
         "pointGrid": [
           [
@@ -1834,6 +1878,186 @@
       "want": {
         "pointGrid[0][1].shade": [
           "enum"
+        ]
+      }
+    },
+    {
+      "name": "json_object",
+      "type": "JsonMatrix",
+      "payload": {
+        "reqJson": {
+          "k": 1,
+          "none": null
+        },
+        "optJson": {},
+        "jsonList": [
+          {
+            "k": [
+              1,
+              null
+            ]
+          }
+        ],
+        "jsonGrid": [
+          [
+            {
+              "k": 1
+            }
+          ],
+          []
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "json_array",
+      "type": "JsonMatrix",
+      "payload": {
+        "reqJson": [
+          1,
+          "two",
+          null
+        ],
+        "optJson": [],
+        "jsonList": [
+          [
+            1,
+            2
+          ],
+          []
+        ],
+        "jsonGrid": [
+          [
+            [
+              1
+            ],
+            []
+          ]
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "json_string",
+      "type": "JsonMatrix",
+      "payload": {
+        "reqJson": "not json",
+        "optJson": "",
+        "jsonList": [
+          "s",
+          ""
+        ],
+        "jsonGrid": [
+          [
+            "{"
+          ]
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "json_number",
+      "type": "JsonMatrix",
+      "payload": {
+        "reqJson": 42,
+        "optJson": -1.5,
+        "jsonList": [
+          0,
+          3.25
+        ],
+        "jsonGrid": [
+          [
+            1e3
+          ]
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "json_boolean",
+      "type": "JsonMatrix",
+      "payload": {
+        "reqJson": true,
+        "optJson": false,
+        "jsonList": [
+          false,
+          true
+        ],
+        "jsonGrid": [
+          [
+            false
+          ]
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "json_required_null",
+      "type": "JsonMatrix",
+      "payload": {
+        "reqJson": null
+      },
+      "want": {
+        "reqJson": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "json_required_absent",
+      "type": "JsonMatrix",
+      "payload": {
+        "optJson": {
+          "k": 1
+        }
+      },
+      "want": {
+        "reqJson": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "json_optional_null",
+      "type": "JsonMatrix",
+      "payload": {
+        "reqJson": 1,
+        "optJson": null,
+        "jsonList": null,
+        "jsonGrid": null
+      },
+      "want": {}
+    },
+    {
+      "name": "json_optional_absent",
+      "type": "JsonMatrix",
+      "payload": {
+        "reqJson": 1
+      },
+      "want": {}
+    },
+    {
+      "name": "json_list_null_element",
+      "type": "JsonMatrix",
+      "payload": {
+        "reqJson": 1,
+        "jsonList": [
+          1,
+          null
+        ],
+        "jsonGrid": [
+          [
+            null,
+            1
+          ]
+        ]
+      },
+      "want": {
+        "jsonGrid[0][0]": [
+          "required"
+        ],
+        "jsonList[1]": [
+          "required"
         ]
       }
     }
