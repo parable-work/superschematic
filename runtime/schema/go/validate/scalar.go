@@ -30,12 +30,13 @@ func (v *Validator) validateScalarRequired(scalar *ir.ScalarDef, value any) []Va
 
 // validateScalarValue validates a scalar value without a required check, mirroring the
 // generated Validate() method. For string primitives, empty strings are skipped
-// (matching generated behavior for optional fields).
+// (matching generated behavior for optional fields), and a value of another
+// JSON type is "type", as it is for a required field.
 func (v *Validator) validateScalarValue(scalar *ir.ScalarDef, value any) []ValidationError {
 	if isStringPrimitive(scalar.Primitive) {
 		s, ok := value.(string)
 		if !ok {
-			return nil
+			return []ValidationError{{Validator: "type", Message: "expected string value"}}
 		}
 		if s == "" {
 			return nil

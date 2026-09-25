@@ -225,6 +225,10 @@ func (v *Validator) validateSingleField(field *ir.FieldDef, key, kind string, re
 		}
 
 	case "builtin":
+		if typeErr := builtinTypeError(field.TypeRef.Name, value); typeErr != nil {
+			errs.SetFieldErrors(key, []ValidationError{*typeErr})
+			return
+		}
 		if required && isBuiltinString(field.TypeRef.Name) {
 			if s, ok := value.(string); ok && s == "" {
 				errs.AddFieldError(key, "required", "required field")
@@ -316,6 +320,10 @@ func (v *Validator) validateArrayElem(field *ir.FieldDef, elemKey, kind string, 
 		}
 
 	case "builtin":
+		if typeErr := builtinTypeError(field.TypeRef.Name, elem); typeErr != nil {
+			errs.SetFieldErrors(elemKey, []ValidationError{*typeErr})
+			return
+		}
 		for _, elemErr := range validateFieldNumericConstraints(field, elem) {
 			errs.AddFieldError(elemKey, elemErr.Validator, elemErr.Message)
 		}
@@ -437,6 +445,36 @@ func fieldKey(f *ir.FieldDef) string {
 		return f.JSONTag
 	}
 	return f.Name
+}
+
+// builtinTypeError returns the "type" error for a builtin field value of the
+// wrong JSON type, or nil. The IR's string, number and boolean are checked,
+// and so are the GraphQL builtin names; any other name is not. The field's
+// own constraints are checked only on a value that passes.
+func builtinTypeError(typeName string, value any) *ValidationError {
+	switch typeName {
+	case "string", "String", "ID":
+		if _, ok := value.(string); ok {
+			return nil
+		}
+		return &ValidationError{Validator: "type", Message: "expected a string"}
+	case "number", "Float":
+		if _, ok := toFloat64(value); ok {
+			return nil
+		}
+		return &ValidationError{Validator: "type", Message: "expected a number"}
+	case "Int":
+		if _, ok := toInt64(value); ok {
+			return nil
+		}
+		return &ValidationError{Validator: "type", Message: "expected an integer"}
+	case "boolean", "Boolean":
+		if _, ok := value.(bool); ok {
+			return nil
+		}
+		return &ValidationError{Validator: "type", Message: "expected a boolean"}
+	}
+	return nil
 }
 
 // isBuiltinString returns true for built-in scalar types that are string-based.
