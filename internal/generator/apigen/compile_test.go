@@ -80,10 +80,43 @@ func TestSessionProviderAPIDependsOnGenericRuntimeOnly(t *testing.T) {
 	}
 }
 
+// TestRoutesImportTimeOnlyForMountedTimedDirectives compiles an API whose
+// mounted routes carry only @bodyLimit and whose @manualRouteRegistration
+// operation carries @rateLimit and @timeout. routes.go calls time only for
+// @rateLimit and @timeout on a route RegisterRoutes mounts, so it must not
+// import time here.
+func TestRoutesImportTimeOnlyForMountedTimedDirectives(t *testing.T) {
+	buildFixtureAPI(t, sessionauth.Provider{}, moveTimedDirectivesToManualRoutes)
+}
+
+// moveTimedDirectivesToManualRoutes leaves @bodyLimit as the only directive
+// on the routes RegisterRoutes mounts and gives the @manualRouteRegistration
+// operations @rateLimit and @timeout.
+func moveTimedDirectivesToManualRoutes(schema *ir.Schema) {
+	untimed := func(mw *ir.MiddlewareConfig) *ir.MiddlewareConfig {
+		if mw == nil {
+			return nil
+		}
+		return &ir.MiddlewareConfig{BodyLimit: mw.BodyLimit}
+	}
+	one := 1
+	for _, set := range schema.OperationSets {
+		set.Middleware = untimed(set.Middleware)
+		for _, op := range set.Operations {
+			if op.ManualRouteRegistration {
+				op.Middleware = &ir.MiddlewareConfig{RateLimit: &one, Timeout: &one}
+				continue
+			}
+			op.Middleware = untimed(op.Middleware)
+		}
+	}
+}
+
 // buildFixtureAPI generates fixture-db types and ORM and the fixture-api
 // types and API module with provider into a temp dist-shaped tree, runs go
 // mod tidy, go build and go vet on the API module, and returns its directory.
-func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider) string {
+// Each mutateAPI function edits the loaded fixture-api IR first.
+func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider, mutateAPI ...func(*ir.Schema)) string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -98,6 +131,9 @@ func buildFixtureAPI(t *testing.T, provider apigen.AuthProvider) string {
 	apiSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-api"))
 	if err != nil {
 		t.Fatalf("load fixture-api: %v", err)
+	}
+	for _, mutate := range mutateAPI {
+		mutate(apiSchema)
 	}
 
 	fixedClock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))

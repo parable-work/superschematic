@@ -229,7 +229,6 @@ type APIOutput struct {
 	Namespaces []string
 
 	HasAuth                  bool
-	HasMiddlewareDirectives  bool
 	HasEncryptedEndpoints    bool
 	HasPermissionEndpoints   bool
 	HasFilterableEndpoints   bool
@@ -238,6 +237,10 @@ type APIOutput struct {
 	HasArrayScalarArgsOnGET  bool
 	HasWebhookHMACEndpoints  bool
 	RequiredWebhookProviders []string
+
+	// RoutesNeedTime gates the time import in routes.go: only @rateLimit and
+	// @timeout render a time call, and only on routes RegisterRoutes mounts.
+	RoutesNeedTime bool
 
 	// UUIDTypeExpr is the qualified Go expression for the schema's UUID
 	// scalar (e.g. "types.IdentityUUID"). Empty when the schema declares no
@@ -481,8 +484,8 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		if endpoint.RequiresAuth {
 			output.HasAuth = true
 		}
-		if endpoint.RateLimit != nil || endpoint.BodyLimit != nil || endpoint.Timeout != nil {
-			output.HasMiddlewareDirectives = true
+		if !endpoint.ManualRouteRegistration && (endpoint.RateLimit != nil || endpoint.Timeout != nil) {
+			output.RoutesNeedTime = true
 		}
 		if endpoint.HasFileUpload {
 			output.HasFileUpload = true
