@@ -71,17 +71,12 @@ schema-file JSON Schema (`superschematic json-schema`) has the key.
 | Postgres column | native `T[]` for a scalar | `JSONB`, `NOT NULL` when required. Postgres multi-dimensional arrays must be rectangular, and lists of lists are often ragged. |
 | Go ORM | native array scan and encode | the JSON codec that maps and `@jsonField` columns use. A nil inner list is stored as `[]`; a union element is decoded through the union's wrapper. |
 | Go API routes | `[]T` | `[][]T` for a body argument and a response. A nil inner list of a response is sent as `[]`. |
+| TypeScript API server | `T[]` | `T[][]` for a body argument and a response. Body decoding applies the list rules below, and a null or missing inner list of a response is sent as `[]`. |
 | SDKs | `[]T`, `T[]`, `list[T]`, `Vec<T>` | `[][]T` (Go), `T[][]` (TypeScript), `list[list[T]]` (Python), `Vec<Vec<T>>` (Rust) |
 
 A schema without a list of lists generates exactly what it did before the
 feature existed, and its IR JSON is unchanged: `isArrayOfArrays` is omitted
 when false.
-
-The TypeScript API server (`api: { language: "TYPESCRIPT" }`) does not
-render `T[][]` yet. It types a list-of-lists body argument or response as
-`T[]`. A list-of-lists field of a request input type or a response type is
-right, because the server takes those types, and the input type's
-validator, from the TypeScript types package.
 
 ## Where it is accepted
 
@@ -114,6 +109,7 @@ argument.
 | A DB column whose element type is another table (`Table[][]`) | `<Type>.<field>: an array of arrays of table type <Table> cannot be a relation; store a list of lists of its keys or of a @jsonField type` |
 | A [projection](/superschematic/reference/projections/) column | `<Type>.<field>: projection columns cannot be arrays of arrays` |
 | A projection's `@column`, `@join`, row rule or `collapse` key that reads one | `<Table>.<field> is an array of arrays, which a projection cannot read` |
+| A body argument of the TypeScript API server whose element type is a union | `tsrestgen does not support arrays of arrays yet (<set>.<operation>(<argument>)): element type <T> is not a scalar, enum or object type` |
 
 ## List rules
 
