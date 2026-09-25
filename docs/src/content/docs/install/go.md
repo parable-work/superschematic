@@ -140,9 +140,10 @@ An API schema with a Go API output writes the module
 chi router and calls your implementations.
 
 An operation with an input type reads it from the JSON body. An operation
-without one reads its other arguments from the JSON body object (on `GET`,
-from the query string), each from its own JSON value, through
-`runtime/http/go/bodyargs`:
+without one reads its other arguments from the JSON body object, each from
+its own JSON value, through `runtime/http/go/bodyargs`. On `GET` they come
+from the query string, where a list is read from repeated keys and
+comma-separated values (`?labels=a,b&labels=c`). In the body:
 
 - A string, enum, UUID or timestamp argument takes a JSON string, a number
   a JSON number, an integer a JSON integer, and a boolean `true`
@@ -156,6 +157,11 @@ from the query string), each from its own JSON value, through
   [list rules](/superschematic/reference/arrays-of-arrays/#list-rules):
   `[]` satisfies a required list, `listMin` and `listMax` bound it, and a
   null element is `required` at `name[i]`.
+- A map (`Record<string, T>`) is a JSON object, and the implementation
+  receives a `map[string]T`. Each value follows the element rules at
+  `name[key]`; a map of lists (`Record<string, T[]>`) has its elements at
+  `name[key][i]`. A map travels only in the body: a map argument of a
+  `GET` operation, or a map path or query parameter, fails the build.
 - The scalar's own lengths, pattern and range, then the argument's own
   constraints, apply to a value and to every element; a value that fails
   is one error named by the rule it breaks (`minLength`, `maxLength`,

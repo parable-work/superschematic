@@ -416,7 +416,12 @@ accept then passes its type's own `Validate`: a scalar's core check, an
 enum's membership, an object's fields nested under its path. A
 `Generic.JSON` argument is any JSON value but null, and an optional one
 that is absent or null reaches the implementation empty, as in the
-TypeScript server below.
+TypeScript server below. A map argument (`Record<string, T>`) is a JSON
+object whose values follow the element rules at `name[key]`, and a map of
+lists (`Record<string, T[]>`) has its elements at `name[key][i]`; list
+bounds do not bound a map, as in the generated types. A list argument of
+a `GET` operation is read from repeated query keys and comma-separated
+values, as in the TypeScript server.
 
 The TypeScript API server decodes every body argument from its JSON value
 with these rules, for a scalar, enum, object or `Generic.JSON` type, alone,

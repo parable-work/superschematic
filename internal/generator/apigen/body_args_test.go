@@ -1,9 +1,11 @@
 package apigen_test
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +56,117 @@ func TestWriteAPIGoldenBodyArgs(t *testing.T) {
 		t.Fatalf("apigen.WriteAPI: %v", err)
 	}
 	checkGoldenFiles(t, outDir, filepath.Join("testdata", "golden", bodyArgsAPI), []string{"routes.go", "openapi.json"})
+}
+
+// TestMapBodyArguments: a map argument (Record<string, T>, alone or of
+// lists) is a body argument even when T is an object type, the route
+// decodes it as a Go map, the implementation takes one, and openapi.json
+// describes it as an object with additionalProperties.
+func TestMapBodyArguments(t *testing.T) {
+	output, err := apigen.Generate(loadBodyArgsAPI(t), apigen.Options{
+		Provider:    sessionauth.Provider{},
+		SchemaName:  bodyArgsAPI,
+		ModulePath:  "example.com/schemas/api/" + bodyArgsAPI,
+		TypesModule: "example.com/schemas/types/go/" + bodyArgsAPI,
+		Clock:       goModuleClock,
+	})
+	if err != nil {
+		t.Fatalf("apigen.Generate: %v", err)
+	}
+	byName := map[string]apigen.EndpointInfo{}
+	for _, endpoint := range output.Endpoints {
+		byName[endpoint.Name] = endpoint
+	}
+	place := byName["placePoints"]
+	if place.HasInput || len(place.BodyArgs) != 1 {
+		t.Fatalf("placePoints takes input %q and body args %+v, want one body argument", place.InputType, place.BodyArgs)
+	}
+	for _, tc := range []struct {
+		arg                     apigen.BodyArg
+		goType, decoder, newArg string
+	}{
+		{place.BodyArgs[0], "map[string]types.Point", "Map", `bodyargs.NewArg("pointByName", bodyargs.Object, bodyargs.Required())`},
+		{byName["nameShades"].BodyArgs[0], "map[string]types.Shade", "Map", `bodyargs.NewArg("shadeByName", bodyargs.String, bodyargs.Required())`},
+		{byName["nameShades"].BodyArgs[1], "map[string][]types.NetworkUrl", "MapOfLists", ""},
+	} {
+		if got := tc.arg.GoListType(); got != tc.goType {
+			t.Errorf("%s Go type = %s, want %s", tc.arg.Name, got, tc.goType)
+		}
+		if got := tc.arg.Decoder(); got != tc.decoder {
+			t.Errorf("%s decoder = %s, want %s", tc.arg.Name, got, tc.decoder)
+		}
+		if tc.newArg != "" && tc.arg.NewArg() != tc.newArg {
+			t.Errorf("%s = %s, want %s", tc.arg.Name, tc.arg.NewArg(), tc.newArg)
+		}
+	}
+
+	var spec struct {
+		Paths map[string]map[string]struct {
+			RequestBody struct {
+				Content map[string]struct {
+					Schema struct {
+						Properties map[string]any `json:"properties"`
+					} `json:"schema"`
+				} `json:"content"`
+			} `json:"requestBody"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal([]byte(output.OpenAPISpecRaw), &spec); err != nil {
+		t.Fatal(err)
+	}
+	properties := func(path string) map[string]any {
+		return spec.Paths[path]["put"].RequestBody.Content["application/json"].Schema.Properties
+	}
+	for _, tc := range []struct {
+		path, arg, want string
+	}{
+		{"/api/posts/{id}/points", "pointByName", `{"type": "object", "additionalProperties": {"$ref": "#/components/schemas/Point"}}`},
+		{"/api/posts/{id}/shade-names", "shadeByName", `{"type": "object", "additionalProperties": {"$ref": "#/components/schemas/Shade"}}`},
+	} {
+		var want any
+		if err := json.Unmarshal([]byte(tc.want), &want); err != nil {
+			t.Fatal(err)
+		}
+		if got := properties(tc.path)[tc.arg]; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s %s = %v, want %v", tc.path, tc.arg, got, want)
+		}
+	}
+	links, _ := properties("/api/posts/{id}/shade-names")["linksByLocale"].(map[string]any)
+	values, _ := links["additionalProperties"].(map[string]any)
+	if links["type"] != "object" || links["nullable"] != true || values["type"] != "array" {
+		t.Errorf("linksByLocale = %v, want a nullable object of arrays", links)
+	}
+}
+
+// TestMapArgumentOutsideTheBodyIsRefused: a map cannot travel in the query
+// string or the path, so a GET operation's map argument, a map query
+// parameter and a map path parameter fail the build with the argument
+// named.
+func TestMapArgumentOutsideTheBodyIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		op   *ir.FieldDef
+		want string
+	}{
+		{"GET argument", &ir.FieldDef{Name: "find", HTTPMethod: "GET", RestPath: "things", TypeRef: ir.TypeRef{Name: "string"},
+			Arguments: []*ir.ArgumentDef{{Name: "byName", TypeRef: ir.TypeRef{Name: "string", IsMap: true}}}},
+			"argument byName: a GET operation sends its arguments in the query string, which cannot carry a map"},
+		{"query parameter", &ir.FieldDef{Name: "find", HTTPMethod: "POST", RestPath: "things", TypeRef: ir.TypeRef{Name: "string"},
+			Arguments: []*ir.ArgumentDef{{Name: "byName", TypeRef: ir.TypeRef{Name: "string", IsMap: true}, IsQuery: true}}},
+			"argument byName: a query parameter cannot be a map"},
+		{"path parameter", &ir.FieldDef{Name: "find", HTTPMethod: "POST", RestPath: "things/{byName}", TypeRef: ir.TypeRef{Name: "string"},
+			Arguments: []*ir.ArgumentDef{{Name: "byName", TypeRef: ir.TypeRef{Name: "string", IsMap: true}, Required: true}}},
+			"argument byName: a path parameter cannot be a map"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := ir.NewSchema("map-args", ir.SchemaKindAPI)
+			schema.OperationSets = []*ir.OperationSet{{Name: "ThingMutations", Operations: []*ir.FieldDef{tc.op}}}
+			_, err := apigen.Generate(schema, apigen.Options{Provider: sessionauth.Provider{}, SchemaName: "map-args", Clock: goModuleClock})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Generate = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
 }
 
 // TestBodyArgsRoutesApplyTheListRules generates the Go types and API

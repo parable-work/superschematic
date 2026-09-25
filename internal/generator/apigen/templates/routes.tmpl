@@ -919,13 +919,13 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- range .ScalarArgs }}
 		{{- if .IsArray }}
 
-		// Parse {{ .Name }} from query string (comma-separated: ?{{ .Name }}=a,b) per the API format conventions.
+		// Parse {{ .Name }} from the query string: comma-separated values
+		// (?{{ .Name }}=a,b), repeated keys (?{{ .Name }}=a&{{ .Name }}=b) or both.
 		// Each provided element is validated individually — if present, it must be a valid
 		// value regardless of whether the array argument itself is required or optional.
 		var {{ .GoName }} []{{ .GoType }}
 		{
-			rawVal := r.URL.Query().Get(`{{ .Name }}`)
-			if rawVal != "" {
+			for _, rawVal := range r.URL.Query()[`{{ .Name }}`] {
 				for _, v := range strings.Split(rawVal, ",") {
 					v = strings.TrimSpace(v)
 					if v == "" {
@@ -1246,7 +1246,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		// Parse body arguments (non-GET endpoints). The body is one JSON
 		// object; each argument is decoded from its own JSON value and
 		// checked by the list and value rules, and every failure is reported
-		// at the argument's path (name, name[i], name[i][j]).
+		// at the argument's path (name, name[i], name[i][j], name[key]).
 		body, err := bodyargs.ReadObject(r.Body)
 		if err != nil {
 			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")

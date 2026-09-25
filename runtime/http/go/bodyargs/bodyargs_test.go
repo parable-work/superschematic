@@ -226,6 +226,57 @@ func TestListOfListsRules(t *testing.T) {
 	})
 }
 
+func TestMapRules(t *testing.T) {
+	shades := NewArg("shades", String, Required())
+	links := NewArg("links", String, Pattern(`^https://`))
+	points := NewArg("points", Object)
+	run := func(errs validate.ValidationErrors, b Body) {
+		Map[shade](errs, b, shades)
+		MapOfLists[string](errs, b, links)
+		Map[point](errs, b, points)
+	}
+	for _, tc := range []struct {
+		body string
+		want map[string]string
+	}{
+		{`{"shades": {"a": "light"}, "links": {"en": ["https://a.test"], "fr": []}, "points": {"p": {"x": 1}}}`, map[string]string{}},
+		{`{"shades": {}}`, map[string]string{}},
+		{`{}`, map[string]string{"shades": "required: required field"}},
+		{`{"shades": null}`, map[string]string{"shades": "required: required field"}},
+		{`{"shades": ["light"], "links": "x"}`, map[string]string{"shades": "type: expected an object", "links": "type: expected an object"}},
+		{`{"shades": {"a": "dim", "b": null, "c": 5}}`, map[string]string{
+			"shades[a]": "enum: invalid enum value",
+			"shades[b]": "required: required field",
+			"shades[c]": "type: expected a string",
+		}},
+		{`{"shades": {}, "links": {"en": ["http://a.test", null], "fr": {}, "de": null}}`, map[string]string{
+			"links[en][0]": "pattern: invalid format",
+			"links[en][1]": "required: required field",
+			"links[fr]":    "type: expected an array",
+			"links[de]":    "required: required field",
+		}},
+		{`{"shades": {}, "points": {"p": {"x": -1}, "q": null}}`, map[string]string{
+			"points[p].x": "min: must be at least 0",
+			"points[q]":   "required: required field",
+		}},
+	} {
+		if got := errorsOf(t, tc.body, run); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: errors = %v, want %v", tc.body, got, tc.want)
+		}
+	}
+	errorsOf(t, `{"shades": {}, "links": {"en": ["https://a.test"], "fr": []}}`, func(errs validate.ValidationErrors, b Body) {
+		if got := Map[shade](errs, b, shades); got == nil || len(got) != 0 {
+			t.Errorf("{} = %#v, want an empty, non-nil map", got)
+		}
+		if got, want := MapOfLists[string](errs, b, links), map[string][]string{"en": {"https://a.test"}, "fr": {}}; !reflect.DeepEqual(got, want) {
+			t.Errorf("links = %#v, want %#v", got, want)
+		}
+		if got := Map[point](errs, b, points); got != nil {
+			t.Errorf("an absent optional map = %#v, want nil", got)
+		}
+	})
+}
+
 // TestValueRulesInOrderOneErrorEach: the rules apply in the order given
 // (the scalar's, then the argument's), and the first a value breaks is its
 // one error.

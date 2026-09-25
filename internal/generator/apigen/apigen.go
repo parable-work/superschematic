@@ -76,9 +76,14 @@ func (p Param) IsGoPrimitive() bool {
 }
 
 // GoListType is GoType with one "[]" per list level: "string", "[]string"
-// or "[][]string".
+// or "[][]string", inside "map[string]" for a map: "map[string]string" or
+// "map[string][]string".
 func (p Param) GoListType() string {
-	return goListType(p.GoType, p.ArrayDepth())
+	listType := goListType(p.GoType, p.ArrayDepth())
+	if p.IsMap {
+		return "map[string]" + listType
+	}
+	return listType
 }
 
 // goListType wraps a Go element type in depth slice levels.
@@ -673,6 +678,9 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	if err := checkArraysOfArraysInBody(namespace, op.Name, method, pathParams, queryParams, scalarArgs); err != nil {
 		return nil, err
 	}
+	if err := checkMapsInBody(namespace, op.Name, method, pathParams, queryParams, scalarArgs); err != nil {
+		return nil, err
+	}
 
 	if hasInput && len(scalarArgs) > 0 {
 		names := make([]string, len(scalarArgs))
@@ -943,10 +951,10 @@ func newTypeMapper(schema *ir.Schema, dependencies map[string]*ir.Schema) *typeM
 // isInputType reports whether an argument of this type is the operation's
 // input payload: a single object type. The v2 IR drops the GraphQL
 // Object/Input split: any data shape passed as an operation argument is
-// that operation's input. A list of objects is not one; it is a body
-// argument.
+// that operation's input. A list or a map of objects is not one; it is a
+// body argument.
 func (m *typeMapper) isInputType(ref ir.TypeRef) bool {
-	if ref.IsArray {
+	if ref.IsArray || ref.IsMap {
 		return false
 	}
 	typeDef, ok := m.findTypeDef(ref.Name)

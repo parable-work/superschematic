@@ -302,7 +302,7 @@ func createGridReplaceLabelsHandler(impl GridImplementation) gohttp.HandlerFunc 
 		// Parse body arguments (non-GET endpoints). The body is one JSON
 		// object; each argument is decoded from its own JSON value and
 		// checked by the list and value rules, and every failure is reported
-		// at the argument's path (name, name[i], name[i][j]).
+		// at the argument's path (name, name[i], name[i][j], name[key]).
 		body, err := bodyargs.ReadObject(r.Body)
 		if err != nil {
 			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")

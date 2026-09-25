@@ -133,6 +133,19 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/posts/{id}/flags",
 			Handler: createTagSetFlagsHandler(cfg.Implementations.Tag),
 		},
+		// Place named points on a post's cover image: a map of an object type
+		// is a body argument, not the operation's input type.
+		{
+			Method:  "PUT",
+			Path:    "/posts/{id}/points",
+			Handler: createTagPlacePointsHandler(cfg.Implementations.Tag),
+		},
+		// Name the shades and links of a post: maps of an enum and of lists.
+		{
+			Method:  "PUT",
+			Path:    "/posts/{id}/shade-names",
+			Handler: createTagNameShadesHandler(cfg.Implementations.Tag),
+		},
 		// Replace a post's tags; returns the labels as stored.
 		{
 			Method:  "PUT",
@@ -166,7 +179,7 @@ func createTagStoreDocumentHandler(impl TagImplementation) gohttp.HandlerFunc {
 		// Parse body arguments (non-GET endpoints). The body is one JSON
 		// object; each argument is decoded from its own JSON value and
 		// checked by the list and value rules, and every failure is reported
-		// at the argument's path (name, name[i], name[i][j]).
+		// at the argument's path (name, name[i], name[i][j], name[key]).
 		body, err := bodyargs.ReadObject(r.Body)
 		if err != nil {
 			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
@@ -216,13 +229,13 @@ func createTagFindTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Parse scalar arguments from query string (GET endpoint)
 
-		// Parse labels from query string (comma-separated: ?labels=a,b) per the API format conventions.
+		// Parse labels from the query string: comma-separated values
+		// (?labels=a,b), repeated keys (?labels=a&labels=b) or both.
 		// Each provided element is validated individually — if present, it must be a valid
 		// value regardless of whether the array argument itself is required or optional.
 		var Labels []string
 		{
-			rawVal := r.URL.Query().Get(`labels`)
-			if rawVal != "" {
+			for _, rawVal := range r.URL.Query()[`labels`] {
 				for _, v := range strings.Split(rawVal, ",") {
 					v = strings.TrimSpace(v)
 					if v == "" {
@@ -305,7 +318,7 @@ func createTagSetFlagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 		// Parse body arguments (non-GET endpoints). The body is one JSON
 		// object; each argument is decoded from its own JSON value and
 		// checked by the list and value rules, and every failure is reported
-		// at the argument's path (name, name[i], name[i][j]).
+		// at the argument's path (name, name[i], name[i][j], name[key]).
 		body, err := bodyargs.ReadObject(r.Body)
 		if err != nil {
 			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
@@ -352,6 +365,120 @@ func createTagSetFlagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 	}
 }
 
+// createTagPlacePointsHandler creates a handler for PUT /api/posts/{id}/points
+//
+// Place named points on a post's cover image: a map of an object type
+// is a body argument, not the operation's input type.
+func createTagPlacePointsHandler(impl TagImplementation) gohttp.HandlerFunc {
+	// Body arguments: the JSON type of each value, then its rules in the
+	// order they are checked (the scalar type's own, then the argument's).
+	bodyPointByNameArg := bodyargs.NewArg("pointByName", bodyargs.Object, bodyargs.Required())
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters
+		IdStr := chi.URLParam(r, "id")
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id := IdStr
+		// Parse body arguments (non-GET endpoints). The body is one JSON
+		// object; each argument is decoded from its own JSON value and
+		// checked by the list and value rules, and every failure is reported
+		// at the argument's path (name, name[i], name[i][j], name[key]).
+		body, err := bodyargs.ReadObject(r.Body)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+			return
+		}
+		var requestBody struct {
+			PointByName map[string]types.Point
+		}
+		validationErrors := types.NewValidationErrors()
+		requestBody.PointByName = bodyargs.Map[types.Point](validationErrors, body, bodyPointByNameArg)
+		if validationErrors.HasErrors() {
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.PlacePoints(r.Context(), Id, requestBody.PointByName)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createTagNameShadesHandler creates a handler for PUT /api/posts/{id}/shade-names
+//
+// Name the shades and links of a post: maps of an enum and of lists.
+func createTagNameShadesHandler(impl TagImplementation) gohttp.HandlerFunc {
+	// Body arguments: the JSON type of each value, then its rules in the
+	// order they are checked (the scalar type's own, then the argument's).
+	bodyShadeByNameArg := bodyargs.NewArg("shadeByName", bodyargs.String, bodyargs.Required())
+	bodyLinksByLocaleArg := bodyargs.NewArg("linksByLocale", bodyargs.String, bodyargs.MaxLength(2048), bodyargs.Pattern(`^https?://[\w\-\{\}]+(\.[\w\-\{\}]+)+([:/?#][\w\-\._~:/?#\[\]@!\$&'\(\)\*\+,;=\{\}%]*)?$`), bodyargs.Pattern(`^https://`))
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters
+		IdStr := chi.URLParam(r, "id")
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id := IdStr
+		// Parse body arguments (non-GET endpoints). The body is one JSON
+		// object; each argument is decoded from its own JSON value and
+		// checked by the list and value rules, and every failure is reported
+		// at the argument's path (name, name[i], name[i][j], name[key]).
+		body, err := bodyargs.ReadObject(r.Body)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+			return
+		}
+		var requestBody struct {
+			ShadeByName   map[string]types.Shade
+			LinksByLocale map[string][]types.NetworkUrl
+		}
+		validationErrors := types.NewValidationErrors()
+		requestBody.ShadeByName = bodyargs.Map[types.Shade](validationErrors, body, bodyShadeByNameArg)
+		requestBody.LinksByLocale = bodyargs.MapOfLists[types.NetworkUrl](validationErrors, body, bodyLinksByLocaleArg)
+		if validationErrors.HasErrors() {
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.NameShades(r.Context(), Id, requestBody.ShadeByName, requestBody.LinksByLocale)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
 // createTagSaveTagsHandler creates a handler for PUT /api/posts/{id}/tags
 //
 // Replace a post's tags; returns the labels as stored.
@@ -376,7 +503,7 @@ func createTagSaveTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 		// Parse body arguments (non-GET endpoints). The body is one JSON
 		// object; each argument is decoded from its own JSON value and
 		// checked by the list and value rules, and every failure is reported
-		// at the argument's path (name, name[i], name[i][j]).
+		// at the argument's path (name, name[i], name[i][j], name[key]).
 		body, err := bodyargs.ReadObject(r.Body)
 		if err != nil {
 			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
