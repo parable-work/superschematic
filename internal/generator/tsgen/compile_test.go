@@ -2,7 +2,6 @@ package tsgen
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -21,10 +20,7 @@ import (
 // so it fails instead.
 func requireOrSkipTSTooling(t *testing.T, reason string) {
 	t.Helper()
-	if os.Getenv("SUPERSCHEMATIC_REQUIRE_TS_CHECKS") == "1" {
-		t.Fatalf("SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1 requires this TypeScript gate to run: %s", reason)
-	}
-	t.Skipf("skipping TypeScript gate: %s", reason)
+	testpaths.RequireOrSkipTS(t, reason)
 }
 
 // tsPackageCase is one generated types package: a schema and the loaded
@@ -38,17 +34,12 @@ type tsPackageCase struct {
 // buildTSPackages writes each case's TypeScript types package, wired
 // against the real superscalar runtime, into <temp>/types/typescript/<name>
 // under a Bun workspace root, as a build lays them out. It installs once at
-// the workspace root and then type-checks (tsc) each package in order, so
-// list a dependency before its consumer. It returns the directory holding
-// the packages and the bun binary, and skips (or fails under
-// SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1) when bun is missing or the install
-// fails.
-//
-// The one install runs at the root on purpose. With bun 1.4.0, a
-// `bun install` inside a member after another install wrote the root
-// lockfile resolves the lockfile's root-relative superscalar file: path
-// from the member directory and fails; with 1.4.2 an install inside a
-// member that has a sibling file: dependency fails the same way.
+// the workspace root, which covers every member, and then type-checks (tsc)
+// each package in order, so list a dependency before its consumer. It
+// returns the directory holding the packages and the bun binary, and skips
+// (or fails under SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1) when bun is missing
+// or the install fails. TestWorkspaceInstallsFromAnyPackage covers
+// installing inside the members.
 func buildTSPackages(t *testing.T, cases []tsPackageCase) (typesRoot, bunPath string) {
 	t.Helper()
 	bunPath, err := exec.LookPath("bun")

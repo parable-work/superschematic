@@ -123,6 +123,14 @@ jobs:
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
 
+      - name: Install the authoring packages
+        # TestEmbeddedDefinitionIsCurrent regenerates the schema-config JSON
+        # Schema with packages/schema-config's own tooling. Without this
+        # install it cannot run, and under SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1
+        # that fails the job.
+        working-directory: packages
+        run: bun install --frozen-lockfile
+
       - name: Setup Python
         # The Go tests that import the generated Python packages (pygen's
         # import, enum and arrays-of-arrays checks, the Python SDK probe)
@@ -143,9 +151,10 @@ jobs:
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
-          # The TypeScript compile gates skip when bun is missing so local
-          # `go test ./...` runs without it. Here bun is installed, so a skip
-          # is a broken gate and must fail.
+          # The TypeScript gates skip when bun, or an install they need, is
+          # missing so local `go test ./...` runs without them. Here both are
+          # set up, so a skip is a broken gate and must fail
+          # (testpaths.RequireOrSkipTS).
           SUPERSCHEMATIC_REQUIRE_TS_CHECKS: "1"
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"

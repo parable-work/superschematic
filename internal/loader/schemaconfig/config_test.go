@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -193,7 +194,8 @@ func TestReadFileMissing(t *testing.T) {
 // TestEmbeddedDefinitionIsCurrent regenerates the JSON Schema from
 // @superschematic/schema-config and diffs it against the embedded artifact, so the
 // checked-in copy cannot drift from the TypeScript contract. Skipped when
-// bun or the package's node_modules are unavailable.
+// bun or the package's node_modules are unavailable, and failed instead
+// under SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1 (CI installs packages/ first).
 //
 // ts-json-schema-generator writes no trailing newline and the repo's
 // end-of-file-fixer hook adds one, so the comparison ignores a single
@@ -201,14 +203,14 @@ func TestReadFileMissing(t *testing.T) {
 func TestEmbeddedDefinitionIsCurrent(t *testing.T) {
 	bun, err := exec.LookPath("bun")
 	if err != nil {
-		t.Skip("bun not installed")
+		testpaths.RequireOrSkipTS(t, "bun not installed")
 	}
 	pkgDir, err := filepath.Abs(filepath.Join("..", "..", "..", "packages", "schema-config"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(pkgDir, "node_modules")); err != nil {
-		t.Skip("packages/schema-config dependencies not installed (run bun install)")
+		testpaths.RequireOrSkipTS(t, "packages/schema-config dependencies not installed (run bun install in packages/)")
 	}
 
 	out := filepath.Join(t.TempDir(), "schema-config.schema.json")

@@ -234,8 +234,8 @@ func (r run) generateTSTypes() error {
 		if err := tsgen.WriteTypesWithProfile(output, dir, r.Options.Profile, r.Options.SkipFormat, codegenProfilePrefixes("output.types-typescript")...); err != nil {
 			return err
 		}
-		// Sibling packages resolve each other through file:../<schema>, so
-		// the directory holding them is a Bun workspace root (see
+		// Sibling packages resolve each other through workspace:*, so the
+		// directory holding them is a Bun workspace root (see
 		// tsgen.WorkspaceRootManifest).
 		return tsgen.WriteWorkspaceRoot(filepath.Dir(dir), r.Options.Naming)
 	}); err != nil {

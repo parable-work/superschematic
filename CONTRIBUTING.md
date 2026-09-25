@@ -115,6 +115,13 @@ of them; run them locally before pushing.
 | `make scrub`          | No leftover mentions, identifiers or planning ids from the source tree this repository was extracted from, dot-paths such as `.github/` included |
 | `make all`            | build, test and lint: everything above except `docs`                 |
 
+Some Go tests run bun: the TypeScript compile checks in tsgen, sdkgen and
+tsrestgen, the TypeScript legs of the parity tests, the document executor
+tests and the schema-config JSON Schema check. They skip when bun, or an
+install they need, is missing. CI sets `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`,
+which turns each of those skips into a failure. Set it locally after
+`make setup` to run the same gates.
+
 ## Rules
 
 ### Generated files are never hand-edited

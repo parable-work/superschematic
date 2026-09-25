@@ -1,0 +1,50 @@
+# Body arguments that are plain lists (T[]) of an object type, next to an
+# enum list, and a list-of-objects response. tsrestgen's object list tests
+# load it; grid.paint in the arrays-of-arrays tests covers T[][].
+name: object-lists-api
+kind: API
+types:
+  # A point on a plane.
+  Point:
+    name: Point
+    role: EmbeddedStruct
+    fields:
+      - name: x
+        typeRef: { name: number }
+        required: true
+      - name: y
+        typeRef: { name: number }
+        required: true
+enums:
+  # The shade of a stroke.
+  Shade:
+    name: Shade
+    values:
+      - name: Light
+        serializedAs: light
+      - name: Dark
+        serializedAs: dark
+operationSets:
+  - name: DrawingMutations
+    operations:
+      # Replace a drawing's outline; returns the outline as stored.
+      - name: saveOutline
+        typeRef: { name: Point, isArray: true }
+        required: true
+        httpMethod: PUT
+        restPath: "drawings/{id}/outline"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          # The outline, at most four points.
+          - name: points
+            typeRef: { name: Point, isArray: true }
+            required: true
+            validateListMax: 4
+          # Marked points; absent when nothing is marked.
+          - name: markers
+            typeRef: { name: Point, isArray: true }
+          # One shade per outline segment.
+          - name: shades
+            typeRef: { name: Shade, isArray: true }

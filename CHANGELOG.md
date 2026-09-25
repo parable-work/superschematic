@@ -94,7 +94,7 @@ of a generated artifact is always listed here with the bump it requires.
 - TypeScript types: every build writes `<out>/types/typescript/package.json`,
   a private Bun workspace root named `<npm_scope>/types-workspace` whose
   workspaces are the generated types packages next to it. A types package
-  that depends on a sibling through `file:../<schema>`, and on the scalar
+  that depends on a sibling through `workspace:*`, and on the scalar
   library through a `file:` spec outside the tree, then installs from the
   root or from any package. The name comes from `npm_scope`. Minor.
 - `@strictJSON` (from `@superschematic/schema`) on a type makes every
@@ -438,6 +438,12 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- Go API: a route no longer emits the response check after the
+  implementation call. It asserted `Validate() interface{ HasErrors() bool }`,
+  which no generated type satisfies (their `Validate` returns
+  `ValidationErrors`), so it never ran and no response was ever checked.
+  Responses are sent as before, and a nil inner list of an array-of-arrays
+  response is still sent as `[]`. Patch.
 - IR: a type's `strictJSON` key is written after `jsonField` instead of
   after `denyUnknownFields`, the position the source tree's IR uses, so a
   persisted schema from either compares byte for byte. The key is written
@@ -634,6 +640,14 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- TypeScript types: a types package names a sibling types package with
+  `workspace:*` instead of `file:../<schema>`. With the `file:` spec, the
+  second `bun install` in the types workspace (Bun 1.4.0), or the first
+  after a package gained such a spec (Bun 1.4.2), read the scalar
+  library's `file:` path from the wrong directory and failed. The
+  TypeScript gates in `go test` now fail instead of skipping under
+  `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`, and the CI `go` job installs
+  `packages/` so the schema-config JSON Schema drift test runs. Minor.
 - Go API: a field is a multipart upload only when its scalar carries
   `fileUpload` metadata. Before, four scalar names (`Artifact.File`,
   `Asset.File`, `Asset.Image`, `Asset.LogoImage`) were treated as uploads
@@ -790,5 +804,16 @@ of a generated artifact is always listed here with the bump it requires.
   scalar, when a brand carries only its name, so no upload scalar could
   pass. The check runs after hydration in every form, against the upload
   metadata the registered catalog declares. Patch.
+- TypeScript API server: a body argument that is a list of an object type
+  (`points: Point[]`) was typed `string[]`, and the runtime turned each
+  element into a string, so the implementation received
+  `"[object Object]"`. It is now typed `Point[]`, and each element goes
+  through the generated `parse<T>Json` with the list rules: a null element
+  is refused at `name[i]` (`required`), a non-object one (`type`), and one
+  the parser refuses ("does not match the declared type"). A single
+  object-typed body argument that is not the input (a DB table type) is
+  parsed the same way. A union-typed body argument, alone or in a list,
+  now fails the build ("tsrestgen cannot decode body argument"). The
+  runtime exports `decodeJsonParam`. Minor.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main

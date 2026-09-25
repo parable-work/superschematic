@@ -10,6 +10,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -123,8 +124,16 @@ func TestListsOfListsSerde(t *testing.T) {
 
 // cargoTestGeneratedCrate writes output as a crate, adds serde_json as a
 // dev-dependency and source as tests/<name>.rs, and runs cargo test on it.
+// A crate that uses the scalar runtime crate resolves it from the
+// superscalar checkout scripts/superscalar-dep.sh stands up, since the crate
+// is not on crates.io yet; without the checkout the test is skipped.
 func cargoTestGeneratedCrate(t *testing.T, cargoPath string, output *ModuleOutput, targetDir, name, source string) {
 	t.Helper()
+	extraToml := "\n[dev-dependencies]\nserde_json = \"1.0\"\n"
+	if output.UsesScalarLib {
+		paths := testpaths.Local(t)
+		extraToml += "\n[patch.crates-io]\n" + output.Naming.ScalarRustCrate + " = { path = \"" + filepath.ToSlash(paths.ScalarRust) + "\" }\n"
+	}
 	outDir := filepath.Join(t.TempDir(), output.CrateName)
 	if err := WriteTypes(output, outDir); err != nil {
 		t.Fatalf("write types: %v", err)
@@ -134,7 +143,7 @@ func cargoTestGeneratedCrate(t *testing.T, cargoPath string, output *ModuleOutpu
 	if err != nil {
 		t.Fatalf("read Cargo.toml: %v", err)
 	}
-	cargoToml = append(cargoToml, []byte("\n[dev-dependencies]\nserde_json = \"1.0\"\n")...)
+	cargoToml = append(cargoToml, []byte(extraToml)...)
 	if err := os.WriteFile(cargoTomlPath, cargoToml, 0o644); err != nil {
 		t.Fatalf("write Cargo.toml: %v", err)
 	}

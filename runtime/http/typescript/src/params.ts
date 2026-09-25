@@ -18,12 +18,13 @@ the library's canonical form, Temporal.DateTime is RFC 3339. Primitive kinds
 stay local and match the Go Param flags: integer, float, boolean, string,
 enum.
 
-A list of lists (T[][]) only travels in a JSON body, so decodeListOfLists
-reads it from JSON values instead of strings; its element may also be an
-object type, parsed by the generated strict parser the spec carries.
+A list of lists (T[][]) and a body parameter of an object type (T, T[] or
+T[][] with kind 'object') only travel in a JSON body, so decodeJsonParam
+reads them from JSON values instead of strings; an object value is parsed
+by the generated strict parser the spec carries.
 */
 
-/** 'object' is an object element type of a list of lists, parsed by ParamSpec.parse; a string never is one. */
+/** 'object' is an object type of a body parameter (T, T[] or T[][]), parsed by ParamSpec.parse; a string never is one. */
 export type ParamKind = 'string' | 'integer' | 'number' | 'boolean' | 'uuid' | 'datetime' | 'enum' | 'object';
 
 export type ParamLocation = 'path' | 'query' | 'body';
@@ -47,7 +48,7 @@ export interface ParamSpec {
   readonly listMin?: number;
   readonly listMax?: number;
   readonly pattern?: string;
-  /** Kind 'object': the generated strict parser of the element type (parse<T>FromJSON over parse<T>Json). */
+  /** Kind 'object': the generated strict parser of the type (parse<T>FromJSON over parse<T>Json). */
   readonly parse?: (value: unknown) => unknown;
 }
 
@@ -175,8 +176,8 @@ export function decodeParam(location: ParamLocation, spec: ParamSpec, raw: reado
   return decodeScalar(location, spec, first);
 }
 
-/** Refuses a value inside a list of lists with one list-rule error, reported at `path`. */
-function refuseAt(location: ParamLocation, spec: ParamSpec, path: string, validator: string, message: string): never {
+/** Refuses one JSON value with one list-rule error, reported at `path` when it sits inside a list. */
+function refuseAt(location: ParamLocation, spec: ParamSpec, path: string | undefined, validator: string, message: string): never {
   return refuse(location, spec, message, [{ validator, message }], path);
 }
 
@@ -194,11 +195,10 @@ function expectedJsonType(kind: ParamKind): { type: 'string' | 'number' | 'boole
   }
 }
 
-/** One innermost element of a list of lists: never null, then the same checks as an element of T[]. */
-function decodeListElement(location: ParamLocation, spec: ParamSpec, path: string, item: unknown): unknown {
-  if (item === null || item === undefined) refuseAt(location, spec, path, 'required', 'required field');
+/** One non-null JSON value: an object goes through the spec's parser, anything else gets the checks of a T[] element. */
+function decodeJsonValue(location: ParamLocation, spec: ParamSpec, item: unknown, path?: string): unknown {
   if (spec.kind === 'object') {
-    if (typeof item !== 'object' || Array.isArray(item)) refuseAt(location, spec, path, 'type', 'expected an object');
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) refuseAt(location, spec, path, 'type', 'expected an object');
     if (!spec.parse) throw new Error(`ParamSpec ${spec.name} has kind 'object' but no parse function`);
     try {
       return spec.parse(item);
@@ -211,6 +211,26 @@ function decodeListElement(location: ParamLocation, spec: ParamSpec, path: strin
   const expected = expectedJsonType(spec.kind);
   if (typeof item !== expected.type) refuseAt(location, spec, path, 'type', expected.message);
   return decodeScalar(location, spec, String(item), path);
+}
+
+/** One list element: never null, then the checks of its kind, reported at `path`. */
+function decodeListElement(location: ParamLocation, spec: ParamSpec, path: string, item: unknown): unknown {
+  if (item === null || item === undefined) refuseAt(location, spec, path, 'required', 'required field');
+  return decodeJsonValue(location, spec, item, path);
+}
+
+/** The outer list is the parameter: absent or null is refused when required, otherwise it is an array within listMin and listMax. */
+function outerList(location: ParamLocation, spec: ParamSpec, value: unknown): unknown[] | undefined {
+  if (value === undefined || value === null) {
+    if (spec.required) refuse(location, spec, 'required');
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    return refuse(location, spec, 'expected an array', [{ validator: 'type', message: 'expected an array' }]);
+  }
+  if (spec.listMin !== undefined && value.length < spec.listMin) refuse(location, spec, `expected at least ${spec.listMin} values`);
+  if (spec.listMax !== undefined && value.length > spec.listMax) refuse(location, spec, `expected at most ${spec.listMax} values`);
+  return value;
 }
 
 /**
@@ -229,21 +249,40 @@ function decodeListElement(location: ParamLocation, spec: ParamSpec, path: strin
  * The first failure refuses the request; its detail carries `path`.
  */
 export function decodeListOfLists(location: ParamLocation, spec: ParamSpec, value: unknown): unknown[][] | undefined {
-  if (value === undefined || value === null) {
-    if (spec.required) refuse(location, spec, 'required');
-    return undefined;
-  }
-  if (!Array.isArray(value)) {
-    return refuse(location, spec, 'expected an array', [{ validator: 'type', message: 'expected an array' }]);
-  }
-  if (spec.listMin !== undefined && value.length < spec.listMin) refuse(location, spec, `expected at least ${spec.listMin} values`);
-  if (spec.listMax !== undefined && value.length > spec.listMax) refuse(location, spec, `expected at most ${spec.listMax} values`);
-  return value.map((row: unknown, i) => {
+  return outerList(location, spec, value)?.map((row: unknown, i) => {
     const rowPath = `${spec.name}[${i}]`;
     if (row === null || row === undefined) refuseAt(location, spec, rowPath, 'required', 'required field');
     if (!Array.isArray(row)) refuseAt(location, spec, rowPath, 'type', 'expected an array');
     return row.map((item: unknown, j) => decodeListElement(location, spec, `${rowPath}[${j}]`, item));
   });
+}
+
+/**
+ * Decodes a body parameter from its JSON value. The Hono adapter reads a
+ * list of lists and every parameter of kind 'object' this way, since an
+ * object cannot pass through the string decoding of path and query values:
+ *
+ * - T[][] is decodeListOfLists;
+ * - T[] follows the same list rules one level down: the list is the
+ *   parameter (required means present, an empty list is valid, listMin and
+ *   listMax bound it), and each element is never null (`required`,
+ *   "required field") and passes the checks of its kind, both at name[i];
+ * - T is refused when required and absent or null, and otherwise passes
+ *   the checks of its kind.
+ *
+ * An object value must be a JSON object (`type`, "expected an object") and
+ * pass the spec's parser ("does not match the declared type").
+ */
+export function decodeJsonParam(location: ParamLocation, spec: ParamSpec, value: unknown): unknown {
+  if (spec.isArrayOfArrays) return decodeListOfLists(location, spec, value);
+  if (spec.isArray) {
+    return outerList(location, spec, value)?.map((item: unknown, i) => decodeListElement(location, spec, `${spec.name}[${i}]`, item));
+  }
+  if (value === undefined || value === null) {
+    if (spec.required) refuse(location, spec, 'required');
+    return undefined;
+  }
+  return decodeJsonValue(location, spec, value);
 }
 
 /** Decodes every spec from a source; the result is keyed by wire name. */

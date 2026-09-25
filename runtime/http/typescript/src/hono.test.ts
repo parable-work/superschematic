@@ -238,6 +238,40 @@ describe('mountOperation', () => {
     expect(await missing.json()).toMatchObject({ details: { location: 'body', parameter: 'rows', reason: 'required' } });
   });
 
+  test('an object-typed body parameter is decoded from its JSON value and reaches the handler as objects', async () => {
+    const parse = (value: unknown) => {
+      if (typeof (value as { x?: unknown }).x !== 'number') throw new Error('parsePoint json validation failed');
+      return value;
+    };
+    const saveOutline: OperationSpec = {
+      ...health,
+      name: 'saveOutline',
+      method: 'PUT',
+      path: '/api/outline',
+      bodyParams: [
+        { name: 'points', kind: 'object', required: true, isArray: true, parse },
+        { name: 'origin', kind: 'object', required: false, parse },
+        { name: 'note', kind: 'string', required: false },
+      ],
+    };
+    const app = build(a => {
+      mountOperation(a, saveOutline, async (_ctx, request) => ({ body: request.body, pointType: typeof (request.body.points as unknown[])[0] }));
+    });
+    const put = (body: unknown) => app.request('/api/outline', { method: 'PUT', body: JSON.stringify(body) });
+    const saved = await put({ points: [{ x: 1 }, { x: 2 }], origin: { x: 0 }, note: 'n' });
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).data).toEqual({ body: { points: [{ x: 1 }, { x: 2 }], origin: { x: 0 }, note: 'n' }, pointType: 'object' });
+    const nullPoint = await put({ points: [{ x: 1 }, null] });
+    expect(nullPoint.status).toBe(400);
+    expect(await nullPoint.json()).toMatchObject({
+      detail: 'Invalid body parameter points[1]: required field',
+      details: { location: 'body', parameter: 'points', path: 'points[1]', errors: [{ validator: 'required', message: 'required field' }] },
+    });
+    const badOrigin = await put({ points: [], origin: 'o' });
+    expect(badOrigin.status).toBe(400);
+    expect(await badOrigin.json()).toMatchObject({ details: { location: 'body', parameter: 'origin', reason: 'expected an object' } });
+  });
+
   test('a list-of-lists result is sent with every nullish list as []', async () => {
     const rowsOf: OperationSpec = { ...health, name: 'rowsOf', path: '/api/rows/{kind}', outputIsArrayOfArrays: true };
     const results: Record<string, unknown> = {

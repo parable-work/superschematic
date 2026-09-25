@@ -68,7 +68,7 @@ func TestStrictJSONGeneratedDecoders(t *testing.T) {
 	t.Run("typescript", func(t *testing.T) {
 		bunPath, err := exec.LookPath("bun")
 		if err != nil {
-			t.Skip("bun not available; skipping TypeScript strict JSON check")
+			testpaths.RequireOrSkipTS(t, "bun not available for the TypeScript strict JSON check")
 		}
 		paths := testpaths.Local(t)
 		out, err := tsgen.Generate(schema, tsgen.Options{SchemaName: "strict-contract"})
@@ -104,7 +104,7 @@ assert.equal(parseOrdinaryJsonNonStrict({ name: 'ordinary', future: true }).name
 		install := exec.Command(bunPath, "install")
 		install.Dir = dir
 		if output, err := install.CombinedOutput(); err != nil {
-			t.Skipf("bun install failed (likely offline): %v\n%s", err, output)
+			testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed (likely offline): %v\n%s", err, output))
 		}
 		run(t, dir, bunPath, "x", "tsc", "--noEmit")
 		run(t, dir, bunPath, "run", "strict.test.ts")
