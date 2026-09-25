@@ -123,6 +123,12 @@ func main() {
 `TypeFromJSON` is strict (unknown fields fail). `TypeFromJSONNonStrict`
 accepts them. `Validate` returns field-level errors.
 
+Decoding refuses a null list element, since a list element is never null:
+`json.Unmarshal` into a generated type fails with
+`decode <Type>: <field>[1]: null element` instead of putting the element
+type's zero value in its place. A null list itself still decodes, to a nil
+list or a null `InputField`.
+
 Encoding keeps an empty list apart from an absent one. An optional list is
 left out when it is nil and written when it is `[]`, so a decoded payload
 re-encodes with the same keys. A required list encodes nil as `[]`.

@@ -359,14 +359,27 @@ suite asserts.
 | Python `validate_all` skips the whole-value check of an optional list when a `None` entry is reported at its index, so each problem is reported once. | Reporting `field: invalid` next to `field[i]: required` |
 | Verification refuses a DB table column that is an array of arrays of another table (`Table[][]`) with one error that names the field; sqlgen and ormgen keep their check as a backstop. | Leaving the refusal to the generators |
 
-One gap is open, pinned in the harness's `knownDivergences`: the
-generated Go validator sees a null element of `T[]` or `T[][]` only as its
-type's zero value, since `json.Unmarshal` decodes it so. A string or number
-element passes or fails its own rules, a string scalar or enum element of a
-required list is `required`, and an object element reports its own
-required fields. Closing it changes the generated Go type, not only its
-validator: the decoder would have to record the null elements for
-`Validate`, or the elements would become pointers. Neither is decided.
+The generated Go types refuse a null list element when they decode. This
+closes the one gap this amendment first recorded, pinned then in the
+harness's `knownDivergences`: `json.Unmarshal` decodes a null element of
+`[]T` to `T`'s zero value, which `Validate` cannot tell from a real `""`,
+`0`, `false` or empty object. A string or number element passed or failed
+its own rules, a string scalar or enum element of a required list was
+`required` by chance, and an object element reported its own required
+fields.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The `UnmarshalJSON` every generated Go type has refuses a null element of a `T[]` field and a null innermost element of a `T[][]` field, required or optional, of every element type (`Generic.JSON` and unions included), with `decode <Type>: <field>[i]: null element` (`<field>[i][j]` for an innermost element). A decoder refusal counts as parity, as for the vectors below. The Go routes (for an input type), the SDKs, the ORM's object columns and `FromJSON`, `FromMap` and `FromYAML` decode through it; no Go type changes. | Pointer elements (`[]*T`), which change the Go type of every list field; recording the null positions in hidden decode state for `Validate`, which goes stale when a caller edits the value |
+| The check reads the raw bytes after `json.Unmarshal` has accepted them. A payload without a `null` token costs one byte search; one with a null anywhere costs one pass over the object's members. Each list is still decoded once. | Decoding each list through `[]json.RawMessage` and each element again |
+| A null inner list of `T[][]` still decodes, to a nil list, which `Validate` reports at `field[i]`. A map whose values are lists is not checked: no validator checks the elements of a map value. | Refusing a null inner list in the decoder too |
+
+Two Go decode paths do not go through a generated type's `UnmarshalJSON`
+and still decode a null element to its zero value: a list argument of an
+API operation without an input type, which the route decodes into a
+struct of its own, and a list or list-of-lists column the ORM reads, which
+it decodes into the Go list directly. The ORM writes no null elements; a
+row another writer stored with one reads with a zero value in its place.
 
 The generated TypeScript validator rejects a null element, validates a
 nested object element of every type, and reports a non-string element of a
@@ -376,7 +389,8 @@ Some payloads never reach a generated validator, and that is expected. In
 Go and Python the typed decoder is the first check, and a payload it
 refuses never becomes a value to validate. `json.Unmarshal` refuses a
 non-list inner value and an element of the wrong JSON type (a number where
-a string scalar belongs); pydantic's strict parse refuses an element of the
+a string scalar belongs), and the generated Go `UnmarshalJSON` refuses a
+null list element; pydantic's strict parse refuses an element of the
 wrong type, a bad enum element and a nested object element with a bad
 field. For those vectors the harness asserts the refusal (`decodeRejects`)
 instead of verdicts; the runtimes, which validate the raw payload, return
