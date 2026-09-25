@@ -444,6 +444,9 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- `runtime/http/go`: OpenTelemetry `otel`, `otel/sdk`, `otel/trace` and
+  `otel/metric` 1.45.0 to 1.46.0. A module that requires the runtime
+  resolves 1.46.0 or later. Patch.
 - Go API: a route no longer emits the response check after the
   implementation call. It asserted `Validate() interface{ HasErrors() bool }`,
   which no generated type satisfies (their `Validate` returns
