@@ -12,7 +12,7 @@ import (
 // TestImportedUnionReExportsWrapper: a field typed with a union from a
 // dependency is a union field (a nilable interface when optional), and the
 // generated module re-exports the dependency's <Union>Wrapper next to the
-// union alias.
+// union alias and validates the field through it.
 func TestImportedUnionReExportsWrapper(t *testing.T) {
 	dependency := ir.NewSchema("contracts", ir.SchemaKindGeneral)
 	dependency.Types["CreatedRevision"] = &ir.TypeDef{Name: "CreatedRevision", Role: ir.RoleEmbeddedStruct}
@@ -61,6 +61,10 @@ func TestImportedUnionReExportsWrapper(t *testing.T) {
 	}
 	if !strings.Contains(string(source), "type RevisionRefWrapper = contracts.RevisionRefWrapper") {
 		t.Fatalf("imported union wrapper alias missing:\n%s", source)
+	}
+	// Validate hands the member to the dependency's wrapper.
+	if !strings.Contains(string(source), "(contracts.RevisionRefWrapper{Value: value}).Validate()") {
+		t.Fatalf("imported union field not validated through its wrapper:\n%s", source)
 	}
 }
 

@@ -33,6 +33,22 @@ func (w {{.Name}}Wrapper) MarshalJSON() ([]byte, error) {
 	return json.Marshal(w.Value)
 }
 
+// Validate validates the member the wrapper holds. Decoding selects a member
+// without checking its required fields, so a containing type's Validate calls
+// this for every union-typed field. A nil Value reports nothing: the field
+// that holds the union decides whether a value is required.
+func (w {{.Name}}Wrapper) Validate() ValidationErrors {
+	switch member := w.Value.(type) {
+	{{range .Types}}case {{.}}:
+		return member.Validate()
+	case *{{.}}:
+		if member != nil {
+			return member.Validate()
+		}
+	{{end}}}
+	return NewValidationErrors()
+}
+
 // UnmarshalJSON unmarshals the union type.
 //
 {{if $dispatchByDiscriminator}}// This union has a discriminator field {{printf "%q" $discriminator}} with a known
@@ -41,9 +57,12 @@ func (w {{.Name}}Wrapper) MarshalJSON() ([]byte, error) {
 // the field-shape ambiguity that arises when one member is a structural subset
 // of another (a payload would otherwise match an earlier member's lenient
 // decoder if its extra fields were silently ignored).
-{{else}}// This union has no member-keyed discriminator dispatch. Strict map decoding
-// selects the correct member by field shape (rejecting payloads with unknown
-// fields).
+{{else}}// This union has no member-keyed discriminator dispatch. A member's decoder
+// ignores keys it does not declare, so trying each decoder in turn would let
+// the first member accept every payload. The wrapper picks the first member
+// whose fields include every payload key and whose tag values the payload
+// does not contradict. When no member declares every key, it tolerates the
+// unknown keys and picks the first member whose tags the payload allows.
 {{end}}func (w *{{.Name}}Wrapper) UnmarshalJSON(data []byte) error {
 	var payload map[string]any
 	if err := json.Unmarshal(data, &payload); err != nil {
@@ -75,12 +94,22 @@ func (w {{.Name}}Wrapper) MarshalJSON() ([]byte, error) {
 	{{end}}default:
 		return fmt.Errorf("decode {{$unionName}} union: unknown discriminator value %q", discriminator)
 	}
-	{{else}}{{range .Types}}
-	// Try {{.}}
-	var {{lower .}} {{.}}
-	if err := {{lower .}}.FromMapStrict(payload); err == nil {
-		w.Value = {{lower .}}
-		return nil
+	{{else}}{{range .Members}}
+	// Try {{.Name}}
+	if unionPayloadKeysWithin(payload{{range .Fields}}, {{printf "%q" .}}{{end}}) && unionPayloadTagsAllow(payload{{range .Tags}}, {{printf "%q" .Field}}, {{printf "%q" .Value}}{{end}}) {
+		var member {{.Name}}
+		if err := member.FromMapStrict(payload); err == nil {
+			w.Value = member
+			return nil
+		}
+	}
+	{{end}}{{range .Members}}
+	if unionPayloadTagsAllow(payload{{range .Tags}}, {{printf "%q" .Field}}, {{printf "%q" .Value}}{{end}}) {
+		var member {{.Name}}
+		if err := member.FromMapStrict(payload); err == nil {
+			w.Value = member
+			return nil
+		}
 	}
 	{{end}}
 
@@ -88,4 +117,37 @@ func (w {{.Name}}Wrapper) MarshalJSON() ([]byte, error) {
 	{{end}}
 }
 
+{{end}}
+{{- if .HasShapeDispatchedUnions}}
+// unionPayloadKeysWithin reports whether every payload key is one of fields.
+func unionPayloadKeysWithin(payload map[string]any, fields ...string) bool {
+	for key := range payload {
+		known := false
+		for _, field := range fields {
+			if key == field {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return false
+		}
+	}
+	return true
+}
+
+// unionPayloadTagsAllow takes field, value pairs and reports whether the
+// payload leaves each field absent or sets it to that string value.
+func unionPayloadTagsAllow(payload map[string]any, tags ...string) bool {
+	for i := 0; i+1 < len(tags); i += 2 {
+		raw, ok := payload[tags[i]]
+		if !ok {
+			continue
+		}
+		if value, isString := raw.(string); !isString || value != tags[i+1] {
+			return false
+		}
+	}
+	return true
+}
 {{end}}

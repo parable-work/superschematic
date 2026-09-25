@@ -662,7 +662,61 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	errors := NewValidationErrors()
 
 	{{range .Fields}}
-	{{if .IsArrayOfArrays}}{{template "nestedListValidate" (nestedList $ .)}}{{else}}{{if or (isValidatableScalarField .) (isEnumType $.Enums $.ImportedEnums .Type)}}
+	{{if .IsArrayOfArrays}}{{template "nestedListValidate" (nestedList $ .)}}{{else}}{{if .IsUnion}}
+	{{/* A union field holds an interface value, so it matches neither the
+	   scalar nor the generated-type branch below. Its wrapper dispatches to the
+	   held member's Validate. Without this branch an absent required union
+	   passed, and so did a member missing its own required fields. */}}
+	{{$wrapper := unionWrapperType .Type $.ImportedUnions}}
+	// Validate {{.Name}} ({{if .Required}}required{{else}}optional{{end}} union)
+	{{if .UsesWrapper}}
+	if t.{{.GoName}}.IsSet() && !t.{{.GoName}}.IsNull() {
+		value := t.{{.GoName}}.Value
+	{{else if .Required}}
+	if t.{{.GoName}} == nil {
+		errors.AddFieldError("{{.Name}}", "required", "required field")
+	} else {
+		value := t.{{.GoName}}
+	{{else}}
+	if t.{{.GoName}} != nil {
+		value := t.{{.GoName}}
+	{{end}}
+		{{if .IsMap}}
+		for key, item := range value {
+			{{if .IsArray}}
+			for i, element := range item {
+				fieldKey := fmt.Sprintf("{{.Name}}[%s][%d]", key, i)
+				if element == nil {
+					errors.AddFieldError(fieldKey, "required", "required field")
+				} else if itemErrs := ({{$wrapper}}{Value: element}).Validate(); itemErrs.HasErrors() {
+					errors.AddNestedError(fieldKey, itemErrs)
+				}
+			}
+			{{else}}
+			fieldKey := fmt.Sprintf("{{.Name}}[%s]", key)
+			if item == nil {
+				errors.AddFieldError(fieldKey, "required", "required field")
+			} else if itemErrs := ({{$wrapper}}{Value: item}).Validate(); itemErrs.HasErrors() {
+				errors.AddNestedError(fieldKey, itemErrs)
+			}
+			{{end}}
+		}
+		{{else if .IsArray}}
+		for i, item := range value {
+			fieldKey := fmt.Sprintf("{{.Name}}[%d]", i)
+			if item == nil {
+				errors.AddFieldError(fieldKey, "required", "required field")
+			} else if itemErrs := ({{$wrapper}}{Value: item}).Validate(); itemErrs.HasErrors() {
+				errors.AddNestedError(fieldKey, itemErrs)
+			}
+		}
+		{{else}}
+		if fieldErrs := ({{$wrapper}}{Value: value}).Validate(); fieldErrs.HasErrors() {
+			errors.AddNestedError("{{.Name}}", fieldErrs)
+		}
+		{{end}}
+	}
+	{{else if or (isValidatableScalarField .) (isEnumType $.Enums $.ImportedEnums .Type)}}
 	{{if .IsMap}}
 	// Validate {{.Name}} entries independently of the map container.
 	{{if .UsesWrapper}}
@@ -1843,6 +1897,12 @@ func {{.AccessorName}}() {{.Type}} {
 				}
 {{- else if .ElemNested}}
 				if itemErrs := item.Validate(); itemErrs.HasErrors() {
+					errors.AddNestedError(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), itemErrs)
+				}
+{{- else if .ElemUnion}}
+				if item == nil {
+					errors.AddFieldError(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), "required", "required field")
+				} else if itemErrs := ({{.ElemUnion}}{Value: item}).Validate(); itemErrs.HasErrors() {
 					errors.AddNestedError(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), itemErrs)
 				}
 {{- end}}

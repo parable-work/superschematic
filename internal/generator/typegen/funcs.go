@@ -210,6 +210,10 @@ type nestedList struct {
 	// that validates and masks its own fields.
 	ElemNested bool
 
+	// ElemUnion is the <Union>Wrapper that validates each innermost element
+	// when the element type is a union. It is empty for other element types.
+	ElemUnion string
+
 	// ListBounds are the listMin and listMax rules, checked against the
 	// outer list. ElemRules are the length, pattern and range rules, checked
 	// against every innermost element.
@@ -219,7 +223,7 @@ type nestedList struct {
 
 // ChecksElements reports whether Validate visits each innermost element.
 func (n nestedList) ChecksElements() bool {
-	return n.ElemValidate != "" || n.ElemNested || len(n.ElemRules) > 0
+	return n.ElemValidate != "" || n.ElemNested || n.ElemUnion != "" || len(n.ElemRules) > 0
 }
 
 // newNestedList describes the T[][] field to the template, resolving its
@@ -240,6 +244,8 @@ func newNestedList(module *ModuleOutput, field FieldInfo) nestedList {
 		if field.Required && !field.HasDefault {
 			list.ElemValidate = "ValidateRequired"
 		}
+	case field.IsUnion:
+		list.ElemUnion = unionWrapperType(field.Type, module.ImportedUnions)
 	case !field.IsScalar && isGeneratedType(module.Types, module.ImportedTypes, field.Type):
 		list.ElemNested = true
 	}
@@ -256,6 +262,17 @@ func newNestedList(module *ModuleOutput, field FieldInfo) nestedList {
 		}
 	}
 	return list
+}
+
+// unionWrapperType returns the <Union>Wrapper that decodes and validates a
+// value of the named union, qualified when the union is imported.
+func unionWrapperType(typeName string, importedUnions []ImportedUnionInfo) string {
+	for _, iu := range importedUnions {
+		if iu.Name == typeName {
+			return iu.ImportAlias + "." + typeName + "Wrapper"
+		}
+	}
+	return typeName + "Wrapper"
 }
 
 // inputFieldValueType returns T for the Go type InputField[T], the type an
@@ -286,14 +303,7 @@ func templateFuncs() template.FuncMap {
 			}
 			return false
 		},
-		"unionWrapperType": func(typeName string, importedUnions []ImportedUnionInfo) string {
-			for _, iu := range importedUnions {
-				if iu.Name == typeName {
-					return iu.ImportAlias + "." + typeName + "Wrapper"
-				}
-			}
-			return typeName + "Wrapper"
-		},
+		"unionWrapperType": unionWrapperType,
 		"formatComment": func(name, doc string) string {
 			return codegen.FormatComment("// ", name, doc)
 		},
