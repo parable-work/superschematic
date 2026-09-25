@@ -154,6 +154,10 @@ scalar, is `type`.
 The same paths appear where each target checks a payload:
 
 - The Go API routes answer `400` with these paths for a request body.
+- The TypeScript API server answers `400` with these paths for a body
+  argument, a `T[]` and a `T[][]` alike, of a scalar, enum, object or
+  `Generic.JSON` type. It reads each element as its JSON value, so a
+  number in a list of strings is `type`, not the string `"5"`.
 - The Go, TypeScript and Python SDKs refuse a null inner list at `name[i]`
   and an element that fails its type's validation at `name[i][j]` before
   sending the request.

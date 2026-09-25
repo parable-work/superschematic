@@ -1,0 +1,93 @@
+# Body arguments that are lists of strings, numbers, integer scalars, an
+# enum, a string scalar and Generic.JSON values, next to single ones and a
+# Generic.JSON list of lists, and a GET whose list travels in the query
+# string. tsrestgen's scalar list tests load it.
+name: scalar-lists-api
+kind: API
+scalars:
+  Network.Url:
+    name: Network.Url
+    languagePrimitive: string
+  Ordering.Rank:
+    name: Ordering.Rank
+    languagePrimitive: number
+  Generic.JSON:
+    name: Generic.JSON
+    languagePrimitive: object
+enums:
+  # The shade of a tag.
+  Shade:
+    name: Shade
+    values:
+      - name: Light
+        serializedAs: light
+      - name: Dark
+        serializedAs: dark
+operationSets:
+  - name: TagMutations
+    operations:
+      # Replace a post's tags; returns the labels as stored.
+      - name: saveTags
+        typeRef: { name: string, isArray: true }
+        required: true
+        httpMethod: PUT
+        restPath: "posts/{id}/tags"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          # The labels, at most three; a label may hold a comma.
+          - name: labels
+            typeRef: { name: string, isArray: true }
+            required: true
+            validateListMax: 3
+          # One weight per label.
+          - name: weights
+            typeRef: { name: number, isArray: true }
+          # Display ranks, integers from 1.
+          - name: ranks
+            typeRef: { name: Ordering.Rank, isArray: true }
+          # One shade per label.
+          - name: shades
+            typeRef: { name: Shade, isArray: true }
+          # One or two links, each on https.
+          - name: links
+            typeRef: { name: Network.Url, isArray: true }
+            validateListMin: 1
+            validateListMax: 2
+            validatePattern: "^https://"
+          # A title for the set.
+          - name: title
+            typeRef: { name: string }
+          # A priority for the set.
+          - name: priority
+            typeRef: { name: number }
+      # Store a JSON document with optional notes; returns the document.
+      - name: storeDocument
+        typeRef: { name: Generic.JSON }
+        required: true
+        httpMethod: POST
+        restPath: "documents"
+        arguments:
+          # Any JSON value but null.
+          - name: document
+            typeRef: { name: Generic.JSON }
+            required: true
+          - name: note
+            typeRef: { name: Generic.JSON }
+          - name: extras
+            typeRef: { name: Generic.JSON, isArray: true }
+          - name: grid
+            typeRef: { name: Generic.JSON, isArray: true, isArrayOfArrays: true }
+  - name: TagQueries
+    operations:
+      # Find posts by label; the labels travel in the query string.
+      - name: findTags
+        typeRef: { name: string, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "posts/tags"
+        arguments:
+          - name: labels
+            typeRef: { name: string, isArray: true }
+            required: true

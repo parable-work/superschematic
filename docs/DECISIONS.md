@@ -382,6 +382,32 @@ field. For those vectors the harness asserts the refusal (`decodeRejects`)
 instead of verdicts; the runtimes, which validate the raw payload, return
 the expected column.
 
+The TypeScript API server decodes every body argument from its JSON value
+with these rules, for a scalar, enum, object or `Generic.JSON` type, alone,
+as `T[]` and as `T[][]`. Before, a list of a scalar or enum went through
+the query-string decoder: it split each element on commas and dropped
+empty ones, turned a null element into `"null"` and an object into
+`"[object Object]"`, accepted `"5"` for a number, and refused `[]` for a
+required list. Now a value of the wrong JSON type is `type`, a null element
+is `required` at `name[i]` or `name[i][j]`, `[]` satisfies a required list,
+and `listMin` and `listMax` bound the outer list. A scalar's own lengths,
+pattern and range apply to each value, and a failure is named by the rule
+it breaks (D14). A list in the query string is still read from repeated
+keys and comma-separated values.
+
+For `Generic.JSON` the server follows the three schema runtimes, which
+agree: a null value of a required field is `required`, a null optional one
+is absent, and a null element of `Generic.JSON[]` (or an innermost one of
+`Generic.JSON[][]`) is `required` at its index. Any other JSON value is
+accepted and reaches the implementation as it is. Two differences are
+open. The runtimes check a `Generic.JSON` value as a string, because the
+scalar catalog gives it the `String` primitive, so they report `type` for
+an object, array, number or boolean that superscalar, every generated type
+and the server accept. And the generated Go, TypeScript and Python
+validators accept a JSON null for a required `Generic.JSON` field, which
+the runtimes and the server refuse; the generated Go validator also
+accepts an absent one and a null element of `Generic.JSON[]`.
+
 ## D13. The scalar JSDoc tag is a naming key, unset by default
 
 The TypeScript types generator can write a JSDoc line above every
