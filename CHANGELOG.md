@@ -94,7 +94,7 @@ of a generated artifact is always listed here with the bump it requires.
 - TypeScript types: every build writes `<out>/types/typescript/package.json`,
   a private Bun workspace root named `<npm_scope>/types-workspace` whose
   workspaces are the generated types packages next to it. A types package
-  that depends on a sibling through `file:../<schema>`, and on the scalar
+  that depends on a sibling through `workspace:*`, and on the scalar
   library through a `file:` spec outside the tree, then installs from the
   root or from any package. The name comes from `npm_scope`. Minor.
 - `@strictJSON` (from `@superschematic/schema`) on a type makes every
@@ -627,6 +627,14 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- TypeScript types: a types package names a sibling types package with
+  `workspace:*` instead of `file:../<schema>`. With the `file:` spec, the
+  second `bun install` in the types workspace (Bun 1.4.0), or the first
+  after a package gained such a spec (Bun 1.4.2), read the scalar
+  library's `file:` path from the wrong directory and failed. The
+  TypeScript gates in `go test` now fail instead of skipping under
+  `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`, and the CI `go` job installs
+  `packages/` so the schema-config JSON Schema drift test runs. Minor.
 - Go API: a field is a multipart upload only when its scalar carries
   `fileUpload` metadata. Before, four scalar names (`Artifact.File`,
   `Asset.File`, `Asset.Image`, `Asset.LogoImage`) were treated as uploads

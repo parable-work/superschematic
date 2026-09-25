@@ -904,7 +904,7 @@ func TestGeneratedValidatorParity(t *testing.T) {
 	t.Run("typescript", func(t *testing.T) {
 		bunPath, err := exec.LookPath("bun")
 		if err != nil {
-			t.Skip("bun not available; skipping TypeScript parity check")
+			testpaths.RequireOrSkipTS(t, "bun not available for the TypeScript parity check")
 		}
 		paths := testpaths.Local(t)
 
@@ -933,7 +933,7 @@ func TestGeneratedValidatorParity(t *testing.T) {
 		install := exec.Command(bunPath, "install")
 		install.Dir = outDir
 		if out, err := install.CombinedOutput(); err != nil {
-			t.Skipf("bun install failed (likely offline): %v\n%s", err, out)
+			testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed (likely offline): %v\n%s", err, out))
 		}
 
 		resultsPath := filepath.Join(sharedDir, "results-ts.json")

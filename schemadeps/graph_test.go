@@ -11,12 +11,12 @@ import (
 func TestCollectFromDist_TypeScriptOmitsWebDBFromAPI(t *testing.T) {
 	dist := t.TempDir()
 	writeTSPackage(t, dist, "types/typescript/web-api", "@schemas/web-api-types", map[string]string{
-		"@schemas/enums-types": "file:../enums",
+		"@schemas/enums-types": "workspace:*",
 		"superscalar":          "file:../../../../../third_party/superscalar/bindings/typescript",
 	})
 	writeTSPackage(t, dist, "types/typescript/enums", "@schemas/enums-types", nil)
 	writeTSPackage(t, dist, "types/typescript/web-db", "@schemas/web-db-types", map[string]string{
-		"@schemas/enums-types": "file:../enums",
+		"@schemas/enums-types": "workspace:*",
 	})
 	writeTSPackage(t, dist, "sdk/typescript/web-api", "@schemas/web-api-sdk", map[string]string{
 		"axios": "1.0.0",
@@ -52,7 +52,7 @@ func TestCollectFromDist_TypeScriptOmitsWebDBFromAPI(t *testing.T) {
 func TestCollectFromDist_AnnotatesProducingService(t *testing.T) {
 	dist := t.TempDir()
 	writeTSPackage(t, dist, "types/typescript/orders-api", "@schemas/orders-api-types", map[string]string{
-		"@schemas/enums-types": "file:../enums",
+		"@schemas/enums-types": "workspace:*",
 	})
 	writeTSPackage(t, dist, "types/typescript/enums", "@schemas/enums-types", nil)
 

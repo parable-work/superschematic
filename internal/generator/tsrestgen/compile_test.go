@@ -21,10 +21,7 @@ import (
 // same rule as sdkgen's compile gate.
 func requireOrSkipTSTooling(t *testing.T, reason string) {
 	t.Helper()
-	if os.Getenv("SUPERSCHEMATIC_REQUIRE_TS_CHECKS") == "1" {
-		t.Fatalf("SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1 requires this TypeScript gate to run: %s", reason)
-	}
-	t.Skipf("skipping TypeScript gate: %s", reason)
+	testpaths.RequireOrSkipTS(t, reason)
 }
 
 // generatedTree is an API package materialized beside its type packages
@@ -104,10 +101,6 @@ func fixtureAPI(t *testing.T) apiFixture {
 // generates the API package and links every peer it resolves by name: the
 // type packages, the scalar library, the http runtime, and hono (from the
 // runtime's own install so both sides see one copy of the framework).
-//
-// The install runs once, at the root: bun 1.4.0 and 1.4.2 each fail an
-// install inside a member in a case the other accepts (see tsgen's
-// buildTSPackages).
 func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 	t.Helper()
 	bunPath, runtimeDir, paths := installRuntime(t)

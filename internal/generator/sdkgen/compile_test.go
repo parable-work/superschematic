@@ -2,7 +2,6 @@ package sdkgen
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -24,10 +23,7 @@ import (
 // against: TestGeneratedSDKCompiles skipped silently on a bad superscalar path.
 func requireOrSkipTSTooling(t *testing.T, reason string) {
 	t.Helper()
-	if os.Getenv("SUPERSCHEMATIC_REQUIRE_TS_CHECKS") == "1" {
-		t.Fatalf("SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1 requires this TypeScript gate to run: %s", reason)
-	}
-	t.Skipf("skipping TypeScript gate: %s", reason)
+	testpaths.RequireOrSkipTS(t, reason)
 }
 
 // TestGeneratedSDKCompiles generates the fixture-api TypeScript SDK wired
