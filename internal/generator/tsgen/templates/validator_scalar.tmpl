@@ -99,9 +99,13 @@ export function validate{{.Scalar.Symbol}}(
   {{end}}
 
   {{if .Scalar.HasCustomValidate}}
-  const [isValid, customErrors] = validate{{.Scalar.Symbol}}FromLib(value as {{.Scalar.TSType}});
-  if (!isValid && customErrors) {
-    errors.push(...customErrors);
+  // The scalar core checks the rules above again, so it runs only when they
+  // pass: one failing value, one error.
+  if (errors.length === 0) {
+    const [isValid, customErrors] = validate{{.Scalar.Symbol}}FromLib(value as {{.Scalar.TSType}});
+    if (!isValid && customErrors) {
+      errors.push(...customErrors);
+    }
   }
   {{end}}
 
@@ -128,6 +132,9 @@ export function validate{{.Scalar.Symbol}}Required(
   {{else if eq .Scalar.TSType "string"}}
   if (value === null || value === undefined || value === "") {
     return [false, [{ validator: "required", message: "required field" }]];
+  }
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected string value" }]];
   }
   {{else}}
   if (value === null || value === undefined) {

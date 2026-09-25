@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/parable-work/superschematic/internal/buildcache"
 	"github.com/parable-work/superschematic/internal/buildplan"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
@@ -130,11 +131,12 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 
 	// The schemas root is the parent of the services directory; the
 	// repository root, which [paths] keys resolve against, is its parent.
-	schemasRoot := filepath.Join(servicePath, "..", "..")
-	repoRoot, err := filepath.Abs(filepath.Join(schemasRoot, ".."))
+	schemasRoot, err := filepath.Abs(filepath.Join(servicePath, "..", ".."))
 	if err != nil {
-		return fmt.Errorf("resolving repository root: %w", err)
+		return fmt.Errorf("resolving schemas root: %w", err)
 	}
+	repoRoot := filepath.Dir(schemasRoot)
+	buildcache.SetSchemasRoot(schemasRoot)
 	names, err := resolveNaming(flags.namingPath, schemasRoot)
 	if err != nil {
 		return err
@@ -182,13 +184,14 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 	outputRoot = absOutputRoot
 
 	if flags.withDeps {
-		return runBuildWithDeps(cmd, reg, names, flags, servicePath, outputRoot, repoRoot)
+		return runBuildWithDeps(cmd, reg, names, flags, servicePath, outputRoot, schemasRoot)
 	}
 
 	_, err = buildService(buildServiceOptions{
 		Naming:      names,
 		ServicePath: servicePath,
 		OutputRoot:  outputRoot,
+		SchemasRoot: schemasRoot,
 		Paths:       names.LocalPaths(repoRoot),
 		LoadOptions: loadOpts,
 		LoadDependency: func(name string) (*ir.Schema, error) {
@@ -211,7 +214,7 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 // in which order. Unlike build-all it writes no dependency graph and runs no
 // build-all hooks: both describe the whole services root, and a closure is a
 // slice of it.
-func runBuildWithDeps(cmd *cobra.Command, reg *registry.Registry, names naming.Naming, flags *buildFlags, servicePath, outputRoot, repoRoot string) error {
+func runBuildWithDeps(cmd *cobra.Command, reg *registry.Registry, names naming.Naming, flags *buildFlags, servicePath, outputRoot, schemasRoot string) error {
 	absServicePath, err := filepath.Abs(servicePath)
 	if err != nil {
 		return fmt.Errorf("resolving service path: %w", err)
@@ -273,7 +276,8 @@ func runBuildWithDeps(cmd *cobra.Command, reg *registry.Registry, names naming.N
 
 	ctx := buildAllTaskContext{
 		outputRoot:     outputRoot,
-		repoRoot:       repoRoot,
+		schemasRoot:    schemasRoot,
+		repoRoot:       filepath.Dir(schemasRoot),
 		loadOpts:       []loader.Option{loader.WithSchemaCatalog(catalog), loader.WithNaming(names), loader.WithRegistry(reg)},
 		schemaCache:    newSharedSchemaCache(),
 		serviceByName:  serviceByName,

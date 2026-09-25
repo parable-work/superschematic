@@ -155,6 +155,30 @@ func mapFromYAMLValue(data []byte) (map[string]any, error) {
 	return result, nil
 }
 
+// validateIdentityUUIDValue validates one Identity.UUID value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateIdentityUUIDValue(value IdentityUUID, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
 // Board - A game board whose columns are lists of lists.
 type Board struct {
 	Id *IdentityUUID `json:"id,omitempty"`
@@ -241,18 +265,9 @@ func (t *Board) Validate() ValidationErrors {
 
 	// Validate optional pointer field
 	if t.Id != nil {
-		if valid, fieldErrs := t.Id.Validate(); !valid {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
 			errors.SetFieldErrors("id", fieldErrs)
 		}
-	}
-
-	if t.Id != nil {
-		value := *t.Id
-
-		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
-			errors.AddFieldError("id", "pattern", "invalid format")
-		}
-
 	}
 
 	// Validate labels (list of lists; an inner list is never null)

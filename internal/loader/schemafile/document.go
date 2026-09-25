@@ -76,11 +76,12 @@ var singleDefKinds = map[string]bool{
 }
 
 // documentCollectionKeys are the top-level keys that identify a
-// multi-definition document when no discriminator is present.
+// multi-definition document when no discriminator is present: the json name
+// of every Document field except name, kind, description and comment.
+// TestDocumentCollectionKeysMatchTheDocument keeps the two in step.
 var documentCollectionKeys = []string{
 	"imports", "scalars", "types", "enums", "unions",
-	"operationSets", "combinators", "primitives", "plots",
-	"concepts", "relationships", "actions", "documents", "extensions",
+	"operationSets", "documents", "extensions",
 }
 
 // form identifies which on-disk shape a payload uses.

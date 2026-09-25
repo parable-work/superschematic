@@ -4,6 +4,7 @@ import {
   newValidationErrors,
   addFieldError,
   setFieldErrors,
+  addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { load as loadYaml } from 'js-yaml';
@@ -15,7 +16,7 @@ import { validateIdentityUUIDRequired, validateIdentityUUID } from '../scalars/i
 
 import { parseTemporalDateTime as parseTemporalDateTimeFromLib } from 'superscalar/scalars';
 
-import { parseTenantFromJSON } from './tenant';
+import { parseTenantFromJSON, validateTenant } from './tenant';
 
 /**
  * Validates a TenantUser object
@@ -46,6 +47,23 @@ export function validateTenantUser(value: TenantUser | null | undefined): Valida
     if (!valid && fieldErrors) {
       setFieldErrors(errors, "id", fieldErrors);
     }
+  }
+
+  {
+    // A nested object is validated as its own type, its errors under the
+    // field's path; any other value is left to the field's other checks.
+    const validateNested = (nested: unknown, path: string) => {
+      if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) {
+        return;
+      }
+      const nestedErrors = validateTenant(nested as Tenant);
+      if (nestedErrors !== true) {
+        addNestedErrors(errors, path, nestedErrors);
+      }
+    };
+
+    validateNested(value.tenant, "tenant");
+
   }
 
   if (value.tenant === null || value.tenant === undefined) {

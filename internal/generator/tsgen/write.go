@@ -231,7 +231,11 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				ParserNestedTypes []string
 				ParserScalarsUsed []ScalarInfo
 				NeedsJSONParse    bool
-				Naming            naming.Naming
+				// ValidatesNestedObjects is true when validate<Type>
+				// validates a nested object field and reports its errors
+				// with addNestedErrors.
+				ValidatesNestedObjects bool
+				Naming                 naming.Naming
 			}{
 				Naming:            output.Naming,
 				Type:              t,
@@ -244,6 +248,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				ParserScalarsUsed: typeParserScalarsUsed(t),
 				NeedsJSONParse:    typeNeedsJSONParse(t, generatedTypeNames),
 			}
+			data.ValidatesNestedObjects = typeValidatesNestedObjects(t, data.ParserNestedTypes)
 			if err := generateFile(generator, "validator_type.tmpl", outPath, data); err != nil {
 				return fmt.Errorf("failed to generate %s: %w", outPath, err)
 			}

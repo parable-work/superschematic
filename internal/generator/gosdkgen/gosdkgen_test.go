@@ -87,7 +87,7 @@ func TestEndpointParametersPreserveScalarWireTypes(t *testing.T) {
 			endpoint := convertEndpoint(apigen.EndpointInfo{
 				Path: "/items/{value}", Method: "GET",
 				PathParams: []apigen.Param{test.param}, QueryParams: []apigen.Param{test.param},
-			}, false, "", "Items")
+			}, false, "", "Items", nil)
 			if got := endpoint.PathParams[0].GoType; got != test.want {
 				t.Errorf("path parameter type = %s, want %s", got, test.want)
 			}

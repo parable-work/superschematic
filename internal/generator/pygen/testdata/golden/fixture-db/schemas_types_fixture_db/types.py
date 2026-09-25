@@ -265,13 +265,17 @@ class Tenant(BaseModel):
 
         # Validate id
         if self.id is not None:
-            try:
-                TypeAdapter(IdentityUUID).validate_python(self.id)
-            except PydanticValidationError as e:
-                errors.add_field_error("id", "invalid", str(e))
 
             if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "id" or key.startswith("id[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.id)
+                except PydanticValidationError as e:
+                    errors.add_field_error("id", "invalid", str(e))
 
         # Validate name
         if self.name is None:
@@ -510,13 +514,17 @@ class TenantUser(BaseModel):
 
         # Validate id
         if self.id is not None:
-            try:
-                TypeAdapter(IdentityUUID).validate_python(self.id)
-            except PydanticValidationError as e:
-                errors.add_field_error("id", "invalid", str(e))
 
             if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "id" or key.startswith("id[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.id)
+                except PydanticValidationError as e:
+                    errors.add_field_error("id", "invalid", str(e))
 
         # Validate tenant
         if self.tenant is not None:
@@ -541,13 +549,17 @@ class TenantUser(BaseModel):
 
         # Validate deletedBy
         if self.deleted_by is not None:
-            try:
-                TypeAdapter(IdentityUUID).validate_python(self.deleted_by)
-            except PydanticValidationError as e:
-                errors.add_field_error("deleted_by", "invalid", str(e))
 
             if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.deleted_by)) is None:
                 errors.add_field_error("deleted_by", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "deleted_by" or key.startswith("deleted_by[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.deleted_by)
+                except PydanticValidationError as e:
+                    errors.add_field_error("deleted_by", "invalid", str(e))
 
         return errors
 

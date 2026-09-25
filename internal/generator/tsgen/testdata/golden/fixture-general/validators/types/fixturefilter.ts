@@ -51,6 +51,16 @@ export function validateFixtureFilter(value: FixtureFilter | null | undefined): 
 
   }
 
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.values)) {
+    value.values.forEach((item, index) => {
+      if (item === null || item === undefined) {
+        setFieldErrors(errors, `values[${index}]`, [{ validator: "required", message: "required field" }]);
+      }
+    });
+  }
+
   return Object.keys(errors).length > 0 ? errors : true;
 }
 
