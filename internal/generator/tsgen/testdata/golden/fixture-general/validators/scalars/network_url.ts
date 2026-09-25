@@ -39,6 +39,9 @@ export function validateNetworkUrlRequired(
   if (value === null || value === undefined || value === "") {
     return [false, [{ validator: "required", message: "required field" }]];
   }
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected string value" }]];
+  }
 
   return validateNetworkUrl(value);
 }

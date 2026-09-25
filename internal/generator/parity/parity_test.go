@@ -585,17 +585,10 @@ var knownDivergences = map[string]map[string]map[string][]string{
 			"numGrid[0][0]":    {"min"},
 			"reqUrlGrid[0][0]": {"required"},
 		},
-		// The scalar's pattern and the core's custom validator both
-		// report the malformed value.
-		"email_bad_format": {"email": {"pattern", "pattern"}},
 		// validate<Type> recurses into nested object values only for a
 		// @strictJSON type, for T, T[] and T[][] alike.
 		"list_bad_object_element": {},
 		"grid_bad_object_element": {},
-		// The superscalar string validator formats a non-string value
-		// and reports the pattern it fails, for T, T[] and T[][] alike.
-		"req_scalar_list_bad_element": {"reqScalarList[1]": {"pattern"}},
-		"grid_bad_scalar_element":     {"reqUrlGrid[1][1]": {"pattern"}},
 	},
 }
 

@@ -18,9 +18,13 @@ export function validateGenericJSON(
     return [true, null];
   }
 
-  const [isValid, customErrors] = validateGenericJSONFromLib(value as JSONValue);
-  if (!isValid && customErrors) {
-    errors.push(...customErrors);
+  // The scalar core checks the rules above again, so it runs only when they
+  // pass: one failing value, one error.
+  if (errors.length === 0) {
+    const [isValid, customErrors] = validateGenericJSONFromLib(value as JSONValue);
+    if (!isValid && customErrors) {
+      errors.push(...customErrors);
+    }
   }
 
   return errors.length > 0 ? [false, errors] : [true, null];
