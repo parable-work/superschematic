@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"reflect"
+	"regexp"
 	"strings"
 )
 
@@ -154,6 +155,33 @@ func mapFromYAMLValue(data []byte) (map[string]any, error) {
 	return result, nil
 }
 
+// validateNetworkUrlValue validates one Network.Url value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateNetworkUrlValue(value NetworkUrl, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if len(string(value)) > 2048 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 2048 characters"})
+	}
+	if matched, err := regexp.MatchString("^https?://[\\w\\-\\{\\}]+(\\.[\\w\\-\\{\\}]+)+([:/?#][\\w\\-\\._~:/?#\\[\\]@!\\$&'\\(\\)\\*\\+,;=\\{\\}%]*)?$", string(value)); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
 // FixtureConfig
 type FixtureConfig struct {
 	DatabaseUrl NetworkUrl `json:"DATABASE_URL"`
@@ -219,7 +247,7 @@ func (t *FixtureConfig) Validate() ValidationErrors {
 
 	// Validate DATABASE_URL (required)
 
-	if valid, fieldErrs := t.DatabaseUrl.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateNetworkUrlValue(t.DatabaseUrl, true); !valid {
 		errors.SetFieldErrors("DATABASE_URL", fieldErrs)
 	}
 

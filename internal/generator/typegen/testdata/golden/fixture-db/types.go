@@ -164,6 +164,87 @@ func mapFromYAMLValue(data []byte) (map[string]any, error) {
 	return result, nil
 }
 
+// validateIdentityNameValue validates one Identity.Name value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateIdentityNameValue(value IdentityName, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if len(string(value)) > 80 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 80 characters"})
+	}
+	if len(string(value)) < 2 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "minLength", Message: "must be at least 2 characters"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateIdentitySlugValue validates one Identity.Slug value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateIdentitySlugValue(value IdentitySlug, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if len(string(value)) > 255 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 255 characters"})
+	}
+	if len(string(value)) < 1 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "minLength", Message: "must be at least 1 characters"})
+	}
+	if matched, err := regexp.MatchString("^[a-z0-9]+(?:[-_][a-z0-9]+)*$", string(value)); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateIdentityUUIDValue validates one Identity.UUID value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateIdentityUUIDValue(value IdentityUUID, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
 // Auditable - Base class providing audit fields to every table.
 type Auditable struct {
 	CreatedAt TemporalDateTime `json:"createdAt"`
@@ -518,20 +599,20 @@ func (t *Tenant) Validate() ValidationErrors {
 
 	// Validate optional pointer field
 	if t.Id != nil {
-		if valid, fieldErrs := t.Id.Validate(); !valid {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
 			errors.SetFieldErrors("id", fieldErrs)
 		}
 	}
 
 	// Validate name (required)
 
-	if valid, fieldErrs := t.Name.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateIdentityNameValue(t.Name, true); !valid {
 		errors.SetFieldErrors("name", fieldErrs)
 	}
 
 	// Validate slug (required)
 
-	if valid, fieldErrs := t.Slug.ValidateRequired(); !valid {
+	if valid, fieldErrs := validateIdentitySlugValue(t.Slug, true); !valid {
 		errors.SetFieldErrors("slug", fieldErrs)
 	}
 
@@ -833,7 +914,7 @@ func (t *TenantUser) Validate() ValidationErrors {
 
 	// Validate optional pointer field
 	if t.Id != nil {
-		if valid, fieldErrs := t.Id.Validate(); !valid {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
 			errors.SetFieldErrors("id", fieldErrs)
 		}
 	}
@@ -857,7 +938,7 @@ func (t *TenantUser) Validate() ValidationErrors {
 
 	// Validate optional pointer field
 	if t.DeletedBy != nil {
-		if valid, fieldErrs := t.DeletedBy.Validate(); !valid {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.DeletedBy, false); !valid {
 			errors.SetFieldErrors("deletedBy", fieldErrs)
 		}
 	}

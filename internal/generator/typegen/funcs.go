@@ -1,6 +1,7 @@
 package typegen
 
 import (
+	"fmt"
 	"strings"
 	"text/template"
 
@@ -96,8 +97,9 @@ func autoFilledField(field FieldInfo) bool {
 
 // scalarValidates reports whether Validate hands field's values to the
 // scalar type's own Validate or ValidateRequired. The scalar core checks the
-// scalar's pattern, lengths and range there, so the rules copied from the
-// scalar (FromScalar) would report a malformed value a second time.
+// scalar's pattern, lengths and range there too, so the rules copied from
+// the scalar (FromScalar) move into validate<Symbol>Value, which reports a
+// failing value once.
 func scalarValidates(field FieldInfo) bool {
 	if !isValidatableScalarField(field) {
 		return false
@@ -106,6 +108,44 @@ func scalarValidates(field FieldInfo) bool {
 		return true
 	}
 	return !autoFilledField(field)
+}
+
+// scalarRules returns the rules copied from the scalar type.
+func scalarRules(rules []codegen.ValidationRule) []codegen.ValidationRule {
+	var kept []codegen.ValidationRule
+	for _, rule := range rules {
+		if rule.FromScalar {
+			kept = append(kept, rule)
+		}
+	}
+	return kept
+}
+
+// scalarValidateCall returns the Go call that validates one value of
+// field's scalar or enum type. value is the Go expression for it, pointer
+// says the expression is a pointer to the value, and required picks the
+// required check. A scalar with rules of its own goes through
+// validate<Symbol>Value (see ScalarValueChecks); anything else calls the
+// type's Validate or ValidateRequired.
+func scalarValidateCall(field FieldInfo, value string, pointer, required bool) string {
+	if len(field.ScalarRules) > 0 && field.ScalarInfo != nil {
+		if pointer {
+			value = "*" + value
+		}
+		return fmt.Sprintf("validate%sValue(%s, %t)", scalarSymbol(field), value, required)
+	}
+	if required {
+		return value + ".ValidateRequired()"
+	}
+	return value + ".Validate()"
+}
+
+// scalarSymbol is the Go type name of field's scalar in this module.
+func scalarSymbol(field FieldInfo) string {
+	if symbol := strings.TrimSpace(field.ScalarInfo.Tokens.Symbol); symbol != "" {
+		return symbol
+	}
+	return field.Type
 }
 
 // withoutScalarRules drops the rules copied from the scalar type.
@@ -219,6 +259,7 @@ func templateFuncs() template.FuncMap {
 		"isGeneratedType":          isGeneratedType,
 		"nestedList":               newNestedList,
 		"autoFilledField":          autoFilledField,
+		"scalarValidateCall":       scalarValidateCall,
 		"inputFieldValueType":      inputFieldValueType,
 		"hasUnionFields": func(fields []FieldInfo) bool {
 			for _, f := range fields {

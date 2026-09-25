@@ -263,7 +263,43 @@ func mapFromYAMLValue(data []byte) (map[string]any, error) {
 
 	return result, nil
 }
-
+{{range .ScalarValueChecks}}{{$check := .}}
+// validate{{.Symbol}}Value validates one {{.Name}} value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validate{{.Symbol}}Value(value {{.Symbol}}, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+{{- range .Rules}}
+{{- if eq .Validator "minLength"}}
+	if len({{validationStringExpr $check.Field "value"}}) < {{printf "%v" .Value}} {
+{{- else if eq .Validator "maxLength"}}
+	if len({{validationStringExpr $check.Field "value"}}) > {{printf "%v" .Value}} {
+{{- else if eq .Validator "pattern"}}
+	if matched, err := regexp.MatchString("{{escapeString (printf "%v" .Value)}}", {{validationStringExpr $check.Field "value"}}); err != nil || !matched {
+{{- else if eq .Validator "min"}}
+	if float64(value) < {{printf "%v" .Value}} {
+{{- else if eq .Validator "max"}}
+	if float64(value) > {{printf "%v" .Value}} {
+{{- end}}
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "{{.Validator}}", Message: "{{escapeString .Message}}"})
+	}
+{{- end}}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+{{end}}
 {{range .Types}}
 {{formatComment .Name .Doc}}
 type {{.Name}} struct {
@@ -442,7 +478,7 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 				continue
 			}
 			{{end}}
-			if valid, itemErrs := item.ValidateRequired(); !valid {
+			if valid, itemErrs := {{scalarValidateCall . "item" (or (hasPrefix .GoType "map[string]*") (hasPrefix .GoType "InputField[map[string]*")) true}}; !valid {
 				errors.SetFieldErrors(fmt.Sprintf("{{.Name}}[%s]", key), itemErrs)
 			}
 		}
@@ -461,14 +497,14 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 		errors.AddFieldError("{{.Name}}", "required", "required field")
 	} else {
 		for i, item := range t.{{.GoName}} {
-			if valid, itemErrs := item.ValidateRequired(); !valid {
+			if valid, itemErrs := {{scalarValidateCall . "item" false true}}; !valid {
 				fieldKey := fmt.Sprintf("{{.Name}}[%d]", i)
 				errors.SetFieldErrors(fieldKey, itemErrs)
 			}
 		}
 	}
 	{{else}}
-	if valid, fieldErrs := t.{{.GoName}}.ValidateRequired(); !valid {
+	if valid, fieldErrs := {{scalarValidateCall . (printf "t.%s" .GoName) false true}}; !valid {
 		errors.SetFieldErrors("{{.Name}}", fieldErrs)
 	}
 	{{end}}
@@ -480,13 +516,13 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 		value := t.{{.GoName}}.Value
 		{{if .IsArray}}
 		for i, item := range value {
-			if valid, itemErrs := item.Validate(); !valid {
+			if valid, itemErrs := {{scalarValidateCall . "item" false false}}; !valid {
 				fieldKey := fmt.Sprintf("{{.Name}}[%d]", i)
 				errors.SetFieldErrors(fieldKey, itemErrs)
 			}
 		}
 		{{else}}
-		if valid, fieldErrs := value.Validate(); !valid {
+		if valid, fieldErrs := {{scalarValidateCall . "value" false false}}; !valid {
 			errors.SetFieldErrors("{{.Name}}", fieldErrs)
 		}
 		{{end}}
@@ -495,7 +531,7 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	{{if .IsArray}}
 	if t.{{.GoName}} != nil {
 		for i, item := range t.{{.GoName}} {
-			if valid, itemErrs := item.Validate(); !valid {
+			if valid, itemErrs := {{scalarValidateCall . "item" false false}}; !valid {
 				fieldKey := fmt.Sprintf("{{.Name}}[%d]", i)
 				errors.SetFieldErrors(fieldKey, itemErrs)
 			}
@@ -505,7 +541,7 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	{{if hasPrefix .GoType "*"}}
 	// Validate optional pointer field
 	if t.{{.GoName}} != nil {
-		if valid, fieldErrs := t.{{.GoName}}.Validate(); !valid {
+		if valid, fieldErrs := {{scalarValidateCall . (printf "t.%s" .GoName) true false}}; !valid {
 			errors.SetFieldErrors("{{.Name}}", fieldErrs)
 		}
 	}
@@ -520,7 +556,7 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	{{else}}
 	// Validate optional value field only when it is set
 	if !reflect.ValueOf(t.{{.GoName}}).IsZero() {
-		if valid, fieldErrs := t.{{.GoName}}.Validate(); !valid {
+		if valid, fieldErrs := {{scalarValidateCall . (printf "t.%s" .GoName) false false}}; !valid {
 			errors.SetFieldErrors("{{.Name}}", fieldErrs)
 		}
 	}
@@ -1574,7 +1610,7 @@ func {{.AccessorName}}() {{.Type}} {
 			}
 			for j, item := range inner {
 {{- if .ElemValidate}}
-				if valid, itemErrs := item.{{.ElemValidate}}(); !valid {
+				if valid, itemErrs := {{scalarValidateCall $f "item" false (eq .ElemValidate "ValidateRequired")}}; !valid {
 					errors.SetFieldErrors(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), itemErrs)
 				}
 {{- else if .ElemNested}}

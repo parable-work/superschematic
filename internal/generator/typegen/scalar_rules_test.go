@@ -37,11 +37,13 @@ const scalarRulesSchemaJSON = `{
   }
 }`
 
-// TestScalarFieldRulesLeftToTheScalar pins that Validate checks a scalar
-// field's own constraints but not a copy of the scalar's: the scalar's
-// Validate already checks its pattern and lengths, and a second copy
-// reported a malformed value twice.
-func TestScalarFieldRulesLeftToTheScalar(t *testing.T) {
+// TestScalarFieldRulesCheckedOnce pins how Validate checks a scalar field:
+// the scalar's own lengths and pattern live once, in validateNetworkUrlValue,
+// which reports a failure by the rule's name and takes the scalar core's
+// verdict only for a value they accept; the field's own constraints stay
+// inline. Before, the scalar's Validate and an inline copy of its rules both
+// reported a failing value.
+func TestScalarFieldRulesCheckedOnce(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "schema.config.json"), []byte(`{"name": "scalar-rules", "kind": "General", "outputs": {"types": {"go": {"enabled": true}}}}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -74,8 +76,9 @@ func TestScalarFieldRulesLeftToTheScalar(t *testing.T) {
 	}
 	source := string(data)
 	for _, want := range []string{
-		`t.Home.Validate()`,
-		`item.ValidateRequired()`,
+		`func validateNetworkUrlValue(value NetworkUrl, required bool) (bool, []ValidationError) {`,
+		`validateNetworkUrlValue(*t.Home, false)`,
+		`validateNetworkUrlValue(item, true)`,
 		`errors.AddFieldError("home", "maxLength", "must be at most 100 characters")`,
 		`regexp.MatchString("^https://", string(value))`,
 		`errors.AddFieldError(fieldKey, "maxLength", "must be at most 100 characters")`,
@@ -84,10 +87,16 @@ func TestScalarFieldRulesLeftToTheScalar(t *testing.T) {
 			t.Errorf("types.go lacks %s", want)
 		}
 	}
-	// Network.Url's own maxLength (2048) and pattern stay in the scalar.
-	for _, unwanted := range []string{"must be at most 2048 characters", "^https?://"} {
+	// Network.Url's own maxLength (2048) and pattern appear once, in
+	// validateNetworkUrlValue, not next to each field.
+	for _, rule := range []string{`Validator: "maxLength", Message: "must be at most 2048 characters"`, `regexp.MatchString("^https?://`} {
+		if got := strings.Count(source, rule); got != 1 {
+			t.Errorf("types.go has %d copies of the scalar's rule %q, want 1", got, rule)
+		}
+	}
+	for _, unwanted := range []string{`t.Home.Validate()`, `item.ValidateRequired()`} {
 		if strings.Contains(source, unwanted) {
-			t.Errorf("types.go repeats the scalar's rule %q", unwanted)
+			t.Errorf("types.go calls %s instead of validateNetworkUrlValue", unwanted)
 		}
 	}
 }
