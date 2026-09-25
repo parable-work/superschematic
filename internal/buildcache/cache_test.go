@@ -3,6 +3,7 @@ package buildcache
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -236,6 +237,75 @@ func TestComputeInputHashesFollowCacheInputs(t *testing.T) {
 	missing, err := ComputeInputHashes(services, repo, declared)
 	require.NoError(t, err)
 	assert.NotEqual(t, withInputAfter["svc"], missing["svc"], "a missing declared input hashes as missing, not as its last contents")
+}
+
+// useExecutable makes path the running executable ToolDigest hashes, and
+// clears any SetToolDigest pin, for the rest of the test.
+func useExecutable(t *testing.T, path string) {
+	t.Helper()
+	savedExecutable, savedOverride := executable, toolDigestOverride
+	t.Cleanup(func() {
+		executable, toolDigestOverride = savedExecutable, savedOverride
+		toolDigestOnce, toolDigestValue = sync.Once{}, ""
+	})
+	executable = func() (string, error) { return path, nil }
+	toolDigestOverride = ""
+	toolDigestOnce, toolDigestValue = sync.Once{}, ""
+}
+
+// TestSetToolDigestReplacesExecutableHash: a distribution that pins the tool
+// digest shares keys across executables that differ byte for byte (two
+// builds from different checkout paths); different digests never share; and
+// without a pin the key follows the executable, as it always has.
+func TestSetToolDigestReplacesExecutableHash(t *testing.T) {
+	repo := t.TempDir()
+	svcDir := filepath.Join(repo, "schemas", "services", "svc")
+	writeFile(t, filepath.Join(svcDir, "src", "svc.schema.ts"), "export class Svc {}")
+	services := []buildplan.Service{
+		{Name: "svc", Dir: svcDir, Config: &schemaconfig.SchemaConfig{Name: "svc", Kind: ir.SchemaKindGeneral}},
+	}
+	exeA := filepath.Join(t.TempDir(), "checkout-a", "superschematic")
+	exeB := filepath.Join(t.TempDir(), "checkout-b", "superschematic")
+	writeFile(t, exeA, "binary built in checkout a")
+	writeFile(t, exeB, "binary built in checkout b")
+
+	key := func(exe, digest string) string {
+		t.Helper()
+		useExecutable(t, exe)
+		SetToolDigest(digest)
+		hashes, err := ComputeInputHashes(services, repo, naming.Naming{})
+		require.NoError(t, err)
+		return hashes["svc"]
+	}
+
+	sumA, err := fileSHA256(exeA)
+	require.NoError(t, err)
+	useExecutable(t, exeA)
+	assert.Equal(t, sumA, ToolDigest(), "without a pin the tool digest is the executable's hash")
+	SetToolDigest("sources-1")
+	assert.Equal(t, "sources-1", ToolDigest())
+	SetToolDigest("")
+	assert.Equal(t, sumA, ToolDigest(), "an empty pin restores the executable's hash")
+
+	assert.Equal(t, key(exeA, ""), key(exeA, ""), "the same executable keeps its keys")
+	assert.NotEqual(t, key(exeA, ""), key(exeB, ""), "without a pin a different executable changes the key")
+	assert.Equal(t, key(exeA, "sources-1"), key(exeB, "sources-1"), "the same pinned digest shares keys across executables")
+	assert.NotEqual(t, key(exeA, "sources-1"), key(exeA, "sources-2"), "a different pinned digest changes the key")
+	assert.NotEqual(t, key(exeA, "sources-1"), key(exeA, ""), "a pinned digest and the executable hash never share keys")
+
+	// The pin replaces only the tool component: naming and inputs still
+	// reach the key.
+	useExecutable(t, exeA)
+	SetToolDigest("sources-1")
+	plain, err := ComputeInputHashes(services, repo, naming.Naming{})
+	require.NoError(t, err)
+	scoped, err := ComputeInputHashes(services, repo, naming.Naming{NpmScope: "@acme"})
+	require.NoError(t, err)
+	assert.NotEqual(t, plain["svc"], scoped["svc"], "naming still changes a pinned key")
+	writeFile(t, filepath.Join(svcDir, "src", "svc.schema.ts"), "export class Svc2 {}")
+	edited, err := ComputeInputHashes(services, repo, naming.Naming{})
+	require.NoError(t, err)
+	assert.NotEqual(t, plain["svc"], edited["svc"], "a schema edit still changes a pinned key")
 }
 
 func TestDefaultRootPrecedence(t *testing.T) {

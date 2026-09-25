@@ -269,7 +269,7 @@ Build cache directory. `~` expands. `SUPERSCHEMATIC_BUILD_CACHE_DIR` and
 Default: unset (no extra files)
 
 Repo-relative files hashed into every `build-all` cache key alongside the
-schema tree, the tool tree and the workspace lockfile: files generation
+schema tree, the tool digest and the workspace lockfile: files generation
 reads that live outside the schema tree.
 
 ## `[paths]`

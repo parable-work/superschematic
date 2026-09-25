@@ -151,20 +151,30 @@ func SetSchemasRoot(schemasRoot string) {
 	SchemasDir = filepath.Base(filepath.Clean(schemasRoot))
 }
 
-// toolDigestOverride lets a binary that embeds its own source digest (or a
-// test) pin the tool component of every cache key. Empty means the running
-// executable's hash.
+// toolDigestOverride is the tool component SetToolDigest pins. Empty means
+// the running executable's hash.
 var toolDigestOverride string
 
-// ToolDigest is the tool component of every cache key: a hash of the
-// running executable, so a rebuilt binary invalidates entries built by the
-// previous one. It is computed once per process.
+// SetToolDigest makes digest the tool component of every cache key in place
+// of the running executable's hash. A distribution that links extensions sets
+// it (through cli.Config.ToolDigest) to a digest of the sources that shape its
+// outputs, so two builds of the same sources share cache entries even when
+// their executables differ byte for byte. Empty restores the executable hash.
+// Call it before any build starts.
+func SetToolDigest(digest string) {
+	toolDigestOverride = digest
+}
+
+// ToolDigest is the tool component of every cache key: the digest
+// SetToolDigest pinned, or else a hash of the running executable, so a
+// rebuilt binary invalidates entries built by the previous one. The
+// executable is hashed once per process.
 func ToolDigest() string {
 	if toolDigestOverride != "" {
 		return toolDigestOverride
 	}
 	toolDigestOnce.Do(func() {
-		exe, err := os.Executable()
+		exe, err := executable()
 		if err != nil {
 			toolDigestValue = "unknown"
 			return
@@ -175,6 +185,8 @@ func ToolDigest() string {
 }
 
 var (
+	// executable locates the running binary; tests point it at other files.
+	executable      = os.Executable
 	toolDigestOnce  sync.Once
 	toolDigestValue string
 )
