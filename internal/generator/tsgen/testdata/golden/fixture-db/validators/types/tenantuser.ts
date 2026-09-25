@@ -7,6 +7,7 @@ import {
   addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
+import { expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import type { TenantUser, JSDate, Tenant } from '../../types';
 
@@ -70,6 +71,8 @@ export function validateTenantUser(value: TenantUser | null | undefined): Valida
     addFieldError(errors, "tenant", "required", "required field");
   }
 
+  expectString(errors, "displayName", value.displayName);
+
   if (value.deletedAt !== null && value.deletedAt !== undefined) {
     const [valid, fieldErrors] = validateTemporalDateTime(value.deletedAt);
     if (!valid && fieldErrors) {
@@ -83,6 +86,8 @@ export function validateTenantUser(value: TenantUser | null | undefined): Valida
       setFieldErrors(errors, "deletedBy", fieldErrors);
     }
   }
+
+  expectNumber(errors, "_version", value._version);
 
   return Object.keys(errors).length > 0 ? errors : true;
 }

@@ -235,7 +235,10 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				// validates a nested object field and reports its errors
 				// with addNestedErrors.
 				ValidatesNestedObjects bool
-				Naming                 naming.Naming
+				// PrimitiveHelpers are the validators/primitives.ts
+				// helpers validate<Type> imports.
+				PrimitiveHelpers []string
+				Naming           naming.Naming
 			}{
 				Naming:            output.Naming,
 				Type:              t,
@@ -247,6 +250,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				ParserNestedTypes: typeParserNestedTypes(t, generatedTypeNames),
 				ParserScalarsUsed: typeParserScalarsUsed(t),
 				NeedsJSONParse:    typeNeedsJSONParse(t, generatedTypeNames),
+				PrimitiveHelpers:  typePrimitiveHelpers(t),
 			}
 			data.ValidatesNestedObjects = typeValidatesNestedObjects(t, data.ParserNestedTypes)
 			if err := generateFile(generator, "validator_type.tmpl", outPath, data); err != nil {
@@ -259,7 +263,15 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		return err
 	}
 
+	hasPrimitiveHelpers := false
+	for i := range output.Types {
+		if len(typePrimitiveHelpers(&output.Types[i])) > 0 {
+			hasPrimitiveHelpers = true
+			break
+		}
+	}
 	validatorFiles := []codegen.ConditionalFile{
+		{Condition: hasPrimitiveHelpers, Template: "validator_primitives.tmpl", Filename: "primitives.ts"},
 		{Condition: hasScalars, Template: "validators_scalars_index.tmpl", Filename: filepath.Join("scalars", "index.ts")},
 		{Condition: hasEnums, Template: "validator_enums.tmpl", Filename: "enums.ts"},
 		{Condition: len(output.Types) > 0, Template: "validators_types_index.tmpl", Filename: filepath.Join("types", "index.ts")},

@@ -18,7 +18,12 @@ export function validateIdentityUUID(
     return [true, null];
   }
 
-  const s = String(value);
+  // A value of another JSON type is "type", and its length and format are
+  // not checked.
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected string value" }]];
+  }
+  const s = value;
 
   if (!IdentityUUIDPattern.test(s)) {
     errors.push({ validator: "pattern", message: "invalid format" });
@@ -36,9 +41,6 @@ export function validateIdentityUUIDRequired(
 
   if (value === null || value === undefined || value === "") {
     return [false, [{ validator: "required", message: "required field" }]];
-  }
-  if (typeof value !== "string") {
-    return [false, [{ validator: "type", message: "expected string value" }]];
   }
 
   return validateIdentityUUID(value);
