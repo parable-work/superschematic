@@ -71,7 +71,7 @@ func TestScalarDelegation_RegistryGovernsEveryName(t *testing.T) {
 
 	viaDefault := New(par12Schema(), WithRegistry(DefaultRegistry())).ValidateType("Doc", input)
 	assert.True(t, viaDefault.HasErrors(), "DefaultRegistry dispatches Embedding.Vector to the core")
-	assert.Equal(t, "scalar", viaDefault.GetFieldErrors("vector")[0].Validator)
+	assert.Equal(t, "pattern", viaDefault.GetFieldErrors("vector")[0].Validator)
 
 	viaEmpty := New(par12Schema(), WithRegistry(NewRegistry())).ValidateType("Doc", input)
 	assert.False(t, viaEmpty.HasErrors(), "an empty registry must not reach the core, got: %v", viaEmpty)
@@ -121,7 +121,7 @@ func TestScalarDelegation_RequiredEmptyStrings(t *testing.T) {
 	assert.NotEmpty(t, pathErrs, "empty required Asset.FilePath must error")
 	assert.NotEmpty(t, bodyErrs, "empty required Text.Markdown must error")
 	// Required-empty semantics are preserved by validateScalarRequired before
-	// delegation, so the tag stays "required" rather than the core's "scalar".
+	// delegation, so the tag stays "required" rather than the core's "pattern".
 	assert.Equal(t, "required", pathErrs[0].Validator)
 	assert.Equal(t, "required", bodyErrs[0].Validator)
 }

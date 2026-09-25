@@ -87,8 +87,10 @@ func (r *Registry) MissingValidators(schema *ir.Schema) []string {
 
 // NewDispatchRegistry returns a Registry that routes every name in names
 // through validate, the name-keyed entry point of a scalar core (superscalar's
-// Validate). A non-nil error becomes a single ValidationError tagged "scalar"
-// carrying the core's message; nil means the value is valid.
+// Validate). A non-nil error becomes a single ValidationError tagged "pattern",
+// the name every validator gives a malformed scalar value, carrying the core's
+// message, so a failure other than a regex mismatch (a length or a parse
+// failure) still says why. nil means the value is valid.
 //
 // This is how a scalar core, or an extension assembled over one, hands the
 // runtime its whole scalar set without a hand-maintained name -> func mirror.
@@ -98,7 +100,7 @@ func NewDispatchRegistry(names []string, validate func(canonical, value string) 
 		canonical := name
 		r.Register(canonical, func(value string) []ValidationError {
 			if err := validate(canonical, value); err != nil {
-				return []ValidationError{{Validator: "scalar", Message: err.Error()}}
+				return []ValidationError{{Validator: "pattern", Message: err.Error()}}
 			}
 			return nil
 		})
