@@ -646,6 +646,12 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Rust API server: an operation set with a multi-word name
+  (`PoolSearchMutations`, namespace `pool-search`) put the kebab-case
+  namespace into its handler names (`handle_pool-search_...`), and the
+  crate did not compile. The router now snake-cases the namespace in
+  handler names, as the implementations struct already did. A single-word
+  namespace renders the same bytes as before. Patch.
 - TypeScript SDK: `tools/index.ts` typed a tool parameter from its JSON
   Schema, so an enum was `string`, an object `Record<string, unknown>` or an
   inline shape, a union `Record<string, unknown>` and a date-time or JSON
