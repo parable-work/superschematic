@@ -133,7 +133,7 @@ public packages at the module root:
 
 | Package | What it is |
 | --- | --- |
-| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`) and the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) are aliased here too |
+| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`) and the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) are aliased here too |
 | `loader` | `LoadService` and `LoadServiceWithConfig` with `WithRegistry`, `WithNaming` and `WithSchemaCatalog`, for extension tests against real fixtures; `NewDeclarationProgram`, a type-checked TypeScript program over in-memory files with the loader's compiler, lib files and module resolution, for an extension that checks declarations the schema frontend does not walk; `SchemaError` and `SchemaErrorList`, its located diagnostics |
 | `cli` | `cli.New`, `cli.Config`, `cli.CommandProvider` |
 | `ir` | The IR, its own Go module, with the extension codecs (section 4.2) |
@@ -449,8 +449,24 @@ distribution that assembles its own scalar package over the generic set and
 needs the loader to accept its extra names and the generators to emit their
 symbols. One catalog per registry; a second registration is an error that
 names both owners. `registry.ScalarCatalogOf` wraps a metadata map as a
-catalog. acme does not register one; `internal/registry/scalars_test.go`
-covers the seam.
+catalog.
+
+A `ScalarMetadata` row has no upload fields, and superscalar's core set has
+no upload scalar. A catalog that implements `UploadCatalog` declares its
+file-upload scalars beside the rows: `Upload(canonical)` returns a
+`ScalarUpload`, the `ir.FileUploadConfig` (size limit, allowed MIME types,
+category) and optional `ir.ImageConstraints`. `registry.ScalarCatalogWithUploads`
+wraps a catalog with a map of them and rejects a name the catalog does not
+define. The loader copies the metadata onto the scalar's `FileUpload` and
+`ImageConstraints` when it hydrates, so a field of the scalar is a
+multipart file part in the generated APIs and SDKs. The loader checks
+`Validate<T, { uploadMaxBytes }>` after hydration, in every form
+(`ir.Schema.ValidateHydrated`): the bound must be positive and the field a
+single scalar whose hydrated def carries `FileUpload`. The frontends'
+own validation (`ir.Schema.Validate`) runs before hydration and leaves the
+bound alone. acme registers a catalog with one upload scalar, `Acme.Photo`
+(section 10); `internal/registry/scalars_test.go` and
+`internal/loader/upload_max_bytes_test.go` cover the seam.
 
 ### 3.11 Extension configuration
 
@@ -956,13 +972,15 @@ go in the naming file, rules in the extension.
 
 `examples/acme-schematic` is the acceptance test of this model: a separate
 Go module (`example.com/acme/schematic`, with a `replace` onto this
-checkout) that imports only `registry`, `cli` and `ir` and adds one of each
-surface:
+checkout) that imports only `registry`, `loader`, `cli` and `ir` (plus the
+superscalar Go package, for the rows of its scalar catalog) and adds one of
+each surface:
 
 | Surface | acme | File |
 | --- | --- | --- |
 | Kind | `Catalog`, pipeline `types`, `catalog` | `ext/kind.go` |
 | Decorator | `@shelf` from `@acme/schema`, on Catalog fields | `ext/decorator.go`, `packages/schema` |
+| Scalar catalog | the core scalars plus `Acme.Photo`, a file-upload scalar; `Product.photo` in the Catalog service bounds it with `uploadMaxBytes` | `ext/scalars.go`, `packages/schema` |
 | Document | `catalog.config.yaml` on Catalog services, with a generator | `ext/document.go` |
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
 | Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |
@@ -975,9 +993,6 @@ surface:
 | Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Binary | `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
-It does not register a scalar catalog; the test in section 3.10 covers
-that.
-
 The acceptance criterion: an extension adds every surface above without
 editing a file outside its own module, and adding one more decorator stays
 that way. Two scripts check it, and the `acme` job in
@@ -988,8 +1003,9 @@ that way. Two scripts check it, and the `acme` job in
   each surface did its work: `describe` lists the kind, document,
   provider and checks; `catalog.json`, the document's output and a
   manifest per service exist, and the inventory hook merges them again
-  when every service is restored from the cache; the `@shelf` payload and
-  the scoped projection view are in the IR, and the view, its migration and
+  when every service is restored from the cache; the `@shelf` payload,
+  `Acme.Photo`'s upload metadata with the `uploadMaxBytes` bound on
+  `Product.photo`, and the scoped projection view are in the IR, and the view, its migration and
   its Arrow schema are written under acme's metadata key prefix; the
   generated API compiles against `apikey`; the committed graph copy is
   current; `fields` type-checks the label declarations; the `@docs`

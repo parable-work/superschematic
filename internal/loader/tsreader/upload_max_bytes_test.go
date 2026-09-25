@@ -43,13 +43,17 @@ func TestUploadMaxBytesLiteralRejectsLossyNumbers(t *testing.T) {
 	}
 }
 
-// TestUploadMaxBytesOnNonUploadFieldFails: the key reaches the IR from
-// TypeScript, and the IR check rejects it on a field that is not a
-// file-upload scalar.
-func TestUploadMaxBytesOnNonUploadFieldFails(t *testing.T) {
-	_, _, err := LoadService(filepath.Join("testdata", "services", "broken-upload-max-bytes"))
-	if err == nil || !strings.Contains(err.Error(), "Attachment.label uploadMaxBytes requires a file-upload scalar") {
-		t.Fatalf("want the file-upload scalar error, got %v", err)
+// The file-upload scalar check runs after the loader hydrates the scalars
+// (internal/loader, TestUploadMaxBytesOnNonUploadFieldFails): a brand
+// carries only its name here. The TypeScript frontend records the bound.
+func TestUploadMaxBytesIsRecordedUnchecked(t *testing.T) {
+	schema, _, err := LoadService(filepath.Join("testdata", "services", "broken-upload-max-bytes"))
+	if err != nil {
+		t.Fatalf("LoadService: %v", err)
+	}
+	label := schema.Types["Attachment"].Fields[0]
+	if label.Name != "label" || label.ValidateUploadMaxBytes == nil || *label.ValidateUploadMaxBytes != 1024 {
+		t.Fatalf("Attachment.label = %+v, want uploadMaxBytes 1024 recorded", label)
 	}
 }
 

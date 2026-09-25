@@ -21,7 +21,10 @@
 #      writes import that name too;
 #   4. the catalog generator wrote catalog.json for the Catalog service;
 #   5. the @shelf payload reached the IR (--emit-ir + jq), and so did the
-#      shop-db projection that satisfies acme's projection policy;
+#      shop-db projection that satisfies acme's projection policy, and
+#      Acme.Photo, the file-upload scalar acme's scalar catalog adds, with
+#      its upload metadata and the uploadMaxBytes bound Product.photo puts
+#      on it;
 #   6. the catalog.config document was loaded and its generator ran;
 #   7. the manifest generator ran on every kind, core and acme, and the
 #      acmeInventory build-all hook merged the manifests from every service's
@@ -135,6 +138,12 @@ jq -e '.types.Product.fields[] | select(.name == "name") | has("extensions") | n
 # Every acme decorator the Catalog service uses, for check_second_decorator.sh.
 DECORATORS="$(jq -r '[.types[].fields[]? | .extensions.acme? // {} | keys[]] | unique | join(" ")' "$OUT/catalog-ir.json")"
 echo "ir decorators on shop-catalog: $DECORATORS"
+
+echo "==> Acme.Photo is a file upload from acme's scalar catalog, bounded by uploadMaxBytes"
+jq -e '.scalars["Acme.Photo"].fileUpload == {"maxSize": 8388608, "allowedTypes": ["image/jpeg", "image/png", "image/webp"], "category": "image"}' \
+  "$OUT/catalog-ir.json" >/dev/null
+jq -e '.types.Product.fields[] | select(.name == "photo") | .typeRef == {"name": "Acme.Photo"} and .validateUploadMaxBytes == 2097152' \
+  "$OUT/catalog-ir.json" >/dev/null
 
 echo "==> shop-db projection is in the IR, scoped the way acme's policy requires"
 "$OUT/acme-schematic" build "$SCHEMAS/services/shop-db" --emit-ir --out "$OUT/ir-dist" >"$OUT/db-ir.json"

@@ -162,6 +162,37 @@ r.RegisterDecorator(registry.DecoratorSpec{
   extension's name. `ir.UpdateExtension` / `ir.GetExtension` are the
   codec.
 
+## A scalar catalog
+
+The loader hydrates every scalar a schema names from the registry's scalar
+catalog, superscalar's core set unless an extension registers another with
+`RegisterScalars`. A distribution whose scalar package adds names registers
+its rows. A superscalar row has no upload fields, so a file-upload scalar is
+declared beside it:
+
+```go
+catalog, err := registry.ScalarCatalogWithUploads(registry.ScalarCatalogOf(rows), map[string]registry.ScalarUpload{
+    "Acme.Photo": {FileUpload: ir.FileUploadConfig{
+        MaxSize:      8 << 20,
+        AllowedTypes: []string{"image/jpeg", "image/png", "image/webp"},
+        Category:     "image",
+    }},
+})
+if err != nil {
+    return err
+}
+return r.RegisterScalars(Name, catalog)
+```
+
+- `rows` holds every scalar the schemas may use: acme copies the core rows
+  from `registry.CoreScalars()` and adds its own.
+- A field of an upload scalar is a multipart file part in the generated
+  APIs and SDKs. `Validate<Acme.Photo, { uploadMaxBytes: 2097152 }>` lowers
+  the limit for one field; the loader checks it after hydration, so it
+  needs the upload declared here.
+- The TypeScript brand (`string & { readonly __brand: "Acme.Photo" }`) can
+  live in the extension's authoring package, as acme's does.
+
 ## A document
 
 A document is a sidecar file the loader reads from the service directory

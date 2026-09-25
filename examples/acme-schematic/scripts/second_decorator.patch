@@ -72,10 +72,10 @@ index 1284b4c..3207937 100644
 +	return f.Perishable, true, nil
 +}
 diff --git a/packages/schema/src/index.ts b/packages/schema/src/index.ts
-index 17663ca..4e1c2d9 100644
+index 3cc778d..fb570c3 100644
 --- a/packages/schema/src/index.ts
 +++ b/packages/schema/src/index.ts
-@@ -16,3 +16,13 @@ export interface ShelfArgs {
+@@ -26,3 +26,13 @@ export interface ShelfArgs {
  export function shelf(_args: ShelfArgs): PropertyDecorator {
    return () => {};
  }
@@ -90,17 +90,18 @@ index 17663ca..4e1c2d9 100644
 +  return () => {};
 +}
 diff --git a/schemas/services/shop-catalog/src/catalog.schema.ts b/schemas/services/shop-catalog/src/catalog.schema.ts
-index 6226480..e587779 100644
+index a4fe0c5..5b3ae06 100644
 --- a/schemas/services/shop-catalog/src/catalog.schema.ts
 +++ b/schemas/services/shop-catalog/src/catalog.schema.ts
-@@ -1,5 +1,5 @@
+@@ -1,6 +1,6 @@
  import { Identity } from "superscalar";
--import { shelf } from "@acme/schema";
-+import { perishable, shelf } from "@acme/schema";
+ import { Validate } from "@superschematic/schema";
+-import { Acme, shelf } from "@acme/schema";
++import { Acme, perishable, shelf } from "@acme/schema";
  
  // A Catalog schema's classes are embedded structs (KindSpec.StructRole).
  // @shelf comes from @acme/schema and is only allowed in Catalog schemas; it
-@@ -9,6 +9,7 @@ export abstract class Product {
+@@ -10,6 +10,7 @@ export abstract class Product {
    sku: Identity.Slug;
  
    @shelf({ aisle: 7 })

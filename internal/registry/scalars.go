@@ -2,9 +2,12 @@ package registry
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	scalars "github.com/parable-work/superscalar/go"
+
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // ScalarCatalog is the read side of a scalar registry: one metadata row per
@@ -90,4 +93,82 @@ func (c metadataCatalog) Names() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// ScalarUpload is the upload metadata of one file-upload scalar. The scalar
+// package's ScalarMetadata row has no field for it, so a catalog carries it
+// beside the row (UploadCatalog). The loader copies it onto the hydrated
+// ScalarDef: FileUpload makes a field of the scalar a multipart file part in
+// the generated APIs and SDKs and is what Validate<T, { uploadMaxBytes }>
+// requires; ImageConstraints, when set, adds the image checks.
+type ScalarUpload struct {
+	FileUpload       ir.FileUploadConfig
+	ImageConstraints *ir.ImageConstraints
+}
+
+// UploadCatalog is a ScalarCatalog that declares which of its scalars are
+// file uploads. The loader asks the registered catalog for this interface
+// and hydrates the upload metadata of every scalar it names.
+type UploadCatalog interface {
+	ScalarCatalog
+	// Upload returns the upload metadata of canonical, false when it is not
+	// a file-upload scalar.
+	Upload(canonical string) (ScalarUpload, bool)
+}
+
+// ScalarCatalogWithUploads returns catalog with uploads declared on it,
+// keyed by canonical scalar name. Every key must name a scalar of catalog.
+// A distribution whose scalar package defines upload scalars registers the
+// result through RegisterScalars.
+func ScalarCatalogWithUploads(catalog ScalarCatalog, uploads map[string]ScalarUpload) (UploadCatalog, error) {
+	if catalog == nil {
+		return nil, fmt.Errorf("registry: upload metadata declared on a nil scalar catalog")
+	}
+	names := make([]string, 0, len(uploads))
+	for name := range uploads {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, ok := catalog.Scalar(name); !ok {
+			return nil, fmt.Errorf("registry: upload metadata declared on %s, which the scalar catalog does not define", name)
+		}
+	}
+	owned := make(map[string]ScalarUpload, len(uploads))
+	for name, upload := range uploads {
+		owned[name] = cloneScalarUpload(upload)
+	}
+	return uploadCatalog{ScalarCatalog: catalog, uploads: owned}, nil
+}
+
+type uploadCatalog struct {
+	ScalarCatalog
+	uploads map[string]ScalarUpload
+}
+
+func (c uploadCatalog) Upload(canonical string) (ScalarUpload, bool) {
+	upload, ok := c.uploads[canonical]
+	if !ok {
+		return ScalarUpload{}, false
+	}
+	return cloneScalarUpload(upload), true
+}
+
+// cloneScalarUpload copies the slices and pointers of upload, so neither
+// the declaring map nor a hydrated ScalarDef can change the catalog's row.
+func cloneScalarUpload(upload ScalarUpload) ScalarUpload {
+	upload.FileUpload.AllowedTypes = slices.Clone(upload.FileUpload.AllowedTypes)
+	if upload.ImageConstraints != nil {
+		image := *upload.ImageConstraints
+		if image.MinAspectRatio != nil {
+			ratio := *image.MinAspectRatio
+			image.MinAspectRatio = &ratio
+		}
+		if image.MaxAspectRatio != nil {
+			ratio := *image.MaxAspectRatio
+			image.MaxAspectRatio = &ratio
+		}
+		upload.ImageConstraints = &image
+	}
+	return upload
 }

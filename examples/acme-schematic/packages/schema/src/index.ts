@@ -8,6 +8,14 @@
 
 export type { ConfirmPolicy } from "./mcp";
 
+// The scalars the acme extension adds to the core set. The brand names the
+// scalar; the catalog the extension registers (ext/scalars.go) gives its
+// metadata, and declares Acme.Photo a file upload.
+export namespace Acme {
+  // A product photo, uploaded as a multipart file part.
+  export type Photo = string & { readonly __brand: "Acme.Photo" };
+}
+
 // ShelfArgs is @shelf's argument: where a field's values are stocked.
 export interface ShelfArgs {
   readonly aisle: number;

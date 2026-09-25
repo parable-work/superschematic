@@ -86,6 +86,16 @@ upload scalar would get a reference to a symbol its scalar package must
 provide under that exact name. The fix is for the upload scalar's registry
 entry to carry the data type's symbol and for the template to render it.
 
+superscalar's `ScalarMetadata` row has no upload fields, so an extension
+declares an upload scalar beside its rows: `registry.ScalarCatalogWithUploads`
+wraps the catalog it registers with each scalar's `ir.FileUploadConfig` and
+optional `ir.ImageConstraints`, and the loader hydrates them onto the
+`ScalarDef`. The `Validate<T, { uploadMaxBytes }>` check reads that metadata,
+so it runs after hydration (`ir.Schema.ValidateHydrated`), not in the
+frontends' `Validate`, which runs before it. acme's `Acme.Photo` exercises
+the path in a Catalog service, whose pipeline renders no Go API and so no
+`FileUploadData` reference.
+
 ## D5. Defaults are superschematic's own
 
 `naming.Default()` names `example.com/schemas` as the Go module root,
