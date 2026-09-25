@@ -7,6 +7,7 @@ import {
   addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
+import { expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import type { GridView, Point } from '../../types';
 
@@ -43,8 +44,16 @@ export function validateGridView(value: GridView | null | undefined): Validation
     });
   }
 
-  if (value.labels === null || value.labels === undefined) {
+  if (!Array.isArray(value.labels)) {
     addFieldError(errors, "labels", "required", "required field");
+  }
+
+  if (Array.isArray(value.labels)) {
+    value.labels.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => expectString(errors, `labels[${rowIndex}][${index}]`, item));
+      }
+    });
   }
 
   // A list element is never null: its one error is "required", in place of
@@ -129,7 +138,7 @@ export function validateGridView(value: GridView | null | undefined): Validation
     });
   }
 
-  if (value.polygons === null || value.polygons === undefined) {
+  if (!Array.isArray(value.polygons)) {
     addFieldError(errors, "polygons", "required", "required field");
   }
 
@@ -153,6 +162,14 @@ export function validateGridView(value: GridView | null | undefined): Validation
         addFieldError(errors, `weights[${rowIndex}]`, "required", "required field");
       } else if (!Array.isArray(row)) {
         addFieldError(errors, `weights[${rowIndex}]`, "type", "expected an array");
+      }
+    });
+  }
+
+  if (Array.isArray(value.weights)) {
+    value.weights.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => expectNumber(errors, `weights[${rowIndex}][${index}]`, item));
       }
     });
   }

@@ -6,6 +6,7 @@ import {
   setFieldErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
+import { expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import type { FixtureConfig, FixtureEnvironment } from '../../types';
 
@@ -34,9 +35,13 @@ export function validateFixtureConfig(value: FixtureConfig | null | undefined): 
     addFieldError(errors, "JWT_SECRET", "required", "required field");
   }
 
+  expectString(errors, "JWT_SECRET", value.JWT_SECRET);
+
   if (value.PORT === null || value.PORT === undefined) {
     addFieldError(errors, "PORT", "required", "required field");
   }
+
+  expectNumber(errors, "PORT", value.PORT);
 
   {
     const [valid, fieldErrors] = validateFixtureEnvironmentRequired(value.ENVIRONMENT);

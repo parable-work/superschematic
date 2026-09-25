@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureToolParamsApiSDK Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-tool-params-api API",
+  "tools": [
+    {
+      "name": "paint.listPaint",
+      "operationId": "PaintListPaintHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Query parameters that are enums.",
+      "namespace": "paint",
+      "methodName": "listPaint",
+      "httpMethod": "GET",
+      "httpPath": "/api/paint",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:8ca68d2f55205414c615387939696065dfd767aa909bea3428196b2de840a5d6",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tone": {"description":"A Tone value","enum":["warm","cool"],"type":"string"},
+          "tones": {"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"}
+        },
+        "required": ["tones"]
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of PaintView",
+        "items": {
+          "type": "object",
+          "description": "PaintView object"
+        }
+      }
+    },
+    {
+      "name": "paint.paint",
+      "operationId": "PaintPaintHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "An input type.",
+      "namespace": "paint",
+      "methodName": "paint",
+      "httpMethod": "POST",
+      "httpPath": "/api/paint",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:873b26d3f3d38089b92b813633d44c83e8585adf2e09ab757996dba46359a0bb",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "at": {"description":"ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.","format":"date-time","type":"string","x-superschematic-scalar":"Temporal.DateTime"},
+          "count": {"description":"A numeric value","type":"number"},
+          "extra": {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
+          "fill": {"description":"A swatch or a palette.","oneOf":[{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},{"additionalProperties":false,"description":"Palette object","properties":{"name":{"description":"A string value","type":"string"},"parent":{"description":"A Palette value","type":["string","null"]}},"required":["name"],"type":"object"}],"type":"object"},
+          "labels": {"additionalProperties":{"description":"A string value","type":"string"},"description":"Map of string values","type":"object"},
+          "maybeAt": {"description":"ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.","format":"date-time","type":["string","null"],"x-superschematic-scalar":"Temporal.DateTime"},
+          "maybeSwatch": {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":["object","null"]},
+          "maybeTone": {"description":"A Tone value","enum":["warm","cool",null],"type":["string","null"]},
+          "maybeTones": {"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":["array","null"]},
+          "palette": {"additionalProperties":false,"description":"Palette object","properties":{"name":{"description":"A string value","type":"string"},"parent":{"description":"A Palette value","type":["string","null"]}},"required":["name"],"type":"object"},
+          "ref": {"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "swatch": {"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},
+          "swatchByName": {"additionalProperties":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},"description":"Map of Swatch values","type":"object"},
+          "swatchRows": {"description":"Array of arrays of Swatch values","items":{"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},"type":"array"},
+          "swatches": {"description":"Array of Swatch values","items":{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},"type":"array"},
+          "tags": {"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},
+          "tone": {"description":"A Tone value","enum":["warm","cool"],"type":"string"},
+          "toneByName": {"additionalProperties":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"description":"Map of Tone values","type":"object"},
+          "toneRows": {"description":"Array of arrays of Tone values","items":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"type":"array"},
+          "tones": {"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},
+          "tonesByName": {"additionalProperties":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"description":"Map of Tone values","type":"object"}
+        },
+        "required": ["at", "count", "extra", "fill", "labels", "palette", "ref", "swatch", "swatchByName", "swatchRows", "swatches", "tags", "tone", "toneByName", "toneRows", "tones", "tonesByName"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "PaintView object"
+      }
+    },
+    {
+      "name": "paint.paintByTone",
+      "operationId": "PaintPaintByToneHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "A path parameter that is an enum.",
+      "namespace": "paint",
+      "methodName": "paintByTone",
+      "httpMethod": "GET",
+      "httpPath": "/api/paint/tones/{tone}",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:7840da09f19cb20960c05e5b7278b6fd89d2c8f9b0ed890319a90e66ae179f07",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tone": {"description":"tone parameter","enum":["warm","cool"],"type":"string"}
+        },
+        "required": ["tone"]
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of PaintView",
+        "items": {
+          "type": "object",
+          "description": "PaintView object"
+        }
+      }
+    },
+    {
+      "name": "paint.setLabels",
+      "operationId": "PaintSetLabelsHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "A body argument that is a map of lists.",
+      "namespace": "paint",
+      "methodName": "setLabels",
+      "httpMethod": "PUT",
+      "httpPath": "/api/paint/{id}/labels",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:d9389e9980fbf48e903479aa416c59cfe5a0933bb4991bd87b87f88bbc27ba6c",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "labelsByLocale": {"additionalProperties":{"description":"Array of string values","items":{"description":"A string value","type":"string"},"type":"array"},"description":"Map of string values","type":"object"}
+        },
+        "required": ["id", "labelsByLocale"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "PaintView object"
+      }
+    },
+    {
+      "name": "paint.setTone",
+      "operationId": "PaintSetToneHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "A body argument that is an enum.",
+      "namespace": "paint",
+      "methodName": "setTone",
+      "httpMethod": "PUT",
+      "httpPath": "/api/paint/{id}/tone",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f91544eb2697ac65fa524d327c926ddf0c06da3b50994e2a471989c4bbde442a",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "tone": {"description":"A Tone value","enum":["warm","cool"],"type":"string"}
+        },
+        "required": ["id", "tone"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "PaintView object"
+      }
+    },
+    {
+      "name": "paint.nameTones",
+      "operationId": "PaintNameTonesHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "A body argument that is a map of enums.",
+      "namespace": "paint",
+      "methodName": "nameTones",
+      "httpMethod": "PUT",
+      "httpPath": "/api/paint/{id}/tone-names",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:ddd43d09afa8b9c8ea246ef8a76f77be6d1242967841f4cd231192263f0dec71",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "toneByName": {"additionalProperties":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"description":"Map of Tone values","type":"object"}
+        },
+        "required": ["id", "toneByName"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "PaintView object"
+      }
+    }
+  ]
+}

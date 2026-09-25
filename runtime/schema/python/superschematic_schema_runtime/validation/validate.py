@@ -111,10 +111,10 @@ def _validate_string_constraints(
     apply_required: bool,
     registry: ScalarValidatorRegistry,
 ) -> list[ValidationError]:
+    # A value of another JSON type is "type", required or not, and its
+    # length and format are not checked.
     if not isinstance(value, str):
-        if apply_required:
-            return [ValidationError(validator="type", message=f"{scalar.name} must be a string.")]
-        return []
+        return [ValidationError(validator="type", message=f"{scalar.name} must be a string.")]
     if value == "" and apply_required:
         return [ValidationError(validator="required", message=f"{scalar.name} is required.")]
 
@@ -317,6 +317,34 @@ def _validate_field_level_numeric_constraints(
     return out
 
 
+def _builtin_type_error(field: FieldDef, value: Any) -> ValidationError | None:
+    """The "type" error for a builtin field value of the wrong JSON type, or None.
+
+    The IR's string, number and boolean are checked, and so are the GraphQL
+    names the JSON Schema reader gives them; any other name is not. The
+    field's own constraints are checked only on a value that passes.
+    """
+    name = field.type_ref.name
+    if name in ("string", "String", "ID"):
+        if isinstance(value, str):
+            return None
+        return ValidationError(validator="type", message="expected a string")
+    if name in ("number", "Float"):
+        if _to_number(value) is not None:
+            return None
+        return ValidationError(validator="type", message="expected a number")
+    if name == "Int":
+        parsed = _to_number(value)
+        if parsed is not None and parsed.is_integer():
+            return None
+        return ValidationError(validator="type", message="expected an integer")
+    if name in ("boolean", "Boolean"):
+        if isinstance(value, bool):
+            return None
+        return ValidationError(validator="type", message="expected a boolean")
+    return None
+
+
 def _has_field_level_constraints(field: FieldDef) -> bool:
     return (
         field.validate_min is not None
@@ -376,6 +404,10 @@ def _validate_single_field(
         return
 
     # builtin
+    type_error = _builtin_type_error(field, value)
+    if type_error is not None:
+        _set_field_errors(errors, key, [type_error])
+        return
     if (
         field.required
         and field.type_ref.name in ("String", "ID")
@@ -425,7 +457,10 @@ def _validate_array_element(
         _set_field_errors(errors, element_key, element_errors)
         return
     if kind == "builtin":
-        if _has_field_level_constraints(field):
+        type_error = _builtin_type_error(field, element)
+        if type_error is not None:
+            _set_field_errors(errors, element_key, [type_error])
+        elif _has_field_level_constraints(field):
             _set_field_errors(errors, element_key, _apply_field_level_constraints(field, element))
         return
     if kind == "enum":

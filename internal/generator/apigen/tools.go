@@ -193,6 +193,43 @@ func (m *typeMapper) allTypeUnions() map[string]ToolUnionInfo {
 	return result
 }
 
+// ToolEnumInfo is an enum the tool argument schemas list the values of.
+type ToolEnumInfo struct {
+	// Values are the serialized values in declaration order.
+	Values []string
+}
+
+// allTypeEnums returns the enums of the schema and its dependencies; the
+// schema's own win a name clash, then dependencies in name order.
+func (m *typeMapper) allTypeEnums() map[string]ToolEnumInfo {
+	result := make(map[string]ToolEnumInfo)
+	add := func(schema *ir.Schema) {
+		if schema == nil {
+			return
+		}
+		for _, enum := range codegen.ExtractEnums(schema) {
+			if _, exists := result[enum.Name]; exists {
+				continue
+			}
+			values := make([]string, 0, len(enum.Values))
+			for _, value := range enum.Values {
+				values = append(values, value.Value)
+			}
+			result[enum.Name] = ToolEnumInfo{Values: values}
+		}
+	}
+	add(m.schema)
+	names := make([]string, 0, len(m.dependencies))
+	for name := range m.dependencies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		add(m.dependencies[name])
+	}
+	return result
+}
+
 // allTypeFields returns the fields of every type in the schema and its
 // dependencies. On a name clash the type with more fields wins; on a tie
 // the schema's own, then the dependency first in name order.

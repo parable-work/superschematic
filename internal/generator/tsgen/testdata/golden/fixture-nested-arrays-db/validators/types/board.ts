@@ -7,6 +7,7 @@ import {
   addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
+import { expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import type { Board, BoardPoint } from '../../types';
 
@@ -43,8 +44,16 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     });
   }
 
-  if (value.labels === null || value.labels === undefined) {
+  if (!Array.isArray(value.labels)) {
     addFieldError(errors, "labels", "required", "required field");
+  }
+
+  if (Array.isArray(value.labels)) {
+    value.labels.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => expectString(errors, `labels[${rowIndex}][${index}]`, item));
+      }
+    });
   }
 
   // A list element is never null: its one error is "required", in place of
@@ -129,7 +138,7 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     });
   }
 
-  if (value.walls === null || value.walls === undefined) {
+  if (!Array.isArray(value.walls)) {
     addFieldError(errors, "walls", "required", "required field");
   }
 
@@ -153,6 +162,14 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
         addFieldError(errors, `scores[${rowIndex}]`, "required", "required field");
       } else if (!Array.isArray(row)) {
         addFieldError(errors, `scores[${rowIndex}]`, "type", "expected an array");
+      }
+    });
+  }
+
+  if (Array.isArray(value.scores)) {
+    value.scores.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((item, index) => expectNumber(errors, `scores[${rowIndex}][${index}]`, item));
       }
     });
   }

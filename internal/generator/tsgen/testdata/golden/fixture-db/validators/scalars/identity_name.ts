@@ -14,7 +14,12 @@ export function validateIdentityName(
     return [true, null];
   }
 
-  const s = String(value);
+  // A value of another JSON type is "type", and its length and format are
+  // not checked.
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected string value" }]];
+  }
+  const s = value;
 
   if (s.length < 2) {
     errors.push({ validator: "minLength", message: "must be at least 2 characters" });
@@ -36,9 +41,6 @@ export function validateIdentityNameRequired(
 
   if (value === null || value === undefined || value === "") {
     return [false, [{ validator: "required", message: "required field" }]];
-  }
-  if (typeof value !== "string") {
-    return [false, [{ validator: "type", message: "expected string value" }]];
   }
 
   return validateIdentityName(value);

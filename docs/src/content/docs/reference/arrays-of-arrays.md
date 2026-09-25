@@ -139,6 +139,7 @@ A validation error names the field and both indexes:
 | An inner list is null | `field[i]` | `required` | `required field` |
 | An inner value is not a list | `field[i]` | `type` | `expected an array` |
 | An innermost element is null | `field[i][j]` | `required` | `required field` |
+| An innermost element has the wrong JSON type, such as a number in a `string[][]` | `field[i][j]` | `type` | `expected a string`, `expected a number`, `expected a boolean` |
 | An innermost element breaks its type's rule | `field[i][j]` | that rule's code, such as `enum`, `maxLength` or `min` | that rule's message |
 | A nested object element has a bad field | `field[i][j].name` | that field's code | that field's message |
 | The outer list is too short or too long | `field` | `listMin`, `listMax` | `must contain at least N items`, `must contain at most N items` |
@@ -148,12 +149,17 @@ is one `pattern` error at `field[i][j]`, as a malformed scalar field is at
 `field`, and an element outside the scalar's length bounds or range is one
 `minLength`, `maxLength`, `min` or `max` error
 ([D14](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-a-failing-scalar-value-is-one-error-named-by-the-rule-it-breaks)).
-An element of the wrong JSON type, such as a number in a list of a string
-scalar, is `type`.
+An element of the wrong JSON type, such as a number in a `string[][]` or
+in a list of a string scalar, is one `type` error, and the field's length,
+pattern and range rules do not check it.
 
 The same paths appear where each target checks a payload:
 
 - The Go API routes answer `400` with these paths for a request body.
+- The TypeScript API server answers `400` with these paths for a body
+  argument, a `T[]` and a `T[][]` alike, of a scalar, enum, object or
+  `Generic.JSON` type. It reads each element as its JSON value, so a
+  number in a list of strings is `type`, not the string `"5"`.
 - The Go, TypeScript and Python SDKs refuse a null inner list at `name[i]`
   and an element that fails its type's validation at `name[i][j]` before
   sending the request.

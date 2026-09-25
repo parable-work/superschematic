@@ -96,7 +96,7 @@ export interface JSONSchemaProperty {
   format?: string;
   description?: string;
   pattern?: string;
-  enum?: string[];
+  enum?: Array<string | null>;
   minLength?: number;
   maxLength?: number;
   minimum?: number;

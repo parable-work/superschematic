@@ -1,0 +1,4 @@
+# Test-local to tsrestgen, so no other generator's goldens read it.
+name: scalar-lists-api
+kind: API
+outputs: {}

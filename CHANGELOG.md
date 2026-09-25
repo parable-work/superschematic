@@ -581,11 +581,14 @@ of a generated artifact is always listed here with the bump it requires.
   one comma-separated value. Before, the handler parsed the parameter as a
   single scalar. The Rust SDK also drops a zero `listMin` check, which
   compared an unsigned length with zero. Minor.
-- The superscalar pin moves to `79a8e6a` (`superscalar.pin` and every
+- The superscalar pin moves to `1be340a` (`superscalar.pin` and every
   `go.mod`), and the TypeScript and Python scalar catalogs are regenerated
   from it. Generated output changes where a scalar changed:
   - Four new scalars are available to schemas: `AgentSkill.Name`,
     `Git.PathPattern`, `Ordering.Rank` and `Version.SemVer`.
+    `Git.PathPattern` reads escapes by the parity of each backslash run:
+    `/a\\[b]` (an escaped backslash, then a class) is accepted, and
+    `/a\\ ` (a bare trailing space) is rejected.
   - `Generic.JSON` is any JSON value. Its description changes in every
     generated scalar comment and readme; its `json_schema` type mapping is
     `any` (was `object`), which the projection Arrow metadata key
@@ -689,9 +692,57 @@ of a generated artifact is always listed here with the bump it requires.
   cache entries keyed on it, as they were. `go version -m` on a release
   binary no longer shows `vcs.*` lines; the tarball's `BUILD_COMMIT` names
   the commit. Patch.
+- TypeScript API server: every body argument is decoded from its JSON
+  value, as an object-typed or list-of-lists one already was (D12). A list
+  of a string, number, boolean, enum or scalar type (`string[]`,
+  `number[]`, `E[]`, `Network.Url[]`) went through the query-string
+  decoder: it split each element on commas and dropped empty strings,
+  turned a null element into `"null"` and an object into
+  `"[object Object]"`, accepted `"5"` for a number, and refused `[]` for a
+  required list. Now a list is its JSON array, a null element is refused
+  at `name[i]` (`required`), an element of the wrong JSON type as `type`,
+  and `[]` satisfies a required list. A single value must arrive as its
+  JSON type too: `"5"` is no longer a number, `5` no longer a string and
+  `"true"` no longer a boolean. A `Generic.JSON` argument (`ParamKind`
+  `json`) is any JSON value but null, as the schema runtimes decide for
+  null, and reaches the implementation as that value; before, it was
+  stringified. A scalar-typed parameter, in the path, the query or the
+  body, carries the scalar's lengths, pattern and range (`ParamSpec.scalar`,
+  type `ScalarConstraints`), which the runtime checks on every value before
+  the argument's own; a constraint refusal names its rule in
+  `details.errors` (`pattern`, `minLength`, `maxLength`, `min`, `max`;
+  D14). A list in the query string is still read from repeated keys and
+  comma-separated values. A client that sent numbers or booleans as
+  strings, or several values in one comma-separated string, sends JSON
+  values of the declared type. Minor.
 
 ### Fixed
 
+- TypeScript types and the Go, TypeScript and Python schema runtimes: a
+  value of the wrong JSON type in a field typed `string`, `number` or
+  `boolean`, required or optional, single, a `T[]` or `T[][]` element or
+  (TypeScript types only) a map value, is one `type` error at its path,
+  and its length, pattern and range are not checked. So is a non-string
+  value of an optional string scalar, and, in the TypeScript validator, a
+  string where a number scalar belongs. Before, `parse<Type>Json` accepted
+  `{"x": "far"}` for a number `x`, and a missing required string with a
+  `maxLength` below 9 was `required` and `maxLength`, because the
+  validator measured `String(undefined)`. A required list given a value
+  that is not a list is `required` in the TypeScript validator, as in the
+  runtimes (D14). Minor.
+- SDK tool documents (TypeScript, Go and Rust): an enum argument or field
+  was written as a plain string, so a model was never told the allowed
+  values. Its schema now carries `enum` with the serialized values at every
+  depth: a path, query or body argument, an input field, a list item at
+  either depth, a map value and a field of a nested object or union member;
+  a nullable one lists `null` too. A body argument of a map type (an
+  operation without an input type) lost its map shape and was written as
+  its value type; it is now an object whose `additionalProperties` is the
+  value schema, a list for a map of lists, and `tools/index.ts` types it
+  `Record<string, T>`. The `inputSchemaDigest` of every tool with an enum
+  argument or a map body argument changes; other digests do not.
+  `JSONSchemaProperty.enum` in `tools/index.ts` is `Array<string | null>`.
+  Patch.
 - Go ORM: `GetManyByIDs` keyed its result map on a hard-coded `entity.Id`
   and took UUID keys. A table keyed on a UUID field with another name did
   not compile, and a table keyed on a string `id` always returned an empty

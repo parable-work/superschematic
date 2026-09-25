@@ -8,24 +8,30 @@ import type { ValidationError } from 'superscalar/validation';
 import { badRequest } from './problem';
 
 /*
-Path, query, and scalar body parameters. The generated router carries one
-ParamSpec per declared argument (the schema's scalar kind and Validate<>
-bounds); this module turns the raw strings a request carries into the scalar
-values the implementation signature promises, or refuses the request with 400
-and a field-level detail. Semantic kinds go through the scalar library (the
-same parse functions the generated Go router calls): Identity.UUID returns
-the library's canonical form, Temporal.DateTime is RFC 3339. Primitive kinds
-stay local and match the Go Param flags: integer, float, boolean, string,
-enum.
+Path, query, and body parameters. The generated router carries one ParamSpec
+per declared argument (the schema's scalar kind, Validate<> bounds and, for a
+scalar type, the scalar's own constraints); this module turns what a request
+carries into the values the implementation signature promises, or refuses the
+request with 400 and a field-level detail. Semantic kinds go through the
+scalar library (the same parse functions the generated Go router calls):
+Identity.UUID returns the library's canonical form, Temporal.DateTime is RFC
+3339. Primitive kinds stay local and match the Go Param flags: integer,
+float, boolean, string, enum.
 
-A list of lists (T[][]) and a body parameter of an object type (T, T[] or
-T[][] with kind 'object') only travel in a JSON body, so decodeJsonParam
-reads them from JSON values instead of strings; an object value is parsed
-by the generated strict parser the spec carries.
+Path and query parameters arrive as strings: decodeParam reads them, and a
+query list accepts repeated keys and comma-separated values. Every body
+parameter arrives as a JSON value, so decodeJsonParam reads it as one: a
+number is not accepted for a string nor a string for a number, a list is a
+JSON array whose elements are never split or dropped, and an object value
+is parsed by the generated strict parser the spec carries.
 */
 
-/** 'object' is an object type of a body parameter (T, T[] or T[][]), parsed by ParamSpec.parse; a string never is one. */
-export type ParamKind = 'string' | 'integer' | 'number' | 'boolean' | 'uuid' | 'datetime' | 'enum' | 'object';
+/**
+ * 'object' is an object type of a body parameter (T, T[] or T[][]), parsed
+ * by ParamSpec.parse; 'json' is a body parameter of a JSON-valued scalar
+ * (Generic.JSON), any JSON value but null. Neither is read from a string.
+ */
+export type ParamKind = 'string' | 'integer' | 'number' | 'boolean' | 'uuid' | 'datetime' | 'enum' | 'object' | 'json';
 
 export type ParamLocation = 'path' | 'query' | 'body';
 
@@ -50,6 +56,25 @@ export interface ParamSpec {
   readonly pattern?: string;
   /** Kind 'object': the generated strict parser of the type (parse<T>FromJSON over parse<T>Json). */
   readonly parse?: (value: unknown) => unknown;
+  /** The constraints of the parameter's scalar type, checked on every value before the argument's own. */
+  readonly scalar?: ScalarConstraints;
+}
+
+/**
+ * A scalar type's own constraints (its IR lengths, pattern and range), as
+ * the schema runtimes check them: lengths count code points, the pattern is
+ * a JavaScript regular expression without flags. A value that breaks one is
+ * refused with one error named by that rule (`minLength`, `maxLength`,
+ * `pattern`, `min`, `max`).
+ */
+export interface ScalarConstraints {
+  /** Canonical scalar name, for the refusal (`Network.Url`). */
+  readonly name: string;
+  readonly minLength?: number;
+  readonly maxLength?: number;
+  readonly pattern?: string;
+  readonly min?: number;
+  readonly max?: number;
 }
 
 /** Raw values by wire name: every occurrence of a query key, one path capture, one body field. */
@@ -129,21 +154,58 @@ function decodeScalar(location: ParamLocation, spec: ParamSpec, raw: string, pat
   }
 }
 
+/**
+ * Refuses one value with one error named by the rule it breaks (`required`,
+ * `type`, `min`, `maxLength`, `pattern`, ...), reported at `path` when it
+ * sits inside a list.
+ */
+function refuseAt(location: ParamLocation, spec: ParamSpec, path: string | undefined, validator: string, message: string): never {
+  return refuse(location, spec, message, [{ validator, message }], path);
+}
+
+/** A scalar's range, then the argument's own bounds. */
 function checkNumber(location: ParamLocation, spec: ParamSpec, value: number, path?: string): number {
-  if (spec.min !== undefined && value < spec.min) refuse(location, spec, `must be at least ${spec.min}`, null, path);
-  if (spec.max !== undefined && value > spec.max) refuse(location, spec, `must be at most ${spec.max}`, null, path);
+  const scalar = spec.scalar;
+  if (scalar?.min !== undefined && value < scalar.min) refuseAt(location, spec, path, 'min', `must be at least ${scalar.min}`);
+  if (scalar?.max !== undefined && value > scalar.max) refuseAt(location, spec, path, 'max', `must be at most ${scalar.max}`);
+  if (spec.min !== undefined && value < spec.min) refuseAt(location, spec, path, 'min', `must be at least ${spec.min}`);
+  if (spec.max !== undefined && value > spec.max) refuseAt(location, spec, path, 'max', `must be at most ${spec.max}`);
   return value;
 }
 
+/** Whether a scalar's pattern accepts a value; a pattern JavaScript cannot compile accepts nothing, as in the schema runtime. */
+function matchesScalarPattern(pattern: string, value: string): boolean {
+  try {
+    return new RegExp(pattern).test(value);
+  } catch {
+    return false;
+  }
+}
+
+/** A scalar's lengths and pattern, then the argument's own constraints. */
 function checkString(location: ParamLocation, spec: ParamSpec, value: string, path?: string): string {
+  const scalar = spec.scalar;
+  if (scalar) {
+    // Code points, not UTF-16 units, as the schema runtimes count.
+    const length = [...value].length;
+    if (scalar.minLength !== undefined && length < scalar.minLength) {
+      refuseAt(location, spec, path, 'minLength', `must be at least ${scalar.minLength} characters`);
+    }
+    if (scalar.maxLength !== undefined && length > scalar.maxLength) {
+      refuseAt(location, spec, path, 'maxLength', `must be at most ${scalar.maxLength} characters`);
+    }
+    if (scalar.pattern && !matchesScalarPattern(scalar.pattern, value)) {
+      refuseAt(location, spec, path, 'pattern', `is not a valid ${scalar.name}`);
+    }
+  }
   if (spec.minLength !== undefined && value.length < spec.minLength) {
-    refuse(location, spec, `must be at least ${spec.minLength} characters`, null, path);
+    refuseAt(location, spec, path, 'minLength', `must be at least ${spec.minLength} characters`);
   }
   if (spec.maxLength !== undefined && value.length > spec.maxLength) {
-    refuse(location, spec, `must be at most ${spec.maxLength} characters`, null, path);
+    refuseAt(location, spec, path, 'maxLength', `must be at most ${spec.maxLength} characters`);
   }
   if (spec.pattern && !new RegExp(spec.pattern, 'u').test(value)) {
-    refuse(location, spec, 'does not match the required pattern', null, path);
+    refuseAt(location, spec, path, 'pattern', 'does not match the required pattern');
   }
   return value;
 }
@@ -176,41 +238,41 @@ export function decodeParam(location: ParamLocation, spec: ParamSpec, raw: reado
   return decodeScalar(location, spec, first);
 }
 
-/** Refuses one JSON value with one list-rule error, reported at `path` when it sits inside a list. */
-function refuseAt(location: ParamLocation, spec: ParamSpec, path: string | undefined, validator: string, message: string): never {
-  return refuse(location, spec, message, [{ validator, message }], path);
-}
-
-/** The JSON type each element kind arrives as, and the refusal when it does not. */
-function expectedJsonType(kind: ParamKind): { type: 'string' | 'number' | 'boolean'; message: string } {
-  switch (kind) {
-    case 'integer':
-      return { type: 'number', message: 'expected an integer' };
-    case 'number':
-      return { type: 'number', message: 'expected a number' };
-    case 'boolean':
-      return { type: 'boolean', message: 'expected a boolean' };
-    default:
-      return { type: 'string', message: 'expected a string' };
-  }
-}
-
-/** One non-null JSON value: an object goes through the spec's parser, anything else gets the checks of a T[] element. */
+/**
+ * One non-null JSON value, checked as its kind: an object goes through the
+ * spec's parser, a JSON-valued scalar is taken as it is, and every other
+ * kind must arrive as its JSON type (`type` otherwise) and then passes the
+ * checks of a path or query value of that kind.
+ */
 function decodeJsonValue(location: ParamLocation, spec: ParamSpec, item: unknown, path?: string): unknown {
-  if (spec.kind === 'object') {
-    if (typeof item !== 'object' || item === null || Array.isArray(item)) refuseAt(location, spec, path, 'type', 'expected an object');
-    if (!spec.parse) throw new Error(`ParamSpec ${spec.name} has kind 'object' but no parse function`);
-    try {
-      return spec.parse(item);
-    } catch {
-      // The parser's message names generated functions; like the input body,
-      // the refusal says what failed and where, not how.
-      return refuse(location, spec, 'does not match the declared type', null, path);
+  switch (spec.kind) {
+    case 'object': {
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) refuseAt(location, spec, path, 'type', 'expected an object');
+      if (!spec.parse) throw new Error(`ParamSpec ${spec.name} has kind 'object' but no parse function`);
+      try {
+        return spec.parse(item);
+      } catch {
+        // The parser's message names generated functions; like the input body,
+        // the refusal says what failed and where, not how.
+        return refuse(location, spec, 'does not match the declared type', null, path);
+      }
     }
+    case 'json':
+      return item;
+    case 'integer':
+      if (typeof item !== 'number' || !Number.isInteger(item)) refuseAt(location, spec, path, 'type', 'expected an integer');
+      if (!Number.isSafeInteger(item)) refuse(location, spec, 'integer out of range', null, path);
+      return checkNumber(location, spec, item, path);
+    case 'number':
+      if (typeof item !== 'number') refuseAt(location, spec, path, 'type', 'expected a number');
+      return checkNumber(location, spec, item, path);
+    case 'boolean':
+      if (typeof item !== 'boolean') refuseAt(location, spec, path, 'type', 'expected a boolean');
+      return item;
+    default:
+      if (typeof item !== 'string') refuseAt(location, spec, path, 'type', 'expected a string');
+      return decodeScalar(location, spec, item, path);
   }
-  const expected = expectedJsonType(spec.kind);
-  if (typeof item !== expected.type) refuseAt(location, spec, path, 'type', expected.message);
-  return decodeScalar(location, spec, String(item), path);
 }
 
 /** One list element: never null, then the checks of its kind, reported at `path`. */
@@ -258,9 +320,8 @@ export function decodeListOfLists(location: ParamLocation, spec: ParamSpec, valu
 }
 
 /**
- * Decodes a body parameter from its JSON value. The Hono adapter reads a
- * list of lists and every parameter of kind 'object' this way, since an
- * object cannot pass through the string decoding of path and query values:
+ * Decodes a body parameter from its JSON value. The Hono adapter reads every
+ * body parameter this way; only path and query values are strings.
  *
  * - T[][] is decodeListOfLists;
  * - T[] follows the same list rules one level down: the list is the
@@ -270,10 +331,18 @@ export function decodeListOfLists(location: ParamLocation, spec: ParamSpec, valu
  * - T is refused when required and absent or null, and otherwise passes
  *   the checks of its kind.
  *
- * An object value must be a JSON object (`type`, "expected an object") and
- * pass the spec's parser ("does not match the declared type").
+ * A value must arrive as the JSON type of its kind: a string for a string,
+ * enum, UUID or timestamp, a number for a number or an integer, a boolean
+ * for a boolean (`type`, "expected a string", ...). An object value must be
+ * a JSON object (`type`, "expected an object") and pass the spec's parser
+ * ("does not match the declared type"). A 'json' value is any JSON value
+ * but null. A parameter of any other kind with a default that is absent or
+ * null decodes the default as a path or query value would.
  */
 export function decodeJsonParam(location: ParamLocation, spec: ParamSpec, value: unknown): unknown {
+  if ((value === undefined || value === null) && spec.defaultValue !== undefined && !spec.isArrayOfArrays && spec.kind !== 'object') {
+    return decodeParam(location, spec, undefined);
+  }
   if (spec.isArrayOfArrays) return decodeListOfLists(location, spec, value);
   if (spec.isArray) {
     return outerList(location, spec, value)?.map((item: unknown, i) => decodeListElement(location, spec, `${spec.name}[${i}]`, item));

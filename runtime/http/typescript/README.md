@@ -17,21 +17,27 @@ Two entry points:
 
 - `@superschematic/http-runtime`, with no framework import:
   `RequestContext`, `HttpProblem` and the problem envelope, the success
-  envelope and `OperationResult` for a non-200 status, path, query and scalar
+  envelope and `OperationResult` for a non-200 status, path, query and
   body parameter decoding from `ParamSpec`s (`Identity.UUID` and
   `Temporal.DateTime` go through superscalar; primitives stay local), the
   permission gate, and a token-bucket rate limiter with a pluggable store.
-  A list of lists (`T[][]`) travels only as a body parameter.
-  `decodeListOfLists` reads it from its JSON value with the schema
-  runtimes' list rules. List bounds apply to the outer list. A null inner
-  list is refused at `name[i]` (`required`), and so is a non-list inner
-  value (`type`). Each element is checked at `name[i][j]`; an object
-  element goes through the generated parser of its type. The 400 detail
-  carries the failing `path`. A list-of-lists result is sent with every
-  nullish list as `[]`. `decodeJsonParam` reads a list of lists, and a
-  body parameter of an object type (`T`, `T[]` or `T[][]`, kind
-  `object`), from its JSON value; a `T[]` follows the same rules one level
-  down, with each element checked at `name[i]`.
+  `decodeParam` reads a path or query value from its strings; a query
+  list accepts repeated keys and comma-separated values.
+  `decodeJsonParam` reads every body parameter from its JSON value, with
+  the schema runtimes' list rules. A value must arrive as its kind's JSON
+  type (`type` otherwise); kind `object` goes through the generated parser
+  of its type, and kind `json` (`Generic.JSON`) is any JSON value but
+  null. A list is its JSON array: `[]` satisfies a required list, list
+  bounds apply to the outer list, and a null element is refused at
+  `name[i]` (`required`). A list of lists (`T[][]`) travels only as a body
+  parameter; `decodeListOfLists` also refuses a null inner list at
+  `name[i]` (`required`) and a non-list inner value (`type`), and checks
+  each element at `name[i][j]`. A spec's `scalar` carries its scalar
+  type's lengths, pattern and range, checked on every value before the
+  argument's own constraints; a constraint refusal names its rule
+  (`pattern`, `minLength`, `maxLength`, `min`, `max`) in the detail's
+  `errors`. The 400 detail carries the failing `path`. A list-of-lists
+  result is sent with every nullish list as `[]`.
 - `@superschematic/http-runtime/hono`, the Hono adapter. `mountOperation`
   runs the pipeline for one operation: request id, `@rateLimit`,
   `hono/timeout`, `hono/bearer-auth` and the permission gate, parameter

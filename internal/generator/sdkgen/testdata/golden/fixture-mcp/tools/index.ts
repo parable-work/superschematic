@@ -108,7 +108,7 @@ export interface JSONSchemaProperty {
   format?: string;
   description?: string;
   pattern?: string;
-  enum?: string[];
+  enum?: Array<string | null>;
   minLength?: number;
   maxLength?: number;
   minimum?: number;
@@ -218,13 +218,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:0908611e4289a8ae0e89cb020c06b4c09b92865c0dded660c09230d951a12216',
+    inputSchemaDigest: 'sha256:c5964090c62f067eeb77c9b0dcc81bbe7449e3b48480b88daf635263613d1808',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         limit: {"description":"A numeric value","maximum":100,"minimum":1,"type":"number"},
-        statuses: {"description":"Array of OrderStatus values","items":{"description":"A OrderStatus value","type":"string"},"maxItems":2,"minItems":1,"type":"array"},
+        statuses: {"description":"Array of OrderStatus values","items":{"description":"A OrderStatus value","enum":["open","shipped"],"type":"string"},"maxItems":2,"minItems":1,"type":"array"},
       },
       required: ['statuses']
     },
@@ -461,7 +461,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       additionalProperties: false,
       properties: {
         limit: {"description":"A numeric value","maximum":100,"minimum":1,"type":"number"},
-        statuses: {"description":"Array of OrderStatus values","items":{"description":"A OrderStatus value","type":"string"},"maxItems":2,"minItems":1,"type":"array"},
+        statuses: {"description":"Array of OrderStatus values","items":{"description":"A OrderStatus value","enum":["open","shipped"],"type":"string"},"maxItems":2,"minItems":1,"type":"array"},
       },
       required: ['statuses']
     }
@@ -545,7 +545,7 @@ export const anthropicTools: AnthropicTool[] = [
       additionalProperties: false,
       properties: {
         limit: {"description":"A numeric value","maximum":100,"minimum":1,"type":"number"},
-        statuses: {"description":"Array of OrderStatus values","items":{"description":"A OrderStatus value","type":"string"},"maxItems":2,"minItems":1,"type":"array"},
+        statuses: {"description":"Array of OrderStatus values","items":{"description":"A OrderStatus value","enum":["open","shipped"],"type":"string"},"maxItems":2,"minItems":1,"type":"array"},
       },
       required: ['statuses']
     }

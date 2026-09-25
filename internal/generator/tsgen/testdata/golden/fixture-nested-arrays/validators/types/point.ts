@@ -6,6 +6,7 @@ import {
   setFieldErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
+import { expectNumber } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import type { Point } from '../../types';
 
@@ -23,9 +24,13 @@ export function validatePoint(value: Point | null | undefined): ValidationResult
     addFieldError(errors, "x", "required", "required field");
   }
 
+  expectNumber(errors, "x", value.x);
+
   if (value.y === null || value.y === undefined) {
     addFieldError(errors, "y", "required", "required field");
   }
+
+  expectNumber(errors, "y", value.y);
 
   return Object.keys(errors).length > 0 ? errors : true;
 }

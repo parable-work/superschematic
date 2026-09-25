@@ -6,6 +6,7 @@ import {
   setFieldErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
+import { expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import type { TenantView } from '../../types';
 
@@ -41,9 +42,13 @@ export function validateTenantView(value: TenantView | null | undefined): Valida
     addFieldError(errors, "userCount", "required", "required field");
   }
 
+  expectNumber(errors, "userCount", value.userCount);
+
   if (value.internalDebugLabel === null || value.internalDebugLabel === undefined) {
     addFieldError(errors, "internalDebugLabel", "required", "required field");
   }
+
+  expectString(errors, "internalDebugLabel", value.internalDebugLabel);
 
   return Object.keys(errors).length > 0 ? errors : true;
 }
