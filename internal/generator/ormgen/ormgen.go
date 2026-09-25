@@ -279,7 +279,10 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 
 	scalarMap := buildScalarLookup(schema)
 	unionNames := collectUnionTypeNames(schema, opts.Dependencies)
-	uuidGoType := resolveUUIDGoType(schema, tableTypes, scalarMap)
+	uuidGoType, err := resolveUUIDGoType(schema, tableTypes, scalarMap)
+	if err != nil {
+		return nil, err
+	}
 
 	repositories := make([]Repository, 0, len(tableTypes))
 	for _, typeDef := range tableTypes {
@@ -416,16 +419,18 @@ func tableTypeDefs(schema *ir.Schema) []*ir.TypeDef {
 
 // resolveUUIDGoType picks the Go type used for PK/FK plumbing: the scalar
 // type of the first declared primary key that is UUID-like, then any
-// UUID-like scalar in the schema. The fallback "types.UUID" preserves the
-// v1 contract for schemas that somehow declare tables without a UUID scalar.
-func resolveUUIDGoType(schema *ir.Schema, tableTypes []*ir.TypeDef, scalars map[string]scalarLookup) string {
+// UUID-like scalar in the schema, by the name the types package declares
+// for it. The ORM's UUID filter, id lookups and user context use that type
+// in every schema, and the types package declares only the scalars the
+// schema has, so a schema without a UUID-like scalar is an error.
+func resolveUUIDGoType(schema *ir.Schema, tableTypes []*ir.TypeDef, scalars map[string]scalarLookup) (string, error) {
 	for _, typeDef := range tableTypes {
 		for _, field := range typeDef.Fields {
 			if !field.Key {
 				continue
 			}
 			if s, ok := scalars[field.TypeRef.Name]; ok && s.traits.IsUUIDLike {
-				return "types." + s.symbol
+				return "types." + s.symbol, nil
 			}
 		}
 	}
@@ -437,11 +442,11 @@ func resolveUUIDGoType(schema *ir.Schema, tableTypes []*ir.TypeDef, scalars map[
 	sort.Strings(names)
 	for _, name := range names {
 		if scalars[name].traits.IsUUIDLike {
-			return "types." + scalars[name].symbol
+			return "types." + scalars[name].symbol, nil
 		}
 	}
 
-	return "types.UUID"
+	return "", fmt.Errorf("ormgen: schema %s has tables but no UUID scalar: the ORM keys its id lookups, UUID filters and user context by one; give a table a key field of a UUID scalar such as Identity.UUID", schema.Name)
 }
 
 // resolveUserIDGoType picks the Go type for the ORM user context from the

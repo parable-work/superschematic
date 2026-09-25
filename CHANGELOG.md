@@ -649,6 +649,11 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Go ORM: a DB schema whose tables use no UUID scalar got an ORM whose id
+  lookups, UUID filter and user context were typed `types.UUID`. The Go
+  types package declares only the scalars the schema uses, and never that
+  name, so the ORM did not compile. Generation now fails with an error that
+  names the schema and asks for a key field of a UUID scalar. Patch.
 - Go SDK: a body argument or response whose type is a scalar was typed
   with the last segment of the scalar's name (`types.UserID` for
   `Identity.UserID`, `types.JSON` for `Generic.JSON`). The Go types package
