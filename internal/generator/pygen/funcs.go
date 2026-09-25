@@ -30,7 +30,7 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 			return enumLookup(typeName)
 		},
 		"hasNonRequiredValidations": hasNonRequiredValidations,
-		"allowsExplicitNullRoot":    allowsExplicitNullRoot,
+		"isAnyJSONRoot":             isAnyJSONRoot,
 		"isList":                    isList,
 		"nullEntryCheck":            nullEntryCheck,
 		"pythonFieldDefault": func(field codegen.FieldInfo) string {
@@ -98,14 +98,17 @@ func nullEntryCheck(field codegen.FieldInfo) string {
 }
 
 // genericJSONScalar is the canonical name of the scalar library's any-JSON
-// scalar. Its value may be any JSON token, null included.
+// scalar.
 const genericJSONScalar = "Generic.JSON"
 
-// allowsExplicitNullRoot reports whether the field is a direct Generic.JSON
-// value: there None is the JSON null token, a present value, not a missing
-// one. A list or map of Generic.JSON still uses None for a missing container.
-func allowsExplicitNullRoot(field codegen.FieldInfo) bool {
-	return field.IsScalar && field.Type == genericJSONScalar && !field.IsArray && !field.IsMap
+// isAnyJSONRoot reports whether the field is a direct value of a scalar that
+// holds any JSON value (its json_schema type mapping is "any"; Generic.JSON).
+// None is a missing value there, as for every field, but a present value is
+// still checked against the scalar's type, since any JSON value but null is
+// one. A list or map of it is checked as a whole.
+func isAnyJSONRoot(field codegen.FieldInfo) bool {
+	return field.IsScalar && field.ScalarInfo != nil && field.ScalarInfo.Traits.IsAnyJSON &&
+		!field.IsArray && !field.IsMap
 }
 
 // pythonString escapes a string for use inside a double-quoted Python string

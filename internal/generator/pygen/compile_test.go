@@ -107,10 +107,10 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 }
 
 // buildGenericJSONProbeScript checks the generated Generic.JSON field: every
-// JSON root, null included, is a valid value that validate_all accepts; an
-// absent required field is rejected; host values JSON cannot represent (a
-// set, a tuple, a non-string key, NaN, infinity, an arbitrary object) are
-// rejected.
+// JSON root but null is a valid value that validate_all accepts; a None
+// required field is "required" in validate_all, and an absent one is
+// rejected; host values JSON cannot represent (a set, a tuple, a non-string
+// key, NaN, infinity, an arbitrary object) are rejected.
 func buildGenericJSONProbeScript(importPaths []string, moduleName string) string {
 	var b strings.Builder
 	b.WriteString("import datetime\nimport sys\n")
@@ -120,9 +120,11 @@ func buildGenericJSONProbeScript(importPaths []string, moduleName string) string
 	}
 	fmt.Fprintf(&b, "from %s.types import Tenant\n", moduleName)
 	b.WriteString("base = dict(createdAt=datetime.datetime(2026, 1, 2, tzinfo=datetime.timezone.utc), name='Acme', slug='acme', email='agent@example.com')\n")
-	b.WriteString("for root in [{'k': 1}, [1, 2], 'text', 42, 1.5, True, None]:\n")
+	b.WriteString("for root in [{'k': 1, 'none': None}, [1, None], 'text', '', 42, 1.5, True, False]:\n")
 	b.WriteString("    model = Tenant(**base, metadata=root)\n")
 	b.WriteString("    assert 'metadata' not in model.validate_all().errors, root\n")
+	b.WriteString("errors = Tenant(**base, metadata=None).validate_all().errors\n")
+	b.WriteString("assert [e['validator'] for e in errors['metadata']] == ['required'], errors\n")
 	b.WriteString("try:\n")
 	b.WriteString("    Tenant(**base)\n")
 	b.WriteString("except ValidationError:\n")

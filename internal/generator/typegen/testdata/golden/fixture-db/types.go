@@ -152,6 +152,21 @@ func mapFromJSONValue(data []byte) (map[string]any, error) {
 	return result, nil
 }
 
+// jsonValueMissing reports whether a required field of a scalar that holds
+// any JSON value (Generic.JSON) has none: it is absent, which decodes to the
+// zero value, or it is the JSON null token. Every other JSON value is one.
+func jsonValueMissing(value any) bool {
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() || rv.IsZero() {
+		return true
+	}
+	if rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
+		token := bytes.TrimSpace(rv.Bytes())
+		return len(token) == 0 || bytes.Equal(token, []byte("null"))
+	}
+	return false
+}
+
 func mapFromYAMLValue(data []byte) (map[string]any, error) {
 	var result map[string]any
 	if err := yaml.Unmarshal(data, &result); err != nil {
@@ -816,6 +831,11 @@ func (t *Tenant) Validate() ValidationErrors {
 		if valid, fieldErrs := t.Status.Validate(); !valid {
 			errors.SetFieldErrors("status", fieldErrs)
 		}
+	}
+
+	// Validate metadata (required): any JSON value but null.
+	if jsonValueMissing(t.Metadata) {
+		errors.AddFieldError("metadata", "required", "required field")
 	}
 
 	// Validate users (required nested type)

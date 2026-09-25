@@ -227,14 +227,16 @@ class {{.Name}}(BaseModel):
         {{range .Fields}}
         # Validate {{.Name}}
         {{- if and .Required (not .IsRelation)}}
-        {{- if allowsExplicitNullRoot .}}
-        # None is the JSON null root, a present value, not a missing field.
-        try:
-            TypeAdapter({{.TargetType}}).validate_python(self.{{.TargetName}})
-        except PydanticValidationError as e:
-            errors.add_field_error("{{snakeCase .Name}}", "invalid", str(e))
+        {{- if isAnyJSONRoot .}}
+        # Any JSON value but None is a value; None is a missing one.
+        if self.{{.TargetName}} is None:
+            errors.add_field_error("{{snakeCase .Name}}", "required", "required field")
+        else:
+            try:
+                TypeAdapter({{.TargetType}}).validate_python(self.{{.TargetName}})
+            except PydanticValidationError as e:
+                errors.add_field_error("{{snakeCase .Name}}", "invalid", str(e))
         {{- if hasNonRequiredValidations .}}
-        if self.{{.TargetName}} is not None:
 {{template "ruleChecks" .}}
         {{- end}}
         {{- else}}

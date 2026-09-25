@@ -79,6 +79,22 @@ func isValidatableScalarField(field FieldInfo) bool {
 	return true
 }
 
+// requiredAnyJSONField reports whether field is a required single value of a
+// scalar that holds any JSON value (its json_schema type mapping is "any";
+// Generic.JSON). Such a scalar has no Validate method of its own in the Go
+// types (isValidatableScalarField), so Validate checks its presence: an
+// absent value and the JSON null token are "required", every other JSON
+// value passes. A list of it is checked by its decoder, a map not at all.
+func requiredAnyJSONField(field FieldInfo) bool {
+	if !field.IsScalar || field.ScalarInfo == nil || !field.ScalarInfo.Traits.IsAnyJSON {
+		return false
+	}
+	if !field.Required || field.HasDefault || field.IsArray || field.IsMap || field.UsesWrapper {
+		return false
+	}
+	return !autoFilledField(field)
+}
+
 // autoFilledField reports whether Validate leaves a required field alone
 // because the store fills it: internal metadata and the audit fields.
 func autoFilledField(field FieldInfo) bool {
@@ -256,6 +272,7 @@ func templateFuncs() template.FuncMap {
 		"validationStringExpr":     validationStringExpr,
 		"isEnumType":               isEnumType,
 		"isValidatableScalarField": isValidatableScalarField,
+		"requiredAnyJSONField":     requiredAnyJSONField,
 		"isGeneratedType":          isGeneratedType,
 		"nestedList":               newNestedList,
 		"autoFilledField":          autoFilledField,

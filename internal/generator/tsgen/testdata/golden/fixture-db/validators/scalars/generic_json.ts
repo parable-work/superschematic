@@ -37,8 +37,7 @@ export function validateGenericJSONRequired(
   value: JSONValue | null | undefined
 ): ScalarValidationResult {
 
-  // JSON null is a present Generic.JSON value; only undefined means absent.
-  if (value === undefined) {
+  if (value === null || value === undefined) {
     return [false, [{ validator: "required", message: "required field" }]];
   }
 
