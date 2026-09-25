@@ -154,6 +154,190 @@ func mapFromYAMLValue(data []byte) (map[string]any, error) {
 	return result, nil
 }
 
+// jsonListField is a list field as rejectNullListElements reads it: its JSON
+// key, and its depth, 1 for a list and 2 for a list of lists.
+type jsonListField struct {
+	name  string
+	depth int
+}
+
+// jsonNull is the JSON null token.
+var jsonNull = []byte("null")
+
+// rejectNullListElements refuses a null element in a list field of data, a
+// typeName object json.Unmarshal has already decoded. A list element is
+// never null, but encoding/json decodes one to the element type's zero
+// value, which Validate cannot tell from a real one. A null inner list of a
+// list of lists is not an element: it decodes to a nil list, which Validate
+// reports. A key names a field as encoding/json matches it, exactly or else
+// without regard to case, and a repeated key is checked at every occurrence.
+// A payload without a null token is not scanned.
+func rejectNullListElements(typeName string, data []byte, fields []jsonListField) error {
+	if !bytes.Contains(data, jsonNull) {
+		return nil
+	}
+	i := skipJSONSpace(data, 0)
+	if i >= len(data) || data[i] != '{' {
+		return nil
+	}
+	i++
+	for {
+		i = skipJSONSpace(data, i)
+		if i >= len(data) || data[i] != '"' {
+			return nil
+		}
+		keyEnd := skipJSONString(data, i)
+		field, isList := matchJSONListField(data[i:keyEnd], fields)
+		i = skipJSONSpace(data, keyEnd)
+		if i >= len(data) || data[i] != ':' {
+			return nil
+		}
+		i = skipJSONSpace(data, i+1)
+		if !isList {
+			i = skipJSONValue(data, i)
+		} else {
+			var at [2]int
+			var found bool
+			if i, at, found = findJSONNullElement(data, i, field.depth); found {
+				if field.depth > 1 {
+					return fmt.Errorf("decode %s: %s[%d][%d]: null element", typeName, field.name, at[0], at[1])
+				}
+				return fmt.Errorf("decode %s: %s[%d]: null element", typeName, field.name, at[0])
+			}
+		}
+		i = skipJSONSpace(data, i)
+		if i >= len(data) || data[i] != ',' {
+			return nil
+		}
+		i++
+	}
+}
+
+// matchJSONListField returns the list field an object key, quoted as in the
+// payload, names.
+func matchJSONListField(quoted []byte, fields []jsonListField) (jsonListField, bool) {
+	if len(quoted) < 2 {
+		return jsonListField{}, false
+	}
+	key := quoted[1 : len(quoted)-1]
+	if bytes.IndexByte(key, '\\') >= 0 {
+		var unquoted string
+		if err := json.Unmarshal(quoted, &unquoted); err != nil {
+			return jsonListField{}, false
+		}
+		key = []byte(unquoted)
+	}
+	for _, field := range fields {
+		if string(key) == field.name {
+			return field, true
+		}
+	}
+	for _, field := range fields {
+		if strings.EqualFold(string(key), field.name) {
+			return field, true
+		}
+	}
+	return jsonListField{}, false
+}
+
+// findJSONNullElement reads the value at data[i] as a list of depth levels
+// and returns the index just past it and the position of its first null
+// element, if it has one. A value that is not a list, such as a null list or
+// a null inner list, has no elements.
+func findJSONNullElement(data []byte, i, depth int) (end int, at [2]int, found bool) {
+	if i >= len(data) || data[i] != '[' {
+		return skipJSONValue(data, i), at, false
+	}
+	i++
+	for n := 0; ; n++ {
+		i = skipJSONSpace(data, i)
+		if i >= len(data) {
+			return i, at, false
+		}
+		if data[i] == ']' {
+			return i + 1, at, false
+		}
+		switch {
+		case depth > 1:
+			var inner [2]int
+			if i, inner, found = findJSONNullElement(data, i, depth-1); found {
+				return i, [2]int{n, inner[0]}, true
+			}
+		case data[i] == 'n':
+			return i, [2]int{n}, true
+		default:
+			i = skipJSONValue(data, i)
+		}
+		i = skipJSONSpace(data, i)
+		if i < len(data) && data[i] == ',' {
+			i++
+		}
+	}
+}
+
+// skipJSONSpace returns the index of the first non-space byte at or after i.
+func skipJSONSpace(data []byte, i int) int {
+	for i < len(data) {
+		switch data[i] {
+		case ' ', '\t', '\n', '\r':
+			i++
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+// skipJSONString returns the index just past the string that opens at
+// data[i].
+func skipJSONString(data []byte, i int) int {
+	for i++; i < len(data); i++ {
+		switch data[i] {
+		case '\\':
+			i++
+		case '"':
+			return i + 1
+		}
+	}
+	return len(data)
+}
+
+// skipJSONValue returns the index just past the JSON value at data[i].
+func skipJSONValue(data []byte, i int) int {
+	if i >= len(data) {
+		return len(data)
+	}
+	switch data[i] {
+	case '"':
+		return skipJSONString(data, i)
+	case '{', '[':
+		depth := 0
+		for i < len(data) {
+			switch data[i] {
+			case '"':
+				i = skipJSONString(data, i)
+				continue
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+				if depth == 0 {
+					return i + 1
+				}
+			}
+			i++
+		}
+		return len(data)
+	}
+	for i++; i < len(data); i++ {
+		switch data[i] {
+		case ',', ']', '}', ' ', '\t', '\n', '\r':
+			return i
+		}
+	}
+	return len(data)
+}
+
 // Drawing - A drawing made of lists of lists: grid rows of cells, polygons as lists
 // of points and batches of sample vectors.
 type Drawing struct {
@@ -306,12 +490,24 @@ func (t *Drawing) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*Alias)(t))
 }
 
+// listFieldsOfDrawing are the list fields of Drawing; UnmarshalJSON
+// refuses a null element in them.
+var listFieldsOfDrawing = []jsonListField{
+	{name: "labels", depth: 2},
+	{name: "shades", depth: 2},
+	{name: "polygons", depth: 2},
+	{name: "samples", depth: 2},
+}
+
 // UnmarshalJSON unmarshals Drawing from JSON with validation
 func (t *Drawing) UnmarshalJSON(data []byte) error {
 	type Alias Drawing
 	aux := (*Alias)(t)
 
 	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if err := rejectNullListElements("Drawing", data, listFieldsOfDrawing); err != nil {
 		return err
 	}
 

@@ -477,6 +477,28 @@ of a generated artifact is always listed here with the bump it requires.
   `maxLength` and is `maxLength`. A field's own constraints
   (`validateMaxLength`, `validatePattern`, ...) are still checked inline.
   Minor.
+- Go types: `UnmarshalJSON` of every generated type refuses a null element
+  of a `T[]` field and a null innermost element of a `T[][]` field,
+  required or optional, of every element type (`Generic.JSON` and unions
+  included), with `decode <Type>: <field>[i]: null element` (or
+  `<field>[i][j]`). `json.Unmarshal` decoded it to the element type's zero
+  value, which `Validate` could not tell from a real `""`, `0`, `false` or
+  empty object, so the generated Go validator was the one validator that
+  let a null element through (D12). A null list and a null inner list
+  decode as before, and no Go type changes. A payload without a `null`
+  token costs one byte search more to decode; one with a null anywhere
+  costs one pass over the object's bytes. Behavior change for data a Go
+  program receives or has stored: a Go API route answers `400` to a request
+  body whose input type holds a null list element, instead of passing a
+  zero value to the implementation; an SDK response that holds one fails to
+  decode; `FromJSON`, `FromMap` and `FromYAML` fail on one; and the Go ORM
+  fails to read a JSON column of an object type whose list holds a null
+  element another writer stored (`failed to decode JSON field <column>:
+  decode <Type>: <field>[i]: null element`). Such stored values stop
+  decoding until the nulls are removed. Not checked: a map whose values are
+  lists, a list argument of an operation without an input type, and a list
+  or list-of-lists column the ORM reads, which still decode a null element
+  to its zero value. Minor.
 - TypeScript types: `validate<Type>` rejects a null list element of every
   `T[]` and `T[][]` field as `required` ("required field") at `field[i]`
   or `field[i][j]`, in an optional list too, as the schema runtimes and

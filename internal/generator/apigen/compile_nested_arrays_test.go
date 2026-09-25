@@ -24,7 +24,9 @@ import (
 // with nestedArraysAPIServerTest: the generated routes serve an
 // implementation over httptest, decode lists of lists from request bodies,
 // answer 400 at name[i] for a null inner list and at name[i][j] for a bad
-// element, and send lists of lists back with a nil inner list as [].
+// element, answer 400 for a null element of an input body before the
+// implementation runs, and send lists of lists back with a nil inner list
+// as [].
 func TestNestedArraysAPIServesNestedJSON(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -314,6 +316,29 @@ func TestSaveGridRefusesNullInnerListsAndBadElements(t *testing.T) {
 	}
 	if impl.saved.Labels != nil {
 		t.Errorf("a refused grid reached the implementation: %+v", impl.saved)
+	}
+}
+
+// A null innermost element is refused by the input type's decoder, so the
+// route answers 400 before the implementation sees a zero value in its
+// place.
+func TestSaveGridRefusesNullElements(t *testing.T) {
+	server, impl := serve(t)
+	for _, tc := range []struct{ name, body string }{
+		{"string element", ` + "`" + `{"labels": [["a", null]], "shades": [], "polygons": []}` + "`" + `},
+		{"enum element", ` + "`" + `{"labels": [], "shades": [[null]], "polygons": []}` + "`" + `},
+		{"object element", ` + "`" + `{"labels": [], "shades": [], "polygons": [[{"x": 1, "y": 2}, null]]}` + "`" + `},
+		{"element of an optional input field", ` + "`" + `{"labels": [], "shades": [], "polygons": [], "weights": [[0.5, null]]}` + "`" + `},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status, body := call(t, server, http.MethodPost, "/api/grids", tc.body)
+			if status != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body %v", status, body)
+			}
+		})
+	}
+	if impl.saved.Labels != nil || impl.saved.Shades != nil || impl.saved.Polygons != nil || impl.saved.Weights.Set {
+		t.Errorf("a grid with a null element reached the implementation: %+v", impl.saved)
 	}
 }
 

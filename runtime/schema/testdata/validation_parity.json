@@ -22,6 +22,21 @@
         "hasCustomNormalize": true,
         "hasCustomValidate": true
       },
+      "Generic.JSON": {
+        "name": "Generic.JSON",
+        "description": "Any valid JSON value: object, array, primitive, or null",
+        "languagePrimitive": "string",
+        "primitive": "String",
+        "typeMappings": {
+          "go": "GenericJSON",
+          "json_schema": "any",
+          "python": "Any",
+          "rust": "serde_json::Value",
+          "sql": "JSONB",
+          "typescript": "JSONValue"
+        },
+        "hasCustomValidate": true
+      },
       "Generic.Probability": {
         "name": "Generic.Probability",
         "description": "Probability value from 0.0 to 1.0 inclusive",
@@ -179,6 +194,20 @@
               "name": "Ordering.Rank",
               "isArray": true,
               "isArrayOfArrays": true
+            }
+          },
+          {
+            "name": "flags",
+            "typeRef": {
+              "name": "boolean",
+              "isArray": true
+            }
+          },
+          {
+            "name": "payloads",
+            "typeRef": {
+              "name": "Generic.JSON",
+              "isArray": true
             }
           }
         ],
@@ -610,6 +639,38 @@
       },
       "want": {
         "reqList[0]": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "scalar_list_null_element",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test",
+          null
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "names": [
+          null
+        ],
+        "ranks": [
+          null,
+          2
+        ]
+      },
+      "want": {
+        "names[0]": [
+          "required"
+        ],
+        "ranks[0]": [
+          "required"
+        ],
+        "reqScalarList[1]": [
           "required"
         ]
       }
@@ -1120,6 +1181,32 @@
       }
     },
     {
+      "name": "list_null_element_every_kind",
+      "type": "ListMatrix",
+      "payload": {
+        "flags": [
+          true,
+          null
+        ],
+        "payloads": [
+          "{}",
+          null
+        ],
+        "reqGrid": [],
+        "reqShadeGrid": [],
+        "reqShadeList": [],
+        "reqUrlGrid": []
+      },
+      "want": {
+        "flags[1]": [
+          "required"
+        ],
+        "payloads[1]": [
+          "required"
+        ]
+      }
+    },
+    {
       "name": "list_null_object_element",
       "type": "ListMatrix",
       "payload": {
@@ -1185,6 +1272,10 @@
       "name": "grid_valid_ragged",
       "type": "ListMatrix",
       "payload": {
+        "flags": [
+          true,
+          false
+        ],
         "numGrid": [
           [
             1,
@@ -1199,6 +1290,10 @@
             "e"
           ],
           []
+        ],
+        "payloads": [
+          "{}",
+          "[1, 2]"
         ],
         "pointGrid": [
           [
@@ -1433,6 +1528,12 @@
       "name": "grid_innermost_null_every_kind",
       "type": "ListMatrix",
       "payload": {
+        "boolGrid": [
+          [
+            true,
+            null
+          ]
+        ],
         "numGrid": [
           [
             null,
@@ -1446,6 +1547,11 @@
           ]
         ],
         "pointGrid": [
+          [
+            null
+          ]
+        ],
+        "rankGrid": [
           [
             null
           ]
@@ -1464,6 +1570,9 @@
         ]
       },
       "want": {
+        "boolGrid[0][1]": [
+          "required"
+        ],
         "numGrid[0][0]": [
           "required"
         ],
@@ -1471,6 +1580,9 @@
           "required"
         ],
         "pointGrid[0][0]": [
+          "required"
+        ],
+        "rankGrid[0][0]": [
           "required"
         ],
         "reqGrid[0][0]": [

@@ -155,7 +155,12 @@ pattern and range rules do not check it.
 
 The same paths appear where each target checks a payload:
 
-- The Go API routes answer `400` with these paths for a request body.
+- The Go API routes answer `400` with these paths for a request body. A
+  null element in a list of the operation's input type fails to decode
+  (below), and the route answers `400` (`Invalid request body`) before the
+  implementation runs. A list argument of an operation without an input
+  type is decoded into the route's own struct, without that check, so a
+  null element there reaches the implementation as its type's zero value.
 - The TypeScript API server answers `400` with these paths for a body
   argument, a `T[]` and a `T[][]` alike, of a scalar, enum, object or
   `Generic.JSON` type. It reads each element as its JSON value, so a
@@ -167,10 +172,20 @@ The same paths appear where each target checks a payload:
   of the wrong type, a bad enum element or a nested object element with a
   bad field itself, at location `(field, i, j)`, before `validate_all`
   runs.
-- `json.Unmarshal` in the generated Go types refuses a non-list inner
-  value and an element of the wrong JSON type before `Validate` runs. It
-  decodes a null element as its type's zero value, so the generated Go
-  validator does not report a null element as `required`; that gap is open.
+- Decoding into a generated Go type refuses a non-list inner value, an
+  element of the wrong JSON type, and a null element of a `T[]` or
+  innermost element of a `T[][]` before `Validate` runs, whatever the
+  element type. The error names the type, the field and the indexes:
+  `decode Drawing: labels[1][0]: null element`. `json.Unmarshal` alone
+  would decode the null to the element type's zero value. A null inner
+  list still decodes, to a nil list, which `Validate` reports at
+  `field[i]`. The SDKs and `FromJSON`, `FromMap` and `FromYAML` decode
+  the same way.
+- The Go ORM reads a JSON column that holds an object type through that
+  type's decoder, so a null element stored in one of its lists fails the
+  read. A list or list-of-lists column is decoded into its Go list
+  directly: a null element another writer stored there reads as the
+  element type's zero value.
 - The Rust types carry no validators: serde refuses a null inner list, and
   list bounds are not checked.
 

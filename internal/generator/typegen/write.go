@@ -54,6 +54,33 @@ func (o *ModuleOutput) NeedsRegexp() bool {
 	return false
 }
 
+// ListFields returns the fields of t whose value is a list, T[] or T[][], in
+// field order. UnmarshalJSON refuses a null element in them (D12): a list
+// element is never null, and encoding/json would decode one to the
+// element type's zero value, which Validate cannot tell from a real one. A
+// map whose values are lists is not among them; no validator checks the
+// elements of a map value.
+func (t TypeInfo) ListFields() []FieldInfo {
+	var fields []FieldInfo
+	for _, field := range t.Fields {
+		if field.IsArray && !field.IsMap {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
+// HasListFields reports whether any type in types.go has a list field, so
+// the file carries the null-element check UnmarshalJSON calls.
+func (o *ModuleOutput) HasListFields() bool {
+	for _, typeInfo := range o.Types {
+		if len(typeInfo.ListFields()) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // ScalarValueCheck is one validate<Symbol>Value function in types.go: the
 // scalar's own rules, checked before the scalar core's verdict is taken.
 type ScalarValueCheck struct {

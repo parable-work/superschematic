@@ -29,8 +29,10 @@
 // to close: in Go and Python the typed decoder is the first check, and the
 // payload never becomes a value to validate. Go's json.Unmarshal refuses a
 // non-list inner value and a value or element of the wrong JSON type (a
-// number where a string belongs); pydantic's strict parse refuses a value
-// or element of the wrong type, a bad enum element and a nested object
+// number where a string belongs), and the generated UnmarshalJSON refuses
+// a null list element, which json.Unmarshal alone would decode to the
+// element type's zero value; pydantic's strict parse refuses a value or
+// element of the wrong type, a bad enum element and a nested object
 // element with a bad field.
 //
 // Verdict comparison is about semantics, not field-name idiom: the Python
@@ -97,7 +99,8 @@ const schemaConfigJSON = `{
 // element; an inner list is never null ("required" at field[i]) and any
 // other non-list inner value is "type" at field[i]; a list element is never
 // null ("required" at field[i] or field[i][j]). Its enum, scalar, object
-// and builtin element types cover the element checks at both depths.
+// and builtin element types cover the element checks at both depths; flags
+// and payloads add boolean and Generic.JSON elements to T[].
 const parityMatrixSchemaJSON = `{
   "scalars": {
     "Network.Url": {
@@ -119,6 +122,10 @@ const parityMatrixSchemaJSON = `{
     "Generic.Probability": {
       "name": "Generic.Probability",
       "languagePrimitive": "number"
+    },
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "languagePrimitive": "object"
     }
   },
   "enums": {
@@ -283,6 +290,14 @@ const parityMatrixSchemaJSON = `{
         {
           "name": "rankGrid",
           "typeRef": { "name": "Ordering.Rank", "isArray": true, "isArrayOfArrays": true }
+        },
+        {
+          "name": "flags",
+          "typeRef": { "name": "boolean", "isArray": true }
+        },
+        {
+          "name": "payloads",
+          "typeRef": { "name": "Generic.JSON", "isArray": true }
         }
       ]
     }
@@ -415,15 +430,25 @@ var vectors = []parityVector{
 	},
 	{
 		// A list element is never null, in an optional list too. The
-		// generated Go validator cannot see it; see knownDivergences.
-		name:    "opt_list_null_element",
-		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optList": ["a", null]}`,
-		want:    map[string][]string{"optList[1]": {"required"}},
+		// generated Go decoder refuses it: json.Unmarshal alone would
+		// decode it to the element type's zero value.
+		name:          "opt_list_null_element",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optList": ["a", null]}`,
+		want:          map[string][]string{"optList[1]": {"required"}},
+		decodeRejects: []string{"go"},
 	},
 	{
-		name:    "req_list_null_element",
-		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": [null, "a"]}`,
-		want:    map[string][]string{"reqList[0]": {"required"}},
+		name:          "req_list_null_element",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": [null, "a"]}`,
+		want:          map[string][]string{"reqList[0]": {"required"}},
+		decodeRejects: []string{"go"},
+	},
+	{
+		// A scalar list element is never null either.
+		name:          "scalar_list_null_element",
+		payload:       `{"reqScalarList": ["https://a.test", null], "reqStr": "ok", "reqList": ["a"], "names": [null], "ranks": [null, 2]}`,
+		want:          map[string][]string{"reqScalarList[1]": {"required"}, "names[0]": {"required"}, "ranks[0]": {"required"}},
+		decodeRejects: []string{"go"},
 	},
 	{
 		// A malformed scalar value is one "pattern" error, for a single
@@ -597,18 +622,32 @@ var vectors = []parityVector{
 	// T[] element types beyond builtins and scalars.
 	{
 		// A list element is never null.
-		name:     "list_null_element",
-		typeName: "ListMatrix",
-		payload:  listMatrix(`"reqShadeList": ["dark", null]`),
-		want:     map[string][]string{"reqShadeList[1]": {"required"}},
+		name:          "list_null_element",
+		typeName:      "ListMatrix",
+		payload:       listMatrix(`"reqShadeList": ["dark", null]`),
+		want:          map[string][]string{"reqShadeList[1]": {"required"}},
+		decodeRejects: []string{"go"},
+	},
+	{
+		// Nor is a boolean element, or a Generic.JSON element: JSON null is
+		// a Generic.JSON value of a field, not of a list element. The
+		// Generic.JSON elements here are JSON text in strings because the
+		// runtimes check a Generic.JSON value as a string, an open
+		// difference (D12, amended).
+		name:          "list_null_element_every_kind",
+		typeName:      "ListMatrix",
+		payload:       listMatrix(`"flags": [true, null], "payloads": ["{}", null]`),
+		want:          map[string][]string{"flags[1]": {"required"}, "payloads[1]": {"required"}},
+		decodeRejects: []string{"go"},
 	},
 	{
 		// A null object element is "required", not an object whose own
 		// required fields are missing.
-		name:     "list_null_object_element",
-		typeName: "ListMatrix",
-		payload:  listMatrix(`"pointList": [{"shade": "dark"}, null]`),
-		want:     map[string][]string{"pointList[1]": {"required"}},
+		name:          "list_null_object_element",
+		typeName:      "ListMatrix",
+		payload:       listMatrix(`"pointList": [{"shade": "dark"}, null]`),
+		want:          map[string][]string{"pointList[1]": {"required"}},
+		decodeRejects: []string{"go"},
 	},
 	{
 		name:          "list_bad_enum_element",
@@ -631,7 +670,8 @@ var vectors = []parityVector{
 		typeName: "ListMatrix",
 		payload: listMatrix(`"reqGrid": [["a", "b", "c"], [], ["d"]], "optGrid": [["e"], []], "numGrid": [[1, 2.5], [10]],
 			"reqUrlGrid": [["https://a.test"], []], "reqShadeGrid": [["light"], ["dark", "light"]],
-			"pointGrid": [[{"shade": "light"}], []], "reqShadeList": ["dark"], "pointList": [{"shade": "light"}]`),
+			"pointGrid": [[{"shade": "light"}], []], "reqShadeList": ["dark"], "pointList": [{"shade": "light"}],
+			"flags": [true, false], "payloads": ["{}", "[1, 2]"]`),
 		want: map[string][]string{},
 	},
 	{
@@ -694,23 +734,28 @@ var vectors = []parityVector{
 	},
 	{
 		// An innermost element is never null.
-		name:     "grid_innermost_null",
-		typeName: "ListMatrix",
-		payload:  listMatrix(`"reqShadeGrid": [["light", null]]`),
-		want:     map[string][]string{"reqShadeGrid[0][1]": {"required"}},
+		name:          "grid_innermost_null",
+		typeName:      "ListMatrix",
+		payload:       listMatrix(`"reqShadeGrid": [["light", null]]`),
+		want:          map[string][]string{"reqShadeGrid[0][1]": {"required"}},
+		decodeRejects: []string{"go"},
 	},
 	{
 		// An innermost element is never null, whatever its type.
 		name:     "grid_innermost_null_every_kind",
 		typeName: "ListMatrix",
-		payload:  listMatrix(`"reqGrid": [[null]], "optGrid": [["a", null]], "numGrid": [[null, 2]], "reqUrlGrid": [[null]], "pointGrid": [[null]]`),
+		payload: listMatrix(`"reqGrid": [[null]], "optGrid": [["a", null]], "numGrid": [[null, 2]], "reqUrlGrid": [[null]], "pointGrid": [[null]],
+			"boolGrid": [[true, null]], "rankGrid": [[null]]`),
 		want: map[string][]string{
 			"reqGrid[0][0]":    {"required"},
 			"optGrid[0][1]":    {"required"},
 			"numGrid[0][0]":    {"required"},
 			"reqUrlGrid[0][0]": {"required"},
 			"pointGrid[0][0]":  {"required"},
+			"boolGrid[0][1]":   {"required"},
+			"rankGrid[0][0]":   {"required"},
 		},
+		decodeRejects: []string{"go"},
 	},
 	{
 		name:     "grid_bad_scalar_format",
@@ -793,27 +838,10 @@ var vectors = []parityVector{
 // suites take no pins: every runtime returns the expected column.
 var knownDivergences = map[string]map[string]map[string][]string{
 	"go": {
-		// json.Unmarshal decodes a null element of []T or [][]T into T's
-		// zero value, so Validate cannot tell it from "", 0 or an empty
-		// object: a string or number element passes or fails its own
-		// rules, a string scalar or enum element of a required list is
-		// "required" by luck, and an object element reports its own
-		// required fields. Closing this changes the generated type (the
-		// decoder records null elements, or elements become pointers);
-		// D12's amendment lists it as an open gap.
-		"opt_list_null_element":    {},
-		"req_list_null_element":    {},
-		"list_null_object_element": {"pointList[1].shade": {"required"}},
-		"grid_innermost_null_every_kind": {
-			"numGrid[0][0]":         {"min"},
-			"pointGrid[0][0].shade": {"required"},
-			"reqUrlGrid[0][0]":      {"required"},
-		},
 		// json.Unmarshal decodes a missing required string field into "",
 		// which Validate cannot tell from a present empty string, and a
 		// present "" satisfies a required builtin string in every
-		// validator. Closing this changes the generated type as the null
-		// element gap does; D12's amendment lists both.
+		// validator. D14's amendment lists it as open.
 		"req_str_absent": {},
 	},
 }
