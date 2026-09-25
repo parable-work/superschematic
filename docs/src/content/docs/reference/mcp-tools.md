@@ -251,6 +251,24 @@ record. An operation without `@mcp` reads `hidden: true` with an empty
 reason, an empty invocation policy and `icon: null`, so a reviewer sees
 every route and why it is or is not a tool.
 
+### `tools/index.ts`
+
+The TypeScript definitions, one `<Namespace><Method>Params` interface per
+tool, and `invokeTool(sdk, name, params)`, which passes the parameters to
+the SDK method. A parameter has the type that method takes:
+
+- an enum, object type or union is the types package's type, at its list
+  and map shape: `shades: Shade[][]`, `pickup: Address`,
+  `swatchByName: Record<string, Swatch>`;
+- a field of the input type whose type is a scalar is the input type's own
+  field type, `at: PaintInput['at']`, because the types package picks a
+  scalar's TypeScript type (`JSDate` for a `Temporal.DateTime`);
+- any other parameter is its JSON Schema type (`string`, `number`,
+  `boolean`, a list or map of them).
+
+The file imports the types it names from the types package, as the SDK's
+namespaces do.
+
 ### The replay contract
 
 When the SDK generators build a tool whose `@docs` declares replay

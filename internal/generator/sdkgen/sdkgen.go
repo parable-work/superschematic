@@ -734,66 +734,6 @@ func toolsTemplateFuncs() template.FuncMap {
 			}
 			return false
 		},
-		"jsonSchemaToTSType": func(prop JSONSchemaProperty) string {
-			// Handle enum types - generate a union of string literals
-			if len(prop.Enum) > 0 {
-				var enumValues []string
-				for _, v := range prop.Enum {
-					enumValues = append(enumValues, fmt.Sprintf("'%s'", v))
-				}
-				return strings.Join(enumValues, " | ")
-			}
-
-			switch prop.Type {
-			case "string":
-				return "string"
-			case "integer", "number":
-				return "number"
-			case "boolean":
-				return "boolean"
-			case "array":
-				if prop.Items != nil && prop.Items.Type == "array" && prop.Items.Items != nil {
-					// An array of arrays (T[][]).
-					return jsonSchemaTypeToTS(prop.Items.Items.Type) + "[][]"
-				}
-				if prop.Items != nil {
-					itemType := jsonSchemaTypeToTS(prop.Items.Type)
-					return itemType + "[]"
-				}
-				return "unknown[]"
-			case "object":
-				if prop.AdditionalProperties != nil && prop.AdditionalProperties.Schema != nil {
-					return "Record<string, " + mapValueTSType(*prop.AdditionalProperties.Schema) + ">"
-				}
-				if len(prop.Properties) > 0 {
-					fields := make([]string, 0, len(prop.Properties))
-					for name, nested := range prop.Properties {
-						nestedType := jsonSchemaTypeToTS(nested.Type)
-						if len(nested.Enum) > 0 {
-							enumValues := make([]string, 0, len(nested.Enum))
-							for _, v := range nested.Enum {
-								enumValues = append(enumValues, fmt.Sprintf("'%s'", v))
-							}
-							nestedType = strings.Join(enumValues, " | ")
-						}
-
-						optional := "?"
-						for _, requiredField := range prop.Required {
-							if requiredField == name {
-								optional = ""
-								break
-							}
-						}
-						fields = append(fields, fmt.Sprintf("%s%s: %s", name, optional, nestedType))
-					}
-					sort.Strings(fields)
-					return "{ " + strings.Join(fields, "; ") + " }"
-				}
-				return "Record<string, unknown>"
-			default:
-				return "unknown"
-			}
-		},
 		"buildInvocationArgs": func(tool ToolDefinition, ns ToolsNamespace) string {
 			var args []string
 
@@ -837,6 +777,71 @@ func toolsTemplateFuncs() template.FuncMap {
 
 			return strings.Join(args, ", ")
 		},
+	}
+}
+
+// jsonSchemaToTSType is the TypeScript type of a tool parameter read from
+// its JSON Schema, for a parameter that names no types-package type
+// (toolParamTSTypes): a primitive or a scalar, a list or map of them, or the
+// encryption key.
+func jsonSchemaToTSType(prop JSONSchemaProperty) string {
+	// Handle enum types - generate a union of string literals
+	if len(prop.Enum) > 0 {
+		var enumValues []string
+		for _, v := range prop.Enum {
+			enumValues = append(enumValues, fmt.Sprintf("'%s'", v))
+		}
+		return strings.Join(enumValues, " | ")
+	}
+
+	switch prop.Type {
+	case "string":
+		return "string"
+	case "integer", "number":
+		return "number"
+	case "boolean":
+		return "boolean"
+	case "array":
+		if prop.Items != nil && prop.Items.Type == "array" && prop.Items.Items != nil {
+			// An array of arrays (T[][]).
+			return jsonSchemaTypeToTS(prop.Items.Items.Type) + "[][]"
+		}
+		if prop.Items != nil {
+			itemType := jsonSchemaTypeToTS(prop.Items.Type)
+			return itemType + "[]"
+		}
+		return "unknown[]"
+	case "object":
+		if prop.AdditionalProperties != nil && prop.AdditionalProperties.Schema != nil {
+			return "Record<string, " + mapValueTSType(*prop.AdditionalProperties.Schema) + ">"
+		}
+		if len(prop.Properties) > 0 {
+			fields := make([]string, 0, len(prop.Properties))
+			for name, nested := range prop.Properties {
+				nestedType := jsonSchemaTypeToTS(nested.Type)
+				if len(nested.Enum) > 0 {
+					enumValues := make([]string, 0, len(nested.Enum))
+					for _, v := range nested.Enum {
+						enumValues = append(enumValues, fmt.Sprintf("'%s'", v))
+					}
+					nestedType = strings.Join(enumValues, " | ")
+				}
+
+				optional := "?"
+				for _, requiredField := range prop.Required {
+					if requiredField == name {
+						optional = ""
+						break
+					}
+				}
+				fields = append(fields, fmt.Sprintf("%s%s: %s", name, optional, nestedType))
+			}
+			sort.Strings(fields)
+			return "{ " + strings.Join(fields, "; ") + " }"
+		}
+		return "Record<string, unknown>"
+	default:
+		return "unknown"
 	}
 }
 

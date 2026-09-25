@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -182,7 +181,7 @@ func TestNestedArraysSDKCompilesAndRuns(t *testing.T) {
 	if err := CompileSDK(sdkDir, typesDir); err != nil {
 		t.Fatalf("generated SDK does not type-check: %v", err)
 	}
-	typecheckNestedArraysTools(t, bunPath, sdkDir)
+	typecheckTools(t, bunPath, sdkDir)
 
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -192,35 +191,6 @@ func TestNestedArraysSDKCompilesAndRuns(t *testing.T) {
 	run.Env = append(os.Environ(), "SDK_DIR="+sdkDir)
 	if out, err := run.CombinedOutput(); err != nil {
 		t.Fatalf("nested arrays SDK runtime test failed: %v\n%s", err, out)
-	}
-}
-
-// typecheckNestedArraysTools runs tsc over tools/index.ts, whose parameter
-// interfaces type list-of-lists arguments as T[][]. It tolerates exactly one
-// diagnostic, which is not about lists: tool parameter interfaces type an
-// enum as string, so GridSaveGridParams (shades: string[][]) is not
-// assignable to SaveGridInput (shades: Shade[][]). A field of a single
-// enum value fails the same way.
-func typecheckNestedArraysTools(t *testing.T, bunPath, sdkDir string) {
-	t.Helper()
-	tools := exec.Command(bunPath, "x", "tsc", "--noEmit", "--strict", "--skipLibCheck", "--pretty", "false",
-		"--target", "ES2020", "--module", "ESNext", "--moduleResolution", "bundler",
-		filepath.Join("tools", "index.ts"))
-	tools.Dir = sdkDir
-	out, err := tools.CombinedOutput()
-	if err == nil {
-		return
-	}
-	const enumParams = "error TS2345: Argument of type 'GridSaveGridParams' is not assignable to parameter of type 'SaveGridInput'."
-	var unexpected []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if strings.HasPrefix(line, " ") || strings.Contains(line, enumParams) {
-			continue
-		}
-		unexpected = append(unexpected, line)
-	}
-	if len(unexpected) > 0 {
-		t.Errorf("tools/index.ts does not type-check: %v\n%s", err, out)
 	}
 }
 
