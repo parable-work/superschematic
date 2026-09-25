@@ -245,6 +245,16 @@ class {{.Name}}(BaseModel):
 {{template "ruleChecks" .}}
         {{- end}}
         {{- end}}
+        {{- else if and .IsScalar (hasNonRequiredValidations .)}}
+        if self.{{.TargetName}} is not None:
+{{template "ruleChecks" .}}
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "{{snakeCase .Name}}" or key.startswith("{{snakeCase .Name}}[") for key in errors.errors):
+                try:
+                    TypeAdapter({{.TargetType}}).validate_python(self.{{.TargetName}})
+                except PydanticValidationError as e:
+                    errors.add_field_error("{{snakeCase .Name}}", "invalid", str(e))
         {{- else}}
         if self.{{.TargetName}} is not None:
             {{- if isList .}}

@@ -597,13 +597,6 @@ var knownDivergences = map[string]map[string]map[string][]string{
 		"req_scalar_list_bad_element": {"reqScalarList[1]": {"pattern"}},
 		"grid_bad_scalar_element":     {"reqUrlGrid[1][1]": {"pattern"}},
 	},
-	"python": {
-		// validate_all type-checks an optional field with the scalar's
-		// pydantic type, which reports the malformed value as invalid
-		// before the pattern rule reports it again.
-		"url_bad_format":   {"url": {"invalid", "pattern"}},
-		"email_bad_format": {"email": {"invalid", "pattern"}},
-	},
 }
 
 func stageParityService(t *testing.T) string {
