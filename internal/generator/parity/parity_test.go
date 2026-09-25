@@ -29,8 +29,10 @@
 // to close: in Go and Python the typed decoder is the first check, and the
 // payload never becomes a value to validate. Go's json.Unmarshal refuses a
 // non-list inner value and a wrong-type element (a number where a string
-// scalar belongs); pydantic's strict parse refuses a wrong-type element, a
-// bad enum element and a nested object element with a bad field.
+// scalar belongs), and the generated UnmarshalJSON refuses a null list
+// element, which json.Unmarshal alone would decode to the element type's
+// zero value; pydantic's strict parse refuses a wrong-type element, a bad
+// enum element and a nested object element with a bad field.
 //
 // Verdict comparison is about semantics, not field-name idiom: the Python
 // driver maps validate_all's snake_case attribute keys back to wire names
@@ -386,15 +388,18 @@ var vectors = []parityVector{
 	},
 	{
 		// A list element is never null, in an optional list too. The
-		// generated Go validator cannot see it; see knownDivergences.
-		name:    "opt_list_null_element",
-		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optList": ["a", null]}`,
-		want:    map[string][]string{"optList[1]": {"required"}},
+		// generated Go decoder refuses it: json.Unmarshal alone would
+		// decode it to the element type's zero value.
+		name:          "opt_list_null_element",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optList": ["a", null]}`,
+		want:          map[string][]string{"optList[1]": {"required"}},
+		decodeRejects: []string{"go"},
 	},
 	{
-		name:    "req_list_null_element",
-		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": [null, "a"]}`,
-		want:    map[string][]string{"reqList[0]": {"required"}},
+		name:          "req_list_null_element",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": [null, "a"]}`,
+		want:          map[string][]string{"reqList[0]": {"required"}},
+		decodeRejects: []string{"go"},
 	},
 	{
 		// A malformed scalar value is one "pattern" error, for a single
@@ -464,18 +469,20 @@ var vectors = []parityVector{
 	// T[] element types beyond builtins and scalars.
 	{
 		// A list element is never null.
-		name:     "list_null_element",
-		typeName: "ListMatrix",
-		payload:  listMatrix(`"reqShadeList": ["dark", null]`),
-		want:     map[string][]string{"reqShadeList[1]": {"required"}},
+		name:          "list_null_element",
+		typeName:      "ListMatrix",
+		payload:       listMatrix(`"reqShadeList": ["dark", null]`),
+		want:          map[string][]string{"reqShadeList[1]": {"required"}},
+		decodeRejects: []string{"go"},
 	},
 	{
 		// A null object element is "required", not an object whose own
 		// required fields are missing.
-		name:     "list_null_object_element",
-		typeName: "ListMatrix",
-		payload:  listMatrix(`"pointList": [{"shade": "dark"}, null]`),
-		want:     map[string][]string{"pointList[1]": {"required"}},
+		name:          "list_null_object_element",
+		typeName:      "ListMatrix",
+		payload:       listMatrix(`"pointList": [{"shade": "dark"}, null]`),
+		want:          map[string][]string{"pointList[1]": {"required"}},
+		decodeRejects: []string{"go"},
 	},
 	{
 		name:          "list_bad_enum_element",
@@ -554,10 +561,11 @@ var vectors = []parityVector{
 	},
 	{
 		// An innermost element is never null.
-		name:     "grid_innermost_null",
-		typeName: "ListMatrix",
-		payload:  listMatrix(`"reqShadeGrid": [["light", null]]`),
-		want:     map[string][]string{"reqShadeGrid[0][1]": {"required"}},
+		name:          "grid_innermost_null",
+		typeName:      "ListMatrix",
+		payload:       listMatrix(`"reqShadeGrid": [["light", null]]`),
+		want:          map[string][]string{"reqShadeGrid[0][1]": {"required"}},
+		decodeRejects: []string{"go"},
 	},
 	{
 		// An innermost element is never null, whatever its type.
@@ -571,6 +579,7 @@ var vectors = []parityVector{
 			"reqUrlGrid[0][0]": {"required"},
 			"pointGrid[0][0]":  {"required"},
 		},
+		decodeRejects: []string{"go"},
 	},
 	{
 		name:     "grid_bad_scalar_format",
@@ -636,27 +645,9 @@ var vectors = []parityVector{
 // the expected column today. Key: language -> vector name -> that language's
 // actual verdicts. When the generator is fixed the pin goes stale and this
 // test fails, forcing the entry's removal in the same change. The runtime
-// suites take no pins: every runtime returns the expected column.
-var knownDivergences = map[string]map[string]map[string][]string{
-	"go": {
-		// json.Unmarshal decodes a null element of []T or [][]T into T's
-		// zero value, so Validate cannot tell it from "", 0 or an empty
-		// object: a string or number element passes or fails its own
-		// rules, a string scalar or enum element of a required list is
-		// "required" by luck, and an object element reports its own
-		// required fields. Closing this changes the generated type (the
-		// decoder records null elements, or elements become pointers);
-		// D12's amendment lists it as an open gap.
-		"opt_list_null_element":    {},
-		"req_list_null_element":    {},
-		"list_null_object_element": {"pointList[1].shade": {"required"}},
-		"grid_innermost_null_every_kind": {
-			"numGrid[0][0]":         {"min"},
-			"pointGrid[0][0].shade": {"required"},
-			"reqUrlGrid[0][0]":      {"required"},
-		},
-	},
-}
+// suites take no pins: every runtime returns the expected column. No
+// generated validator has a pin today.
+var knownDivergences = map[string]map[string]map[string][]string{}
 
 func stageParityService(t *testing.T) string {
 	t.Helper()
