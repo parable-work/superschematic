@@ -209,12 +209,15 @@ One entry per operation, with these keys in this order: `name`
   false`) over the path parameters, the query parameters, the input type's
   fields or the scalar arguments, and `publicEncryptionKey` for an
   encrypted endpoint. Nested object types expand to their fields, closed;
-  a union is `oneOf` with each member's discriminator pinned; a map is an
-  object whose `additionalProperties` is the value schema; `Validate<>`
-  bounds carry over. A body field that is not required is nullable
-  (`"type": ["string", "null"]`); an optional query parameter is left out
-  instead. A property of a schema scalar names it under
-  `x-superschematic-scalar`.
+  a union is `oneOf` with each member's discriminator pinned; an enum is a
+  string whose `enum` lists its serialized values, wherever it appears (an
+  argument, a field, a list item, a map value), with `null` among them
+  when the property is nullable; a map, as a field or as a body argument,
+  is an object whose `additionalProperties` is the value schema (an array
+  schema for a map of lists); `Validate<>` bounds carry over. A body field
+  that is not required is nullable (`"type": ["string", "null"]`); an
+  optional query parameter is left out instead. A property of a schema
+  scalar names it under `x-superschematic-scalar`.
 - `inputSchemaDigest` is `sha256:` and the hex SHA-256 of `parameters` as
   the generator encodes it (vendor keys first, then `additionalProperties`,
   `type`, `properties`, `required`), so a change to the arguments changes

@@ -20,7 +20,7 @@ func TestFieldArrayOfArraysSchema(t *testing.T) {
 		ValidateMin: &minimum, ValidateMax: &maximum, ValidateMinLength: &minLength,
 		ValidateListMin: &listMin, ValidateListMax: &listMax, ValidatePattern: "^[a-z]+$",
 	}
-	got := FieldToJSONSchemaProperty(field, map[string]apigen.ScalarJSONSchemaInfo{"string": {Type: "string"}}, nil, nil, nil)
+	got := FieldToJSONSchemaProperty(field, map[string]apigen.ScalarJSONSchemaInfo{"string": {Type: "string"}}, nil, nil, nil, nil)
 	encoded, err := json.Marshal(got)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestFieldArrayOfArraysOfObjects(t *testing.T) {
 	fields := map[string][]apigen.Param{"Point": {{Name: "x", Type: "number", Required: true}}}
 	got := FieldToJSONSchemaProperty(
 		apigen.Param{Name: "polygons", Type: "Point", Required: true, IsArray: true, IsArrayOfArrays: true},
-		map[string]apigen.ScalarJSONSchemaInfo{"number": {Type: "number"}}, fields, nil, nil,
+		map[string]apigen.ScalarJSONSchemaInfo{"number": {Type: "number"}}, fields, nil, nil, nil,
 	)
 	if got.Type != "array" || got.Nullable || got.Items == nil || got.Items.Type != "array" || got.Items.Nullable {
 		t.Fatalf("polygons = %#v, want a required array of arrays", got)
@@ -55,7 +55,7 @@ func TestFieldArrayOfArraysOfObjects(t *testing.T) {
 // optional.
 func TestScalarArgumentListShapes(t *testing.T) {
 	scalars := map[string]apigen.ScalarJSONSchemaInfo{"string": {Type: "string"}}
-	schema := BuildParametersSchema(nil, nil, false, "", nil, nil, []ToolScalarArg{
+	schema := BuildParametersSchema(nil, nil, false, "", nil, nil, nil, []ToolScalarArg{
 		{Name: "label", Type: "string", Required: true},
 		{Name: "note", Type: "string"},
 		{Name: "tags", Type: "string", Required: true, IsArray: true},
@@ -74,6 +74,33 @@ func TestScalarArgumentListShapes(t *testing.T) {
 	}
 	if len(schema.Required) != 2 || schema.Required[0] != "label" || schema.Required[1] != "tags" {
 		t.Fatalf("required = %v, want [label tags]", schema.Required)
+	}
+}
+
+// TestScalarArgumentMapsAndEnums: a map body argument is an object whose
+// additionalProperties is the value schema, a list included, and an enum
+// lists its values as a path parameter, as a body argument and inside a
+// map, with null when it is optional.
+func TestScalarArgumentMapsAndEnums(t *testing.T) {
+	scalars := map[string]apigen.ScalarJSONSchemaInfo{"string": {Type: "string"}}
+	enums := map[string]apigen.ToolEnumInfo{"Tone": {Values: []string{"warm", "cool"}}}
+	schema := BuildParametersSchema(
+		[]ToolPathParam{{Name: "tone", Type: "Tone"}}, nil, false, "", nil, nil, enums,
+		[]ToolScalarArg{
+			{Name: "labels", Type: "string", Required: true, IsMap: true, IsArray: true},
+			{Name: "toneByName", Type: "Tone", Required: true, IsMap: true},
+			{Name: "maybeTone", Type: "Tone"},
+		}, false, scalars, byName, apigen.ToolKeys{})
+	encoded, err := json.Marshal(schema.Properties)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"labels":{"additionalProperties":{"type":"array","description":"Array of string values","items":{"type":"string"}},"type":"object","description":"Map of string values"},` +
+		`"maybeTone":{"description":"A Tone value","type":["string","null"],"enum":["warm","cool",null]},` +
+		`"tone":{"type":"string","description":"tone parameter","enum":["warm","cool"]},` +
+		`"toneByName":{"additionalProperties":{"type":"string","description":"A Tone value","enum":["warm","cool"]},"type":"object","description":"Map of Tone values"}}`
+	if string(encoded) != want {
+		t.Fatalf("properties =\n%s\nwant\n%s", encoded, want)
 	}
 }
 
