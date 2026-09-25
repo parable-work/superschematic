@@ -819,6 +819,18 @@ of a generated artifact is always listed here with the bump it requires.
   first member whose tags the payload allows. A Go server now answers 400
   to a union input without the member's required fields, which it used to
   accept. Unions with a discriminator decode as before. Minor.
+- Rust types: an untagged union (one without an `@internalMetadata`
+  discriminator) decodes to the member the payload describes. serde's
+  untagged derive tried each member in turn, and a member's derived
+  `Deserialize` ignores keys it does not declare, so the first member whose
+  required fields were present took the payload: of two members with the
+  same fields, told apart by a defaulted `kind`, the second never decoded,
+  and a payload with an unknown key went to the first member it fit. The
+  union now decodes through a `serde_json::Value` and picks its member by
+  the Go types' rule above, which both generators take from one place. A
+  payload that is not a JSON object is refused; serde used to read a JSON
+  array as a member struct. A crate with an untagged union now depends on
+  `serde_json`. Patch.
 - TypeScript types and the Go, TypeScript and Python schema runtimes: a
   value of the wrong JSON type in a field typed `string`, `number` or
   `boolean`, required or optional, single, a `T[]` or `T[][]` element or

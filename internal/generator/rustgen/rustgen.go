@@ -112,7 +112,8 @@ type UnionInfo struct {
 	Types []string
 
 	// Discriminator is the shared member field used for serde's internal
-	// tagging. Unions without a discriminator are emitted as untagged.
+	// tagging. Unions without a discriminator are emitted as untagged and
+	// decoded by member shape (annotateShapeDispatch).
 	Discriminator string
 
 	// Members pairs each member type with its serde tag value. TagValue is
@@ -129,6 +130,11 @@ type UnionInfo struct {
 type UnionMemberInfo struct {
 	Name     string
 	TagValue string
+
+	// Fields and Tags are set only for untagged unions; see
+	// annotateShapeDispatch. Fields lists the member's JSON field names.
+	Fields []string
+	Tags   []codegen.UnionTag
 }
 
 // ImportedTypeInfo holds alias metadata for definitions owned by a
@@ -319,6 +325,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if err := validateRenderedUnionDiscriminatorDefaults(output.Types, output.Unions); err != nil {
 		return nil, err
 	}
+	if err := annotateShapeDispatch(schema, output.Unions, opts.Dependencies); err != nil {
+		return nil, err
+	}
 	for i := range output.Unions {
 		output.Unions[i].PreserveJSON = containsGenericJSON(schema, output.Unions[i].Name, opts.Dependencies, map[string]bool{})
 	}
@@ -403,6 +412,56 @@ func convertUnions(codegenUnions []codegen.UnionInfo) []UnionInfo {
 		}
 	}
 	return unions
+}
+
+// annotateShapeDispatch fills Fields and Tags on every member of an untagged
+// union from codegen.UnionShapes. serde's untagged derive tries each member
+// in turn, and a member's derived Deserialize ignores keys it does not
+// declare, so the first member whose required fields are present took every
+// payload: two members with the same fields, told apart only by a
+// defaulted kind, always decoded as the first. A member may be imported from
+// a dependency, so its fields are read from the schema that declares it.
+func annotateShapeDispatch(schema *ir.Schema, unions []UnionInfo, dependencies map[string]*ir.Schema) error {
+	for u := range unions {
+		union := &unions[u]
+		if union.Discriminator != "" {
+			continue
+		}
+		// A member field's type is resolved where the member is declared,
+		// which for an imported member is its dependency.
+		enums := map[string]bool{}
+		members := make([][]codegen.FieldInfo, len(union.Members))
+		for i, member := range union.Members {
+			owner := runtimeSymbolOwner(schema, member.Name, dependencies, map[string]bool{})
+			var def *ir.TypeDef
+			if owner != nil {
+				def = owner.Types[member.Name]
+			}
+			if def == nil {
+				return fmt.Errorf("union %s member %s is not a type this crate declares or imports", union.Name, member.Name)
+			}
+			for _, field := range def.Fields {
+				if field == nil {
+					continue
+				}
+				if typeOwner := runtimeSymbolOwner(owner, field.TypeRef.Name, dependencies, map[string]bool{}); typeOwner != nil && typeOwner.Enums[field.TypeRef.Name] != nil {
+					enums[field.TypeRef.Name] = true
+				}
+				members[i] = append(members[i], codegen.FieldInfo{
+					Name:    field.Name,
+					Type:    field.TypeRef.Name,
+					IsArray: field.TypeRef.IsArray,
+					IsMap:   field.TypeRef.IsMap,
+					Default: field.Default,
+				})
+			}
+		}
+		for i, shape := range codegen.UnionShapes(members, func(typeName string) bool { return enums[typeName] }) {
+			union.Members[i].Fields = shape.Fields
+			union.Members[i].Tags = shape.Tags
+		}
+	}
+	return nil
 }
 
 func validateUnionDiscriminatorDefaults(schema *ir.Schema, unions []codegen.UnionInfo) error {
@@ -737,6 +796,17 @@ func hasMapFields(types []TypeInfo) bool {
 	return false
 }
 
+// HasUntaggedUnions reports whether unions.rs decodes a union by member
+// shape, and so needs the shape-dispatch helpers.
+func (o ModuleOutput) HasUntaggedUnions() bool {
+	for _, union := range o.Unions {
+		if union.Discriminator == "" {
+			return true
+		}
+	}
+	return false
+}
+
 func hasUnionFields(types []TypeInfo) bool {
 	for _, typ := range types {
 		for _, field := range typ.Fields {
@@ -787,13 +857,10 @@ func collectExternalCrateDeps(output *ModuleOutput) []ExternalCrateDep {
 	if len(output.CompositeDefaults) > 0 {
 		crateNames["serde_json"] = struct{}{}
 	}
-	// A discriminated union, or one that reaches Generic.JSON, decodes
-	// through serde_json::Value (unions.tmpl).
-	for _, union := range output.Unions {
-		if union.Discriminator != "" || union.PreserveJSON {
-			crateNames["serde_json"] = struct{}{}
-			break
-		}
+	// Every union decodes through serde_json::Value (unions.tmpl): a
+	// discriminated one reads its tag from it, an untagged one its keys.
+	if len(output.Unions) > 0 {
+		crateNames["serde_json"] = struct{}{}
 	}
 
 	for _, scalar := range output.Scalars {
