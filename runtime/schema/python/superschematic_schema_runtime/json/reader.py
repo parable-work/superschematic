@@ -558,7 +558,7 @@ def parse_schema(schema: Any) -> Schema:
     definitions = definitions_raw if _is_object(definitions_raw) else {}
 
     parsed = Schema(
-        name=_as_string(root.get("title")),
+        name=_as_string(root.get("name")) or _as_string(root.get("title")),
         kind=_as_string(root.get("x-kind")),
         description=_as_string(root.get("description")),
         root_type=_as_string(root.get("x-rootType")),

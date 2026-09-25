@@ -646,6 +646,10 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Python schema runtime: `parse_schema` named the schema from the root
+  `title` only, so a document that carries its identifier in `name` and a
+  display title in `title` got the display title as its name. It now reads
+  `name` first and falls back to `title`. Patch.
 - Rust API server: an operation set with a multi-word name
   (`PoolSearchMutations`, namespace `pool-search`) put the kebab-case
   namespace into its handler names (`handle_pool-search_...`), and the
