@@ -204,19 +204,6 @@ func (t *TenantView) Validate() ValidationErrors {
 		errors.SetFieldErrors("name", fieldErrs)
 	}
 
-	{
-		value := t.Name
-
-		if len(string(value)) > 80 {
-			errors.AddFieldError("name", "maxLength", "must be at most 80 characters")
-		}
-
-		if len(string(value)) < 2 {
-			errors.AddFieldError("name", "minLength", "must be at least 2 characters")
-		}
-
-	}
-
 	return errors
 }
 
@@ -446,40 +433,10 @@ func (t *CreateTenantInput) Validate() ValidationErrors {
 		errors.SetFieldErrors("name", fieldErrs)
 	}
 
-	{
-		value := t.Name
-
-		if len(string(value)) > 80 {
-			errors.AddFieldError("name", "maxLength", "must be at most 80 characters")
-		}
-
-		if len(string(value)) < 2 {
-			errors.AddFieldError("name", "minLength", "must be at least 2 characters")
-		}
-
-	}
-
 	// Validate slug (required)
 
 	if valid, fieldErrs := t.Slug.ValidateRequired(); !valid {
 		errors.SetFieldErrors("slug", fieldErrs)
-	}
-
-	{
-		value := t.Slug
-
-		if len(string(value)) > 255 {
-			errors.AddFieldError("slug", "maxLength", "must be at most 255 characters")
-		}
-
-		if len(string(value)) < 1 {
-			errors.AddFieldError("slug", "minLength", "must be at least 1 characters")
-		}
-
-		if matched, err := regexp.MatchString("^[a-z0-9]+(?:[-_][a-z0-9]+)*$", string(value)); err != nil || !matched {
-			errors.AddFieldError("slug", "pattern", "invalid format")
-		}
-
 	}
 
 	return errors

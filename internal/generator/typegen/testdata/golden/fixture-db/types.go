@@ -523,55 +523,16 @@ func (t *Tenant) Validate() ValidationErrors {
 		}
 	}
 
-	if t.Id != nil {
-		value := *t.Id
-
-		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
-			errors.AddFieldError("id", "pattern", "invalid format")
-		}
-
-	}
-
 	// Validate name (required)
 
 	if valid, fieldErrs := t.Name.ValidateRequired(); !valid {
 		errors.SetFieldErrors("name", fieldErrs)
 	}
 
-	{
-		value := t.Name
-
-		if len(string(value)) > 80 {
-			errors.AddFieldError("name", "maxLength", "must be at most 80 characters")
-		}
-
-		if len(string(value)) < 2 {
-			errors.AddFieldError("name", "minLength", "must be at least 2 characters")
-		}
-
-	}
-
 	// Validate slug (required)
 
 	if valid, fieldErrs := t.Slug.ValidateRequired(); !valid {
 		errors.SetFieldErrors("slug", fieldErrs)
-	}
-
-	{
-		value := t.Slug
-
-		if len(string(value)) > 255 {
-			errors.AddFieldError("slug", "maxLength", "must be at most 255 characters")
-		}
-
-		if len(string(value)) < 1 {
-			errors.AddFieldError("slug", "minLength", "must be at least 1 characters")
-		}
-
-		if matched, err := regexp.MatchString("^[a-z0-9]+(?:[-_][a-z0-9]+)*$", string(value)); err != nil || !matched {
-			errors.AddFieldError("slug", "pattern", "invalid format")
-		}
-
 	}
 
 	{
@@ -877,15 +838,6 @@ func (t *TenantUser) Validate() ValidationErrors {
 		}
 	}
 
-	if t.Id != nil {
-		value := *t.Id
-
-		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
-			errors.AddFieldError("id", "pattern", "invalid format")
-		}
-
-	}
-
 	// Validate tenant (required nested type)
 
 	if fieldErrs := t.Tenant.Validate(); fieldErrs.HasErrors() {
@@ -908,15 +860,6 @@ func (t *TenantUser) Validate() ValidationErrors {
 		if valid, fieldErrs := t.DeletedBy.Validate(); !valid {
 			errors.SetFieldErrors("deletedBy", fieldErrs)
 		}
-	}
-
-	if t.DeletedBy != nil {
-		value := *t.DeletedBy
-
-		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
-			errors.AddFieldError("deletedBy", "pattern", "invalid format")
-		}
-
 	}
 
 	return errors

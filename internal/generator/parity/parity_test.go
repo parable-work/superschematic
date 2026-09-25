@@ -564,19 +564,13 @@ var knownDivergences = map[string]map[string]map[string][]string{
 		// element rules accept.
 		"opt_list_null_element": {},
 		"req_list_null_element": {},
-		// The scalar's Validate reports the malformed value and the
-		// inline copy of the scalar's pattern reports it again.
-		"url_bad_format":             {"url": {"pattern", "pattern"}},
-		"email_bad_format":           {"email": {"pattern", "pattern"}},
-		"req_scalar_list_bad_format": {"reqScalarList[1]": {"pattern", "pattern"}},
-		"grid_bad_scalar_format":     {"reqUrlGrid[0][1]": {"pattern", "pattern"}},
 		// A null object element decodes to the zero value, whose own
 		// required fields fail.
 		"list_null_object_element": {"pointList[1].shade": {"required"}},
 		"grid_innermost_null_every_kind": {
 			"numGrid[0][0]":         {"min"},
 			"pointGrid[0][0].shade": {"required"},
-			"reqUrlGrid[0][0]":      {"pattern", "required"},
+			"reqUrlGrid[0][0]":      {"required"},
 		},
 	},
 	"typescript": {

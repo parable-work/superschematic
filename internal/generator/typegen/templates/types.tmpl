@@ -450,7 +450,7 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	{{else}}
 	{{if and .Required (not .HasDefault)}}
 	{{/* Skip validation for common audit fields that are auto-generated */}}
-	{{if and (not .InternalMetadata) (ne .Name "id") (ne .Name "createdAt") (ne .Name "createdBy") (ne .Name "updatedAt") (ne .Name "updatedBy")}}
+	{{if not (autoFilledField .)}}
 	// Validate {{.Name}} (required)
 	{{if .IsArray}}
 	{{/* required means present, not non-empty: an empty array is a valid value.

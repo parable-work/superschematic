@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"reflect"
-	"regexp"
 	"strings"
 )
 
@@ -227,36 +226,10 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 		errors.SetFieldErrors("financeMoney", fieldErrs)
 	}
 
-	{
-		value := t.FinanceMoney
-
-		if float64(value) < 0 {
-			errors.AddFieldError("financeMoney", "min", "must be at least 0")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("financeMoney", "max", "must be at most 9007199254740991")
-		}
-
-	}
-
 	// Validate genericInt64 (required)
 
 	if valid, fieldErrs := t.GenericInt64.ValidateRequired(); !valid {
 		errors.SetFieldErrors("genericInt64", fieldErrs)
-	}
-
-	{
-		value := t.GenericInt64
-
-		if float64(value) < -9007199254740991 {
-			errors.AddFieldError("genericInt64", "min", "must be at least -9007199254740991")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("genericInt64", "max", "must be at most 9007199254740991")
-		}
-
 	}
 
 	// Validate identityUUID (required)
@@ -265,28 +238,10 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 		errors.SetFieldErrors("identityUUID", fieldErrs)
 	}
 
-	{
-		value := t.IdentityUUID
-
-		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
-			errors.AddFieldError("identityUUID", "pattern", "invalid format")
-		}
-
-	}
-
 	// Validate identityUserID (required)
 
 	if valid, fieldErrs := t.IdentityUserID.ValidateRequired(); !valid {
 		errors.SetFieldErrors("identityUserID", fieldErrs)
-	}
-
-	{
-		value := t.IdentityUserID
-
-		if matched, err := regexp.MatchString("^[0-9A-Za-z]{1,22}$", value.String()); err != nil || !matched {
-			errors.AddFieldError("identityUserID", "pattern", "invalid format")
-		}
-
 	}
 
 	// Validate temporalDateTime (required)
@@ -301,36 +256,10 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 		errors.SetFieldErrors("temporalDays", fieldErrs)
 	}
 
-	{
-		value := t.TemporalDays
-
-		if float64(value) < -9007199254740991 {
-			errors.AddFieldError("temporalDays", "min", "must be at least -9007199254740991")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("temporalDays", "max", "must be at most 9007199254740991")
-		}
-
-	}
-
 	// Validate temporalDuration (required)
 
 	if valid, fieldErrs := t.TemporalDuration.ValidateRequired(); !valid {
 		errors.SetFieldErrors("temporalDuration", fieldErrs)
-	}
-
-	{
-		value := t.TemporalDuration
-
-		if len(value.String()) > 32 {
-			errors.AddFieldError("temporalDuration", "maxLength", "must be at most 32 characters")
-		}
-
-		if matched, err := regexp.MatchString("^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$", value.String()); err != nil || !matched {
-			errors.AddFieldError("temporalDuration", "pattern", "invalid format")
-		}
-
 	}
 
 	// Validate temporalHours (required)
@@ -339,36 +268,10 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 		errors.SetFieldErrors("temporalHours", fieldErrs)
 	}
 
-	{
-		value := t.TemporalHours
-
-		if float64(value) < -9007199254740991 {
-			errors.AddFieldError("temporalHours", "min", "must be at least -9007199254740991")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("temporalHours", "max", "must be at most 9007199254740991")
-		}
-
-	}
-
 	// Validate temporalMilliseconds (required)
 
 	if valid, fieldErrs := t.TemporalMilliseconds.ValidateRequired(); !valid {
 		errors.SetFieldErrors("temporalMilliseconds", fieldErrs)
-	}
-
-	{
-		value := t.TemporalMilliseconds
-
-		if float64(value) < -9007199254740991 {
-			errors.AddFieldError("temporalMilliseconds", "min", "must be at least -9007199254740991")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("temporalMilliseconds", "max", "must be at most 9007199254740991")
-		}
-
 	}
 
 	// Validate temporalMinutes (required)
@@ -377,36 +280,10 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 		errors.SetFieldErrors("temporalMinutes", fieldErrs)
 	}
 
-	{
-		value := t.TemporalMinutes
-
-		if float64(value) < -9007199254740991 {
-			errors.AddFieldError("temporalMinutes", "min", "must be at least -9007199254740991")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("temporalMinutes", "max", "must be at most 9007199254740991")
-		}
-
-	}
-
 	// Validate temporalSeconds (required)
 
 	if valid, fieldErrs := t.TemporalSeconds.ValidateRequired(); !valid {
 		errors.SetFieldErrors("temporalSeconds", fieldErrs)
-	}
-
-	{
-		value := t.TemporalSeconds
-
-		if float64(value) < -9007199254740991 {
-			errors.AddFieldError("temporalSeconds", "min", "must be at least -9007199254740991")
-		}
-
-		if float64(value) > 9007199254740991 {
-			errors.AddFieldError("temporalSeconds", "max", "must be at most 9007199254740991")
-		}
-
 	}
 
 	return errors

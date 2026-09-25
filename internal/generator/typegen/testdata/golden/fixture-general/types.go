@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"reflect"
-	"regexp"
 	"strings"
 )
 
@@ -222,19 +221,6 @@ func (t *FixtureConfig) Validate() ValidationErrors {
 
 	if valid, fieldErrs := t.DatabaseUrl.ValidateRequired(); !valid {
 		errors.SetFieldErrors("DATABASE_URL", fieldErrs)
-	}
-
-	{
-		value := t.DatabaseUrl
-
-		if len(string(value)) > 2048 {
-			errors.AddFieldError("DATABASE_URL", "maxLength", "must be at most 2048 characters")
-		}
-
-		if matched, err := regexp.MatchString("^https?://[\\w\\-\\{\\}]+(\\.[\\w\\-\\{\\}]+)+([:/?#][\\w\\-\\._~:/?#\\[\\]@!\\$&'\\(\\)\\*\\+,;=\\{\\}%]*)?$", string(value)); err != nil || !matched {
-			errors.AddFieldError("DATABASE_URL", "pattern", "invalid format")
-		}
-
 	}
 
 	// Validate ENVIRONMENT (optional)

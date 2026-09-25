@@ -78,6 +78,47 @@ func isValidatableScalarField(field FieldInfo) bool {
 	return true
 }
 
+// autoFilledField reports whether Validate leaves a required field alone
+// because the store fills it: internal metadata and the audit fields.
+func autoFilledField(field FieldInfo) bool {
+	if !field.Required || field.HasDefault {
+		return false
+	}
+	if field.InternalMetadata {
+		return true
+	}
+	switch field.Name {
+	case "id", "createdAt", "createdBy", "updatedAt", "updatedBy":
+		return true
+	}
+	return false
+}
+
+// scalarValidates reports whether Validate hands field's values to the
+// scalar type's own Validate or ValidateRequired. The scalar core checks the
+// scalar's pattern, lengths and range there, so the rules copied from the
+// scalar (FromScalar) would report a malformed value a second time.
+func scalarValidates(field FieldInfo) bool {
+	if !isValidatableScalarField(field) {
+		return false
+	}
+	if field.IsMap || field.IsArrayOfArrays {
+		return true
+	}
+	return !autoFilledField(field)
+}
+
+// withoutScalarRules drops the rules copied from the scalar type.
+func withoutScalarRules(rules []codegen.ValidationRule) []codegen.ValidationRule {
+	kept := make([]codegen.ValidationRule, 0, len(rules))
+	for _, rule := range rules {
+		if !rule.FromScalar {
+			kept = append(kept, rule)
+		}
+	}
+	return kept
+}
+
 // isGeneratedType reports whether typeName is an object or input type this
 // module declares or aliases, which has Validate and MaskSecrets methods.
 func isGeneratedType(types []TypeInfo, importedTypes []ImportedTypeInfo, typeName string) bool {
@@ -177,6 +218,7 @@ func templateFuncs() template.FuncMap {
 		"isValidatableScalarField": isValidatableScalarField,
 		"isGeneratedType":          isGeneratedType,
 		"nestedList":               newNestedList,
+		"autoFilledField":          autoFilledField,
 		"inputFieldValueType":      inputFieldValueType,
 		"hasUnionFields": func(fields []FieldInfo) bool {
 			for _, f := range fields {

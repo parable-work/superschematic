@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"reflect"
-	"regexp"
 	"strings"
 )
 
@@ -244,15 +243,6 @@ func (t *Board) Validate() ValidationErrors {
 		if valid, fieldErrs := t.Id.Validate(); !valid {
 			errors.SetFieldErrors("id", fieldErrs)
 		}
-	}
-
-	if t.Id != nil {
-		value := *t.Id
-
-		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
-			errors.AddFieldError("id", "pattern", "invalid format")
-		}
-
 	}
 
 	// Validate labels (list of lists; an inner list is never null)

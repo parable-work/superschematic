@@ -740,6 +740,9 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 				}
 			}
 		}
+		if scalarValidates(field) {
+			field.Validations = withoutScalarRules(field.Validations)
+		}
 
 		fields[i] = field
 	}

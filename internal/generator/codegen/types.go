@@ -328,6 +328,11 @@ type ValidationRule struct {
 
 	// Value is the constraint value (e.g., max length number, regex pattern string).
 	Value interface{}
+
+	// FromScalar marks a rule copied from the field's scalar type. A
+	// generator whose scalar type validates itself skips these rules, so a
+	// malformed value is not reported twice.
+	FromScalar bool
 }
 
 // EnumInfo holds information about an enum type.
