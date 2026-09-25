@@ -86,6 +86,16 @@ upload scalar would get a reference to a symbol its scalar package must
 provide under that exact name. The fix is for the upload scalar's registry
 entry to carry the data type's symbol and for the template to render it.
 
+superscalar's `ScalarMetadata` row has no upload fields, so an extension
+declares an upload scalar beside its rows: `registry.ScalarCatalogWithUploads`
+wraps the catalog it registers with each scalar's `ir.FileUploadConfig` and
+optional `ir.ImageConstraints`, and the loader hydrates them onto the
+`ScalarDef`. The `Validate<T, { uploadMaxBytes }>` check reads that metadata,
+so it runs after hydration (`ir.Schema.ValidateHydrated`), not in the
+frontends' `Validate`, which runs before it. acme's `Acme.Photo` exercises
+the path in a Catalog service, whose pipeline renders no Go API and so no
+`FileUploadData` reference.
+
 ## D5. Defaults are superschematic's own
 
 `naming.Default()` names `example.com/schemas` as the Go module root,
@@ -99,12 +109,14 @@ under `superschematic/build`.
 
 A distribution that republishes the authoring packages under its own scope
 lists them in `authoring_packages` and maps each to the declaring package in
-`[package_aliases]`. The alias map has three consumers: the TypeScript writer
+`[package_aliases]`. The alias map has four consumers: the TypeScript writer
 picks the preferred specifier when it emits an import, the registry's
 forbidden-package check resolves an import to its declaring package before
-looking it up, and the resolver's "type from package" diagnostic names the
-specifier the author wrote. `sentinel.Content` emits the `schema-config`
-specifier through the same map.
+looking it up, the resolver's "type from package" diagnostic names the
+specifier the author wrote, and the build plan's config check (`build-all`,
+`build --with-deps`) accepts a `schema.config.ts` import of any specifier
+that maps onto `@superschematic/schema-config`. `sentinel.Content` emits the
+`schema-config` specifier through the same map.
 
 ## D6. The HTTP runtime carries only provider-neutral packages
 

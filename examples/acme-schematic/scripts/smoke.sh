@@ -15,10 +15,16 @@
 #   2. `describe` lists the Catalog kind, the document, the apikey provider
 #      the checks (the icon and audience checks, the @mcp check on API and
 #      the projection check on DB) and acme's tool invocation policy;
-#   3. build-all over the schemas root builds all five services;
+#   3. build-all over the schemas root builds all five services, whose
+#      schema.config.ts files import the config package under acme's own
+#      name ([package_aliases] "@acme/schema-config"), and the sentinels it
+#      writes import that name too;
 #   4. the catalog generator wrote catalog.json for the Catalog service;
 #   5. the @shelf payload reached the IR (--emit-ir + jq), and so did the
-#      shop-db projection that satisfies acme's projection policy;
+#      shop-db projection that satisfies acme's projection policy, and
+#      Acme.Photo, the file-upload scalar acme's scalar catalog adds, with
+#      its upload metadata and the uploadMaxBytes bound Product.photo puts
+#      on it;
 #   6. the catalog.config document was loaded and its generator ran;
 #   7. the manifest generator ran on every kind, core and acme, and the
 #      acmeInventory build-all hook merged the manifests from every service's
@@ -109,9 +115,13 @@ grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.tx
 grep -q '^checks: acmeIcons (every kind), acmeDocsAudience (every kind), acmeToolsClassified (API), acmeProjectionScope (DB)$' "$OUT/describe.txt"
 grep -q '^tool invocation policy: confirm (never, always; default never)$' "$OUT/describe.txt"
 
-echo "==> build-all over the schemas root"
+echo "==> build-all over the schemas root, every config importing the aliased config package"
 rm -rf "$DIST"
 "$OUT/acme-schematic" build-all "$SCHEMAS/services"
+for service in shop-db shop-api shop-config shop-catalog shop-storefront; do
+  grep -q '^import { .* } from "@acme/schema-config";$' "$SCHEMAS/services/$service/schema.config.ts"
+  grep -q '^import { .* } from "@acme/schema-config";$' "$SCHEMAS/services/$service/src/service.generated.ts"
+done
 
 echo "==> catalog generator wrote the Catalog service's file"
 test -s "$DIST/acme/catalog/shop-catalog/catalog.json"
@@ -128,6 +138,12 @@ jq -e '.types.Product.fields[] | select(.name == "name") | has("extensions") | n
 # Every acme decorator the Catalog service uses, for check_second_decorator.sh.
 DECORATORS="$(jq -r '[.types[].fields[]? | .extensions.acme? // {} | keys[]] | unique | join(" ")' "$OUT/catalog-ir.json")"
 echo "ir decorators on shop-catalog: $DECORATORS"
+
+echo "==> Acme.Photo is a file upload from acme's scalar catalog, bounded by uploadMaxBytes"
+jq -e '.scalars["Acme.Photo"].fileUpload == {"maxSize": 8388608, "allowedTypes": ["image/jpeg", "image/png", "image/webp"], "category": "image"}' \
+  "$OUT/catalog-ir.json" >/dev/null
+jq -e '.types.Product.fields[] | select(.name == "photo") | .typeRef == {"name": "Acme.Photo"} and .validateUploadMaxBytes == 2097152' \
+  "$OUT/catalog-ir.json" >/dev/null
 
 echo "==> shop-db projection is in the IR, scoped the way acme's policy requires"
 "$OUT/acme-schematic" build "$SCHEMAS/services/shop-db" --emit-ir --out "$OUT/ir-dist" >"$OUT/db-ir.json"

@@ -42,8 +42,18 @@ authoring_packages = [
   "@superschematic/schema",
   "@superschematic/schema-config",
   "@acme/schema",
+  "@acme/schema-config",
   "superscalar",
 ]
+
+# acme republishes the config package under its own name: every
+# schema.config.ts imports defineConfig from @acme/schema-config, which
+# tsconfig.base.json resolves to the core package's sources. The alias maps
+# that name onto the declaring package, so build-all and build --with-deps
+# accept the import, the per-kind import rules see the core package, and the
+# sentinels build-all writes import @acme/schema-config too.
+[package_aliases]
+"@acme/schema-config" = "@superschematic/schema-config"
 
 # Where the runtime modules live, relative to the repository root, which is
 # the parent of the schemas root: examples/acme-schematic. Generated

@@ -94,7 +94,7 @@ of a generated artifact is always listed here with the bump it requires.
 - TypeScript types: every build writes `<out>/types/typescript/package.json`,
   a private Bun workspace root named `<npm_scope>/types-workspace` whose
   workspaces are the generated types packages next to it. A types package
-  that depends on a sibling through `file:../<schema>`, and on the scalar
+  that depends on a sibling through `workspace:*`, and on the scalar
   library through a `file:` spec outside the tree, then installs from the
   root or from any package. The name comes from `npm_scope`. Minor.
 - `@strictJSON` (from `@superschematic/schema`) on a type makes every
@@ -426,9 +426,24 @@ of a generated artifact is always listed here with the bump it requires.
   `TypeRef.ArrayDepth()`. `examples/acme-schematic` declares a list of
   lists as a DB column, in API types and as a tool argument, and its smoke
   follows it into every output. No generated output changes.
+- `registry.ScalarCatalogWithUploads`, `registry.UploadCatalog` and
+  `registry.ScalarUpload`: a scalar catalog declares which of its scalars
+  are file uploads, with each one's `ir.FileUploadConfig` and optional
+  `ir.ImageConstraints`, and the loader hydrates them onto the scalar.
+  superscalar's `ScalarMetadata` row has no upload fields, so no catalog
+  could declare an upload scalar before. `ir.Schema.ValidateHydrated` runs
+  the IR checks that read hydrated scalar metadata. `examples/acme-schematic`
+  registers `Acme.Photo` and bounds it with `uploadMaxBytes` in its Catalog
+  service. Minor.
 
 ### Changed
 
+- Go API: a route no longer emits the response check after the
+  implementation call. It asserted `Validate() interface{ HasErrors() bool }`,
+  which no generated type satisfies (their `Validate` returns
+  `ValidationErrors`), so it never ran and no response was ever checked.
+  Responses are sent as before, and a nil inner list of an array-of-arrays
+  response is still sent as `[]`. Patch.
 - IR: a type's `strictJSON` key is written after `jsonField` instead of
   after `denyUnknownFields`, the position the source tree's IR uses, so a
   persisted schema from either compares byte for byte. The key is written
@@ -618,6 +633,10 @@ of a generated artifact is always listed here with the bump it requires.
   re-encoding a payload keeps an empty list present, as the TypeScript,
   Python and Rust types already do. Before, `[]` was dropped on encode and
   came back as absent. Minor.
+- IR: `Schema.Validate` no longer checks `Validate<T, { uploadMaxBytes }>`;
+  `Schema.ValidateHydrated` does, and the loader runs it once the scalars
+  are hydrated, in every form. A caller that relied on `Validate` for the
+  check calls `ValidateHydrated` on a hydrated schema. Minor.
 
 ### Fixed
 
@@ -630,11 +649,20 @@ of a generated artifact is always listed here with the bump it requires.
   object type or union, imported from the types package, and a scalar
   field of the input type as `<Input>['<field>']`. A caller that passed a
   string where an enum is taken passes the enum member. Minor.
+- TypeScript types: a types package names a sibling types package with
+  `workspace:*` instead of `file:../<schema>`. With the `file:` spec, the
+  second `bun install` in the types workspace (Bun 1.4.0), or the first
+  after a package gained such a spec (Bun 1.4.2), read the scalar
+  library's `file:` path from the wrong directory and failed. The
+  TypeScript gates in `go test` now fail instead of skipping under
+  `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`, and the CI `go` job installs
+  `packages/` so the schema-config JSON Schema drift test runs. Minor.
 - Go API: a field is a multipart upload only when its scalar carries
   `fileUpload` metadata. Before, four scalar names (`Artifact.File`,
   `Asset.File`, `Asset.Image`, `Asset.LogoImage`) were treated as uploads
   without it, with a 100 MiB limit and no allowed types. A catalog that
-  registers those names declares `fileUpload` on them. Minor.
+  registers those names declares `fileUpload` on them
+  (`registry.ScalarCatalogWithUploads`). Minor.
 - `build-all` writes the TypeScript types workspace manifest
   (`types/typescript/package.json`) on a run where every service was
   restored from the cache or up to date. Before, only a service's types
@@ -771,5 +799,30 @@ of a generated artifact is always listed here with the bump it requires.
   reached to `[]`, including a field tagged `json:"-"`, which is not on the
   wire, so encoding changed a value's in-memory metadata. It now skips
   fields tagged `json:"-"` and unexported fields. Patch.
+- `build-all` and `build --with-deps`: a `schema.config.ts` that imported
+  the config package under a specifier `[package_aliases]` maps onto
+  `@superschematic/schema-config` failed discovery with "schema.config.ts
+  may import only @superschematic/schema-config", so a distribution that
+  republishes the authoring packages under its own names could build none
+  of its services with either command. The check resolves each import
+  through the alias table, and its error names every accepted specifier.
+  Patch.
+- `Validate<T, { uploadMaxBytes }>` on a file-upload scalar failed to load
+  from TypeScript with "uploadMaxBytes requires a file-upload scalar". The
+  TypeScript frontend checked the bound before the loader hydrated the
+  scalar, when a brand carries only its name, so no upload scalar could
+  pass. The check runs after hydration in every form, against the upload
+  metadata the registered catalog declares. Patch.
+- TypeScript API server: a body argument that is a list of an object type
+  (`points: Point[]`) was typed `string[]`, and the runtime turned each
+  element into a string, so the implementation received
+  `"[object Object]"`. It is now typed `Point[]`, and each element goes
+  through the generated `parse<T>Json` with the list rules: a null element
+  is refused at `name[i]` (`required`), a non-object one (`type`), and one
+  the parser refuses ("does not match the declared type"). A single
+  object-typed body argument that is not the input (a DB table type) is
+  parsed the same way. A union-typed body argument, alone or in a list,
+  now fails the build ("tsrestgen cannot decode body argument"). The
+  runtime exports `decodeJsonParam`. Minor.
 
 [Unreleased]: https://github.com/parable-work/superschematic/commits/main

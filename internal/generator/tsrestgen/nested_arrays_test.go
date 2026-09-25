@@ -75,7 +75,7 @@ func nestedArraysFixture(t *testing.T, withPaint bool) apiFixture {
 	return apiFixture{name: nestedArraysAPI, schema: schema, endpoints: endpoints}
 }
 
-func generateNestedArrays(t *testing.T, fixture apiFixture) *APIOutput {
+func generateFixture(t *testing.T, fixture apiFixture) *APIOutput {
 	t.Helper()
 	output, err := Generate(fixture.schema, fixture.endpoints, Options{SchemaName: fixture.name, Clock: fixedClock})
 	if err != nil {
@@ -100,13 +100,13 @@ func endpointsByName(output *APIOutput) map[string]EndpointInfo {
 // argument is string[][], and a bare string[][] response. Regenerate with
 // go test ./internal/generator/tsrestgen -run TestWriteAPIGoldenNestedArrays -update
 func TestWriteAPIGoldenNestedArrays(t *testing.T) {
-	checkGolden(t, generateNestedArrays(t, nestedArraysFixture(t, false)), nestedArraysAPI)
+	checkGolden(t, generateFixture(t, nestedArraysFixture(t, false)), nestedArraysAPI)
 }
 
 // TestGenerateNestedArraysShape: a T[][] body argument and response render
 // with two list levels, and the operation table marks both for the runtime.
 func TestGenerateNestedArraysShape(t *testing.T) {
-	byName := endpointsByName(generateNestedArrays(t, nestedArraysFixture(t, false)))
+	byName := endpointsByName(generateFixture(t, nestedArraysFixture(t, false)))
 
 	replace := byName["replaceLabels"]
 	if replace.Method != "PUT" || len(replace.BodyParams) != 1 {
@@ -141,7 +141,7 @@ func TestGenerateNestedArraysShape(t *testing.T) {
 // and an object element is parsed by the generated strict parser of its
 // type, which the router imports from the types package's validators.
 func TestGenerateNestedArraysElementKinds(t *testing.T) {
-	output := generateNestedArrays(t, nestedArraysFixture(t, true))
+	output := generateFixture(t, nestedArraysFixture(t, true))
 	paint := endpointsByName(output)["paint"]
 	if len(paint.BodyParams) != 2 {
 		t.Fatalf("paint body params = %+v", paint.BodyParams)

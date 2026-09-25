@@ -11,6 +11,24 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 )
 
+// RequireTSChecksEnv names the variable that turns a TypeScript gate's skip
+// into a failure. CI sets it to 1 in every job that runs these gates.
+const RequireTSChecksEnv = "SUPERSCHEMATIC_REQUIRE_TS_CHECKS"
+
+// RequireOrSkipTS handles a TypeScript gate that cannot run: bun is
+// missing, an install failed, or a dependency tree is not installed.
+// Locally it skips, so `go test ./...` runs without bun. With
+// SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1 it fails, because in CI a skip hides
+// a broken gate.
+func RequireOrSkipTS(t testing.TB, reason string) {
+	t.Helper()
+	if os.Getenv(RequireTSChecksEnv) == "1" {
+		t.Fatalf("%s=1 requires this TypeScript gate to run: %s", RequireTSChecksEnv, reason)
+		return
+	}
+	t.Skipf("skipping TypeScript gate: %s", reason)
+}
+
 // RepoRoot returns the repository root, found from this file's location.
 func RepoRoot(t *testing.T) string {
 	t.Helper()

@@ -1,6 +1,6 @@
 import { Network } from "superscalar";
 import { Default, Secret, docs, icon, purpose } from "@superschematic/schema";
-import { envVars } from "@superschematic/schema-config";
+import { envVars } from "@acme/schema-config";
 
 export enum ShopEnvironment {
   Development = "development",

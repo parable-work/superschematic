@@ -48,7 +48,8 @@ func WithStrictScalarResolution() ValidateOption {
 // member lists, verifying that each resolves to a known definition, and
 // verifies that every import is a named import. It also checks the TypeRef
 // invariants of an array of arrays: isArrayOfArrays requires isArray and
-// excludes isMap.
+// excludes isMap. The checks that read hydrated scalar metadata are
+// [Schema.ValidateHydrated]'s.
 //
 // Resolution sources (checked in order):
 //   - schema.Scalars
@@ -139,7 +140,6 @@ func (s *Schema) validateTypeDef(cfg *validateConfig, td *TypeDef) []error {
 			errs = append(errs, fmt.Errorf("%s.%s platform default %q does not match field type %q", td.Name, f.Name, f.PlatformDefault, f.TypeRef.Name))
 		}
 		errs = append(errs, validateArrayOfArrays(td.Name+"."+f.Name, f.TypeRef)...)
-		errs = append(errs, s.validateFieldUploadMaxBytes(td.Name, f)...)
 		if f.Relation != nil && f.Relation.OnDelete != "" {
 			switch f.Relation.OnDelete {
 			case "CASCADE", "RESTRICT", "NO ACTION":
@@ -164,12 +164,42 @@ func (s *Schema) validateOperationSet(cfg *validateConfig, set *OperationSet) []
 			errs = append(errs, fmt.Errorf("%s.%s references unknown type %q", set.Name, op.Name, op.TypeRef.Name))
 		}
 		errs = append(errs, validateArrayOfArrays(set.Name+"."+op.Name, op.TypeRef)...)
-		errs = append(errs, s.validateFieldUploadMaxBytes(set.Name, op)...)
 		for _, arg := range op.Arguments {
 			if !s.isResolvable(cfg, arg.TypeRef.Name) {
 				errs = append(errs, fmt.Errorf("%s.%s argument %q references unknown type %q", set.Name, op.Name, arg.Name, arg.TypeRef.Name))
 			}
 			errs = append(errs, validateArrayOfArrays(fmt.Sprintf("%s.%s argument %q", set.Name, op.Name, arg.Name), arg.TypeRef)...)
+		}
+	}
+	return errs
+}
+
+// ValidateHydrated runs the checks that read the metadata a loader hydrates
+// onto each ScalarDef from the scalar registry. Validate cannot run them: a
+// frontend validates the IR it built before the loader hydrates it, and a
+// TypeScript brand carries only the scalar's name until then. Run it once
+// the scalars are hydrated.
+//
+// It checks Validate<T, { uploadMaxBytes }> on every field of a type and
+// every operation: the bound is positive and the field is a single
+// file-upload scalar, one whose ScalarDef carries FileUpload metadata.
+func (s *Schema) ValidateHydrated() []error {
+	var errs []error
+	for _, name := range sortedStringMapKeys(s.Types) {
+		td := s.Types[name]
+		if td == nil {
+			continue
+		}
+		for _, f := range td.Fields {
+			errs = append(errs, s.validateFieldUploadMaxBytes(td.Name, f)...)
+		}
+	}
+	for _, set := range s.OperationSets {
+		if set == nil {
+			continue
+		}
+		for _, op := range set.Operations {
+			errs = append(errs, s.validateFieldUploadMaxBytes(set.Name, op)...)
 		}
 	}
 	return errs

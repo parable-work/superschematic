@@ -6,7 +6,7 @@ import { timeout } from 'hono/timeout';
 import { authorize, type Authenticator, type PermissionMatcher } from './auth';
 import { OperationResult, envelopeResponse, requestIdOf } from './envelope';
 import type { OperationSpec, RequestContext } from './operation';
-import { decodeListOfLists, decodeParams } from './params';
+import { decodeJsonParam, decodeParams, type ParamSpec } from './params';
 import {
   HttpProblem,
   badRequest,
@@ -328,15 +328,17 @@ async function decode(ctx: RequestContext, spec: OperationSpec): Promise<Decoded
       throw badRequest('Request body must be a JSON object');
     }
     const object = (raw ?? {}) as Record<string, unknown>;
-    // A list of lists is decoded from its JSON value; the other body
-    // parameters go through the string decoding that path and query use.
-    body = decodeParams('body', spec.bodyParams.filter(param => !param.isArrayOfArrays), name => {
+    // A list of lists and an object-typed parameter (T, T[] or T[][]) are
+    // decoded from their JSON value; the other body parameters go through
+    // the string decoding that path and query use.
+    const fromJson = (param: ParamSpec) => param.isArrayOfArrays === true || param.kind === 'object';
+    body = decodeParams('body', spec.bodyParams.filter(param => !fromJson(param)), name => {
       const value = object[name];
       if (value === undefined || value === null) return undefined;
       return Array.isArray(value) ? value.map(item => String(item)) : [String(value)];
     });
-    for (const param of spec.bodyParams.filter(param => param.isArrayOfArrays)) {
-      const value = decodeListOfLists('body', param, object[param.name]);
+    for (const param of spec.bodyParams.filter(fromJson)) {
+      const value = decodeJsonParam('body', param, object[param.name]);
       if (value !== undefined) body[param.name] = value;
     }
   }

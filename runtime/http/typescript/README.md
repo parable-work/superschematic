@@ -28,7 +28,10 @@ Two entry points:
   value (`type`). Each element is checked at `name[i][j]`; an object
   element goes through the generated parser of its type. The 400 detail
   carries the failing `path`. A list-of-lists result is sent with every
-  nullish list as `[]`.
+  nullish list as `[]`. `decodeJsonParam` reads a list of lists, and a
+  body parameter of an object type (`T`, `T[]` or `T[][]`, kind
+  `object`), from its JSON value; a `T[]` follows the same rules one level
+  down, with each element checked at `name[i]`.
 - `@superschematic/http-runtime/hono`, the Hono adapter. `mountOperation`
   runs the pipeline for one operation: request id, `@rateLimit`,
   `hono/timeout`, `hono/bearer-auth` and the permission gate, parameter

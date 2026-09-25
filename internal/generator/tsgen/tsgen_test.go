@@ -174,7 +174,7 @@ func TestWriteTypesValidatesImportedEnumFields(t *testing.T) {
 		PackageDependencies: []PackageDependency{
 			{
 				Name: enumsPackage,
-				Spec: "file:../fixture-enums",
+				Spec: "workspace:*",
 			},
 		},
 	}

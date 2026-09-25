@@ -67,6 +67,16 @@ func TestExtensionRegistersEverySurface(t *testing.T) {
 	if got := reg.AuthProviders(); strings.Join(got, ",") != "apikey,session" {
 		t.Fatalf("AuthProviders = %v, want apikey and session", got)
 	}
+	uploads, ok := reg.Scalars().(registry.UploadCatalog)
+	if !ok {
+		t.Fatal("Scalars() is not the acme catalog: it declares no upload scalars")
+	}
+	if _, ok := uploads.Upload(ext.PhotoScalar); !ok {
+		t.Fatalf("the acme catalog does not declare %s a file upload", ext.PhotoScalar)
+	}
+	if got, want := len(reg.Scalars().Names()), len(registry.CoreScalars().Names())+1; got != want {
+		t.Fatalf("acme catalog has %d scalars, want the core's plus %s (%d)", got, ext.PhotoScalar, want)
+	}
 	if names.AuthProvider != "apikey" {
 		t.Fatalf("naming selects %q, want apikey", names.AuthProvider)
 	}
@@ -152,6 +162,9 @@ func TestCoreRegistryHasNoAcmeSurface(t *testing.T) {
 	if got := reg.AuthProviders(); strings.Join(got, ",") != "session" {
 		t.Fatalf("core AuthProviders = %v, want session only", got)
 	}
+	if _, ok := reg.Scalars().Scalar(ext.PhotoScalar); ok {
+		t.Fatalf("core Scalars knows %s", ext.PhotoScalar)
+	}
 }
 
 func TestUnknownExtensionConfigKeyFailsAssembly(t *testing.T) {
@@ -186,6 +199,17 @@ func TestCatalogServiceLoadsAndGenerates(t *testing.T) {
 	}
 	if _, ok, _ := ext.ShelfOf(field(t, schema, "Product", "name")); ok {
 		t.Fatal("Product.name carries a shelf it never declared")
+	}
+
+	// Acme.Photo comes from the acme scalar catalog with its upload
+	// metadata, so Validate<Acme.Photo, { uploadMaxBytes }> passes the
+	// file-upload check that runs after hydration.
+	photo := schema.Scalars[ext.PhotoScalar]
+	if photo == nil || photo.FileUpload == nil || photo.FileUpload.MaxSize != ext.PhotoUpload.FileUpload.MaxSize || photo.FileUpload.Category != "image" {
+		t.Fatalf("%s = %+v, want the catalog's upload metadata", ext.PhotoScalar, photo)
+	}
+	if bound := field(t, schema, "Product", "photo").ValidateUploadMaxBytes; bound == nil || *bound != 2<<20 {
+		t.Fatalf("Product.photo uploadMaxBytes = %v, want 2 MiB", bound)
 	}
 
 	raw, ok := schema.Documents[ext.DocumentName]

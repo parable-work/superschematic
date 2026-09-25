@@ -20,6 +20,7 @@
       "@superschematic/schema-config": ["../../../packages/schema-config/src/index.ts"],
       "superscalar": ["../../../third_party/superscalar/bindings/typescript/src/index.ts"],
       "@acme/schema": ["../packages/schema/src/index.ts"],
+      "@acme/schema-config": ["../../../packages/schema-config/src/index.ts"],
       "@acme/*": ["./services/*/src/index.ts"]
     }
   }
