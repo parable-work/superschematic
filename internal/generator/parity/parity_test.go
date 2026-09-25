@@ -24,9 +24,13 @@
 // the matrix schema and rows to the vector table.
 //
 // Where a typed decoder refuses a payload before the generated validator
-// can see it (Go's json.Unmarshal for a non-list inner value, pydantic's
-// strict parse for an enum or nested object), the vector lists that
-// language in decodeRejects and the driver asserts the refusal instead.
+// can see it, the vector lists that language in decodeRejects and the
+// driver asserts the refusal instead. That is expected, not a divergence
+// to close: in Go and Python the typed decoder is the first check, and the
+// payload never becomes a value to validate. Go's json.Unmarshal refuses a
+// non-list inner value and a wrong-type element (a number where a string
+// scalar belongs); pydantic's strict parse refuses a wrong-type element, a
+// bad enum element and a nested object element with a bad field.
 //
 // Verdict comparison is about semantics, not field-name idiom: the Python
 // driver maps validate_all's snake_case attribute keys back to wire names
@@ -232,7 +236,9 @@ type parityVector struct {
 	want     map[string][]string
 	// decodeRejects lists the generated languages ("go", "python") whose
 	// typed decoder refuses the payload before the validator runs. Their
-	// driver reports decodeRejected instead of validator verdicts.
+	// driver reports decodeRejected instead of validator verdicts. This is
+	// the expected answer for those languages, not a pin: see the package
+	// comment.
 	decodeRejects []string
 }
 
@@ -560,12 +566,16 @@ var vectors = []parityVector{
 // suites take no pins: every runtime returns the expected column.
 var knownDivergences = map[string]map[string]map[string][]string{
 	"go": {
-		// Go decodes a null element of []string into "", which the
-		// element rules accept.
-		"opt_list_null_element": {},
-		"req_list_null_element": {},
-		// A null object element decodes to the zero value, whose own
-		// required fields fail.
+		// json.Unmarshal decodes a null element of []T or [][]T into T's
+		// zero value, so Validate cannot tell it from "", 0 or an empty
+		// object: a string or number element passes or fails its own
+		// rules, a string scalar or enum element of a required list is
+		// "required" by luck, and an object element reports its own
+		// required fields. Closing this changes the generated type (the
+		// decoder records null elements, or elements become pointers);
+		// D12's amendment lists it as an open gap.
+		"opt_list_null_element":    {},
+		"req_list_null_element":    {},
 		"list_null_object_element": {"pointList[1].shade": {"required"}},
 		"grid_innermost_null_every_kind": {
 			"numGrid[0][0]":         {"min"},

@@ -143,15 +143,27 @@ A validation error names the field and both indexes:
 | A nested object element has a bad field | `field[i][j].name` | that field's code | that field's message |
 | The outer list is too short or too long | `field` | `listMin`, `listMax` | `must contain at least N items`, `must contain at most N items` |
 
+A malformed scalar element, such as `not a url` in a `Network.Url[][]`,
+is one `pattern` error at `field[i][j]`, as a malformed scalar field is at
+`field`
+([D14](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-a-malformed-scalar-value-is-one-pattern-error)).
+An element of the wrong JSON type, such as a number in a list of a string
+scalar, is `type`.
+
 The same paths appear where each target checks a payload:
 
 - The Go API routes answer `400` with these paths for a request body.
 - The Go, TypeScript and Python SDKs refuse a null inner list at `name[i]`
   and an element that fails its type's validation at `name[i][j]` before
   sending the request.
-- pydantic's strict parse in the generated Python types refuses a bad enum
-  or nested object element itself, at location `(field, i, j)`, before
-  `validate_all` runs.
+- pydantic's strict parse in the generated Python types refuses an element
+  of the wrong type, a bad enum element or a nested object element with a
+  bad field itself, at location `(field, i, j)`, before `validate_all`
+  runs.
+- `json.Unmarshal` in the generated Go types refuses a non-list inner
+  value and an element of the wrong JSON type before `Validate` runs. It
+  decodes a null element as its type's zero value, so the generated Go
+  validator does not report a null element as `required`; that gap is open.
 - The Rust types carry no validators: serde refuses a null inner list, and
   list bounds are not checked.
 
