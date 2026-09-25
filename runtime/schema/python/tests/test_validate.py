@@ -110,3 +110,43 @@ def test_validate_field_level_constraints():
     errs = validate_type(schema, "T", {"name": "ab", "age": 150})
     assert "name" in errs
     assert "age" in errs
+
+
+def test_validate_malformed_scalar_reported_once():
+    """The registered validator re-checks what the schema's pattern checks,
+    so it only sees a value the pattern accepts: one failing value, one error."""
+    calls: list[str] = []
+
+    def validator(value: str) -> list[ValidationError]:
+        calls.append(value)
+        return [ValidationError(validator="pattern", message="core rejects " + value)]
+
+    reg = ScalarValidatorRegistry()
+    reg.register("Mystery.Code", validator)
+    schema = parse_schema(
+        {
+            "definitions": {
+                "Mystery.Code": {
+                    "type": "string",
+                    "pattern": "^[a-z]+$",
+                    "x-typeMapping": {"python": "str"},
+                },
+                "T": {
+                    "x-kind": "type",
+                    "type": "object",
+                    "properties": {"x": {"$ref": "#/definitions/Mystery.Code"}},
+                },
+            }
+        }
+    )
+    options = __import__(
+        "superschematic_schema_runtime", fromlist=["RuntimeOptions"]
+    ).RuntimeOptions(validate_registry=reg)
+
+    errs = validate_type(schema, "T", {"x": "NOT-A-CODE"}, options=options)
+    assert [e.validator for e in errs["x"]] == ["pattern"]
+    assert calls == []
+
+    errs = validate_type(schema, "T", {"x": "abc"}, options=options)
+    assert [(e.validator, e.message) for e in errs["x"]] == [("pattern", "core rejects abc")]
+    assert calls == ["abc"]
