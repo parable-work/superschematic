@@ -649,6 +649,12 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Go SDK: a body argument or response whose type is a scalar was typed
+  with the last segment of the scalar's name (`types.UserID` for
+  `Identity.UserID`, `types.JSON` for `Generic.JSON`). The Go types package
+  does not declare those names, so the SDK did not compile. It now uses the
+  name the types package declares (`types.IdentityUserID`,
+  `types.GenericJSON`). Patch.
 - JSON and YAML readers: the keys that mark a multi-definition schema
   file without a `kind` or `role` included six that the document form does
   not have. A file whose only top-level key was one of them was read as a
