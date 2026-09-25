@@ -575,10 +575,10 @@ of a generated artifact is always listed here with the bump it requires.
   build. `build --with-deps` still writes none. Patch.
 - Python types: a `Generic.JSON` scalar validates that its value stays in
   the JSON domain (strings, finite numbers, booleans, null, lists, and
-  dicts with string keys, without cycles) and a required direct
-  `Generic.JSON` field accepts `None` as the JSON `null` value in
-  `validate_all` instead of reporting it missing. A set, a tuple, NaN or an
-  arbitrary object, which JSON cannot carry, now fails validation. Minor.
+  dicts with string keys, without cycles), and `validate_all` checks a
+  required direct `Generic.JSON` field against it. A set, a tuple, NaN or
+  an arbitrary object, which JSON cannot carry, now fails validation.
+  Minor.
 - Go types: an optional field of an API input type (an `InputField[T]`
   wrapper) is tagged `omitzero` instead of `omitempty`, and `InputField`
   gains `IsZero`, so encoding leaves out only a field whose key was absent.
@@ -655,8 +655,6 @@ of a generated artifact is always listed here with the bump it requires.
     (any JSON value), where it was `Record<string, any>`.
   - `types/scalars.ts` re-exports `JSONValue`.
   - The scalar validator skips string checks.
-  - A required `Generic.JSON` treats JSON `null` as present and only
-    `undefined` as missing, as Go and Python already did.
 
   rustgen's special case for `Generic.StringMap` is gone, because its
   `HashMap` now comes from the catalog. An extension that registers a
@@ -765,6 +763,29 @@ of a generated artifact is always listed here with the bump it requires.
   argument or a map body argument changes; other digests do not.
   `JSONSchemaProperty.enum` in `tools/index.ts` is `Array<string | null>`.
   Patch.
+- Go, TypeScript and Python schema runtimes and the generated Go,
+  TypeScript and Python validators: `Generic.JSON` is any JSON value but
+  null (D14, amended). The runtimes checked it as a string, from the
+  `String` primitive of its superscalar metadata row: in parse
+  (`ParseType`, `LoadType`, `parseType`, `loadType`, `parse_type`,
+  `load_type`) and in validation an object, array, number or boolean was
+  `type`, and the Go runtime read a string as JSON text, so `"s"` was
+  `pattern`. Now a present value of any JSON type passes, with no type,
+  length or pattern check, and the parse step keeps it as it is; a value no
+  JSON document can carry (NaN, a set, `undefined` inside an object) is
+  `type`. The runtimes key the rule off the scalar's `json_schema` type
+  mapping `any`, not its name or primitive. A null or missing required
+  `Generic.JSON` is `required` in every validator: the generated
+  TypeScript (`validate<Symbol>Required`) and Python (`validate_all`)
+  validators took a null one for a present JSON value, and the generated
+  Go `Validate` checked neither null nor absence. A null optional one is
+  absent, a null list element is `required` at its index (the generated
+  Go decoder refuses it, D12), and a map value may still be null. Behavior change: a runtime accepts an
+  object, array, number or boolean it refused; a Go API route answers
+  `400` with `required` to a request body whose input type has a null or
+  missing required `Generic.JSON` field; `parse<Type>Json` in TypeScript
+  throws on one, and `validate_all` in Python reports it. New in the `ir`
+  module: `ScalarDef.IsAnyJSON` and `JSONSchemaAnyType`. Minor.
 - Go ORM: `GetManyByIDs` keyed its result map on a hard-coded `entity.Id`
   and took UUID keys. A table keyed on a UUID field with another name did
   not compile, and a table keyed on a string `id` always returned an empty

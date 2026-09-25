@@ -151,7 +151,10 @@ is one `pattern` error at `field[i][j]`, as a malformed scalar field is at
 ([D14](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-a-failing-scalar-value-is-one-error-named-by-the-rule-it-breaks)).
 An element of the wrong JSON type, such as a number in a `string[][]` or
 in a list of a string scalar, is one `type` error, and the field's length,
-pattern and range rules do not check it.
+pattern and range rules do not check it. A `Generic.JSON` element has no
+wrong JSON type: an object, array, string, number or boolean is valid, and
+only a null element is `required`
+([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-genericjson-is-any-json-value-but-null)).
 
 The same paths appear where each target checks a payload:
 

@@ -409,19 +409,13 @@ pattern and range apply to each value, and a failure is named by the rule
 it breaks (D14). A list in the query string is still read from repeated
 keys and comma-separated values.
 
-For `Generic.JSON` the server follows the three schema runtimes, which
-agree: a null value of a required field is `required`, a null optional one
-is absent, and a null element of `Generic.JSON[]` (or an innermost one of
-`Generic.JSON[][]`) is `required` at its index. Any other JSON value is
-accepted and reaches the implementation as it is. Two differences are
-open. The runtimes check a `Generic.JSON` value as a string, because the
-scalar catalog gives it the `String` primitive: a required field holding an
-object, array, number or boolean is `type` there, while superscalar, every
-generated type and the server accept it. And the generated Go, TypeScript
-and Python validators accept a JSON null for a required `Generic.JSON`
-field, which the runtimes and the server refuse; the generated Go
-validator also accepts an absent one. The Go decoder refuses a null
-element of `Generic.JSON[]`, as it does any null list element (above).
+For `Generic.JSON` the server follows the rule every validator follows
+(D14, amended): a null value of a required field is `required`, a null
+optional one is absent, and a null element of `Generic.JSON[]` (or an
+innermost one of `Generic.JSON[][]`) is `required` at its index. Any other
+JSON value is accepted and reaches the implementation as it is. The Go
+decoder refuses a null element of `Generic.JSON[]`, as it does any null
+list element (above).
 
 ## D13. The scalar JSDoc tag is a naming key, unset by default
 
@@ -565,3 +559,40 @@ The runtimes' lenient parse coerces a numeric or boolean string only for
 the GraphQL names (`Int`, `Float`, `Boolean`), not for the IR's `number`
 and `boolean`, so a `"5"` in a `number` field is `type` after a lenient
 parse too.
+
+### D14, amended: `Generic.JSON` is any JSON value but null
+
+`Generic.JSON` holds any JSON value: an object, an array, a string, a
+number or a boolean. superscalar's metadata row gives it the `String`
+primitive, and the scalar catalogs, the IR and the schema JSON document
+carry that primitive, so the three runtimes checked its value as a string.
+In parse and in validation an object, array, number or boolean was `type`,
+while superscalar and every generated type accept it. The Go runtime also
+handed a string to the scalar core, which reads it as JSON text, so `"s"`
+was `pattern` there and valid in the other two. The generated validators
+disagreed on null the other way: the Go, TypeScript and Python ones
+accepted a null required `Generic.JSON` field, which the runtimes and the
+TypeScript API server refused, and the Go one accepted a missing one.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A `Generic.JSON` value is any JSON value but null. A present value of any JSON type passes, with no `type`, length or pattern check, and a string need not be JSON text. A null inside an object or an array is part of the value. | Checking it as the `String` primitive says |
+| Null is a missing value, as for every other field. A null or missing required `Generic.JSON` is `required`, a null optional one is absent, and a null element of `Generic.JSON[]`, or a null innermost element of `Generic.JSON[][]`, is `required` at its index (D12, amended). | JSON null as a present value of a required field, which the generated validators took it for |
+| Every validator keys the rule off the scalar's `json_schema` type mapping, `any`, not its name or primitive: `ir.ScalarDef.IsAnyJSON` in Go (the Go runtime, and the generators through the `IsAnyJSON` scalar trait), `isAnyJSONScalar` in the TypeScript runtime and `ScalarDef.is_any_json` in the Python runtime. The IR, the TypeScript runtime's builtin catalog and the schema JSON document (`x-typeMapping`) all carry the mapping. | Keying off the name; a primitive of its own derived by the catalog generator, which would reach neither the IR the loader emits nor the schema JSON document, and would change the IR `primitive` that sqlgen, rustgen, pygen and envgen read |
+| The runtimes' parse step passes the value through unchanged. Validation refuses only a value no JSON document can carry (NaN, an infinite number, a set, `undefined` inside an object, a cycle) as `type`. | Checking the value in parse too |
+| A map value is outside the rule: every generated validator still accepts a null `Generic.JSON` map value, and the runtimes do not walk maps. | Refusing it in the generated TypeScript validator alone, the one validator that checks map values, which would make the languages disagree |
+
+The generated Go types give `Generic.JSON` no `Validate` method, so
+`Validate` checks a required single field itself (`jsonValueMissing`): the
+zero value, which an absent key decodes to, and the JSON null token are
+`required`. The generated `UnmarshalJSON` refuses a null element of
+`[]GenericJSON` or `[][]GenericJSON`, as it does any null list element
+(D12, amended). The Go ORM still reads a JSON null stored in a required
+`Generic.JSON` column as the null token; it reads, it does not validate.
+
+The TypeScript runtime's schema JSON writer still writes `"type":
+"string"` for the scalar, from its primitive, and the readers turn that
+into the `String` primitive; the `x-typeMapping` beside it decides. A
+primitive of its own in superscalar's metadata would let the catalogs, the
+IR and the schema JSON document say it directly; until then the type
+mapping is the source.
