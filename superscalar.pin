@@ -3,4 +3,4 @@
 # under third_party/superscalar and builds the Go static archive from it;
 # go.mod pins the same commit as a pseudo-version, and a test keeps the two
 # in agreement.
-commit=79a8e6a73504f091e4f7600ddaaafe68a1a06b13
+commit=1be340a36ae173181a505befcd16d459a1d4465c
