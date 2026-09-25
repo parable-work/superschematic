@@ -425,6 +425,13 @@ registry assembles one the same way; acme's `describe` does.
 root descriptions (`Short`, `Long`). A binary is its `main` calling
 `cli.New(...).Execute()`; `cmd/superschematic` passes no extension.
 
+`cli.Config.ToolDigest` replaces the hash of the running executable in
+every `build-all` cache key and stamp (section 7.4). `cli.New` applies it
+for the whole process through `buildcache.SetToolDigest`; empty keeps the
+executable hash. It is a config field rather than an `-ldflags -X` target
+because a renamed field fails to compile, while an `-X` flag naming a
+renamed variable is silently ignored.
+
 `json-schema` emits the data-form schema for the binary's registry
 (section 5). `format` reads the file with the binary's registry, so a file
 that uses an extension's kind, decorators, documents or tool invocation
@@ -848,6 +855,40 @@ those. Services build in dependency order, each with the discovered schema
 set as the document loaders' `Catalog`. The dependency graph is written
 next, and its `[deps] copy` when the naming file sets one. The hooks run
 last, whether or not any service was built (section 3.8).
+
+### 7.4 Build cache key
+
+A service's cache key, which is also its stamp, hashes the service's
+schema tree, its `authDb`'s tree, the files its documents imported from
+elsewhere under the schemas root, the keys of its dependencies, the
+resolved naming without `[deps]`, the `[cache] inputs` files, the schemas
+workspace's `package.json` and `bun.lock`, the `go`, `bun`, `rustc` and
+`cargo` versions on the `PATH`, and the tool digest.
+
+The tool digest stands for the generator code. By default it is a SHA-256
+of the running executable, so a rebuilt binary misses every entry its
+predecessor stored. That is safe, but it only shares entries between
+identical binaries. `make build` and the release pipeline build with
+`-trimpath -buildvcs=false`, so the binary depends on the Go sources and
+the link inputs, not on the checkout path or the commit. Rebuilding the
+same sources in the same checkout gives the same bytes. Two checkouts
+still link different binaries: `CGO_LDFLAGS` names each checkout's own
+superscalar archive by absolute path, and the Go build ID hashes the
+linker flags. On macOS even an empty build ID (`-ldflags=-buildid=`)
+leaves a different `LC_UUID`.
+
+A distribution whose checkouts should share the cache sets
+`cli.Config.ToolDigest` (section 3.9) to a digest of everything that
+shapes its outputs: its extension sources, any templates or data they
+embed, and the superschematic version it links (its `go.sum` lines, or
+the commit it pins). The digest replaces the executable hash and nothing
+else, so the schema, naming and toolchain parts of the key still apply.
+A digest that misses a changed input hands out entries that other code
+generated. Embed it at build time, from `//go:embed` of the sources or a
+file `go generate` writes, rather than reading files at run time.
+`examples/acme-schematic` leaves it unset: it links the core through a
+`replace` to this checkout, so a digest of its own files would miss core
+edits.
 
 ## 8. Auth providers
 

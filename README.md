@@ -72,7 +72,7 @@ Or by hand:
 ```
 export GOTOOLCHAIN=go1.26.4
 eval "$(scripts/superscalar-dep.sh --export)"
-go build -o bin/superschematic ./cmd/superschematic
+go build -trimpath -buildvcs=false -o bin/superschematic ./cmd/superschematic
 bin/superschematic build path/to/schemas/services/my-service
 ```
 

@@ -198,7 +198,10 @@ jobs:
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           out="dist/superschematic_${VERSION}_${NAME}"
           mkdir -p "$out"
-          go build -trimpath -ldflags "-s -w" -o "$out/superschematic" ./cmd/superschematic
+          # The Makefile's GO_BUILD_FLAGS plus stripping: no checkout paths
+          # and no VCS stamp in the binary. BUILD_COMMIT below names the
+          # commit instead.
+          go build -trimpath -buildvcs=false -ldflags "-s -w" -o "$out/superschematic" ./cmd/superschematic
           "$out/superschematic" --help >/dev/null
           cp LICENSE README.md CHANGELOG.md "$out/"
           # The commit every binary must agree on; assemble refuses a set

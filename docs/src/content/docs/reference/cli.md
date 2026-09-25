@@ -104,6 +104,15 @@ service. With `--cache`, a service whose input hash matches a stamp and
 whose outputs still exist is skipped; a miss restores from the cache or
 rebuilds.
 
+The input hash covers a hash of the running binary, so rebuilding the
+binary with different code invalidates every stamp and cache entry. Build
+it with `-trimpath -buildvcs=false`, as `make build` does, so a commit
+that changes no Go source keeps the same binary. A binary that links
+extensions can set `cli.Config.ToolDigest` instead, so builds from
+different checkouts share entries; the
+[extension guide](/superschematic/guides/write-an-extension/#share-the-build-cache-across-checkouts)
+explains what the digest must cover.
+
 A service with sidecar documents also gets
 `<schemas-root>/dist/.authoring-imports/<service>.json`, which lists the
 files elsewhere under the schemas root that its documents import. The

@@ -33,7 +33,7 @@ module tags. Until the first tag, build from a checkout:
 ```
 export GOTOOLCHAIN=go1.26.4
 eval "$(scripts/superscalar-dep.sh --export)"
-go build -o bin/superschematic ./cmd/superschematic
+go build -trimpath -buildvcs=false -o bin/superschematic ./cmd/superschematic
 ```
 
 `make setup && make build` does the same.
