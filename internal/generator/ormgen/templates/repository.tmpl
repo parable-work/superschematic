@@ -1088,14 +1088,14 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 }
 
 // GetManyByIDs retrieves multiple {{ .TypeName }} records by their IDs in a single query
-func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ $.UUIDGoType }}) (map[{{ $.UUIDGoType }}]*types.{{ .TypeName }}, error) {
+func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType }}) (map[{{ .LookupKeyType }}]*types.{{ .TypeName }}, error) {
 	if len(ids) == 0 {
-		return map[{{ $.UUIDGoType }}]*types.{{ .TypeName }}{}, nil
+		return map[{{ .LookupKeyType }}]*types.{{ .TypeName }}{}, nil
 	}
 
 	// Dedupe IDs
-	seen := make(map[{{ $.UUIDGoType }}]bool)
-	uniqueIDs := make([]{{ $.UUIDGoType }}, 0, len(ids))
+	seen := make(map[{{ .LookupKeyType }}]bool)
+	uniqueIDs := make([]{{ .LookupKeyType }}, 0, len(ids))
 	for _, id := range ids {
 		if !seen[id] {
 			seen[id] = true
@@ -1108,7 +1108,7 @@ func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ $.UUIDGoType }}
 	args := make([]interface{}, len(uniqueIDs))
 	for i, id := range uniqueIDs {
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
-		args[i] = id.ToUUID()
+		args[i] = id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}
 	}
 
 	// Build query with explicit column order
@@ -1132,7 +1132,7 @@ func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ $.UUIDGoType }}
 	defer rows.Close()
 
 	// Scan results into map
-	resultMap := make(map[{{ $.UUIDGoType }}]*types.{{ .TypeName }}, len(uniqueIDs))
+	resultMap := make(map[{{ .LookupKeyType }}]*types.{{ .TypeName }}, len(uniqueIDs))
 
 	{{- if eq (len .OrderedMembers) 0 }}
 	// No fields to scan
@@ -1177,12 +1177,17 @@ func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ $.UUIDGoType }}
 		}
 		{{- end }}
 		{{- end }}
+		{{- if .PrimaryKeyIsUUID }}
 
-		entityID, ok := {{ lowerFirst .TypeName }}UUIDValue(entity.Id)
+		entityID, ok := {{ lowerFirst .TypeName }}UUIDValue(entity.{{ toGoName .PrimaryKeyField }})
 		if !ok {
 			continue
 		}
 		resultMap[entityID] = entity
+		{{- else }}
+
+		resultMap[entity.{{ toGoName .PrimaryKeyField }}] = entity
+		{{- end }}
 	}
 
 	if err := rows.Err(); err != nil {

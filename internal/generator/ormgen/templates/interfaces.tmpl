@@ -19,7 +19,7 @@ import (
 // {{ .TypeName }}RepositoryInterface defines the contract for {{ .TypeName }} data access.
 type {{ .TypeName }}RepositoryInterface interface {
 	GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts *{{ .TypeName }}GetOptions) (*types.{{ .TypeName }}, error)
-	GetManyByIDs(ctx context.Context, ids []{{ $.UUIDGoType }}) (map[{{ $.UUIDGoType }}]*types.{{ .TypeName }}, error)
+	GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType }}) (map[{{ .LookupKeyType }}]*types.{{ .TypeName }}, error)
 	{{- if .Versioned }}
 	GetVersion(ctx context.Context, id {{ .PrimaryKeyType }}, version int64) (*types.{{ .TypeName }}, error)
 	ListVersions(ctx context.Context, id {{ .PrimaryKeyType }}, opts *{{ .TypeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ .TypeName }}], error)
@@ -132,8 +132,8 @@ func (r *NoOp{{ .Name }}) GetOne(_ context.Context, _ {{ .PrimaryKeyType }}, _ *
 	return nil, ErrNotFound
 }
 
-func (r *NoOp{{ .Name }}) GetManyByIDs(_ context.Context, _ []{{ $.UUIDGoType }}) (map[{{ $.UUIDGoType }}]*types.{{ .TypeName }}, error) {
-	return map[{{ $.UUIDGoType }}]*types.{{ .TypeName }}{}, nil
+func (r *NoOp{{ .Name }}) GetManyByIDs(_ context.Context, _ []{{ .LookupKeyType }}) (map[{{ .LookupKeyType }}]*types.{{ .TypeName }}, error) {
+	return map[{{ .LookupKeyType }}]*types.{{ .TypeName }}{}, nil
 }
 
 {{- if .Versioned }}

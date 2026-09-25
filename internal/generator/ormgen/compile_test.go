@@ -367,60 +367,7 @@ import (
 const strategyADDLSQL = ` + "`" + string(createSQL) + "`" + `
 
 func TestStrategyACompositeHistoryAsOf(t *testing.T) {
-	dsn := os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the generated ORM Strategy A integration test")
-	}
-
-	ctx := context.Background()
-	basePool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect base pool: %v", err)
-	}
-	defer basePool.Close()
-
-	schemaName := fmt.Sprintf("superschematic_strategy_a_%d", time.Now().UnixNano())
-	if _, err := basePool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA %s", schemaName)); err != nil {
-		t.Fatalf("create schema: %v", err)
-	}
-	defer func() {
-		_, _ = basePool.Exec(context.Background(), fmt.Sprintf("DROP SCHEMA %s CASCADE", schemaName))
-	}()
-
-	cfg, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("parse database URL: %v", err)
-	}
-	if cfg.ConnConfig.RuntimeParams == nil {
-		cfg.ConnConfig.RuntimeParams = map[string]string{}
-	}
-	// Generated DDL can use extension types installed in public (citext);
-	// keep the test schema first and public after it.
-	cfg.ConnConfig.RuntimeParams["search_path"] = schemaName + ",public"
-
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		t.Fatalf("connect schema pool: %v", err)
-	}
-
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		pool.Close()
-		t.Fatalf("acquire ddl connection: %v", err)
-	}
-	if _, err := conn.Conn().PgConn().Exec(ctx, strategyADDLSQL).ReadAll(); err != nil {
-		conn.Release()
-		pool.Close()
-		t.Fatalf("apply generated ddl: %v", err)
-	}
-	conn.Release()
-
-	db, err := ConnectWithPool(pool)
-	if err != nil {
-		pool.Close()
-		t.Fatalf("connect generated orm: %v", err)
-	}
-	defer db.Close()
+	db, pool := openStrategyADatabase(t)
 
 	tenantID := mustUUID(t, "00000000-0000-0000-0000-000000000001")
 	tenantTwoID := mustUUID(t, "00000000-0000-0000-0000-000000000002")
@@ -626,6 +573,93 @@ VALUES ($1, $2, $3, $4, $5)` + "`" + `, userThreeID.ToUUID(), tenantID.ToUUID(),
 	}
 }
 
+// GetManyByIDs takes and keys on each table's own primary key: a UUID column
+// other than id, and a string id.
+func TestGetManyByIDsKeysOnPrimaryKey(t *testing.T) {
+	db, pool := openStrategyADatabase(t)
+	ctx := context.Background()
+
+	orderID := mustUUID(t, "00000000-0000-0000-0000-000000000201")
+	execStrategyASQL(t, pool, "INSERT INTO shipment (order_id, carrier) VALUES ($1, $2)", orderID.ToUUID(), "carrier-a")
+	shipments, err := db.Shipment.GetManyByIDs(ctx, []types.IdentityUUID{orderID})
+	if err != nil {
+		t.Fatalf("get shipments: %v", err)
+	}
+	if len(shipments) != 1 || shipments[orderID] == nil || shipments[orderID].Carrier != "carrier-a" {
+		t.Fatalf("shipments = %v, want carrier-a under %s", shipments, orderID.ToUUID())
+	}
+
+	execStrategyASQL(t, pool, "INSERT INTO coupon (id, label) VALUES ($1, $2)", "SPRING", "Spring sale")
+	coupons, err := db.Coupon.GetManyByIDs(ctx, []string{"SPRING", "MISSING"})
+	if err != nil {
+		t.Fatalf("get coupons: %v", err)
+	}
+	if len(coupons) != 1 || coupons["SPRING"] == nil || coupons["SPRING"].Label != "Spring sale" {
+		t.Fatalf("coupons = %v, want Spring sale under SPRING", coupons)
+	}
+}
+
+// openStrategyADatabase applies the generated DDL in a fresh schema and
+// connects the generated ORM to it.
+func openStrategyADatabase(t *testing.T) (*Database, *pgxpool.Pool) {
+	t.Helper()
+	dsn := os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the generated ORM Strategy A integration test")
+	}
+
+	ctx := context.Background()
+	basePool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect base pool: %v", err)
+	}
+	t.Cleanup(basePool.Close)
+
+	schemaName := fmt.Sprintf("superschematic_strategy_a_%d", time.Now().UnixNano())
+	if _, err := basePool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA %s", schemaName)); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = basePool.Exec(context.Background(), fmt.Sprintf("DROP SCHEMA %s CASCADE", schemaName))
+	})
+
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse database URL: %v", err)
+	}
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	// Generated DDL can use extension types installed in public (citext);
+	// keep the test schema first and public after it.
+	cfg.ConnConfig.RuntimeParams["search_path"] = schemaName + ",public"
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("connect schema pool: %v", err)
+	}
+
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		pool.Close()
+		t.Fatalf("acquire ddl connection: %v", err)
+	}
+	if _, err := conn.Conn().PgConn().Exec(ctx, strategyADDLSQL).ReadAll(); err != nil {
+		conn.Release()
+		pool.Close()
+		t.Fatalf("apply generated ddl: %v", err)
+	}
+	conn.Release()
+
+	db, err := ConnectWithPool(pool)
+	if err != nil {
+		pool.Close()
+		t.Fatalf("connect generated orm: %v", err)
+	}
+	t.Cleanup(db.Close)
+	return db, pool
+}
+
 func mustUUID(t *testing.T, raw string) types.IdentityUUID {
 	t.Helper()
 	id, err := types.ParseIdentityUUID(raw)
@@ -743,6 +777,26 @@ func extendFixtureForCompileCoverage(schema *ir.Schema) {
 		},
 	}
 	schema.Unions["RevisionRef"] = &ir.UnionDef{Name: "RevisionRef", Types: []string{"CreatedRevision", "UpdatedRevision"}}
+
+	// Tables keyed on a UUID column other than id and on a string id.
+	// GetManyByIDs read a hard-coded entity.Id and took UUID keys, so the
+	// first did not compile and the second always returned an empty map.
+	schema.Types["Shipment"] = &ir.TypeDef{
+		Name: "Shipment",
+		Role: ir.RoleDBTable,
+		Fields: []*ir.FieldDef{
+			{Name: "orderId", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, Key: true},
+			{Name: "carrier", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		},
+	}
+	schema.Types["Coupon"] = &ir.TypeDef{
+		Name: "Coupon",
+		Role: ir.RoleDBTable,
+		Fields: []*ir.FieldDef{
+			{Name: "id", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Key: true},
+			{Name: "label", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		},
+	}
 	schema.Types["UnionRecord"] = &ir.TypeDef{
 		Name: "UnionRecord",
 		Role: ir.RoleDBTable,

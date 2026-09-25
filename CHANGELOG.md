@@ -640,6 +640,18 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Go ORM: `GetManyByIDs` keyed its result map on a hard-coded `entity.Id`
+  and took UUID keys. A table keyed on a UUID field with another name did
+  not compile, and a table keyed on a string `id` always returned an empty
+  map. The method now takes and keys on the table's own key: the UUID type
+  for a UUID key under any field name, the key's type otherwise
+  (`[]string` for a string `id`). A caller of a string-keyed table's
+  `GetManyByIDs` passes strings. Minor.
+- Go API: `routes.go` imported `time` when any operation declared
+  `@rateLimit`, `@bodyLimit` or `@timeout`, but only `@rateLimit` and
+  `@timeout` on a route `RegisterRoutes` mounts call it. An API whose only
+  such directives were `@bodyLimit`, or sat on `@manualRouteRegistration`
+  operations, did not compile. Patch.
 - TypeScript SDK: `tools/index.ts` typed a tool parameter from its JSON
   Schema, so an enum was `string`, an object `Record<string, unknown>` or an
   inline shape, a union `Record<string, unknown>` and a date-time or JSON

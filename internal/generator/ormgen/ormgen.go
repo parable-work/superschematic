@@ -85,6 +85,8 @@ type Repository struct {
 	PrimaryKeyCol          string // e.g. "id"
 	QuotedPrimaryKey       string // e.g. "id" or "\"order\""
 	PrimaryKeyIsUUID       bool   // gates id.ToUUID() coercion in SQL arguments
+	PrimaryKeyField        string // schema field name, e.g. "id" or "orderId"
+	LookupKeyType          string // GetManyByIDs key: UUIDGoType for a UUID key, else PrimaryKeyType
 	HasSoftDelete          bool   // deletedAt field present
 	HasDeletedBy           bool   // deletedBy field present (soft deletes stamp it)
 	Versioned              bool   // history table/read methods should be generated
@@ -582,6 +584,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 		})
 
 		if field.IsPrimaryKey {
+			repo.PrimaryKeyField = field.Name
 			repo.PrimaryKeyCol = field.DBName
 			repo.QuotedPrimaryKey = field.QuotedDBName
 			repo.PrimaryKeyType = field.GoType
@@ -618,10 +621,15 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 			fieldIdx++
 		}
 		repo.OrderedMembers = members
+		repo.PrimaryKeyField = "id"
 		repo.PrimaryKeyCol = "id"
 		repo.QuotedPrimaryKey = sqlutil.QuoteIdentifier("id")
 		repo.PrimaryKeyType = uuidGoType
 		repo.PrimaryKeyIsUUID = true
+	}
+	repo.LookupKeyType = uuidGoType
+	if !repo.PrimaryKeyIsUUID {
+		repo.LookupKeyType = repo.PrimaryKeyType
 	}
 	if repo.Versioned {
 		appendVersionField(&repo)

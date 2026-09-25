@@ -33,7 +33,7 @@ import (
 {{- if or .HasFileUpload .HasArrayQueryParams .HasArrayScalarArgsOnGET }}
 	"strings"
 {{- end }}
-{{- if .HasMiddlewareDirectives }}
+{{- if .RoutesNeedTime }}
 	"time"
 {{- end }}
 
