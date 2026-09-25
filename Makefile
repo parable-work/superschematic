@@ -18,6 +18,13 @@ export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print)
 GO_MODULES := . ir runtime/schema/go runtime/http/go
 BIN := bin/superschematic
 
+# build-all keys its cache on a hash of this binary. -trimpath drops the
+# checkout's absolute source paths, and -buildvcs=false drops the revision,
+# time and dirty bit Go stamps when the checkout's .git is a directory, so a
+# commit or an edit that changes no Go source leaves the binary, and its
+# cache entries, as they were. release.yml builds with the same two flags.
+GO_BUILD_FLAGS := -trimpath -buildvcs=false
+
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check ts python rust docs cli-smoke scrub clean
 
@@ -35,7 +42,7 @@ setup:
 build: go-build $(BIN)
 
 $(BIN): FORCE
-	go build -o $(BIN) ./cmd/superschematic
+	go build $(GO_BUILD_FLAGS) -o $(BIN) ./cmd/superschematic
 
 FORCE:
 

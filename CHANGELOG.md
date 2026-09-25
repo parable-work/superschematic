@@ -441,6 +441,13 @@ of a generated artifact is always listed here with the bump it requires.
   the IR checks that read hydrated scalar metadata. `examples/acme-schematic`
   registers `Acme.Photo` and bounds it with `uploadMaxBytes` in its Catalog
   service. Minor.
+- `cli.Config.ToolDigest`: a distribution that links extensions sets the
+  tool component of every `build-all` cache key and stamp, in place of a
+  hash of the running executable. Two builds with the same digest share
+  cache entries even when their executables differ, as builds from two
+  checkouts do. The digest must change whenever the distribution's sources
+  or the superschematic version it links change. Unset keeps the executable
+  hash. Minor.
 
 ### Changed
 
@@ -675,6 +682,13 @@ of a generated artifact is always listed here with the bump it requires.
   `Schema.ValidateHydrated` does, and the loader runs it once the scalars
   are hydrated, in every form. A caller that relied on `Validate` for the
   check calls `ValidateHydrated` on a hydrated schema. Minor.
+- `make build` and the release pipeline build the `superschematic` binary
+  with `-trimpath -buildvcs=false`. The binary no longer carries checkout
+  paths or the revision, time and dirty bit Go stamps, so a commit or an
+  edit that changes no Go source leaves the binary, and the `build-all`
+  cache entries keyed on it, as they were. `go version -m` on a release
+  binary no longer shows `vcs.*` lines; the tarball's `BUILD_COMMIT` names
+  the commit. Patch.
 
 ### Fixed
 

@@ -36,6 +36,76 @@ That is the whole of `cmd/acme-schematic/main.go`. Every command assembles
 a fresh registry from the naming file it resolves, with every extension
 passed here.
 
+### Share the build cache across checkouts
+
+`build-all --cache` keys every entry on a hash of the running binary, so
+a rebuilt binary never reuses what the previous one stored. Binaries
+built in two checkouts usually differ, even with
+`-trimpath -buildvcs=false`: when `CGO_LDFLAGS` names each checkout's own
+superscalar archive, as `scripts/superscalar-dep.sh --print` does, the Go
+build ID hashes that path, and on macOS the `LC_UUID` differs even with
+an empty build ID. Two worktrees of one repository then never share cache
+hits.
+
+Set `cli.Config.ToolDigest` to share them. The digest replaces the binary
+hash in every cache key and stamp; the schema, naming and toolchain parts
+of the key still apply. It must change whenever anything that shapes the
+generated output changes: your extension's sources, the templates and
+data they embed, and the superschematic version you link. Embed it at
+build time. One way is a file at your module root, since `//go:embed`
+reaches only files at or below its package's directory:
+
+```go
+// Package schematic sits at the module root, next to go.mod.
+package schematic
+
+import (
+    "crypto/sha256"
+    "embed"
+    "encoding/hex"
+    "fmt"
+    "io/fs"
+)
+
+//go:embed go.mod go.sum ext
+var sources embed.FS
+
+// SourceDigest hashes the path and contents of every embedded file.
+func SourceDigest() string {
+    h := sha256.New()
+    err := fs.WalkDir(sources, ".", func(path string, d fs.DirEntry, err error) error {
+        if err != nil || d.IsDir() {
+            return err
+        }
+        data, err := sources.ReadFile(path)
+        if err != nil {
+            return err
+        }
+        _, _ = fmt.Fprintf(h, "%s %d\n", path, len(data))
+        _, _ = h.Write(data)
+        return nil
+    })
+    if err != nil {
+        panic(err)
+    }
+    return hex.EncodeToString(h.Sum(nil))
+}
+```
+
+```go
+root := cli.New(cli.Config{
+    Name:       "acme-schematic",
+    ToolDigest: schematic.SourceDigest(),
+}, ext.Extension{})
+```
+
+`go.sum` pins superschematic by content hash when you require a version.
+A `replace` to a local directory has no `go.sum` line, so the digest must
+cover that directory some other way, or stay unset. A digest that misses
+a changed input hands out entries other code generated. Unset is always
+correct: it keeps the binary hash. acme leaves it unset for that reason,
+since it links the core through a `replace` to this repository.
+
 ## The extension type
 
 ```go

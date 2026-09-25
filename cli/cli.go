@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/parable-work/superschematic/internal/buildcache"
 	"github.com/parable-work/superschematic/registry"
 )
 
@@ -27,6 +28,16 @@ type Config struct {
 	// Short and Long replace the root command's descriptions when set.
 	Short string
 	Long  string
+	// ToolDigest, when set, is the tool component of every build-all cache
+	// key in place of a hash of the running executable. A distribution sets
+	// it to a digest of everything that shapes its outputs: its extension
+	// sources and the superschematic version it links. Two builds with the
+	// same digest then share cache entries even when their executables
+	// differ, as builds from two checkouts do. A digest that misses a
+	// changed input hands out stale entries. Empty keeps the executable
+	// hash. The value applies to the whole process: New sets it.
+	// docs/extension-model.md section 7.4.
+	ToolDigest string
 }
 
 // CommandProvider is the optional interface an extension implements to
@@ -63,6 +74,7 @@ schema's kind and the config's outputs block select. Names and paths come from
 superschematic.toml at the schemas root; extensions linked into the binary add
 kinds, decorators, documents, generators, auth providers and subcommands.`, name)
 	}
+	buildcache.SetToolDigest(cfg.ToolDigest)
 	a := &app{exts: exts}
 	root := &cobra.Command{
 		Use:           name,
