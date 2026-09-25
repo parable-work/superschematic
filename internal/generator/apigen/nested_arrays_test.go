@@ -119,8 +119,8 @@ func TestNestedArraysAPIShape(t *testing.T) {
 	if labels.OutputArrayDepth() != 2 || labels.OutputGoListType() != "[][]string" {
 		t.Fatalf("gridLabels output depth %d, Go type %q", labels.OutputArrayDepth(), labels.OutputGoListType())
 	}
-	if output.ValidatesListElements() {
-		t.Fatal("ValidatesListElements = true for a list of lists of strings")
+	if len(replace.BodyArgs) != 1 || replace.BodyArgs[0].Decoder() != "ListOfLists" || replace.BodyArgs[0].Kind != "String" {
+		t.Fatalf("replaceLabels decodes its body arguments as %+v", replace.BodyArgs)
 	}
 	for _, field := range output.TypeFields["SaveGridInput"] {
 		if field.Name == "polygons" && (field.ArrayDepth() != 2 || field.Type != "Point") {
@@ -130,9 +130,9 @@ func TestNestedArraysAPIShape(t *testing.T) {
 }
 
 // TestNestedArraysRouteValidatesElements: a body argument that is an array
-// of arrays of an enum or an object validates each element at name[i][j]
-// through the validateListElement helper, and a T[][] response of objects
-// sends a nil inner list as [].
+// of arrays of an enum or an object is decoded by the HTTP runtime's
+// bodyargs.ListOfLists, which validates each element at name[i][j], and a
+// T[][] response of objects sends a nil inner list as [].
 func TestNestedArraysRouteValidatesElements(t *testing.T) {
 	nested := func(name string) ir.TypeRef { return ir.TypeRef{Name: name, IsArray: true, IsArrayOfArrays: true} }
 	schema := ir.NewSchema("nested-routes", ir.SchemaKindAPI)
@@ -157,8 +157,8 @@ func TestNestedArraysRouteValidatesElements(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	if !output.ValidatesListElements() {
-		t.Fatal("ValidatesListElements = false")
+	if !output.HasBodyArgs() {
+		t.Fatal("HasBodyArgs = false")
 	}
 	outDir := t.TempDir()
 	if err := apigen.WriteAPI(output, outDir); err != nil {
@@ -169,21 +169,17 @@ func TestNestedArraysRouteValidatesElements(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"Shades   [][]types.Shade `json:\"shades\"`",
-		"Polygons [][]types.Point `json:\"polygons\"`",
-		`validationErrors.AddFieldError("shades", "required", "required field")`,
-		`validationErrors.AddFieldError(fmt.Sprintf("polygons[%d]", i), "required", "required field")`,
-		`validateListElement(validationErrors, fmt.Sprintf("shades[%d][%d]", i, j), &row[j])`,
-		`validateListElement(validationErrors, fmt.Sprintf("polygons[%d][%d]", i, j), &row[j])`,
-		"func validateListElement(validationErrors types.ValidationErrors, path string, item any) {",
+		"Shades   [][]types.Shade\n",
+		"Polygons [][]types.Point\n",
+		`bodyShadesArg := bodyargs.NewArg("shades", bodyargs.String, bodyargs.Required())`,
+		`bodyPolygonsArg := bodyargs.NewArg("polygons", bodyargs.Object)`,
+		`requestBody.Shades = bodyargs.ListOfLists[types.Shade](validationErrors, body, bodyShadesArg)`,
+		`requestBody.Polygons = bodyargs.ListOfLists[types.Point](validationErrors, body, bodyPolygonsArg)`,
 		"result[i] = []types.Point{}",
 	} {
 		if !strings.Contains(string(routes), want) {
 			t.Errorf("routes.go lacks %s", want)
 		}
-	}
-	if strings.Contains(string(routes), `AddFieldError("polygons", "required"`) {
-		t.Error("the optional polygons argument is checked for presence")
 	}
 }
 

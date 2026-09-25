@@ -374,12 +374,13 @@ fields.
 | The check reads the raw bytes after `json.Unmarshal` has accepted them. A payload without a `null` token costs one byte search; one with a null anywhere costs one pass over the object's members. Each list is still decoded once. | Decoding each list through `[]json.RawMessage` and each element again |
 | A null inner list of `T[][]` still decodes, to a nil list, which `Validate` reports at `field[i]`. A map whose values are lists is not checked: no validator checks the elements of a map value. | Refusing a null inner list in the decoder too |
 
-Two Go decode paths do not go through a generated type's `UnmarshalJSON`
-and still decode a null element to its zero value: a list argument of an
-API operation without an input type, which the route decodes into a
-struct of its own, and a list or list-of-lists column the ORM reads, which
-it decodes into the Go list directly. The ORM writes no null elements; a
-row another writer stored with one reads with a zero value in its place.
+One Go decode path does not go through a generated type's `UnmarshalJSON`
+and still decodes a null element to its zero value: a list or
+list-of-lists column the ORM reads, which it decodes into the Go list
+directly. The ORM writes no null elements; a row another writer stored
+with one reads with a zero value in its place. A list argument of an API
+operation without an input type, which the Go route decodes itself, is
+refused with a null element (below).
 
 The generated TypeScript validator rejects a null element, validates a
 nested object element of every type, and reports a non-string element of a
@@ -395,6 +396,27 @@ wrong type, a bad enum element and a nested object element with a bad
 field. For those vectors the harness asserts the refusal (`decodeRejects`)
 instead of verdicts; the runtimes, which validate the raw payload, return
 the expected column.
+
+The Go API routes decode a body argument, an argument of an operation
+without an input type other than a path or query parameter, through
+`runtime/http/go/bodyargs` with these rules, alone, as `T[]` and as
+`T[][]`. Before, the body decoded into a struct, and an argument was
+checked only through its Go type's `Validate`, which a list and a builtin
+lack (a list of lists had a null inner list check and its elements'
+`Validate`): a required list or builtin could be absent, a null element
+became its type's zero value, and a value of the wrong JSON type failed
+the request with no path. Now each argument is read from its own JSON
+value: a value of the wrong JSON type is `type`, a null element is
+`required` at `name[i]` or `name[i][j]`, `[]` satisfies a required list,
+and `listMin` and `listMax` bound the outer list. The scalar's own
+lengths, pattern and range, then the argument's constraints, apply to
+each value, and the first rule a value breaks is its one error (D14);
+lengths count bytes, as every Go validator does. A value those rules
+accept then passes its type's own `Validate`: a scalar's core check, an
+enum's membership, an object's fields nested under its path. A
+`Generic.JSON` argument is any JSON value but null, and an optional one
+that is absent or null reaches the implementation empty, as in the
+TypeScript server below.
 
 The TypeScript API server decodes every body argument from its JSON value
 with these rules, for a scalar, enum, object or `Generic.JSON` type, alone,

@@ -134,6 +134,9 @@ type EndpointInfo struct {
 	PathParams  []Param
 	QueryParams []Param
 	ScalarArgs  []Param
+	// BodyArgs are the ScalarArgs of an operation that is not GET, with how
+	// the Go route decodes each from the JSON body; nil on GET.
+	BodyArgs []BodyArg
 
 	Description string
 	// Operation is the schema operation the endpoint is generated from.
@@ -299,19 +302,12 @@ func (o *APIOutput) HasConstants() bool {
 	return o.IsPublic && o.UUIDTypeExpr != ""
 }
 
-// ValidatesListElements reports whether a route validates the elements of
-// a body argument that is an array of arrays of a type that may carry its
-// own validation (not a Go primitive); routes.go then carries the
-// validateListElement helper those routes call.
-func (o *APIOutput) ValidatesListElements() bool {
+// HasBodyArgs reports whether a route decodes body arguments, so routes.go
+// imports the HTTP runtime's bodyargs package.
+func (o *APIOutput) HasBodyArgs() bool {
 	for _, endpoint := range o.Endpoints {
-		if endpoint.Method == "GET" || endpoint.HasInput {
-			continue
-		}
-		for _, arg := range endpoint.ScalarArgs {
-			if arg.IsArrayOfArrays && !arg.IsGoPrimitive() {
-				return true
-			}
+		if len(endpoint.BodyArgs) > 0 {
+			return true
 		}
 	}
 	return false
@@ -754,6 +750,9 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		IsWebhook:                    op.Webhook,
 		WebhookHMACProvider:          op.HMACVerifiedProvider,
 		WebhookHMACProviderTypesExpr: webhookHMACTypesExpr,
+	}
+	if method != "GET" {
+		endpoint.BodyArgs = types.bodyArgs(scalarArgs)
 	}
 	endpoint.NeedsTypesImport = endpointNeedsTypesImport(endpoint)
 	if err := provider.Endpoint(op, set, endpoint); err != nil {

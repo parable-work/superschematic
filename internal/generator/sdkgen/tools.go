@@ -51,12 +51,21 @@ type ToolDefinition struct {
 	PathParams               []ToolPathParam          // Path parameters for invocation
 	HasInput                 bool                     // Whether endpoint has input type
 	InputType                string                   // Input type name if HasInput
+	InputFields              []ToolInputField         // the input type's fields, in order, if HasInput
 	ScalarArgs               []ToolScalarArg          // Scalar arguments (not path params)
 	QueryArgs                []ToolQueryArg           // Query arguments, with shape and bounds
 	Encrypted                bool                     // Whether endpoint payload must be encrypted
 	BindingStatus            string                   // ready, or unsupported_multipart for a file upload
 	InputSchemaDigest        string                   // sha256 of the encoded Parameters
 	MCPBinding               MCPToolBinding           // Explicit MCP invocation binding metadata
+}
+
+// ToolInputField is one field of a tool's input type: its name in the types
+// package, which the SDK method's input takes, and its key in the tool's
+// parameters.
+type ToolInputField struct {
+	Name string
+	Key  string
 }
 
 // MCPToolBinding, MCPToolArgumentBinding and MCPMethodArgumentBinding are
@@ -234,6 +243,13 @@ func endpointToTool(
 	}
 	guidance := toolsutil.OperationGuidance(endpoint.Docs)
 
+	var inputFields []ToolInputField
+	if endpoint.HasInput {
+		for _, field := range inputTypeFields[endpoint.InputType] {
+			inputFields = append(inputFields, ToolInputField{Name: field.Name, Key: tsutil.ToCamelCase(field.Name)})
+		}
+	}
+
 	tool := ToolDefinition{
 		Name:                     toolName,
 		OperationID:              endpoint.OperationID,
@@ -259,6 +275,7 @@ func endpointToTool(
 		PathParams:               pathParams,
 		HasInput:                 endpoint.HasInput,
 		InputType:                endpoint.InputType,
+		InputFields:              inputFields,
 		ScalarArgs:               scalarArgs,
 		QueryArgs:                queryArgs,
 		Encrypted:                endpoint.Encrypted,
@@ -415,6 +432,7 @@ func buildMCPToolBinding(
 		querySources = append(querySources, paramName)
 	}
 
+	inputPosition := position
 	inputSources := make([]string, 0)
 	inputKind := ""
 	if endpoint.HasInput && endpoint.InputType != "" {
@@ -467,6 +485,15 @@ func buildMCPToolBinding(
 	}
 
 	if endpoint.Encrypted {
+		// Body arguments without an input type are one positional
+		// parameter each, and the options follow the query parameter
+		// after the last of them.
+		if inputKind == "scalar" && len(endpoint.ScalarArgs) > 1 {
+			position = inputPosition + len(endpoint.ScalarArgs)
+			if len(querySources) > 0 {
+				position++
+			}
+		}
 		_, isRequired := required["publicEncryptionKey"]
 		arguments = append(arguments, MCPToolArgumentBinding{
 			ToolParameter: "publicEncryptionKey",

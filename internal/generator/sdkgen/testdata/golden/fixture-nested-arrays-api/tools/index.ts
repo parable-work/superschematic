@@ -444,7 +444,9 @@ export type ToolParams = {
 };
 
 /**
- * Invokes a tool by name using the SDK
+ * Invokes a tool by name using the SDK. A tool whose bindingStatus is
+ * unsupported_multipart uploads a file, which tool parameters cannot carry;
+ * invokeTool throws for it without sending a request.
  *
  * @param sdk - The initialized SDK instance
  * @param toolName - The namespaced tool name (e.g., "auth.sendMagicLink")
@@ -465,13 +467,13 @@ export async function invokeTool<T extends ToolName>(
 ): Promise<unknown> {
   switch (toolName) {
     case GRID_SAVE_GRID:
-      return sdk.grid.saveGrid(params as GridSaveGridParams);
+      return sdk.grid.saveGrid({ labels: (params as GridSaveGridParams).labels, shades: (params as GridSaveGridParams).shades, polygons: (params as GridSaveGridParams).polygons, weights: (params as GridSaveGridParams).weights });
     case GRID_GET_GRID:
       return sdk.grid.getGrid((params as GridGetGridParams).id);
     case GRID_GRID_LABELS:
       return sdk.grid.gridLabels((params as GridGridLabelsParams).id, { limit: (params as GridGridLabelsParams).limit });
     case GRID_REPLACE_LABELS:
-      return sdk.grid.replaceLabels((params as GridReplaceLabelsParams).id, params as GridReplaceLabelsParams);
+      return sdk.grid.replaceLabels((params as GridReplaceLabelsParams).id, { labels: (params as GridReplaceLabelsParams).labels });
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }

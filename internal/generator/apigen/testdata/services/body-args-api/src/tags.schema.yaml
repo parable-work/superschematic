@@ -1,0 +1,142 @@
+# Body arguments of operations without an input type: lists of strings,
+# numbers, an integer scalar, an enum, a string scalar, a UUID and an object
+# type, required single values of each builtin type, and Generic.JSON values
+# alone, in a list and in a list of lists. The Go route tests in apigen load
+# it. saveTags and storeDocument match the TypeScript server's scalar list
+# fixture, so both servers answer the same vectors.
+name: body-args-api
+kind: API
+scalars:
+  Network.Url:
+    name: Network.Url
+    languagePrimitive: string
+  Ordering.Rank:
+    name: Ordering.Rank
+    languagePrimitive: number
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+  Generic.JSON:
+    name: Generic.JSON
+    languagePrimitive: object
+enums:
+  # The shade of a tag.
+  Shade:
+    name: Shade
+    values:
+      - name: Light
+        serializedAs: light
+      - name: Dark
+        serializedAs: dark
+types:
+  # A point on a post's cover image.
+  Point:
+    name: Point
+    role: EmbeddedStruct
+    fields:
+      - name: x
+        typeRef: { name: number }
+        required: true
+        validateMin: 0
+      - name: y
+        typeRef: { name: number }
+        required: true
+operationSets:
+  - name: TagMutations
+    operations:
+      # Replace a post's tags; returns the labels as stored.
+      - name: saveTags
+        typeRef: { name: string, isArray: true }
+        required: true
+        httpMethod: PUT
+        restPath: "posts/{id}/tags"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          # The labels, at most three; a label may hold a comma.
+          - name: labels
+            typeRef: { name: string, isArray: true }
+            required: true
+            validateListMax: 3
+          # One weight per label.
+          - name: weights
+            typeRef: { name: number, isArray: true }
+          # Display ranks, integers from 1.
+          - name: ranks
+            typeRef: { name: Ordering.Rank, isArray: true }
+          # One shade per label.
+          - name: shades
+            typeRef: { name: Shade, isArray: true }
+          # One or two links, each on https.
+          - name: links
+            typeRef: { name: Network.Url, isArray: true }
+            validateListMin: 1
+            validateListMax: 2
+            validatePattern: "^https://"
+          # A title for the set.
+          - name: title
+            typeRef: { name: string }
+          # A priority for the set.
+          - name: priority
+            typeRef: { name: number }
+      # Set a post's flags; every argument is required.
+      - name: setFlags
+        typeRef: { name: boolean }
+        required: true
+        httpMethod: POST
+        restPath: "posts/{id}/flags"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: pinned
+            typeRef: { name: boolean }
+            required: true
+          - name: score
+            typeRef: { name: number }
+            required: true
+            validateMax: 10
+          # At least two characters.
+          - name: caption
+            typeRef: { name: string }
+            required: true
+            validateMinLength: 2
+          - name: rank
+            typeRef: { name: Ordering.Rank }
+            required: true
+          # Related posts.
+          - name: related
+            typeRef: { name: Identity.UUID, isArray: true }
+          # Points on the cover image.
+          - name: points
+            typeRef: { name: Point, isArray: true }
+      # Store a JSON document with optional notes; returns the document.
+      - name: storeDocument
+        typeRef: { name: Generic.JSON }
+        required: true
+        httpMethod: POST
+        restPath: "documents"
+        arguments:
+          # Any JSON value but null.
+          - name: document
+            typeRef: { name: Generic.JSON }
+            required: true
+          - name: note
+            typeRef: { name: Generic.JSON }
+          - name: extras
+            typeRef: { name: Generic.JSON, isArray: true }
+          - name: grid
+            typeRef: { name: Generic.JSON, isArray: true, isArrayOfArrays: true }
+  - name: TagQueries
+    operations:
+      # Find posts by label; the labels travel in the query string.
+      - name: findTags
+        typeRef: { name: string, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "posts/tags"
+        arguments:
+          - name: labels
+            typeRef: { name: string, isArray: true }
+            required: true

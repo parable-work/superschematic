@@ -629,7 +629,9 @@ export type ToolParams = {
 };
 
 /**
- * Invokes a tool by name using the SDK
+ * Invokes a tool by name using the SDK. A tool whose bindingStatus is
+ * unsupported_multipart uploads a file, which tool parameters cannot carry;
+ * invokeTool throws for it without sending a request.
  *
  * @param sdk - The initialized SDK instance
  * @param toolName - The namespaced tool name (e.g., "auth.sendMagicLink")
@@ -658,9 +660,9 @@ export async function invokeTool<T extends ToolName>(
     case ORDER_GET_ORDER:
       return sdk.order.getOrder((params as OrderGetOrderParams).id);
     case ORDER_UPDATE_ORDER:
-      return sdk.order.updateOrder((params as OrderUpdateOrderParams).id, params as OrderUpdateOrderParams);
+      return sdk.order.updateOrder((params as OrderUpdateOrderParams).id, { revision: (params as OrderUpdateOrderParams).revision, note: (params as OrderUpdateOrderParams).note });
     case ORDER_OPEN_RETURN:
-      return sdk.order.openReturn(params as OrderOpenReturnParams);
+      return sdk.order.openReturn({ requestId: (params as OrderOpenReturnParams).requestId, orderId: (params as OrderOpenReturnParams).orderId, reason: (params as OrderOpenReturnParams).reason, pickup: (params as OrderOpenReturnParams).pickup, labels: (params as OrderOpenReturnParams).labels });
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }

@@ -16,6 +16,7 @@ import (
 	orm "example.com/schemas/orm/fixture-db"
 	types "example.com/schemas/types/go/fixture-api"
 	"github.com/go-chi/chi/v5"
+	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
 	runtimesession "github.com/parable-work/superschematic/runtime/http/go/session"
@@ -476,6 +477,9 @@ func createTenantGetTenantHandler(impl TenantImplementation) gohttp.HandlerFunc 
 
 // createTenantUpdateSecretHandler creates a handler for PATCH /api/tenants/{id}
 func createTenantUpdateSecretHandler(impl TenantImplementation) gohttp.HandlerFunc {
+	// Body arguments: the JSON type of each value, then its rules in the
+	// order they are checked (the scalar type's own, then the argument's).
+	bodySecretArg := bodyargs.NewArg("secret", bodyargs.String, bodyargs.Required())
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters
 		IdStr := chi.URLParam(r, "id")
@@ -488,25 +492,23 @@ func createTenantUpdateSecretHandler(impl TenantImplementation) gohttp.HandlerFu
 			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
 			return
 		}
-		// Parse scalar arguments from request body (non-GET endpoints)
-		var requestBody struct {
-			Secret string `json:"secret"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		// Parse body arguments (non-GET endpoints). The body is one JSON
+		// object; each argument is decoded from its own JSON value and
+		// checked by the list and value rules, and every failure is reported
+		// at the argument's path (name, name[i], name[i][j]).
+		body, err := bodyargs.ReadObject(r.Body)
+		if err != nil {
 			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
 			return
 		}
-
-		// Validate secret
-		if validator, ok := interface{}(requestBody.Secret).(interface {
-			ValidateRequired() (bool, []types.ValidationError)
-		}); ok {
-			if valid, fieldErrs := validator.ValidateRequired(); !valid {
-				validationErrors := types.NewValidationErrors()
-				validationErrors.SetFieldErrors("secret", fieldErrs)
-				RespondValidationErrors(w, r, validationErrors)
-				return
-			}
+		var requestBody struct {
+			Secret string
+		}
+		validationErrors := types.NewValidationErrors()
+		requestBody.Secret = bodyargs.Value[string](validationErrors, body, bodySecretArg)
+		if validationErrors.HasErrors() {
+			RespondValidationErrors(w, r, validationErrors)
+			return
 		}
 
 		// Ensure request context is still valid before entering implementation logic.

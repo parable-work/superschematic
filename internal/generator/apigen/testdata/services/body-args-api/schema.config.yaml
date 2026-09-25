@@ -1,0 +1,4 @@
+# Test-local to apigen, so no other generator's goldens read it.
+name: body-args-api
+kind: API
+outputs: {}

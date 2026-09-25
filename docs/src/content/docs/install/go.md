@@ -133,6 +133,53 @@ Encoding keeps an empty list apart from an absent one. An optional list is
 left out when it is nil and written when it is `[]`, so a decoded payload
 re-encodes with the same keys. A required list encodes nil as `[]`.
 
+## Serve a generated API
+
+An API schema with a Go API output writes the module
+`example.com/schemas/api/<name>`. `RegisterRoutes` mounts its routes on a
+chi router and calls your implementations.
+
+An operation with an input type reads it from the JSON body. An operation
+without one reads its other arguments from the JSON body object (on `GET`,
+from the query string), each from its own JSON value, through
+`runtime/http/go/bodyargs`:
+
+- A string, enum, UUID or timestamp argument takes a JSON string, a number
+  a JSON number, an integer a JSON integer, and a boolean `true`
+  or `false`. Any other JSON type is `type`: `"5"` is not a number, and
+  `5` is not a string.
+- A `Generic.JSON` argument takes any JSON value but null, and the
+  implementation receives that value.
+- An object-typed argument goes through its type's decoder, and its field
+  errors nest under the argument's path.
+- A list is its JSON array and follows the
+  [list rules](/superschematic/reference/arrays-of-arrays/#list-rules):
+  `[]` satisfies a required list, `listMin` and `listMax` bound it, and a
+  null element is `required` at `name[i]`.
+- The scalar's own lengths, pattern and range, then the argument's own
+  constraints, apply to a value and to every element; a value that fails
+  is one error named by the rule it breaks (`minLength`, `maxLength`,
+  `pattern`, `min`, `max`). An enum value outside the enum is `enum`.
+
+A required argument that is absent or null is `required`; an optional one
+is its zero value. The body must be one JSON object, and its keys match
+the argument names exactly. The route answers 400 with every error at
+once, keyed by path, as it does for an input type's fields:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Validation Failed",
+  "status": 400,
+  "detail": "Validation failed",
+  "code": "WA-VL-001",
+  "errors": {
+    "labels[1]": [{ "validator": "required", "message": "required field" }],
+    "links[0]": [{ "validator": "pattern", "message": "invalid format" }]
+  }
+}
+```
+
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk.go` enabled writes
