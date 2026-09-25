@@ -1,4 +1,4 @@
-import { defineConfig } from "@superschematic/schema-config";
+import { defineConfig } from "@acme/schema-config";
 
 // A schema of the Catalog kind, which only the acme extension registers.
 // SchemaKind is closed to the core three; an extension kind is written as a

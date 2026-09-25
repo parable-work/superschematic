@@ -12,6 +12,7 @@ The extension adds one of each registration surface:
 |---|---|---|
 | Kind | `Catalog`, with a `catalog` generator | `ext/kind.go` |
 | Decorator | `@shelf` from `@acme/schema`, into the field's `extensions.acme` slot | `ext/decorator.go`, `packages/schema` |
+| Scalar catalog | the core scalars plus `Acme.Photo`, a file-upload scalar that `shop-catalog` bounds with `uploadMaxBytes` | `ext/scalars.go`, `packages/schema` |
 | Document | `catalog.config.yaml` next to a Catalog schema, with a generator | `ext/document.go` |
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
 | Build-all hook | `acmeInventory`, every service's manifest merged into one file | `ext/inventory.go` |
@@ -71,6 +72,7 @@ examples/acme-schematic/
     extension.go              Extension: Name, Register, Commands; [extension.acme] config
     kind.go                   Catalog kind + catalog generator
     decorator.go              @shelf + the field codec
+    scalars.go                the scalar catalog: the core scalars plus the Acme.Photo upload scalar
     document.go               catalog.config document + generator
     manifest.go               acmeManifest generator on every kind
     inventory.go              acmeInventory build-all hook
@@ -81,16 +83,16 @@ examples/acme-schematic/
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
-  packages/schema/            @acme/schema, the authoring package @shelf is imported from, and the confirm key's type
+  packages/schema/            @acme/schema, the authoring package @shelf and the Acme.Photo brand are imported from, and the confirm key's type
   schemas/
-    superschematic.toml       naming, auth_provider = "apikey", [paths], [deps], [extension.acme]
+    superschematic.toml       naming, auth_provider = "apikey", [package_aliases], [paths], [deps], [extension.acme]
     deps.json                 the committed copy of the dependency graph ([deps] copy)
-    tsconfig.base.json        path aliases for @superschematic/*, @acme/*, superscalar
+    tsconfig.base.json        path aliases for @superschematic/*, @acme/* (@acme/schema-config included), superscalar
     services/shop-db          DB: User, Session, ApiKey, Product, StockLevel
                               tables and the storefront.stock projection
     services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs, @mcp, @icon
     services/shop-config      General: ShopConfig with @envVars and field @docs/@purpose/@icon
-    services/shop-catalog     Catalog: Product, Bundle with @shelf; catalog.config.yaml
+    services/shop-catalog     Catalog: Product, Bundle with @shelf; Product.photo, an Acme.Photo upload; catalog.config.yaml
     services/shop-storefront  API on the TypeScript server: carts, a public probe, a manual event stream
   storefront/                 app.ts implements the generated shop-storefront router; app.test.ts drives it
   labels/                     shelf-label.d.ts and location.d.ts, the declarations `fields` reads
@@ -262,6 +264,39 @@ In the IR the payload appears as
 `{"name": "sku", ..., "extensions": {"acme": {"shelf": {"aisle": 3, "bay": "B"}}}}`,
 in the TypeScript form and the data form alike. `ShelfOf(fd)` is the read
 side the generators use.
+
+## A scalar catalog
+
+superscalar's core scalars have no file upload. `ext/scalars.go` registers a
+catalog of the core rows plus `Acme.Photo`, and declares it a file upload
+beside its row, since superscalar's `ScalarMetadata` has no upload fields:
+
+```go
+catalog, err := registry.ScalarCatalogWithUploads(registry.ScalarCatalogOf(rows), map[string]registry.ScalarUpload{
+	"Acme.Photo": {FileUpload: ir.FileUploadConfig{
+		MaxSize:      8 << 20,
+		AllowedTypes: []string{"image/jpeg", "image/png", "image/webp"},
+		Category:     "image",
+	}},
+})
+if err != nil {
+	return err
+}
+return r.RegisterScalars(Name, catalog)
+```
+
+`@acme/schema` exports the brand, `Acme.Photo`, and `shop-catalog`'s
+`Product.photo` lowers the upload limit for one field:
+
+```ts
+photo: Validate<Acme.Photo, { uploadMaxBytes: 2097152 }>;
+```
+
+The loader hydrates the upload metadata onto the scalar, then checks the
+bound: it must be positive and name a single file-upload scalar. The smoke
+reads both from the IR. `shop-catalog` renders no Go API, so no generated
+code references the upload helpers a Go API with a multipart field needs
+from the scalar package (`docs/DECISIONS.md`, D4).
 
 ## A document
 
@@ -603,8 +638,13 @@ command. The acme file sets `go_module_root`, `npm_scope`,
 `python_types_module_prefix`, `python_sdk_module_prefix`,
 `python_sdk_module_suffix`, `rust_crate_prefix`, `package_author`,
 `metadata_key_prefix`, `scalar_jsdoc_tag`, `auth_provider`,
-`authoring_packages`, the `[paths]` and `[deps]` tables and
-`[extension.acme]`. `[deps] copy` makes `build-all` also write the
+`authoring_packages`, the `[package_aliases]`, `[paths]` and `[deps]`
+tables and `[extension.acme]`. `[package_aliases]` maps
+`@acme/schema-config` onto `@superschematic/schema-config`: every
+`schema.config.ts` imports `defineConfig` under acme's own name, the way a
+distribution that republishes the config package would, and `build-all`
+and `build --with-deps` accept that import and write sentinels that use it.
+`[deps] copy` makes `build-all` also write the
 dependency graph of the generated packages to `schemas/deps.json`, which is
 committed; each package in it names the service that produced it, and the
 smoke fails when the committed copy is stale. `scalar_jsdoc_tag = "acmeScalar"`

@@ -1,4 +1,4 @@
-import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema-config";
+import { defineConfig, SchemaKind, TargetLanguage } from "@acme/schema-config";
 
 // A DB schema: the core sql and orm generators run for it, and types in the
 // languages listed here. The acme manifest generator (ext/manifest.go) is

@@ -54,6 +54,10 @@ type (
 	// the core's.
 	ToolInvocationPolicy = registry.ToolInvocationPolicy
 	ScalarCatalog        = registry.ScalarCatalog
+	// UploadCatalog is a ScalarCatalog that declares its file-upload
+	// scalars; ScalarUpload is the metadata it declares for one.
+	UploadCatalog = registry.UploadCatalog
+	ScalarUpload  = registry.ScalarUpload
 	// SchemaCatalogEntry is one discovered service's identity facts, the
 	// value type of LoadContext.Catalog.
 	SchemaCatalogEntry = registry.SchemaCatalogEntry
@@ -190,6 +194,12 @@ func CoreScalars() ScalarCatalog { return registry.CoreScalars() }
 // internal/registry.ScalarCatalogOf.
 func ScalarCatalogOf(rows map[string]*scalars.ScalarMetadata) ScalarCatalog {
 	return registry.ScalarCatalogOf(rows)
+}
+
+// ScalarCatalogWithUploads declares file-upload metadata on scalars of
+// catalog; see internal/registry.ScalarCatalogWithUploads.
+func ScalarCatalogWithUploads(catalog ScalarCatalog, uploads map[string]ScalarUpload) (UploadCatalog, error) {
+	return registry.ScalarCatalogWithUploads(catalog, uploads)
 }
 
 // EnvConfigOf resolves schema's @envVars contract under the default naming

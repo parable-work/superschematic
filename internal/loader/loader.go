@@ -165,6 +165,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 				return nil, nil, err
 			}
+			if err := validateHydrated(schema); err != nil {
+				return nil, nil, err
+			}
 			if err := o.profile.Measure("loader.composite-defaults", func() error {
 				return loadCompositeDefaults(servicePath, schema, vin.ExternalEnums)
 			}); err != nil {
@@ -248,6 +251,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 				errs = append(errs, fmt.Errorf("%s: %s", schema.Name, e.Error()))
 			}
 		}
+		if err := validateHydrated(schema); err != nil {
+			errs = append(errs, err)
+		}
 		return nil
 	}); err != nil {
 		return nil, nil, err
@@ -284,11 +290,11 @@ func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 
 // hydrateScalarsFromRegistry fills every ScalarDef the schema references
 // from the scalar catalog: description, primitive, constraints, custom
-// hooks and the per-language type mappings. A name the catalog does not
-// know is an error when the schema declares nothing about it beyond its
-// identity (a TypeScript brand or a bare data-form entry, which can only
-// have meant a catalog scalar); a data-form scalar that carries its own
-// constraints is left as written.
+// hooks, upload metadata (from an UploadCatalog) and the per-language type
+// mappings. A name the catalog does not know is an error when the schema
+// declares nothing about it beyond its identity (a TypeScript brand or a
+// bare data-form entry, which can only have meant a catalog scalar); a
+// data-form scalar that carries its own constraints is left as written.
 func hydrateScalarsFromRegistry(schema *ir.Schema, catalog registry.ScalarCatalog) error {
 	if schema == nil {
 		return nil
@@ -298,6 +304,7 @@ func hydrateScalarsFromRegistry(schema *ir.Schema, catalog registry.ScalarCatalo
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	uploads, declaresUploads := catalog.(registry.UploadCatalog)
 	var unknown []string
 	for _, name := range names {
 		scalar := schema.Scalars[name]
@@ -324,6 +331,14 @@ func hydrateScalarsFromRegistry(schema *ir.Schema, catalog registry.ScalarCatalo
 		scalar.HasCustomNormalize = metadata.HasCustomNormalize
 		scalar.HasCustomParse = metadata.HasCustomParse
 		scalar.HasCustomValidate = metadata.HasCustomValidate
+		// The scalar package's row has no upload fields; a catalog that
+		// declares upload scalars carries them beside it.
+		if declaresUploads {
+			if upload, ok := uploads.Upload(scalar.Name); ok {
+				scalar.FileUpload = &upload.FileUpload
+				scalar.ImageConstraints = upload.ImageConstraints
+			}
+		}
 
 		if metadata.SQLType == "" && metadata.JSONSchemaType == "" && metadata.Symbol == "" {
 			continue
@@ -356,6 +371,18 @@ func hydrateScalarsFromRegistry(schema *ir.Schema, catalog registry.ScalarCatalo
 		return fmt.Errorf("unknown scalar %s: not in the scalar registry (%d scalars registered); the schema names it without defining it, so it must come from a registered scalar package or extension", strings.Join(unknown, ", "), len(catalog.Names()))
 	}
 	return nil
+}
+
+// validateHydrated runs the IR checks that read hydrated scalar metadata
+// (ir.Schema.ValidateHydrated). Every form reaches it after
+// hydrateScalarsFromRegistry, so a scalar the catalog declares as a file
+// upload is one by the time Validate<T, { uploadMaxBytes }> is checked.
+func validateHydrated(schema *ir.Schema) error {
+	var errs []error
+	for _, e := range schema.ValidateHydrated() {
+		errs = append(errs, fmt.Errorf("%s: %w", schema.Name, e))
+	}
+	return errors.Join(errs...)
 }
 
 // isCatalogReference reports whether def carries nothing but its identity:

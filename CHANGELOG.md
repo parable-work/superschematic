@@ -426,6 +426,15 @@ of a generated artifact is always listed here with the bump it requires.
   `TypeRef.ArrayDepth()`. `examples/acme-schematic` declares a list of
   lists as a DB column, in API types and as a tool argument, and its smoke
   follows it into every output. No generated output changes.
+- `registry.ScalarCatalogWithUploads`, `registry.UploadCatalog` and
+  `registry.ScalarUpload`: a scalar catalog declares which of its scalars
+  are file uploads, with each one's `ir.FileUploadConfig` and optional
+  `ir.ImageConstraints`, and the loader hydrates them onto the scalar.
+  superscalar's `ScalarMetadata` row has no upload fields, so no catalog
+  could declare an upload scalar before. `ir.Schema.ValidateHydrated` runs
+  the IR checks that read hydrated scalar metadata. `examples/acme-schematic`
+  registers `Acme.Photo` and bounds it with `uploadMaxBytes` in its Catalog
+  service. Minor.
 
 ### Changed
 
@@ -624,6 +633,10 @@ of a generated artifact is always listed here with the bump it requires.
   re-encoding a payload keeps an empty list present, as the TypeScript,
   Python and Rust types already do. Before, `[]` was dropped on encode and
   came back as absent. Minor.
+- IR: `Schema.Validate` no longer checks `Validate<T, { uploadMaxBytes }>`;
+  `Schema.ValidateHydrated` does, and the loader runs it once the scalars
+  are hydrated, in every form. A caller that relied on `Validate` for the
+  check calls `ValidateHydrated` on a hydrated schema. Minor.
 
 ### Fixed
 
@@ -639,7 +652,8 @@ of a generated artifact is always listed here with the bump it requires.
   `fileUpload` metadata. Before, four scalar names (`Artifact.File`,
   `Asset.File`, `Asset.Image`, `Asset.LogoImage`) were treated as uploads
   without it, with a 100 MiB limit and no allowed types. A catalog that
-  registers those names declares `fileUpload` on them. Minor.
+  registers those names declares `fileUpload` on them
+  (`registry.ScalarCatalogWithUploads`). Minor.
 - `build-all` writes the TypeScript types workspace manifest
   (`types/typescript/package.json`) on a run where every service was
   restored from the cache or up to date. Before, only a service's types
@@ -776,6 +790,20 @@ of a generated artifact is always listed here with the bump it requires.
   reached to `[]`, including a field tagged `json:"-"`, which is not on the
   wire, so encoding changed a value's in-memory metadata. It now skips
   fields tagged `json:"-"` and unexported fields. Patch.
+- `build-all` and `build --with-deps`: a `schema.config.ts` that imported
+  the config package under a specifier `[package_aliases]` maps onto
+  `@superschematic/schema-config` failed discovery with "schema.config.ts
+  may import only @superschematic/schema-config", so a distribution that
+  republishes the authoring packages under its own names could build none
+  of its services with either command. The check resolves each import
+  through the alias table, and its error names every accepted specifier.
+  Patch.
+- `Validate<T, { uploadMaxBytes }>` on a file-upload scalar failed to load
+  from TypeScript with "uploadMaxBytes requires a file-upload scalar". The
+  TypeScript frontend checked the bound before the loader hydrated the
+  scalar, when a brand carries only its name, so no upload scalar could
+  pass. The check runs after hydration in every form, against the upload
+  metadata the registered catalog declares. Patch.
 - TypeScript API server: a body argument that is a list of an object type
   (`points: Point[]`) was typed `string[]`, and the runtime turned each
   element into a string, so the implementation received

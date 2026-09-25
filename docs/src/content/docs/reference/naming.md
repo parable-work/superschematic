@@ -247,7 +247,10 @@ authoring_packages = ["@acme/api", "@acme/db", "@acme/schema", "@acme/schema-con
 
 The loader resolves symbols to their declaring package. The writer and
 diagnostics use the author's spelling (the alphabetically first alias
-that maps to a declaring package).
+that maps to a declaring package). `build-all` and `build --with-deps`
+accept a `schema.config.ts` that imports the config package under any
+specifier mapped onto `@superschematic/schema-config`. The generated
+service sentinels import it under the author's spelling too.
 
 ## `[cache]`
 

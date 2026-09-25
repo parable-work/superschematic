@@ -29,7 +29,7 @@ func TestValidate_CleanSchema(t *testing.T) {
 	}
 }
 
-func TestValidate_UploadMaxBytesRequiresPositiveFileUploadScalar(t *testing.T) {
+func TestValidateHydrated_UploadMaxBytesRequiresPositiveFileUploadScalar(t *testing.T) {
 	limit := int64(64 * 1024 * 1024)
 	s := newTestSchema()
 	s.Scalars["Media.File"] = &ScalarDef{
@@ -43,29 +43,49 @@ func TestValidate_UploadMaxBytesRequiresPositiveFileUploadScalar(t *testing.T) {
 		Required:               true,
 		ValidateUploadMaxBytes: &limit,
 	})
-	if errs := s.Validate(); len(errs) != 0 {
+	if errs := s.ValidateHydrated(); len(errs) != 0 {
 		t.Fatalf("valid upload bound: %v", errs)
 	}
 
 	zero := int64(0)
 	s.Types["User"].Fields[1].ValidateUploadMaxBytes = &zero
-	if errs := s.Validate(); len(errs) != 1 || !strings.Contains(errs[0].Error(), "must be positive") {
+	if errs := s.ValidateHydrated(); len(errs) != 1 || !strings.Contains(errs[0].Error(), "must be positive") {
 		t.Fatalf("zero upload bound errors = %v, want one positive-bound error", errs)
 	}
 
 	s.Types["User"].Fields[1].ValidateUploadMaxBytes = &limit
 	s.Types["User"].Fields[1].TypeRef = TypeRef{Name: "Media.File", IsArray: true}
-	if errs := s.Validate(); len(errs) != 1 || !strings.Contains(errs[0].Error(), "requires a file-upload scalar") {
+	if errs := s.ValidateHydrated(); len(errs) != 1 || !strings.Contains(errs[0].Error(), "requires a file-upload scalar") {
 		t.Fatalf("list upload bound errors = %v, want one file-upload scalar error", errs)
 	}
 
 	s.Types["User"].Fields[1].TypeRef = TypeRef{Name: "Identity.UUID"}
-	if errs := s.Validate(); len(errs) != 1 || !strings.Contains(errs[0].Error(), "User.archive uploadMaxBytes requires a file-upload scalar") {
+	if errs := s.ValidateHydrated(); len(errs) != 1 || !strings.Contains(errs[0].Error(), "User.archive uploadMaxBytes requires a file-upload scalar") {
 		t.Fatalf("non-upload bound errors = %v, want one file-upload scalar error", errs)
 	}
 }
 
-func TestValidate_UploadMaxBytesChecksOperations(t *testing.T) {
+// TestValidate_LeavesUploadMaxBytesToValidateHydrated: a frontend validates
+// before the loader hydrates, when a scalar reference carries no FileUpload
+// metadata yet, so Validate does not judge the bound; ValidateHydrated does.
+func TestValidate_LeavesUploadMaxBytesToValidateHydrated(t *testing.T) {
+	limit := int64(1024)
+	s := newTestSchema()
+	s.Scalars["Media.File"] = &ScalarDef{Name: "Media.File", LanguagePrimitive: LanguageString}
+	s.Types["User"].Fields = append(s.Types["User"].Fields, &FieldDef{
+		Name: "archive", TypeRef: TypeRef{Name: "Media.File"}, ValidateUploadMaxBytes: &limit,
+	})
+	if errs := s.Validate(); len(errs) != 0 {
+		t.Fatalf("Validate() = %v, want the bound left to ValidateHydrated", errs)
+	}
+
+	s.Scalars["Media.File"].FileUpload = &FileUploadConfig{MaxSize: 4096}
+	if errs := s.ValidateHydrated(); len(errs) != 0 {
+		t.Fatalf("ValidateHydrated() on the hydrated upload scalar = %v, want none", errs)
+	}
+}
+
+func TestValidateHydrated_UploadMaxBytesChecksOperations(t *testing.T) {
 	limit := int64(1024)
 	s := newTestSchema()
 	s.OperationSets = []*OperationSet{{
@@ -74,7 +94,7 @@ func TestValidate_UploadMaxBytesChecksOperations(t *testing.T) {
 			Name: "upload", TypeRef: TypeRef{Name: "Identity.UUID"}, ValidateUploadMaxBytes: &limit,
 		}},
 	}}
-	errs := s.Validate()
+	errs := s.ValidateHydrated()
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "UserMutations.upload uploadMaxBytes requires a file-upload scalar") {
 		t.Fatalf("validation errors = %v, want the operation's file-upload scalar error", errs)
 	}

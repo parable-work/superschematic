@@ -4,6 +4,8 @@
 //   - a schema kind, Catalog, with its own generator (kind.go);
 //   - a decorator, @shelf from @acme/schema, that writes into the open
 //     extensions slot of a field (decorator.go);
+//   - a scalar catalog: the core scalars plus Acme.Photo, a file-upload
+//     scalar the Catalog service bounds with uploadMaxBytes (scalars.go);
 //   - a sidecar document, catalog.config.yaml, with a generator (document.go);
 //   - a generator on the core kinds, the acme manifest (manifest.go);
 //   - a build-all hook that merges every service's manifest into one
@@ -25,7 +27,8 @@
 // A binary is cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})
 // (cmd/acme-schematic). Every file here imports only the public packages an
 // out-of-tree extension has: registry, loader, cli and ir, plus the pinned
-// TypeScript compiler's shim for the node kinds fields.go matches.
+// TypeScript compiler's shim for the node kinds fields.go matches and the
+// superscalar Go package whose rows scalars.go extends.
 package ext
 
 import (
@@ -74,6 +77,9 @@ func (Extension) Register(r *registry.Registry) error {
 		return err
 	}
 	if err := registerDecorator(r); err != nil {
+		return err
+	}
+	if err := registerScalars(r); err != nil {
 		return err
 	}
 	if err := registerDocument(r); err != nil {

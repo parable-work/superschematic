@@ -1,4 +1,4 @@
-import { defineConfig, SchemaKind, service, TargetLanguage } from "@superschematic/schema-config";
+import { defineConfig, SchemaKind, service, TargetLanguage } from "@acme/schema-config";
 
 // A public API schema. authDb names the DB schema the auth provider probes
 // for its stores: the acme "apikey" provider finds shop-db's ApiKey and User

@@ -14,6 +14,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/registry"
+	"github.com/parable-work/superschematic/internal/sentinel"
 )
 
 var configNames = []string{"schema.config.ts", "schema.config.json", "schema.config.yaml"}
@@ -137,7 +138,7 @@ func configPath(serviceDir string) string {
 
 func readConfig(serviceDir string, configPath string, reg *registry.Registry) (*schemaconfig.SchemaConfig, error) {
 	if filepath.Base(configPath) == "schema.config.ts" {
-		if err := checkConfigPurity(configPath); err != nil {
+		if err := checkConfigPurity(configPath, reg.Naming()); err != nil {
 			return nil, err
 		}
 		return tsreader.ReadServiceConfig(serviceDir, reg)
@@ -151,22 +152,36 @@ func readConfig(serviceDir string, configPath string, reg *registry.Registry) (*
 // import statements) that a line-level scan is reliable.
 var configImportPattern = regexp.MustCompile(`(?m)^\s*import\b[^'"]*['"]([^'"]+)['"]`)
 
-// checkConfigPurity enforces the identity layer's cycle-proofing rule
-// : schema.config.ts may import only
-// @superschematic/schema-config. Configs are imported as identity references by the
-// platform model; any richer import graph would drag arbitrary code into
-// every consumer's evaluation.
-func checkConfigPurity(configPath string) error {
+// checkConfigPurity enforces the identity layer's cycle-proofing rule:
+// schema.config.ts may import only the config package
+// (sentinel.ConfigPackage), under its own name or under a specifier the
+// naming file's [package_aliases] maps onto it. Configs are imported as
+// identity references by the platform model; any richer import graph would
+// drag arbitrary code into every consumer's evaluation.
+func checkConfigPurity(configPath string, n naming.Naming) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
 	}
 	for _, match := range configImportPattern.FindAllStringSubmatch(string(data), -1) {
-		if match[1] != "@superschematic/schema-config" {
-			return fmt.Errorf("%s: imports %q; schema.config.ts may import only @superschematic/schema-config (configs are identity references and must stay dependency-free)", configPath, match[1])
+		if n.DeclaringPackage(match[1]) != sentinel.ConfigPackage {
+			return fmt.Errorf("%s: imports %q; schema.config.ts may import only %s (configs are identity references and must stay dependency-free)", configPath, match[1], strings.Join(configSpecifiers(n), " or "))
 		}
 	}
 	return nil
+}
+
+// configSpecifiers returns the specifiers a schema.config.ts may import,
+// sorted: the config package and every alias the naming maps onto it.
+func configSpecifiers(n naming.Naming) []string {
+	specifiers := []string{sentinel.ConfigPackage}
+	for specifier, declaring := range n.PackageAliases {
+		if declaring == sentinel.ConfigPackage && specifier != sentinel.ConfigPackage {
+			specifiers = append(specifiers, specifier)
+		}
+	}
+	sort.Strings(specifiers)
+	return specifiers
 }
 
 // TopologicalSort returns services ordered so dependencies precede dependents.

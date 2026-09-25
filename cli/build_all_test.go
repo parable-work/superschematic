@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/parable-work/superschematic/internal/sentinel"
 	"github.com/parable-work/superschematic/schemadeps"
 )
 
@@ -285,6 +288,66 @@ func TestBuildAllCommand_IsolatedTypeScriptProgramsFallback(t *testing.T) {
 	assert.NotContains(t, out.String(), "Shared TypeScript program")
 	assert.Contains(t, errOut.String(), "phase=tsreader.program.create")
 	assert.NotContains(t, errOut.String(), "phase=tsreader.program.workspace-create")
+}
+
+// TestBuildAllCommand_AliasedConfigImport: a distribution republishes the
+// config package under its own name and maps that name onto it in
+// [package_aliases]. build-all and build --with-deps discover services whose
+// schema.config.ts imports the aliased name, and the sentinels build-all
+// writes import it too.
+func TestBuildAllCommand_AliasedConfigImport(t *testing.T) {
+	servicesRoot := prepareTSServicesRoot(t, "fixture-db", "fixture-api")
+	aliasConfigImports(t, servicesRoot, "@acme/schema-config", "fixture-db", "fixture-api")
+
+	out := new(bytes.Buffer)
+	root := New(Config{})
+	root.SetOut(out)
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", t.TempDir()})
+	require.NoError(t, root.Execute())
+	assert.Contains(t, out.String(), "Discovered 2 schema services: fixture-db, fixture-api")
+	generated, err := os.ReadFile(filepath.Join(servicesRoot, "fixture-db", "src", "service.generated.ts"))
+	require.NoError(t, err)
+	assert.Contains(t, string(generated), `from "@acme/schema-config"`)
+
+	out.Reset()
+	root = New(Config{})
+	root.SetOut(out)
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"build", "--with-deps", filepath.Join(servicesRoot, "fixture-api"), "--out", t.TempDir()})
+	require.NoError(t, root.Execute())
+	assert.Contains(t, out.String(), "Resolved 2 schema services for fixture-api: fixture-db, fixture-api")
+}
+
+// aliasConfigImports rewrites each service's schema.config.ts to import the
+// config package as alias, resolves alias to the same sources in the base
+// tsconfig, and maps it onto the config package in the schemas root's
+// naming file.
+func aliasConfigImports(t *testing.T, servicesRoot string, alias string, services ...string) {
+	t.Helper()
+	schemasRoot := filepath.Dir(servicesRoot)
+	basePath := filepath.Join(schemasRoot, "tsconfig.base.json")
+	data, err := os.ReadFile(basePath)
+	require.NoError(t, err)
+	var base map[string]any
+	require.NoError(t, json.Unmarshal(data, &base))
+	paths := base["compilerOptions"].(map[string]any)["paths"].(map[string]any)
+	paths[alias] = paths[sentinel.ConfigPackage]
+	data, err = json.MarshalIndent(base, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(basePath, data, 0o644))
+
+	for _, service := range services {
+		path := filepath.Join(servicesRoot, service, "schema.config.ts")
+		source, err := os.ReadFile(path)
+		require.NoError(t, err)
+		rewritten := strings.ReplaceAll(string(source), `from "`+sentinel.ConfigPackage+`"`, `from "`+alias+`"`)
+		require.NotEqual(t, string(source), rewritten, "%s imports no config package", path)
+		require.NoError(t, os.WriteFile(path, []byte(rewritten), 0o644))
+	}
+
+	toml := fmt.Sprintf("[package_aliases]\n%q = %q\n", alias, sentinel.ConfigPackage)
+	require.NoError(t, os.WriteFile(filepath.Join(schemasRoot, "superschematic.toml"), []byte(toml), 0o644))
 }
 
 func prepareJSONServicesRoot(t *testing.T) string {
