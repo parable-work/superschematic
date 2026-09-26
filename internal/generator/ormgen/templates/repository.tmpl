@@ -1897,6 +1897,13 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	values = append(values, input.{{ toGoName .Name }}.ToUUID())
 	{{- else if .IsDateTimeScalar }}
 	values = append(values, time.Time(input.{{ toGoName .Name }}))
+	{{- else if .EnumDefault }}
+	// An unset enum takes its schema default; "" is never a member.
+	if input.{{ toGoName .Name }} == "" {
+		values = append(values, {{ .GoType }}({{ printf "%q" .EnumDefault }}))
+	} else {
+		values = append(values, input.{{ toGoName .Name }})
+	}
 	{{- else }}
 	values = append(values, input.{{ toGoName .Name }})
 	{{- end }}
@@ -2151,6 +2158,13 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 		values = append(values, input.{{ toGoName .Name }}.ToUUID())
 		{{- else if .IsDateTimeScalar }}
 		values = append(values, time.Time(input.{{ toGoName .Name }}))
+		{{- else if .EnumDefault }}
+		// An unset enum takes its schema default; "" is never a member.
+		if input.{{ toGoName .Name }} == "" {
+			values = append(values, {{ .GoType }}({{ printf "%q" .EnumDefault }}))
+		} else {
+			values = append(values, input.{{ toGoName .Name }})
+		}
 		{{- else }}
 		values = append(values, input.{{ toGoName .Name }})
 		{{- end }}

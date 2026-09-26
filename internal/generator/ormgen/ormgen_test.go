@@ -1028,3 +1028,73 @@ func TestGenerateRefusesTablesWithoutAUUIDScalar(t *testing.T) {
 		}
 	}
 }
+
+// A required enum with a declared default inserts that default when the
+// caller leaves the Go field at "" (never an enum member), whether the enum
+// is local or imported from a dependency schema. Without it a struct literal
+// that omits the field inserts an empty string and fails the column's CHECK.
+// An optional enum and a required enum without a default keep the plain
+// insert.
+func TestRequiredEnumDefaultAppliesToLocalAndImportedEnums(t *testing.T) {
+	enums := ir.NewSchema("enums", ir.SchemaKindGeneral)
+	enums.Enums["OrderStatus"] = &ir.EnumDef{Name: "OrderStatus"}
+
+	db := ir.NewSchema("order-db", ir.SchemaKindDB)
+	db.Imports = []ir.Import{{Package: "@schemas/enums", Types: []string{"OrderStatus"}}}
+	db.Enums["OrderPriority"] = &ir.EnumDef{Name: "OrderPriority"}
+	db.Scalars["Identity.UUID"] = &ir.ScalarDef{Name: "Identity.UUID", LanguagePrimitive: ir.LanguageString}
+	pending, normal := "pending", "normal"
+	db.Types["Order"] = &ir.TypeDef{
+		Name: "Order",
+		Role: ir.RoleDBTable,
+		Fields: []*ir.FieldDef{
+			{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, Key: true},
+			{Name: "status", TypeRef: ir.TypeRef{Name: "OrderStatus"}, Required: true, Default: &pending},
+			{Name: "priority", TypeRef: ir.TypeRef{Name: "OrderPriority"}, Required: true, Default: &normal},
+			{Name: "previousStatus", TypeRef: ir.TypeRef{Name: "OrderStatus"}},
+			{Name: "fallbackStatus", TypeRef: ir.TypeRef{Name: "OrderStatus"}, Required: true},
+		},
+	}
+
+	output, err := Generate(db, Options{
+		SchemaName:   "order-db",
+		ModulePath:   "example.com/schemas/orm/order-db",
+		TypesModule:  "example.com/schemas/types/go/order-db",
+		Dependencies: map[string]*ir.Schema{"enums": enums},
+		Clock:        codegen.FixedClock(time.Unix(0, 0).UTC()),
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	fields := map[string]Field{}
+	for _, field := range output.Repositories[0].Fields {
+		fields[field.Name] = field
+	}
+	for name, want := range map[string]string{
+		"status":         "pending",
+		"priority":       "normal",
+		"previousStatus": "",
+		"fallbackStatus": "",
+	} {
+		if got := fields[name].EnumDefault; got != want {
+			t.Errorf("%s EnumDefault = %q, want %q", name, got, want)
+		}
+	}
+
+	outDir := t.TempDir()
+	if err := WriteORM(output, outDir); err != nil {
+		t.Fatalf("WriteORM: %v", err)
+	}
+	source, err := os.ReadFile(filepath.Join(outDir, "repository_order.go"))
+	if err != nil {
+		t.Fatalf("read repository: %v", err)
+	}
+	for _, want := range []string{
+		`values = append(values, types.OrderStatus("pending"))`,
+		`values = append(values, types.OrderPriority("normal"))`,
+	} {
+		if n := strings.Count(string(source), want); n != 2 {
+			t.Errorf("CreateOne and CreateMany must each insert the default; found %d of %q", n, want)
+		}
+	}
+}

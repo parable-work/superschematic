@@ -716,6 +716,9 @@ func findSnapshotUser(t *testing.T, users []types.TenantUser, id types.IdentityU
 	if err := os.WriteFile(filepath.Join(ormDir, "strategy_a_history_test.go"), []byte(strategyATest), 0o644); err != nil {
 		t.Fatalf("write strategy a history test: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(ormDir, "enum_default_test.go"), []byte(enumDefaultTest), 0o644); err != nil {
+		t.Fatalf("write enum default test: %v", err)
+	}
 
 	tidy := exec.Command("go", "mod", "tidy")
 	tidy.Dir = ormDir
@@ -741,6 +744,86 @@ func findSnapshotUser(t *testing.T, users []types.TenantUser, id types.IdentityU
 		t.Errorf("generated ORM module fails go vet: %v\n%s", err, out)
 	}
 }
+
+// enumDefaultTest runs in the generated ORM module. Its transaction records
+// the arguments of the INSERT that CreateOne and CreateMany send and fails
+// the statement, so the test reads what would reach Postgres without one.
+// The fixture's status is Default<TenantStatus, TenantStatus.Active>.
+const enumDefaultTest = `package orm
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+	types "example.com/schemas/types/go/fixture-db"
+)
+
+var errCaptured = errors.New("statement captured")
+
+type captureTx struct {
+	pgx.Tx
+	args []any
+}
+
+func (tx *captureTx) QueryRow(_ context.Context, _ string, args ...any) pgx.Row {
+	tx.args = args
+	return capturedRow{}
+}
+
+func (tx *captureTx) Query(_ context.Context, _ string, args ...any) (pgx.Rows, error) {
+	tx.args = args
+	return nil, errCaptured
+}
+
+type capturedRow struct{}
+
+func (capturedRow) Scan(...any) error { return errCaptured }
+
+func boundStatuses(args []any) []types.TenantStatus {
+	var statuses []types.TenantStatus
+	for _, arg := range args {
+		if status, ok := arg.(types.TenantStatus); ok {
+			statuses = append(statuses, status)
+		}
+	}
+	return statuses
+}
+
+// A required enum left at "" is inserted as its schema default; "" is
+// never a member and fails the column's CHECK. A set value is kept.
+func TestCreateBindsTheEnumDefaultWhenUnset(t *testing.T) {
+	ctx := context.Background()
+	tx := &captureTx{}
+	repo := &TenantRepository{tx: tx}
+
+	for _, tc := range []struct {
+		input *types.Tenant
+		want  types.TenantStatus
+	}{
+		{&types.Tenant{}, types.TenantStatus_Active},
+		{&types.Tenant{Status: types.TenantStatus_Suspended}, types.TenantStatus_Suspended},
+	} {
+		if _, err := repo.CreateOne(ctx, tc.input); !errors.Is(err, errCaptured) {
+			t.Fatalf("CreateOne err = %v, want the captured statement", err)
+		}
+		if got := boundStatuses(tx.args); !reflect.DeepEqual(got, []types.TenantStatus{tc.want}) {
+			t.Errorf("CreateOne(status %q) bound %q, want [%q]", tc.input.Status, got, tc.want)
+		}
+	}
+
+	inputs := []*types.Tenant{{}, {Status: types.TenantStatus_Suspended}}
+	if _, err := repo.CreateMany(ctx, inputs); !errors.Is(err, errCaptured) {
+		t.Fatalf("CreateMany err = %v, want the captured statement", err)
+	}
+	want := []types.TenantStatus{types.TenantStatus_Active, types.TenantStatus_Suspended}
+	if got := boundStatuses(tx.args); !reflect.DeepEqual(got, want) {
+		t.Errorf("CreateMany bound %q, want %q", got, want)
+	}
+}
+`
 
 // extendFixtureForCompileCoverage mutates the loaded fixture-db IR to
 // exercise template branches the fixture schema does not reach: nullable,

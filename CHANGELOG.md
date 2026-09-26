@@ -801,6 +801,13 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Go ORM: `CreateOne` and `CreateMany` insert a required enum field's
+  declared default when the Go value is `""`, for an enum declared in the
+  schema or imported from a dependency. They inserted `''`, which is not a
+  member, so a struct literal that left out a field typed
+  `Default<OrderStatus, OrderStatus.Pending>` failed the column's `CHECK`.
+  A set value is inserted as before. Optional enums, enum lists and
+  required enums without a default are unchanged. Patch.
 - Go types: a union field is validated, and a union without an
   `@internalMetadata` discriminator decodes to the member the payload
   describes. `Validate` emitted nothing for a union field, so an absent
