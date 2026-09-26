@@ -409,3 +409,78 @@ func TestParseType_AnyJSONScalar(t *testing.T) {
 		assert.Equal(t, raw["parts"], out["parts"])
 	}
 }
+
+// structuredParseSchema declares a JSON-object scalar with a custom parse
+// step and a JSON-array scalar without one, named so neither the name nor
+// the String primitive can decide how they parse.
+func structuredParseSchema() *ir.Schema {
+	s := ir.NewSchema("parse-test", ir.SchemaKindGeneral)
+	s.Scalars["Tags"] = &ir.ScalarDef{
+		Name:           "Mystery.Tags",
+		Primitive:      "String",
+		HasCustomParse: true,
+		TypeMappings:   map[string]string{"json_schema": "object"},
+	}
+	s.Scalars["Points"] = &ir.ScalarDef{
+		Name:         "Mystery.Points",
+		Primitive:    "String",
+		TypeMappings: map[string]string{"json_schema": "array"},
+	}
+	s.Types["Doc"] = &ir.TypeDef{
+		Name: "Doc",
+		Kind: ir.TypeKindObject,
+		Fields: []*ir.FieldDef{
+			{Name: "tags", TypeRef: ir.TypeRef{Name: "Tags"}, Required: true},
+			{Name: "tagList", TypeRef: ir.TypeRef{Name: "Tags", IsArray: true}},
+			{Name: "points", TypeRef: ir.TypeRef{Name: "Points"}},
+			{Name: "pointList", TypeRef: ir.TypeRef{Name: "Points", IsArray: true}},
+		},
+	}
+	return s
+}
+
+// TestParseType_StructuredJSONScalar: a scalar whose json_schema type mapping
+// is "object" or "array" parses to its object or array, in the lenient and
+// the strict parse. The value's JSON text is read into it; the object's
+// custom parse step sees JSON text either way and its canonical output is
+// decoded. A value of another JSON type is "type".
+func TestParseType_StructuredJSONScalar(t *testing.T) {
+	var seen []string
+	reg := NewParseRegistry()
+	reg.Register("Mystery.Tags", func(input string) (string, []ValidationError) {
+		seen = append(seen, input)
+		if input == `{"bad":1}` {
+			return input, []ValidationError{{Validator: "parse", Message: "not a string map"}}
+		}
+		return `{"k":"v"}`, nil
+	})
+	for _, strict := range []bool{false, true} {
+		seen = nil
+		p := New(structuredParseSchema(), WithParseRegistry(reg), WithStrict(strict))
+		out, errs := p.ParseType("Doc", map[string]any{
+			"tags":      map[string]any{"k": "v"},
+			"tagList":   []any{`{"k": "v"}`},
+			"points":    `[0.5, -1]`,
+			"pointList": []any{[]any{1.0}, "[2]"},
+		})
+		require.False(t, errs.HasErrors(), "strict=%v errs=%v", strict, errs)
+		assert.Equal(t, map[string]any{"k": "v"}, out["tags"])
+		assert.Equal(t, []any{map[string]any{"k": "v"}}, out["tagList"])
+		assert.Equal(t, []any{0.5, -1.0}, out["points"])
+		assert.Equal(t, []any{[]any{1.0}, []any{2.0}}, out["pointList"])
+		assert.Equal(t, []string{`{"k":"v"}`, `{"k": "v"}`}, seen)
+
+		// Text that is not JSON of the declared shape is kept for
+		// validation to report; the parse step's own error is its result.
+		out, errs = p.ParseType("Doc", map[string]any{"tags": map[string]any{"bad": 1.0}, "points": "not json"})
+		assert.Equal(t, "parse", errs.GetFieldErrors("tags")[0].Validator)
+		assert.Equal(t, "not json", out["points"])
+		assert.Nil(t, errs.GetFieldErrors("points"))
+
+		_, errs = p.ParseType("Doc", map[string]any{"tags": []any{"k"}, "points": map[string]any{}, "pointList": []any{true}})
+		for _, key := range []string{"tags", "points", "pointList[0]"} {
+			require.Len(t, errs.GetFieldErrors(key), 1, key)
+			assert.Equal(t, "type", errs.GetFieldErrors(key)[0].Validator, key)
+		}
+	}
+}

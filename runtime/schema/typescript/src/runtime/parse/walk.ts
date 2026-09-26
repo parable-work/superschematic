@@ -13,7 +13,7 @@ import {
   setFieldErrors,
   type ValidationErrors,
 } from 'superscalar/validation';
-import { isAnyJSONScalar } from '../validation/types';
+import { isAnyJSONScalar, jsonShapeOf, structuredJSONType } from '../validation/types';
 import type { FieldDef, ScalarDef, Schema, TypeDef, TypeRef } from '../validation/types';
 import { coerceBool, coerceFloat, coerceInt } from './coerce';
 import { applyDefault } from './defaults';
@@ -286,6 +286,13 @@ function applyScalar(
   // Any JSON value is one, whatever the scalar's primitive; validation
   // checks it.
   if (isAnyJSONScalar(scalar)) return [value, true];
+  // A JSON object or array scalar takes its object or array, or the value's
+  // JSON text, which the String primitive's steps below read.
+  const shape = structuredJSONType(scalar);
+  if (shape) {
+    if (jsonShapeOf(value) === shape) return [value, true];
+    if (typeof value !== 'string') return [value, false];
+  }
   switch (scalar.primitive) {
     case 'Int':
       return coerceInt(value, ctx.strict);
@@ -315,6 +322,8 @@ function applyScalarParse(
   key: string,
   errors: ValidationErrors
 ): unknown {
+  const shape = structuredJSONType(scalar);
+  if (shape) return parseStructuredJSON(ctx, scalar, shape, value, key, errors);
   if (!scalar.hasCustomParse) return value;
   const fn = ctx.parseRegistry.get(scalar.name);
   if (!fn) return value;
@@ -329,6 +338,44 @@ function applyScalarParse(
     return ok ? coerced : value;
   }
   return parsed;
+}
+
+/**
+ * Parses a value of a JSON object or array scalar (structuredJSONType) into
+ * that object or array, the value every generated type holds. A string is
+ * the value's JSON text. When the scalar has a registered parser
+ * (Generic_StringMap), the text, or the JSON text of an object or array,
+ * goes through it and its canonical text is decoded; a parser error is the
+ * result. Text that does not decode to the declared shape is kept as it is,
+ * for validation to report.
+ */
+function parseStructuredJSON(
+  ctx: WalkContext,
+  scalar: ScalarDef,
+  shape: 'object' | 'array',
+  value: unknown,
+  key: string,
+  errors: ValidationErrors
+): unknown {
+  let text = typeof value === 'string' ? value : undefined;
+  const fn = scalar.hasCustomParse ? ctx.parseRegistry.get(scalar.name) : undefined;
+  if (fn) {
+    const input = text ?? JSON.stringify(value);
+    if (input === undefined) return value;
+    const [parsed, errs] = fn(input);
+    if (errs.length > 0) {
+      setFieldErrors(errors, key, errs);
+      return value;
+    }
+    text = parsed;
+  }
+  if (text === undefined) return value;
+  try {
+    const decoded: unknown = JSON.parse(text);
+    return jsonShapeOf(decoded) === shape ? decoded : value;
+  } catch {
+    return value;
+  }
 }
 
 function applyBuiltin(name: string, value: unknown, strict: boolean): [unknown, boolean] {
@@ -348,6 +395,8 @@ function applyBuiltin(name: string, value: unknown, strict: boolean): [unknown, 
 }
 
 function typeMismatchMessage(scalar: ScalarDef): string {
+  const shape = structuredJSONType(scalar);
+  if (shape) return `expected a JSON ${shape} or its JSON text`;
   switch (scalar.primitive) {
     case 'Int':
       return 'expected integer value';

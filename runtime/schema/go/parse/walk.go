@@ -1,10 +1,12 @@
 package parse
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 
 	"github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/runtime/schema/go/internal/jsonshape"
 )
 
 // walkTypeDef walks every field in td, copying values from raw into result
@@ -237,6 +239,9 @@ func (p *Parser) walkArrayElem(field *ir.FieldDef, elemKey, kind string, elem an
 }
 
 func (p *Parser) applyCustomParse(scalar *ir.ScalarDef, value any) (any, []ValidationError) {
+	if shape := scalar.StructuredJSONType(); shape != "" {
+		return p.parseStructuredJSON(scalar, shape, value)
+	}
 	if !scalar.HasCustomParse {
 		return value, nil
 	}
@@ -261,6 +266,42 @@ func (p *Parser) applyCustomParse(scalar *ir.ScalarDef, value any) (any, []Valid
 	return parsed, nil
 }
 
+// parseStructuredJSON parses a value of a scalar whose value is a JSON object
+// or a JSON array (ir.ScalarDef.StructuredJSONType; Generic.StringMap and
+// Embedding.Vector in the core catalog) into that object or array, the value
+// every generated type holds. A string is the value's JSON text. When the
+// scalar has a registered parser (Generic.StringMap), the text, or the JSON
+// text of an object or array, goes through it and its canonical text is
+// decoded; a parser error is the result. Text that does not decode to the
+// declared shape is kept as it is, for validation to report.
+func (p *Parser) parseStructuredJSON(scalar *ir.ScalarDef, shape string, value any) (any, []ValidationError) {
+	text, isText := value.(string)
+	if scalar.HasCustomParse {
+		if fn, ok := p.parseReg.Get(scalar.Name); ok {
+			if !isText {
+				encoded, err := json.Marshal(value)
+				if err != nil {
+					return value, nil
+				}
+				text = string(encoded)
+			}
+			canonical, errs := fn(text)
+			if len(errs) > 0 {
+				return value, errs
+			}
+			text, isText = canonical, true
+		}
+	}
+	if !isText {
+		return value, nil
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(text), &decoded); err != nil || jsonshape.Of(decoded) != shape {
+		return value, nil
+	}
+	return decoded, nil
+}
+
 // applyScalar applies coercion and normalize to a single scalar value.
 // Returns the resulting value (possibly typed as int64/float64/bool/string)
 // and true on success.
@@ -269,6 +310,16 @@ func (p *Parser) applyScalar(scalar *ir.ScalarDef, value any, strict bool) (any,
 	// checks it.
 	if scalar == nil || scalar.IsAnyJSON() {
 		return value, true
+	}
+	// A JSON object or array scalar takes its object or array, or the
+	// value's JSON text, which the String primitive's steps below read.
+	if shape := scalar.StructuredJSONType(); shape != "" {
+		if jsonshape.Of(value) == shape {
+			return value, true
+		}
+		if _, isText := value.(string); !isText {
+			return value, false
+		}
 	}
 	switch scalar.Primitive {
 	case "Int":
@@ -356,6 +407,9 @@ func fieldKey(f *ir.FieldDef) string {
 func typeMismatchMessage(scalar *ir.ScalarDef) string {
 	if scalar == nil {
 		return "type mismatch"
+	}
+	if shape := scalar.StructuredJSONType(); shape != "" {
+		return "expected " + jsonshape.Noun(shape) + " or its JSON text"
 	}
 	switch scalar.Primitive {
 	case "Int":

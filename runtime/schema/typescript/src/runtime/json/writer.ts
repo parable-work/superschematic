@@ -6,6 +6,7 @@ import type {
   Schema,
   TypeRef,
 } from '../validation/types';
+import { isAnyJSONScalar, structuredJSONType } from '../validation/types';
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 interface JsonObject {
@@ -442,11 +443,27 @@ function serializeSchemaDefinitions(schema: Schema): JsonObject {
   return output;
 }
 
+/**
+ * The JSON Schema type of a scalar's value. Its json_schema type mapping
+ * decides where the catalog's String primitive says otherwise: a JSON object
+ * or array scalar (structuredJSONType) is "object" or "array", and an
+ * any-JSON scalar (isAnyJSONScalar) has no type, since every JSON value is
+ * one. The readers turn "object" into the JSON primitive, and an absent type
+ * or "array" into String; the x-typeMapping beside it keeps the rule.
+ */
+function scalarJsonType(scalar: ScalarDef): string | undefined {
+  if (isAnyJSONScalar(scalar)) {
+    return undefined;
+  }
+  return structuredJSONType(scalar) || primitiveToJsonType(scalar.primitive) || 'string';
+}
+
 function serializeScalar(scalar: ScalarDef): JsonObject {
-  const output: JsonObject = {
-    type: primitiveToJsonType(scalar.primitive) || 'string',
-    'x-scalar': scalar.name,
-  };
+  const output: JsonObject = { 'x-scalar': scalar.name };
+  const jsonType = scalarJsonType(scalar);
+  if (jsonType !== undefined) {
+    output.type = jsonType;
+  }
 
   if (scalar.description) {
     output.description = scalar.description;

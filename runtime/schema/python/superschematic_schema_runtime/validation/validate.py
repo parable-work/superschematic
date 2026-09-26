@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from typing import Any
@@ -15,7 +16,7 @@ from ..errors import (
 )
 from .registry import ScalarValidatorRegistry, create_default_scalar_validator_registry
 from .resolver import resolve_schema
-from .types import FieldDef, ScalarDef, Schema, SchemaInput, TypeDef
+from .types import FieldDef, ScalarDef, Schema, SchemaInput, TypeDef, json_shape_of
 
 
 _BUILTIN_SCALARS = frozenset({"String", "Int", "Float", "Boolean", "ID"})
@@ -285,6 +286,39 @@ def _validate_any_json_value(
     return []
 
 
+def _validate_structured_json_value(
+    scalar: ScalarDef,
+    shape: str,
+    value: Any,
+    required: bool,
+    registry: ScalarValidatorRegistry,
+) -> list[ValidationError]:
+    """Validate a value, other than a string, of a JSON object or array scalar
+    (``ScalarDef.structured_json_type``).
+
+    The dict or list is the value every generated type holds, so a value of
+    another JSON type, or one no JSON document can carry, is "type". The dict
+    or list goes to the scalar validator registry as its JSON text, the form
+    the scalar core reads, so the core checks what it holds (a string map's
+    values, a vector's numbers). A string is the value's JSON text and gets the
+    String primitive's checks, as before. None is a missing value.
+    """
+    if value is None:
+        return (
+            [ValidationError(validator="required", message=f"{scalar.name} is required.")]
+            if required
+            else []
+        )
+    if json_shape_of(value) != shape or not _is_json_value(value, set()):
+        return [
+            ValidationError(validator="type", message=f"{scalar.name} must be a JSON {shape}.")
+        ]
+    scalar_fn = registry.get(scalar.name)
+    if scalar_fn is None:
+        return []
+    return list(scalar_fn(json.dumps(value, separators=(",", ":"))) or [])
+
+
 def _validate_scalar_value(
     scalar: ScalarDef,
     value: Any,
@@ -293,6 +327,9 @@ def _validate_scalar_value(
 ) -> list[ValidationError]:
     if scalar.is_any_json():
         return _validate_any_json_value(scalar, value, required)
+    shape = scalar.structured_json_type()
+    if shape and not isinstance(value, str):
+        return _validate_structured_json_value(scalar, shape, value, required, registry)
     if scalar.primitive == "Int":
         return _validate_int_constraints(scalar, value)
     if scalar.primitive == "Float":

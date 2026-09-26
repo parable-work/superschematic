@@ -1103,3 +1103,65 @@ func TestValidateType_AnyJSONScalar(t *testing.T) {
 	require.Len(t, errs.GetFieldErrors("body"), 1)
 	assert.Equal(t, "type", errs.GetFieldErrors("body")[0].Validator)
 }
+
+// TestValidateType_StructuredJSONScalar: a scalar whose json_schema type
+// mapping is "object" or "array" holds that JSON object or array, whatever
+// its name and its String primitive, or the value's JSON text. Any other
+// JSON type is "type". The registered validator sees the object or array as
+// its JSON text; a string goes to it as it is.
+func TestValidateType_StructuredJSONScalar(t *testing.T) {
+	s := ir.NewSchema("test", ir.SchemaKindGeneral)
+	s.Scalars["Tags"] = &ir.ScalarDef{Name: "Mystery.Tags", Primitive: "String", TypeMappings: map[string]string{"json_schema": "object"}}
+	s.Scalars["Points"] = &ir.ScalarDef{Name: "Mystery.Points", Primitive: "String", TypeMappings: map[string]string{"json_schema": "array"}}
+	s.Types["Doc"] = &ir.TypeDef{
+		Name: "Doc",
+		Kind: ir.TypeKindObject,
+		Fields: []*ir.FieldDef{
+			{Name: "tags", TypeRef: ir.TypeRef{Name: "Tags"}, Required: true},
+			{Name: "points", TypeRef: ir.TypeRef{Name: "Points"}},
+			{Name: "pointList", TypeRef: ir.TypeRef{Name: "Points", IsArray: true}},
+		},
+	}
+	var seen []string
+	reg := NewRegistry()
+	for _, name := range []string{"Mystery.Tags", "Mystery.Points"} {
+		reg.Register(name, func(value string) []ValidationError {
+			seen = append(seen, value)
+			if strings.Contains(value, "bad") {
+				return []ValidationError{{Validator: "pattern", Message: "core rejects it"}}
+			}
+			return nil
+		})
+	}
+	v := New(s, WithRegistry(reg))
+
+	errs := v.ValidateType("Doc", map[string]any{
+		"tags":      map[string]any{"k": "v"},
+		"points":    []any{0.5, -1.0},
+		"pointList": []any{[]float32{1}, []any{}, "[2]"},
+	})
+	assert.False(t, errs.HasErrors(), "%v", errs)
+	assert.Equal(t, []string{`{"k":"v"}`, `[0.5,-1]`, `[1]`, `[]`, `[2]`}, seen)
+
+	errs = v.ValidateType("Doc", map[string]any{"tags": `{"k": "v"}`, "points": "[]"})
+	assert.False(t, errs.HasErrors(), "%v", errs)
+
+	errs = v.ValidateType("Doc", map[string]any{"tags": map[string]any{"bad": 1.0}})
+	assert.Equal(t, "pattern", errs.GetFieldErrors("tags")[0].Validator)
+
+	errs = v.ValidateType("Doc", map[string]any{
+		"tags": []any{"k"}, "points": map[string]any{}, "pointList": []any{true, nil},
+	})
+	for key, want := range map[string]string{"tags": "type", "points": "type", "pointList[0]": "type", "pointList[1]": "required"} {
+		require.Len(t, errs.GetFieldErrors(key), 1, key)
+		assert.Equal(t, want, errs.GetFieldErrors(key)[0].Validator, key)
+	}
+
+	errs = v.ValidateType("Doc", map[string]any{"points": nil})
+	assert.Equal(t, "required", errs.GetFieldErrors("tags")[0].Validator)
+	assert.Nil(t, errs.GetFieldErrors("points"))
+
+	// A value no JSON document can carry is "type".
+	errs = v.ValidateType("Doc", map[string]any{"tags": map[string]any{}, "points": []any{math.NaN()}})
+	assert.Equal(t, "type", errs.GetFieldErrors("points")[0].Validator)
+}
