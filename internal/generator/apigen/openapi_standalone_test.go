@@ -2,6 +2,7 @@ package apigen
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -177,5 +178,49 @@ func TestTypeOpenAPISchemaAppliesScalarConstraintsToMapValues(t *testing.T) {
 func TestTypeOpenAPISchemaRejectsUnknownType(t *testing.T) {
 	if _, err := TypeOpenAPISchema("Missing", ir.NewSchema("contracts", ir.SchemaKindGeneral), nil); err == nil {
 		t.Fatal("an unknown type must be an error")
+	}
+}
+
+// TestTypeOpenAPISchemaTypesArrayScalars: a scalar whose json_schema type
+// mapping is "array" (Embedding.Vector) is a JSON array of its element
+// primitive, alone and as a list element, not a string.
+func TestTypeOpenAPISchemaTypesArrayScalars(t *testing.T) {
+	schema := ir.NewSchema("contracts", ir.SchemaKindGeneral)
+	schema.Scalars["Embedding.Vector"] = &ir.ScalarDef{
+		Name:              "Embedding.Vector",
+		LanguagePrimitive: ir.LanguageString,
+		TypeMappings:      map[string]string{"json_schema": "array", "go": "EmbeddingVector", "typescript": "number[]", "python": "list[float]"},
+	}
+	schema.Scalars["Mystery.Points"] = &ir.ScalarDef{
+		Name:              "Mystery.Points",
+		LanguagePrimitive: ir.LanguageString,
+		TypeMappings:      map[string]string{"json_schema": "array"},
+	}
+	schema.Types["Embedded"] = &ir.TypeDef{
+		Name: "Embedded",
+		Role: ir.RoleEmbeddedStruct,
+		Fields: []*ir.FieldDef{
+			{Name: "vec", TypeRef: ir.TypeRef{Name: "Embedding.Vector"}, Required: true},
+			{Name: "vecs", TypeRef: ir.TypeRef{Name: "Embedding.Vector", IsArray: true}, Required: true},
+			{Name: "points", TypeRef: ir.TypeRef{Name: "Mystery.Points"}, Required: true},
+		},
+	}
+	standalone, err := TypeOpenAPISchema("Embedded", schema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	properties := standalone["properties"].(map[string]interface{})
+	vec := properties["vec"].(map[string]interface{})
+	if vec["type"] != "array" || !reflect.DeepEqual(vec["items"], map[string]interface{}{"type": "number"}) {
+		t.Fatalf("Embedding.Vector = %#v, want an array of numbers", vec)
+	}
+	vecs := properties["vecs"].(map[string]interface{})
+	inner, ok := vecs["items"].(map[string]interface{})
+	if vecs["type"] != "array" || !ok || inner["type"] != "array" || !reflect.DeepEqual(inner["items"], map[string]interface{}{"type": "number"}) {
+		t.Fatalf("Embedding.Vector[] = %#v, want an array of arrays of numbers", vecs)
+	}
+	points := properties["points"].(map[string]interface{})
+	if points["type"] != "array" || !reflect.DeepEqual(points["items"], map[string]interface{}{}) {
+		t.Fatalf("an array scalar without an element type = %#v, want items {}", points)
 	}
 }

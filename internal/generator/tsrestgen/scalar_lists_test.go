@@ -68,7 +68,7 @@ func TestGenerateScalarListsShape(t *testing.T) {
 	}
 
 	store := byName["storeDocument"]
-	if len(store.BodyParams) != 4 {
+	if len(store.BodyParams) != 6 {
 		t.Fatalf("storeDocument body params = %+v", store.BodyParams)
 	}
 	for i, want := range []struct{ tsType, spec string }{
@@ -76,6 +76,8 @@ func TestGenerateScalarListsShape(t *testing.T) {
 		{"GenericJSON", "{ name: 'note', kind: 'json', required: false }"},
 		{"GenericJSON[]", "{ name: 'extras', kind: 'json', required: false, isArray: true }"},
 		{"GenericJSON[][]", "{ name: 'grid', kind: 'json', required: false, isArray: true, isArrayOfArrays: true }"},
+		{"GenericStringMap", "{ name: 'labels', kind: 'jsonObject', required: false }"},
+		{"EmbeddingVector[]", "{ name: 'embeddings', kind: 'jsonArray', required: false, isArray: true }"},
 	} {
 		if got := store.BodyParams[i]; got.TSType != want.tsType || got.SpecLiteral != want.spec {
 			t.Errorf("storeDocument body param %d = %s %s, want %s %s", i, got.TSType, got.SpecLiteral, want.tsType, want.spec)

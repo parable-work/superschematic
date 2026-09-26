@@ -29,9 +29,23 @@ is parsed by the generated strict parser the spec carries.
 /**
  * 'object' is an object type of a body parameter (T, T[] or T[][]), parsed
  * by ParamSpec.parse; 'json' is a body parameter of a JSON-valued scalar
- * (Generic.JSON), any JSON value but null. Neither is read from a string.
+ * (Generic.JSON), any JSON value but null; 'jsonObject' and 'jsonArray' are
+ * body parameters of a scalar whose value is a JSON object
+ * (Generic.StringMap) or a JSON array (Embedding.Vector), as the generated
+ * types send it. None is read from a string.
  */
-export type ParamKind = 'string' | 'integer' | 'number' | 'boolean' | 'uuid' | 'datetime' | 'enum' | 'object' | 'json';
+export type ParamKind =
+  | 'string'
+  | 'integer'
+  | 'number'
+  | 'boolean'
+  | 'uuid'
+  | 'datetime'
+  | 'enum'
+  | 'object'
+  | 'json'
+  | 'jsonObject'
+  | 'jsonArray';
 
 export type ParamLocation = 'path' | 'query' | 'body';
 
@@ -147,7 +161,10 @@ function decodeScalar(location: ParamLocation, spec: ParamSpec, raw: string, pat
       return raw;
     }
     case 'object':
+    case 'jsonObject':
       return refuse(location, spec, 'expected an object', null, path);
+    case 'jsonArray':
+      return refuse(location, spec, 'expected an array', null, path);
     case 'string':
     default:
       return checkString(location, spec, raw, path);
@@ -259,6 +276,12 @@ function decodeJsonValue(location: ParamLocation, spec: ParamSpec, item: unknown
     }
     case 'json':
       return item;
+    case 'jsonObject':
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) refuseAt(location, spec, path, 'type', 'expected an object');
+      return item;
+    case 'jsonArray':
+      if (!Array.isArray(item)) refuseAt(location, spec, path, 'type', 'expected an array');
+      return item;
     case 'integer':
       if (typeof item !== 'number' || !Number.isInteger(item)) refuseAt(location, spec, path, 'type', 'expected an integer');
       if (!Number.isSafeInteger(item)) refuse(location, spec, 'integer out of range', null, path);
@@ -336,8 +359,10 @@ export function decodeListOfLists(location: ParamLocation, spec: ParamSpec, valu
  * for a boolean (`type`, "expected a string", ...). An object value must be
  * a JSON object (`type`, "expected an object") and pass the spec's parser
  * ("does not match the declared type"). A 'json' value is any JSON value
- * but null. A parameter of any other kind with a default that is absent or
- * null decodes the default as a path or query value would.
+ * but null; a 'jsonObject' value is a JSON object and a 'jsonArray' value a
+ * JSON array (`type` otherwise), taken as they are. A parameter of any
+ * other kind with a default that is absent or null decodes the default as a
+ * path or query value would.
  */
 export function decodeJsonParam(location: ParamLocation, spec: ParamSpec, value: unknown): unknown {
   if ((value === undefined || value === null) && spec.defaultValue !== undefined && !spec.isArrayOfArrays && spec.kind !== 'object') {

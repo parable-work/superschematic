@@ -336,6 +336,25 @@ describe('JSON body parameters of a scalar, enum or JSON type', () => {
     refusedAt(p({ kind: 'json', isArray: true, isArrayOfArrays: true }), [[{}, null]], 'x[0][1]', 'required', 'required field');
   });
 
+  test('a JSON object or array scalar takes that object or array, and nothing else', () => {
+    const map = p({ kind: 'jsonObject' });
+    expect(decodeJsonParam('body', map, { a: 'b' })).toEqual({ a: 'b' });
+    expect(decodeJsonParam('body', map, {})).toEqual({});
+    for (const value of [['a'], '{"a":"b"}', 5, true]) {
+      refusedAt(map, value, undefined, 'type', 'expected an object');
+    }
+    const vector = p({ kind: 'jsonArray' });
+    expect(decodeJsonParam('body', vector, [0.5, 1])).toEqual([0.5, 1]);
+    for (const value of [{}, '[1]', 1.5, false]) {
+      refusedAt(vector, value, undefined, 'type', 'expected an array');
+    }
+    expect(decodeJsonParam('body', p({ kind: 'jsonArray', required: false }), null)).toBeUndefined();
+    const vectors = p({ kind: 'jsonArray', isArray: true });
+    expect(decodeJsonParam('body', vectors, [[1], []])).toEqual([[1], []]);
+    refusedAt(vectors, [[1], 2], 'x[1]', 'type', 'expected an array');
+    refusedAt(vectors, [[1], null], 'x[1]', 'required', 'required field');
+  });
+
   test("a scalar's own constraints apply to every value, each failure one error named by its rule", () => {
     const url = { name: 'Network.Url', maxLength: 24, pattern: '^https?://[a-z.]+$' };
     const urls = p({ isArray: true, scalar: url, listMin: 1, listMax: 2 });

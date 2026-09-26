@@ -13,7 +13,9 @@ import {
   type RouterRuntimeOptions,
 } from '@superschematic/http-runtime/hono';
 import type {
+  EmbeddingVector,
   GenericJSON,
+  GenericStringMap,
   NetworkUrl,
 } from 'superscalar/scalars';
 import type {
@@ -35,7 +37,7 @@ export const operationSpecs = {
     path: '/api/documents',
     pathParams: [],
     queryParams: [],
-    bodyParams: [{ name: 'document', kind: 'json', required: true }, { name: 'note', kind: 'json', required: false }, { name: 'extras', kind: 'json', required: false, isArray: true }, { name: 'grid', kind: 'json', required: false, isArray: true, isArrayOfArrays: true }],
+    bodyParams: [{ name: 'document', kind: 'json', required: true }, { name: 'note', kind: 'json', required: false }, { name: 'extras', kind: 'json', required: false, isArray: true }, { name: 'grid', kind: 'json', required: false, isArray: true, isArrayOfArrays: true }, { name: 'labels', kind: 'jsonObject', required: false }, { name: 'embeddings', kind: 'jsonArray', required: false, isArray: true }],
     auth: { public: false, required: false, permissions: [] },
     manual: false,
   },
@@ -85,6 +87,8 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
           note: request.body['note'] as GenericJSON | undefined,
           extras: request.body['extras'] as GenericJSON[] | undefined,
           grid: request.body['grid'] as GenericJSON[][] | undefined,
+          labels: request.body['labels'] as GenericStringMap | undefined,
+          embeddings: request.body['embeddings'] as EmbeddingVector[] | undefined,
         },
         ctx
       ),

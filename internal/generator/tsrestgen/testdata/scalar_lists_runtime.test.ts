@@ -88,14 +88,21 @@ const lists = [
 ];
 
 describe('generated scalar-lists-api router', () => {
-  test('operation table: body arguments keep their kinds, Generic.JSON is json, a scalar carries its constraints', () => {
+  test('operation table: body arguments keep their kinds, Generic.JSON is json, a JSON object or array scalar is jsonObject or jsonArray, a scalar carries its constraints', () => {
     const [labels, weights, ranks, shades, links] = operationSpecs.saveTags.bodyParams;
     expect(labels).toEqual({ name: 'labels', kind: 'string', required: true, isArray: true, listMax: 3 });
     expect(weights).toEqual({ name: 'weights', kind: 'number', required: false, isArray: true });
     expect(ranks).toEqual({ name: 'ranks', kind: 'integer', required: false, isArray: true, scalar: { name: 'Ordering.Rank', min: 1, max: Number.MAX_SAFE_INTEGER } });
     expect(shades).toEqual({ name: 'shades', kind: 'enum', required: false, isArray: true, enumValues: ['light', 'dark'] });
     expect(links).toMatchObject({ name: 'links', kind: 'string', isArray: true, listMin: 1, listMax: 2, pattern: '^https://', scalar: { name: 'Network.Url', maxLength: 2048 } });
-    expect(operationSpecs.storeDocument.bodyParams.map((param: { kind: string }) => param.kind)).toEqual(['json', 'json', 'json', 'json']);
+    expect(operationSpecs.storeDocument.bodyParams.map((param: { kind: string }) => param.kind)).toEqual([
+      'json',
+      'json',
+      'json',
+      'json',
+      'jsonObject',
+      'jsonArray',
+    ]);
     expect(operationSpecs.findTags.queryParams).toEqual([{ name: 'labels', kind: 'string', required: true, isArray: true }]);
   });
 
@@ -205,6 +212,24 @@ describe('generated scalar-lists-api router', () => {
     expect(await refused(storeDocument, { document: 1, grid: [[null]] })).toMatchObject(at('grid', 'grid[0][0]', 'required', 'required field'));
     expect(await refused(storeDocument, { document: 1, grid: [null] })).toMatchObject(at('grid', 'grid[0]', 'required', 'required field'));
     expect(await refused(storeDocument, { document: 1, grid: [{}] })).toMatchObject(at('grid', 'grid[0]', 'type', 'expected an array'));
+  });
+
+  test('a JSON object or array scalar takes that object or array, as the generated types send it', async () => {
+    const labels = { region: 'eu' };
+    const embeddings = [[0.5, 1], []];
+    const stored = await storeDocument({ document: 1, labels, embeddings });
+    expect(stored.status).toBe(200);
+    expect(received.at(-1)).toEqual({ document: 1, labels, embeddings });
+    expect(await refused(storeDocument, { document: 1, labels: '{"region":"eu"}' })).toMatchObject(
+      at('labels', undefined, 'type', 'expected an object')
+    );
+    expect(await refused(storeDocument, { document: 1, labels: ['eu'] })).toMatchObject(at('labels', undefined, 'type', 'expected an object'));
+    expect(await refused(storeDocument, { document: 1, embeddings: [[1], '[2]'] })).toMatchObject(
+      at('embeddings', 'embeddings[1]', 'type', 'expected an array')
+    );
+    expect(await refused(storeDocument, { document: 1, embeddings: [null] })).toMatchObject(
+      at('embeddings', 'embeddings[0]', 'required', 'required field')
+    );
   });
 
   test('a GET list still reads repeated keys and comma-separated query values', async () => {
