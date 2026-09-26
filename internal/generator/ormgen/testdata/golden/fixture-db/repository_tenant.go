@@ -1242,7 +1242,12 @@ func (r *TenantRepository) CreateOne(ctx context.Context, input *types.Tenant) (
 	fields = append(fields, `status`)
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-	values = append(values, input.Status)
+	// An unset enum takes its schema default; "" is never a member.
+	if input.Status == "" {
+		values = append(values, types.TenantStatus("active"))
+	} else {
+		values = append(values, input.Status)
+	}
 	// Required field: isActive
 	fields = append(fields, `is_active`)
 	paramNum++
@@ -1395,7 +1400,12 @@ func (r *TenantRepository) CreateMany(ctx context.Context, inputs []*types.Tenan
 		values = append(values, input.Email)
 		paramNum++
 		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Status)
+		// An unset enum takes its schema default; "" is never a member.
+		if input.Status == "" {
+			values = append(values, types.TenantStatus("active"))
+		} else {
+			values = append(values, input.Status)
+		}
 		paramNum++
 		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 		values = append(values, input.IsActive)

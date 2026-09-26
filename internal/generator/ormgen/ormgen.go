@@ -168,6 +168,12 @@ type Field struct {
 	// DerefValue is true when the field's Go representation is a pointer
 	// that must be dereferenced before being passed as a SQL argument.
 	DerefValue bool
+
+	// EnumDefault is the declared @default of a required, non-array enum
+	// field. CreateOne and CreateMany insert it when the caller leaves the
+	// field at its Go zero value, the empty string, which is never an enum
+	// member; without it a struct literal that omits the field inserts ''.
+	EnumDefault string
 }
 
 // ArrayDepth is 0 for T, 1 for T[] and 2 for T[][], as ir.TypeRef reports it.
@@ -281,6 +287,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 
 	scalarMap := buildScalarLookup(schema)
 	unionNames := collectUnionTypeNames(schema, opts.Dependencies)
+	enumNames := collectEnumTypeNames(schema, opts.Dependencies)
 	uuidGoType, err := resolveUUIDGoType(schema, tableTypes, scalarMap)
 	if err != nil {
 		return nil, err
@@ -288,7 +295,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 
 	repositories := make([]Repository, 0, len(tableTypes))
 	for _, typeDef := range tableTypes {
-		repo, err := extractRepository(typeDef, schema, scalarMap, unionNames, uuidGoType)
+		repo, err := extractRepository(typeDef, schema, scalarMap, unionNames, enumNames, uuidGoType)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract table from type %s: %w", typeDef.Name, err)
 		}
@@ -468,6 +475,31 @@ func resolveUserIDGoType(tableTypes []*ir.TypeDef, scalars map[string]scalarLook
 	return uuidGoType
 }
 
+// collectEnumTypeNames returns locally declared enums plus imported enum
+// symbols whose dependency schemas are available to ormgen.
+func collectEnumTypeNames(schema *ir.Schema, dependencies map[string]*ir.Schema) map[string]bool {
+	enums := make(map[string]bool, len(schema.Enums))
+	for name := range schema.Enums {
+		enums[name] = true
+	}
+	for _, imported := range schema.Imports {
+		depName := imported.Package
+		if slash := strings.LastIndex(depName, "/"); slash >= 0 {
+			depName = depName[slash+1:]
+		}
+		dependency := dependencies[depName]
+		if dependency == nil {
+			continue
+		}
+		for _, name := range imported.Types {
+			if dependency.Enums[name] != nil {
+				enums[name] = true
+			}
+		}
+	}
+	return enums
+}
+
 // collectUnionTypeNames returns locally declared unions plus imported union
 // symbols whose dependency schemas are available to ormgen.
 func collectUnionTypeNames(schema *ir.Schema, dependencies map[string]*ir.Schema) map[string]bool {
@@ -504,7 +536,7 @@ func isRelationalTarget(typeName string, schema *ir.Schema) bool {
 }
 
 // extractRepository extracts repository information from an IR TypeDef.
-func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool, uuidGoType string) (Repository, error) {
+func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[string]scalarLookup, unionNames, enumNames map[string]bool, uuidGoType string) (Repository, error) {
 	tableName := codegen.ToSnakeCase(typeDef.Name)
 	repo := Repository{
 		Name:            typeDef.Name + "Repository",
@@ -578,6 +610,9 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 		}
 
 		field := extractField(fieldDef, schema, scalars, unionNames)
+		if enumNames[field.IRType] && field.IsRequired && !field.IsArray && fieldDef.Default != nil {
+			field.EnumDefault = *fieldDef.Default
+		}
 		if field.IsJSONField && field.IsUnion {
 			field.JSONUnionDecoder = "decode" + typeDef.Name + codegen.ToPascalCase(field.Name) + "JSONUnion"
 		}
