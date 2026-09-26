@@ -25,6 +25,9 @@ func (e *APIError) Error() string {
 	if e.Message == "" {
 		return "api error"
 	}
+	if e.StatusCode > 0 && e.Code != "" {
+		return fmt.Sprintf("%s (code: %s, status: %d)", e.Message, e.Code, e.StatusCode)
+	}
 	if e.StatusCode > 0 {
 		return fmt.Sprintf("%s (status: %d)", e.Message, e.StatusCode)
 	}

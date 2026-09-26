@@ -808,6 +808,14 @@ of a generated artifact is always listed here with the bump it requires.
   `Default<OrderStatus, OrderStatus.Pending>` failed the column's `CHECK`.
   A set value is inserted as before. Optional enums, enum lists and
   required enums without a default are unchanged. Patch.
+- Go SDK: an error response's message is read from the RFC 9457 `detail`
+  member first, then `error`, then `message`. A generated Go server writes
+  its message only in `detail`, which the Go SDK did not read, so an error
+  carried the generic text for its status, such as "api request failed".
+  The TypeScript, Python and Rust SDKs already read `detail`.
+  `APIError.Error()` adds the error code when the response has one:
+  `<message> (code: <code>, status: <status>)`. Without a code it is
+  `<message> (status: <status>)` as before. Patch.
 - Go types: a union field is validated, and a union without an
   `@internalMetadata` discriminator decodes to the member the payload
   describes. `Validate` emitted nothing for a union field, so an absent

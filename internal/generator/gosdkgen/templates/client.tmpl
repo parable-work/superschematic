@@ -669,7 +669,11 @@ func decodeError(statusCode int, body []byte, headers http.Header) error {
 	var details map[string]any
 	var payload map[string]any
 	if len(body) > 0 && json.Unmarshal(body, &payload) == nil {
-		if parsedMessage := parsePayloadString(payload, "error"); parsedMessage != "" {
+		// Generated servers answer with an RFC 9457 problem whose user-safe
+		// message is `detail`; `error` and `message` are older body shapes.
+		if parsedMessage := parsePayloadString(payload, "detail"); parsedMessage != "" {
+			message = parsedMessage
+		} else if parsedMessage := parsePayloadString(payload, "error"); parsedMessage != "" {
 			message = parsedMessage
 		} else if parsedMessage := parsePayloadString(payload, "message"); parsedMessage != "" {
 			message = parsedMessage

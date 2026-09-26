@@ -11,14 +11,24 @@ import (
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
-// TestNestedArraysSDKBuildsAndRuns generates the Go types module and the Go
-// SDK of fixture-nested-arrays-api, with grid.paint added, into a temp tree
-// laid out as a build writes it, then runs go mod tidy, go build, go vet and
-// go test on the SDK module with nestedArraysSDKTest: [][]T arguments and
-// responses cross an httptest server as nested JSON arrays, a nil inner
-// list or a bad element fails validation at its index path before any
-// request, and an optional list argument is sent only when it is not nil.
+// TestNestedArraysSDKBuildsAndRuns runs nestedArraysSDKTest in the generated
+// SDK: [][]T arguments and responses cross an httptest server as nested JSON
+// arrays, a nil inner list or a bad element fails validation at its index
+// path before any request, and an optional list argument is sent only when
+// it is not nil.
 func TestNestedArraysSDKBuildsAndRuns(t *testing.T) {
+	sdkOutput := runInNestedArraysSDK(t, "nested_arrays_test.go", nestedArraysSDKTest)
+	if !sdkOutput.ValidatesListElements {
+		t.Fatal("ValidatesListElements = false with grid.paint's Shade[][] and Point[][] arguments")
+	}
+}
+
+// runInNestedArraysSDK generates the Go types module and the Go SDK of
+// fixture-nested-arrays-api, with grid.paint added, into a temp tree laid
+// out as a build writes it, writes testSource into the SDK module as
+// testFile, then runs go mod tidy, go build, go vet and go test there.
+func runInNestedArraysSDK(t *testing.T, testFile, testSource string) *SDKOutput {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
@@ -45,10 +55,7 @@ func TestNestedArraysSDKBuildsAndRuns(t *testing.T) {
 	}
 
 	sdkOutput := writeNestedArraysSDK(t, apiOutput, sdkDir, typesDir)
-	if !sdkOutput.ValidatesListElements {
-		t.Fatal("ValidatesListElements = false with grid.paint's Shade[][] and Point[][] arguments")
-	}
-	if err := os.WriteFile(filepath.Join(sdkDir, "nested_arrays_test.go"), []byte(nestedArraysSDKTest), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sdkDir, testFile), []byte(testSource), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -64,6 +71,7 @@ func TestNestedArraysSDKBuildsAndRuns(t *testing.T) {
 			t.Fatalf("go %s in the generated SDK: %v\n%s", strings.Join(args, " "), err, out)
 		}
 	}
+	return sdkOutput
 }
 
 // nestedArraysSDKTest runs in the generated SDK module against an httptest
