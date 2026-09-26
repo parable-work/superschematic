@@ -3,8 +3,9 @@
 # maintains this repository anywhere but the license, the GitHub org in
 # module paths, import specifiers and publisher registrations, and the
 # maintainer lines in the contributor docs; when it carries an identifier
-# or id shape from the source tree's planning; or when core source uses
-# tenancy vocabulary. Everything else is a leftover from the source tree.
+# or id shape from the source tree's planning, or names one of the source
+# tree's schema kinds; or when core source uses tenancy vocabulary.
+# Everything else is a leftover from the source tree.
 #
 # The search runs with ripgrep when it is installed and with git grep
 # otherwise; the CI runners do not ship ripgrep. SCRUB_ENGINE=rg or
@@ -150,6 +151,18 @@ generator="$(scan -i 'psgen' . -- "${hashes[@]}")"
 if [ -n "$shapes$generator" ]; then
   echo "scrub: source-tree id shapes:" >&2
   printf '%s\n' "$shapes" "$generator" | drop '^$' >&2
+  exit 1
+fi
+
+# Schema kinds the source tree defines and the core does not: plots,
+# combinators and ontology definitions, in any case and inside identifiers.
+# Its fourth kind, primitives, is not searched: the core uses "primitive" for
+# a scalar's language primitive and for JSON primitives.
+kinds="$(scan -i 'plot|combinator|ontolog' . -- "${hashes[@]}")"
+
+if [ -n "$kinds" ]; then
+  echo "scrub: source-tree schema kinds:" >&2
+  echo "$kinds" >&2
   exit 1
 fi
 

@@ -108,7 +108,6 @@ const (
 	structField fieldKind = iota
 	aliasField
 	operationField
-	plotInputField
 )
 
 // fieldTypeExpr renders a field's full type expression: the base reference
