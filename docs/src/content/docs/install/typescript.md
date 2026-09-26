@@ -108,7 +108,10 @@ Every object type gets `parse<Type>Json`, `parse<Type>JsonNonStrict`,
 `validate<Type>`, which rejects a field value of the wrong JSON type, such
 as `"5"` in a `number` field, with `type` at the field's path. A
 `Generic.JSON` field takes any JSON value but null: a null or missing
-required one is `required`. Type-only imports (no runtime) come from
+required one is `required`. A `Generic.StringMap` field takes a JSON
+object and an `Embedding.Vector` field a JSON array, or the value's JSON
+text; any other JSON type is `type`
+([JSON-valued scalars](/superschematic/reference/json-scalars/)). Type-only imports (no runtime) come from
 `@schemas/catalog-types/types`.
 
 ## Consume a generated SDK
@@ -165,6 +168,10 @@ JSON value it holds, alone, as a list (`T[]`) or as a list of lists
   number, and `5` is not a string.
 - A `Generic.JSON` argument takes any JSON value but null, and the
   implementation receives that value.
+- A `Generic.StringMap` argument takes a JSON object and an
+  `Embedding.Vector` argument a JSON array, as the generated types send
+  them; any other JSON type, the value's JSON text included, answers 400
+  with `type`. See [JSON-valued scalars](/superschematic/reference/json-scalars/).
 - An argument of an object type goes through that type's generated
   `parse<T>Json` decoder, so the implementation receives objects. An
   element the decoder refuses answers "does not match the declared type".
