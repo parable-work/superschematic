@@ -8,10 +8,11 @@
 // as '//' comments above each node.
 //
 // TypeScript is the only format that cannot carry the full IR: schema-level
-// comments and descriptions, plot pipelines and versions, combinator and
-// primitive implementation refs, unions, and map-typed fields have no
-// TypeScript authoring form. The writer returns a descriptive error rather
-// than silently dropping such content.
+// comments, extension data and documents, descriptions on the schema and on
+// type, enum and operation-set definitions, unions, map-typed fields, and
+// scalar metadata beyond the language primitive have no TypeScript authoring
+// form. The writer returns a descriptive error rather than silently dropping
+// such content.
 package tswriter
 
 import (
