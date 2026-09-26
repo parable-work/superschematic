@@ -71,6 +71,18 @@ type ScalarInfo struct {
 	// type mapping is "any"; Generic.JSON): the validator skips string checks,
 	// and null is a missing value like undefined, except as a map value.
 	IsAnyJSON bool
+
+	// StructuredJSON is "object" or "array" for a scalar whose value is a JSON
+	// object or a JSON array (its json_schema type mapping; Generic.StringMap,
+	// Embedding.Vector): the validator takes that object or array, or its JSON
+	// text, refuses any other JSON type with "type", and hands the value to
+	// superscalar's validator for what it holds.
+	StructuredJSON string
+
+	// UsesLibValidate marks a scalar whose validator calls superscalar's
+	// validate<Symbol>: one with a custom validator, and every JSON object or
+	// array scalar.
+	UsesLibValidate bool
 }
 
 // FieldInfo holds information about a struct field for TypeScript generation.
@@ -369,6 +381,8 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 			IsIntegerLike:                s.Traits.IsIntegerLike,
 			HasParseFromJSON:             s.HasCustomParse && s.TargetType == "JSDate",
 			IsAnyJSON:                    s.Traits.IsAnyJSON,
+			StructuredJSON:               s.Traits.StructuredJSON,
+			UsesLibValidate:              s.HasCustomValidate || s.Traits.StructuredJSON != "",
 		}
 	}
 	return scalars

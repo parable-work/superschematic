@@ -254,8 +254,10 @@ func mapFromJSONValue(data []byte) (map[string]any, error) {
 {{- if .NeedsJSONValueMissing}}
 
 // jsonValueMissing reports whether a required field of a scalar that holds
-// any JSON value (Generic.JSON) has none: it is absent, which decodes to the
-// zero value, or it is the JSON null token. Every other JSON value is one.
+// any JSON value (Generic.JSON), or a JSON object (Generic.StringMap), has
+// none: it is absent, which decodes to the zero value (a nil map), or it is
+// the JSON null token. Every other JSON value, an empty object included, is
+// one.
 func jsonValueMissing(value any) bool {
 	rv := reflect.ValueOf(value)
 	if !rv.IsValid() || rv.IsZero() {
@@ -825,6 +827,11 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 	{{end}}
 	{{else if requiredAnyJSONField .}}
 	// Validate {{.Name}} (required): any JSON value but null.
+	if jsonValueMissing(t.{{.GoName}}) {
+		errors.AddFieldError("{{.Name}}", "required", "required field")
+	}
+	{{else if requiredStructuredJSONField .}}
+	// Validate {{.Name}} (required): a JSON {{.ScalarInfo.Traits.StructuredJSON}}, which may be empty.
 	if jsonValueMissing(t.{{.GoName}}) {
 		errors.AddFieldError("{{.Name}}", "required", "required field")
 	}

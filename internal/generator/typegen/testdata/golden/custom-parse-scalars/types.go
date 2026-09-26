@@ -143,6 +143,23 @@ func mapFromJSONValue(data []byte) (map[string]any, error) {
 	return result, nil
 }
 
+// jsonValueMissing reports whether a required field of a scalar that holds
+// any JSON value (Generic.JSON), or a JSON object (Generic.StringMap), has
+// none: it is absent, which decodes to the zero value (a nil map), or it is
+// the JSON null token. Every other JSON value, an empty object included, is
+// one.
+func jsonValueMissing(value any) bool {
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() || rv.IsZero() {
+		return true
+	}
+	if rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
+		token := bytes.TrimSpace(rv.Bytes())
+		return len(token) == 0 || bytes.Equal(token, []byte("null"))
+	}
+	return false
+}
+
 func mapFromYAMLValue(data []byte) (map[string]any, error) {
 	var result map[string]any
 	if err := yaml.Unmarshal(data, &result); err != nil {
@@ -495,6 +512,11 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 
 	if valid, fieldErrs := validateGenericInt64Value(t.GenericInt64, true); !valid {
 		errors.SetFieldErrors("genericInt64", fieldErrs)
+	}
+
+	// Validate genericStringMap (required): a JSON object, which may be empty.
+	if jsonValueMissing(t.GenericStringMap) {
+		errors.AddFieldError("genericStringMap", "required", "required field")
 	}
 
 	// Validate identityUUID (required)

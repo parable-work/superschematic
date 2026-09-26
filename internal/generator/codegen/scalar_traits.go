@@ -38,6 +38,7 @@ func BuildScalarTraits(scalarDef *ir.ScalarDef, tokens ScalarTokens, targetType 
 		traits.IsPathLike = true
 	}
 	traits.IsAnyJSON = scalarDef.IsAnyJSON()
+	traits.StructuredJSON = scalarDef.StructuredJSONType()
 	return traits
 }
 

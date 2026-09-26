@@ -240,7 +240,7 @@ class {{.Name}}(BaseModel):
 {{template "ruleChecks" .}}
         {{- end}}
         {{- else}}
-        if self.{{.TargetName}} is None:
+        if self.{{.TargetName}} is None{{if isStructuredJSONRoot .}} or self.{{.TargetName}} == ""{{end}}:
             errors.add_field_error("{{snakeCase .Name}}", "required", "required field")
         {{- if or (hasNonRequiredValidations .) (isList .)}}
         else:
@@ -258,13 +258,13 @@ class {{.Name}}(BaseModel):
                 except PydanticValidationError as e:
                     errors.add_field_error("{{snakeCase .Name}}", "invalid", str(e))
         {{- else}}
-        if self.{{.TargetName}} is not None:
+        if self.{{.TargetName}} is not None{{if isStructuredJSONRoot .}} and self.{{.TargetName}} != ""{{end}}:
             {{- if isList .}}
             # A None entry is reported at its own index below; the whole-value
             # check would repeat it at the field.
             if not ({{nullEntryCheck .}}):
                 try:
-                    TypeAdapter({{.TargetType}}).validate_python(self.{{.TargetName}})
+                    TypeAdapter({{.TargetType}}).validate_python({{structuredJSONListValue .}})
                 except PydanticValidationError as e:
                     errors.add_field_error("{{snakeCase .Name}}", "invalid", str(e))
             {{- else}}

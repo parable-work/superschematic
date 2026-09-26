@@ -82,7 +82,8 @@ func TestGeneratedStringMapUsesCanonicalParser(t *testing.T) {
 	for _, expected := range []string{
 		"GenericStringMap = Annotated[\n    Dict[str, str],",
 		"BeforeValidator(_custom_parse_generic_string_map)",
-		"parse_generic_string_map(v if isinstance(v, str) else json.dumps(v))",
+		"v = json.loads(v)",
+		"parse_generic_string_map(json.dumps(v))",
 		"return json.loads(parsed)",
 	} {
 		if !strings.Contains(string(source), expected) {
@@ -167,11 +168,112 @@ func TestGeneratedObjectParserUsesJSONTraits(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"import json",
-		"parse_acme_headers(v if isinstance(v, str) else json.dumps(v))",
+		"v = json.loads(v)",
+		"parse_acme_headers(json.dumps(v))",
 		"return json.loads(parsed)",
 	} {
 		if !strings.Contains(string(source), expected) {
 			t.Fatalf("generated object parser is missing %q:\n%s", expected, source)
 		}
+	}
+}
+
+// TestGeneratedEmbeddingVectorIsAList pins the Embedding.Vector binding: a
+// JSON array scalar is a list[float] whose before-validator reads a string
+// as the list's JSON text, whether or not superscalar is installed, and
+// refuses any other JSON type. When python3 has pydantic, the generated
+// model runs.
+func TestGeneratedEmbeddingVectorIsAList(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "vector-fixture")
+	files := map[string]any{
+		"schema.config.json": map[string]any{
+			"name":    "vector-fixture",
+			"kind":    "General",
+			"outputs": map[string]any{"types": map[string]any{"python": map[string]any{"enabled": true}}},
+		},
+		filepath.Join("src", "fixture.schema.json"): map[string]any{
+			"scalars": map[string]any{
+				"Embedding.Vector": map[string]any{"name": "Embedding.Vector", "languagePrimitive": "string"},
+			},
+			"types": map[string]any{
+				"VectorFixture": map[string]any{
+					"name": "VectorFixture",
+					"role": "EmbeddedStruct",
+					"fields": []any{
+						map[string]any{"name": "vec", "typeRef": map[string]any{"name": "Embedding.Vector"}, "required": true},
+						map[string]any{"name": "vecs", "typeRef": map[string]any{"name": "Embedding.Vector", "isArray": true}},
+					},
+				},
+			},
+		},
+	}
+	for rel, doc := range files {
+		data, err := json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, rel), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	schema, err := loader.LoadService(dir)
+	if err != nil {
+		t.Fatalf("load vector-fixture: %v", err)
+	}
+	output, err := Generate(schema, Options{SchemaName: "vector-fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outDir := t.TempDir()
+	if err := WriteTypes(output, outDir); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(outDir, output.PythonModuleName, "scalars.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"EmbeddingVector = Annotated[\n    list[float],",
+		"BeforeValidator(_custom_parse_embedding_vector)",
+		"parse_embedding_vector(json.dumps(v))",
+	} {
+		if !strings.Contains(string(source), expected) {
+			t.Fatalf("generated Embedding.Vector binding is missing %q:\n%s", expected, source)
+		}
+	}
+
+	if testing.Short() {
+		t.Skip("skipping generated-package run in -short mode")
+	}
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable; generated binding assertions passed")
+	}
+	if err := exec.Command(python, "-c", "import pydantic").Run(); err != nil {
+		t.Skip("pydantic unavailable; generated binding assertions passed")
+	}
+	command := exec.Command(python, "-B", "-c", `
+import importlib
+import sys
+from pydantic import ValidationError
+
+VectorFixture = importlib.import_module(sys.argv[1]).VectorFixture
+assert VectorFixture.model_validate({"vec": [0.5, 1]}, strict=True).vec == [0.5, 1.0]
+assert VectorFixture.model_validate({"vec": "[0.5, 1]", "vecs": ["[]", [2]]}, strict=True).vecs == [[], [2.0]]
+assert VectorFixture.model_validate({"vec": []}, strict=True).model_dump(mode="json")["vec"] == []
+for invalid in ({"k": 1}, 1.5, True, ["a"], "not json", "{}", None):
+    try:
+        VectorFixture.model_validate({"vec": invalid}, strict=True)
+    except ValidationError as error:
+        assert error.errors()[0]["loc"][0] == "vec", error
+    else:
+        raise AssertionError(f"{invalid!r} was accepted as a vector")
+`, output.PythonModuleName)
+	command.Env = append(os.Environ(), "PYTHONPATH="+outDir+string(os.PathListSeparator)+os.Getenv("PYTHONPATH"))
+	if result, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("generated Embedding.Vector model failed: %v\n%s", err, result)
 	}
 }

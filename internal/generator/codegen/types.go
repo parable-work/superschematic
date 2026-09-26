@@ -117,7 +117,13 @@ type ScalarTraits struct {
 	// a value, and JSON null is a missing one. Generic.JSON is one; an
 	// object- or array-shaped scalar (Generic.StringMap) is JSON-like but
 	// not any JSON.
-	IsAnyJSON      bool
+	IsAnyJSON bool
+	// StructuredJSON is "object" or "array" for a scalar whose value is a
+	// JSON object or a JSON array, from its json_schema type mapping
+	// (ir.ScalarDef.StructuredJSONType; Generic.StringMap, Embedding.Vector),
+	// and "" otherwise. The Go, TypeScript and Python types hold the object
+	// or the array; a validator also takes its JSON text.
+	StructuredJSON string
 	IsLocationLike bool
 	IsEmailLike    bool
 	IsURLLike      bool

@@ -167,3 +167,64 @@ func runGeneratedPackageScript(t *testing.T, output *ModuleOutput, script string
 		}
 	}
 }
+
+// TestGeneratedStructuredScalarsCheckTheirShape pins the validators of the
+// JSON object and array scalars (Generic.StringMap, Embedding.Vector): the
+// object or array is a value, and so is its JSON text; an empty string is
+// no value; any other JSON type is "type"; superscalar checks what the
+// value holds.
+func TestGeneratedStructuredScalarsCheckTheirShape(t *testing.T) {
+	schema := loadScalarService(t, "structured-fixture", []string{"Generic.StringMap", "Embedding.Vector"}, "StructuredFixture", []map[string]any{
+		{"name": "tags", "typeRef": map[string]any{"name": "Generic.StringMap"}, "required": true},
+		{"name": "vec", "typeRef": map[string]any{"name": "Embedding.Vector"}, "required": true},
+		{"name": "vecs", "typeRef": map[string]any{"name": "Embedding.Vector", "isArray": true}},
+	})
+	output, err := Generate(schema, Options{SchemaName: schema.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scalar := range output.Scalars {
+		want := map[string]string{"Generic.StringMap": "object", "Embedding.Vector": "array"}[scalar.Name]
+		if scalar.StructuredJSON != want || !scalar.UsesLibValidate {
+			t.Fatalf("%s: StructuredJSON = %q, UsesLibValidate = %v; want %q, true", scalar.Name, scalar.StructuredJSON, scalar.UsesLibValidate, want)
+		}
+	}
+	const runtimeTest = `
+import type { StructuredFixture } from './types';
+import { validateEmbeddingVector, validateEmbeddingVectorRequired } from './validators/scalars/embedding_vector';
+import { validateGenericStringMap, validateGenericStringMapRequired } from './validators/scalars/generic_string_map';
+import { validateStructuredFixture } from './validators/types/structuredfixture';
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
+function validators(result: ReturnType<typeof validateEmbeddingVector>): string[] {
+  return result[0] ? [] : (result[1] ?? []).map((e) => e.validator);
+}
+
+const valid: StructuredFixture = { tags: { k: 'v' }, vec: [0.5, 1], vecs: [[], [2]] };
+assert(validateStructuredFixture(valid) === true, 'a map and vectors were refused');
+for (const value of [[0.5, 1], [], '[0.5, 1]', '[]']) {
+  assert(validateEmbeddingVectorRequired(value as never)[0], 'vector refused: ' + JSON.stringify(value));
+}
+for (const value of [{ k: 'v' }, {}, '{"k": "v"}']) {
+  assert(validateGenericStringMapRequired(value as never)[0], 'map refused: ' + JSON.stringify(value));
+}
+for (const value of [{ k: 1 }, 1.5, true]) {
+  assert(validators(validateEmbeddingVector(value as never)).join() === 'type', 'vector type: ' + JSON.stringify(value));
+}
+for (const value of [['k'], 42, false]) {
+  assert(validators(validateGenericStringMap(value as never)).join() === 'type', 'map type: ' + JSON.stringify(value));
+}
+assert(!validateEmbeddingVector(['a'] as never)[0], 'superscalar did not check the elements');
+assert(!validateGenericStringMap({ k: 1 } as never)[0], 'superscalar did not check the values');
+assert(validators(validateEmbeddingVectorRequired('' as never)).join() === 'required', 'a required empty string is missing');
+assert(validateEmbeddingVector('' as never)[0], 'an optional empty string is absent');
+assert(validators(validateGenericStringMapRequired(null)).join() === 'required', 'a required null is missing');
+const wrong = validateStructuredFixture({ tags: ['k'], vec: {}, vecs: [[1], 7, null] } as unknown as StructuredFixture);
+assert(wrong !== true, 'wrong shapes were accepted');
+assert(JSON.stringify(Object.keys(wrong).sort()) === JSON.stringify(['tags', 'vec', 'vecs[1]', 'vecs[2]']), JSON.stringify(wrong));
+`
+	runGeneratedPackageScript(t, output, runtimeTest)
+}
