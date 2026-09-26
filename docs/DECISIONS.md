@@ -680,3 +680,83 @@ type from its mapping: `object` or `array` for these scalars, where it
 wrote `string`. The readers turn `object` into the `JSON` primitive and
 `array` into `String`; the rule keys off `x-typeMapping`, so both read
 back to the same checks.
+
+## D16. An engine takes schemas as data, and behaviors compose on its types
+
+A distribution built a server on the source tree that takes a schema while
+it runs, with no build step. It stores instances of the schema's type and
+serves them over HTTP, an event stream and MCP tools. The types in those
+schemas compose behaviors. A behavior is code that adds fields,
+operations, checks and storage to a type: a state machine, dependency
+edges between instances, leases with fencing tokens. A type composes
+several. The mechanism is generic, so it comes into the core under D10.
+What the distribution built on the engine is its application and stays
+there. A schema-driven UI is deferred.
+
+This entry records the design before any of it is built.
+
+The engine:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine is the TypeScript package `@superschematic/engine` in `runtime/engine/typescript`. `runtime/` holds the code that runs schemas: the libraries generated code links, and the engine, which runs a schema with no generated code. The engine uses the schema runtime for validation, the HTTP runtime for routing and authentication (D15) and superscalar for scalars. It does not call the compiler, and the compiler imports nothing from it (D1). | A separate repository, which would pin superscalar (D3), the schema runtime, the HTTP runtime and `@superschematic/schema-ir` at commits until the first release and version apart from them; a Go engine, which would rewrite the source implementation and its test suites; `runtime` as the package name, which the libraries generated code links already use |
+| It reads one schema as one document in the JSON data form of a schema file, the form `superschematic format --to=json` writes. The document has `kind: General` and a `name`, which keys the schema's versions. It has no `imports`: a type in another schema is reached through a link behavior. The strict loader (below) checks it. | `.schema.ts` files, which only the Go frontend reads, so the engine would call the compiler on every publish; a format of the engine's own; `--emit-ir` output, which is a whole service's merged IR rather than one file, carries composite defaults from sidecar files no schema file holds, and is read by the schema runtime's `parseSchemaIR` leniently, not against a meta-schema |
+| The type that holds instances is the type named like the schema, or its only type; other types are nested values. Each schema has the operations `create`, `get`, `list`, `update` and `delete`, and each behavior adds its own. Operation names are camelCase. | Several instance types in one schema |
+| A schema name has versions. `define` stores a draft and `publish` makes it the live version; instances are read and written with the newest published version. A new version may change fields only in ways every stored instance still satisfies: a new optional field, a new enum value, a wider bound. Anything else needs a new schema name. Each behavior declares which changes to its own config a new version may make, including adding or removing it. | Reading every stored instance with the newest version and dropping the fields it removed without an error, which the source implementation did; migrations, which can come later without changing the rule |
+| Storage is one SQLite file. The engine owns three tables: schema versions, instances with their fields as JSON, and an append-only event log. A behavior owns the columns it adds to the instances table and side tables of its own, and the engine creates them when a schema that uses the behavior is published. Behavior code runs synchronously inside the write transaction and cannot await, and one process writes the file. A driver interface wraps the JavaScript runtime's SQLite binding. Postgres and asynchronous transactions are a later entry. | Postgres now, which `sqlgen` targets but which nothing here needs yet, and which would make every behavior asynchronous; a dialect layer over SQLite and Postgres, which could not express the JSON functions and full-text search the behaviors' SQL uses |
+| Schemas and instances live in namespaces. The default is one. A deployment may configure more; a namespace looks a schema name up in itself, then in one shared namespace. Who may read, write, define and publish is an access policy the deployment supplies, beside the HTTP runtime's `Authenticator` and `PermissionMatcher`. Where a behavior limits who may call an operation (a transition only a reviewer may make), its config names a permission, and the deployment's `PermissionMatcher` decides whether a principal holds it. The engine has no roles of its own. | The source implementation's fixed set of actor kinds, which its behaviors' configs named, and its fixed rule for who may publish; tenancy, which D6 and D15 keep out of the HTTP runtimes |
+
+What it serves:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The HTTP API is a fixed set of routes that carry the schema name as a path parameter and resolve it per request, mounted through the HTTP runtime with its success and RFC 9457 problem envelopes (D15). | A router generated for each published version, which Hono cannot unmount when the version changes |
+| The engine serves one MCP tool per operation, behavior operations included, in the shape the SDK generators write to `tools/schema.json`. Its MCP endpoint authenticates through the same `Authenticator`. | One tool per schema with an `action` argument, which the source implementation used; a distribution can add that as an adapter |
+| The invocation policy (D11) and the vendor-extension keys are engine options. The defaults are the core's; a deployment passes the policy and keys its binary registers, so the engine writes what its generated SDKs write. A behavior's declaration sets the policy of each of its operations. | Reading them from the Go registry, which does not run inside the engine; the core's key everywhere, which drops the bytes D11 exists to keep |
+| Events stream as server-sent events on a route the HTTP runtime authenticates like any other. A client resumes from a cursor and receives new events and schema changes as they commit. | A WebSocket, which the source implementation used; it needs an upgrade handler outside the router and an authentication handshake of its own |
+| The engine serves a JSON describe document per schema: the JSON Schema of an instance, the behaviors with their config, and the operations with their parameter schemas. It also serves MCP tools for writing schemas: list, describe and define a draft. They cannot publish; publishing is an HTTP call the access policy governs. | Tools that publish, which would let an MCP client put a schema live on its own |
+
+Behaviors:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The concept is a behavior, not a trait. The core `@trait` decorator already marks a type as a trait (`role: Trait`): types list it in `implements`, their config arguments are checked against its `TraitConfig`, and the TypeScript reader copies a field-bearing trait's fields onto them at build time. A behavior adds operations, checks and storage at run time, which a trait cannot. | Carrying behaviors in `implements`, which the source implementation did and which would give one IR field two meanings |
+| The IR gets `TypeDef.Behaviors []BehaviorRef`. A `BehaviorRef` has a `Name` and a `Config`, which is canonical JSON (`ir.CanonicalJSON`) as extension data is, so it round-trips byte for byte across the forms. The field is written after `implements` and omitted when empty, so IR JSON for a schema without behaviors is byte for byte what it was. The list is ordered, and the behaviors' checks run in list order. A type lists a behavior at most once. | `map[string]any`, as `TraitRef.ConfigArgs` is; a slot under `extensions`, which would make a core mechanism look like one extension's data |
+| A behavior is declared once, in a JSON file: its name, description, config JSON Schema, the behaviors it requires and conflicts with, the fields it adds, and its operations with their parameter and result schemas, whether each writes, and its invocation policy. The file sits beside the Go package that registers it, which embeds it and passes it to `Registry.RegisterBehavior`. A Go tool with a `-check` mode copies it into the npm package that implements the behavior, as `internal/tools/scalarcatalog` writes the scalar catalogs. | A declaration only in TypeScript, which `superschematic build` could not check; separate Go and TypeScript declarations, which drift |
+| The loader fails a load on an unknown behavior, a config its schema rejects, a missing requirement, a conflict, a field that collides with the type's own or another behavior's, or two behaviors on one type with the same operation name. `superschematic json-schema` limits `behaviors[].name` to the registered names and checks each `config` against its declaration, as it checks a decorator's arguments (section 5 of `docs/extension-model.md`). The engine runs the same checks at publish time and refuses a behavior it has no implementation for. | Accepting a behavior with no implementation at publish and only listing it as unimplemented, which the source implementation did |
+| The core declares every behavior this repository implements, under bare names. An extension's behaviors are named `<extension>.<Name>`. This is the one place an extension's data sits outside its `extensions.<name>` slot, so `Registry.Use` rejects an extension name that contains a dot. An extension that declares a behavior ships its TypeScript implementation, which a deployment registers with the engine. | Qualifying the core's own names; letting an extension declare a bare name |
+| Registering an implementation with the engine does not load an extension into the compiler at run time, which section 2 of `docs/extension-model.md` rules out. The declaration is still a Go registration compiled into the binary; the engine only runs the code for it. | An engine that loads Go extensions as plugins |
+| A behavior writes only its own storage. It changes another behavior's state only through that behavior's operations, so a status changes only through the state machine's checks. | Shared columns written with raw SQL, as in the source implementation, where four behaviors set a status without the state machine's allowed transitions or guards |
+| The TypeScript authoring form is a `@behavior(name, config)` decorator from `@superschematic/schema` on a class; several on one class apply in source order. Its config is typed per name through an interface an extension's authoring package augments, as `MCPToolOptions` is (D11). The data forms carry `behaviors: [{name, config}]` on a type, and `format --to=ts` writes the decorator. | A decorator per behavior, which would add a TypeScript export and a `DecoratorSpec` for every declaration |
+| Until a generator renders behaviors, it refuses a type that declares one, with an error that names the generator. `build --emit-ir`, `format` and `json-schema` accept it. | Letting a generator ignore them, which would generate a type without the fields and operations its behaviors add; allowing behaviors only on General-kind schemas, whose `types` generator would still do that |
+
+Which behaviors ship:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine package carries a state machine with guarded transitions, dependency edges between instances, typed links across schemas optionally pinned to a revision, immutable revisions with an optional review step, reactions to events, fields derived from linked instances, comments, and full-text search with optional vectors. | One package for every behavior |
+| `@superschematic/engine-workqueue` carries claimable work: leases with fencing tokens and heartbeats, assignment, a claim order and `claimNext` (the next eligible instance, claimed in one transaction that takes its lease, reserves its budget and moves its status), reserve-then-settle budgets in units the deployment names, retries per failure class, worker presence, and blueprints that create child instances with their edges. The core declares these behaviors too; a deployment installs the package to run them. In the source implementation the claim order and the claim were store code; here they are behaviors, so the engine names none of them. | Leaving claimable work to each distribution; putting it in the engine package |
+| Reading the event log belongs to the engine, not to a behavior. Display metadata a UI reads, such as a label or which field is the title, is written with decorators, as documentation is (D10); it adds no field, operation or storage. The source implementation had one more behavior, specific to its application, which does not come across. | A behavior for either |
+
+The data form in TypeScript:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The schema-file data form gets TypeScript types: the `Document` and every IR node type under `$defs`. A Go tool writes them from the reflection `json-schema` uses, with the parts a registry closes (extension slots, documents, the invocation-policy key) left open, into a subpath of `@superschematic/schema-ir`. Its `-check` mode runs in `make test` and CI, as the scalar catalog's does (`catalog-check`). The package's `index.d.ts`, which types the runtime document the schema runtime reads, stays as it is. | A hand-written mirror; moving the package root to the data form, which changes the shape of every type the schema runtime imports under the same names; `json-schema-to-typescript`, which the source implementation used, as a second generator with rules of its own beside the Go tools that write every other generated file |
+| The strict loader goes in `@superschematic/schema-runtime`. It does what the Go data-form reader does and no more: it checks a document against a meta-schema, decodes it and fills the registry's defaults, for which the meta-schema gains the invocation policy's default. The meta-schema is the `json-schema` output of the deployment's binary, so a schema that uses an extension's decorators loads; the core's is the default. Its serializer writes the document as `ir.CanonicalJSON` does, compact with object keys sorted; the engine stores that form and identifies a version by it. `parseSchemaIR` stays, and the engine builds its validator from the loaded document with it. | A loader bound to the core meta-schema, which refuses every schema that uses an extension |
+| A Go test writes accept and reject vectors, with the expected canonical bytes, to `runtime/schema/testdata/`, and the TypeScript suite asserts them, as `validation_parity.json` does for validation (D12, amended). | A TypeScript-only loader with its own fixtures |
+
+Each new package carries the repository's one version and joins `make ts`
+and the CI `typescript` job, and `@superschematic/schema-ir` becomes a
+version site in `scripts/bump_version.py`. The port is done, in D10's
+terms, when the engine runs its behaviors with no extension linked and
+the acme example declares one behavior (`acme.<Name>`) with its
+TypeScript implementation and no core edit, asserted by
+`scripts/smoke.sh` (section 10 of `docs/extension-model.md`).
+
+Status: nothing is built. The TypeScript types and the strict loader come
+first, because the engine and its publish checks read schemas through
+them; behavior declarations in the compiler follow. Each change that
+lands a piece updates this paragraph, the README layout table and the
+pages that describe it. The names and rules are reversible until the
+first release.
