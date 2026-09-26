@@ -22,6 +22,19 @@
         "hasCustomNormalize": true,
         "hasCustomValidate": true
       },
+      "Embedding.Vector": {
+        "name": "Embedding.Vector",
+        "description": "Fixed-dimensional float32 vector",
+        "languagePrimitive": "string",
+        "primitive": "String",
+        "typeMappings": {
+          "go": "EmbeddingVector",
+          "json_schema": "array",
+          "python": "list[float]",
+          "rust": "Vec\u003cf32\u003e",
+          "typescript": "number[]"
+        }
+      },
       "Generic.JSON": {
         "name": "Generic.JSON",
         "description": "Any valid JSON value: object, array, primitive, or null",
@@ -52,6 +65,21 @@
         },
         "minimum": 0,
         "maximum": 1
+      },
+      "Generic.StringMap": {
+        "name": "Generic.StringMap",
+        "description": "A string-to-string map stored as JSON",
+        "languagePrimitive": "string",
+        "primitive": "String",
+        "typeMappings": {
+          "go": "GenericStringMap",
+          "json_schema": "object",
+          "python": "Dict[str, str]",
+          "rust": "std::collections::HashMap\u003cString, String\u003e",
+          "sql": "JSONB",
+          "typescript": "Record\u003cstring, string\u003e"
+        },
+        "hasCustomParse": true
       },
       "Identity.Name": {
         "name": "Identity.Name",
@@ -386,6 +414,54 @@
               "name": "ParityShade"
             },
             "required": true
+          }
+        ],
+        "jsonField": true
+      },
+      "StructuredMatrix": {
+        "name": "StructuredMatrix",
+        "owner": "src/parity-matrix.schema.json",
+        "role": "EmbeddedStruct",
+        "fields": [
+          {
+            "name": "reqMap",
+            "typeRef": {
+              "name": "Generic.StringMap"
+            },
+            "required": true
+          },
+          {
+            "name": "optMap",
+            "typeRef": {
+              "name": "Generic.StringMap"
+            }
+          },
+          {
+            "name": "mapList",
+            "typeRef": {
+              "name": "Generic.StringMap",
+              "isArray": true
+            }
+          },
+          {
+            "name": "reqVec",
+            "typeRef": {
+              "name": "Embedding.Vector"
+            },
+            "required": true
+          },
+          {
+            "name": "optVec",
+            "typeRef": {
+              "name": "Embedding.Vector"
+            }
+          },
+          {
+            "name": "vecList",
+            "typeRef": {
+              "name": "Embedding.Vector",
+              "isArray": true
+            }
           }
         ],
         "jsonField": true
@@ -2057,6 +2133,218 @@
           "required"
         ],
         "jsonList[1]": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "structured_value",
+      "type": "StructuredMatrix",
+      "payload": {
+        "reqMap": {
+          "k": "v"
+        },
+        "optMap": {},
+        "mapList": [
+          {
+            "a": "b"
+          },
+          {}
+        ],
+        "reqVec": [
+          0.5,
+          -1
+        ],
+        "optVec": [],
+        "vecList": [
+          [
+            1,
+            2.5
+          ],
+          []
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "structured_text",
+      "type": "StructuredMatrix",
+      "payload": {
+        "reqMap": "{\"k\": \"v\"}",
+        "optMap": "{}",
+        "mapList": [
+          "{\"a\": \"b\"}"
+        ],
+        "reqVec": "[0.5, -1]",
+        "optVec": "[]",
+        "vecList": [
+          "[1, 2.5]"
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "structured_map_wrong_type",
+      "type": "StructuredMatrix",
+      "payload": {
+        "reqMap": [
+          "a"
+        ],
+        "optMap": 42,
+        "mapList": [
+          {},
+          true
+        ],
+        "reqVec": []
+      },
+      "want": {
+        "mapList[1]": [
+          "type"
+        ],
+        "optMap": [
+          "type"
+        ],
+        "reqMap": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "structured_vector_wrong_type",
+      "type": "StructuredMatrix",
+      "payload": {
+        "reqMap": {},
+        "reqVec": {
+          "k": 1
+        },
+        "optVec": 1.5,
+        "vecList": [
+          [
+            1
+          ],
+          false
+        ]
+      },
+      "want": {
+        "optVec": [
+          "type"
+        ],
+        "reqVec": [
+          "type"
+        ],
+        "vecList[1]": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "structured_required_null",
+      "type": "StructuredMatrix",
+      "payload": {
+        "reqMap": null,
+        "reqVec": null
+      },
+      "want": {
+        "reqMap": [
+          "required"
+        ],
+        "reqVec": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "structured_required_absent",
+      "type": "StructuredMatrix",
+      "payload": {
+        "optMap": {
+          "k": "v"
+        },
+        "optVec": [
+          1
+        ]
+      },
+      "want": {
+        "reqMap": [
+          "required"
+        ],
+        "reqVec": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "structured_optional_null",
+      "type": "StructuredMatrix",
+      "payload": {
+        "reqMap": {},
+        "reqVec": [],
+        "optMap": null,
+        "optVec": null,
+        "mapList": null,
+        "vecList": null
+      },
+      "want": {}
+    },
+    {
+      "name": "structured_optional_absent",
+      "type": "StructuredMatrix",
+      "payload": {
+        "reqMap": {
+          "k": "v"
+        },
+        "reqVec": [
+          1
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "structured_empty_text",
+      "type": "StructuredMatrix",
+      "payload": {
+        "reqMap": "",
+        "optMap": "",
+        "mapList": [
+          ""
+        ],
+        "reqVec": "",
+        "optVec": "",
+        "vecList": [
+          ""
+        ]
+      },
+      "want": {
+        "reqMap": [
+          "required"
+        ],
+        "reqVec": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "structured_list_null_element",
+      "type": "StructuredMatrix",
+      "payload": {
+        "reqMap": {},
+        "reqVec": [],
+        "mapList": [
+          {},
+          null
+        ],
+        "vecList": [
+          null,
+          [
+            1
+          ]
+        ]
+      },
+      "want": {
+        "mapList[1]": [
+          "required"
+        ],
+        "vecList[0]": [
           "required"
         ]
       }
