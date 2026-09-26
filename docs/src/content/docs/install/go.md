@@ -221,3 +221,11 @@ sdk, err := catalogsdk.New(catalogsdk.SDKConfig{
 Namespace fields on the client match the operation sets in the schema
 (`ProductQueries` becomes a `ProductQueries` field). See
 `examples/acme-schematic` for a full API plus auth provider.
+
+A response outside 2xx returns an `*APIError`, or a type that embeds one:
+`*AuthenticationError` for 401, `*AuthorizationError` for 403 and
+`*RateLimitError` for 429. `Message` is the problem's `detail` (or an
+older body's `error` or `message`), `Code` is its `code` and
+`StatusCode` the HTTP status. `Error()` joins them:
+`order 7 has already shipped (code: ORDER_SHIPPED, status: 409)`, or
+`<message> (status: <status>)` when the response has no code.
