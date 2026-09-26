@@ -7,8 +7,8 @@ import type { JSDate } from '../../types';
 {{if scalarLibTypeName .Scalar}}
 import type { {{.Scalar.TSType}} } from '{{$.Module.Naming.ScalarNpmPackage}}/scalars';
 {{end}}
-{{if or .Scalar.HasCustomValidate .Scalar.HasCustomNormalize .Scalar.HasCustomParse}}
-import { {{if .Scalar.HasCustomValidate}}validate{{.Scalar.Symbol}} as validate{{.Scalar.Symbol}}FromLib{{end}}{{if and .Scalar.HasCustomValidate (or .Scalar.HasCustomNormalize .Scalar.HasCustomParse)}}, {{end}}{{if .Scalar.HasCustomNormalize}}normalize{{.Scalar.Symbol}} as normalize{{.Scalar.Symbol}}FromLib{{end}}{{if and .Scalar.HasCustomNormalize .Scalar.HasCustomParse}}, {{end}}{{if .Scalar.HasCustomParse}}parse{{.Scalar.Symbol}} as parse{{.Scalar.Symbol}}FromLib{{end}} } from '{{$.Module.Naming.ScalarNpmPackage}}/scalars';
+{{if or .Scalar.UsesLibValidate .Scalar.HasCustomNormalize .Scalar.HasCustomParse}}
+import { {{if .Scalar.UsesLibValidate}}validate{{.Scalar.Symbol}} as validate{{.Scalar.Symbol}}FromLib{{end}}{{if and .Scalar.UsesLibValidate (or .Scalar.HasCustomNormalize .Scalar.HasCustomParse)}}, {{end}}{{if .Scalar.HasCustomNormalize}}normalize{{.Scalar.Symbol}} as normalize{{.Scalar.Symbol}}FromLib{{end}}{{if and .Scalar.HasCustomNormalize .Scalar.HasCustomParse}}, {{end}}{{if .Scalar.HasCustomParse}}parse{{.Scalar.Symbol}} as parse{{.Scalar.Symbol}}FromLib{{end}} } from '{{$.Module.Naming.ScalarNpmPackage}}/scalars';
 {{end}}
 
 {{if .Scalar.Pattern}}
@@ -34,7 +34,31 @@ export function validate{{.Scalar.Symbol}}(
     return [true, null];
   }
 
-  {{if and (eq .Scalar.Primitive "string") (not .Scalar.HasJSONParse) (not .Scalar.IsAnyJSON)}}
+  {{if .Scalar.StructuredJSON}}
+  // The value is a JSON {{.Scalar.StructuredJSON}}, or its JSON text; an empty string is no
+  // value. Any other JSON type is "type". superscalar checks what it holds.
+  const candidate: unknown = value;
+  if (candidate === "") {
+    return [true, null];
+  }
+  {{if eq .Scalar.StructuredJSON "array"}}
+  if (typeof candidate !== "string" && !Array.isArray(candidate)) {
+    return [false, [{ validator: "type", message: "expected a JSON array" }]];
+  }
+  {{else}}
+  if (typeof candidate !== "string" && (typeof candidate !== "object" || candidate === null || Array.isArray(candidate))) {
+    return [false, [{ validator: "type", message: "expected a JSON object" }]];
+  }
+  {{end}}
+  {
+    const [isValid, coreErrors] = validate{{.Scalar.Symbol}}FromLib(candidate);
+    if (!isValid && coreErrors) {
+      errors.push(...coreErrors);
+    }
+  }
+  {{end}}
+
+  {{if and (eq .Scalar.Primitive "string") (not .Scalar.HasJSONParse) (not .Scalar.IsAnyJSON) (not .Scalar.StructuredJSON)}}
   {{if eq .Scalar.TSType "string"}}
   // A value of another JSON type is "type", and its length and format are
   // not checked.
@@ -108,7 +132,7 @@ export function validate{{.Scalar.Symbol}}(
   {{end}}
   {{end}}
 
-  {{if .Scalar.HasCustomValidate}}
+  {{if and .Scalar.HasCustomValidate (not .Scalar.StructuredJSON)}}
   // The scalar core checks the rules above again, so it runs only when they
   // pass: one failing value, one error.
   if (errors.length === 0) {
@@ -119,7 +143,7 @@ export function validate{{.Scalar.Symbol}}(
   }
   {{end}}
 
-  {{if and .Scalar.HasJSONParse (not .Scalar.HasCustomValidate)}}
+  {{if and .Scalar.HasJSONParse (not .Scalar.HasCustomValidate) (not .Scalar.StructuredJSON)}}
   if (parse{{.Scalar.Symbol}}FromLib(value) === null) {
     errors.push({ validator: "parse", message: "invalid {{.Scalar.Name}}" });
   }
@@ -136,6 +160,11 @@ export function validate{{.Scalar.Symbol}}Required(
 ): ScalarValidationResult {
   {{if eq .Scalar.TSType "string"}}
   if (value === null || value === undefined || value === "") {
+    return [false, [{ validator: "required", message: "required field" }]];
+  }
+  {{else if .Scalar.StructuredJSON}}
+  // An empty string is no JSON text: a missing value, as for a string scalar.
+  if (value === null || value === undefined || (value as unknown) === "") {
     return [false, [{ validator: "required", message: "required field" }]];
   }
   {{else}}

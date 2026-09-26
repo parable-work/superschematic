@@ -80,8 +80,9 @@ type ModuleOutput struct {
 	// imports json and math for its host-value validator.
 	HasGenericJSON bool
 
-	// HasJSONParse is true when a custom parser takes and returns JSON
-	// values (pythonParsesJSON); scalars.py imports json for it.
+	// HasJSONParse is true when a scalar's wrapper takes and returns JSON
+	// values (pythonParsesJSON); scalars.py imports json, and superscalar
+	// when it is installed, for it.
 	HasJSONParse bool
 
 	// Custom superscalar implementation flags (any scalar).

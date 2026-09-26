@@ -82,12 +82,12 @@ func (o *ModuleOutput) HasListFields() bool {
 }
 
 // NeedsJSONValueMissing reports whether types.go's Validate checks a
-// required any-JSON field (requiredAnyJSONField), which calls the
-// jsonValueMissing helper.
+// required any-JSON field (requiredAnyJSONField) or JSON object field
+// (requiredStructuredJSONField), which call the jsonValueMissing helper.
 func (o *ModuleOutput) NeedsJSONValueMissing() bool {
 	for _, typeInfo := range o.Types {
 		for _, field := range typeInfo.Fields {
-			if requiredAnyJSONField(field) {
+			if requiredAnyJSONField(field) || requiredStructuredJSONField(field) {
 				return true
 			}
 		}

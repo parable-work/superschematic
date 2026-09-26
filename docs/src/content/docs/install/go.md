@@ -171,6 +171,10 @@ comma-separated values (`?labels=a,b&labels=c`). In the body:
   `5` is not a string.
 - A `Generic.JSON` argument takes any JSON value but null, and the
   implementation receives that value.
+- A `Generic.StringMap` argument takes a JSON object and an
+  `Embedding.Vector` argument a JSON array; any other JSON type, the
+  value's JSON text included, is `type`. See
+  [JSON-valued scalars](/superschematic/reference/json-scalars/).
 - An object-typed argument goes through its type's decoder, and its field
   errors nest under the argument's path.
 - A list is its JSON array and follows the

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/runtime/schema/go/internal/jsonshape"
 )
 
 // validateScalarRequired validates a scalar value with a required check, mirroring the
@@ -17,6 +18,11 @@ import (
 func (v *Validator) validateScalarRequired(scalar *ir.ScalarDef, value any) []ValidationError {
 	if scalar.IsAnyJSON() {
 		return validateAnyJSON(value)
+	}
+	if shape := scalar.StructuredJSONType(); shape != "" {
+		if _, isText := value.(string); !isText {
+			return v.validateStructuredJSON(scalar, shape, value)
+		}
 	}
 	if isStringPrimitive(scalar.Primitive) {
 		s, ok := value.(string)
@@ -39,6 +45,11 @@ func (v *Validator) validateScalarRequired(scalar *ir.ScalarDef, value any) []Va
 func (v *Validator) validateScalarValue(scalar *ir.ScalarDef, value any) []ValidationError {
 	if scalar.IsAnyJSON() {
 		return validateAnyJSON(value)
+	}
+	if shape := scalar.StructuredJSONType(); shape != "" {
+		if _, isText := value.(string); !isText {
+			return v.validateStructuredJSON(scalar, shape, value)
+		}
 	}
 	if isStringPrimitive(scalar.Primitive) {
 		s, ok := value.(string)
@@ -66,6 +77,31 @@ func validateAnyJSON(value any) []ValidationError {
 		return []ValidationError{{Validator: "type", Message: "expected a JSON value"}}
 	}
 	return nil
+}
+
+// validateStructuredJSON validates a present value, other than a string, of
+// a scalar whose value is a JSON object or a JSON array
+// (ir.ScalarDef.StructuredJSONType; Generic.StringMap and Embedding.Vector in
+// the core catalog). The catalog gives it the String primitive, but the
+// object or array is the value every generated type holds. A value of
+// another JSON type, or one no JSON document can carry, is "type". The
+// object or array goes to the registered validator as its JSON text, the
+// form the scalar core reads, so the core checks what it holds (a string
+// map's values, a vector's numbers). A string is the value's JSON text: the
+// callers hand it to the String primitive's checks, as before.
+func (v *Validator) validateStructuredJSON(scalar *ir.ScalarDef, shape string, value any) []ValidationError {
+	if jsonshape.Of(value) != shape || !isJSONValue(value, 0) {
+		return []ValidationError{{Validator: "type", Message: "expected " + jsonshape.Noun(shape)}}
+	}
+	fn, ok := v.registry.Get(scalar.Name)
+	if !ok {
+		return nil
+	}
+	text, err := json.Marshal(value)
+	if err != nil {
+		return []ValidationError{{Validator: "type", Message: "expected " + jsonshape.Noun(shape)}}
+	}
+	return fn(string(text))
 }
 
 // maxJSONDepth is encoding/json's nesting limit. No decoded value is deeper,

@@ -8,6 +8,7 @@ const {
   ScalarValidatorRegistry,
   loadType,
   parseSchemaIR,
+  ScalarParseRegistry,
   validateSchemaType,
 } = require('../dist/runtime/index.js');
 
@@ -149,6 +150,103 @@ test('loading an any-JSON scalar keeps the value as it is', () => {
     const result = loadType(anyJSONSchema, 'Doc', payload, { strict });
     assert.deepStrictEqual(result.errors, {});
     assert.deepStrictEqual(result.data, JSON.parse(payload));
+  }
+});
+
+// Scalars whose json_schema type mapping is "object" or "array" hold that
+// JSON object or array, whatever their name and String primitive, or the
+// value's JSON text. The registered validator sees the object or array as
+// its JSON text; the object scalar's parse step sees JSON text either way.
+const structuredSchema = parseSchemaIR({
+  name: 'scalar-errors-structured',
+  kind: 'General',
+  scalars: {
+    'Mystery.Tags': {
+      name: 'Mystery.Tags',
+      primitive: 'String',
+      languagePrimitive: 'string',
+      hasCustomParse: true,
+      typeMappings: { json_schema: 'object' },
+    },
+    'Mystery.Points': {
+      name: 'Mystery.Points',
+      primitive: 'String',
+      languagePrimitive: 'string',
+      typeMappings: { json_schema: 'array' },
+    },
+  },
+  types: {
+    Doc: {
+      name: 'Doc',
+      role: 'EmbeddedStruct',
+      fields: [
+        { name: 'tags', typeRef: { name: 'Mystery.Tags' }, required: true },
+        { name: 'points', typeRef: { name: 'Mystery.Points' } },
+        { name: 'pointList', typeRef: { name: 'Mystery.Points', isArray: true } },
+      ],
+    },
+  },
+});
+const structuredCalls = [];
+const structuredRegistry = new ScalarValidatorRegistry(
+  Object.fromEntries(
+    ['Mystery.Tags', 'Mystery.Points'].map((name) => [
+      name,
+      (value) => {
+        structuredCalls.push(value);
+        return value.includes('bad') ? [{ validator: 'pattern', message: 'core rejects it' }] : null;
+      },
+    ])
+  )
+);
+
+function structuredVerdicts(data) {
+  const result = validateSchemaType(structuredSchema, 'Doc', data, { scalarRegistry: structuredRegistry });
+  if (result === true) return {};
+  return Object.fromEntries(Object.entries(result).map(([k, v]) => [k, v.map((e) => e.validator)]));
+}
+
+test('a JSON object or array scalar takes its value or the JSON text of it', () => {
+  structuredCalls.length = 0;
+  assert.deepStrictEqual(
+    structuredVerdicts({ tags: { k: 'v' }, points: [0.5, -1], pointList: [[1], [], '[2]'] }),
+    {}
+  );
+  assert.deepStrictEqual(structuredCalls, ['{"k":"v"}', '[0.5,-1]', '[1]', '[]', '[2]']);
+  assert.deepStrictEqual(structuredVerdicts({ tags: '{"k": "v"}', points: '[]' }), {});
+  assert.deepStrictEqual(structuredVerdicts({ tags: { bad: 1 } }), { tags: ['pattern'] });
+});
+
+test('a JSON object or array scalar refuses another JSON type', () => {
+  assert.deepStrictEqual(structuredVerdicts({ tags: ['k'], points: {}, pointList: [true, null] }), {
+    tags: ['type'],
+    points: ['type'],
+    'pointList[0]': ['type'],
+    'pointList[1]': ['required'],
+  });
+  assert.deepStrictEqual(structuredVerdicts({ points: null }), { tags: ['required'] });
+  assert.deepStrictEqual(structuredVerdicts({ tags: {}, points: [Number.NaN] }), { points: ['type'] });
+});
+
+test('loading a JSON object or array scalar reads its JSON text into the value', () => {
+  const seen = [];
+  const parseRegistry = new ScalarParseRegistry();
+  parseRegistry.register('Mystery.Tags', (input) => {
+    seen.push(input);
+    return input.includes('bad') ? [input, [{ validator: 'parse', message: 'not a string map' }]] : ['{"k":"v"}', []];
+  });
+  const payload = '{"tags": {"k": "v"}, "points": "[0.5, -1]", "pointList": [[1], "[2]"]}';
+  for (const strict of [false, true]) {
+    seen.length = 0;
+    const result = loadType(structuredSchema, 'Doc', payload, { strict, parseRegistry });
+    assert.deepStrictEqual(result.errors, {});
+    assert.deepStrictEqual(result.data, { tags: { k: 'v' }, points: [0.5, -1], pointList: [[1], [2]] });
+    assert.deepStrictEqual(seen, ['{"k":"v"}']);
+
+    const bad = loadType(structuredSchema, 'Doc', '{"tags": {"bad": 1}, "points": 5}', { strict, parseRegistry });
+    assert.deepStrictEqual(Object.keys(bad.errors).sort(), ['points', 'tags']);
+    assert.strictEqual(bad.errors.tags[0].validator, 'parse');
+    assert.strictEqual(bad.errors.points[0].validator, 'type');
   }
 });
 

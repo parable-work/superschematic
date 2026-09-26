@@ -7,6 +7,7 @@ fields with ``{"validator": "unknown_field"}``.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,7 +18,7 @@ from ..errors import (
     has_errors as _has_errors,
     new_validation_errors,
 )
-from ..validation.types import FieldDef, ScalarDef, Schema, TypeDef, TypeRef
+from ..validation.types import FieldDef, ScalarDef, Schema, TypeDef, TypeRef, json_shape_of
 from .coerce import coerce_bool, coerce_float, coerce_int
 from .defaults import apply_default
 from .registry import ScalarNormalizeRegistry, ScalarParseRegistry
@@ -55,6 +56,9 @@ def field_key(field: FieldDef) -> str:
 
 
 def _type_mismatch_message(scalar: ScalarDef) -> str:
+    shape = scalar.structured_json_type()
+    if shape:
+        return f"expected a JSON {shape} or its JSON text"
     primitive = scalar.primitive
     if primitive == "Int":
         return "expected integer value"
@@ -72,6 +76,14 @@ def _apply_scalar(ctx: WalkContext, scalar: ScalarDef, value: Any) -> tuple[Any,
     # checks it.
     if scalar.is_any_json():
         return value, True
+    # A JSON object or array scalar takes its dict or list, or the value's
+    # JSON text, which the String primitive's steps below read.
+    shape = scalar.structured_json_type()
+    if shape:
+        if json_shape_of(value) == shape:
+            return value, True
+        if not isinstance(value, str):
+            return value, False
     primitive = scalar.primitive
     if primitive == "Int":
         return coerce_int(value, ctx.strict)
@@ -98,6 +110,9 @@ def _apply_scalar_parse(
     key: str,
     errors: ValidationErrors,
 ) -> Any:
+    shape = scalar.structured_json_type()
+    if shape:
+        return _parse_structured_json(ctx, scalar, shape, value, key, errors)
     if not scalar.has_custom_parse:
         return value
     fn = ctx.parse_registry.get(scalar.name)
@@ -111,6 +126,46 @@ def _apply_scalar_parse(
         coerced, ok = coerce_int(parsed, False)
         return coerced if ok else value
     return parsed
+
+
+def _parse_structured_json(
+    ctx: WalkContext,
+    scalar: ScalarDef,
+    shape: str,
+    value: Any,
+    key: str,
+    errors: ValidationErrors,
+) -> Any:
+    """Parse a value of a JSON object or array scalar
+    (``ScalarDef.structured_json_type``) into that dict or list, the value
+    every generated type holds.
+
+    A string is the value's JSON text. When the scalar has a registered parser
+    (Generic.StringMap), the text, or the JSON text of a dict or list, goes
+    through it and its canonical text is decoded; a parser error is the result.
+    Text that does not decode to the declared shape is kept as it is, for
+    validation to report.
+    """
+    text = value if isinstance(value, str) else None
+    fn = ctx.parse_registry.get(scalar.name) if scalar.has_custom_parse else None
+    if fn is not None:
+        if text is None:
+            try:
+                text = json.dumps(value, separators=(",", ":"), allow_nan=False)
+            except (TypeError, ValueError):
+                return value
+        parsed, errs = fn(text)
+        if errs:
+            errors[key] = list(errs)
+            return value
+        text = parsed
+    if text is None:
+        return value
+    try:
+        decoded = json.loads(text)
+    except ValueError:
+        return value
+    return decoded if json_shape_of(decoded) == shape else value
 
 
 def _apply_builtin(name: str, value: Any, strict: bool) -> tuple[Any, bool]:

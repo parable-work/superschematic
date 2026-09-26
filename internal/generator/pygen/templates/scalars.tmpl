@@ -20,18 +20,18 @@ import re
 {{if .HasDateTime -}}
 from datetime import datetime
 {{end}}
-{{if or .HasCustomNormalize .HasCustomValidate .HasCustomParse}}
+{{if or .HasCustomNormalize .HasCustomValidate .HasCustomParse .HasJSONParse}}
 # Import custom scalar implementations from the scalar library
 try:
     from {{.Naming.ScalarPythonModule}} import (
-        {{range $scalar := .Scalars}}{{if or $scalar.HasCustomNormalize $scalar.HasCustomValidate $scalar.HasCustomParse}}
+        {{range $scalar := .Scalars}}{{if or $scalar.HasCustomNormalize $scalar.HasCustomValidate $scalar.HasCustomParse (pythonParsesJSON $scalar)}}
         {{- if and $scalar.HasCustomNormalize (ne $scalar.Name "Generic.JSON")}}
         normalize_{{pythonScalarModule $scalar}},
         {{- end}}
         {{- if $scalar.HasCustomValidate}}
         validate_{{pythonScalarModule $scalar}},
         {{- end}}
-        {{- if and $scalar.HasCustomParse (ne $scalar.Name "Generic.JSON")}}
+        {{- if and (or $scalar.HasCustomParse (pythonParsesJSON $scalar)) (ne $scalar.Name "Generic.JSON")}}
         parse_{{pythonScalarModule $scalar}},
         {{- end}}
         {{end}}{{end}}
@@ -42,20 +42,34 @@ except ImportError:
     _SCALAR_LIB_AVAILABLE = False
 {{end}}
 
-{{range .Scalars}}{{if and .HasCustomParse (ne .Name "Generic.JSON")}}
+{{range .Scalars}}{{if and (or .HasCustomParse (pythonParsesJSON .)) (ne .Name "Generic.JSON")}}
 def _custom_parse_{{pythonScalarModule .}}(v: Any) -> Any:
-{{if pythonParsesJSON .}}    """Parse JSON values through the scalar library and return their native representation."""
+{{if pythonParsesJSON .}}    """Parse a JSON value, or its JSON text, into its native representation.
+
+    A string is read as JSON text. The scalar library, when installed, checks
+    the value and returns its canonical JSON text, which is decoded.
+    """
+    if v is None:
+        return v
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError as e:
+            raise ValueError(f"expected JSON text: {e}")
+    if not _SCALAR_LIB_AVAILABLE:
+        return v
+    try:
+        parsed = parse_{{pythonScalarModule .}}(json.dumps(v))
 {{else}}    """Custom parse wrapper for {{.Name}}.
 
     The scalar library native hooks are string-in/string-out, so non-string
     inputs are stringified before the call and numeric targets are
     converted back afterwards.
     """
-{{end}}    if not _SCALAR_LIB_AVAILABLE or v is None:
+    if not _SCALAR_LIB_AVAILABLE or v is None:
         return v
     try:
-{{if pythonParsesJSON .}}        parsed = parse_{{pythonScalarModule .}}(v if isinstance(v, str) else json.dumps(v))
-{{else}}        parsed = parse_{{pythonScalarModule .}}(v if isinstance(v, str) else str(v))
+        parsed = parse_{{pythonScalarModule .}}(v if isinstance(v, str) else str(v))
 {{end}}    except Exception as e:
         raise ValueError(str(e))
     {{- if pythonParsesJSON .}}
@@ -310,7 +324,7 @@ def _validate_location(v: Any) -> Dict[str, float]:
         examples=["{{pythonString .Example}}"],
         {{- end}}
     ),
-    {{- if .HasCustomParse}}
+    {{- if or .HasCustomParse (pythonParsesJSON .)}}
     BeforeValidator(_custom_parse_{{pythonScalarModule .}}),
     {{- end}}
     {{- if .HasCustomNormalize}}

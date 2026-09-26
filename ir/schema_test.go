@@ -92,3 +92,29 @@ func TestScalarDef_IsAnyJSON(t *testing.T) {
 		}
 	}
 }
+
+// TestScalarDef_StructuredJSONType keys the object and array rule off the
+// json_schema type mapping, whatever the name and the String primitive. A
+// scalar that also declares a pattern or a length is a string by its own
+// metadata and is not structured.
+func TestScalarDef_StructuredJSONType(t *testing.T) {
+	cases := []struct {
+		name   string
+		scalar *ScalarDef
+		want   string
+	}{
+		{"object", &ScalarDef{Name: "Mystery.Tags", Primitive: "String", TypeMappings: map[string]string{"json_schema": "object"}}, JSONSchemaObjectType},
+		{"array", &ScalarDef{Name: "Mystery.Points", Primitive: "String", TypeMappings: map[string]string{"json_schema": "array"}}, JSONSchemaArrayType},
+		{"any", &ScalarDef{Name: "Generic.JSON", Primitive: "String", TypeMappings: map[string]string{"json_schema": "any"}}, ""},
+		{"string", &ScalarDef{Name: "Contact.Email", Primitive: "String", TypeMappings: map[string]string{"json_schema": "string"}}, ""},
+		{"object with a pattern", &ScalarDef{Name: "Geo.Location", Primitive: "String", Pattern: "^-?\\d+,-?\\d+$", TypeMappings: map[string]string{"json_schema": "object"}}, ""},
+		{"array with a length", &ScalarDef{Name: "Mystery.Points", Primitive: "String", MaxLength: 10, TypeMappings: map[string]string{"json_schema": "array"}}, ""},
+		{"no mappings", &ScalarDef{Name: "Generic.StringMap"}, ""},
+		{"nil", nil, ""},
+	}
+	for _, tc := range cases {
+		if got := tc.scalar.StructuredJSONType(); got != tc.want {
+			t.Errorf("%s: StructuredJSONType() = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

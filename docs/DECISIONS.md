@@ -617,9 +617,66 @@ zero value, which an absent key decodes to, and the JSON null token are
 (D12, amended). The Go ORM still reads a JSON null stored in a required
 `Generic.JSON` column as the null token; it reads, it does not validate.
 
-The TypeScript runtime's schema JSON writer still writes `"type":
-"string"` for the scalar, from its primitive, and the readers turn that
+The TypeScript runtime's schema JSON writer wrote `"type": "string"` for
+the scalar, from its primitive. It now writes no `type`, since every JSON
+value is one (the next amendment), and the readers turn the missing type
 into the `String` primitive; the `x-typeMapping` beside it decides. A
 primitive of its own in superscalar's metadata would let the catalogs, the
 IR and the schema JSON document say it directly; until then the type
 mapping is the source.
+
+### D14, amended: a JSON object or array scalar holds that object or array
+
+superscalar's metadata rows give `Generic.StringMap` (`json_schema`
+`object`) and `Embedding.Vector` (`json_schema` `array`) the `String`
+primitive, so the three runtimes checked their values as strings. In parse
+and in validation they refused a map or an array with `type` and took only
+the value's JSON text. The generated types hold the object or the array:
+
+| Target | `Generic.StringMap` | `Embedding.Vector` |
+|--------|---------------------|--------------------|
+| Go types | `map[string]string`: a JSON object; the JSON text is refused | `[]float32`: a JSON array; the JSON text is refused |
+| TypeScript types | `Record<string, string>` | `number[]` |
+| Python types | `Dict[str, str]`; the decoder also reads the JSON text into the dict | `list[float]`, read as the dict is (it was `Any`: pygen did not read the catalog's `list[float]`) |
+| Rust types | `HashMap<String, String>` | `Vec<f32>` |
+| OpenAPI | `object` with string values | `array` of numbers (it was `string`: the generator had no case for `array`) |
+| Go API routes | a JSON object | a JSON array |
+| SQL, Go ORM | `JSONB`, read and written as the map | `TEXT`: the catalog names no SQL type |
+| superscalar | canonical JSON text of the object | canonical JSON text of the array |
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A scalar whose `json_schema` type mapping is `object` or `array` holds that JSON object or JSON array, the value its generated types put on the wire. Any other JSON type (a number, a boolean, an array for an object scalar, an object for an array scalar) is `type`. | Checking it as the `String` primitive says |
+| A string holding the value's JSON text is accepted on input too. The runtimes took only that form before, the generated Python decoder reads it into the value, and superscalar's parse functions take it. The runtimes check a string with the `String` primitive's rules, as before, so an empty string is a missing value: `required` in a required field, absent in an optional one or an element of an optional list. Parse reads the text into the object or array. | Refusing the JSON text, which every caller of the runtimes sends today |
+| Null is a missing value, as for every other field: a null or missing required value is `required`, a null optional one is absent, and a null list element is `required` at its index (D12, amended). An empty object or array is a value. | Treating an empty map or vector as missing |
+| What the object or array holds (a string map's values, a vector's numbers) is the scalar core's check. The runtimes hand the core the value's JSON text through their registries (the Python runtime's default registry has D14's gap), the generated TypeScript validator calls superscalar's `validate<Symbol>`, and the Go and Python decoders hold the value to their types. A failure is named as D14's core-only checks are, which differ by validator, and is not in the parity matrix. | An element check of its own in every validator |
+| Every validator keys the rule off the type mapping, not the scalar's name or primitive: `ir.ScalarDef.StructuredJSONType` in Go (the Go runtime, and the generators through the `StructuredJSON` scalar trait), `structuredJSONType` in the TypeScript runtime and `ScalarDef.structured_json_type` in the Python runtime. A scalar that also declares a pattern or a length, which are rules on a string, is not one (below). | Keying off the names |
+| The generated Go types, the Go API routes and the TypeScript API server take only the object or array; the TypeScript server read such an argument as a string before, and now uses the `jsonObject` and `jsonArray` parameter kinds. A decoder refusal counts as parity (D12, amended). | Taking the JSON text in every decoder |
+
+The generated Go `Validate` reports a missing required `Generic.StringMap`
+(a nil map) as `required` through `jsonValueMissing`, as it does a
+`Generic.JSON`; it checked nothing for the field before. The generated
+`ParseEmbeddingVector` decodes the core's canonical JSON text into the
+slice; it converted the text to the slice type, and a module with an
+`Embedding.Vector` field did not build.
+
+`Geo.Location` is left as it was. Its row has `json_schema` `object`, SQL
+`POINT` and TypeScript `{ lat: number; lon: number }`, but also the pattern
+`^-?\d+(\.\d+)?,-?\d+(\.\d+)?$` and the example `37.7749,-122.4194`, and
+the generated types disagree on its wire form. The Go type is superscalar's
+`struct { Lat float64; Lon float64 }` with no JSON tags: it writes
+`{"Lat": ..., "Lon": ...}`, which superscalar's parser and the TypeScript
+type refuse, and it refuses the `"lat,lon"` string. The generated
+TypeScript and Python validators test the pattern on the value, so they
+take the string and refuse the object. The generated Go `Validate` tests
+the pattern on the struct and does not build. The Rust type is
+`serde_json::Value`. `StructuredJSONType` is empty for it because of the
+pattern, so every validator still checks it as a string. Once superscalar's
+row agrees with itself (no pattern or string example, JSON tags on the Go
+struct), it holds the object like the others without a change here.
+
+The TypeScript runtime's schema JSON writer writes a scalar's JSON Schema
+type from its mapping: `object` or `array` for these scalars, where it
+wrote `string`. The readers turn `object` into the `JSON` primitive and
+`array` into `String`; the rule keys off `x-typeMapping`, so both read
+back to the same checks.

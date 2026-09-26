@@ -65,7 +65,8 @@ type ScalarInfo struct {
 
 	// ParseAsJSON means the superscalar parse target returns canonical JSON
 	// text that must be decoded into this module's scalar alias (a map or
-	// other JSON-like Go type).
+	// other JSON-like Go type): a JSON-shaped custom-parse scalar, and every
+	// JSON object or array scalar (Embedding.Vector's []float32).
 	ParseAsJSON bool
 }
 
@@ -547,7 +548,7 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 		}
 		scalar.ParseTarget = scalarLibParseTarget(scalar)
 		scalar.ParseAsInt64 = scalar.ParseTarget != "" && scalar.Traits.IsIntegerLike
-		scalar.ParseAsJSON = scalar.HasCustomParse && scalar.Traits.IsJSONLike
+		scalar.ParseAsJSON = (scalar.HasCustomParse && scalar.Traits.IsJSONLike) || scalar.Traits.StructuredJSON != ""
 		scalars[i] = scalar
 	}
 	return scalars

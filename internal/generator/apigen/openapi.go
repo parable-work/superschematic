@@ -806,6 +806,34 @@ func applyOpenAPIScalarConstraints(
 	if valueSchema := scalarMapValueOpenAPISchema(bestDef); valueSchema != nil {
 		schemaObject["additionalProperties"] = valueSchema
 	}
+	if itemSchema := scalarArrayItemsOpenAPISchema(bestDef); itemSchema != nil {
+		schemaObject["items"] = itemSchema
+	}
+}
+
+// scalarArrayItemsOpenAPISchema returns the item schema of an array scalar
+// whose elements are one primitive ([]float32 in Go, list[float] in Python,
+// number[] in TypeScript, Vec<f32> in Rust; Embedding.Vector), or nil.
+func scalarArrayItemsOpenAPISchema(scalarDef *ir.ScalarDef) map[string]interface{} {
+	if scalarDef == nil || scalarDef.TypeMappings["json_schema"] != ir.JSONSchemaArrayType {
+		return nil
+	}
+	goType := strings.ReplaceAll(scalarDef.TypeMappings["go"], " ", "")
+	pythonType := strings.ReplaceAll(scalarDef.TypeMappings["python"], " ", "")
+	typeScriptType := strings.ReplaceAll(scalarDef.TypeMappings["typescript"], " ", "")
+	rustType := strings.ReplaceAll(scalarDef.TypeMappings["rust"], " ", "")
+	elemType := ""
+	switch {
+	case strings.HasPrefix(goType, "[]"):
+		elemType = strings.TrimPrefix(goType, "[]")
+	case strings.HasPrefix(strings.ToLower(pythonType), "list[") && strings.HasSuffix(pythonType, "]"):
+		elemType = pythonType[len("list[") : len(pythonType)-1]
+	case strings.HasSuffix(typeScriptType, "[]"):
+		elemType = strings.TrimSuffix(typeScriptType, "[]")
+	case strings.HasPrefix(rustType, "Vec<") && strings.HasSuffix(rustType, ">"):
+		elemType = strings.TrimSuffix(strings.TrimPrefix(rustType, "Vec<"), ">")
+	}
+	return openAPIPrimitiveSchema(elemType)
 }
 
 // scalarMapValueOpenAPISchema returns the value schema of an object scalar
@@ -827,14 +855,20 @@ func scalarMapValueOpenAPISchema(scalarDef *ir.ScalarDef) map[string]interface{}
 	case strings.HasPrefix(typeScriptType, "Record<string,") && strings.HasSuffix(typeScriptType, ">"):
 		valueType = strings.TrimSuffix(strings.TrimPrefix(typeScriptType, "Record<string,"), ">")
 	}
-	switch strings.ToLower(valueType) {
+	return openAPIPrimitiveSchema(valueType)
+}
+
+// openAPIPrimitiveSchema returns the schema of a language primitive named in
+// a scalar's type mapping, or nil when the name is not one.
+func openAPIPrimitiveSchema(typeName string) map[string]interface{} {
+	switch strings.ToLower(typeName) {
 	case "string", "str":
 		return map[string]interface{}{"type": "string"}
 	case "bool", "boolean":
 		return map[string]interface{}{"type": "boolean"}
-	case "float", "float32", "float64", "number":
+	case "float", "float32", "float64", "number", "f32", "f64":
 		return map[string]interface{}{"type": "number"}
-	case "int", "int32", "int64", "integer":
+	case "int", "int32", "int64", "integer", "i32", "i64":
 		return map[string]interface{}{"type": "integer"}
 	default:
 		return nil
@@ -988,6 +1022,11 @@ func typeToOpenAPISchema(typeName string, scalarExamples, scalarDescriptions, sc
 		schema["type"] = "boolean"
 	case "object":
 		schema["type"] = "object"
+	case "array":
+		// An array scalar (Embedding.Vector). OpenAPI 3.0 requires items;
+		// applyOpenAPIScalarConstraints narrows them from the type mappings.
+		schema["type"] = "array"
+		schema["items"] = map[string]interface{}{}
 	case "any":
 		// An empty Schema Object accepts every JSON value, null included.
 	default:
@@ -995,7 +1034,7 @@ func typeToOpenAPISchema(typeName string, scalarExamples, scalarDescriptions, sc
 	}
 
 	if example, ok := scalarExamples[typeName]; ok {
-		if schemaType, _ := schema["type"].(string); schemaType == "object" || primitive == "any" {
+		if schemaType, _ := schema["type"].(string); schemaType == "object" || schemaType == "array" || primitive == "any" {
 			var parsedExample interface{}
 			if err := json.Unmarshal([]byte(example), &parsedExample); err == nil {
 				schema["example"] = parsedExample

@@ -27,7 +27,7 @@ func WriteTypes(output *ModuleOutput, outputDir string) error {
 	hasTypes := len(output.Types) > 0 || len(output.ImportedTypes) > 0
 	data := &templateData{
 		ModuleOutput:   output,
-		NeedsScalarLib: output.HasCustomNormalize || output.HasCustomValidate || output.HasCustomParse,
+		NeedsScalarLib: output.HasCustomNormalize || output.HasCustomValidate || output.HasCustomParse || output.HasJSONParse,
 		NeedsYAML:      hasTypes,
 	}
 

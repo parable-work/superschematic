@@ -75,6 +75,34 @@ class ScalarDef:
         """
         return self.type_mappings.get("json_schema") == "any"
 
+    def structured_json_type(self) -> str:
+        """``"object"`` or ``"array"`` when the scalar's value is a JSON object or
+        a JSON array, and ``""`` otherwise.
+
+        The json_schema type mapping declares the shape (Generic.StringMap and
+        Embedding.Vector in the core catalog). The catalog gives such a scalar
+        the String primitive, but every generated type holds the dict or the
+        list. A scalar that also declares a pattern or a length, which are rules
+        on a string, contradicts itself (Geo.Location's row has a "lat,lon"
+        pattern) and is not structured: it keeps the String primitive's checks
+        until its metadata agrees. Parse and validation key the rule off this,
+        not the scalar's name or primitive.
+        """
+        if self.pattern or self.min_length > 0 or self.max_length > 0:
+            return ""
+        json_type = self.type_mappings.get("json_schema")
+        return json_type if json_type in ("object", "array") else ""
+
+
+def json_shape_of(value: object) -> str:
+    """The JSON shape of a value: ``"object"`` for a dict with string keys,
+    ``"array"`` for a list, ``""`` for anything else (a tuple included)."""
+    if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    return ""
+
 
 @dataclass
 class MiddlewareConfig:

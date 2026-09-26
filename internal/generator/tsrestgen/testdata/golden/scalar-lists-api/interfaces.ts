@@ -9,7 +9,9 @@
 
 import type { OperationResult, RequestContext } from '@superschematic/http-runtime';
 import type {
+  EmbeddingVector,
   GenericJSON,
+  GenericStringMap,
   NetworkUrl,
 } from 'superscalar/scalars';
 import type {
@@ -25,6 +27,8 @@ export interface StoreDocumentArgs {
   note?: GenericJSON;
   extras?: GenericJSON[];
   grid?: GenericJSON[][];
+  labels?: GenericStringMap;
+  embeddings?: EmbeddingVector[];
 }
 
 /** Arguments of tag.findTags (GET /api/posts/tags). */

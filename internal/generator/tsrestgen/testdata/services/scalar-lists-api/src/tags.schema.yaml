@@ -1,7 +1,8 @@
 # Body arguments that are lists of strings, numbers, integer scalars, an
 # enum, a string scalar and Generic.JSON values, next to single ones and a
-# Generic.JSON list of lists, and a GET whose list travels in the query
-# string. tsrestgen's scalar list tests load it.
+# Generic.JSON list of lists, a JSON object scalar and a list of a JSON
+# array scalar, and a GET whose list travels in the query string.
+# tsrestgen's scalar list tests load it.
 name: scalar-lists-api
 kind: API
 scalars:
@@ -14,6 +15,12 @@ scalars:
   Generic.JSON:
     name: Generic.JSON
     languagePrimitive: object
+  Generic.StringMap:
+    name: Generic.StringMap
+    languagePrimitive: string
+  Embedding.Vector:
+    name: Embedding.Vector
+    languagePrimitive: string
 enums:
   # The shade of a tag.
   Shade:
@@ -79,6 +86,12 @@ operationSets:
             typeRef: { name: Generic.JSON, isArray: true }
           - name: grid
             typeRef: { name: Generic.JSON, isArray: true, isArrayOfArrays: true }
+          # Labels for the document: a JSON object of strings.
+          - name: labels
+            typeRef: { name: Generic.StringMap }
+          # Embeddings of the document: each a JSON array of numbers.
+          - name: embeddings
+            typeRef: { name: Embedding.Vector, isArray: true }
   - name: TagQueries
     operations:
       # Find posts by label; the labels travel in the query string.

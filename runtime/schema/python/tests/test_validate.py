@@ -6,6 +6,7 @@ import json
 
 from superschematic_schema_runtime import (
     RuntimeOptions,
+    ScalarParseRegistry,
     ScalarValidatorRegistry,
     ValidationError,
     create_default_scalar_validator_registry,
@@ -221,3 +222,107 @@ def test_load_any_json_scalar_keeps_the_value():
         result = load_type(_any_json_schema(), "Doc", payload, RuntimeOptions(strict=strict))
         assert _validator_names(result.errors) == {}
         assert result.data == json.loads(payload)
+
+
+def _structured_schema():
+    """Scalars whose json_schema type mapping is "object" or "array", named so
+    neither the name nor the String primitive can decide how they validate."""
+    return parse_schema(
+        {
+            "definitions": {
+                "Mystery.Tags": {
+                    "type": "string",
+                    "x-typeMapping": {"json_schema": "object"},
+                    "x-hasCustomParse": True,
+                },
+                "Mystery.Points": {"type": "string", "x-typeMapping": {"json_schema": "array"}},
+                "Doc": {
+                    "x-kind": "type",
+                    "type": "object",
+                    "required": ["tags"],
+                    "properties": {
+                        "tags": {"$ref": "#/definitions/Mystery.Tags"},
+                        "points": {"$ref": "#/definitions/Mystery.Points"},
+                        "pointList": {
+                            "type": "array",
+                            "items": {"$ref": "#/definitions/Mystery.Points"},
+                        },
+                    },
+                },
+            }
+        }
+    )
+
+
+def _structured_options(calls: list[str]) -> RuntimeOptions:
+    def validator(value: str) -> list[ValidationError]:
+        calls.append(value)
+        if "bad" in value:
+            return [ValidationError(validator="pattern", message="core rejects it")]
+        return []
+
+    reg = ScalarValidatorRegistry()
+    reg.register("Mystery.Tags", validator)
+    reg.register("Mystery.Points", validator)
+    return RuntimeOptions(validate_registry=reg)
+
+
+def test_validate_structured_scalar_takes_its_value_or_its_json_text():
+    calls: list[str] = []
+    options = _structured_options(calls)
+    schema = _structured_schema()
+    data = {"tags": {"k": "v"}, "points": [0.5, -1], "pointList": [[1], [], "[2]"]}
+    assert _validator_names(validate_type(schema, "Doc", data, options=options)) == {}
+    assert calls == ['{"k":"v"}', "[0.5,-1]", "[1]", "[]", "[2]"]
+    data = {"tags": '{"k": "v"}', "points": "[]"}
+    assert _validator_names(validate_type(schema, "Doc", data, options=options)) == {}
+    data = {"tags": {"bad": 1}}
+    assert _validator_names(validate_type(schema, "Doc", data, options=options)) == {
+        "tags": ["pattern"]
+    }
+
+
+def test_validate_structured_scalar_refuses_another_json_type():
+    options = _structured_options([])
+    schema = _structured_schema()
+    data = {"tags": ["k"], "points": {}, "pointList": [True, None]}
+    assert _validator_names(validate_type(schema, "Doc", data, options=options)) == {
+        "tags": ["type"],
+        "points": ["type"],
+        "pointList[0]": ["type"],
+        "pointList[1]": ["required"],
+    }
+    data = {"points": None}
+    assert _validator_names(validate_type(schema, "Doc", data, options=options)) == {
+        "tags": ["required"]
+    }
+    for value in [(1, 2), {1: "v"}, [float("nan")]]:
+        data = {"tags": {}, "points": value}
+        assert _validator_names(validate_type(schema, "Doc", data, options=options)) == {
+            "points": ["type"]
+        }, value
+
+
+def test_load_structured_scalar_reads_its_json_text_into_the_value():
+    seen: list[str] = []
+
+    def parse(value: str):
+        seen.append(value)
+        if "bad" in value:
+            return value, [ValidationError(validator="parse", message="not a string map")]
+        return '{"k":"v"}', []
+
+    parse_registry = ScalarParseRegistry()
+    parse_registry.register("Mystery.Tags", parse)
+    payload = '{"tags": {"k": "v"}, "points": "[0.5, -1]", "pointList": [[1], "[2]"]}'
+    for strict in (False, True):
+        seen.clear()
+        options = RuntimeOptions(strict=strict, parse_registry=parse_registry)
+        result = load_type(_structured_schema(), "Doc", payload, options)
+        assert _validator_names(result.errors) == {}
+        assert result.data == {"tags": {"k": "v"}, "points": [0.5, -1], "pointList": [[1], [2]]}
+        assert seen == ['{"k":"v"}']
+
+        bad = load_type(_structured_schema(), "Doc", '{"tags": {"bad": 1}, "points": 5}', options)
+        assert bad.errors["tags"][0].validator == "parse"
+        assert bad.errors["points"][0].validator == "type"

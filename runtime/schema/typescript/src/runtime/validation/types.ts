@@ -58,3 +58,39 @@ export type ValidationFunction = (
 export function isAnyJSONScalar(scalar: ScalarDef): boolean {
   return scalar.typeMappings?.json_schema === 'any';
 }
+
+/**
+ * Returns "object" or "array" when a scalar's value is a JSON object or a
+ * JSON array, which its json_schema type mapping declares (Generic_StringMap
+ * and Embedding_Vector in the core catalog), and "" otherwise. The catalog
+ * gives such a scalar the String primitive, but every generated type holds
+ * the object or the array. A scalar that also declares a pattern or a length,
+ * which are rules on a string, contradicts itself (Geo_Location's row has a
+ * "lat,lon" pattern) and is not structured: it keeps the String primitive's
+ * checks until its metadata agrees. Parse and validation key the rule off
+ * this, not the scalar's name or primitive.
+ */
+export function structuredJSONType(scalar: ScalarDef): 'object' | 'array' | '' {
+  if (scalar.pattern || scalar.minLength > 0 || scalar.maxLength > 0) {
+    return '';
+  }
+  const jsonType = scalar.typeMappings?.json_schema;
+  return jsonType === 'object' || jsonType === 'array' ? jsonType : '';
+}
+
+/**
+ * The JSON shape of a value: "array" for an array, "object" for a plain
+ * object, "" for anything else (a class instance included).
+ */
+export function jsonShapeOf(value: unknown): 'object' | 'array' | '' {
+  if (Array.isArray(value)) {
+    return 'array';
+  }
+  if (typeof value === 'object' && value !== null) {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype === Object.prototype || prototype === null) {
+      return 'object';
+    }
+  }
+  return '';
+}

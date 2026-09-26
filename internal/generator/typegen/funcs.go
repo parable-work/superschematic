@@ -89,6 +89,29 @@ func requiredAnyJSONField(field FieldInfo) bool {
 	if !field.IsScalar || field.ScalarInfo == nil || !field.ScalarInfo.Traits.IsAnyJSON {
 		return false
 	}
+	return requiredSingleValue(field)
+}
+
+// requiredStructuredJSONField reports whether field is a required single
+// value of a scalar that holds a JSON object or array (its json_schema type
+// mapping is "object" or "array"; Generic.StringMap) and whose Go type
+// Validate cannot call (isValidatableScalarField). Validate checks its
+// presence: an absent value and JSON null decode to a nil map or slice,
+// which is "required"; an empty object or array is a value. Its decoder
+// already holds it to the Go type (a map of strings), so nothing else is
+// checked. A list of it is checked by its decoder, a map not at all.
+func requiredStructuredJSONField(field FieldInfo) bool {
+	if !field.IsScalar || field.ScalarInfo == nil || field.ScalarInfo.Traits.StructuredJSON == "" ||
+		isValidatableScalarField(field) {
+		return false
+	}
+	return requiredSingleValue(field)
+}
+
+// requiredSingleValue reports whether field is a required single value that
+// Validate checks for presence: not a list or map, not defaulted or wrapped,
+// and not one the store fills.
+func requiredSingleValue(field FieldInfo) bool {
 	if !field.Required || field.HasDefault || field.IsArray || field.IsMap || field.UsesWrapper {
 		return false
 	}
@@ -284,17 +307,18 @@ func inputFieldValueType(goType string) string {
 // templateFuncs returns the typegen-specific template functions.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"hasEmittableValidations":  hasEmittableValidations,
-		"isZeroListMinimum":        isZeroListMinimum,
-		"validationStringExpr":     validationStringExpr,
-		"isEnumType":               isEnumType,
-		"isValidatableScalarField": isValidatableScalarField,
-		"requiredAnyJSONField":     requiredAnyJSONField,
-		"isGeneratedType":          isGeneratedType,
-		"nestedList":               newNestedList,
-		"autoFilledField":          autoFilledField,
-		"scalarValidateCall":       scalarValidateCall,
-		"inputFieldValueType":      inputFieldValueType,
+		"hasEmittableValidations":     hasEmittableValidations,
+		"isZeroListMinimum":           isZeroListMinimum,
+		"validationStringExpr":        validationStringExpr,
+		"isEnumType":                  isEnumType,
+		"isValidatableScalarField":    isValidatableScalarField,
+		"requiredAnyJSONField":        requiredAnyJSONField,
+		"requiredStructuredJSONField": requiredStructuredJSONField,
+		"isGeneratedType":             isGeneratedType,
+		"nestedList":                  newNestedList,
+		"autoFilledField":             autoFilledField,
+		"scalarValidateCall":          scalarValidateCall,
+		"inputFieldValueType":         inputFieldValueType,
 		"hasUnionFields": func(fields []FieldInfo) bool {
 			for _, f := range fields {
 				if f.IsUnion {

@@ -125,11 +125,14 @@
     },
     "Embedding_Vector": {
       "description": "Fixed-dimensional float32 vector",
-      "type": "string",
+      "type": "array",
       "x-scalar": "Embedding_Vector",
       "x-typeMapping": {
         "go": "EmbeddingVector",
-        "json_schema": "array"
+        "json_schema": "array",
+        "python": "list[float]",
+        "rust": "Vec<f32>",
+        "typescript": "number[]"
       }
     },
     "File_SizeBytes": {
@@ -175,7 +178,6 @@
     },
     "Generic_JSON": {
       "description": "Any valid JSON value: object, array, primitive, or null",
-      "type": "string",
       "x-hasCustomValidate": true,
       "x-scalar": "Generic_JSON",
       "x-typeMapping": {
@@ -204,13 +206,16 @@
     },
     "Generic_StringMap": {
       "description": "A string-to-string map stored as JSON",
-      "type": "string",
+      "type": "object",
       "x-hasCustomParse": true,
       "x-scalar": "Generic_StringMap",
       "x-typeMapping": {
         "go": "GenericStringMap",
         "json_schema": "object",
-        "sql": "JSONB"
+        "python": "Dict[str, str]",
+        "rust": "std::collections::HashMap<String, String>",
+        "sql": "JSONB",
+        "typescript": "Record<string, string>"
       }
     },
     "Geo_Location": {
@@ -654,6 +659,40 @@
       },
       "x-kind": "enum",
       "x-owner": "parity-fixture"
+    },
+    "StructuredMatrix": {
+      "properties": {
+        "mapList": {
+          "items": {
+            "$ref": "#/definitions/scalars/Generic_StringMap"
+          },
+          "type": "array"
+        },
+        "optMap": {
+          "$ref": "#/definitions/scalars/Generic_StringMap"
+        },
+        "optVec": {
+          "$ref": "#/definitions/scalars/Embedding_Vector"
+        },
+        "reqMap": {
+          "$ref": "#/definitions/scalars/Generic_StringMap"
+        },
+        "reqVec": {
+          "$ref": "#/definitions/scalars/Embedding_Vector"
+        },
+        "vecList": {
+          "items": {
+            "$ref": "#/definitions/scalars/Embedding_Vector"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "reqMap",
+        "reqVec"
+      ],
+      "type": "object",
+      "x-kind": "type"
     },
     "Temporal_CronExpression": {
       "description": "Standard 5-field cron expression for scheduling",

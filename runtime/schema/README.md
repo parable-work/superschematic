@@ -52,12 +52,21 @@ go run ./internal/tools/scalarcatalog -check   # CI: fail when stale
 ```
 
 A row's `primitive` decides how parse and validation check a value, with
-one exception. A scalar whose `json_schema` type mapping is `any`
-(`Generic.JSON`) holds any JSON value but null, although its row says
-`String`: each runtime keys that off the mapping (`ir.ScalarDef.IsAnyJSON`,
-`isAnyJSONScalar`, `ScalarDef.is_any_json`), passes the value through
-parse, and validates only that it is a JSON value. A null or missing
-required one is `required`.
+two exceptions, both keyed off the scalar's `json_schema` type mapping
+although the row says `String`:
+
+- A scalar whose mapping is `any` (`Generic.JSON`) holds any JSON value
+  but null. Each runtime keys that off the mapping
+  (`ir.ScalarDef.IsAnyJSON`, `isAnyJSONScalar`, `ScalarDef.is_any_json`),
+  passes the value through parse, and validates only that it is a JSON
+  value. A null or missing required one is `required`.
+- A scalar whose mapping is `object` or `array` (`Generic.StringMap`,
+  `Embedding.Vector`) holds that JSON object or array, or its JSON text
+  (`ir.ScalarDef.StructuredJSONType`, `structuredJSONType`,
+  `ScalarDef.structured_json_type`). Parse reads the text into the object
+  or array; validation refuses any other JSON type as `type` and hands the
+  scalar core the value's JSON text. A scalar that also has a pattern or a
+  length (`Geo.Location`) keeps the `String` checks.
 
 ## Local development
 

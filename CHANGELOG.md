@@ -898,6 +898,48 @@ of a generated artifact is always listed here with the bump it requires.
   missing required `Generic.JSON` field; `parse<Type>Json` in TypeScript
   throws on one, and `validate_all` in Python reports it. New in the `ir`
   module: `ScalarDef.IsAnyJSON` and `JSONSchemaAnyType`. Minor.
+- Go, TypeScript and Python schema runtimes, the generated Go, TypeScript
+  and Python validators and the TypeScript API server: a scalar whose
+  `json_schema` type mapping is `object` or `array` (`Generic.StringMap`,
+  `Embedding.Vector`) holds that JSON object or array, the value its
+  generated types put on the wire (D14, amended). The runtimes checked it
+  as a string, from the `String` primitive of its superscalar metadata
+  row: in parse and in validation a map or an array was `type`, and only
+  its JSON text passed. Now the object or array passes, and so does its
+  JSON text, which parse reads into the object or array; any other JSON
+  type is `type`; a null or missing required one is `required`, and an
+  empty object or array is a value. The runtimes hand the scalar core the
+  value's JSON text, so it still checks a map's values and a vector's
+  numbers. The rule keys off the type mapping, not the name; a scalar
+  whose metadata also has a pattern or a length (`Geo.Location`) keeps
+  its string checks. Behavior change: a runtime accepts a map or an array
+  it refused, and `ParseType`, `parseType` and `parse_type` return the
+  object or array for its JSON text, where they returned the text. The
+  generated TypeScript validator reports a value of another JSON type as
+  `type` (it said `parse` for a string map and took anything for a
+  vector); the generated Go `Validate` reports a missing required
+  `Generic.StringMap` as `required`, which it did not check; the
+  generated Python `Embedding.Vector` is `list[float]`, read from the
+  list or its JSON text, where it was `Any`; and the Python decoder reads
+  the JSON text of either scalar without superscalar installed. The
+  TypeScript API server takes a body argument of either scalar as its
+  object or array (parameter kinds `jsonObject` and `jsonArray` in
+  `@superschematic/http-runtime`), as the Go routes do, where it took
+  only a string. New in the `ir` module: `ScalarDef.StructuredJSONType`,
+  `JSONSchemaObjectType` and `JSONSchemaArrayType`. Minor.
+- Go types: a module with an `Embedding.Vector` field builds.
+  `ParseEmbeddingVector` converted the scalar core's canonical text to
+  `[]float32`, which does not compile; it now decodes the JSON array, as
+  `ParseGenericStringMap` decodes its map. Patch.
+- OpenAPI: an `Embedding.Vector` field, or one of any scalar whose
+  `json_schema` type mapping is `array`, is an `array` whose items come
+  from its type mappings (`number` for `Embedding.Vector`); it was a
+  `string`. Patch.
+- TypeScript schema runtime: `writeSchemaJson` and `writeScalarsJson`
+  write a scalar's JSON Schema type from its `json_schema` mapping: no
+  `type` for `Generic.JSON`, whose value is any JSON value, and `object` or
+  `array` for a JSON object or array scalar. They wrote `string` for all
+  three, from the `String` primitive. Patch.
 - TypeScript SDK: `invokeTool` in `tools/index.ts` did not type-check or
   call some SDK methods correctly. A tool with two or more required body
   arguments and no input type passed one object where the method requires

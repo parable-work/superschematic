@@ -107,6 +107,13 @@ const schemaConfigJSON = `{
 // no type or pattern check on it. A null or missing required one is
 // "required", a null optional one is absent, and a null element of
 // Generic.JSON[] or Generic.JSON[][] is "required" at its index (D12).
+//
+// StructuredMatrix holds Generic.StringMap and Embedding.Vector, whose value
+// is a JSON object and a JSON array (D14, amended): the object or array, or
+// a string holding its JSON text, is a value; any other JSON type is
+// "type"; null, or an empty string, is a missing value. What the object or
+// array holds is the scalar core's check, whose name differs by validator,
+// so no vector breaks it.
 const parityMatrixSchemaJSON = `{
   "scalars": {
     "Network.Url": {
@@ -132,6 +139,14 @@ const parityMatrixSchemaJSON = `{
     "Generic.JSON": {
       "name": "Generic.JSON",
       "languagePrimitive": "object"
+    },
+    "Generic.StringMap": {
+      "name": "Generic.StringMap",
+      "languagePrimitive": "string"
+    },
+    "Embedding.Vector": {
+      "name": "Embedding.Vector",
+      "languagePrimitive": "string"
     }
   },
   "enums": {
@@ -328,6 +343,39 @@ const parityMatrixSchemaJSON = `{
         {
           "name": "jsonGrid",
           "typeRef": { "name": "Generic.JSON", "isArray": true, "isArrayOfArrays": true }
+        }
+      ]
+    },
+    "StructuredMatrix": {
+      "name": "StructuredMatrix",
+      "role": "EmbeddedStruct",
+      "jsonField": true,
+      "fields": [
+        {
+          "name": "reqMap",
+          "typeRef": { "name": "Generic.StringMap" },
+          "required": true
+        },
+        {
+          "name": "optMap",
+          "typeRef": { "name": "Generic.StringMap" }
+        },
+        {
+          "name": "mapList",
+          "typeRef": { "name": "Generic.StringMap", "isArray": true }
+        },
+        {
+          "name": "reqVec",
+          "typeRef": { "name": "Embedding.Vector" },
+          "required": true
+        },
+        {
+          "name": "optVec",
+          "typeRef": { "name": "Embedding.Vector" }
+        },
+        {
+          "name": "vecList",
+          "typeRef": { "name": "Embedding.Vector", "isArray": true }
         }
       ]
     }
@@ -925,6 +973,84 @@ var vectors = []parityVector{
 		want:          map[string][]string{"jsonList[1]": {"required"}, "jsonGrid[0][0]": {"required"}},
 		decodeRejects: []string{"go"},
 	},
+
+	// Generic.StringMap and Embedding.Vector hold a JSON object and a JSON
+	// array (D14, amended): the value every generated type puts on the wire.
+	// A string holding that value's JSON text is accepted too. Any other JSON
+	// type is "type", and null is a missing value.
+	{
+		name:     "structured_value",
+		typeName: "StructuredMatrix",
+		payload:  `{"reqMap": {"k": "v"}, "optMap": {}, "mapList": [{"a": "b"}, {}], "reqVec": [0.5, -1], "optVec": [], "vecList": [[1, 2.5], []]}`,
+		want:     map[string][]string{},
+	},
+	{
+		// The JSON text of the value, the form the runtimes took before. The
+		// Go decoder takes only the object or array.
+		name:          "structured_text",
+		typeName:      "StructuredMatrix",
+		payload:       `{"reqMap": "{\"k\": \"v\"}", "optMap": "{}", "mapList": ["{\"a\": \"b\"}"], "reqVec": "[0.5, -1]", "optVec": "[]", "vecList": ["[1, 2.5]"]}`,
+		want:          map[string][]string{},
+		decodeRejects: []string{"go"},
+	},
+	{
+		// An array where an object belongs, a number and a boolean are "type".
+		name:          "structured_map_wrong_type",
+		typeName:      "StructuredMatrix",
+		payload:       `{"reqMap": ["a"], "optMap": 42, "mapList": [{}, true], "reqVec": []}`,
+		want:          map[string][]string{"reqMap": {"type"}, "optMap": {"type"}, "mapList[1]": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		// An object where an array belongs, a number and a boolean are "type".
+		name:          "structured_vector_wrong_type",
+		typeName:      "StructuredMatrix",
+		payload:       `{"reqMap": {}, "reqVec": {"k": 1}, "optVec": 1.5, "vecList": [[1], false]}`,
+		want:          map[string][]string{"reqVec": {"type"}, "optVec": {"type"}, "vecList[1]": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:     "structured_required_null",
+		typeName: "StructuredMatrix",
+		payload:  `{"reqMap": null, "reqVec": null}`,
+		want:     map[string][]string{"reqMap": {"required"}, "reqVec": {"required"}},
+	},
+	{
+		name:     "structured_required_absent",
+		typeName: "StructuredMatrix",
+		payload:  `{"optMap": {"k": "v"}, "optVec": [1]}`,
+		want:     map[string][]string{"reqMap": {"required"}, "reqVec": {"required"}},
+	},
+	{
+		// An empty object or array is a value, required or not.
+		name:     "structured_optional_null",
+		typeName: "StructuredMatrix",
+		payload:  `{"reqMap": {}, "reqVec": [], "optMap": null, "optVec": null, "mapList": null, "vecList": null}`,
+		want:     map[string][]string{},
+	},
+	{
+		name:     "structured_optional_absent",
+		typeName: "StructuredMatrix",
+		payload:  `{"reqMap": {"k": "v"}, "reqVec": [1]}`,
+		want:     map[string][]string{},
+	},
+	{
+		// An empty string is no JSON text: a missing value, as for a string
+		// scalar. A required one is "required"; an optional one, or a list
+		// element, is absent.
+		name:          "structured_empty_text",
+		typeName:      "StructuredMatrix",
+		payload:       `{"reqMap": "", "optMap": "", "mapList": [""], "reqVec": "", "optVec": "", "vecList": [""]}`,
+		want:          map[string][]string{"reqMap": {"required"}, "reqVec": {"required"}},
+		decodeRejects: []string{"go"},
+	},
+	{
+		name:          "structured_list_null_element",
+		typeName:      "StructuredMatrix",
+		payload:       `{"reqMap": {}, "reqVec": [], "mapList": [{}, null], "vecList": [null, [1]]}`,
+		want:          map[string][]string{"mapList[1]": {"required"}, "vecList[0]": {"required"}},
+		decodeRejects: []string{"go"},
+	},
 }
 
 // knownDivergences pins where a language's generated validator disagrees with
@@ -1103,6 +1229,8 @@ func newParityValue(typeName string) parityValidatable {
 		return &ListMatrix{}
 	case "JsonMatrix":
 		return &JsonMatrix{}
+	case "StructuredMatrix":
+		return &StructuredMatrix{}
 	}
 	return nil
 }
@@ -1169,7 +1297,12 @@ func TestValidationParityDriver(t *testing.T) {
 `
 
 const tsDriver = `import { readFileSync, writeFileSync } from 'node:fs';
-import { validateJsonMatrix, validateListMatrix, validateParityMatrix } from './validators/types';
+import {
+  validateJsonMatrix,
+  validateListMatrix,
+  validateParityMatrix,
+  validateStructuredMatrix,
+} from './validators/types';
 
 type Errors = { [key: string]: { validator: string }[] | Errors };
 
@@ -1189,6 +1322,7 @@ const validators: Record<string, (value: never) => true | Errors> = {
   ParityMatrix: validateParityMatrix as never,
   ListMatrix: validateListMatrix as never,
   JsonMatrix: validateJsonMatrix as never,
+  StructuredMatrix: validateStructuredMatrix as never,
 };
 const vectors = JSON.parse(readFileSync(process.env.PARITY_VECTORS as string, 'utf8'));
 const results: Record<string, Record<string, string[]>> = {};

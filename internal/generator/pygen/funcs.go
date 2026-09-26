@@ -31,6 +31,8 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 		},
 		"hasNonRequiredValidations": hasNonRequiredValidations,
 		"isAnyJSONRoot":             isAnyJSONRoot,
+		"isStructuredJSONRoot":      isStructuredJSONRoot,
+		"structuredJSONListValue":   structuredJSONListValue,
 		"isList":                    isList,
 		"nullEntryCheck":            nullEntryCheck,
 		"pythonFieldDefault": func(field codegen.FieldInfo) string {
@@ -46,12 +48,14 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 	}
 }
 
-// pythonParsesJSON reports whether a custom-parse scalar has a JSON shape (a
-// map such as Generic.StringMap): its generated wrapper hands superscalar the
-// value's JSON text and decodes the canonical JSON it returns, so the model
-// holds a native value rather than JSON text.
+// pythonParsesJSON reports whether a scalar's value is a JSON value its
+// generated wrapper parses: a JSON object or array scalar (Generic.StringMap,
+// Embedding.Vector), or a custom-parse scalar with a JSON shape. The wrapper
+// reads a string as the value's JSON text, hands superscalar the value's
+// canonical JSON text when it is installed, and decodes what it returns, so
+// the model holds a native value rather than JSON text.
 func pythonParsesJSON(scalar codegen.ScalarInfo) bool {
-	return scalar.HasCustomParse && scalar.Traits.IsJSONLike
+	return scalar.Traits.StructuredJSON != "" || (scalar.HasCustomParse && scalar.Traits.IsJSONLike)
 }
 
 // buildEnumLookup reports whether a type name refers to a local or imported enum.
@@ -109,6 +113,28 @@ const genericJSONScalar = "Generic.JSON"
 func isAnyJSONRoot(field codegen.FieldInfo) bool {
 	return field.IsScalar && field.ScalarInfo != nil && field.ScalarInfo.Traits.IsAnyJSON &&
 		!field.IsArray && !field.IsMap
+}
+
+// isStructuredJSONRoot reports whether the field is a direct value of a
+// scalar that holds a JSON object or array (its json_schema type mapping is
+// "object" or "array"; Generic.StringMap, Embedding.Vector). An empty string
+// there is no JSON text: a missing value, as for a string scalar.
+func isStructuredJSONRoot(field codegen.FieldInfo) bool {
+	return field.IsScalar && field.ScalarInfo != nil && field.ScalarInfo.Traits.StructuredJSON != "" &&
+		!field.IsArray && !field.IsMap
+}
+
+// structuredJSONListValue renders the value validate_all checks a list field
+// against its type with. A T[] of a JSON object or array scalar drops its
+// empty strings, which are no JSON text and so no value, as the schema
+// runtimes skip them; any other list is checked as it is.
+func structuredJSONListValue(field codegen.FieldInfo) string {
+	ref := "self." + field.TargetName
+	if field.IsScalar && field.ScalarInfo != nil && field.ScalarInfo.Traits.StructuredJSON != "" &&
+		field.IsArray && !field.IsArrayOfArrays && !field.IsMap {
+		return fmt.Sprintf(`[item for item in %s if item != ""]`, ref)
+	}
+	return ref
 }
 
 // pythonString escapes a string for use inside a double-quoted Python string
@@ -289,6 +315,11 @@ func pythonScalarType(targetType string) string {
 	}
 
 	if strings.HasPrefix(targetType, "Dict[") || strings.HasPrefix(targetType, "List[") || strings.HasPrefix(targetType, "Optional[") {
+		return targetType
+	}
+	// Built-in generics (list[float], Embedding.Vector's Python type) name a
+	// JSON array or object as the capitalized typing forms do.
+	if strings.HasPrefix(targetType, "list[") || strings.HasPrefix(targetType, "dict[") {
 		return targetType
 	}
 
