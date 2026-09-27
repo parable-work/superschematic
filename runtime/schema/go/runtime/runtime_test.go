@@ -94,6 +94,31 @@ func TestLoadType_MergesParseAndValidateErrors(t *testing.T) {
 	require.True(t, errs.HasErrors())
 }
 
+// A lenient load coerces a numeric or boolean string into a field typed with
+// the IR's number or boolean, as it does for Float and Boolean; a strict load
+// leaves it for validation, which refuses it (D14, amended).
+func TestLoadType_LenientCoercesIRBuiltins(t *testing.T) {
+	s := ir.NewSchema("rt-test", ir.SchemaKindGeneral)
+	s.Types["Settings"] = &ir.TypeDef{
+		Name: "Settings",
+		Kind: ir.TypeKindObject,
+		Fields: []*ir.FieldDef{
+			{Name: "ratio", TypeRef: ir.TypeRef{Name: "number"}},
+			{Name: "enabled", TypeRef: ir.TypeRef{Name: "boolean"}},
+		},
+	}
+	payload := []byte(`{"ratio":"5","enabled":"true"}`)
+
+	data, errs := New(s).LoadType("Settings", payload)
+	require.False(t, errs.HasErrors(), "errs=%v", errs)
+	assert.Equal(t, 5.0, data["ratio"])
+	assert.Equal(t, true, data["enabled"])
+
+	_, errs = New(s).LoadTypeStrict("Settings", payload)
+	assert.Equal(t, "type", errs.GetFieldErrors("ratio")[0].Validator)
+	assert.Equal(t, "type", errs.GetFieldErrors("enabled")[0].Validator)
+}
+
 func TestLoadTypeStrict_RejectsUnknown(t *testing.T) {
 	rt := New(testSchema())
 	_, errs := rt.LoadTypeStrict("User", []byte(`{"name":"Alice","email":"alice@example.com","extra":"x"}`))

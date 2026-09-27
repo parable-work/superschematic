@@ -2,7 +2,8 @@
 // validate phase: a required list means present, not non-empty; listMin and
 // listMax bound the outer list; a field's own constraints apply to every
 // element and every innermost element; an element and an inner list are
-// never null; a non-list inner value is a type error.
+// never null; a non-list value, as the list or an inner list, is a type
+// error.
 /* eslint-disable no-console */
 const assert = require('node:assert');
 
@@ -69,7 +70,12 @@ test('a required list is present, not non-empty', () => {
   assert.deepStrictEqual(verdicts({ tags: [], rows: [] }), { tags: ['listMin'] });
   assert.deepStrictEqual(verdicts(base({})), {});
   assert.deepStrictEqual(verdicts({}), { tags: ['required'], rows: ['required'] });
-  assert.deepStrictEqual(verdicts({ tags: 'a', rows: [] }), { tags: ['required'] });
+});
+
+test('a list given a value that is not a list is a type error, required or optional', () => {
+  const result = validateSchemaType(schema, 'Rules', { tags: 'a', rows: {}, cells: 'ab', codes: 5 });
+  const typeError = [{ validator: 'type', message: 'expected an array' }];
+  assert.deepStrictEqual(result, { tags: typeError, rows: typeError, cells: typeError, codes: typeError });
 });
 
 test('listMin and listMax bound the list, and the outer list of T[][]', () => {

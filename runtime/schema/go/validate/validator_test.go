@@ -753,11 +753,13 @@ func TestValidateType_RequiredArrayField(t *testing.T) {
 		assert.False(t, errs.HasErrors(), "errs=%v", errs)
 	})
 
-	t.Run("non-list value is required", func(t *testing.T) {
+	// A present value that is not a list is of the wrong JSON type (D14,
+	// amended), not missing.
+	t.Run("non-list value is type", func(t *testing.T) {
 		errs := v.ValidateType("Group", map[string]any{
 			"members": "Alice",
 		})
-		assert.Equal(t, []ValidationError{{Validator: "required", Message: "required field"}}, errs.GetFieldErrors("members"))
+		assert.Equal(t, []ValidationError{{Validator: "type", Message: "expected an array"}}, errs.GetFieldErrors("members"))
 	})
 
 	t.Run("nil element in non-null array", func(t *testing.T) {

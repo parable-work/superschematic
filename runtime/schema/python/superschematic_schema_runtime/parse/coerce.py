@@ -51,8 +51,10 @@ def coerce_int(value: Any, strict: bool) -> tuple[int, bool]:
 
 
 def coerce_float(value: Any, strict: bool) -> tuple[float, bool]:
+    # A boolean is not a number, in either mode, as in the Go and TypeScript
+    # runtimes.
     if isinstance(value, bool):
-        return (1.0 if value else 0.0), True
+        return 0.0, False
     if isinstance(value, (int, float)):
         as_float = float(value)
         if not math.isfinite(as_float):

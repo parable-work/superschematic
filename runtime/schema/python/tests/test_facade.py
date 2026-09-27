@@ -7,6 +7,7 @@ import json
 from superschematic_schema_runtime import (
     Runtime,
     RuntimeOptions,
+    Schema,
     has_errors,
     load_input,
     load_type,
@@ -134,3 +135,41 @@ def test_runtime_options_strict_override(connector_schema):
     result = rt.load_type("Connector", {"email": "a@b.com", "password": "p4ssw0rd!", "extra": 1})
     assert has_errors(result.errors)
     assert "extra" in result.errors
+
+
+def test_lenient_load_coerces_the_ir_number_and_boolean():
+    """A lenient load coerces "5" and "true" for the IR's number and boolean.
+
+    The JSON reader names them Float and Boolean, which were already coerced;
+    a schema built from the IR names gets the same coercion. A strict load
+    passes the value through, and validation refuses it.
+    """
+    from superschematic_schema_runtime.validation.types import FieldDef, TypeDef, TypeRef
+
+    schema = Schema(
+        name="settings",
+        types={
+            "Settings": TypeDef(
+                name="Settings",
+                fields=[
+                    FieldDef(name="ratio", type_ref=TypeRef(name="number")),
+                    FieldDef(name="enabled", type_ref=TypeRef(name="boolean")),
+                    FieldDef(name="weights", type_ref=TypeRef(name="number", is_array=True)),
+                ],
+            )
+        },
+    )
+    lenient = load_type(schema, "Settings", {"ratio": " 5 ", "enabled": "TRUE", "weights": ["1.5", 2]})
+    assert not has_errors(lenient.errors)
+    assert lenient.data == {"ratio": 5.0, "enabled": True, "weights": [1.5, 2.0]}
+
+    unreadable = load_type(schema, "Settings", {"ratio": "far", "enabled": "yes"})
+    assert unreadable.errors["ratio"][0].validator == "type"
+    assert unreadable.errors["enabled"][0].validator == "type"
+
+    strict = load_type_strict(schema, "Settings", {"ratio": "5", "enabled": "true"})
+    assert {key: [e.validator for e in value] for key, value in strict.errors.items()} == {
+        "ratio": ["type"],
+        "enabled": ["type"],
+    }
+

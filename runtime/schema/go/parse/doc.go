@@ -14,8 +14,11 @@
 //     and arrays are not applied in this phase.
 //  3. Lenient coercion: JSON-decoded values are coerced into the expected
 //     primitive (integer-valued float64 -> int64 for Int scalars, string -> bool for
-//     "true"/"false", json.Number -> int64 / float64, etc.). Strict mode
-//     disables coercion and emits {Validator: "type"} for any mismatch.
+//     "true"/"false", json.Number -> int64 / float64, etc.). The IR's number
+//     and boolean builtins are coerced as Float and Boolean are. Strict mode
+//     disables coercion and emits {Validator: "type"} for any mismatch of a
+//     scalar or a GraphQL builtin; it passes a number or boolean field's value
+//     through for validate to check.
 //  4. If ScalarDef.HasCustomNormalize and the NormalizeRegistry has an
 //     entry, run normalize on the value and replace it in the result.
 //  5. If ScalarDef.HasCustomParse and the ParseRegistry has an entry, run

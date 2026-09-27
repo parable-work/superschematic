@@ -34,6 +34,8 @@ def test_coerce_int(value, strict, expected):
         ("3.14", False, (3.14, True)),
         ("3.14", True, (0.0, False)),
         ("nan", False, (0.0, False)),
+        (True, False, (0.0, False)),  # booleans are NOT coerced to numbers
+        (False, True, (0.0, False)),
     ],
 )
 def test_coerce_float(value, strict, expected):

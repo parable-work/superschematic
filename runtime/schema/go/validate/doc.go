@@ -19,10 +19,16 @@
 //
 // # Arrays
 //
-// Each element of a list field is validated at field[i]. For an array of
-// arrays (T[][]) each element must be a list: a null inner list is reported
-// as required at field[i], and each inner element is validated at
-// field[i][j]. An empty inner list is valid.
+// A list field's value must be a list: any other value is reported as type
+// at field, required or optional. Each element is validated at field[i].
+// For an array of arrays (T[][]) each element must be a list: a null inner
+// list is reported as required at field[i], and each inner element is
+// validated at field[i][j]. An empty inner list is valid.
+//
+// # Lengths
+//
+// minLength and maxLength count Unicode code points (runes), not bytes, as
+// every other validator does.
 //
 // # Scalar Validator Registry
 //
