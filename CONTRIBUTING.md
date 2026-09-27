@@ -181,9 +181,9 @@ and concrete.
 ## Releases
 
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
-`api`, `schema-config`, `schema-ir`, `schema-runtime`), the PyPI distribution
-(`superschematic-schema-runtime`), the crates (`superschematic-http-runtime`,
-`superschematic-versiongraph`) and the five Go modules all carry the SemVer
+`api`, `schema-config`, `schema-ir`, `schema-runtime`, `http-runtime`), the
+PyPI distribution (`superschematic-schema-runtime`), the crate
+(`superschematic-http-runtime`) and the four Go modules all carry the SemVer
 version in `versions.env`, and `scripts/bump_version.py` is the only thing
 that writes it. `bump_version.py check` fails when any site disagrees; CI
 runs it on every pull request and the release workflow runs it before

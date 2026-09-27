@@ -2,6 +2,12 @@
   "name": "@superschematic/schema-ir",
   "version": "0.0.0",
   "description": "superschematic schema IR types for TypeScript: the runtime schema document (the package root) and the schema-file data form with its JSON Schema (./schema-file, ./schema-file.json). Types and JSON only, no runtime code.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/parable-work/superschematic",
+    "directory": "ir/typescript"
+  },
   "types": "./index.d.ts",
   "exports": {
     ".": {
