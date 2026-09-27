@@ -170,9 +170,10 @@ fi
 # Per-field transform* directives belong to a distribution, not the core: a
 # distribution declares its field directives with extension DecoratorSpecs
 # that write the IR Extensions slot (docs/DECISIONS.md, D18). Any transform*
-# identifier fails here. CHANGELOG.md names the fields the core removed and
-# is the one file skipped.
-transforms="$(scan 'transform[A-Z]' . -- "${hashes[@]}" \
+# identifier fails here, in camelCase, PascalCase or snake_case, which covers
+# IR keys, x-transform* vendor keys and Go names. CHANGELOG.md names the
+# fields the core removed and is the one file skipped.
+transforms="$(scan '[Tt]ransform([A-Z]|_[a-z])' . -- "${hashes[@]}" \
   | drop '^\./CHANGELOG\.md:[0-9]+:')"
 
 if [ -n "$transforms" ]; then
