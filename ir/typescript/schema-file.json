@@ -433,45 +433,6 @@
           "default": "",
           "type": "string"
         },
-        "transformAccountId": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformDedupKey": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformExternalUserId": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformFingerprintInput": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformForeignKey": {
-          "$ref": "#/$defs/TransformForeignKeyDef"
-        },
-        "transformOrdering": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformPartitionDate": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformPersonEmail": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformPersonName": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformStructural": {
-          "default": false,
-          "type": "boolean"
-        },
         "typeRef": {
           "$ref": "#/$defs/TypeRef"
         },
@@ -1474,22 +1435,6 @@
       },
       "required": [
         "name"
-      ],
-      "type": "object"
-    },
-    "TransformForeignKeyDef": {
-      "additionalProperties": false,
-      "properties": {
-        "idField": {
-          "default": "",
-          "type": "string"
-        },
-        "tap": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "tap"
       ],
       "type": "object"
     },

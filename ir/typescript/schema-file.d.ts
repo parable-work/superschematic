@@ -151,16 +151,6 @@ export interface FieldDef {
   sourceMustProject?: boolean;
   temporalFormat?: string;
   title?: string;
-  transformAccountId?: boolean;
-  transformDedupKey?: boolean;
-  transformExternalUserId?: boolean;
-  transformFingerprintInput?: boolean;
-  transformForeignKey?: TransformForeignKeyDef;
-  transformOrdering?: boolean;
-  transformPartitionDate?: boolean;
-  transformPersonEmail?: boolean;
-  transformPersonName?: boolean;
-  transformStructural?: boolean;
   typeRef: TypeRef;
   uiHidden?: boolean;
   unique?: boolean;
@@ -426,11 +416,6 @@ export interface TraitConfigSchema {
 export interface TraitRef {
   configArgs?: { [key: string]: unknown };
   name: string;
-}
-
-export interface TransformForeignKeyDef {
-  idField?: string;
-  tap: string;
 }
 
 export interface TypeDef {

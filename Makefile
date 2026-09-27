@@ -109,8 +109,8 @@ cli-smoke: $(BIN)
 # The extraction scrub: the only allowed maintainer mentions are the license
 # holder, the GitHub org in module paths and publisher registrations, and the
 # maintainer lines; source-tree identifiers, planning ids (wave, review and
-# phase numbers) and schema-kind names fail it, and so do transform* field
-# directives outside the core IR allowlist.
+# phase numbers) and schema-kind names fail it, and so does any transform*
+# field directive (D18).
 scrub:
 	scripts/scrub-check.sh
 

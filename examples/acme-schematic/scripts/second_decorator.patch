@@ -1,8 +1,8 @@
 diff --git a/ext/decorator.go b/ext/decorator.go
-index 1284b4c..3207937 100644
+index 7963414..4ba8a14 100644
 --- a/ext/decorator.go
 +++ b/ext/decorator.go
-@@ -14,11 +14,17 @@ type Shelf struct {
+@@ -14,12 +14,18 @@ type Shelf struct {
  	Bay   string `json:"bay,omitempty"`
  }
  
@@ -11,22 +11,22 @@ index 1284b4c..3207937 100644
 +	Days int `json:"days"`
 +}
 +
- // fieldExt is the acme slot on a field: the codec both the decorator and
- // the generators go through. Adding a second decorator on fields means
- // adding a second member here and nothing outside this package.
+ // fieldExt is the acme slot on a field: the codec both the decorators and
+ // the generators go through. Each field decorator is one member, so adding
+ // another means a member here and nothing outside this package.
  type fieldExt struct {
--	Shelf *Shelf `json:"shelf,omitempty"`
+-	Shelf   *Shelf `json:"shelf,omitempty"`
+-	FeedKey bool   `json:"feedKey,omitempty"`
 +	Shelf      *Shelf      `json:"shelf,omitempty"`
++	FeedKey    bool        `json:"feedKey,omitempty"`
 +	Perishable *Perishable `json:"perishable,omitempty"`
  }
  
  // ShelfArgs is @shelf's argument schema. Both frontends validate every use
-@@ -35,9 +41,34 @@ var ShelfArgs = json.RawMessage(`{
+@@ -36,9 +42,34 @@ var ShelfArgs = json.RawMessage(`{
  	}
  }`)
  
--// registerDecorator adds @shelf: a field decorator from @acme/schema that
--// only Catalog schemas may use.
 +// PerishableArgs is @perishable's argument schema.
 +var PerishableArgs = json.RawMessage(`{
 +	"type": "object",
@@ -35,8 +35,8 @@ index 1284b4c..3207937 100644
 +	"properties": {"days": {"type": "integer", "minimum": 1}}
 +}`)
 +
-+// registerDecorator adds @shelf and @perishable: field decorators from
-+// @acme/schema that only Catalog schemas may use.
+ // registerDecorator adds acme's field decorators from @acme/schema. Each
+ // is only allowed in Catalog schemas.
  func registerDecorator(r *registry.Registry) error {
 +	if err := r.RegisterDecorator(registry.DecoratorSpec{
 +		Name:      "perishable",
@@ -55,12 +55,12 @@ index 1284b4c..3207937 100644
 +	}); err != nil {
 +		return err
 +	}
- 	return r.RegisterDecorator(registry.DecoratorSpec{
+ 	if err := r.RegisterDecorator(registry.DecoratorSpec{
  		Name:      "shelf",
  		Extension: Name,
-@@ -63,3 +94,12 @@ func ShelfOf(fd *ir.FieldDef) (*Shelf, bool, error) {
+@@ -91,3 +122,12 @@ func IsFeedKey(fd *ir.FieldDef) (bool, error) {
  	}
- 	return f.Shelf, true, nil
+ 	return f.FeedKey, nil
  }
 +
 +// PerishableOf returns the shelf life declared on fd, if any.
@@ -72,13 +72,13 @@ index 1284b4c..3207937 100644
 +	return f.Perishable, true, nil
 +}
 diff --git a/packages/schema/src/index.ts b/packages/schema/src/index.ts
-index 3cc778d..fb570c3 100644
+index b81ccd3..9b1597c 100644
 --- a/packages/schema/src/index.ts
 +++ b/packages/schema/src/index.ts
-@@ -26,3 +26,13 @@ export interface ShelfArgs {
- export function shelf(_args: ShelfArgs): PropertyDecorator {
-   return () => {};
- }
+@@ -31,3 +31,13 @@ export function shelf(_args: ShelfArgs): PropertyDecorator {
+ // feedKey marks a field of a Catalog schema as part of the key acme's
+ // supplier feed matches rows on. It takes no argument.
+ export const feedKey: PropertyDecorator = () => {};
 +
 +// PerishableArgs is @perishable's argument: how long a field's values keep.
 +export interface PerishableArgs {
@@ -90,18 +90,18 @@ index 3cc778d..fb570c3 100644
 +  return () => {};
 +}
 diff --git a/schemas/services/shop-catalog/src/catalog.schema.ts b/schemas/services/shop-catalog/src/catalog.schema.ts
-index a4fe0c5..5b3ae06 100644
+index e5679ba..46f404c 100644
 --- a/schemas/services/shop-catalog/src/catalog.schema.ts
 +++ b/schemas/services/shop-catalog/src/catalog.schema.ts
 @@ -1,6 +1,6 @@
  import { Identity } from "superscalar";
  import { Validate } from "@superschematic/schema";
--import { Acme, shelf } from "@acme/schema";
-+import { Acme, perishable, shelf } from "@acme/schema";
+-import { Acme, feedKey, shelf } from "@acme/schema";
++import { Acme, feedKey, perishable, shelf } from "@acme/schema";
  
  // A Catalog schema's classes are embedded structs (KindSpec.StructRole).
- // @shelf comes from @acme/schema and is only allowed in Catalog schemas; it
-@@ -10,6 +10,7 @@ export abstract class Product {
+ // @shelf and @feedKey come from @acme/schema and are only allowed in Catalog
+@@ -11,6 +11,7 @@ export abstract class Product {
    sku: Identity.Slug;
  
    @shelf({ aisle: 7 })
