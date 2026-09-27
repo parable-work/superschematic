@@ -148,9 +148,10 @@ func tenantUserUUIDPtr(value types.IdentityUUID) *types.IdentityUUID {
 	return &value
 }
 
-// GetVersion retrieves a historical TenantUser value by version.
+// GetVersion retrieves a historical TenantUser value by version. A delete
+// tombstone's version is not a value of the row, so it reads as ErrNotFound.
 func (r *TenantUserRepository) GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.TenantUser, error) {
-	query := `SELECT data FROM tenant_user_history WHERE id = $1 AND _version = $2`
+	query := `SELECT data FROM tenant_user_history WHERE id = $1 AND _version = $2 AND operation <> 'DELETE'`
 
 	var data []byte
 	var row pgx.Row
@@ -216,8 +217,18 @@ func (r *TenantUserRepository) ListVersions(ctx context.Context, id types.Identi
 }
 
 // GetAsOf retrieves the latest historical TenantUser value at or before ts.
+// It returns ErrNotFound when the row did not exist then: no history row at
+// or before ts, or the latest one is a delete tombstone or a soft-deleted image.
 func (r *TenantUserRepository) GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.TenantUser, error) {
-	query := `SELECT data FROM tenant_user_history WHERE id = $1 AND recorded_at <= $2 ORDER BY recorded_at DESC, _version DESC LIMIT 1`
+	query := `SELECT data
+FROM (
+  SELECT operation, data
+  FROM tenant_user_history
+  WHERE id = $1 AND recorded_at <= $2
+  ORDER BY recorded_at DESC, _version DESC
+  LIMIT 1
+) latest
+WHERE operation <> 'DELETE' AND (data->>'deleted_at') IS NULL`
 
 	var data []byte
 	var row pgx.Row
@@ -242,6 +253,8 @@ func (r *TenantUserRepository) GetAsOf(ctx context.Context, id types.IdentityUUI
 }
 
 // ListAsOfByTenantID retrieves the latest historical TenantUser values for tenant at or before ts.
+// A row whose latest history row at ts is a delete tombstone or a soft-deleted
+// image is left out.
 func (r *TenantUserRepository) ListAsOfByTenantID(ctx context.Context, tenantID types.IdentityUUID, ts time.Time, opts *TenantUserHistoryOptions) ([]types.HistoryRecord[*types.TenantUser], error) {
 	if opts == nil {
 		opts = &TenantUserHistoryOptions{}
@@ -254,7 +267,7 @@ func (r *TenantUserRepository) ListAsOfByTenantID(ctx context.Context, tenantID 
 )
 SELECT _version, operation, recorded_at, data
 FROM latest
-WHERE operation <> 'DELETE' AND data->>'tenant_id' = $2
+WHERE operation <> 'DELETE' AND (data->>'deleted_at') IS NULL AND data->>'tenant_id' = $2
 ORDER BY recorded_at ASC, _version ASC`
 	query += buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
 
@@ -1365,8 +1378,32 @@ func (r *TenantUserRepository) UpdateOne(ctx context.Context, id types.IdentityU
 }
 
 // UpdateOneIfVersion updates a single TenantUser only if its current _version matches expectedVersion.
+// It returns ErrVersionConflict when the row exists at another version and
+// ErrNotFound when it does not exist.
 func (r *TenantUserRepository) UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *TenantUserUpdate) (*types.TenantUser, error) {
 	return r.updateOne(ctx, id, update, &expectedVersion)
+}
+
+// versionMiss tells apart why a write fenced on _version matched no row:
+// ErrVersionConflict when the row exists at another version, ErrNotFound when
+// it does not exist or is soft-deleted.
+func (r *TenantUserRepository) versionMiss(ctx context.Context, id types.IdentityUUID) error {
+	query := `SELECT _version FROM tenant_user WHERE id = $1 AND deleted_at IS NULL`
+
+	var version int64
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, id.ToUUID())
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, id.ToUUID())
+	}
+	if err := row.Scan(&version); err != nil {
+		if err == pgx.ErrNoRows {
+			return ErrNotFound
+		}
+		return fmt.Errorf("failed to read TenantUser version: %w", err)
+	}
+	return ErrVersionConflict
 }
 
 func (r *TenantUserRepository) updateOne(ctx context.Context, id types.IdentityUUID, update *TenantUserUpdate, expectedVersion *int64) (*types.TenantUser, error) {
@@ -1457,6 +1494,9 @@ func (r *TenantUserRepository) updateOne(ctx context.Context, id types.IdentityU
 		&result.Version,
 	); err != nil {
 		if err == pgx.ErrNoRows {
+			if expectedVersion != nil {
+				return nil, r.versionMiss(ctx, id)
+			}
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to scan result: %w", err)
@@ -1565,6 +1605,34 @@ func (r *TenantUserRepository) DeleteOne(ctx context.Context, id types.IdentityU
 	return nil
 }
 
+// DeleteOneIfVersion soft deletes a single TenantUser only if its current
+// _version matches expectedVersion. It returns ErrVersionConflict when the row
+// exists at another version and ErrNotFound when it does not exist.
+func (r *TenantUserRepository) DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error {
+	if !HasUserID(ctx) {
+		return ErrNoUserInContext
+	}
+	query := `UPDATE tenant_user SET deleted_at = $1, deleted_by = $2 WHERE id = $3 AND _version = $4 AND deleted_at IS NULL`
+	queryArgs := []interface{}{time.Now(), GetUserID(ctx), id.ToUUID(), expectedVersion}
+
+	var result pgconn.CommandTag
+	var err error
+	if r.tx != nil {
+		result, err = r.tx.Exec(ctx, query, queryArgs...)
+	} else {
+		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to delete record: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return r.versionMiss(ctx, id)
+	}
+
+	return nil
+}
+
 // DeleteMany soft deletes multiple TenantUser records matching the filter
 func (r *TenantUserRepository) DeleteMany(ctx context.Context, filter *TenantUserFilter) (int, error) {
 	if !HasUserID(ctx) {
@@ -1596,15 +1664,19 @@ func (r *TenantUserRepository) DeleteMany(ctx context.Context, filter *TenantUse
 	return int(result.RowsAffected()), nil
 }
 
-// HardDeleteOne permanently deletes a single TenantUser record by ID
+// HardDeleteOne permanently deletes a single TenantUser record by ID.
+// The history tombstone records the context user as its deleted_by.
 func (r *TenantUserRepository) HardDeleteOne(ctx context.Context, id types.IdentityUUID) error {
-	query := `DELETE FROM tenant_user WHERE id = $1`
-	queryArgs := []interface{}{id.ToUUID()}
+	query := historyActorCTE + `DELETE FROM tenant_user USING history_actor WHERE id = $2`
+	queryArgs := []interface{}{historyActor(ctx), id.ToUUID()}
 
 	var result pgconn.CommandTag
 	var err error
 	if r.tx != nil {
 		result, err = r.tx.Exec(ctx, query, queryArgs...)
+		if err == nil {
+			err = clearHistoryActor(ctx, r.tx)
+		}
 	} else {
 		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
 	}
