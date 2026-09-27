@@ -2,6 +2,7 @@ package schemafile
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -217,4 +218,84 @@ func mapKeys2[V any](m map[string]V) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// TestDefaultsAreWhatTheEncoderOmits: a property of the JSON Schema has a
+// default exactly when the Go encoder leaves it out at one value, and the
+// default is that value. For each field of each IR struct a document
+// reaches, the test encodes the struct with that field at its empty value
+// (a pointer to a zero value, an empty slice or map, a zero scalar) and
+// looks for the key in the output, through the struct's own encoder.
+func TestDefaultsAreWhatTheEncoderOmits(t *testing.T) {
+	data, err := Definition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root struct {
+		Defs map[string]struct {
+			Properties map[string]map[string]any `json:"properties"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatal(err)
+	}
+
+	seen := map[reflect.Type]bool{}
+	sawDefault := false
+	var visit func(reflect.Type)
+	visit = func(typ reflect.Type) {
+		for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice || typ.Kind() == reflect.Map {
+			typ = typ.Elem()
+		}
+		if typ.Kind() != reflect.Struct || seen[typ] {
+			return
+		}
+		seen[typ] = true
+		props := root.Defs[typ.Name()].Properties
+		for i := range typ.NumField() {
+			field := typ.Field(i)
+			name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+			if !field.IsExported() || name == "-" {
+				continue
+			}
+			visit(field.Type)
+
+			value := reflect.New(typ).Elem()
+			empty := value.Field(i)
+			switch empty.Kind() {
+			case reflect.Pointer:
+				empty.Set(reflect.New(empty.Type().Elem()))
+			case reflect.Slice:
+				empty.Set(reflect.MakeSlice(empty.Type(), 0, 0))
+			case reflect.Map:
+				empty.Set(reflect.MakeMap(empty.Type()))
+			}
+			encoded, err := json.Marshal(value.Interface())
+			if err != nil {
+				t.Fatalf("%s.%s: %v", typ.Name(), field.Name, err)
+			}
+			var keys map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &keys); err != nil {
+				t.Fatal(err)
+			}
+			_, written := keys[name]
+			fallback, hasDefault := props[name]["default"]
+			switch {
+			case written && hasDefault:
+				t.Errorf("$defs/%s/properties/%s has default %v, but the encoder writes the key at its empty value", typ.Name(), name, fallback)
+			case !written && !hasDefault:
+				t.Errorf("$defs/%s/properties/%s has no default, but the encoder omits the key at its empty value", typ.Name(), name)
+			case hasDefault:
+				sawDefault = true
+				want, _ := json.Marshal(empty.Interface())
+				if got, _ := json.Marshal(fallback); string(got) != string(want) {
+					t.Errorf("$defs/%s/properties/%s default = %s, want %s", typ.Name(), name, got, want)
+				}
+			}
+		}
+	}
+	visit(reflect.TypeFor[Document]())
+	if !sawDefault {
+		t.Fatal("no property of the JSON Schema has a default")
+	}
 }

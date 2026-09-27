@@ -754,15 +754,23 @@ the acme example declares one behavior (`acme.<Name>`) with its
 TypeScript implementation and no core edit, asserted by
 `scripts/smoke.sh` (section 10 of `docs/extension-model.md`).
 
-Status: the TypeScript types are built. `internal/tools/schemafiletypes`
-writes `schema-file.d.ts` and `schema-file.json` into
-`@superschematic/schema-ir` (subpaths `./schema-file` and
-`./schema-file.json`), `make schema-file-types-check` and CI run its
-`-check`, the package takes the repository's version, and the meta-schema
-declares the invocation policy's default. The types also leave the schema
-kinds open, since a registry adds kinds as it adds extension slots. The
-strict loader comes next, because the engine and its publish checks read
-schemas through it; behavior declarations in the compiler follow. Each
-change that lands a piece updates this paragraph, the README layout table
-and the pages that describe it. The names and rules are reversible until
-the first release.
+Status: the TypeScript types and the strict loader are built.
+`internal/tools/schemafiletypes` writes `schema-file.d.ts` and
+`schema-file.json` into `@superschematic/schema-ir` (subpaths
+`./schema-file` and `./schema-file.json`), `make schema-file-types-check`
+and CI run its `-check`, and the package takes the repository's version.
+The types also leave the schema kinds open, since a registry adds kinds as
+it adds extension slots. `@superschematic/schema-runtime` exports the
+loader (`SchemaFileLoader`, `loadSchemaFile`) and the serializer
+(`canonicalJSON`), and `internal/loader/schemafile` writes the parity
+vectors to `runtime/schema/testdata/schema_file_parity.json`. Besides the
+invocation policy's default, the meta-schema gives every property the Go
+encoder omits at one value (a non-pointer empty string, false or zero, an
+empty list or map) that value as its default. The Go reader's canonical
+form drops such a value, since its decoder cannot tell it from an absent
+key, and the loader reads which properties those are from the meta-schema
+rather than from a list of its own. The loader reads number literals
+through JSON.parse source text access, so it needs Node.js 21 or later or
+Bun. Behavior declarations in the compiler follow. Each change that lands
+a piece updates this paragraph, the README layout table and the pages that
+describe it. The names and rules are reversible until the first release.

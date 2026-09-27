@@ -90,6 +90,11 @@ export {
 
 export { loadYamlObject, dumpYaml } from './yaml';
 
+// Strict schema-file loader: the Go data-form reader's checks, decoding and
+// defaults over a meta-schema, and the canonical form ir.CanonicalJSON writes.
+export { SchemaFileError, SchemaFileLoader, canonicalJSON, loadSchemaFile } from './schemafile';
+export type { LoadedSchemaFile, SchemaFileIssue, SchemaFileLoaderOptions } from './schemafile';
+
 import { parseSchemaJson } from './json/reader';
 import { writeSchemaJson, writeScalarsJson } from './json/writer';
 import type { ScalarDef, Schema } from './validation/types';

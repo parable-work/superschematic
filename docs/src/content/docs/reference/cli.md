@@ -149,7 +149,12 @@ import type { Document, SchemaFile } from "@superschematic/schema-ir/schema-file
 The types leave open the parts a binary's registry closes: the extension
 slots, the documents, the schema kinds and the MCP invocation policy key.
 The JSON Schema gives the policy key its default, which the readers fill
-in for a visible tool that omits it.
+in for a visible tool that omits it. The readers also drop a property that
+holds a value the IR cannot tell from an absent key, such as `false` or an
+empty string or list, and the JSON Schema gives each such property that
+value as its default. `@superschematic/schema-runtime`'s
+`SchemaFileLoader` loads schema files against this output, or against a
+binary's own.
 
 ## `format --to=ts\|json\|yaml <file>`
 

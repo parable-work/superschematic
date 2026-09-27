@@ -1,0 +1,692 @@
+{
+  "comment": "Written by TestSchemaFileParityCorpus (internal/loader/schemafile); regenerate with go test ./internal/loader/schemafile -run TestSchemaFileParityCorpus -update. The extended vectors load against schema_file_parity.meta-schema.json.",
+  "canonical": [
+    {
+      "name": "numbers as written",
+      "input": "[1.0, -0, 1E2, 1e+2, 0.10, 12345678901234567890123, 1e400, -1.5e-7]",
+      "output": "[1.0,-0,1E2,1e+2,0.10,12345678901234567890123,1e400,-1.5e-7]"
+    },
+    {
+      "name": "key order by UTF-8 bytes",
+      "input": "{\"b\": 1, \"a\": 2, \"B\": 3, \"é\": 4, \"z\": 5, \"😀\": 6, \"\": 7, \"\\uffff\": 8, \"aa\": 9}",
+      "output": "{\"\":7,\"B\":3,\"a\":2,\"aa\":9,\"b\":1,\"z\":5,\"é\":4,\"￿\":8,\"😀\":6}"
+    },
+    {
+      "name": "nested and whitespace",
+      "input": " {\n\t\"list\": [ {\"y\": null, \"x\": true}, [], {} ],\r\n \"s\": \"\" } ",
+      "output": "{\"list\":[{\"x\":true,\"y\":null},[],{}],\"s\":\"\"}"
+    },
+    {
+      "name": "escapes",
+      "input": "[\"<a&b>\", \"\\u2028\\u2029\", \"\\\"\\\\\\/\", \"\\b\\f\\n\\r\\t\", \"\\u0001\\u001f\\u007f\", \"\\u00e9\\u00E9\", \"\\ud83d\\ude00\", \"\\ud800\", \"\\udc00x\\ud800\", \"é\u2028\u2029😀\"]",
+      "output": "[\"\\u003ca\\u0026b\\u003e\",\"\\u2028\\u2029\",\"\\\"\\\\/\",\"\\b\\f\\n\\r\\t\",\"\\u0001\\u001f\",\"éé\",\"😀\",\"�\",\"�x�\",\"é\\u2028\\u2029😀\"]"
+    },
+    {
+      "name": "top-level scalars",
+      "input": "\"text\"",
+      "output": "\"text\""
+    },
+    {
+      "name": "top-level number",
+      "input": "-0.0",
+      "output": "-0.0"
+    },
+    {
+      "name": "top-level null",
+      "input": "null",
+      "output": "null"
+    },
+    {
+      "name": "duplicate keys keep the last",
+      "input": "{\"a\": 1, \"a\": {\"b\": 2}}",
+      "output": "{\"a\":{\"b\":2}}"
+    },
+    {
+      "name": "invalid JSON",
+      "input": "{\"a\": }",
+      "error": "invalid character '}' looking for beginning of value"
+    },
+    {
+      "name": "trailing data",
+      "input": "{} {}",
+      "error": "trailing data after JSON value"
+    },
+    {
+      "name": "empty input",
+      "input": "",
+      "error": "EOF"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "document with every collection",
+      "registry": "core",
+      "input": "{\n\t\t\"name\": \"catalog\", \"kind\": \"General\", \"description\": \"Catalog.\", \"comment\": \"top\",\n\t\t\"imports\": [{\"from\": \"../shared\", \"package\": \"shared\", \"types\": [\"Money\"]}],\n\t\t\"scalars\": {\"Local.Code\": {\"name\": \"Local.Code\", \"languagePrimitive\": \"string\", \"pattern\": \"^[A-Z]+$\", \"minLength\": 1, \"maxLength\": 8}},\n\t\t\"types\": {\"Item\": {\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [\n\t\t\t{\"name\": \"code\", \"typeRef\": {\"name\": \"Local.Code\"}, \"required\": true},\n\t\t\t{\"name\": \"tags\", \"typeRef\": {\"name\": \"String\", \"isArray\": true}},\n\t\t\t{\"name\": \"grid\", \"typeRef\": {\"name\": \"Integer\", \"isArray\": true, \"isArrayOfArrays\": true}}\n\t\t]}},\n\t\t\"enums\": {\"Colour\": {\"name\": \"Colour\", \"values\": [{\"name\": \"RED\", \"serializedAs\": \"red\"}, {\"name\": \"BLUE\"}]}},\n\t\t\"unions\": {\"Shape\": {\"name\": \"Shape\", \"types\": [\"Item\"]}},\n\t\t\"operationSets\": [{\"name\": \"ItemOps\", \"operations\": [{\"name\": \"getItem\", \"typeRef\": {\"name\": \"Item\"}, \"httpMethod\": \"GET\"}]}]\n\t}",
+      "accept": true,
+      "canonical": "{\"comment\":\"top\",\"description\":\"Catalog.\",\"enums\":{\"Colour\":{\"name\":\"Colour\",\"values\":[{\"name\":\"RED\",\"serializedAs\":\"red\"},{\"name\":\"BLUE\"}]}},\"imports\":[{\"from\":\"../shared\",\"package\":\"shared\",\"types\":[\"Money\"]}],\"kind\":\"General\",\"name\":\"catalog\",\"operationSets\":[{\"name\":\"ItemOps\",\"operations\":[{\"httpMethod\":\"GET\",\"name\":\"getItem\",\"typeRef\":{\"name\":\"Item\"}}]}],\"scalars\":{\"Local.Code\":{\"languagePrimitive\":\"string\",\"maxLength\":8,\"minLength\":1,\"name\":\"Local.Code\",\"pattern\":\"^[A-Z]+$\"}},\"types\":{\"Item\":{\"fields\":[{\"name\":\"code\",\"required\":true,\"typeRef\":{\"name\":\"Local.Code\"}},{\"name\":\"tags\",\"typeRef\":{\"isArray\":true,\"name\":\"String\"}},{\"name\":\"grid\",\"typeRef\":{\"isArray\":true,\"isArrayOfArrays\":true,\"name\":\"Integer\"}}],\"name\":\"Item\",\"role\":\"EmbeddedStruct\"}},\"unions\":{\"Shape\":{\"name\":\"Shape\",\"types\":[\"Item\"]}}}"
+    },
+    {
+      "name": "document by kind alone",
+      "registry": "core",
+      "input": "{\"kind\": \"API\", \"name\": \"orders\"}",
+      "accept": true,
+      "canonical": "{\"kind\":\"API\",\"name\":\"orders\"}"
+    },
+    {
+      "name": "document by a collection key alone",
+      "registry": "core",
+      "input": "{\"types\": {\"Item\": {\"name\": \"Item\", \"role\": \"DBTable\"}}}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"name\":\"Item\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "documents-only payload",
+      "registry": "core",
+      "input": "{\"documents\": {}}",
+      "accept": true,
+      "canonical": "{}"
+    },
+    {
+      "name": "extensions-only payload",
+      "registry": "core",
+      "input": "{\"extensions\": {}}",
+      "accept": true,
+      "canonical": "{}"
+    },
+    {
+      "name": "imports-only payload",
+      "registry": "core",
+      "input": "{\"imports\": [{\"package\": \"shared\", \"types\": []}]}",
+      "accept": true,
+      "canonical": "{\"imports\":[{\"package\":\"shared\",\"types\":[]}]}"
+    },
+    {
+      "name": "type file",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"fields\": [{\"name\": \"id\", \"typeRef\": {\"name\": \"Identity.UUID\"}, \"key\": true}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"fields\":[{\"key\":true,\"name\":\"id\",\"typeRef\":{\"name\":\"Identity.UUID\"}}],\"name\":\"Item\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "enum file",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"Colour\", \"values\": [{\"name\": \"RED\"}], \"description\": \"Colours.\"}",
+      "accept": true,
+      "canonical": "{\"enums\":{\"Colour\":{\"description\":\"Colours.\",\"name\":\"Colour\",\"values\":[{\"name\":\"RED\"}]}}}"
+    },
+    {
+      "name": "union file",
+      "registry": "core",
+      "input": "{\"kind\": \"Union\", \"name\": \"Shape\", \"types\": [\"Circle\", \"Square\"]}",
+      "accept": true,
+      "canonical": "{\"unions\":{\"Shape\":{\"name\":\"Shape\",\"types\":[\"Circle\",\"Square\"]}}}"
+    },
+    {
+      "name": "scalar file",
+      "registry": "core",
+      "input": "{\"kind\": \"Scalar\", \"name\": \"Local.Code\", \"languagePrimitive\": \"string\", \"minimum\": -9223372036854775808, \"maximum\": 9223372036854775807}",
+      "accept": true,
+      "canonical": "{\"scalars\":{\"Local.Code\":{\"languagePrimitive\":\"string\",\"maximum\":9223372036854775807,\"minimum\":-9223372036854775808,\"name\":\"Local.Code\"}}}"
+    },
+    {
+      "name": "operation set file",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [], \"encrypted\": true}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"encrypted\":true,\"name\":\"Ops\",\"operations\":[]}]}"
+    },
+    {
+      "name": "visible tool without a policy gets the default",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"deleteOrder\", \"typeRef\": {\"name\": \"Order\"}, \"httpMethod\": \"DELETE\", \"mcp\": {\"handle\": \"delete_order\", \"hidden\": false}}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"Ops\",\"operations\":[{\"httpMethod\":\"DELETE\",\"mcp\":{\"handle\":\"delete_order\",\"hidden\":false,\"invocationPolicy\":\"auto\"},\"name\":\"deleteOrder\",\"typeRef\":{\"name\":\"Order\"}}]}]}"
+    },
+    {
+      "name": "visible tool keeps its policy",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"deleteOrder\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": {\"handle\": \"delete_order\", \"hidden\": false, \"invocationPolicy\": \"ask\"}}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"Ops\",\"operations\":[{\"mcp\":{\"handle\":\"delete_order\",\"hidden\":false,\"invocationPolicy\":\"ask\"},\"name\":\"deleteOrder\",\"typeRef\":{\"name\":\"Order\"}}]}]}"
+    },
+    {
+      "name": "visible tool keeps the default value written out",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"getOrder\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": {\"handle\": \"get_order\", \"hidden\": false, \"invocationPolicy\": \"auto\"}}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"Ops\",\"operations\":[{\"mcp\":{\"handle\":\"get_order\",\"hidden\":false,\"invocationPolicy\":\"auto\"},\"name\":\"getOrder\",\"typeRef\":{\"name\":\"Order\"}}]}]}"
+    },
+    {
+      "name": "hidden tool gets no policy",
+      "registry": "core",
+      "input": "{\"operationSets\": [{\"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"purge\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": {\"hidden\": true, \"hiddenReason\": \"Staff only.\"}}]}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"Ops\",\"operations\":[{\"mcp\":{\"hidden\":true,\"hiddenReason\":\"Staff only.\"},\"name\":\"purge\",\"typeRef\":{\"name\":\"Order\"}}]}]}"
+    },
+    {
+      "name": "hidden tool keeps a policy it declares",
+      "registry": "core",
+      "input": "{\"operationSets\": [{\"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"purge\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": {\"hidden\": true, \"hiddenReason\": \"Staff only.\", \"invocationPolicy\": \"auto\"}}]}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"Ops\",\"operations\":[{\"mcp\":{\"hidden\":true,\"hiddenReason\":\"Staff only.\",\"invocationPolicy\":\"auto\"},\"name\":\"purge\",\"typeRef\":{\"name\":\"Order\"}}]}]}"
+    },
+    {
+      "name": "an mcp record on a type field gets no policy",
+      "registry": "core",
+      "input": "{\"name\": \"Order\", \"role\": \"APIView\", \"fields\": [\n\t\t{\"name\": \"id\", \"typeRef\": {\"name\": \"String\"}, \"mcp\": {\"handle\": \"order_id\", \"hidden\": false}}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Order\":{\"fields\":[{\"mcp\":{\"handle\":\"order_id\",\"hidden\":false},\"name\":\"id\",\"typeRef\":{\"name\":\"String\"}}],\"name\":\"Order\",\"role\":\"APIView\"}}}"
+    },
+    {
+      "name": "mcp _meta holds any JSON",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"getOrder\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": {\"handle\": \"get_order\", \"hidden\": false, \"_meta\": {\"ui\": {\"order\": 1.0, \"weights\": [-0, 2.50, 1e21]}, \"flag\": null}}}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"Ops\",\"operations\":[{\"mcp\":{\"_meta\":{\"flag\":null,\"ui\":{\"order\":1,\"weights\":[-0,2.5,1e+21]}},\"handle\":\"get_order\",\"hidden\":false,\"invocationPolicy\":\"auto\"},\"name\":\"getOrder\",\"typeRef\":{\"name\":\"Order\"}}]}]}"
+    },
+    {
+      "name": "zero values the decoder drops",
+      "registry": "core",
+      "input": "{\n\t\t\"name\": \"\", \"description\": \"\", \"comment\": \"\", \"imports\": [], \"scalars\": {}, \"enums\": {}, \"unions\": {}, \"operationSets\": [], \"documents\": {}, \"extensions\": {},\n\t\t\"types\": {\"Item\": {\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"description\": \"\", \"fields\": [\n\t\t\t{\"name\": \"a\", \"typeRef\": {\"name\": \"String\", \"isArray\": false, \"isArrayOfArrays\": false, \"isMap\": false, \"elemNonNull\": false},\n\t\t\t \"required\": false, \"description\": \"\", \"permissions\": [], \"arguments\": []}\n\t\t], \"indexes\": [], \"implements\": [{\"name\": \"Named\", \"configArgs\": {}}], \"strictJSON\": false}}\n\t}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"fields\":[{\"name\":\"a\",\"typeRef\":{\"name\":\"String\"}}],\"implements\":[{\"name\":\"Named\"}],\"name\":\"Item\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "zero values a pointer keeps",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [\n\t\t{\"name\": \"a\", \"typeRef\": {\"name\": \"Integer\"}, \"default\": \"\", \"validateMin\": 0, \"validateMax\": 0, \"validateMinLength\": 0, \"validateMaxLength\": 0, \"validateListMin\": 0}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"fields\":[{\"default\":\"\",\"name\":\"a\",\"typeRef\":{\"name\":\"Integer\"},\"validateListMin\":0,\"validateMax\":0,\"validateMaxLength\":0,\"validateMin\":0,\"validateMinLength\":0}],\"name\":\"Item\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "zero values of a scalar file",
+      "registry": "core",
+      "input": "{\"kind\": \"Scalar\", \"name\": \"Local.Code\", \"languagePrimitive\": \"string\", \"minLength\": 0, \"maxLength\": 0, \"minimum\": 0, \"reservedWords\": [], \"typeMappings\": {}}",
+      "accept": true,
+      "canonical": "{\"scalars\":{\"Local.Code\":{\"languagePrimitive\":\"string\",\"minimum\":0,\"name\":\"Local.Code\"}}}"
+    },
+    {
+      "name": "zero values of an mcp record",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"getOrder\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": {\"handle\": \"\", \"hidden\": false, \"hiddenReason\": \"\", \"_meta\": {}}}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"Ops\",\"operations\":[{\"mcp\":{\"hidden\":false,\"invocationPolicy\":\"auto\"},\"name\":\"getOrder\",\"typeRef\":{\"name\":\"Order\"}}]}]}"
+    },
+    {
+      "name": "projection literals keep their zero values",
+      "registry": "core",
+      "input": "{\"name\": \"OrderView\", \"role\": \"Projection\", \"projection\": {\"pool\": \"main\", \"name\": \"order_view\", \"migration\": \"0001\", \"source\": \"Order\",\n\t\t\"predicates\": [{\"column\": \"archived\", \"equals\": {\"bool\": false}}, {\"column\": \"note\", \"equals\": {\"string\": \"\"}}, {\"column\": \"total\", \"equals\": {\"number\": 0}}]}}",
+      "accept": true,
+      "canonical": "{\"types\":{\"OrderView\":{\"name\":\"OrderView\",\"projection\":{\"migration\":\"0001\",\"name\":\"order_view\",\"pool\":\"main\",\"predicates\":[{\"column\":\"archived\",\"equals\":{\"bool\":false}},{\"column\":\"note\",\"equals\":{\"string\":\"\"}},{\"column\":\"total\",\"equals\":{\"number\":0}}],\"source\":\"Order\"},\"role\":\"Projection\"}}}"
+    },
+    {
+      "name": "float fields",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [\n\t\t{\"name\": \"a\", \"typeRef\": {\"name\": \"Float\"}, \"validateMin\": 1.0, \"validateMax\": 1E2},\n\t\t{\"name\": \"b\", \"typeRef\": {\"name\": \"Float\"}, \"validateMin\": -0, \"validateMax\": 1e21},\n\t\t{\"name\": \"c\", \"typeRef\": {\"name\": \"Float\"}, \"validateMin\": 1e-7, \"validateMax\": 0.000001},\n\t\t{\"name\": \"d\", \"typeRef\": {\"name\": \"Float\"}, \"validateMin\": 123456789012345678901234567890, \"validateMax\": 0.1},\n\t\t{\"name\": \"e\", \"typeRef\": {\"name\": \"Float\"}, \"validateMin\": 5e-324, \"validateMax\": 1.7976931348623157e308},\n\t\t{\"name\": \"f\", \"typeRef\": {\"name\": \"Float\"}, \"validateMin\": 1e-400, \"validateMax\": -1.5e-10},\n\t\t{\"name\": \"g\", \"typeRef\": {\"name\": \"Float\"}, \"validateMin\": 123456789.123456789, \"validateMax\": 2.50}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"fields\":[{\"name\":\"a\",\"typeRef\":{\"name\":\"Float\"},\"validateMax\":100,\"validateMin\":1},{\"name\":\"b\",\"typeRef\":{\"name\":\"Float\"},\"validateMax\":1e+21,\"validateMin\":-0},{\"name\":\"c\",\"typeRef\":{\"name\":\"Float\"},\"validateMax\":0.000001,\"validateMin\":1e-7},{\"name\":\"d\",\"typeRef\":{\"name\":\"Float\"},\"validateMax\":0.1,\"validateMin\":1.2345678901234568e+29},{\"name\":\"e\",\"typeRef\":{\"name\":\"Float\"},\"validateMax\":1.7976931348623157e+308,\"validateMin\":5e-324},{\"name\":\"f\",\"typeRef\":{\"name\":\"Float\"},\"validateMax\":-1.5e-10,\"validateMin\":0},{\"name\":\"g\",\"typeRef\":{\"name\":\"Float\"},\"validateMax\":2.5,\"validateMin\":123456789.12345679}],\"name\":\"Item\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "integer fields",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [\n\t\t{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"validateMinLength\": -0, \"validateMaxLength\": 9007199254740993},\n\t\t{\"name\": \"b\", \"typeRef\": {\"name\": \"File\"}, \"validateUploadMaxBytes\": 9223372036854775807, \"validateListMin\": -9223372036854775808}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"fields\":[{\"name\":\"a\",\"typeRef\":{\"name\":\"String\"},\"validateMaxLength\":9007199254740993,\"validateMinLength\":0},{\"name\":\"b\",\"typeRef\":{\"name\":\"File\"},\"validateListMin\":-9223372036854775808,\"validateUploadMaxBytes\":9223372036854775807}],\"name\":\"Item\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "any values in configArgs",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"implements\": [{\"name\": \"Named\", \"configArgs\": {\n\t\t\"a\": 1.0, \"b\": -0, \"c\": 12345678901234567890, \"d\": 1e21, \"e\": [0.10, {\"f\": 1E-7}], \"g\": null, \"h\": \"x\", \"i\": 1e-400}}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"implements\":[{\"configArgs\":{\"a\":1,\"b\":-0,\"c\":12345678901234567000,\"d\":1e+21,\"e\":[0.1,{\"f\":1e-7}],\"g\":null,\"h\":\"x\",\"i\":0},\"name\":\"Named\"}],\"name\":\"Item\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "an integer field refuses a fraction",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"validateMinLength\": 1.0}]}",
+      "accept": false,
+      "error": "an integer field refuses a fraction: json: cannot unmarshal number 1.0 into Go struct field FieldDef.fields.validateMinLength of type int"
+    },
+    {
+      "name": "an integer field refuses an exponent",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"validateMinLength\": 1e2}]}",
+      "accept": false,
+      "error": "an integer field refuses an exponent: json: cannot unmarshal number 1e2 into Go struct field FieldDef.fields.validateMinLength of type int"
+    },
+    {
+      "name": "an integer field refuses a value past int64",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"File\"}, \"validateUploadMaxBytes\": 9223372036854775808}]}",
+      "accept": false,
+      "error": "an integer field refuses a value past int64: json: cannot unmarshal number 9223372036854775808 into Go struct field FieldDef.fields.validateUploadMaxBytes of type int64"
+    },
+    {
+      "name": "an integer field refuses a value below int64",
+      "registry": "core",
+      "input": "{\"kind\": \"Scalar\", \"name\": \"Local.Code\", \"languagePrimitive\": \"number\", \"minimum\": -9223372036854775809}",
+      "accept": false,
+      "error": "an integer field refuses a value below int64: json: cannot unmarshal number -9223372036854775809 into Go struct field ScalarDef.minimum of type int64"
+    },
+    {
+      "name": "an integer field refuses a fraction past the double precision",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"validateMinLength\": 1.0000000000000001}]}",
+      "accept": false,
+      "error": "an integer field refuses a fraction past the double precision: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/validateMinLength': got number, want integer"
+    },
+    {
+      "name": "a float past float64 fails anywhere",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"implements\": [{\"name\": \"Named\", \"configArgs\": {\"a\": 1e400}}]}",
+      "accept": false,
+      "error": "a float past float64 fails anywhere: json: cannot unmarshal number 1e400 into Go value of type float64"
+    },
+    {
+      "name": "a negative float past float64 fails",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"Float\"}, \"validateMin\": -1e309}]}",
+      "accept": false,
+      "error": "a negative float past float64 fails: json: cannot unmarshal number -1e309 into Go value of type float64"
+    },
+    {
+      "name": "strings",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"description\": \"<a&b> \\u2028\\u2029 \\\"q\\\" \\\\ \\/ \\b\\f\\n\\r\\t \\u0001 \\u007f \\u00e9 \\ud83d\\ude00 \\ud800 \\udc00\", \"fields\": [\n\t\t{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"comment\": \"é😀\u2028\"}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"description\":\"\\u003ca\\u0026b\\u003e \\u2028\\u2029 \\\"q\\\" \\\\ / \\b\\f\\n\\r\\t \\u0001  é 😀 � �\",\"fields\":[{\"comment\":\"é😀\\u2028\",\"name\":\"a\",\"typeRef\":{\"name\":\"String\"}}],\"name\":\"Item\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "map keys sort by UTF-8 bytes",
+      "registry": "core",
+      "input": "{\"types\": {\n\t\t\"😀\": {\"name\": \"😀\", \"role\": \"EmbeddedStruct\"}, \"\\uffff\": {\"name\": \"\\uffff\", \"role\": \"EmbeddedStruct\"},\n\t\t\"é\": {\"name\": \"é\", \"role\": \"EmbeddedStruct\"}, \"b\": {\"name\": \"b\", \"role\": \"EmbeddedStruct\"}, \"B\": {\"name\": \"B\", \"role\": \"EmbeddedStruct\"}}}",
+      "accept": true,
+      "canonical": "{\"types\":{\"B\":{\"name\":\"B\",\"role\":\"EmbeddedStruct\"},\"b\":{\"name\":\"b\",\"role\":\"EmbeddedStruct\"},\"é\":{\"name\":\"é\",\"role\":\"EmbeddedStruct\"},\"￿\":{\"name\":\"￿\",\"role\":\"EmbeddedStruct\"},\"😀\":{\"name\":\"😀\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "a key named __proto__",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"implements\": [{\"name\": \"Named\", \"configArgs\": {\"__proto__\": {\"x\": 1}, \"constructor\": 2}}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"implements\":[{\"configArgs\":{\"__proto__\":{\"x\":1},\"constructor\":2},\"name\":\"Named\"}],\"name\":\"Item\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "unknown key on the document",
+      "registry": "core",
+      "input": "{\"kind\": \"General\", \"name\": \"x\", \"colour\": \"red\"}",
+      "accept": false,
+      "error": "unknown key on the document: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/Document'\n- at '': additional properties 'colour' not allowed"
+    },
+    {
+      "name": "unknown key on a type",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"colour\": \"red\"}",
+      "accept": false,
+      "error": "unknown key on a type: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '': additional properties 'colour' not allowed"
+    },
+    {
+      "name": "unknown key on a field",
+      "registry": "core",
+      "input": "{\"types\": {\"Item\": {\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"colour\": \"red\"}]}}}",
+      "accept": false,
+      "error": "unknown key on a field: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/Document'\n- at '/types/Item/fields/0': additional properties 'colour' not allowed"
+    },
+    {
+      "name": "unknown key on a type ref",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\", \"isList\": true}}]}",
+      "accept": false,
+      "error": "unknown key on a type ref: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/typeRef': additional properties 'isList' not allowed"
+    },
+    {
+      "name": "unknown key on an enum value",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"Colour\", \"values\": [{\"name\": \"RED\", \"colour\": \"red\"}]}",
+      "accept": false,
+      "error": "unknown key on an enum value: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0': additional properties 'colour' not allowed"
+    },
+    {
+      "name": "unknown key on an mcp record",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [{\"name\": \"op\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": {\"handle\": \"op\", \"hidden\": false, \"review\": \"always\"}}]}",
+      "accept": false,
+      "error": "unknown key on an mcp record: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/mcp': additional properties 'review' not allowed"
+    },
+    {
+      "name": "unknown key on a projection literal",
+      "registry": "core",
+      "input": "{\"name\": \"V\", \"role\": \"Projection\", \"projection\": {\"pool\": \"p\", \"name\": \"v\", \"migration\": \"m\", \"source\": \"s\", \"predicates\": [{\"column\": \"c\", \"equals\": {\"int\": 1}}]}}",
+      "accept": false,
+      "error": "unknown key on a projection literal: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/projection/predicates/0/equals': additional properties 'int' not allowed"
+    },
+    {
+      "name": "a definition key on a single-definition file",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"Colour\", \"values\": [], \"types\": {}}",
+      "accept": false,
+      "error": "a definition key on a single-definition file: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '': additional properties 'types' not allowed"
+    },
+    {
+      "name": "a type's own kind makes it no single-definition file",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"kind\": \"object\"}",
+      "accept": false,
+      "error": "a type's own kind makes it no single-definition file: unknown kind \"object\": expected a definition kind (Enum, Union, Scalar, OperationSet) or a schema kind"
+    },
+    {
+      "name": "a type's own kind in a document",
+      "registry": "core",
+      "input": "{\"types\": {\"Item\": {\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"kind\": \"object\"}}}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"kind\":\"object\",\"name\":\"Item\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "an extension the core does not link",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"extensions\": {\"acme\": {\"tagged\": true}}}",
+      "accept": false,
+      "error": "an extension the core does not link: extensions key \"acme\" on type \"Item\" is not a registered extension (none are registered)"
+    },
+    {
+      "name": "a document the core does not register",
+      "registry": "core",
+      "input": "{\"documents\": {\"catalogConfig\": {}}}",
+      "accept": false,
+      "error": "a document the core does not register: documents key \"catalogConfig\" on the document is not a registered document (none are registered)"
+    },
+    {
+      "name": "unknown role",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"Table\"}",
+      "accept": false,
+      "error": "unknown role: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/role': value must be one of 'DBTable', 'APIView', 'APIInput', 'EmbeddedStruct', 'APIOperationSet', 'Trait', 'Projection'"
+    },
+    {
+      "name": "unknown schema kind",
+      "registry": "core",
+      "input": "{\"kind\": \"Catalog\", \"name\": \"c\"}",
+      "accept": false,
+      "error": "unknown schema kind: unknown kind \"Catalog\": expected a definition kind (Enum, Union, Scalar, OperationSet) or a schema kind"
+    },
+    {
+      "name": "empty kind",
+      "registry": "core",
+      "input": "{\"kind\": \"\", \"name\": \"c\"}",
+      "accept": false,
+      "error": "empty kind: unknown kind \"\": expected a definition kind (Enum, Union, Scalar, OperationSet) or a schema kind"
+    },
+    {
+      "name": "kind that is not a string",
+      "registry": "core",
+      "input": "{\"kind\": 3, \"types\": {}}",
+      "accept": false,
+      "error": "kind that is not a string: the \"kind\" key must be a string"
+    },
+    {
+      "name": "unknown language primitive",
+      "registry": "core",
+      "input": "{\"kind\": \"Scalar\", \"name\": \"S\", \"languagePrimitive\": \"Text\"}",
+      "accept": false,
+      "error": "unknown language primitive: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/ScalarFile'\n- at '/languagePrimitive': value must be one of 'string', 'number', 'boolean', 'object'"
+    },
+    {
+      "name": "unknown http method",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [{\"name\": \"op\", \"typeRef\": {\"name\": \"Order\"}, \"httpMethod\": \"FETCH\"}]}",
+      "accept": false,
+      "error": "unknown http method: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/httpMethod': value must be one of 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'"
+    },
+    {
+      "name": "unknown invocation policy value",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [{\"name\": \"op\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": {\"handle\": \"op\", \"hidden\": false, \"invocationPolicy\": \"always\"}}]}",
+      "accept": false,
+      "error": "unknown invocation policy value: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/mcp/invocationPolicy': value must be one of 'auto', 'ask'"
+    },
+    {
+      "name": "unknown docs lifecycle",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [{\"name\": \"op\", \"typeRef\": {\"name\": \"Order\"}, \"docs\": {\"title\": \"T\", \"description\": \"D\", \"capability\": \"c\", \"lifecycle\": \"beta\", \"visibility\": \"public\", \"mappingStatus\": \"mapped\"}}]}",
+      "accept": false,
+      "error": "unknown docs lifecycle: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/docs/lifecycle': value must be one of 'draft', 'experimental', 'active', 'deprecated', 'retired'"
+    },
+    {
+      "name": "a string where a boolean belongs",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"strictJSON\": \"yes\"}",
+      "accept": false,
+      "error": "a string where a boolean belongs: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/strictJSON': got string, want boolean"
+    },
+    {
+      "name": "null where a string belongs",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"description\": null}",
+      "accept": false,
+      "error": "null where a string belongs: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/description': got null, want string"
+    },
+    {
+      "name": "null for an mcp record",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [{\"name\": \"op\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": null}]}",
+      "accept": false,
+      "error": "null for an mcp record: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/mcp': got null, want object"
+    },
+    {
+      "name": "a type without its name",
+      "registry": "core",
+      "input": "{\"role\": \"EmbeddedStruct\"}",
+      "accept": false,
+      "error": "a type without its name: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '': missing property 'name'"
+    },
+    {
+      "name": "an mcp record without hidden",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [{\"name\": \"op\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": {\"handle\": \"op\"}}]}",
+      "accept": false,
+      "error": "an mcp record without hidden: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/mcp': missing property 'hidden'"
+    },
+    {
+      "name": "empty object",
+      "registry": "core",
+      "input": "{}",
+      "accept": false,
+      "error": "empty object: cannot determine schema file shape: expected a \"kind\" or \"role\" discriminator or a document collection key (types, enums, ...)"
+    },
+    {
+      "name": "name alone",
+      "registry": "core",
+      "input": "{\"name\": \"x\"}",
+      "accept": false,
+      "error": "name alone: cannot determine schema file shape: expected a \"kind\" or \"role\" discriminator or a document collection key (types, enums, ...)"
+    },
+    {
+      "name": "top-level array",
+      "registry": "core",
+      "input": "[]",
+      "accept": false,
+      "error": "top-level array: json: cannot unmarshal array into Go value of type map[string]interface {}"
+    },
+    {
+      "name": "top-level null",
+      "registry": "core",
+      "input": "null",
+      "accept": false,
+      "error": "top-level null: cannot determine schema file shape: expected a \"kind\" or \"role\" discriminator or a document collection key (types, enums, ...)"
+    },
+    {
+      "name": "top-level string",
+      "registry": "core",
+      "input": "\"x\"",
+      "accept": false,
+      "error": "top-level string: json: cannot unmarshal string into Go value of type map[string]interface {}"
+    },
+    {
+      "name": "invalid JSON",
+      "registry": "core",
+      "input": "{\"name\": }",
+      "accept": false,
+      "error": "invalid JSON: invalid character '}' looking for beginning of value"
+    },
+    {
+      "name": "trailing data",
+      "registry": "core",
+      "input": "{\"types\": {}} x",
+      "accept": false,
+      "error": "trailing data: invalid character 'x' after top-level value"
+    },
+    {
+      "name": "a registry's kind",
+      "registry": "extended",
+      "input": "{\"kind\": \"Catalog\", \"name\": \"catalog\"}",
+      "accept": true,
+      "canonical": "{\"kind\":\"Catalog\",\"name\":\"catalog\"}"
+    },
+    {
+      "name": "extension data on every holder",
+      "registry": "extended",
+      "input": "{\n\t\t\"kind\": \"DB\", \"name\": \"shop\",\n\t\t\"extensions\": {\"acme\": {\"catalog\": true, \"n\": 1.0, \"big\": 12345678901234567890123, \"neg\": -0, \"e\": 1E+2, \"s\": \"<&>\"}},\n\t\t\"documents\": {\"catalogConfig\": {\"shelves\": 3, \"note\": \"x\"}, \"otherConfig\": {\"any\": [1.0, -0]}},\n\t\t\"types\": {\"Item\": {\"name\": \"Item\", \"role\": \"DBTable\", \"extensions\": {\"acme\": {\"tagged\": true}},\n\t\t\t\"fields\": [{\"name\": \"slug\", \"typeRef\": {\"name\": \"Identity.Slug\"}, \"extensions\": {\"acme\": {\"shelf\": {\"aisle\": 3.0, \"z\": -0}}}}]}},\n\t\t\"operationSets\": [{\"name\": \"ItemOps\", \"extensions\": {\"acme\": {\"audited\": true}},\n\t\t\t\"operations\": [{\"name\": \"getItem\", \"typeRef\": {\"name\": \"Item\"}, \"extensions\": {\"acme\": {\"audited\": true}}}]}]\n\t}",
+      "accept": true,
+      "canonical": "{\"documents\":{\"catalogConfig\":{\"note\":\"x\",\"shelves\":3},\"otherConfig\":{\"any\":[1.0,-0]}},\"extensions\":{\"acme\":{\"big\":12345678901234567890123,\"catalog\":true,\"e\":1E+2,\"n\":1.0,\"neg\":-0,\"s\":\"\\u003c\\u0026\\u003e\"}},\"kind\":\"DB\",\"name\":\"shop\",\"operationSets\":[{\"extensions\":{\"acme\":{\"audited\":true}},\"name\":\"ItemOps\",\"operations\":[{\"extensions\":{\"acme\":{\"audited\":true}},\"name\":\"getItem\",\"typeRef\":{\"name\":\"Item\"}}]}],\"types\":{\"Item\":{\"extensions\":{\"acme\":{\"tagged\":true}},\"fields\":[{\"extensions\":{\"acme\":{\"shelf\":{\"aisle\":3.0,\"z\":-0}}},\"name\":\"slug\",\"typeRef\":{\"name\":\"Identity.Slug\"}}],\"name\":\"Item\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "extension numbers stay as written",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [\n\t\t{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"extensions\": {\"acme\": {\"shelf\": {\"aisle\": 12345678901234567890, \"z\": 1E2}}}},\n\t\t{\"name\": \"b\", \"typeRef\": {\"name\": \"String\"}, \"extensions\": {\"acme\": {\"shelf\": {\"aisle\": 0, \"z\": 1.50}}}}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"fields\":[{\"extensions\":{\"acme\":{\"shelf\":{\"aisle\":12345678901234567890,\"z\":1E2}}},\"name\":\"a\",\"typeRef\":{\"name\":\"String\"}},{\"extensions\":{\"acme\":{\"shelf\":{\"aisle\":0,\"z\":1.50}}},\"name\":\"b\",\"typeRef\":{\"name\":\"String\"}}],\"name\":\"Item\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "empty extension entries on the holders are dropped",
+      "registry": "extended",
+      "input": "{\n\t\t\"extensions\": {\"acme\": {}, \"other\": {}},\n\t\t\"types\": {\"Item\": {\"name\": \"Item\", \"role\": \"DBTable\", \"extensions\": {\"acme\": {}},\n\t\t\t\"fields\": [{\"name\": \"slug\", \"typeRef\": {\"name\": \"String\"}, \"extensions\": {\"acme\": {}}}]}},\n\t\t\"operationSets\": [{\"name\": \"Ops\", \"extensions\": {\"acme\": {}}, \"operations\": [{\"name\": \"op\", \"typeRef\": {\"name\": \"Item\"}, \"extensions\": {\"acme\": {}}}]}]\n\t}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"Ops\",\"operations\":[{\"name\":\"op\",\"typeRef\":{\"name\":\"Item\"}}]}],\"types\":{\"Item\":{\"fields\":[{\"name\":\"slug\",\"typeRef\":{\"name\":\"String\"}}],\"name\":\"Item\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "an empty extension entry on a trait config field is kept",
+      "registry": "extended",
+      "input": "{\"name\": \"Named\", \"role\": \"Trait\", \"traitConfig\": {\"fields\": [\n\t\t{\"name\": \"label\", \"typeRef\": {\"name\": \"String\"}, \"extensions\": {\"acme\": {}}}]}}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Named\":{\"name\":\"Named\",\"role\":\"Trait\",\"traitConfig\":{\"fields\":[{\"extensions\":{\"acme\":{}},\"name\":\"label\",\"typeRef\":{\"name\":\"String\"}}]}}}}"
+    },
+    {
+      "name": "documents keep an empty document",
+      "registry": "extended",
+      "input": "{\"documents\": {\"catalogConfig\": {}, \"cfg\": {}}}",
+      "accept": true,
+      "canonical": "{\"documents\":{\"catalogConfig\":{},\"cfg\":{}}}"
+    },
+    {
+      "name": "a document against its schema",
+      "registry": "extended",
+      "input": "{\"documents\": {\"catalogConfig\": {\"shelves\": \"three\"}}}",
+      "accept": false,
+      "error": "a document against its schema: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/Document'\n- at '/documents/catalogConfig/shelves': got string, want integer"
+    },
+    {
+      "name": "a decorator argument against its schema",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"extensions\": {\"acme\": {\"shelf\": {\"aisle\": -1}}}}]}",
+      "accept": false,
+      "error": "a decorator argument against its schema: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/extensions/acme/shelf/aisle': minimum: got -1, want 0"
+    },
+    {
+      "name": "a decorator argument with a fraction",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"extensions\": {\"acme\": {\"shelf\": {\"aisle\": 1.5}}}}]}",
+      "accept": false,
+      "error": "a decorator argument with a fraction: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/extensions/acme/shelf/aisle': got number, want integer"
+    },
+    {
+      "name": "a decorator on the wrong target",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"extensions\": {\"acme\": {\"shelf\": {\"aisle\": 1}}}}",
+      "accept": false,
+      "error": "a decorator on the wrong target: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/extensions/acme': additional properties 'shelf' not allowed"
+    },
+    {
+      "name": "an extension the registry does not link",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"extensions\": {\"vendor\": {}}}",
+      "accept": false,
+      "error": "an extension the registry does not link: extensions key \"vendor\" on type \"Item\" is not a registered extension (registered: acme, empty, other)"
+    },
+    {
+      "name": "a float past float64 in extension data",
+      "registry": "extended",
+      "input": "{\"extensions\": {\"acme\": {\"n\": 1e400}}}",
+      "accept": false,
+      "error": "a float past float64 in extension data: json: cannot unmarshal number 1e400 into Go value of type float64"
+    },
+    {
+      "name": "the registry's policy default",
+      "registry": "extended",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"deleteOrder\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": {\"handle\": \"delete_order\", \"hidden\": false}}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"Ops\",\"operations\":[{\"mcp\":{\"handle\":\"delete_order\",\"hidden\":false,\"review\":\"never\"},\"name\":\"deleteOrder\",\"typeRef\":{\"name\":\"Order\"}}]}]}"
+    },
+    {
+      "name": "the registry's policy value",
+      "registry": "extended",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"deleteOrder\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": {\"handle\": \"delete_order\", \"hidden\": false, \"review\": \"always\"}}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"Ops\",\"operations\":[{\"mcp\":{\"handle\":\"delete_order\",\"hidden\":false,\"review\":\"always\"},\"name\":\"deleteOrder\",\"typeRef\":{\"name\":\"Order\"}}]}]}"
+    },
+    {
+      "name": "the core policy key under a registry's policy",
+      "registry": "extended",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"deleteOrder\", \"typeRef\": {\"name\": \"Order\"}, \"mcp\": {\"handle\": \"delete_order\", \"hidden\": false, \"invocationPolicy\": \"ask\"}}]}",
+      "accept": false,
+      "error": "the core policy key under a registry's policy: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/mcp': additional properties 'invocationPolicy' not allowed"
+    },
+    {
+      "name": "file docs.schema.json",
+      "registry": "core",
+      "input": "{\n  \"name\": \"fixture-docs\",\n  \"kind\": \"API\",\n  \"scalars\": {\n    \"Identity.UUID\": {\n      \"name\": \"Identity.UUID\",\n      \"description\": \"UUID v4 with automatic base62 encoding for client-facing APIs\",\n      \"languagePrimitive\": \"string\",\n      \"primitive\": \"String\",\n      \"typeMappings\": {\n        \"go\": \"IdentityUUID\",\n        \"json_schema\": \"string\",\n        \"python\": \"uuid.UUID\",\n        \"rust\": \"uuid::Uuid\",\n        \"sql\": \"UUID\",\n        \"typescript\": \"string\"\n      },\n      \"pattern\": \"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$\",\n      \"hasCustomParse\": true\n    }\n  },\n  \"types\": {\n    \"Order\": {\n      \"name\": \"Order\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"id\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"totalCents\",\n          \"title\": \"Total\",\n          \"purpose\": \"The order total in **cents**, tax included.\",\n          \"icon\": \"receipt\",\n          \"typeRef\": {\n            \"name\": \"number\"\n          },\n          \"required\": true\n        }\n      ]\n    },\n    \"ReturnRequest\": {\n      \"name\": \"ReturnRequest\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"orderId\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"reason\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          },\n          \"required\": true\n        }\n      ]\n    }\n  },\n  \"operationSets\": [\n    {\n      \"name\": \"OrderQueries\",\n      \"operations\": [\n        {\n          \"name\": \"getOrder\",\n          \"comment\": \"Fetch one order. OpenAPI takes the @docs description instead.\",\n          \"docs\": {\n            \"title\": \"Get an order\",\n            \"description\": \"Returns one order by its identifier.\",\n            \"capability\": \"orders.get\",\n            \"lifecycle\": \"active\",\n            \"visibility\": \"public\",\n            \"audience\": \"shoppers\",\n            \"mappingStatus\": \"mapped\",\n            \"useWhen\": \"Use when you have an order identifier.\",\n            \"doNotUseWhen\": \"Do not use to list orders; call listOrders.\",\n            \"success\": \"Returns the order with its total.\",\n            \"errors\": [\n              {\n                \"code\": \"order_not_found\",\n                \"description\": \"No order has that identifier.\",\n                \"commonCorrection\": \"Take the identifier from a listOrders result.\"\n              }\n            ]\n          },\n          \"typeRef\": {\n            \"name\": \"Order\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"id\",\n              \"typeRef\": {\n                \"name\": \"Identity.UUID\"\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"GET\",\n          \"restPath\": \"orders/{id}\"\n        },\n        {\n          \"name\": \"listOrders\",\n          \"comment\": \"Lists every order. Without @docs the summary is the operation name.\",\n          \"typeRef\": {\n            \"name\": \"Order\",\n            \"isArray\": true\n          },\n          \"required\": true,\n          \"httpMethod\": \"GET\",\n          \"restPath\": \"orders\"\n        }\n      ]\n    },\n    {\n      \"name\": \"ReturnMutations\",\n      \"operations\": [\n        {\n          \"name\": \"openReturn\",\n          \"docs\": {\n            \"title\": \"Open a return\",\n            \"description\": \"Opens a return for one delivered order.\",\n            \"capability\": \"orders.returns.open\",\n            \"lifecycle\": \"deprecated\",\n            \"visibility\": \"preview\",\n            \"mappingStatus\": \"uncertain\",\n            \"replacement\": \"orders.returns.create\",\n            \"sunset\": \"2027-01-31\"\n          },\n          \"typeRef\": {\n            \"name\": \"Order\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"input\",\n              \"typeRef\": {\n                \"name\": \"ReturnRequest\"\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"POST\",\n          \"restPath\": \"returns\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "accept": true,
+      "canonical": "{\"kind\":\"API\",\"name\":\"fixture-docs\",\"operationSets\":[{\"name\":\"OrderQueries\",\"operations\":[{\"arguments\":[{\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}}],\"comment\":\"Fetch one order. OpenAPI takes the @docs description instead.\",\"docs\":{\"audience\":\"shoppers\",\"capability\":\"orders.get\",\"description\":\"Returns one order by its identifier.\",\"doNotUseWhen\":\"Do not use to list orders; call listOrders.\",\"errors\":[{\"code\":\"order_not_found\",\"commonCorrection\":\"Take the identifier from a listOrders result.\",\"description\":\"No order has that identifier.\"}],\"lifecycle\":\"active\",\"mappingStatus\":\"mapped\",\"success\":\"Returns the order with its total.\",\"title\":\"Get an order\",\"useWhen\":\"Use when you have an order identifier.\",\"visibility\":\"public\"},\"httpMethod\":\"GET\",\"name\":\"getOrder\",\"required\":true,\"restPath\":\"orders/{id}\",\"typeRef\":{\"name\":\"Order\"}},{\"comment\":\"Lists every order. Without @docs the summary is the operation name.\",\"httpMethod\":\"GET\",\"name\":\"listOrders\",\"required\":true,\"restPath\":\"orders\",\"typeRef\":{\"isArray\":true,\"name\":\"Order\"}}]},{\"name\":\"ReturnMutations\",\"operations\":[{\"arguments\":[{\"name\":\"input\",\"required\":true,\"typeRef\":{\"name\":\"ReturnRequest\"}}],\"docs\":{\"capability\":\"orders.returns.open\",\"description\":\"Opens a return for one delivered order.\",\"lifecycle\":\"deprecated\",\"mappingStatus\":\"uncertain\",\"replacement\":\"orders.returns.create\",\"sunset\":\"2027-01-31\",\"title\":\"Open a return\",\"visibility\":\"preview\"},\"httpMethod\":\"POST\",\"name\":\"openReturn\",\"required\":true,\"restPath\":\"returns\",\"typeRef\":{\"name\":\"Order\"}}]}],\"scalars\":{\"Identity.UUID\":{\"description\":\"UUID v4 with automatic base62 encoding for client-facing APIs\",\"hasCustomParse\":true,\"languagePrimitive\":\"string\",\"name\":\"Identity.UUID\",\"pattern\":\"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$\",\"primitive\":\"String\",\"typeMappings\":{\"go\":\"IdentityUUID\",\"json_schema\":\"string\",\"python\":\"uuid.UUID\",\"rust\":\"uuid::Uuid\",\"sql\":\"UUID\",\"typescript\":\"string\"}}},\"types\":{\"Order\":{\"fields\":[{\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"icon\":\"receipt\",\"name\":\"totalCents\",\"purpose\":\"The order total in **cents**, tax included.\",\"required\":true,\"title\":\"Total\",\"typeRef\":{\"name\":\"number\"}}],\"name\":\"Order\",\"role\":\"EmbeddedStruct\"},\"ReturnRequest\":{\"fields\":[{\"name\":\"orderId\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"reason\",\"required\":true,\"typeRef\":{\"name\":\"string\"}}],\"name\":\"ReturnRequest\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "file environment.schema.json",
+      "registry": "core",
+      "input": "{\n  \"name\": \"FixtureEnvironment\",\n  \"kind\": \"Enum\",\n  \"comment\": \"Runtime environment classification.\",\n  \"values\": [\n    { \"name\": \"Development\", \"serializedAs\": \"development\" },\n    { \"name\": \"Production\", \"serializedAs\": \"production\" }\n  ]\n}\n",
+      "accept": true,
+      "canonical": "{\"enums\":{\"FixtureEnvironment\":{\"comment\":\"Runtime environment classification.\",\"name\":\"FixtureEnvironment\",\"values\":[{\"name\":\"Development\",\"serializedAs\":\"development\"},{\"name\":\"Production\",\"serializedAs\":\"production\"}]}}}"
+    },
+    {
+      "name": "file general.schema.json",
+      "registry": "core",
+      "input": "{\n  \"name\": \"fixture-general\",\n  \"kind\": \"General\",\n  \"scalars\": {\n    \"Network.Url\": {\n      \"name\": \"Network.Url\",\n      \"description\": \"Valid HTTP/HTTPS URL\",\n      \"languagePrimitive\": \"string\",\n      \"primitive\": \"String\",\n      \"typeMappings\": {\n        \"go\": \"NetworkUrl\",\n        \"json_schema\": \"string\",\n        \"python\": \"str\",\n        \"rust\": \"String\",\n        \"sql\": \"varchar(4096)\",\n        \"typescript\": \"string\"\n      },\n      \"maxLength\": 2048,\n      \"pattern\": \"^https?://[\\\\w\\\\-\\\\{\\\\}]+(\\\\.[\\\\w\\\\-\\\\{\\\\}]+)+([:/?#][\\\\w\\\\-\\\\._~:/?#\\\\[\\\\]@!\\\\$\\u0026'\\\\(\\\\)\\\\*\\\\+,;=\\\\{\\\\}%]*)?$\"\n    }\n  },\n  \"types\": {\n    \"FixtureConfig\": {\n      \"name\": \"FixtureConfig\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"DATABASE_URL\",\n          \"title\": \"Database URL\",\n          \"purpose\": \"Connection target for the **primary database**.\",\n          \"icon\": \"database\",\n          \"typeRef\": {\n            \"name\": \"Network.Url\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"JWT_SECRET\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          },\n          \"required\": true,\n          \"secret\": true\n        },\n        {\n          \"name\": \"PORT\",\n          \"typeRef\": {\n            \"name\": \"number\"\n          },\n          \"required\": true,\n          \"default\": \"8080\"\n        },\n        {\n          \"name\": \"ENVIRONMENT\",\n          \"typeRef\": {\n            \"name\": \"FixtureEnvironment\"\n          },\n          \"required\": true,\n          \"default\": \"development\"\n        }\n      ],\n      \"envVars\": true\n    },\n    \"FixtureFilter\": {\n      \"name\": \"FixtureFilter\",\n      \"comment\": \"JSON-persisted filter: exercises optional-list constraint gating.\\nAbsent/null must skip listMin; an explicit [] must fail it (decode must\\nnot normalize an absent optional list into an empty non-nil slice).\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"kind\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          },\n          \"required\": true,\n          \"validateMaxLength\": 32\n        },\n        {\n          \"name\": \"values\",\n          \"typeRef\": {\n            \"name\": \"string\",\n            \"isArray\": true\n          },\n          \"validateMaxLength\": 64,\n          \"validateListMin\": 1,\n          \"validateListMax\": 10\n        }\n      ],\n      \"jsonField\": true\n    },\n    \"RetryPolicy\": {\n      \"name\": \"RetryPolicy\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"maxAttempts\",\n          \"typeRef\": {\n            \"name\": \"number\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"backoffSeconds\",\n          \"typeRef\": {\n            \"name\": \"number\"\n          }\n        }\n      ]\n    }\n  },\n  \"enums\": {\n    \"FixtureEnvironment\": {\n      \"name\": \"FixtureEnvironment\",\n      \"comment\": \"Runtime environment classification.\",\n      \"values\": [\n        {\n          \"name\": \"Development\",\n          \"serializedAs\": \"development\"\n        },\n        {\n          \"name\": \"Production\",\n          \"serializedAs\": \"production\"\n        }\n      ]\n    }\n  }\n}\n",
+      "accept": true,
+      "canonical": "{\"enums\":{\"FixtureEnvironment\":{\"comment\":\"Runtime environment classification.\",\"name\":\"FixtureEnvironment\",\"values\":[{\"name\":\"Development\",\"serializedAs\":\"development\"},{\"name\":\"Production\",\"serializedAs\":\"production\"}]}},\"kind\":\"General\",\"name\":\"fixture-general\",\"scalars\":{\"Network.Url\":{\"description\":\"Valid HTTP/HTTPS URL\",\"languagePrimitive\":\"string\",\"maxLength\":2048,\"name\":\"Network.Url\",\"pattern\":\"^https?://[\\\\w\\\\-\\\\{\\\\}]+(\\\\.[\\\\w\\\\-\\\\{\\\\}]+)+([:/?#][\\\\w\\\\-\\\\._~:/?#\\\\[\\\\]@!\\\\$\\u0026'\\\\(\\\\)\\\\*\\\\+,;=\\\\{\\\\}%]*)?$\",\"primitive\":\"String\",\"typeMappings\":{\"go\":\"NetworkUrl\",\"json_schema\":\"string\",\"python\":\"str\",\"rust\":\"String\",\"sql\":\"varchar(4096)\",\"typescript\":\"string\"}}},\"types\":{\"FixtureConfig\":{\"envVars\":true,\"fields\":[{\"icon\":\"database\",\"name\":\"DATABASE_URL\",\"purpose\":\"Connection target for the **primary database**.\",\"required\":true,\"title\":\"Database URL\",\"typeRef\":{\"name\":\"Network.Url\"}},{\"name\":\"JWT_SECRET\",\"required\":true,\"secret\":true,\"typeRef\":{\"name\":\"string\"}},{\"default\":\"8080\",\"name\":\"PORT\",\"required\":true,\"typeRef\":{\"name\":\"number\"}},{\"default\":\"development\",\"name\":\"ENVIRONMENT\",\"required\":true,\"typeRef\":{\"name\":\"FixtureEnvironment\"}}],\"name\":\"FixtureConfig\",\"role\":\"EmbeddedStruct\"},\"FixtureFilter\":{\"comment\":\"JSON-persisted filter: exercises optional-list constraint gating.\\nAbsent/null must skip listMin; an explicit [] must fail it (decode must\\nnot normalize an absent optional list into an empty non-nil slice).\",\"fields\":[{\"name\":\"kind\",\"required\":true,\"typeRef\":{\"name\":\"string\"},\"validateMaxLength\":32},{\"name\":\"values\",\"typeRef\":{\"isArray\":true,\"name\":\"string\"},\"validateListMax\":10,\"validateListMin\":1,\"validateMaxLength\":64}],\"jsonField\":true,\"name\":\"FixtureFilter\",\"role\":\"EmbeddedStruct\"},\"RetryPolicy\":{\"fields\":[{\"name\":\"maxAttempts\",\"required\":true,\"typeRef\":{\"name\":\"number\"}},{\"name\":\"backoffSeconds\",\"typeRef\":{\"name\":\"number\"}}],\"name\":\"RetryPolicy\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "file mcp.schema.json",
+      "registry": "core",
+      "input": "{\n  \"name\": \"fixture-mcp\",\n  \"kind\": \"API\",\n  \"scalars\": {\n    \"Identity.UUID\": {\n      \"name\": \"Identity.UUID\",\n      \"description\": \"UUID v4 with automatic base62 encoding for client-facing APIs\",\n      \"languagePrimitive\": \"string\",\n      \"primitive\": \"String\",\n      \"typeMappings\": {\n        \"go\": \"IdentityUUID\",\n        \"json_schema\": \"string\",\n        \"python\": \"uuid.UUID\",\n        \"rust\": \"uuid::Uuid\",\n        \"sql\": \"UUID\",\n        \"typescript\": \"string\"\n      },\n      \"pattern\": \"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$\",\n      \"hasCustomParse\": true\n    }\n  },\n  \"types\": {\n    \"Address\": {\n      \"name\": \"Address\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"line1\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"city\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"postalCode\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          }\n        }\n      ]\n    },\n    \"Order\": {\n      \"name\": \"Order\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"id\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"status\",\n          \"typeRef\": {\n            \"name\": \"OrderStatus\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"revision\",\n          \"typeRef\": {\n            \"name\": \"number\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"totalCents\",\n          \"typeRef\": {\n            \"name\": \"number\"\n          },\n          \"required\": true\n        }\n      ]\n    },\n    \"OrderUpdate\": {\n      \"name\": \"OrderUpdate\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"revision\",\n          \"typeRef\": {\n            \"name\": \"number\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"note\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          }\n        }\n      ]\n    },\n    \"ReturnRequest\": {\n      \"name\": \"ReturnRequest\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"requestId\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"orderId\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"reason\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          },\n          \"required\": true,\n          \"validateMinLength\": 1,\n          \"validateMaxLength\": 500\n        },\n        {\n          \"name\": \"pickup\",\n          \"typeRef\": {\n            \"name\": \"Address\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"labels\",\n          \"typeRef\": {\n            \"name\": \"string\",\n            \"isMap\": true\n          },\n          \"required\": true\n        }\n      ]\n    }\n  },\n  \"enums\": {\n    \"OrderStatus\": {\n      \"name\": \"OrderStatus\",\n      \"values\": [\n        {\n          \"name\": \"Open\",\n          \"serializedAs\": \"open\"\n        },\n        {\n          \"name\": \"Shipped\",\n          \"serializedAs\": \"shipped\"\n        }\n      ]\n    }\n  },\n  \"operationSets\": [\n    {\n      \"name\": \"OrderQueries\",\n      \"operations\": [\n        {\n          \"name\": \"getOrder\",\n          \"comment\": \"Fetch one order.\",\n          \"docs\": {\n            \"title\": \"Get an order\",\n            \"description\": \"Returns one order by its identifier.\",\n            \"capability\": \"orders.get\",\n            \"lifecycle\": \"active\",\n            \"visibility\": \"public\",\n            \"audience\": \"shoppers\",\n            \"mappingStatus\": \"mapped\",\n            \"replayMode\": \"read_only\",\n            \"useWhen\": \"Use when you have an order identifier.\",\n            \"doNotUseWhen\": \"Do not use to list orders; call list_orders.\",\n            \"success\": \"Returns the order with its status and total.\",\n            \"errors\": [\n              {\n                \"code\": \"order_not_found\",\n                \"description\": \"No order has that identifier.\",\n                \"commonCorrection\": \"Take the identifier from a list_orders result.\"\n              }\n            ]\n          },\n          \"mcp\": {\n            \"handle\": \"get_order\",\n            \"hidden\": false,\n            \"invocationPolicy\": \"auto\",\n            \"_meta\": {\n              \"ui\": {\n                \"resourceUri\": \"ui://orders/detail\"\n              }\n            }\n          },\n          \"icon\": \"receipt\",\n          \"typeRef\": {\n            \"name\": \"Order\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"id\",\n              \"typeRef\": {\n                \"name\": \"Identity.UUID\"\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"GET\",\n          \"restPath\": \"orders/{id}\"\n        },\n        {\n          \"name\": \"listOrders\",\n          \"docs\": {\n            \"title\": \"List orders\",\n            \"description\": \"Lists orders by status.\",\n            \"capability\": \"orders.list\",\n            \"lifecycle\": \"active\",\n            \"visibility\": \"public\",\n            \"mappingStatus\": \"mapped\",\n            \"replayMode\": \"read_only\"\n          },\n          \"mcp\": {\n            \"handle\": \"list_orders\",\n            \"hidden\": false,\n            \"invocationPolicy\": \"auto\"\n          },\n          \"icon\": \"list\",\n          \"typeRef\": {\n            \"name\": \"Order\",\n            \"isArray\": true\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"statuses\",\n              \"typeRef\": {\n                \"name\": \"OrderStatus\",\n                \"isArray\": true\n              },\n              \"required\": true,\n              \"validateListMin\": 1,\n              \"validateListMax\": 2,\n              \"isQuery\": true\n            },\n            {\n              \"name\": \"limit\",\n              \"typeRef\": {\n                \"name\": \"number\"\n              },\n              \"validateMin\": 1,\n              \"validateMax\": 100,\n              \"isQuery\": true\n            }\n          ],\n          \"httpMethod\": \"GET\",\n          \"restPath\": \"orders\"\n        },\n        {\n          \"name\": \"exportOrders\",\n          \"comment\": \"Not classified: no @mcp, so no tool.\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          },\n          \"required\": true,\n          \"httpMethod\": \"GET\",\n          \"restPath\": \"orders/export\"\n        }\n      ]\n    },\n    {\n      \"name\": \"OrderMutations\",\n      \"operations\": [\n        {\n          \"name\": \"openReturn\",\n          \"docs\": {\n            \"title\": \"Open a return\",\n            \"description\": \"Opens a return for one delivered order.\",\n            \"capability\": \"orders.returns.open\",\n            \"lifecycle\": \"active\",\n            \"visibility\": \"public\",\n            \"mappingStatus\": \"mapped\",\n            \"replayMode\": \"idempotent\",\n            \"idempotencyKeyPointers\": [\n              \"/requestId\"\n            ]\n          },\n          \"mcp\": {\n            \"handle\": \"open_return\",\n            \"hidden\": false,\n            \"invocationPolicy\": \"auto\"\n          },\n          \"icon\": \"box\",\n          \"typeRef\": {\n            \"name\": \"Order\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"input\",\n              \"typeRef\": {\n                \"name\": \"ReturnRequest\"\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"POST\",\n          \"restPath\": \"returns\"\n        },\n        {\n          \"name\": \"updateOrder\",\n          \"docs\": {\n            \"title\": \"Update an order\",\n            \"description\": \"Changes an order's note when its revision still matches.\",\n            \"capability\": \"orders.update\",\n            \"lifecycle\": \"active\",\n            \"visibility\": \"public\",\n            \"mappingStatus\": \"mapped\",\n            \"replayMode\": \"compare_and_swap\",\n            \"expectedRevisionPointers\": [\n              \"/revision\"\n            ]\n          },\n          \"mcp\": {\n            \"handle\": \"update_order\",\n            \"hidden\": false,\n            \"invocationPolicy\": \"ask\"\n          },\n          \"icon\": \"pen\",\n          \"typeRef\": {\n            \"name\": \"Order\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"id\",\n              \"typeRef\": {\n                \"name\": \"Identity.UUID\"\n              },\n              \"required\": true\n            },\n            {\n              \"name\": \"input\",\n              \"typeRef\": {\n                \"name\": \"OrderUpdate\"\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"PATCH\",\n          \"restPath\": \"orders/{id}\"\n        },\n        {\n          \"name\": \"deleteOrder\",\n          \"mcp\": {\n            \"hidden\": true,\n            \"hiddenReason\": \"Staff console only.\"\n          },\n          \"typeRef\": {\n            \"name\": \"Order\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"id\",\n              \"typeRef\": {\n                \"name\": \"Identity.UUID\"\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"DELETE\",\n          \"restPath\": \"orders/{id}\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "accept": true,
+      "canonical": "{\"enums\":{\"OrderStatus\":{\"name\":\"OrderStatus\",\"values\":[{\"name\":\"Open\",\"serializedAs\":\"open\"},{\"name\":\"Shipped\",\"serializedAs\":\"shipped\"}]}},\"kind\":\"API\",\"name\":\"fixture-mcp\",\"operationSets\":[{\"name\":\"OrderQueries\",\"operations\":[{\"arguments\":[{\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}}],\"comment\":\"Fetch one order.\",\"docs\":{\"audience\":\"shoppers\",\"capability\":\"orders.get\",\"description\":\"Returns one order by its identifier.\",\"doNotUseWhen\":\"Do not use to list orders; call list_orders.\",\"errors\":[{\"code\":\"order_not_found\",\"commonCorrection\":\"Take the identifier from a list_orders result.\",\"description\":\"No order has that identifier.\"}],\"lifecycle\":\"active\",\"mappingStatus\":\"mapped\",\"replayMode\":\"read_only\",\"success\":\"Returns the order with its status and total.\",\"title\":\"Get an order\",\"useWhen\":\"Use when you have an order identifier.\",\"visibility\":\"public\"},\"httpMethod\":\"GET\",\"icon\":\"receipt\",\"mcp\":{\"_meta\":{\"ui\":{\"resourceUri\":\"ui://orders/detail\"}},\"handle\":\"get_order\",\"hidden\":false,\"invocationPolicy\":\"auto\"},\"name\":\"getOrder\",\"required\":true,\"restPath\":\"orders/{id}\",\"typeRef\":{\"name\":\"Order\"}},{\"arguments\":[{\"isQuery\":true,\"name\":\"statuses\",\"required\":true,\"typeRef\":{\"isArray\":true,\"name\":\"OrderStatus\"},\"validateListMax\":2,\"validateListMin\":1},{\"isQuery\":true,\"name\":\"limit\",\"typeRef\":{\"name\":\"number\"},\"validateMax\":100,\"validateMin\":1}],\"docs\":{\"capability\":\"orders.list\",\"description\":\"Lists orders by status.\",\"lifecycle\":\"active\",\"mappingStatus\":\"mapped\",\"replayMode\":\"read_only\",\"title\":\"List orders\",\"visibility\":\"public\"},\"httpMethod\":\"GET\",\"icon\":\"list\",\"mcp\":{\"handle\":\"list_orders\",\"hidden\":false,\"invocationPolicy\":\"auto\"},\"name\":\"listOrders\",\"required\":true,\"restPath\":\"orders\",\"typeRef\":{\"isArray\":true,\"name\":\"Order\"}},{\"comment\":\"Not classified: no @mcp, so no tool.\",\"httpMethod\":\"GET\",\"name\":\"exportOrders\",\"required\":true,\"restPath\":\"orders/export\",\"typeRef\":{\"name\":\"string\"}}]},{\"name\":\"OrderMutations\",\"operations\":[{\"arguments\":[{\"name\":\"input\",\"required\":true,\"typeRef\":{\"name\":\"ReturnRequest\"}}],\"docs\":{\"capability\":\"orders.returns.open\",\"description\":\"Opens a return for one delivered order.\",\"idempotencyKeyPointers\":[\"/requestId\"],\"lifecycle\":\"active\",\"mappingStatus\":\"mapped\",\"replayMode\":\"idempotent\",\"title\":\"Open a return\",\"visibility\":\"public\"},\"httpMethod\":\"POST\",\"icon\":\"box\",\"mcp\":{\"handle\":\"open_return\",\"hidden\":false,\"invocationPolicy\":\"auto\"},\"name\":\"openReturn\",\"required\":true,\"restPath\":\"returns\",\"typeRef\":{\"name\":\"Order\"}},{\"arguments\":[{\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"input\",\"required\":true,\"typeRef\":{\"name\":\"OrderUpdate\"}}],\"docs\":{\"capability\":\"orders.update\",\"description\":\"Changes an order's note when its revision still matches.\",\"expectedRevisionPointers\":[\"/revision\"],\"lifecycle\":\"active\",\"mappingStatus\":\"mapped\",\"replayMode\":\"compare_and_swap\",\"title\":\"Update an order\",\"visibility\":\"public\"},\"httpMethod\":\"PATCH\",\"icon\":\"pen\",\"mcp\":{\"handle\":\"update_order\",\"hidden\":false,\"invocationPolicy\":\"ask\"},\"name\":\"updateOrder\",\"required\":true,\"restPath\":\"orders/{id}\",\"typeRef\":{\"name\":\"Order\"}},{\"arguments\":[{\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}}],\"httpMethod\":\"DELETE\",\"mcp\":{\"hidden\":true,\"hiddenReason\":\"Staff console only.\"},\"name\":\"deleteOrder\",\"required\":true,\"restPath\":\"orders/{id}\",\"typeRef\":{\"name\":\"Order\"}}]}],\"scalars\":{\"Identity.UUID\":{\"description\":\"UUID v4 with automatic base62 encoding for client-facing APIs\",\"hasCustomParse\":true,\"languagePrimitive\":\"string\",\"name\":\"Identity.UUID\",\"pattern\":\"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$\",\"primitive\":\"String\",\"typeMappings\":{\"go\":\"IdentityUUID\",\"json_schema\":\"string\",\"python\":\"uuid.UUID\",\"rust\":\"uuid::Uuid\",\"sql\":\"UUID\",\"typescript\":\"string\"}}},\"types\":{\"Address\":{\"fields\":[{\"name\":\"line1\",\"required\":true,\"typeRef\":{\"name\":\"string\"}},{\"name\":\"city\",\"required\":true,\"typeRef\":{\"name\":\"string\"}},{\"name\":\"postalCode\",\"typeRef\":{\"name\":\"string\"}}],\"name\":\"Address\",\"role\":\"EmbeddedStruct\"},\"Order\":{\"fields\":[{\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"status\",\"required\":true,\"typeRef\":{\"name\":\"OrderStatus\"}},{\"name\":\"revision\",\"required\":true,\"typeRef\":{\"name\":\"number\"}},{\"name\":\"totalCents\",\"required\":true,\"typeRef\":{\"name\":\"number\"}}],\"name\":\"Order\",\"role\":\"EmbeddedStruct\"},\"OrderUpdate\":{\"fields\":[{\"name\":\"revision\",\"required\":true,\"typeRef\":{\"name\":\"number\"}},{\"name\":\"note\",\"typeRef\":{\"name\":\"string\"}}],\"name\":\"OrderUpdate\",\"role\":\"EmbeddedStruct\"},\"ReturnRequest\":{\"fields\":[{\"name\":\"requestId\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"orderId\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"reason\",\"required\":true,\"typeRef\":{\"name\":\"string\"},\"validateMaxLength\":500,\"validateMinLength\":1},{\"name\":\"pickup\",\"required\":true,\"typeRef\":{\"name\":\"Address\"}},{\"name\":\"labels\",\"required\":true,\"typeRef\":{\"isMap\":true,\"name\":\"string\"}}],\"name\":\"ReturnRequest\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "file nested-arrays-api.schema.json",
+      "registry": "core",
+      "input": "{\n  \"name\": \"fixture-nested-arrays-api\",\n  \"kind\": \"API\",\n  \"scalars\": {\n    \"Identity.UUID\": {\n      \"name\": \"Identity.UUID\",\n      \"description\": \"UUID v4 with automatic base62 encoding for client-facing APIs\",\n      \"languagePrimitive\": \"string\",\n      \"primitive\": \"String\",\n      \"typeMappings\": {\n        \"go\": \"IdentityUUID\",\n        \"json_schema\": \"string\",\n        \"python\": \"uuid.UUID\",\n        \"rust\": \"uuid::Uuid\",\n        \"sql\": \"UUID\",\n        \"typescript\": \"string\"\n      },\n      \"pattern\": \"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$\",\n      \"hasCustomParse\": true\n    }\n  },\n  \"types\": {\n    \"GridView\": {\n      \"name\": \"GridView\",\n      \"comment\": \"Response: a stored grid.\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"id\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"labels\",\n          \"typeRef\": {\n            \"name\": \"string\",\n            \"isArray\": true,\n            \"isArrayOfArrays\": true\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"shades\",\n          \"typeRef\": {\n            \"name\": \"Shade\",\n            \"isArray\": true,\n            \"isArrayOfArrays\": true\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"polygons\",\n          \"typeRef\": {\n            \"name\": \"Point\",\n            \"isArray\": true,\n            \"isArrayOfArrays\": true\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"weights\",\n          \"typeRef\": {\n            \"name\": \"number\",\n            \"isArray\": true,\n            \"isArrayOfArrays\": true\n          }\n        }\n      ]\n    },\n    \"Point\": {\n      \"name\": \"Point\",\n      \"comment\": \"A point on a plane.\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"x\",\n          \"typeRef\": {\n            \"name\": \"number\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"y\",\n          \"typeRef\": {\n            \"name\": \"number\"\n          },\n          \"required\": true\n        }\n      ]\n    },\n    \"SaveGridInput\": {\n      \"name\": \"SaveGridInput\",\n      \"comment\": \"Request body: a grid to store.\",\n      \"role\": \"APIInput\",\n      \"fields\": [\n        {\n          \"name\": \"labels\",\n          \"comment\": \"Cell labels, one inner list per row.\",\n          \"typeRef\": {\n            \"name\": \"string\",\n            \"isArray\": true,\n            \"isArrayOfArrays\": true\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"shades\",\n          \"comment\": \"Cell shades, one inner list per row.\",\n          \"typeRef\": {\n            \"name\": \"Shade\",\n            \"isArray\": true,\n            \"isArrayOfArrays\": true\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"polygons\",\n          \"comment\": \"Polygons, each a list of its points.\",\n          \"typeRef\": {\n            \"name\": \"Point\",\n            \"isArray\": true,\n            \"isArrayOfArrays\": true\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"weights\",\n          \"comment\": \"Weight vectors in batches; absent when the grid is unweighted.\",\n          \"typeRef\": {\n            \"name\": \"number\",\n            \"isArray\": true,\n            \"isArrayOfArrays\": true\n          }\n        }\n      ]\n    }\n  },\n  \"enums\": {\n    \"Shade\": {\n      \"name\": \"Shade\",\n      \"comment\": \"The shade of one grid cell.\",\n      \"values\": [\n        {\n          \"name\": \"Light\",\n          \"serializedAs\": \"light\"\n        },\n        {\n          \"name\": \"Dark\",\n          \"serializedAs\": \"dark\"\n        }\n      ]\n    }\n  },\n  \"operationSets\": [\n    {\n      \"name\": \"GridMutations\",\n      \"operations\": [\n        {\n          \"name\": \"saveGrid\",\n          \"comment\": \"Store a grid from a request body.\",\n          \"typeRef\": {\n            \"name\": \"GridView\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"input\",\n              \"typeRef\": {\n                \"name\": \"SaveGridInput\"\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"POST\",\n          \"restPath\": \"grids\"\n        },\n        {\n          \"name\": \"replaceLabels\",\n          \"comment\": \"Replace a grid's labels; the body argument is a list of lists.\",\n          \"typeRef\": {\n            \"name\": \"GridView\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"id\",\n              \"typeRef\": {\n                \"name\": \"Identity.UUID\"\n              },\n              \"required\": true\n            },\n            {\n              \"name\": \"labels\",\n              \"typeRef\": {\n                \"name\": \"string\",\n                \"isArray\": true,\n                \"isArrayOfArrays\": true\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"PUT\",\n          \"restPath\": \"grids/{id}/labels\"\n        }\n      ]\n    },\n    {\n      \"name\": \"GridQueries\",\n      \"operations\": [\n        {\n          \"name\": \"getGrid\",\n          \"typeRef\": {\n            \"name\": \"GridView\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"id\",\n              \"typeRef\": {\n                \"name\": \"Identity.UUID\"\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"GET\",\n          \"restPath\": \"grids/{id}\"\n        },\n        {\n          \"name\": \"gridLabels\",\n          \"comment\": \"One grid's labels as a bare list of lists, at most `limit` rows.\",\n          \"typeRef\": {\n            \"name\": \"string\",\n            \"isArray\": true,\n            \"isArrayOfArrays\": true\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"id\",\n              \"typeRef\": {\n                \"name\": \"Identity.UUID\"\n              },\n              \"required\": true\n            },\n            {\n              \"name\": \"limit\",\n              \"typeRef\": {\n                \"name\": \"number\"\n              },\n              \"isQuery\": true\n            }\n          ],\n          \"httpMethod\": \"GET\",\n          \"restPath\": \"grids/{id}/labels\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "accept": true,
+      "canonical": "{\"enums\":{\"Shade\":{\"comment\":\"The shade of one grid cell.\",\"name\":\"Shade\",\"values\":[{\"name\":\"Light\",\"serializedAs\":\"light\"},{\"name\":\"Dark\",\"serializedAs\":\"dark\"}]}},\"kind\":\"API\",\"name\":\"fixture-nested-arrays-api\",\"operationSets\":[{\"name\":\"GridMutations\",\"operations\":[{\"arguments\":[{\"name\":\"input\",\"required\":true,\"typeRef\":{\"name\":\"SaveGridInput\"}}],\"comment\":\"Store a grid from a request body.\",\"httpMethod\":\"POST\",\"name\":\"saveGrid\",\"required\":true,\"restPath\":\"grids\",\"typeRef\":{\"name\":\"GridView\"}},{\"arguments\":[{\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"labels\",\"required\":true,\"typeRef\":{\"isArray\":true,\"isArrayOfArrays\":true,\"name\":\"string\"}}],\"comment\":\"Replace a grid's labels; the body argument is a list of lists.\",\"httpMethod\":\"PUT\",\"name\":\"replaceLabels\",\"required\":true,\"restPath\":\"grids/{id}/labels\",\"typeRef\":{\"name\":\"GridView\"}}]},{\"name\":\"GridQueries\",\"operations\":[{\"arguments\":[{\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}}],\"httpMethod\":\"GET\",\"name\":\"getGrid\",\"required\":true,\"restPath\":\"grids/{id}\",\"typeRef\":{\"name\":\"GridView\"}},{\"arguments\":[{\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"isQuery\":true,\"name\":\"limit\",\"typeRef\":{\"name\":\"number\"}}],\"comment\":\"One grid's labels as a bare list of lists, at most `limit` rows.\",\"httpMethod\":\"GET\",\"name\":\"gridLabels\",\"required\":true,\"restPath\":\"grids/{id}/labels\",\"typeRef\":{\"isArray\":true,\"isArrayOfArrays\":true,\"name\":\"string\"}}]}],\"scalars\":{\"Identity.UUID\":{\"description\":\"UUID v4 with automatic base62 encoding for client-facing APIs\",\"hasCustomParse\":true,\"languagePrimitive\":\"string\",\"name\":\"Identity.UUID\",\"pattern\":\"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$\",\"primitive\":\"String\",\"typeMappings\":{\"go\":\"IdentityUUID\",\"json_schema\":\"string\",\"python\":\"uuid.UUID\",\"rust\":\"uuid::Uuid\",\"sql\":\"UUID\",\"typescript\":\"string\"}}},\"types\":{\"GridView\":{\"comment\":\"Response: a stored grid.\",\"fields\":[{\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"labels\",\"required\":true,\"typeRef\":{\"isArray\":true,\"isArrayOfArrays\":true,\"name\":\"string\"}},{\"name\":\"shades\",\"required\":true,\"typeRef\":{\"isArray\":true,\"isArrayOfArrays\":true,\"name\":\"Shade\"}},{\"name\":\"polygons\",\"required\":true,\"typeRef\":{\"isArray\":true,\"isArrayOfArrays\":true,\"name\":\"Point\"}},{\"name\":\"weights\",\"typeRef\":{\"isArray\":true,\"isArrayOfArrays\":true,\"name\":\"number\"}}],\"name\":\"GridView\",\"role\":\"EmbeddedStruct\"},\"Point\":{\"comment\":\"A point on a plane.\",\"fields\":[{\"name\":\"x\",\"required\":true,\"typeRef\":{\"name\":\"number\"}},{\"name\":\"y\",\"required\":true,\"typeRef\":{\"name\":\"number\"}}],\"name\":\"Point\",\"role\":\"EmbeddedStruct\"},\"SaveGridInput\":{\"comment\":\"Request body: a grid to store.\",\"fields\":[{\"comment\":\"Cell labels, one inner list per row.\",\"name\":\"labels\",\"required\":true,\"typeRef\":{\"isArray\":true,\"isArrayOfArrays\":true,\"name\":\"string\"}},{\"comment\":\"Cell shades, one inner list per row.\",\"name\":\"shades\",\"required\":true,\"typeRef\":{\"isArray\":true,\"isArrayOfArrays\":true,\"name\":\"Shade\"}},{\"comment\":\"Polygons, each a list of its points.\",\"name\":\"polygons\",\"required\":true,\"typeRef\":{\"isArray\":true,\"isArrayOfArrays\":true,\"name\":\"Point\"}},{\"comment\":\"Weight vectors in batches; absent when the grid is unweighted.\",\"name\":\"weights\",\"typeRef\":{\"isArray\":true,\"isArrayOfArrays\":true,\"name\":\"number\"}}],\"name\":\"SaveGridInput\",\"role\":\"APIInput\"}}}"
+    },
+    {
+      "name": "file projection-source.schema.json",
+      "registry": "core",
+      "input": "{\n  \"name\": \"fixture-projection\",\n  \"kind\": \"DB\",\n  \"types\": {\n    \"Auditable\": {\n      \"name\": \"Auditable\",\n      \"role\": \"DBTable\",\n      \"fields\": [\n        {\n          \"name\": \"id\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true,\n          \"key\": true,\n          \"unique\": true,\n          \"autoGenerated\": true\n        },\n        {\n          \"name\": \"createdAt\",\n          \"typeRef\": {\n            \"name\": \"Temporal.DateTime\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"updatedAt\",\n          \"typeRef\": {\n            \"name\": \"Temporal.DateTime\"\n          }\n        }\n      ]\n    },\n    \"Channel\": {\n      \"name\": \"Channel\",\n      \"comment\": \"A release channel of an app: the line a preference row resolves against.\",\n      \"role\": \"DBTable\",\n      \"extends\": \"Auditable\",\n      \"rawHeritage\": {\n        \"extends\": \"Auditable\"\n      },\n      \"fields\": [\n        {\n          \"name\": \"id\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true,\n          \"inheritedFrom\": \"Auditable\",\n          \"key\": true,\n          \"unique\": true,\n          \"autoGenerated\": true\n        },\n        {\n          \"name\": \"createdAt\",\n          \"typeRef\": {\n            \"name\": \"Temporal.DateTime\"\n          },\n          \"required\": true,\n          \"inheritedFrom\": \"Auditable\"\n        },\n        {\n          \"name\": \"updatedAt\",\n          \"typeRef\": {\n            \"name\": \"Temporal.DateTime\"\n          },\n          \"inheritedFrom\": \"Auditable\"\n        },\n        {\n          \"name\": \"account\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"name\",\n          \"typeRef\": {\n            \"name\": \"Identity.Name\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"handle\",\n          \"typeRef\": {\n            \"name\": \"Identity.Slug\"\n          },\n          \"required\": true\n        }\n      ]\n    },\n    \"Preference\": {\n      \"name\": \"Preference\",\n      \"comment\": \"One stored preference value for a slot, scoped to an app, a team, or a\\nuser.\",\n      \"role\": \"DBTable\",\n      \"extends\": \"Auditable\",\n      \"rawHeritage\": {\n        \"extends\": \"Auditable\"\n      },\n      \"fields\": [\n        {\n          \"name\": \"id\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true,\n          \"inheritedFrom\": \"Auditable\",\n          \"key\": true,\n          \"unique\": true,\n          \"autoGenerated\": true\n        },\n        {\n          \"name\": \"createdAt\",\n          \"typeRef\": {\n            \"name\": \"Temporal.DateTime\"\n          },\n          \"required\": true,\n          \"inheritedFrom\": \"Auditable\"\n        },\n        {\n          \"name\": \"updatedAt\",\n          \"typeRef\": {\n            \"name\": \"Temporal.DateTime\"\n          },\n          \"inheritedFrom\": \"Auditable\"\n        },\n        {\n          \"name\": \"account\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"channel\",\n          \"typeRef\": {\n            \"name\": \"Channel\"\n          },\n          \"required\": true,\n          \"relation\": {\n            \"type\": \"Channel\"\n          }\n        },\n        {\n          \"name\": \"branch\",\n          \"typeRef\": {\n            \"name\": \"Channel\"\n          },\n          \"relation\": {\n            \"type\": \"Channel\"\n          }\n        },\n        {\n          \"name\": \"commit\",\n          \"comment\": \"A released value's commit; a row carries a branch or a commit, never\\nboth.\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          }\n        },\n        {\n          \"name\": \"scope\",\n          \"typeRef\": {\n            \"name\": \"PreferenceScope\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"userId\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          }\n        },\n        {\n          \"name\": \"slotKey\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"handle\",\n          \"typeRef\": {\n            \"name\": \"Identity.Slug\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"value\",\n          \"typeRef\": {\n            \"name\": \"Generic.JSON\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"revision\",\n          \"typeRef\": {\n            \"name\": \"Generic.Int64\"\n          },\n          \"required\": true,\n          \"default\": \"1\"\n        },\n        {\n          \"name\": \"tags\",\n          \"typeRef\": {\n            \"name\": \"Identity.Slug\",\n            \"isArray\": true\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"archivedAt\",\n          \"comment\": \"Set when the row is retired; retired rows leave the projection.\",\n          \"typeRef\": {\n            \"name\": \"Temporal.DateTime\"\n          }\n        },\n        {\n          \"name\": \"hidden\",\n          \"comment\": \"Hidden rows are kept for audit but never served.\",\n          \"typeRef\": {\n            \"name\": \"boolean\"\n          },\n          \"required\": true,\n          \"default\": \"false\"\n        }\n      ],\n      \"indexes\": [\n        {\n          \"keys\": [\n            \"account\",\n            \"slotKey\"\n          ]\n        }\n      ]\n    }\n  }\n}\n",
+      "accept": true,
+      "canonical": "{\"kind\":\"DB\",\"name\":\"fixture-projection\",\"types\":{\"Auditable\":{\"fields\":[{\"autoGenerated\":true,\"key\":true,\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"},\"unique\":true},{\"name\":\"createdAt\",\"required\":true,\"typeRef\":{\"name\":\"Temporal.DateTime\"}},{\"name\":\"updatedAt\",\"typeRef\":{\"name\":\"Temporal.DateTime\"}}],\"name\":\"Auditable\",\"role\":\"DBTable\"},\"Channel\":{\"comment\":\"A release channel of an app: the line a preference row resolves against.\",\"extends\":\"Auditable\",\"fields\":[{\"autoGenerated\":true,\"inheritedFrom\":\"Auditable\",\"key\":true,\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"},\"unique\":true},{\"inheritedFrom\":\"Auditable\",\"name\":\"createdAt\",\"required\":true,\"typeRef\":{\"name\":\"Temporal.DateTime\"}},{\"inheritedFrom\":\"Auditable\",\"name\":\"updatedAt\",\"typeRef\":{\"name\":\"Temporal.DateTime\"}},{\"name\":\"account\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"name\",\"required\":true,\"typeRef\":{\"name\":\"Identity.Name\"}},{\"name\":\"handle\",\"required\":true,\"typeRef\":{\"name\":\"Identity.Slug\"}}],\"name\":\"Channel\",\"rawHeritage\":{\"extends\":\"Auditable\"},\"role\":\"DBTable\"},\"Preference\":{\"comment\":\"One stored preference value for a slot, scoped to an app, a team, or a\\nuser.\",\"extends\":\"Auditable\",\"fields\":[{\"autoGenerated\":true,\"inheritedFrom\":\"Auditable\",\"key\":true,\"name\":\"id\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"},\"unique\":true},{\"inheritedFrom\":\"Auditable\",\"name\":\"createdAt\",\"required\":true,\"typeRef\":{\"name\":\"Temporal.DateTime\"}},{\"inheritedFrom\":\"Auditable\",\"name\":\"updatedAt\",\"typeRef\":{\"name\":\"Temporal.DateTime\"}},{\"name\":\"account\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"channel\",\"relation\":{\"type\":\"Channel\"},\"required\":true,\"typeRef\":{\"name\":\"Channel\"}},{\"name\":\"branch\",\"relation\":{\"type\":\"Channel\"},\"typeRef\":{\"name\":\"Channel\"}},{\"comment\":\"A released value's commit; a row carries a branch or a commit, never\\nboth.\",\"name\":\"commit\",\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"scope\",\"required\":true,\"typeRef\":{\"name\":\"PreferenceScope\"}},{\"name\":\"userId\",\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"slotKey\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"handle\",\"required\":true,\"typeRef\":{\"name\":\"Identity.Slug\"}},{\"name\":\"value\",\"required\":true,\"typeRef\":{\"name\":\"Generic.JSON\"}},{\"default\":\"1\",\"name\":\"revision\",\"required\":true,\"typeRef\":{\"name\":\"Generic.Int64\"}},{\"name\":\"tags\",\"required\":true,\"typeRef\":{\"isArray\":true,\"name\":\"Identity.Slug\"}},{\"comment\":\"Set when the row is retired; retired rows leave the projection.\",\"name\":\"archivedAt\",\"typeRef\":{\"name\":\"Temporal.DateTime\"}},{\"comment\":\"Hidden rows are kept for audit but never served.\",\"default\":\"false\",\"name\":\"hidden\",\"required\":true,\"typeRef\":{\"name\":\"boolean\"}}],\"indexes\":[{\"keys\":[\"account\",\"slotKey\"]}],\"name\":\"Preference\",\"rawHeritage\":{\"extends\":\"Auditable\"},\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "file projection.schema.json",
+      "registry": "core",
+      "input": "{\n  \"name\": \"fixture-projection\",\n  \"kind\": \"DB\",\n  \"scalars\": {\n    \"Generic.Int64\": {\n      \"name\": \"Generic.Int64\",\n      \"description\": \"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.\",\n      \"languagePrimitive\": \"number\",\n      \"primitive\": \"Int\",\n      \"typeMappings\": {\n        \"go\": \"GenericInt64\",\n        \"json_schema\": \"integer\",\n        \"python\": \"int\",\n        \"rust\": \"i64\",\n        \"sql\": \"BIGINT\",\n        \"typescript\": \"number\"\n      },\n      \"minimum\": -9007199254740991,\n      \"maximum\": 9007199254740991,\n      \"hasCustomParse\": true\n    },\n    \"Generic.JSON\": {\n      \"name\": \"Generic.JSON\",\n      \"description\": \"Any valid JSON value: object, array, primitive, or null\",\n      \"languagePrimitive\": \"string\",\n      \"primitive\": \"String\",\n      \"typeMappings\": {\n        \"go\": \"GenericJSON\",\n        \"json_schema\": \"any\",\n        \"python\": \"Any\",\n        \"rust\": \"serde_json::Value\",\n        \"sql\": \"JSONB\",\n        \"typescript\": \"JSONValue\"\n      },\n      \"hasCustomValidate\": true\n    },\n    \"Identity.Name\": {\n      \"name\": \"Identity.Name\",\n      \"description\": \"An objects name\",\n      \"languagePrimitive\": \"string\",\n      \"primitive\": \"String\",\n      \"typeMappings\": {\n        \"go\": \"IdentityName\",\n        \"json_schema\": \"string\",\n        \"python\": \"str\",\n        \"rust\": \"String\",\n        \"sql\": \"VARCHAR(80)\",\n        \"typescript\": \"string\"\n      },\n      \"maxLength\": 80,\n      \"minLength\": 2\n    },\n    \"Identity.Slug\": {\n      \"name\": \"Identity.Slug\",\n      \"description\": \"A URL friendly version of a string\",\n      \"languagePrimitive\": \"string\",\n      \"primitive\": \"String\",\n      \"typeMappings\": {\n        \"go\": \"IdentitySlug\",\n        \"json_schema\": \"string\",\n        \"python\": \"str\",\n        \"rust\": \"String\",\n        \"sql\": \"CITEXT\",\n        \"typescript\": \"string\"\n      },\n      \"maxLength\": 255,\n      \"minLength\": 1,\n      \"pattern\": \"^[a-z0-9]+(?:[-_][a-z0-9]+)*$\"\n    },\n    \"Identity.UUID\": {\n      \"name\": \"Identity.UUID\",\n      \"description\": \"UUID v4 with automatic base62 encoding for client-facing APIs\",\n      \"languagePrimitive\": \"string\",\n      \"primitive\": \"String\",\n      \"typeMappings\": {\n        \"go\": \"IdentityUUID\",\n        \"json_schema\": \"string\",\n        \"python\": \"uuid.UUID\",\n        \"rust\": \"uuid::Uuid\",\n        \"sql\": \"UUID\",\n        \"typescript\": \"string\"\n      },\n      \"pattern\": \"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$\",\n      \"hasCustomParse\": true\n    },\n    \"Temporal.DateTime\": {\n      \"name\": \"Temporal.DateTime\",\n      \"description\": \"ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.\",\n      \"languagePrimitive\": \"string\",\n      \"primitive\": \"String\",\n      \"typeMappings\": {\n        \"go\": \"TemporalDateTime\",\n        \"json_schema\": \"string\",\n        \"python\": \"datetime.datetime\",\n        \"rust\": \"chrono::DateTime\\u003cchrono::Utc\\u003e\",\n        \"sql\": \"TIMESTAMPTZ\",\n        \"typescript\": \"JSDate\"\n      },\n      \"hasCustomParse\": true\n    }\n  },\n  \"types\": {\n    \"AppPreference\": {\n      \"name\": \"AppPreference\",\n      \"comment\": \"Preference values visible to the current account, channel and user: app\\nand team rows for the selected channel, and user rows only for the user\\nwhose session runs the query. App rows resolve by the branch or the\\nreleased commit the caller names (either setting may be left unset), and\\none row per slot survives: user over team over app, and a branch row\\nbefore the released commit's.\",\n      \"role\": \"Projection\",\n      \"fields\": [\n        {\n          \"name\": \"slotKey\",\n          \"comment\": \"Stable identity of the slot the value belongs to.\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"handle\",\n          \"typeRef\": {\n            \"name\": \"Identity.Slug\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"scope\",\n          \"typeRef\": {\n            \"name\": \"PreferenceScope\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"userId\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          }\n        },\n        {\n          \"name\": \"channelId\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true,\n          \"projectedFrom\": \"base.channel\"\n        },\n        {\n          \"name\": \"channelHandle\",\n          \"typeRef\": {\n            \"name\": \"Identity.Slug\"\n          },\n          \"required\": true,\n          \"projectedFrom\": \"channel.handle\"\n        },\n        {\n          \"name\": \"branchName\",\n          \"typeRef\": {\n            \"name\": \"Identity.Name\"\n          },\n          \"projectedFrom\": \"branch.name\"\n        },\n        {\n          \"name\": \"value\",\n          \"typeRef\": {\n            \"name\": \"Generic.JSON\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"revision\",\n          \"typeRef\": {\n            \"name\": \"Generic.Int64\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"tags\",\n          \"typeRef\": {\n            \"name\": \"Identity.Slug\",\n            \"isArray\": true\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"updatedAt\",\n          \"typeRef\": {\n            \"name\": \"Temporal.DateTime\"\n          },\n          \"projectedFrom\": \"base.updatedAt\"\n        }\n      ],\n      \"projection\": {\n        \"pool\": \"app\",\n        \"name\": \"preferences\",\n        \"migration\": \"20260902120000\",\n        \"source\": \"Preference\",\n        \"joins\": [\n          {\n            \"type\": \"Channel\",\n            \"alias\": \"channel\",\n            \"kind\": \"inner\",\n            \"on\": [\n              {\n                \"left\": \"channel.id\",\n                \"right\": \"base.channel\"\n              }\n            ]\n          },\n          {\n            \"type\": \"Channel\",\n            \"alias\": \"branch\",\n            \"kind\": \"left\",\n            \"on\": [\n              {\n                \"left\": \"branch.id\",\n                \"right\": \"base.branch\"\n              }\n            ]\n          }\n        ],\n        \"predicates\": [\n          {\n            \"column\": \"base.account\",\n            \"setting\": \"app.account_id\"\n          },\n          {\n            \"column\": \"base.channel\",\n            \"setting\": \"app.channel_id\"\n          },\n          {\n            \"column\": \"base.userId\",\n            \"setting\": \"app.user_id\",\n            \"when\": {\n              \"column\": \"base.scope\",\n              \"equals\": \"user\"\n            }\n          },\n          {\n            \"anyOf\": [\n              {\n                \"column\": \"base.branch\",\n                \"setting\": \"app.branch_id\",\n                \"optional\": true\n              },\n              {\n                \"column\": \"base.commit\",\n                \"setting\": \"app.commit_id\",\n                \"optional\": true\n              }\n            ],\n            \"when\": {\n              \"column\": \"base.scope\",\n              \"equals\": \"app\"\n            }\n          },\n          {\n            \"column\": \"base.archivedAt\",\n            \"isNull\": true\n          },\n          {\n            \"column\": \"base.hidden\",\n            \"equals\": {\n              \"bool\": false\n            }\n          },\n          {\n            \"column\": \"base.userId\",\n            \"notNull\": true,\n            \"when\": {\n              \"column\": \"base.scope\",\n              \"equals\": \"user\"\n            }\n          }\n        ],\n        \"collapse\": {\n          \"by\": [\n            \"base.slotKey\"\n          ],\n          \"order\": [\n            {\n              \"column\": \"base.scope\",\n              \"rank\": [\n                \"user\",\n                \"team\",\n                \"app\"\n              ]\n            },\n            {\n              \"column\": \"base.branch\",\n              \"direction\": \"asc\",\n              \"nulls\": \"last\"\n            }\n          ]\n        }\n      }\n    }\n  },\n  \"enums\": {\n    \"PreferenceScope\": {\n      \"name\": \"PreferenceScope\",\n      \"values\": [\n        {\n          \"name\": \"App\",\n          \"serializedAs\": \"app\"\n        },\n        {\n          \"name\": \"Team\",\n          \"serializedAs\": \"team\"\n        },\n        {\n          \"name\": \"User\",\n          \"serializedAs\": \"user\"\n        }\n      ]\n    }\n  }\n}\n",
+      "accept": true,
+      "canonical": "{\"enums\":{\"PreferenceScope\":{\"name\":\"PreferenceScope\",\"values\":[{\"name\":\"App\",\"serializedAs\":\"app\"},{\"name\":\"Team\",\"serializedAs\":\"team\"},{\"name\":\"User\",\"serializedAs\":\"user\"}]}},\"kind\":\"DB\",\"name\":\"fixture-projection\",\"scalars\":{\"Generic.Int64\":{\"description\":\"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.\",\"hasCustomParse\":true,\"languagePrimitive\":\"number\",\"maximum\":9007199254740991,\"minimum\":-9007199254740991,\"name\":\"Generic.Int64\",\"primitive\":\"Int\",\"typeMappings\":{\"go\":\"GenericInt64\",\"json_schema\":\"integer\",\"python\":\"int\",\"rust\":\"i64\",\"sql\":\"BIGINT\",\"typescript\":\"number\"}},\"Generic.JSON\":{\"description\":\"Any valid JSON value: object, array, primitive, or null\",\"hasCustomValidate\":true,\"languagePrimitive\":\"string\",\"name\":\"Generic.JSON\",\"primitive\":\"String\",\"typeMappings\":{\"go\":\"GenericJSON\",\"json_schema\":\"any\",\"python\":\"Any\",\"rust\":\"serde_json::Value\",\"sql\":\"JSONB\",\"typescript\":\"JSONValue\"}},\"Identity.Name\":{\"description\":\"An objects name\",\"languagePrimitive\":\"string\",\"maxLength\":80,\"minLength\":2,\"name\":\"Identity.Name\",\"primitive\":\"String\",\"typeMappings\":{\"go\":\"IdentityName\",\"json_schema\":\"string\",\"python\":\"str\",\"rust\":\"String\",\"sql\":\"VARCHAR(80)\",\"typescript\":\"string\"}},\"Identity.Slug\":{\"description\":\"A URL friendly version of a string\",\"languagePrimitive\":\"string\",\"maxLength\":255,\"minLength\":1,\"name\":\"Identity.Slug\",\"pattern\":\"^[a-z0-9]+(?:[-_][a-z0-9]+)*$\",\"primitive\":\"String\",\"typeMappings\":{\"go\":\"IdentitySlug\",\"json_schema\":\"string\",\"python\":\"str\",\"rust\":\"String\",\"sql\":\"CITEXT\",\"typescript\":\"string\"}},\"Identity.UUID\":{\"description\":\"UUID v4 with automatic base62 encoding for client-facing APIs\",\"hasCustomParse\":true,\"languagePrimitive\":\"string\",\"name\":\"Identity.UUID\",\"pattern\":\"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$\",\"primitive\":\"String\",\"typeMappings\":{\"go\":\"IdentityUUID\",\"json_schema\":\"string\",\"python\":\"uuid.UUID\",\"rust\":\"uuid::Uuid\",\"sql\":\"UUID\",\"typescript\":\"string\"}},\"Temporal.DateTime\":{\"description\":\"ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.\",\"hasCustomParse\":true,\"languagePrimitive\":\"string\",\"name\":\"Temporal.DateTime\",\"primitive\":\"String\",\"typeMappings\":{\"go\":\"TemporalDateTime\",\"json_schema\":\"string\",\"python\":\"datetime.datetime\",\"rust\":\"chrono::DateTime\\u003cchrono::Utc\\u003e\",\"sql\":\"TIMESTAMPTZ\",\"typescript\":\"JSDate\"}}},\"types\":{\"AppPreference\":{\"comment\":\"Preference values visible to the current account, channel and user: app\\nand team rows for the selected channel, and user rows only for the user\\nwhose session runs the query. App rows resolve by the branch or the\\nreleased commit the caller names (either setting may be left unset), and\\none row per slot survives: user over team over app, and a branch row\\nbefore the released commit's.\",\"fields\":[{\"comment\":\"Stable identity of the slot the value belongs to.\",\"name\":\"slotKey\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"handle\",\"required\":true,\"typeRef\":{\"name\":\"Identity.Slug\"}},{\"name\":\"scope\",\"required\":true,\"typeRef\":{\"name\":\"PreferenceScope\"}},{\"name\":\"userId\",\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"channelId\",\"projectedFrom\":\"base.channel\",\"required\":true,\"typeRef\":{\"name\":\"Identity.UUID\"}},{\"name\":\"channelHandle\",\"projectedFrom\":\"channel.handle\",\"required\":true,\"typeRef\":{\"name\":\"Identity.Slug\"}},{\"name\":\"branchName\",\"projectedFrom\":\"branch.name\",\"typeRef\":{\"name\":\"Identity.Name\"}},{\"name\":\"value\",\"required\":true,\"typeRef\":{\"name\":\"Generic.JSON\"}},{\"name\":\"revision\",\"required\":true,\"typeRef\":{\"name\":\"Generic.Int64\"}},{\"name\":\"tags\",\"required\":true,\"typeRef\":{\"isArray\":true,\"name\":\"Identity.Slug\"}},{\"name\":\"updatedAt\",\"projectedFrom\":\"base.updatedAt\",\"typeRef\":{\"name\":\"Temporal.DateTime\"}}],\"name\":\"AppPreference\",\"projection\":{\"collapse\":{\"by\":[\"base.slotKey\"],\"order\":[{\"column\":\"base.scope\",\"rank\":[\"user\",\"team\",\"app\"]},{\"column\":\"base.branch\",\"direction\":\"asc\",\"nulls\":\"last\"}]},\"joins\":[{\"alias\":\"channel\",\"kind\":\"inner\",\"on\":[{\"left\":\"channel.id\",\"right\":\"base.channel\"}],\"type\":\"Channel\"},{\"alias\":\"branch\",\"kind\":\"left\",\"on\":[{\"left\":\"branch.id\",\"right\":\"base.branch\"}],\"type\":\"Channel\"}],\"migration\":\"20260902120000\",\"name\":\"preferences\",\"pool\":\"app\",\"predicates\":[{\"column\":\"base.account\",\"setting\":\"app.account_id\"},{\"column\":\"base.channel\",\"setting\":\"app.channel_id\"},{\"column\":\"base.userId\",\"setting\":\"app.user_id\",\"when\":{\"column\":\"base.scope\",\"equals\":\"user\"}},{\"anyOf\":[{\"column\":\"base.branch\",\"optional\":true,\"setting\":\"app.branch_id\"},{\"column\":\"base.commit\",\"optional\":true,\"setting\":\"app.commit_id\"}],\"when\":{\"column\":\"base.scope\",\"equals\":\"app\"}},{\"column\":\"base.archivedAt\",\"isNull\":true},{\"column\":\"base.hidden\",\"equals\":{\"bool\":false}},{\"column\":\"base.userId\",\"notNull\":true,\"when\":{\"column\":\"base.scope\",\"equals\":\"user\"}}],\"source\":\"Preference\"},\"role\":\"Projection\"}}}"
+    }
+  ]
+}

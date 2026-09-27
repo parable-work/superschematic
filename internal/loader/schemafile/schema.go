@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -99,6 +100,10 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 		return nil, err
 	}
 
+	if err := addEncoderDefaults(defs); err != nil {
+		return nil, err
+	}
+
 	// Single-definition file forms: the definition shape plus a required
 	// "kind" discriminator. A single TypeDef file needs no variant because
 	// "role" is already a required TypeDef property.
@@ -182,6 +187,77 @@ func addMCPInvocationProperty(defs map[string]any, policy registry.ToolInvocatio
 	}
 	props[policy.Key] = map[string]any{"type": "string", "enum": enum, "default": policy.Default}
 	return nil
+}
+
+// addEncoderDefaults gives every property the Go encoder omits at one value
+// that value as its default: an omitempty string, bool or number that is
+// not a pointer (its zero value) and an omitempty slice or map (empty). A
+// decoded document holds no such value, since the decoder cannot tell it
+// from an absent key, so a reader in another language that drops a
+// property equal to its default writes the document as the Go reader
+// decodes it. A pointer keeps its zero value and has no default, and
+// neither does a struct, which the encoder never omits. OperationMCP's
+// encoder omits its keys as its struct tags say.
+func addEncoderDefaults(defs map[string]any) error {
+	seen := map[reflect.Type]bool{}
+	var visit func(t reflect.Type) error
+	visit = func(t reflect.Type) error {
+		for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Map {
+			t = t.Elem()
+		}
+		if t.Kind() != reflect.Struct || seen[t] {
+			return nil
+		}
+		seen[t] = true
+		props, err := propertiesOf(defs, t.Name())
+		if err != nil {
+			return err
+		}
+		for i := range t.NumField() {
+			field := t.Field(i)
+			name, options, _ := strings.Cut(field.Tag.Get("json"), ",")
+			if !field.IsExported() || name == "-" {
+				continue
+			}
+			if name == "" {
+				name = field.Name
+			}
+			if err := visit(field.Type); err != nil {
+				return err
+			}
+			omitted, ok := omittedValue(field.Type)
+			if !ok || !slices.Contains(strings.Split(options, ","), "omitempty") {
+				continue
+			}
+			prop, ok := props[name].(map[string]any)
+			if !ok {
+				return fmt.Errorf("$defs/%s has no %q property", t.Name(), name)
+			}
+			prop["default"] = omitted
+		}
+		return nil
+	}
+	return visit(reflect.TypeFor[Document]())
+}
+
+// omittedValue is the value an omitempty field of type t is omitted at,
+// and false for a type the encoder writes whatever its value.
+func omittedValue(t reflect.Type) (any, bool) {
+	switch t.Kind() {
+	case reflect.String:
+		return "", true
+	case reflect.Bool:
+		return false, true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return 0, true
+	case reflect.Slice:
+		return []any{}, true
+	case reflect.Map:
+		return map[string]any{}, true
+	}
+	return nil, false
 }
 
 // singleDefVariant deep-copies a $defs entry and adds the required "kind"

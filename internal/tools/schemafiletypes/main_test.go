@@ -82,8 +82,10 @@ export const hiddenAsString: OperationMCP = { hidden: 'no' };
 // compiler the schema loader uses. The package is mounted as a consumer
 // installs it, with its package.json, and imported through the exports
 // map. Every data-form file the JSON writer produces for the fixture
-// corpus is assigned to the type of its form, the open parts accept what a
-// registry may add, and the closed parts refuse what no registry accepts.
+// corpus is assigned to the type of its form, every document the Go reader
+// decodes in the schema-file parity corpus to Document, the open parts
+// accept what a registry may add, and the closed parts refuse what no
+// registry accepts.
 func TestTypesCheckTheCorpus(t *testing.T) {
 	root := testpaths.RepoRoot(t)
 	outputs, err := render()
@@ -123,6 +125,25 @@ func TestTypesCheckTheCorpus(t *testing.T) {
 	}
 	if count == 0 {
 		t.Fatal("the corpus wrote no documents")
+	}
+	// Every document the Go reader accepts in the schema-file parity
+	// corpus, core and extended registry alike, is a Document as the
+	// reader decodes it.
+	var parity struct {
+		Vectors []struct {
+			Name      string `json:"name"`
+			Accept    bool   `json:"accept"`
+			Canonical string `json:"canonical"`
+		} `json:"vectors"`
+	}
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(root, "runtime", "schema", "testdata", "schema_file_parity.json"))), &parity); err != nil {
+		t.Fatal(err)
+	}
+	for _, vector := range parity.Vectors {
+		if vector.Accept {
+			fmt.Fprintf(&check, "// parity: %s\nexport const doc%d: Document = %s;\n", vector.Name, count, vector.Canonical)
+			count++
+		}
 	}
 	check.WriteString(openParts)
 	check.WriteString(closedParts)

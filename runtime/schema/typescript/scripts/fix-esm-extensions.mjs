@@ -5,6 +5,10 @@
 // applied to the emitted output. Idempotent: a specifier that already ends in
 // .js or .mjs is skipped. Same script as superscalar bindings/typescript
 // minus that package's backend renames.
+//
+// A static import of a .json module also gets the `with { type: "json" }`
+// attribute Node ESM requires; the CommonJS build cannot carry it, so the
+// source leaves it out.
 import { readdirSync, readFileSync, writeFileSync, statSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,8 +33,12 @@ function fixFile(file) {
       return `${prefix}${spec}.js${suffix}`;
     }
   );
-  if (fixed !== original) {
-    writeFileSync(file, fixed);
+  const withAttributes = fixed.replace(
+    /(from\s+["'][^"']+\.json["'])(\s*;)/g,
+    '$1 with { type: "json" }$2'
+  );
+  if (withAttributes !== original) {
+    writeFileSync(file, withAttributes);
   }
 }
 
