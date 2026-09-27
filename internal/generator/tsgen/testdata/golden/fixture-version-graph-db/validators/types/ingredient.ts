@@ -38,9 +38,14 @@ export function validateIngredient(value: Ingredient | null | undefined): Valida
 
   {
     // A nested object is validated as its own type, its errors under the
-    // field's path; any other value is left to the field's other checks.
+    // field's path. Any other JSON value is "type"; null is left to the
+    // field's presence checks.
     const validateNested = (nested: unknown, path: string) => {
-      if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) {
+      if (nested === null || nested === undefined) {
+        return;
+      }
+      if (typeof nested !== 'object' || Array.isArray(nested)) {
+        addFieldError(errors, path, "type", "expected an object");
         return;
       }
       const nestedErrors = validateRecipe(nested as Recipe);
@@ -86,9 +91,14 @@ export function validateIngredient(value: Ingredient | null | undefined): Valida
 
   {
     // A nested object is validated as its own type, its errors under the
-    // field's path; any other value is left to the field's other checks.
+    // field's path. Any other JSON value is "type"; null is left to the
+    // field's presence checks.
     const validateNested = (nested: unknown, path: string) => {
-      if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) {
+      if (nested === null || nested === undefined) {
+        return;
+      }
+      if (typeof nested !== 'object' || Array.isArray(nested)) {
+        addFieldError(errors, path, "type", "expected an object");
         return;
       }
       const nestedErrors = validateRecipeRef(nested as RecipeRef);

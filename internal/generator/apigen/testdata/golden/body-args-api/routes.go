@@ -255,7 +255,7 @@ func createTagSearchPostsHandler(impl TagImplementation) gohttp.HandlerFunc {
 			Tags = make([]string, 0, len(TagsValues))
 			for _, rawValue := range TagsValues {
 				elem := rawValue
-				if len(rawValue) < 2 {
+				if len([]rune(rawValue)) < 2 {
 					validationErrors := types.NewValidationErrors()
 					validationErrors.SetFieldErrors("tags", []types.ValidationError{{Validator: "minLength", Message: "each item must be at least 2 characters"}})
 					RespondValidationErrors(w, r, validationErrors)
@@ -378,13 +378,13 @@ func createTagSearchPostsHandler(impl TagImplementation) gohttp.HandlerFunc {
 		var Caption string
 		if CaptionStr := parseStringQueryParamPtr(r, "caption"); CaptionStr != nil {
 			Caption = string(*CaptionStr)
-			if len(string(Caption)) < 2 {
+			if len([]rune(string(Caption))) < 2 {
 				validationErrors := types.NewValidationErrors()
 				validationErrors.SetFieldErrors("caption", []types.ValidationError{{Validator: "minLength", Message: "must be at least 2 characters"}})
 				RespondValidationErrors(w, r, validationErrors)
 				return
 			}
-			if len(string(Caption)) > 5 {
+			if len([]rune(string(Caption))) > 5 {
 				validationErrors := types.NewValidationErrors()
 				validationErrors.SetFieldErrors("caption", []types.ValidationError{{Validator: "maxLength", Message: "must be at most 5 characters"}})
 				RespondValidationErrors(w, r, validationErrors)

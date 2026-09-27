@@ -25,6 +25,12 @@ export function validateRecipeEntityKind(
     return [true, null];
   }
 
+  // A value of another JSON type is "type"; a string outside the enum is
+  // "enum".
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected a string" }]];
+  }
+
   if (!isValidRecipeEntityKind(value)) {
     errors.push({ validator: "enum", message: `must be a valid RecipeEntityKind value` });
   }
@@ -45,11 +51,7 @@ export function validateRecipeEntityKindRequired(
     return [false, errors];
   }
 
-  if (!isValidRecipeEntityKind(value)) {
-    errors.push({ validator: "enum", message: `must be a valid RecipeEntityKind value` });
-  }
-
-  return errors.length > 0 ? [false, errors] : [true, null];
+  return validateRecipeEntityKind(value);
 }
 
 /**
@@ -69,6 +71,12 @@ export function validateRecipePatchOperation(
 
   if (value === null || value === undefined) {
     return [true, null];
+  }
+
+  // A value of another JSON type is "type"; a string outside the enum is
+  // "enum".
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected a string" }]];
   }
 
   if (!isValidRecipePatchOperation(value)) {
@@ -91,9 +99,5 @@ export function validateRecipePatchOperationRequired(
     return [false, errors];
   }
 
-  if (!isValidRecipePatchOperation(value)) {
-    errors.push({ validator: "enum", message: `must be a valid RecipePatchOperation value` });
-  }
-
-  return errors.length > 0 ? [false, errors] : [true, null];
+  return validateRecipePatchOperation(value);
 }
