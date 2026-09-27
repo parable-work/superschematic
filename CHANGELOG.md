@@ -13,6 +13,43 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- Version graph declarations (D17). `@superschematic/db` exports
+  `@versionGraph({ name?, schemaEpoch? })` for a graph root,
+  `@graphMember({ graph, parent?: { key, of }, order?, singleton? })` for
+  an entity kind of the graph and `@conflictUnit('atomic' | 'keyed' |
+  'jsonSchema' | 'excluded')` for a member field's merge unit, with the
+  `VersionGraphOptions`, `GraphMemberOptions`, `GraphParent`,
+  `ConflictUnitStrategy` and `SchemaClass` types; `graph` and `parent.of`
+  name classes as values. The core registry declares the three
+  decorators. The IR gains `TypeDef.versionGraph`
+  (`ir.VersionGraphConfig`), `TypeDef.graphMember`
+  (`ir.GraphMemberConfig`, `ir.GraphParent`), `FieldDef.conflictUnit`, the
+  `ir.ConflictUnit*` constants and `TypeDef.VersionGraphName`; the JSON and
+  YAML forms, the schema-file JSON Schema and TypeScript types, and
+  `format` carry them. Verification checks the rules D17 states: a root
+  and each member have one UUID `@key`; a member is `@versioned`, has
+  exactly one relation to its root and no `deletedAt`, and belongs to one
+  graph; `parent.of` is a member of the same graph and `parent.key` a UUID
+  field; `order` names a `Generic.Int64` field; `keyed` and `jsonSchema`
+  sit only on a member's JSON object field; a graph has a member, a
+  PascalCase name and a non-negative epoch, and generates no name the
+  schema already defines. The loader then expands each graph into ordinary
+  types: `<Name>Ref` (`@versioned`, soft-deletable, name unique per root
+  among live refs), `<Name>Commit` (`sequence` unique per root),
+  `<Name>Patch` (unique on `(commit, entityKind, entityKey)`, indexed on
+  `(entityId, entityVersion)`), the enums `<Name>EntityKind` and
+  `<Name>PatchOperation`, and on each member `entityKey` (generated on
+  insert), `ref`, `deletedOnRef`, a unique `(entityKey, ref)` index and,
+  with `retentionDays`, a prune pin on `<name>_patch(entity_id,
+  entity_version)`. Every generated relation is `RESTRICT`, and the actor
+  fields take the type the ORM resolves its user id to. The `sql`, `orm`
+  and `types` generators emit them as any other tables. What the expansion
+  adds carries `origin: "versionGraph"` (`ir.OriginVersionGraph`) on
+  `TypeDef`, `FieldDef`, `EnumDef`, `IndexDef` and `PruneReference`; the
+  data forms have no `origin` key and refuse one, and `format` leaves the
+  expanded definitions out and writes the declarations. Every new key is
+  omitted when unset, so the IR and every generated artifact of a schema
+  without a graph are unchanged. Minor.
 - Generated Rust and Python types give a `@versioned` table the `_version`
   field and declare a generic `HistoryRecord`, as the Go and TypeScript
   types do (D17). In Rust the field is `version: i64`, renamed to
@@ -955,6 +992,13 @@ of a generated artifact is always listed here with the bump it requires.
   values of the declared type. Minor.
 
 ### Fixed
+
+- A struct that holds itself through a cycle of relations to other
+  structs compiles in Go and Rust. The Rust types box a field whose struct
+  holds the owner back inline, as they boxed a direct self-reference, and
+  the ORM's field selections (`<Type>Fields`) take a pointer for such a
+  relation's nested selection, as for a self-relation. Output for a schema
+  without such a cycle is unchanged. Patch.
 
 - Go ORM: `CreateOne` and `CreateMany` insert a required enum field's
   declared default when the Go value is `""`, for an enum declared in the

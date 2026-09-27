@@ -125,6 +125,7 @@ func TestGeneratedPackagesCompile(t *testing.T) {
 		{name: "fixture-nested-arrays", schema: load("fixture-nested-arrays")},
 		{name: "fixture-nested-arrays-db", schema: load("fixture-nested-arrays-db")},
 		{name: "fixture-nested-arrays-api", schema: load("fixture-nested-arrays-api")},
+		{name: "fixture-version-graph-db", schema: load("fixture-version-graph-db")},
 	}
 	buildTSPackages(t, append(cases, loadNestedArraysEdges(t)...))
 }

@@ -767,7 +767,7 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 		// Build selected fields in OrderedMembers order so FK columns match scan order.
 		{{- range .OrderedMembers }}
 		{{- if .IsRelationship }}
-		if opts.Fields.{{ toGoName .Relationship.FieldName }} || {{- if eq .Relationship.TargetType $.TypeName }} (opts.Fields.{{ toGoName .Relationship.FieldName }}Nested != nil && !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero() {{- end }} {
+		if opts.Fields.{{ toGoName .Relationship.FieldName }} || {{- if .Relationship.NestedByPointer }} (opts.Fields.{{ toGoName .Relationship.FieldName }}Nested != nil && !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero() {{- end }} {
 			fieldStrings = append(fieldStrings, "{{ .Relationship.DBColumnName }}")
 		}
 		{{- else }}
@@ -899,11 +899,11 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 	{{- range $i, $rel := .Relationships }}
 	{{- if not $rel.IsArray }}
 	if selectedRel{{ toGoName $rel.FieldName }} && tempRel{{ toGoName $rel.FieldName }} != nil {
-		relRequested := opts != nil && (opts.Fields.{{ toGoName $rel.FieldName }} || {{- if eq $rel.TargetType $.TypeName }} (opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {{- end }})
+		relRequested := opts != nil && (opts.Fields.{{ toGoName $rel.FieldName }} || {{- if $rel.NestedByPointer }} (opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {{- end }})
 		if relRequested {
 			childFields := ({{ $rel.TargetType }}Fields{}).All()
 			childFieldsAreDefault := true
-			{{- if eq $rel.TargetType $.TypeName }}
+			{{- if $rel.NestedByPointer }}
 			if opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {
 				childFields = *opts.Fields.{{ toGoName $rel.FieldName }}Nested
 				childFieldsAreDefault = false
@@ -1222,7 +1222,7 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 		// Build selected fields in OrderedMembers order so FK columns match scan order.
 		{{- range .OrderedMembers }}
 		{{- if .IsRelationship }}
-		if opts.Fields.{{ toGoName .Relationship.FieldName }} || {{- if eq .Relationship.TargetType $.TypeName }} (opts.Fields.{{ toGoName .Relationship.FieldName }}Nested != nil && !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero() {{- end }} {
+		if opts.Fields.{{ toGoName .Relationship.FieldName }} || {{- if .Relationship.NestedByPointer }} (opts.Fields.{{ toGoName .Relationship.FieldName }}Nested != nil && !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero() {{- end }} {
 			fieldStrings = append(fieldStrings, "{{ .Relationship.DBColumnName }}")
 		}
 		{{- else }}
@@ -1384,11 +1384,11 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 	{{- range $i, $member := .OrderedMembers }}
 	{{- if $member.IsRelationship }}
 	if tempRel{{ toGoName $member.Relationship.FieldName }} != nil {
-		relRequested := opts != nil && (opts.Fields.{{ toGoName $member.Relationship.FieldName }} || {{- if eq $member.Relationship.TargetType $.TypeName }} (opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested.IsZero() {{- end }})
+		relRequested := opts != nil && (opts.Fields.{{ toGoName $member.Relationship.FieldName }} || {{- if $member.Relationship.NestedByPointer }} (opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested.IsZero() {{- end }})
 		if relRequested {
 			childFields := ({{ $member.Relationship.TargetType }}Fields{}).All()
 			childFieldsAreDefault := true
-			{{- if eq $member.Relationship.TargetType $.TypeName }}
+			{{- if $member.Relationship.NestedByPointer }}
 			if opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested.IsZero() {
 				childFields = *opts.Fields.{{ toGoName $member.Relationship.FieldName }}Nested
 				childFieldsAreDefault = false
@@ -1448,7 +1448,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 	var fieldStrings []string
 	{{- range .OrderedMembers }}
 	{{- if .IsRelationship }}
-	if opts.Fields.{{ toGoName .Relationship.FieldName }} || {{- if eq .Relationship.TargetType $.TypeName }} (opts.Fields.{{ toGoName .Relationship.FieldName }}Nested != nil && !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero() {{- end }} {
+	if opts.Fields.{{ toGoName .Relationship.FieldName }} || {{- if .Relationship.NestedByPointer }} (opts.Fields.{{ toGoName .Relationship.FieldName }}Nested != nil && !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero() {{- end }} {
 		fieldStrings = append(fieldStrings, "{{ .Relationship.DBColumnName }}")
 	}
 	{{- else }}
@@ -1610,7 +1610,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 	// Batch hydrate relationships (outside the row loop for efficiency)
 	{{- range $i, $rel := .Relationships }}
 	{{- if not $rel.IsArray }}
-	if opts.Fields.{{ toGoName $rel.FieldName }} || {{- if eq $rel.TargetType $.TypeName }} (opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {{- end }} {
+	if opts.Fields.{{ toGoName $rel.FieldName }} || {{- if $rel.NestedByPointer }} (opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {{- end }} {
 		// Collect unique FK IDs from results (dedupe during collection)
 		{{ $rel.FieldName }}IDSet := make(map[{{ $.UUIDGoType }}]bool)
 		var {{ $rel.FieldName }}IDs []{{ $.UUIDGoType }}
@@ -1637,7 +1637,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 		// Batch fetch related entities with typed child field options.
 		childFields := ({{ $rel.TargetType }}Fields{}).All()
 		childFieldsAreDefault := true
-		{{- if eq $rel.TargetType $.TypeName }}
+		{{- if $rel.NestedByPointer }}
 		if opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {
 			childFields = *opts.Fields.{{ toGoName $rel.FieldName }}Nested
 			childFieldsAreDefault = false

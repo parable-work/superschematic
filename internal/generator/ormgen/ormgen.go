@@ -219,6 +219,12 @@ type Relationship struct {
 	IsArray                   bool // true for hasMany relationships
 	TargetPrimaryKeyIsPointer bool
 
+	// NestedByPointer makes a to-one relationship's Nested field selection
+	// a pointer: the target's field selection holds this type's, directly
+	// (a self-relation) or through a cycle of to-one relationships, so a
+	// value would give the selection struct no finite size.
+	NestedByPointer bool
+
 	// For hasMany relationships, these deterministic names point to the
 	// child's relation field back to this parent (e.g. "Connector") and the
 	// corresponding filter field (e.g. "ConnectorID"). Empty means fallback
@@ -314,6 +320,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	}
 
 	attachInboundReferences(repositories)
+	markNestedCycles(repositories)
 
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
@@ -925,6 +932,42 @@ func attachInboundReferences(repositories []Repository) {
 		sort.Slice(repositories[i].ReferencedBy, func(a, b int) bool {
 			return repositories[i].ReferencedBy[a].FilterField < repositories[i].ReferencedBy[b].FilterField
 		})
+	}
+}
+
+// markNestedCycles sets NestedByPointer on every to-one relationship whose
+// target's field selection reaches back to the owner's.
+func markNestedCycles(repositories []Repository) {
+	toOne := make(map[string][]string, len(repositories))
+	for _, repo := range repositories {
+		for _, rel := range repo.Relationships {
+			if !rel.IsArray {
+				toOne[repo.TypeName] = append(toOne[repo.TypeName], rel.TargetType)
+			}
+		}
+	}
+	reaches := func(from, to string) bool {
+		seen := map[string]bool{}
+		stack := []string{from}
+		for len(stack) > 0 {
+			name := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if name == to {
+				return true
+			}
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			stack = append(stack, toOne[name]...)
+		}
+		return false
+	}
+	for i := range repositories {
+		for j := range repositories[i].Relationships {
+			rel := &repositories[i].Relationships[j]
+			rel.NestedByPointer = !rel.IsArray && reaches(rel.TargetType, repositories[i].TypeName)
+		}
 	}
 }
 

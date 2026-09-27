@@ -283,8 +283,10 @@ D18 in `docs/DECISIONS.md` removed ten such fields from the core IR on
 that rule. A spec with no `Args` takes no argument, as acme's `@feedKey`
 does, and the data forms write its value as `true`. A spec with a nil
 `Apply` is a marker the frontend interprets itself; only the core registers
-those (`trait`, `source`, `envVars`, `versioned`), and `RegisterDecorator`
-refuses an extension decorator without `Apply`.
+those (`trait`, `source`, `envVars`, `versioned`, `versionGraph`,
+`graphMember`), and `RegisterDecorator` refuses an extension decorator
+without `Apply`. `versionGraph` and `graphMember` name schema classes as
+values (`graph: Recipe`), which the argument evaluator does not read.
 
 A decorator has a TypeScript half: a function the extension's npm package
 exports that does nothing at run time, so the author gets completion and

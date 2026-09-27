@@ -263,6 +263,16 @@
           "default": "",
           "type": "string"
         },
+        "conflictUnit": {
+          "default": "",
+          "enum": [
+            "atomic",
+            "keyed",
+            "jsonSchema",
+            "excluded"
+          ],
+          "type": "string"
+        },
         "default": {
           "type": "string"
         },
@@ -503,6 +513,45 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "GraphMemberConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "graph": {
+          "type": "string"
+        },
+        "order": {
+          "default": "",
+          "type": "string"
+        },
+        "parent": {
+          "$ref": "#/$defs/GraphParent"
+        },
+        "singleton": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "graph"
+      ],
+      "type": "object"
+    },
+    "GraphParent": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "of": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "of"
+      ],
       "type": "object"
     },
     "HTTPBinaryStreamDef": {
@@ -1481,6 +1530,9 @@
           },
           "type": "array"
         },
+        "graphMember": {
+          "$ref": "#/$defs/GraphMemberConfig"
+        },
         "implements": {
           "default": [],
           "items": {
@@ -1541,6 +1593,9 @@
         },
         "traitConfig": {
           "$ref": "#/$defs/TraitConfigSchema"
+        },
+        "versionGraph": {
+          "$ref": "#/$defs/VersionGraphConfig"
         },
         "versioned": {
           "default": false,
@@ -1640,6 +1695,20 @@
         "types",
         "kind"
       ],
+      "type": "object"
+    },
+    "VersionGraphConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "schemaEpoch": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "VersionedConfig": {
