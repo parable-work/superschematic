@@ -21,6 +21,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/loader/verify"
+	"github.com/parable-work/superschematic/internal/loader/versiongraph"
 	"github.com/parable-work/superschematic/internal/loader/yamlreader"
 	"github.com/parable-work/superschematic/internal/profile"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -276,7 +277,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 }
 
 // runVerify executes the format-agnostic verification pass on the assembled
-// schema: warnings print to [WarningWriter], errors fail the load.
+// schema: warnings print to [WarningWriter], errors fail the load. A schema
+// that verifies has its version graphs expanded into ordinary types, and
+// any scalar only the generated fields use is hydrated from the registry.
 func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 	res := verify.Run(schema, vin)
 	for _, warning := range res.Warnings {
@@ -284,6 +287,15 @@ func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 	}
 	if err := res.Err(); err != nil {
 		return nil, err
+	}
+	if added := versiongraph.Expand(schema); len(added) > 0 {
+		reg := vin.Registry
+		if reg == nil {
+			reg = registry.New(vin.Naming.OrDefault())
+		}
+		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+			return nil, err
+		}
 	}
 	return schema, nil
 }
