@@ -27,6 +27,7 @@ type CoverRepositoryInterface interface {
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *CoverUpdate) (*types.Cover, error)
 	UpdateMany(ctx context.Context, filter *CoverFilter, update *CoverUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
 	DeleteMany(ctx context.Context, filter *CoverFilter) (int, error)
 }
 
@@ -49,6 +50,7 @@ type IngredientRepositoryInterface interface {
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *IngredientUpdate) (*types.Ingredient, error)
 	UpdateMany(ctx context.Context, filter *IngredientFilter, update *IngredientUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
 	DeleteMany(ctx context.Context, filter *IngredientFilter) (int, error)
 }
 
@@ -69,6 +71,7 @@ type NoteRepositoryInterface interface {
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *NoteUpdate) (*types.Note, error)
 	UpdateMany(ctx context.Context, filter *NoteFilter, update *NoteUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
 	DeleteMany(ctx context.Context, filter *NoteFilter) (int, error)
 }
 
@@ -133,6 +136,7 @@ type RecipeRefRepositoryInterface interface {
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *RecipeRefUpdate) (*types.RecipeRef, error)
 	UpdateMany(ctx context.Context, filter *RecipeRefFilter, update *RecipeRefUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
 	DeleteMany(ctx context.Context, filter *RecipeRefFilter) (int, error)
 	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
 }
@@ -156,6 +160,7 @@ type StepRepositoryInterface interface {
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *StepUpdate) (*types.Step, error)
 	UpdateMany(ctx context.Context, filter *StepFilter, update *StepUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
 	DeleteMany(ctx context.Context, filter *StepFilter) (int, error)
 }
 
@@ -327,6 +332,10 @@ func (r *NoOpCoverRepository) DeleteOne(_ context.Context, _ types.IdentityUUID)
 	return nil
 }
 
+func (r *NoOpCoverRepository) DeleteOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64) error {
+	return nil
+}
+
 func (r *NoOpCoverRepository) DeleteMany(_ context.Context, _ *CoverFilter) (int, error) {
 	return 0, nil
 }
@@ -413,6 +422,10 @@ func (r *NoOpIngredientRepository) DeleteOne(_ context.Context, _ types.Identity
 	return nil
 }
 
+func (r *NoOpIngredientRepository) DeleteOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64) error {
+	return nil
+}
+
 func (r *NoOpIngredientRepository) DeleteMany(_ context.Context, _ *IngredientFilter) (int, error) {
 	return 0, nil
 }
@@ -488,6 +501,10 @@ func (r *NoOpNoteRepository) UpdateMany(_ context.Context, _ *NoteFilter, _ *Not
 }
 
 func (r *NoOpNoteRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpNoteRepository) DeleteOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64) error {
 	return nil
 }
 
@@ -739,6 +756,10 @@ func (r *NoOpRecipeRefRepository) DeleteOne(_ context.Context, _ types.IdentityU
 	return nil
 }
 
+func (r *NoOpRecipeRefRepository) DeleteOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64) error {
+	return nil
+}
+
 func (r *NoOpRecipeRefRepository) DeleteMany(_ context.Context, _ *RecipeRefFilter) (int, error) {
 	return 0, nil
 }
@@ -826,6 +847,10 @@ func (r *NoOpStepRepository) UpdateMany(_ context.Context, _ *StepFilter, _ *Ste
 }
 
 func (r *NoOpStepRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpStepRepository) DeleteOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64) error {
 	return nil
 }
 

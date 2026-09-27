@@ -194,9 +194,10 @@ func recipeRefUUIDPtr(value types.IdentityUUID) *types.IdentityUUID {
 	return &value
 }
 
-// GetVersion retrieves a historical RecipeRef value by version.
+// GetVersion retrieves a historical RecipeRef value by version. A delete
+// tombstone's version is not a value of the row, so it reads as ErrNotFound.
 func (r *RecipeRefRepository) GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.RecipeRef, error) {
-	query := `SELECT data FROM recipe_ref_history WHERE id = $1 AND _version = $2`
+	query := `SELECT data FROM recipe_ref_history WHERE id = $1 AND _version = $2 AND operation <> 'DELETE'`
 
 	var data []byte
 	var row pgx.Row
@@ -262,8 +263,18 @@ func (r *RecipeRefRepository) ListVersions(ctx context.Context, id types.Identit
 }
 
 // GetAsOf retrieves the latest historical RecipeRef value at or before ts.
+// It returns ErrNotFound when the row did not exist then: no history row at
+// or before ts, or the latest one is a delete tombstone or a soft-deleted image.
 func (r *RecipeRefRepository) GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.RecipeRef, error) {
-	query := `SELECT data FROM recipe_ref_history WHERE id = $1 AND recorded_at <= $2 ORDER BY recorded_at DESC, _version DESC LIMIT 1`
+	query := `SELECT data
+FROM (
+  SELECT operation, data
+  FROM recipe_ref_history
+  WHERE id = $1 AND recorded_at <= $2
+  ORDER BY recorded_at DESC, _version DESC
+  LIMIT 1
+) latest
+WHERE operation <> 'DELETE' AND (data->>'deleted_at') IS NULL`
 
 	var data []byte
 	var row pgx.Row
@@ -288,6 +299,8 @@ func (r *RecipeRefRepository) GetAsOf(ctx context.Context, id types.IdentityUUID
 }
 
 // ListAsOfByRootID retrieves the latest historical RecipeRef values for root at or before ts.
+// A row whose latest history row at ts is a delete tombstone or a soft-deleted
+// image is left out.
 func (r *RecipeRefRepository) ListAsOfByRootID(ctx context.Context, rootID types.IdentityUUID, ts time.Time, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error) {
 	if opts == nil {
 		opts = &RecipeRefHistoryOptions{}
@@ -300,7 +313,7 @@ func (r *RecipeRefRepository) ListAsOfByRootID(ctx context.Context, rootID types
 )
 SELECT _version, operation, recorded_at, data
 FROM latest
-WHERE operation <> 'DELETE' AND data->>'root_id' = $2
+WHERE operation <> 'DELETE' AND (data->>'deleted_at') IS NULL AND data->>'root_id' = $2
 ORDER BY recorded_at ASC, _version ASC`
 	query += buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
 
@@ -338,6 +351,8 @@ ORDER BY recorded_at ASC, _version ASC`
 }
 
 // ListAsOfByParentRefID retrieves the latest historical RecipeRef values for parentRef at or before ts.
+// A row whose latest history row at ts is a delete tombstone or a soft-deleted
+// image is left out.
 func (r *RecipeRefRepository) ListAsOfByParentRefID(ctx context.Context, parentRefID types.IdentityUUID, ts time.Time, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error) {
 	if opts == nil {
 		opts = &RecipeRefHistoryOptions{}
@@ -350,7 +365,7 @@ func (r *RecipeRefRepository) ListAsOfByParentRefID(ctx context.Context, parentR
 )
 SELECT _version, operation, recorded_at, data
 FROM latest
-WHERE operation <> 'DELETE' AND data->>'parent_ref_id' = $2
+WHERE operation <> 'DELETE' AND (data->>'deleted_at') IS NULL AND data->>'parent_ref_id' = $2
 ORDER BY recorded_at ASC, _version ASC`
 	query += buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
 
@@ -388,6 +403,8 @@ ORDER BY recorded_at ASC, _version ASC`
 }
 
 // ListAsOfByBaseCommitID retrieves the latest historical RecipeRef values for baseCommit at or before ts.
+// A row whose latest history row at ts is a delete tombstone or a soft-deleted
+// image is left out.
 func (r *RecipeRefRepository) ListAsOfByBaseCommitID(ctx context.Context, baseCommitID types.IdentityUUID, ts time.Time, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error) {
 	if opts == nil {
 		opts = &RecipeRefHistoryOptions{}
@@ -400,7 +417,7 @@ func (r *RecipeRefRepository) ListAsOfByBaseCommitID(ctx context.Context, baseCo
 )
 SELECT _version, operation, recorded_at, data
 FROM latest
-WHERE operation <> 'DELETE' AND data->>'base_commit_id' = $2
+WHERE operation <> 'DELETE' AND (data->>'deleted_at') IS NULL AND data->>'base_commit_id' = $2
 ORDER BY recorded_at ASC, _version ASC`
 	query += buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
 
@@ -438,6 +455,8 @@ ORDER BY recorded_at ASC, _version ASC`
 }
 
 // ListAsOfByHeadCommitID retrieves the latest historical RecipeRef values for headCommit at or before ts.
+// A row whose latest history row at ts is a delete tombstone or a soft-deleted
+// image is left out.
 func (r *RecipeRefRepository) ListAsOfByHeadCommitID(ctx context.Context, headCommitID types.IdentityUUID, ts time.Time, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error) {
 	if opts == nil {
 		opts = &RecipeRefHistoryOptions{}
@@ -450,7 +469,7 @@ func (r *RecipeRefRepository) ListAsOfByHeadCommitID(ctx context.Context, headCo
 )
 SELECT _version, operation, recorded_at, data
 FROM latest
-WHERE operation <> 'DELETE' AND data->>'head_commit_id' = $2
+WHERE operation <> 'DELETE' AND (data->>'deleted_at') IS NULL AND data->>'head_commit_id' = $2
 ORDER BY recorded_at ASC, _version ASC`
 	query += buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
 
@@ -2506,8 +2525,32 @@ func (r *RecipeRefRepository) UpdateOne(ctx context.Context, id types.IdentityUU
 }
 
 // UpdateOneIfVersion updates a single RecipeRef only if its current _version matches expectedVersion.
+// It returns ErrVersionConflict when the row exists at another version and
+// ErrNotFound when it does not exist.
 func (r *RecipeRefRepository) UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *RecipeRefUpdate) (*types.RecipeRef, error) {
 	return r.updateOne(ctx, id, update, &expectedVersion)
+}
+
+// versionMiss tells apart why a write fenced on _version matched no row:
+// ErrVersionConflict when the row exists at another version, ErrNotFound when
+// it does not exist or is soft-deleted.
+func (r *RecipeRefRepository) versionMiss(ctx context.Context, id types.IdentityUUID) error {
+	query := `SELECT _version FROM recipe_ref WHERE id = $1 AND deleted_at IS NULL`
+
+	var version int64
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, id.ToUUID())
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, id.ToUUID())
+	}
+	if err := row.Scan(&version); err != nil {
+		if err == pgx.ErrNoRows {
+			return ErrNotFound
+		}
+		return fmt.Errorf("failed to read RecipeRef version: %w", err)
+	}
+	return ErrVersionConflict
 }
 
 func (r *RecipeRefRepository) updateOne(ctx context.Context, id types.IdentityUUID, update *RecipeRefUpdate, expectedVersion *int64) (*types.RecipeRef, error) {
@@ -2660,6 +2703,9 @@ func (r *RecipeRefRepository) updateOne(ctx context.Context, id types.IdentityUU
 		&result.Version,
 	); err != nil {
 		if err == pgx.ErrNoRows {
+			if expectedVersion != nil {
+				return nil, r.versionMiss(ctx, id)
+			}
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to scan result: %w", err)
@@ -2828,6 +2874,34 @@ func (r *RecipeRefRepository) DeleteOne(ctx context.Context, id types.IdentityUU
 	return nil
 }
 
+// DeleteOneIfVersion soft deletes a single RecipeRef only if its current
+// _version matches expectedVersion. It returns ErrVersionConflict when the row
+// exists at another version and ErrNotFound when it does not exist.
+func (r *RecipeRefRepository) DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error {
+	if !HasUserID(ctx) {
+		return ErrNoUserInContext
+	}
+	query := `UPDATE recipe_ref SET deleted_at = $1, deleted_by = $2 WHERE id = $3 AND _version = $4 AND deleted_at IS NULL`
+	queryArgs := []interface{}{time.Now(), GetUserID(ctx), id.ToUUID(), expectedVersion}
+
+	var result pgconn.CommandTag
+	var err error
+	if r.tx != nil {
+		result, err = r.tx.Exec(ctx, query, queryArgs...)
+	} else {
+		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to delete record: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return r.versionMiss(ctx, id)
+	}
+
+	return nil
+}
+
 // DeleteMany soft deletes multiple RecipeRef records matching the filter
 func (r *RecipeRefRepository) DeleteMany(ctx context.Context, filter *RecipeRefFilter) (int, error) {
 	if !HasUserID(ctx) {
@@ -2859,15 +2933,19 @@ func (r *RecipeRefRepository) DeleteMany(ctx context.Context, filter *RecipeRefF
 	return int(result.RowsAffected()), nil
 }
 
-// HardDeleteOne permanently deletes a single RecipeRef record by ID
+// HardDeleteOne permanently deletes a single RecipeRef record by ID.
+// The history tombstone records the context user as its deleted_by.
 func (r *RecipeRefRepository) HardDeleteOne(ctx context.Context, id types.IdentityUUID) error {
-	query := `DELETE FROM recipe_ref WHERE id = $1`
-	queryArgs := []interface{}{id.ToUUID()}
+	query := historyActorCTE + `DELETE FROM recipe_ref USING history_actor WHERE id = $2`
+	queryArgs := []interface{}{historyActor(ctx), id.ToUUID()}
 
 	var result pgconn.CommandTag
 	var err error
 	if r.tx != nil {
 		result, err = r.tx.Exec(ctx, query, queryArgs...)
+		if err == nil {
+			err = clearHistoryActor(ctx, r.tx)
+		}
 	} else {
 		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
 	}

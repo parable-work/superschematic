@@ -156,9 +156,10 @@ func ingredientUUIDPtr(value types.IdentityUUID) *types.IdentityUUID {
 	return &value
 }
 
-// GetVersion retrieves a historical Ingredient value by version.
+// GetVersion retrieves a historical Ingredient value by version. A delete
+// tombstone's version is not a value of the row, so it reads as ErrNotFound.
 func (r *IngredientRepository) GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Ingredient, error) {
-	query := `SELECT data FROM ingredient_history WHERE id = $1 AND _version = $2`
+	query := `SELECT data FROM ingredient_history WHERE id = $1 AND _version = $2 AND operation <> 'DELETE'`
 
 	var data []byte
 	var row pgx.Row
@@ -224,8 +225,18 @@ func (r *IngredientRepository) ListVersions(ctx context.Context, id types.Identi
 }
 
 // GetAsOf retrieves the latest historical Ingredient value at or before ts.
+// It returns ErrNotFound when the row did not exist then: no history row at
+// or before ts, or the latest one is a delete tombstone.
 func (r *IngredientRepository) GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Ingredient, error) {
-	query := `SELECT data FROM ingredient_history WHERE id = $1 AND recorded_at <= $2 ORDER BY recorded_at DESC, _version DESC LIMIT 1`
+	query := `SELECT data
+FROM (
+  SELECT operation, data
+  FROM ingredient_history
+  WHERE id = $1 AND recorded_at <= $2
+  ORDER BY recorded_at DESC, _version DESC
+  LIMIT 1
+) latest
+WHERE operation <> 'DELETE'`
 
 	var data []byte
 	var row pgx.Row
@@ -301,6 +312,7 @@ func (r *IngredientRepository) PruneHistoryFunctionName() string {
 }
 
 // ListAsOfByRecipeID retrieves the latest historical Ingredient values for recipe at or before ts.
+// A row whose latest history row at ts is a delete tombstone is left out.
 func (r *IngredientRepository) ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *IngredientHistoryOptions) ([]types.HistoryRecord[*types.Ingredient], error) {
 	if opts == nil {
 		opts = &IngredientHistoryOptions{}
@@ -351,6 +363,7 @@ ORDER BY recorded_at ASC, _version ASC`
 }
 
 // ListAsOfByRefID retrieves the latest historical Ingredient values for ref at or before ts.
+// A row whose latest history row at ts is a delete tombstone is left out.
 func (r *IngredientRepository) ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *IngredientHistoryOptions) ([]types.HistoryRecord[*types.Ingredient], error) {
 	if opts == nil {
 		opts = &IngredientHistoryOptions{}
@@ -1719,8 +1732,32 @@ func (r *IngredientRepository) UpdateOne(ctx context.Context, id types.IdentityU
 }
 
 // UpdateOneIfVersion updates a single Ingredient only if its current _version matches expectedVersion.
+// It returns ErrVersionConflict when the row exists at another version and
+// ErrNotFound when it does not exist.
 func (r *IngredientRepository) UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *IngredientUpdate) (*types.Ingredient, error) {
 	return r.updateOne(ctx, id, update, &expectedVersion)
+}
+
+// versionMiss tells apart why a write fenced on _version matched no row:
+// ErrVersionConflict when the row exists at another version, ErrNotFound when
+// it does not exist.
+func (r *IngredientRepository) versionMiss(ctx context.Context, id types.IdentityUUID) error {
+	query := `SELECT _version FROM ingredient WHERE id = $1`
+
+	var version int64
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, id.ToUUID())
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, id.ToUUID())
+	}
+	if err := row.Scan(&version); err != nil {
+		if err == pgx.ErrNoRows {
+			return ErrNotFound
+		}
+		return fmt.Errorf("failed to read Ingredient version: %w", err)
+	}
+	return ErrVersionConflict
 }
 
 func (r *IngredientRepository) updateOne(ctx context.Context, id types.IdentityUUID, update *IngredientUpdate, expectedVersion *int64) (*types.Ingredient, error) {
@@ -1835,6 +1872,9 @@ func (r *IngredientRepository) updateOne(ctx context.Context, id types.IdentityU
 		&result.Version,
 	); err != nil {
 		if err == pgx.ErrNoRows {
+			if expectedVersion != nil {
+				return nil, r.versionMiss(ctx, id)
+			}
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to scan result: %w", err)
@@ -1956,6 +1996,31 @@ func (r *IngredientRepository) DeleteOne(ctx context.Context, id types.IdentityU
 
 	if result.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+
+	return nil
+}
+
+// DeleteOneIfVersion permanently deletes a single Ingredient only if its
+// current _version matches expectedVersion. It returns ErrVersionConflict when
+// the row exists at another version and ErrNotFound when it does not exist.
+func (r *IngredientRepository) DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error {
+	query := `DELETE FROM ingredient WHERE id = $1 AND _version = $2`
+	queryArgs := []interface{}{id.ToUUID(), expectedVersion}
+
+	var result pgconn.CommandTag
+	var err error
+	if r.tx != nil {
+		result, err = r.tx.Exec(ctx, query, queryArgs...)
+	} else {
+		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to delete record: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return r.versionMiss(ctx, id)
 	}
 
 	return nil

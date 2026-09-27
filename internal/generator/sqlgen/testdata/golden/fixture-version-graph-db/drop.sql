@@ -13,20 +13,25 @@ DROP INDEX IF EXISTS uq_ingredient_entity_ref CASCADE;
 DROP INDEX IF EXISTS uq_cover_entity_ref CASCADE;
 
 -- Drop history capture triggers and functions
+DROP TRIGGER IF EXISTS trg_step_bump_version ON step;
 DROP TRIGGER IF EXISTS trg_step_capture_history_write ON step;
 DROP TRIGGER IF EXISTS trg_step_capture_history_delete ON step;
 DROP FUNCTION IF EXISTS step_prune_history(INTEGER);
 DROP FUNCTION IF EXISTS step_capture_history();
+DROP TRIGGER IF EXISTS trg_recipe_ref_bump_version ON recipe_ref;
 DROP TRIGGER IF EXISTS trg_recipe_ref_capture_history_write ON recipe_ref;
 DROP TRIGGER IF EXISTS trg_recipe_ref_capture_history_delete ON recipe_ref;
 DROP FUNCTION IF EXISTS recipe_ref_capture_history();
+DROP TRIGGER IF EXISTS trg_note_bump_version ON note;
 DROP TRIGGER IF EXISTS trg_note_capture_history_write ON note;
 DROP TRIGGER IF EXISTS trg_note_capture_history_delete ON note;
 DROP FUNCTION IF EXISTS note_capture_history();
+DROP TRIGGER IF EXISTS trg_ingredient_bump_version ON ingredient;
 DROP TRIGGER IF EXISTS trg_ingredient_capture_history_write ON ingredient;
 DROP TRIGGER IF EXISTS trg_ingredient_capture_history_delete ON ingredient;
 DROP FUNCTION IF EXISTS ingredient_prune_history(INTEGER);
 DROP FUNCTION IF EXISTS ingredient_capture_history();
+DROP TRIGGER IF EXISTS trg_cover_bump_version ON cover;
 DROP TRIGGER IF EXISTS trg_cover_capture_history_write ON cover;
 DROP TRIGGER IF EXISTS trg_cover_capture_history_delete ON cover;
 DROP FUNCTION IF EXISTS cover_capture_history();

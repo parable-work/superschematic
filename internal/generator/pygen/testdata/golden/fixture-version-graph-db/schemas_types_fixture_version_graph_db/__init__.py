@@ -42,6 +42,7 @@ from .enums import (
 
 from .types import (
     Cover,
+    HistoryRecord,
     Ingredient,
     Note,
     Recipe,
@@ -69,6 +70,7 @@ __all__ = [
 
     # Types
     "Cover",
+    "HistoryRecord",
     "Ingredient",
     "Note",
     "Recipe",
