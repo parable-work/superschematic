@@ -168,6 +168,19 @@ type ScalarArg struct {
 	// element runs its own validation.
 	IsArrayOfArrays bool
 	IsGoPrimitive   bool
+	// IsMap marks a map argument (Record<string, T>, map[string]T; with
+	// IsArray, Record<string, T[]>, map[string][]T), typed as the Go route
+	// takes it. A list value is checked for nil at name[key] and, unless
+	// IsGoPrimitive, each value or list element runs its own validation at
+	// name[key] or name[key][i].
+	IsMap bool
+}
+
+// ValidatesMapValues reports whether the argument is a map whose values the
+// SDK checks: a list value for nil, a value or element for its own
+// validation.
+func (a ScalarArg) ValidatesMapValues() bool {
+	return a.IsMap && (a.IsArray || !a.IsGoPrimitive)
 }
 
 // FileUploadField represents file upload field metadata.
@@ -242,7 +255,7 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 			ns.RequiresTypes = true
 		}
 		for _, arg := range converted.ScalarArgs {
-			if arg.IsArrayOfArrays && !arg.IsGoPrimitive {
+			if (arg.IsArrayOfArrays || arg.IsMap) && !arg.IsGoPrimitive {
 				output.ValidatesListElements = true
 			}
 		}
@@ -348,6 +361,10 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			goType = goListType(goType, arg.ArrayDepth())
 			pointer = false // slices are nil-able, no pointer needed
 		}
+		if arg.IsMap {
+			goType = "map[string]" + goType
+			pointer = false // maps are nil-able, no pointer needed
+		}
 		scalarArgs = append(scalarArgs, ScalarArg{
 			Name:              arg.Name,
 			GoName:            goutil.GoPublicIdentifier(arg.Name),
@@ -364,6 +381,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			ValidatePattern:   arg.ValidatePattern,
 			IsArrayOfArrays:   arg.IsArrayOfArrays,
 			IsGoPrimitive:     arg.IsGoPrimitive(),
+			IsMap:             arg.IsMap,
 		})
 	}
 
@@ -928,8 +946,9 @@ func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, n
 			needsTypes = true
 		}
 		for _, arg := range ep.ScalarArgs {
-			if arg.IsArrayOfArrays {
-				// The inner-list checks name the index: fmt.Sprintf.
+			if arg.IsArrayOfArrays || arg.ValidatesMapValues() {
+				// The inner-list and map value checks name the index or
+				// the key: fmt.Sprintf.
 				needsFmt = true
 			}
 		}

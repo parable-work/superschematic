@@ -419,9 +419,26 @@ that is absent or null reaches the implementation empty, as in the
 TypeScript server below. A map argument (`Record<string, T>`) is a JSON
 object whose values follow the element rules at `name[key]`, and a map of
 lists (`Record<string, T[]>`) has its elements at `name[key][i]`; list
-bounds do not bound a map, as in the generated types. A list argument of
-a `GET` operation is read from repeated query keys and comma-separated
-values, as in the TypeScript server.
+bounds do not bound a map, as in the generated types. The Go SDK types
+a map argument as the route takes it, `map[string]T` or
+`map[string][]T`, and checks each value at `name[key]` before it sends
+the request; it typed one as its value type.
+
+A list argument of a `GET` operation is read from repeated query keys and
+comma-separated values, as in the TypeScript server, by
+`bodyargs.QueryList` with the same `Arg` and the same rules. Each item is
+trimmed and an empty one dropped, and no item is an absent list
+(`required` when the argument is required). `listMin` and `listMax` bound
+the items. Each item is read as its type's JSON value (a number, an
+integer, a boolean as `strconv.ParseBool` reads it, or a string) and then
+checked as an element at `name[i]`: an item that is not a number is
+`type`, and the scalar's and the argument's rules and the type's own
+`Validate` follow. Before, the route cast each item's string to the
+element's Go type, which does not compile for a list of numbers,
+booleans, UUIDs or timestamps; reported an element's failure at `name`;
+answered a missing required list with a plain 400 message; and checked
+an element only against the argument's pattern and its type's
+`Validate`, which a number does not have.
 
 The TypeScript API server decodes every body argument from its JSON value
 with these rules, for a scalar, enum, object or `Generic.JSON` type, alone,
@@ -434,7 +451,12 @@ is `required` at `name[i]` or `name[i][j]`, `[]` satisfies a required list,
 and `listMin` and `listMax` bound the outer list. A scalar's own lengths,
 pattern and range apply to each value, and a failure is named by the rule
 it breaks (D14). A list in the query string is still read from repeated
-keys and comma-separated values.
+keys and comma-separated values. A map argument (`Record<string, T>`,
+`Record<string, T[]>`) follows the Go routes' map rules: a JSON object
+(`type` otherwise) whose values are checked as list elements at
+`name[key]`, a list value's elements at `name[key][i]`, and no list
+bounds. Before, the server typed and decoded a map argument as its value
+type.
 
 For `Generic.JSON` the server follows the rule every validator follows
 (D14, amended): a null value of a required field is `required`, a null
@@ -549,6 +571,11 @@ a list element and a list-of-lists element (`Network.Url`, and
 for length and range failures as a single field and a list element
 (`Network.Url` and `Identity.Name` for length, `Ordering.Rank`, an
 integer, and `Generic.Probability`, a float, for range).
+
+The Go API routes named a failure of a query parameter or a `GET`
+argument `min_length`, `max_length`, `list_min` or `list_max`. They use
+the names every other validator uses: `minLength`, `maxLength`, `listMin`
+and `listMax`.
 
 The names and the one-error rule are reversible until the first release.
 

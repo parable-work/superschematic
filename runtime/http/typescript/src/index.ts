@@ -33,7 +33,7 @@ export { MemoryRateLimitStore, clientIpKey, clientIpOf } from './ratelimit';
 export type { RateLimitDecision, RateLimitOptions, RateLimitStore } from './ratelimit';
 export { OperationResult, envelope, envelopeResponse, requestIdOf } from './envelope';
 export type { Envelope, EnvelopeMeta } from './envelope';
-export { decodeJsonParam, decodeListOfLists, decodeParam, decodeParams } from './params';
+export { decodeJsonParam, decodeListOfLists, decodeMap, decodeParam, decodeParams } from './params';
 export type { ParamKind, ParamSpec, ParamLocation, ParamSource, ScalarConstraints } from './params';
 export { authorize, covers, hasAnyPermission } from './auth';
 export type { Authenticator, PermissionMatcher, Principal } from './auth';

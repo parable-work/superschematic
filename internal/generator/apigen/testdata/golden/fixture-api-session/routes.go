@@ -311,13 +311,13 @@ func createTenantListTenantsHandler(impl TenantImplementation) gohttp.HandlerFun
 		}
 		if IdsPresent && len(Ids) < 1 {
 			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("ids", []types.ValidationError{{Validator: "list_min", Message: "must contain at least 1 items"}})
+			validationErrors.SetFieldErrors("ids", []types.ValidationError{{Validator: "listMin", Message: "must contain at least 1 items"}})
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}
 		if IdsPresent && len(Ids) > 100 {
 			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("ids", []types.ValidationError{{Validator: "list_max", Message: "must contain at most 100 items"}})
+			validationErrors.SetFieldErrors("ids", []types.ValidationError{{Validator: "listMax", Message: "must contain at most 100 items"}})
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}
@@ -357,13 +357,13 @@ func createTenantListTenantsHandler(impl TenantImplementation) gohttp.HandlerFun
 		}
 		if StatusesPresent && len(Statuses) < 0 {
 			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("statuses", []types.ValidationError{{Validator: "list_min", Message: "must contain at least 0 items"}})
+			validationErrors.SetFieldErrors("statuses", []types.ValidationError{{Validator: "listMin", Message: "must contain at least 0 items"}})
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}
 		if StatusesPresent && len(Statuses) > 10 {
 			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("statuses", []types.ValidationError{{Validator: "list_max", Message: "must contain at most 10 items"}})
+			validationErrors.SetFieldErrors("statuses", []types.ValidationError{{Validator: "listMax", Message: "must contain at most 10 items"}})
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}

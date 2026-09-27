@@ -1,0 +1,57 @@
+# Map body arguments: a map of an enum, a map of lists of a string scalar,
+# a map of an object type and a map of a builtin. gosdkgen's map argument
+# tests load it.
+name: map-args-api
+kind: API
+scalars:
+  Network.Url:
+    name: Network.Url
+    languagePrimitive: string
+enums:
+  # The shade of a tag.
+  Shade:
+    name: Shade
+    values:
+      - name: Light
+        serializedAs: light
+      - name: Dark
+        serializedAs: dark
+types:
+  # A point on a post's cover image.
+  Point:
+    name: Point
+    role: EmbeddedStruct
+    fields:
+      - name: x
+        typeRef: { name: number }
+        required: true
+        validateMin: 0
+      - name: y
+        typeRef: { name: number }
+        required: true
+operationSets:
+  - name: PostMutations
+    operations:
+      # Name the shades, links, points and weights of a post.
+      - name: nameThings
+        typeRef: { name: boolean }
+        required: true
+        httpMethod: PUT
+        restPath: "posts/{id}/names"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          # A shade per name.
+          - name: shadeByName
+            typeRef: { name: Shade, isMap: true }
+            required: true
+          # Links per locale.
+          - name: linksByLocale
+            typeRef: { name: Network.Url, isMap: true, isArray: true }
+          # A point per name.
+          - name: pointByName
+            typeRef: { name: Point, isMap: true }
+          # A weight per name.
+          - name: weightByName
+            typeRef: { name: number, isMap: true }
