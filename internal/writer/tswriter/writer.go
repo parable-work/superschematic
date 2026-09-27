@@ -117,6 +117,7 @@ var symbolPackages = map[string]string{
 	"searchField": "@superschematic/db", "sourceMustProject": "@superschematic/db", "unique": "@superschematic/db",
 	"versioned":  "@superschematic/db",
 	"projection": "@superschematic/db", "join": "@superschematic/db", "column": "@superschematic/db",
+	"versionGraph": "@superschematic/db", "graphMember": "@superschematic/db", "conflictUnit": "@superschematic/db",
 	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",
 	"ManyToMany": "@superschematic/db", "Relation": "@superschematic/db",
 	// @superschematic/api
@@ -314,8 +315,8 @@ func scalarLibLanguagePrimitive(primitive string) ir.LanguagePrimitive {
 	}
 }
 
-// sortedTypes returns type names topologically sorted so heritage and
-// @source targets are declared before the classes that reference them
+// sortedTypes returns type names topologically sorted so heritage, @source
+// and @graphMember targets are declared before the classes that reference them
 // (decorator arguments and extends clauses are value positions in
 // TypeScript: forward references do not compile).
 func (e *emitter) sortedTypes() []string {
@@ -337,6 +338,16 @@ func (e *emitter) sortedTypes() []string {
 		if def.Source != nil {
 			if target, ok := e.localSourceTarget(def.Source.Target); ok {
 				if _, declared := e.doc.Types[target]; declared {
+					d = append(d, target)
+				}
+			}
+		}
+		// @graphMember names its root and its parent's type as values,
+		// which a class may not use before its declaration; a member may
+		// name itself.
+		if member := def.GraphMember; member != nil {
+			for _, target := range []string{member.Graph, parentOf(member)} {
+				if _, ok := e.doc.Types[target]; ok && target != name {
 					d = append(d, target)
 				}
 			}
@@ -422,4 +433,12 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// parentOf returns the parent type a graph member names, or "".
+func parentOf(member *ir.GraphMemberConfig) string {
+	if member.Parent == nil {
+		return ""
+	}
+	return member.Parent.Of
 }

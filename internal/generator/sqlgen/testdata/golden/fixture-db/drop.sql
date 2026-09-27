@@ -7,9 +7,11 @@ DROP INDEX IF EXISTS idx_tenant_user_tenant_display_name CASCADE;
 DROP INDEX IF EXISTS uq_tenant_slug CASCADE;
 
 -- Drop history capture triggers and functions
+DROP TRIGGER IF EXISTS trg_tenant_user_bump_version ON tenant_user;
 DROP TRIGGER IF EXISTS trg_tenant_user_capture_history_write ON tenant_user;
 DROP TRIGGER IF EXISTS trg_tenant_user_capture_history_delete ON tenant_user;
 DROP FUNCTION IF EXISTS tenant_user_capture_history();
+DROP TRIGGER IF EXISTS trg_tenant_bump_version ON tenant;
 DROP TRIGGER IF EXISTS trg_tenant_capture_history_write ON tenant;
 DROP TRIGGER IF EXISTS trg_tenant_capture_history_delete ON tenant;
 DROP FUNCTION IF EXISTS tenant_capture_history();

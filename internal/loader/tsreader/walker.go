@@ -299,6 +299,171 @@ func (w *walker) versionedConfigFromDecorator(d decoratorRef) (*ir.VersionedConf
 	return out, nil
 }
 
+// versionGraphFromDecorator reads @versionGraph({ name?, schemaEpoch? }?).
+// The bare and empty forms give the zero config: the graph takes the root's
+// name and epoch 0.
+func (w *walker) versionGraphFromDecorator(d decoratorRef) (*ir.VersionGraphConfig, *SchemaError) {
+	out := &ir.VersionGraphConfig{}
+	if len(d.args) == 0 {
+		return out, nil
+	}
+	if len(d.args) != 1 {
+		return nil, errorAtNode(d.node, "@versionGraph takes at most one config object")
+	}
+	v, serr := w.evaluateExpression(d.args[0])
+	if serr != nil {
+		return nil, serr
+	}
+	cfg, ok := v.(map[string]any)
+	if !ok {
+		return nil, errorAtNode(d.node, "@versionGraph config must be an object literal")
+	}
+	for key, value := range cfg {
+		switch key {
+		case "name":
+			s, ok := value.(string)
+			if !ok {
+				return nil, errorAtNode(d.node, "@versionGraph name must be a string literal")
+			}
+			out.Name = s
+		case "schemaEpoch":
+			f, ok := value.(float64)
+			if !ok || f != float64(int64(f)) {
+				return nil, errorAtNode(d.node, "@versionGraph schemaEpoch must be an integer literal")
+			}
+			out.SchemaEpoch = int64(f)
+		default:
+			return nil, errorAtNode(d.node, "@versionGraph config has unknown key %q", key)
+		}
+	}
+	return out, nil
+}
+
+// graphMemberFromDecorator reads @graphMember({ graph, parent?, order?,
+// singleton? }). graph and parent.of name schema classes as values, which
+// the argument evaluator does not read, so the object literal is walked
+// here.
+func (w *walker) graphMemberFromDecorator(d decoratorRef) (*ir.GraphMemberConfig, *SchemaError) {
+	if len(d.args) != 1 || d.args[0].Kind != kindObjectLiteralExpression {
+		return nil, errorAtNode(d.node, "@graphMember takes one config object literal")
+	}
+	out := &ir.GraphMemberConfig{}
+	serr := w.eachProperty(d.args[0], func(key string, value *astNode) *SchemaError {
+		switch key {
+		case "graph":
+			name, serr := w.classReference(d, value)
+			out.Graph = name
+			return serr
+		case "parent":
+			parent, serr := w.graphParent(d, value)
+			out.Parent = parent
+			return serr
+		case "order":
+			v, serr := w.evaluateExpression(value)
+			if serr != nil {
+				return serr
+			}
+			s, ok := v.(string)
+			if !ok {
+				return errorAtNode(value, "@graphMember order must be a string literal naming a field")
+			}
+			out.Order = s
+		case "singleton":
+			v, serr := w.evaluateExpression(value)
+			if serr != nil {
+				return serr
+			}
+			b, ok := v.(bool)
+			if !ok {
+				return errorAtNode(value, "@graphMember singleton must be a boolean literal")
+			}
+			out.Singleton = b
+		default:
+			return errorAtNode(value, "@graphMember config has unknown key %q", key)
+		}
+		return nil
+	})
+	if serr != nil {
+		return nil, serr
+	}
+	if out.Graph == "" {
+		return nil, errorAtNode(d.node, "@graphMember requires graph, the @versionGraph root class")
+	}
+	return out, nil
+}
+
+// graphParent reads the parent: { key, of } object of @graphMember.
+func (w *walker) graphParent(d decoratorRef, node *astNode) (*ir.GraphParent, *SchemaError) {
+	if node.Kind != kindObjectLiteralExpression {
+		return nil, errorAtNode(node, "@graphMember parent must be an object literal { key, of }")
+	}
+	out := &ir.GraphParent{}
+	serr := w.eachProperty(node, func(key string, value *astNode) *SchemaError {
+		switch key {
+		case "key":
+			v, serr := w.evaluateExpression(value)
+			if serr != nil {
+				return serr
+			}
+			s, ok := v.(string)
+			if !ok {
+				return errorAtNode(value, "@graphMember parent key must be a string literal naming a field")
+			}
+			out.Key = s
+		case "of":
+			name, serr := w.classReference(d, value)
+			out.Of = name
+			return serr
+		default:
+			return errorAtNode(value, "@graphMember parent has unknown key %q", key)
+		}
+		return nil
+	})
+	if serr != nil {
+		return nil, serr
+	}
+	if out.Key == "" || out.Of == "" {
+		return nil, errorAtNode(node, "@graphMember parent requires both key and of")
+	}
+	return out, nil
+}
+
+// eachProperty calls fn for each plain property assignment of an object
+// literal, in source order.
+func (w *walker) eachProperty(node *astNode, fn func(key string, value *astNode) *SchemaError) *SchemaError {
+	props := node.AsObjectLiteralExpression().Properties
+	if props == nil {
+		return nil
+	}
+	for _, p := range props.Nodes {
+		if p.Kind != kindPropertyAssignment {
+			return errorAtNode(p, "object arguments must use plain property assignments")
+		}
+		key, serr := w.evaluatePropertyName(p.Name(), 0)
+		if serr != nil {
+			return serr
+		}
+		if serr := fn(key, p.AsPropertyAssignment().Initializer); serr != nil {
+			return serr
+		}
+	}
+	return nil
+}
+
+// classReference resolves a decorator argument that names a schema class as
+// a value (graph: Recipe) to the class name. Whether the class belongs to
+// this schema is a verification rule.
+func (w *walker) classReference(d decoratorRef, node *astNode) (string, *SchemaError) {
+	if node.Kind != kindIdentifier && node.Kind != kindPropertyAccessExpression {
+		return "", errorAtNode(node, "@%s expects a schema class here", d.id.name)
+	}
+	id, ok := w.identityOf(node)
+	if !ok || id.decl == nil || id.decl.Kind != kindClassDeclaration {
+		return "", errorAtNode(node, "cannot resolve %q in @%s to a schema class", w.nodeText(node), d.id.name)
+	}
+	return id.name, nil
+}
+
 // decoratorsOf parses and identity-resolves a node's decorators. Decorators
 // that do not originate from an authoring package are schema errors.
 func (w *walker) decoratorsOf(node *astNode) []decoratorRef {
@@ -328,6 +493,17 @@ func (w *walker) decoratorsOf(node *astNode) []decoratorRef {
 			continue
 		}
 		out = append(out, decoratorRef{id: id, args: args, node: d})
+	}
+	return out
+}
+
+// findDecorators returns every decorator of the given name, in source order.
+func findDecorators(decorators []decoratorRef, name string) []decoratorRef {
+	var out []decoratorRef
+	for _, d := range decorators {
+		if d.id.name == name {
+			out = append(out, d)
+		}
 	}
 	return out
 }
@@ -428,6 +604,22 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 			w.addErr(serr)
 		} else {
 			td.VersionedConfig = cfg
+		}
+	}
+	if graph := findDecorator(decorators, "versionGraph"); graph != nil {
+		if cfg, serr := w.versionGraphFromDecorator(*graph); serr != nil {
+			w.addErr(serr)
+		} else {
+			td.VersionGraph = cfg
+		}
+	}
+	if members := findDecorators(decorators, "graphMember"); len(members) > 1 {
+		w.addErr(errorAtNode(members[1].node, "a type belongs to at most one version graph: @graphMember appears %d times", len(members)))
+	} else if len(members) == 1 {
+		if cfg, serr := w.graphMemberFromDecorator(members[0]); serr != nil {
+			w.addErr(serr)
+		} else {
+			td.GraphMember = cfg
 		}
 	}
 

@@ -45,8 +45,8 @@ export function source(_target: unknown): ClassDecorator {
 }
 export const virtual: PropertyDecorator = noopPropertyDecorator;
 
-// Wire encodings for @temporalFormat: the epoch members of
-// IncrementalTimeFormatEnum. ISO text is the default and is never declared.
+// Wire encodings for @temporalFormat: the epoch units. ISO text is the
+// default and is never declared.
 export type TemporalWireFormat =
   | 'unix'
   | 'unix_millis'

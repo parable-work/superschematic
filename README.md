@@ -45,13 +45,14 @@ Pages on a release tag once the repository is public.
 | `ir/typescript/` | `@superschematic/schema-ir`: the runtime document's types, and the schema-file data form's types and JSON Schema |
 | `runtime/schema/{go,typescript,python}/` | Schema runtime the generated code links |
 | `runtime/http/{go,rust,typescript}/` | HTTP runtime the generated servers link |
+| `runtime/versiongraph/{rust,go,wasm}/` | Version-graph core: compose, merge, diff, hash and validate trees of versioned rows; a Rust crate with a Go binding and a wasm build |
 | `packages/` | `@superschematic/{api,db,schema,schema-config}`: the TypeScript authoring packages |
 | `extensions/` | Example extensions |
 | `superschematic.toml` | The default naming file, written out |
 
-Four Go modules: the root (compiler), `ir`, `runtime/schema/go` and
-`runtime/http/go`. Generated code imports the runtimes and the IR, never the
-compiler.
+Five Go modules: the root (compiler), `ir`, `runtime/schema/go`,
+`runtime/http/go` and `runtime/versiongraph/go`. Generated code imports the
+runtimes and the IR, never the compiler.
 
 ## Build
 

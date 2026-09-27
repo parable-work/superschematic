@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/testpaths"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // TestNestedArraysSDKBuildsAndRuns runs nestedArraysSDKTest in the generated
@@ -23,25 +25,33 @@ func TestNestedArraysSDKBuildsAndRuns(t *testing.T) {
 	}
 }
 
-// runInNestedArraysSDK generates the Go types module and the Go SDK of
-// fixture-nested-arrays-api, with grid.paint added, into a temp tree laid
-// out as a build writes it, writes testSource into the SDK module as
-// testFile, then runs go mod tidy, go build, go vet and go test there.
+// runInNestedArraysSDK runs testSource in the Go SDK of
+// fixture-nested-arrays-api, with grid.paint added (runInSDK).
 func runInNestedArraysSDK(t *testing.T, testFile, testSource string) *SDKOutput {
+	t.Helper()
+	schema, apiOutput := loadNestedArraysAPI(t, true)
+	return runInSDK(t, schema, apiOutput, nestedArraysService, testFile, testSource)
+}
+
+// runInSDK generates the Go types module and the Go SDK of service into a
+// temp tree laid out as a build writes it, writes testSource into the SDK
+// module as testFile, then runs go mod tidy, go build, go vet and go test
+// there.
+func runInSDK(t *testing.T, schema *ir.Schema, apiOutput *apigen.APIOutput, service, testFile, testSource string) *SDKOutput {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
 	paths := testpaths.Local(t)
-	schema, apiOutput := loadNestedArraysAPI(t, true)
+	typesModule := "example.com/schemas/types/go/" + service
 
 	root := t.TempDir()
-	typesDir := filepath.Join(root, "types", "go", nestedArraysService)
-	sdkDir := filepath.Join(root, "sdk", "go", nestedArraysService)
+	typesDir := filepath.Join(root, "types", "go", service)
+	sdkDir := filepath.Join(root, "sdk", "go", service)
 
 	typesOutput, err := typegen.Generate(schema, typegen.Options{
-		SchemaName: nestedArraysService,
-		ModulePath: nestedArraysTypesModule,
+		SchemaName: service,
+		ModulePath: typesModule,
 		Clock:      nestedArraysClock,
 	})
 	if err != nil {
@@ -54,7 +64,13 @@ func runInNestedArraysSDK(t *testing.T, testFile, testSource string) *SDKOutput 
 		t.Fatalf("typegen.WriteTypes: %v", err)
 	}
 
-	sdkOutput := writeNestedArraysSDK(t, apiOutput, sdkDir, typesDir)
+	sdkOutput, err := Generate(apiOutput, "example.com/schemas/sdk/go/"+service, "sdk", nestedArraysClock)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if err := WriteSDKWithTools(sdkOutput, apiOutput, sdkDir, typesDir, nestedArraysClock); err != nil {
+		t.Fatalf("WriteSDKWithTools: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(sdkDir, testFile), []byte(testSource), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -14,11 +14,12 @@ type Shelf struct {
 	Bay   string `json:"bay,omitempty"`
 }
 
-// fieldExt is the acme slot on a field: the codec both the decorator and
-// the generators go through. Adding a second decorator on fields means
-// adding a second member here and nothing outside this package.
+// fieldExt is the acme slot on a field: the codec both the decorators and
+// the generators go through. Each field decorator is one member, so adding
+// another means a member here and nothing outside this package.
 type fieldExt struct {
-	Shelf *Shelf `json:"shelf,omitempty"`
+	Shelf   *Shelf `json:"shelf,omitempty"`
+	FeedKey bool   `json:"feedKey,omitempty"`
 }
 
 // ShelfArgs is @shelf's argument schema. Both frontends validate every use
@@ -35,10 +36,10 @@ var ShelfArgs = json.RawMessage(`{
 	}
 }`)
 
-// registerDecorator adds @shelf: a field decorator from @acme/schema that
-// only Catalog schemas may use.
+// registerDecorator adds acme's field decorators from @acme/schema. Each
+// is only allowed in Catalog schemas.
 func registerDecorator(r *registry.Registry) error {
-	return r.RegisterDecorator(registry.DecoratorSpec{
+	if err := r.RegisterDecorator(registry.DecoratorSpec{
 		Name:      "shelf",
 		Extension: Name,
 		Packages:  []string{Package},
@@ -52,6 +53,24 @@ func registerDecorator(r *registry.Registry) error {
 			}
 			return ir.UpdateExtension(n.Field, Name, func(f *fieldExt) { f.Shelf = &s })
 		},
+	}); err != nil {
+		return err
+	}
+	// @feedKey marks a field as part of the key acme's supplier feed matches
+	// incoming rows on; several on one type form a composite key. It is the
+	// shape of a distribution's per-field directive: a flag the core IR has
+	// no field for, stored in the extension's slot. With no Args it takes no
+	// argument: TypeScript writes it bare and the data forms as
+	// "feedKey": true.
+	return r.RegisterDecorator(registry.DecoratorSpec{
+		Name:      "feedKey",
+		Extension: Name,
+		Packages:  []string{Package},
+		Target:    registry.TargetField,
+		Kinds:     []string{Kind},
+		Apply: func(n registry.Node, _ []any, _ registry.Site) error {
+			return ir.UpdateExtension(n.Field, Name, func(f *fieldExt) { f.FeedKey = true })
+		},
 	})
 }
 
@@ -62,4 +81,13 @@ func ShelfOf(fd *ir.FieldDef) (*Shelf, bool, error) {
 		return nil, false, err
 	}
 	return f.Shelf, true, nil
+}
+
+// IsFeedKey reports whether fd carries @feedKey.
+func IsFeedKey(fd *ir.FieldDef) (bool, error) {
+	f, ok, err := ir.GetExtension[fieldExt](fd, Name)
+	if err != nil || !ok {
+		return false, err
+	}
+	return f.FeedKey, nil
 }

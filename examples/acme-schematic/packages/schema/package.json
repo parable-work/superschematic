@@ -2,7 +2,7 @@
   "name": "@acme/schema",
   "version": "0.0.0",
   "private": true,
-  "description": "Authoring package for the acme-schematic example extension: the @shelf decorator, the confirm key on @mcp and the acme.Rating behavior's config.",
+  "description": "Authoring package for the acme-schematic example extension: the @shelf and @feedKey decorators, the confirm key on @mcp and the acme.Rating behavior's config.",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts"

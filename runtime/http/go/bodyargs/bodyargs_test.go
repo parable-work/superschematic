@@ -3,6 +3,7 @@ package bodyargs
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -275,6 +276,94 @@ func TestMapRules(t *testing.T) {
 			t.Errorf("an absent optional map = %#v, want nil", got)
 		}
 	})
+}
+
+// queryErrorsOf parses a query string, runs decode and returns the recorded
+// errors as path -> "validator: message".
+func queryErrorsOf(t *testing.T, query string, decode func(validate.ValidationErrors, url.Values)) map[string]string {
+	t.Helper()
+	values, err := url.ParseQuery(query)
+	if err != nil {
+		t.Fatalf("ParseQuery(%s): %v", query, err)
+	}
+	errs := validate.NewValidationErrors()
+	decode(errs, values)
+	return flatten("", errs)
+}
+
+// TestQueryListReadsEveryKeyAndEveryComma: the items of a GET list are every
+// occurrence of its key, each split on commas, trimmed, with empty items
+// dropped, and each is read as its kind's JSON value.
+func TestQueryListReadsEveryKeyAndEveryComma(t *testing.T) {
+	queryErrorsOf(t, "labels=a,b&labels=%20c%20,,&scores=1.5,-2,1e3&ranks=1,2&flags=true,false,1,F&at=2026-01-02T03:04:05Z", func(errs validate.ValidationErrors, q url.Values) {
+		if got, want := QueryList[string](errs, q, NewArg("labels", String)), []string{"a", "b", "c"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("labels = %#v, want %#v", got, want)
+		}
+		if got, want := QueryList[float64](errs, q, NewArg("scores", Number)), []float64{1.5, -2, 1000}; !reflect.DeepEqual(got, want) {
+			t.Errorf("scores = %#v, want %#v", got, want)
+		}
+		if got, want := QueryList[int64](errs, q, NewArg("ranks", Integer)), []int64{1, 2}; !reflect.DeepEqual(got, want) {
+			t.Errorf("ranks = %#v, want %#v", got, want)
+		}
+		if got, want := QueryList[bool](errs, q, NewArg("flags", Boolean)), []bool{true, false, true, false}; !reflect.DeepEqual(got, want) {
+			t.Errorf("flags = %#v, want %#v", got, want)
+		}
+		if got := QueryList[timestamp](errs, q, NewArg("at", String)); len(got) != 1 || got[0].value != "2026-01-02T03:04:05Z" {
+			t.Errorf("at = %#v", got)
+		}
+		if got := QueryList[string](errs, q, NewArg("absent", String)); got != nil {
+			t.Errorf("an absent optional list = %#v, want nil", got)
+		}
+		if len(errs) != 0 {
+			t.Errorf("errors = %v", flatten("", errs))
+		}
+	})
+}
+
+// TestQueryListRules: no item is absent, the list bounds count the items,
+// an item that is not its kind's JSON value is "type" at name[i], and each
+// item passes the value rules and its type's own validation at name[i].
+func TestQueryListRules(t *testing.T) {
+	run := func(errs validate.ValidationErrors, q url.Values) {
+		QueryList[string](errs, q, NewArg("labels", String, Required(), ListMin(2), ListMax(3), MinLength(2), Pattern(`^[a-z]+$`)))
+		QueryList[float64](errs, q, NewArg("scores", Number, Min(0), Max(10)))
+		QueryList[int64](errs, q, NewArg("ranks", Integer, Min(1)))
+		QueryList[bool](errs, q, NewArg("flags", Boolean))
+		QueryList[shade](errs, q, NewArg("shades", String))
+		QueryList[timestamp](errs, q, NewArg("at", String))
+	}
+	for _, tc := range []struct {
+		query string
+		want  map[string]string
+	}{
+		{"labels=ab,cd", map[string]string{}},
+		{"", map[string]string{"labels": "required: required field"}},
+		{"labels=", map[string]string{"labels": "required: required field"}},
+		{"labels=,%20,", map[string]string{"labels": "required: required field"}},
+		{"labels=ab", map[string]string{"labels": "listMin: must contain at least 2 items"}},
+		{"labels=ab,cd,ef,gh", map[string]string{"labels": "listMax: must contain at most 3 items"}},
+		{"labels=ab,c,D1", map[string]string{"labels[1]": "minLength: must be at least 2 characters", "labels[2]": "pattern: invalid format"}},
+		{"labels=ab,cd&scores=1,x,NaN,Infinity,0x10,-1,11", map[string]string{
+			"scores[1]": "type: expected a number",
+			"scores[2]": "type: expected a number",
+			"scores[3]": "type: expected a number",
+			"scores[4]": "type: expected a number",
+			"scores[5]": "min: must be at least 0",
+			"scores[6]": "max: must be at most 10",
+		}},
+		{"labels=ab,cd&ranks=1,1.5,two,0", map[string]string{
+			"ranks[1]": "type: expected an integer",
+			"ranks[2]": "type: expected an integer",
+			"ranks[3]": "min: must be at least 1",
+		}},
+		{"labels=ab,cd&flags=true,yes", map[string]string{"flags[1]": "type: expected a boolean"}},
+		{"labels=ab,cd&shades=light,dim", map[string]string{"shades[1]": "enum: invalid enum value"}},
+		{"labels=ab,cd&at=2026-01-02T03:04:05Z,yesterday", map[string]string{"at[1]": "pattern: invalid format"}},
+	} {
+		if got := queryErrorsOf(t, tc.query, run); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: errors = %v, want %v", tc.query, got, tc.want)
+		}
+	}
 }
 
 // TestValueRulesInOrderOneErrorEach: the rules apply in the order given

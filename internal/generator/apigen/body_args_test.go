@@ -138,6 +138,96 @@ func TestMapBodyArguments(t *testing.T) {
 	}
 }
 
+// TestOpenAPIBodyArgumentsCarryTheirConstraints: openapi.json describes a
+// body argument as it describes a field of an input type. The scalar's own
+// constraints and the argument's Validate<> bounds (minLength, maxLength,
+// pattern, minimum, maximum) go on each value: the argument, the items of a
+// list, the values of a map. listMin and listMax are minItems and maxItems
+// on a list, and a map has none.
+func TestOpenAPIBodyArgumentsCarryTheirConstraints(t *testing.T) {
+	output, err := apigen.Generate(loadBodyArgsAPI(t), apigen.Options{
+		Provider:   sessionauth.Provider{},
+		SchemaName: bodyArgsAPI,
+		Clock:      goModuleClock,
+	})
+	if err != nil {
+		t.Fatalf("apigen.Generate: %v", err)
+	}
+	var spec struct {
+		Paths map[string]map[string]struct {
+			RequestBody struct {
+				Content map[string]struct {
+					Schema struct {
+						Properties map[string]map[string]any `json:"properties"`
+					} `json:"schema"`
+				} `json:"content"`
+			} `json:"requestBody"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal([]byte(output.OpenAPISpecRaw), &spec); err != nil {
+		t.Fatal(err)
+	}
+	property := func(path, method, arg string) map[string]any {
+		t.Helper()
+		schema, ok := spec.Paths[path][method].RequestBody.Content["application/json"].Schema.Properties[arg]
+		if !ok {
+			t.Fatalf("%s %s has no body property %s", method, path, arg)
+		}
+		return schema
+	}
+	object := func(value any) map[string]any {
+		t.Helper()
+		m, ok := value.(map[string]any)
+		if !ok {
+			t.Fatalf("%v is not a schema object", value)
+		}
+		return m
+	}
+	want := func(name string, got map[string]any, key string, value any) {
+		t.Helper()
+		if !reflect.DeepEqual(got[key], value) {
+			t.Errorf("%s %s = %v, want %v; schema %v", name, key, got[key], value, got)
+		}
+	}
+	absent := func(name string, got map[string]any, keys ...string) {
+		t.Helper()
+		for _, key := range keys {
+			if _, ok := got[key]; ok {
+				t.Errorf("%s has %s: %v", name, key, got)
+			}
+		}
+	}
+
+	const tags, flags, shadeNames = "/api/posts/{id}/tags", "/api/posts/{id}/flags", "/api/posts/{id}/shade-names"
+	labels := property(tags, "put", "labels")
+	want("labels", labels, "maxItems", 3.0)
+	absent("labels", labels, "minItems")
+
+	links := property(tags, "put", "links")
+	want("links", links, "minItems", 1.0)
+	want("links", links, "maxItems", 2.0)
+	want("links", links, "nullable", true)
+	absent("links", links, "pattern", "maxLength")
+	linkItems := object(links["items"])
+	// The scalar's maxLength, and the argument's pattern after the scalar's.
+	want("links items", linkItems, "maxLength", 2048.0)
+	want("links items", linkItems, "pattern", "^https://")
+
+	ranks := property(tags, "put", "ranks")
+	absent("ranks", ranks, "minimum")
+	want("ranks items", object(ranks["items"]), "minimum", 1.0)
+
+	want("score", property(flags, "post", "score"), "maximum", 10.0)
+	want("caption", property(flags, "post", "caption"), "minLength", 2.0)
+	want("rank", property(flags, "post", "rank"), "minimum", 1.0)
+
+	byLocale := property(shadeNames, "put", "linksByLocale")
+	absent("linksByLocale", byLocale, "pattern", "minItems", "maxItems")
+	localeLinks := object(byLocale["additionalProperties"])
+	absent("linksByLocale values", localeLinks, "pattern")
+	want("linksByLocale value items", object(localeLinks["items"]), "pattern", "^https://")
+}
+
 // TestMapArgumentOutsideTheBodyIsRefused: a map cannot travel in the query
 // string or the path, so a GET operation's map argument, a map query
 // parameter and a map path parameter fail the build with the argument

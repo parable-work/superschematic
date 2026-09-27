@@ -313,12 +313,14 @@ func (r run) generateSQL() error {
 	if err != nil {
 		return err
 	}
+	names := r.Options.Naming.OrDefault()
 	output, err := sqlgen.Generate(r.Schema, sqlgen.Options{
-		SchemaName:        r.Config.Name,
-		Dependencies:      deps,
-		Clock:             r.Options.Clock,
-		ViewOwner:         r.Outputs.SQLViewOwner(),
-		MetadataKeyPrefix: r.Options.Naming.OrDefault().MetadataKeyPrefix,
+		SchemaName:          r.Config.Name,
+		Dependencies:        deps,
+		Clock:               r.Options.Clock,
+		ViewOwner:           r.Outputs.SQLViewOwner(),
+		MetadataKeyPrefix:   names.MetadataKeyPrefix,
+		HistoryActorSetting: names.HistoryActorSetting,
 	})
 	if err != nil {
 		return fmt.Errorf("generator: sql for %s: %w", r.Config.Name, err)

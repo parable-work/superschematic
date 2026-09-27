@@ -32,12 +32,16 @@ Two entry points:
   `name[i]` (`required`). A list of lists (`T[][]`) travels only as a body
   parameter; `decodeListOfLists` also refuses a null inner list at
   `name[i]` (`required`) and a non-list inner value (`type`), and checks
-  each element at `name[i][j]`. A spec's `scalar` carries its scalar
-  type's lengths, pattern and range, checked on every value before the
-  argument's own constraints; a constraint refusal names its rule
-  (`pattern`, `minLength`, `maxLength`, `min`, `max`) in the detail's
-  `errors`. The 400 detail carries the failing `path`. A list-of-lists
-  result is sent with every nullish list as `[]`.
+  each element at `name[i][j]`. A map (`isMap`, `Record<string, T>`)
+  also travels only as a body parameter; `decodeMap` takes a JSON object
+  (`type` otherwise) and checks each value as a list element at
+  `name[key]`, or, with `isArray`, each list value at `name[key]` and its
+  elements at `name[key][i]`. List bounds do not bound a map. A spec's
+  `scalar` carries its scalar type's lengths, pattern and range, checked
+  on every value before the argument's own constraints; a constraint
+  refusal names its rule (`pattern`, `minLength`, `maxLength`, `min`,
+  `max`) in the detail's `errors`. The 400 detail carries the failing
+  `path`. A list-of-lists result is sent with every nullish list as `[]`.
 - `@superschematic/http-runtime/hono`, the Hono adapter. `mountOperation`
   runs the pipeline for one operation: request id, `@rateLimit`,
   `hono/timeout`, `hono/bearer-auth` and the permission gate, parameter

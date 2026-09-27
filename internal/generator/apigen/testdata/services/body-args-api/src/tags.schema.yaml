@@ -2,9 +2,12 @@
 # numbers, an integer scalar, an enum, a string scalar, a UUID and an object
 # type, required single values of each builtin type, Generic.JSON values
 # alone, in a list and in a list of lists, and maps of an enum, of lists of
-# a string scalar and of an object type. The Go route tests in apigen load
-# it. saveTags, storeDocument and findTags match the TypeScript server's
-# scalar list fixture, so both servers answer the same vectors.
+# a string scalar and of an object type. searchPosts takes the arguments of
+# a GET operation, which travel in the query string: lists of numbers, an
+# integer scalar, booleans, UUIDs, timestamps and strings, optional single
+# values of each, and a @query list. The Go route tests in apigen load it.
+# saveTags, storeDocument and findTags match the TypeScript server's scalar
+# list fixture, so both servers answer the same vectors.
 name: body-args-api
 kind: API
 scalars:
@@ -20,6 +23,9 @@ scalars:
   Generic.JSON:
     name: Generic.JSON
     languagePrimitive: object
+  Temporal.DateTime:
+    name: Temporal.DateTime
+    languagePrimitive: string
 enums:
   # The shade of a tag.
   Shade:
@@ -173,3 +179,54 @@ operationSets:
           - name: labels
             typeRef: { name: string, isArray: true }
             required: true
+      # Search posts by score, rank, flag, related post, date and code.
+      - name: searchPosts
+        typeRef: { name: string, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "posts/search"
+        arguments:
+          # At most two tags of two or more characters.
+          - name: tags
+            typeRef: { name: string, isArray: true }
+            isQuery: true
+            validateListMax: 2
+            validateMinLength: 2
+          # Scores from 0 to 10.
+          - name: scores
+            typeRef: { name: number, isArray: true }
+            validateMin: 0
+            validateMax: 10
+          # At most three display ranks, integers from 1.
+          - name: ranks
+            typeRef: { name: Ordering.Rank, isArray: true }
+            validateListMax: 3
+          - name: flags
+            typeRef: { name: boolean, isArray: true }
+          - name: related
+            typeRef: { name: Identity.UUID, isArray: true }
+          - name: days
+            typeRef: { name: Temporal.DateTime, isArray: true }
+          # Two to four codes of two to four lowercase letters.
+          - name: codes
+            typeRef: { name: string, isArray: true }
+            validateListMin: 2
+            validateListMax: 4
+            validateMinLength: 2
+            validateMaxLength: 4
+            validatePattern: "^[a-z]+$"
+          # A caption of two to five characters.
+          - name: caption
+            typeRef: { name: string }
+            validateMinLength: 2
+            validateMaxLength: 5
+          - name: limit
+            typeRef: { name: number }
+          - name: page
+            typeRef: { name: Ordering.Rank }
+          - name: pinned
+            typeRef: { name: boolean }
+          - name: author
+            typeRef: { name: Identity.UUID }
+          - name: since
+            typeRef: { name: Temporal.DateTime }

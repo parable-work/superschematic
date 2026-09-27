@@ -23,7 +23,7 @@ const fixturesDir = "../../loader/tsreader/testdata/services"
 // against their golden copies. Regenerate with:
 // go test ./internal/generator/sqlgen -run TestWriteDDLGolden -update
 func TestWriteDDLGolden(t *testing.T) {
-	for _, svc := range []string{"fixture-db", "fixture-nested-arrays-db"} {
+	for _, svc := range []string{"fixture-db", "fixture-nested-arrays-db", "fixture-version-graph-db"} {
 		t.Run(svc, func(t *testing.T) {
 			schema, err := loader.LoadService(filepath.Join(fixturesDir, svc))
 			if err != nil {
@@ -334,11 +334,11 @@ func TestGenerateVersionedTableHistoryDDL(t *testing.T) {
 		"CREATE UNIQUE INDEX uq_event_log_history_event_id_version ON event_log_history (event_id, _version);",
 		"CREATE INDEX idx_event_log_history_event_id_recorded ON event_log_history (event_id, recorded_at);",
 		"CREATE OR REPLACE FUNCTION event_log_capture_history() RETURNS trigger AS $$",
-		"VALUES (OLD.event_id, OLD._version + 1, 'DELETE', to_jsonb(OLD));",
+		"to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )",
 		"NEW._version := OLD._version + 1;",
 		"VALUES (NEW.event_id, NEW._version, TG_OP, to_jsonb(NEW));",
-		"CREATE TRIGGER trg_event_log_capture_history_write",
-		"BEFORE INSERT OR UPDATE ON event_log",
+		"CREATE TRIGGER trg_event_log_bump_version\n  BEFORE UPDATE ON event_log",
+		"CREATE TRIGGER trg_event_log_capture_history_write\n  AFTER INSERT OR UPDATE ON event_log",
 		"CREATE TRIGGER trg_event_log_capture_history_delete",
 		"AFTER DELETE ON event_log",
 	} {
@@ -352,6 +352,7 @@ func TestGenerateVersionedTableHistoryDDL(t *testing.T) {
 		t.Fatalf("read drop.sql: %v", err)
 	}
 	for _, want := range []string{
+		"DROP TRIGGER IF EXISTS trg_event_log_bump_version ON event_log;",
 		"DROP TRIGGER IF EXISTS trg_event_log_capture_history_write ON event_log;",
 		"DROP TRIGGER IF EXISTS trg_event_log_capture_history_delete ON event_log;",
 		"DROP FUNCTION IF EXISTS event_log_capture_history();",

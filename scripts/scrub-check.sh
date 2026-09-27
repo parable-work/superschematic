@@ -3,8 +3,9 @@
 # maintains this repository anywhere but the license, the GitHub org in
 # module paths, import specifiers and publisher registrations, and the
 # maintainer lines in the contributor docs; when it carries an identifier
-# or id shape from the source tree's planning, or names one of the source
-# tree's schema kinds; or when core source uses tenancy vocabulary.
+# or id shape from the source tree's planning, names one of the source
+# tree's schema kinds or carries a transform* field directive; or when core
+# source uses tenancy vocabulary.
 # Everything else is a leftover from the source tree.
 #
 # The search runs with ripgrep when it is installed and with git grep
@@ -166,29 +167,18 @@ if [ -n "$kinds" ]; then
   exit 1
 fi
 
-# Per-field transform* directives are a distribution's, not the core's; a
-# distribution keeps its field directives in the IR Extensions slot. The
-# core IR still carries ten of them in the files below. This allowlist
-# exists only until they are removed from the core IR; the change that
-# removes them deletes it, and any transform* identifier then fails here.
-core_ir_transform_allowlist_files='^\./(ir/types\.go|ir/typescript/(index\.d\.ts|schema-file\.d\.ts|schema-file\.json)|runtime/schema/testdata/schema_file_parity\.meta-schema\.json|runtime/schema/typescript/src/runtime/(ir/reader|json/reader|json/writer)\.ts):[0-9]+:'
-core_ir_transform_allowlist_names='^transform(DedupKey|Ordering|FingerprintInput|PartitionDate|Structural|PersonEmail|PersonName|AccountId|ExternalUserId|ForeignKey)$'
-transform_lines="$(scan 'transform[A-Z]' . -- "${hashes[@]}")"
-transforms=""
-while IFS= read -r line; do
-  [ -n "$line" ] || continue
-  if [[ $line =~ $core_ir_transform_allowlist_files ]]; then
-    unlisted="$(printf '%s\n' "$line" | grep -oE 'transform[A-Z][A-Za-z0-9_]*' | drop "$core_ir_transform_allowlist_names")"
-    if [ -z "$unlisted" ]; then
-      continue
-    fi
-  fi
-  transforms+="$line"$'\n'
-done <<<"$transform_lines"
+# Per-field transform* directives belong to a distribution, not the core: a
+# distribution declares its field directives with extension DecoratorSpecs
+# that write the IR Extensions slot (docs/DECISIONS.md, D18). Any transform*
+# identifier fails here, in camelCase, PascalCase or snake_case, which covers
+# IR keys, x-transform* vendor keys and Go names. CHANGELOG.md names the
+# fields the core removed and is the one file skipped.
+transforms="$(scan '[Tt]ransform([A-Z]|_[a-z])' . -- "${hashes[@]}" \
+  | drop '^\./CHANGELOG\.md:[0-9]+:')"
 
 if [ -n "$transforms" ]; then
-  echo "scrub: transform* identifiers outside the core IR allowlist:" >&2
-  printf '%s' "$transforms" >&2
+  echo "scrub: transform* identifiers:" >&2
+  echo "$transforms" >&2
   exit 1
 fi
 

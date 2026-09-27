@@ -15,7 +15,7 @@ package {{ toPackageName .SchemaName }}
 {{- end }}
 {{- if eq .Method "GET" }}
 {{- range .ScalarArgs }}
-{{- if and .ValidatePattern (or .IsArray (not (or .IsInt .IsFloat .IsBool .IsUUID))) }}
+{{- if and .ValidatePattern (not .IsArray) (not (or .IsInt .IsFloat .IsBool .IsUUID .IsDateTime)) }}
 {{- $hasPatternValidation = true }}
 {{- end }}
 {{- end }}
@@ -30,7 +30,7 @@ import (
 	"regexp"
 {{- end }}
 	"strconv"
-{{- if or .HasFileUpload .HasArrayQueryParams .HasArrayScalarArgsOnGET }}
+{{- if or .HasFileUpload .HasArrayQueryParams }}
 	"strings"
 {{- end }}
 {{- if .RoutesNeedTime }}
@@ -331,9 +331,17 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 	{{- end }}
 	{{- if eq .Method "GET" }}
 	{{- range .ScalarArgs }}
-	{{- if and .ValidatePattern (or .IsArray (not (or .IsInt .IsFloat .IsBool .IsUUID))) }}
+	{{- if and .ValidatePattern (not .IsArray) (not (or .IsInt .IsFloat .IsBool .IsUUID .IsDateTime)) }}
 	scalar{{ .GoName }}PatternRegex := regexp.MustCompile({{ printf "%q" .ValidatePattern }})
 	{{- end }}
+	{{- end }}
+	{{- end }}
+	{{- if .QueryListArgs }}
+	// List arguments in the query string: the JSON type of each item, then
+	// its rules in the order they are checked (the scalar type's own, then
+	// the argument's).
+	{{- range .QueryListArgs }}
+	queryList{{ .GoName }}Arg := {{ .NewArg }}
 	{{- end }}
 	{{- end }}
 	{{- if .BodyArgs }}
@@ -520,7 +528,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 				{{- if .ValidateMinLength }}
 				if len(rawValue) < {{ .ValidateMinLength }} {
 					validationErrors := types.NewValidationErrors()
-					validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "min_length", Message: "each item must be at least {{ .ValidateMinLength }} characters"}})
+					validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "minLength", Message: "each item must be at least {{ .ValidateMinLength }} characters"}})
 					RespondValidationErrors(w, r, validationErrors)
 					return
 				}
@@ -528,7 +536,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 				{{- if .ValidateMaxLength }}
 				if len(rawValue) > {{ .ValidateMaxLength }} {
 					validationErrors := types.NewValidationErrors()
-					validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "max_length", Message: "each item must be at most {{ .ValidateMaxLength }} characters"}})
+					validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "maxLength", Message: "each item must be at most {{ .ValidateMaxLength }} characters"}})
 					RespondValidationErrors(w, r, validationErrors)
 					return
 				}
@@ -562,7 +570,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- if .ValidateListMin }}
 		if {{ .GoName }}Present && len({{ .GoName }}) < {{ .ValidateListMin }} {
 			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "list_min", Message: "must contain at least {{ .ValidateListMin }} items"}})
+			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "listMin", Message: "must contain at least {{ .ValidateListMin }} items"}})
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}
@@ -570,7 +578,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- if .ValidateListMax }}
 		if {{ .GoName }}Present && len({{ .GoName }}) > {{ .ValidateListMax }} {
 			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "list_max", Message: "must contain at most {{ .ValidateListMax }} items"}})
+			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "listMax", Message: "must contain at most {{ .ValidateListMax }} items"}})
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}
@@ -719,14 +727,14 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- if .Required }}
 		if len({{ .GoName }}) < {{ .ValidateMinLength }} {
 			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "min_length", Message: "must be at least {{ .ValidateMinLength }} characters"}})
+			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "minLength", Message: "must be at least {{ .ValidateMinLength }} characters"}})
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}
 		{{- else }}
 		if {{ .GoName }} != nil && len(*{{ .GoName }}) < {{ .ValidateMinLength }} {
 			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "min_length", Message: "must be at least {{ .ValidateMinLength }} characters"}})
+			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "minLength", Message: "must be at least {{ .ValidateMinLength }} characters"}})
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}
@@ -736,14 +744,14 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- if .Required }}
 		if len({{ .GoName }}) > {{ .ValidateMaxLength }} {
 			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "max_length", Message: "must be at most {{ .ValidateMaxLength }} characters"}})
+			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "maxLength", Message: "must be at most {{ .ValidateMaxLength }} characters"}})
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}
 		{{- else }}
 		if {{ .GoName }} != nil && len(*{{ .GoName }}) > {{ .ValidateMaxLength }} {
 			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "max_length", Message: "must be at most {{ .ValidateMaxLength }} characters"}})
+			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "maxLength", Message: "must be at most {{ .ValidateMaxLength }} characters"}})
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}
@@ -919,90 +927,19 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- range .ScalarArgs }}
 		{{- if .IsArray }}
 
-		// Parse {{ .Name }} from the query string: comma-separated values
-		// (?{{ .Name }}=a,b), repeated keys (?{{ .Name }}=a&{{ .Name }}=b) or both.
-		// Each provided element is validated individually — if present, it must be a valid
-		// value regardless of whether the array argument itself is required or optional.
+		// {{ .Name }} travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at {{ .Name }}[i]; no item is an
+		// absent list.
 		var {{ .GoName }} []{{ .GoType }}
 		{
-			for _, rawVal := range r.URL.Query()[`{{ .Name }}`] {
-				for _, v := range strings.Split(rawVal, ",") {
-					v = strings.TrimSpace(v)
-					if v == "" {
-						continue
-					}
-					{{- if .ValidatePattern }}
-					if !scalar{{ .GoName }}PatternRegex.MatchString(v) {
-						validationErrors := types.NewValidationErrors()
-						validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "pattern", Message: "invalid format"}})
-						RespondValidationErrors(w, r, validationErrors)
-						return
-					}
-					{{- end }}
-					elem := {{ .GoType }}(v)
-					if validator, ok := interface{}(elem).(interface{ ValidateRequired() (bool, []types.ValidationError) }); ok {
-						if valid, fieldErrs := validator.ValidateRequired(); !valid {
-							validationErrors := types.NewValidationErrors()
-							validationErrors.SetFieldErrors("{{ .Name }}", fieldErrs)
-							RespondValidationErrors(w, r, validationErrors)
-							return
-						}
-					} else if validator, ok := interface{}(elem).(interface{ Validate() (bool, []types.ValidationError) }); ok {
-						if valid, fieldErrs := validator.Validate(); !valid {
-							validationErrors := types.NewValidationErrors()
-							validationErrors.SetFieldErrors("{{ .Name }}", fieldErrs)
-							RespondValidationErrors(w, r, validationErrors)
-							return
-						}
-					}
-					{{ .GoName }} = append({{ .GoName }}, elem)
-				}
+			listErrors := types.NewValidationErrors()
+			{{ .GoName }} = bodyargs.QueryList[{{ .GoType }}](listErrors, r.URL.Query(), queryList{{ .GoName }}Arg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
 			}
 		}
-		{{- if .Required }}
-		if len({{ .GoName }}) == 0 {
-			if r.URL.Query().Has("{{ .Name }}") {
-				RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} cannot be empty")
-			} else {
-				RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} is required")
-			}
-			return
-		}
-		{{- end }}
-		{{- if .ValidateListMin }}
-		{{- if .Required }}
-		if len({{ .GoName }}) < {{ .ValidateListMin }} {
-			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "list_min", Message: "must contain at least {{ .ValidateListMin }} items"}})
-			RespondValidationErrors(w, r, validationErrors)
-			return
-		}
-		{{- else }}
-		if r.URL.Query().Has("{{ .Name }}") && len({{ .GoName }}) < {{ .ValidateListMin }} {
-			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "list_min", Message: "must contain at least {{ .ValidateListMin }} items"}})
-			RespondValidationErrors(w, r, validationErrors)
-			return
-		}
-		{{- end }}
-		{{- end }}
-		{{- if .ValidateListMax }}
-		{{- if .Required }}
-		if len({{ .GoName }}) > {{ .ValidateListMax }} {
-			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "list_max", Message: "must contain at most {{ .ValidateListMax }} items"}})
-			RespondValidationErrors(w, r, validationErrors)
-			return
-		}
-		{{- else }}
-		if r.URL.Query().Has("{{ .Name }}") && len({{ .GoName }}) > {{ .ValidateListMax }} {
-			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "list_max", Message: "must contain at most {{ .ValidateListMax }} items"}})
-			RespondValidationErrors(w, r, validationErrors)
-			return
-		}
-		{{- end }}
-		{{- end }}
 		{{- else }}
 		{{- if .IsInt }}
 		{{- if .Required }}
@@ -1021,7 +958,12 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			{{ .GoName }} = parsed
 		}
 		{{- else }}
-		{{ .GoName }} := parseIntQueryParamPtr(r, "{{ .Name }}")
+		// Absent, the implementation receives the zero value.
+		var {{ .GoName }} int64
+		{{ .GoName }}Ptr := parseIntQueryParamPtr(r, "{{ .Name }}")
+		if {{ .GoName }}Ptr != nil {
+			{{ .GoName }} = *{{ .GoName }}Ptr
+		}
 		{{- end }}
 		{{- if .ValidateMin }}
 		{{- if .Required }}
@@ -1032,7 +974,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			return
 		}
 		{{- else }}
-		if {{ .GoName }} != nil && *{{ .GoName }} < int64({{ .ValidateMin }}) {
+		if {{ .GoName }}Ptr != nil && {{ .GoName }} < int64({{ .ValidateMin }}) {
 			validationErrors := types.NewValidationErrors()
 			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "min", Message: "must be at least {{ .ValidateMin }}"}})
 			RespondValidationErrors(w, r, validationErrors)
@@ -1049,7 +991,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			return
 		}
 		{{- else }}
-		if {{ .GoName }} != nil && *{{ .GoName }} > int64({{ .ValidateMax }}) {
+		if {{ .GoName }}Ptr != nil && {{ .GoName }} > int64({{ .ValidateMax }}) {
 			validationErrors := types.NewValidationErrors()
 			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "max", Message: "must be at most {{ .ValidateMax }}"}})
 			RespondValidationErrors(w, r, validationErrors)
@@ -1074,7 +1016,12 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			{{ .GoName }} = parsed
 		}
 		{{- else }}
-		{{ .GoName }} := parseFloat64QueryParamPtr(r, "{{ .Name }}")
+		// Absent, the implementation receives the zero value.
+		var {{ .GoName }} float64
+		{{ .GoName }}Ptr := parseFloat64QueryParamPtr(r, "{{ .Name }}")
+		if {{ .GoName }}Ptr != nil {
+			{{ .GoName }} = *{{ .GoName }}Ptr
+		}
 		{{- end }}
 		{{- if .ValidateMin }}
 		{{- if .Required }}
@@ -1085,7 +1032,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			return
 		}
 		{{- else }}
-		if {{ .GoName }} != nil && *{{ .GoName }} < float64({{ .ValidateMin }}) {
+		if {{ .GoName }}Ptr != nil && {{ .GoName }} < float64({{ .ValidateMin }}) {
 			validationErrors := types.NewValidationErrors()
 			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "min", Message: "must be at least {{ .ValidateMin }}"}})
 			RespondValidationErrors(w, r, validationErrors)
@@ -1102,7 +1049,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			return
 		}
 		{{- else }}
-		if {{ .GoName }} != nil && *{{ .GoName }} > float64({{ .ValidateMax }}) {
+		if {{ .GoName }}Ptr != nil && {{ .GoName }} > float64({{ .ValidateMax }}) {
 			validationErrors := types.NewValidationErrors()
 			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "max", Message: "must be at most {{ .ValidateMax }}"}})
 			RespondValidationErrors(w, r, validationErrors)
@@ -1127,7 +1074,12 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			{{ .GoName }} = parsed
 		}
 		{{- else }}
-		{{ .GoName }} := parseBoolQueryParamPtr(r, "{{ .Name }}")
+		// Absent, the implementation receives the zero value.
+		var {{ .GoName }} bool
+		{{ .GoName }}Ptr := parseBoolQueryParamPtr(r, "{{ .Name }}")
+		if {{ .GoName }}Ptr != nil {
+			{{ .GoName }} = *{{ .GoName }}Ptr
+		}
 		{{- end }}
 		{{- else if .IsUUID }}
 		{{- if .Required }}
@@ -1146,14 +1098,43 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			{{ .GoName }} = parsed
 		}
 		{{- else }}
-		var {{ .GoName }} *{{ .GoType }}
+		// Absent, the implementation receives the zero value.
+		var {{ .GoName }} {{ .GoType }}
 		if {{ .GoName }}Str := parseStringQueryParamPtr(r, "{{ .Name }}"); {{ .GoName }}Str != nil {
 			parsed, err := {{ .ParseFunc }}(*{{ .GoName }}Str)
 			if err != nil {
 				RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} must be a valid UUID")
 				return
 			}
-			{{ .GoName }} = &parsed
+			{{ .GoName }} = parsed
+		}
+		{{- end }}
+		{{- else if .IsDateTime }}
+		{{- if .Required }}
+		var {{ .GoName }} {{ .GoType }}
+		{
+			dateTimeStr := parseStringQueryParam(r, "{{ .Name }}", "")
+			if dateTimeStr == "" {
+				RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} is required")
+				return
+			}
+			parsed, err := {{ .ParseFunc }}(dateTimeStr)
+			if err != nil {
+				RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} must be a valid datetime")
+				return
+			}
+			{{ .GoName }} = parsed
+		}
+		{{- else }}
+		// Absent, the implementation receives the zero value.
+		var {{ .GoName }} {{ .GoType }}
+		if {{ .GoName }}Str := parseStringQueryParamPtr(r, "{{ .Name }}"); {{ .GoName }}Str != nil {
+			parsed, err := {{ .ParseFunc }}(*{{ .GoName }}Str)
+			if err != nil {
+				RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} must be a valid datetime")
+				return
+			}
+			{{ .GoName }} = parsed
 		}
 		{{- end }}
 		{{- else }}
@@ -1172,7 +1153,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- if .ValidateMinLength }}
 		if len(string({{ .GoName }})) < {{ .ValidateMinLength }} {
 			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "min_length", Message: "must be at least {{ .ValidateMinLength }} characters"}})
+			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "minLength", Message: "must be at least {{ .ValidateMinLength }} characters"}})
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}
@@ -1180,7 +1161,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- if .ValidateMaxLength }}
 		if len(string({{ .GoName }})) > {{ .ValidateMaxLength }} {
 			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "max_length", Message: "must be at most {{ .ValidateMaxLength }} characters"}})
+			validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "maxLength", Message: "must be at most {{ .ValidateMaxLength }} characters"}})
 			RespondValidationErrors(w, r, validationErrors)
 			return
 		}
@@ -1208,7 +1189,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			{{- if .ValidateMinLength }}
 			if len(string({{ .GoName }})) < {{ .ValidateMinLength }} {
 				validationErrors := types.NewValidationErrors()
-				validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "min_length", Message: "must be at least {{ .ValidateMinLength }} characters"}})
+				validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "minLength", Message: "must be at least {{ .ValidateMinLength }} characters"}})
 				RespondValidationErrors(w, r, validationErrors)
 				return
 			}
@@ -1216,7 +1197,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			{{- if .ValidateMaxLength }}
 			if len(string({{ .GoName }})) > {{ .ValidateMaxLength }} {
 				validationErrors := types.NewValidationErrors()
-				validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "max_length", Message: "must be at most {{ .ValidateMaxLength }} characters"}})
+				validationErrors.SetFieldErrors("{{ .Name }}", []types.ValidationError{ {Validator: "maxLength", Message: "must be at most {{ .ValidateMaxLength }} characters"}})
 				RespondValidationErrors(w, r, validationErrors)
 				return
 			}

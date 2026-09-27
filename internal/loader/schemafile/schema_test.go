@@ -54,6 +54,20 @@ func TestDefinitionRejectsUnknownKeys(t *testing.T) {
 			wantErr: "sparkles",
 		},
 		{
+			// Origin marks what the loader expanded; no schema file writes it.
+			name: "origin on a field",
+			payload: `{
+				"name": "Step", "role": "DBTable",
+				"fields": [{"name": "ref", "typeRef": {"name": "string"}, "origin": "versionGraph"}]
+			}`,
+			wantErr: "origin",
+		},
+		{
+			name:    "origin on a type",
+			payload: `{"name": "RecipeRef", "role": "DBTable", "origin": "versionGraph"}`,
+			wantErr: "origin",
+		},
+		{
 			name:    "unknown role",
 			payload: `{"name": "Tenant", "role": "Tablecloth"}`,
 			wantErr: "'/role': value must be one of",
@@ -256,7 +270,15 @@ func TestDefaultsAreWhatTheEncoderOmits(t *testing.T) {
 		for i := range typ.NumField() {
 			field := typ.Field(i)
 			name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+			schemaTag, _, _ := strings.Cut(field.Tag.Get("jsonschema"), ",")
 			if !field.IsExported() || name == "-" {
+				continue
+			}
+			if schemaTag == "-" {
+				// Loader output the data forms have no key for.
+				if _, ok := props[name]; ok {
+					t.Errorf("$defs/%s/properties/%s: a jsonschema:\"-\" field must have no property", typ.Name(), name)
+				}
 				continue
 			}
 			visit(field.Type)

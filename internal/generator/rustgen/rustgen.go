@@ -68,6 +68,10 @@ type FieldInfo struct {
 	// every number exactly as written.
 	PreserveJSON bool
 
+	// IsVersion marks the _version metadata field of a versioned table. It
+	// is always written and reads as 0 when absent, as Go decodes it.
+	IsVersion bool
+
 	// SkipSerializing is true for union discriminator fields with a
 	// renderable default. The enum wrapper writes the tag key, and the
 	// default reconstructs the member field during deserialization.
@@ -211,6 +215,11 @@ type ModuleOutput struct {
 	// types.rs imports crate::unions only in that case to avoid an
 	// unused-import warning.
 	UsesUnions bool
+
+	// HasVersionedTypes is true when a DB table carries the _version field;
+	// types.rs then declares HistoryRecord, whose recorded_at is the scalar
+	// crate's DateTime.
+	HasVersionedTypes bool
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -318,6 +327,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 
 	objectTypes := codegen.ExtractTypes(schema, codegenScalars, extraction, localObjectRoles...)
+	objectTypes = codegen.AddVersionFields(objectTypes, extraction)
 	inputTypes := codegen.ExtractTypes(schema, codegenScalars, extraction, ir.RoleAPIInput)
 
 	output.Types = convertTypes(objectTypes, defaultEnums, enumLookup, discriminators)
@@ -332,6 +342,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		output.Unions[i].PreserveJSON = containsGenericJSON(schema, output.Unions[i].Name, opts.Dependencies, map[string]bool{})
 	}
 
+	output.HasVersionedTypes = hasVersionFields(output.Types)
 	output.UsesHashMap = hasMapFields(output.Types)
 	output.UsesUnions = hasUnionFields(output.Types)
 	output.ExternalCrateDeps = collectExternalCrateDeps(output)
@@ -528,6 +539,7 @@ func validateRenderedUnionDiscriminatorDefaults(types []TypeInfo, unions []Union
 // convertTypes converts codegen.TypeInfo to rustgen.TypeInfo.
 func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enumLookup codegen.EnumLookup, discriminators map[string]string) []TypeInfo {
 	types := make([]TypeInfo, len(codegenTypes))
+	contains := inlineContainment(codegenTypes)
 	for i, t := range codegenTypes {
 		types[i] = TypeInfo{
 			Name:   t.Name,
@@ -546,8 +558,10 @@ func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enu
 			// the related object may not be loaded.
 			required := f.Required && !f.IsRelation
 
+			// A struct that holds itself inline, directly or through
+			// another struct that holds it back, has no finite size.
 			rustType := f.TargetType
-			if rustType == t.Name {
+			if rustType == t.Name || reachesInline(contains, rustType, t.Name) {
 				rustType = "Box<" + rustType + ">"
 			}
 			if !required {
@@ -575,6 +589,7 @@ func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enu
 				Doc:         f.Doc(),
 				// The core's any-JSON scalar, as pygen's genericJSONScalar.
 				PreserveJSON: f.IsScalar && f.Type == "Generic.JSON",
+				IsVersion:    f.Name == "_version" && f.InternalMetadata,
 			}
 
 			if f.Default != nil {
@@ -617,6 +632,47 @@ func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enu
 		types[i].HasDefaults = hasDefaults && canImplDefault
 	}
 	return types
+}
+
+// inlineContainment maps each generated struct to the structs its fields
+// hold inline: a field whose Rust type is another struct's name, not a Vec
+// or a map of it.
+func inlineContainment(codegenTypes []codegen.TypeInfo) map[string][]string {
+	structs := make(map[string]bool, len(codegenTypes))
+	for _, t := range codegenTypes {
+		structs[t.Name] = true
+	}
+	contains := make(map[string][]string, len(codegenTypes))
+	for _, t := range codegenTypes {
+		for _, f := range t.Fields {
+			if structs[f.TargetType] {
+				contains[t.Name] = append(contains[t.Name], f.TargetType)
+			}
+		}
+	}
+	return contains
+}
+
+// reachesInline reports whether struct from holds struct to inline, through
+// any chain of inline fields.
+func reachesInline(contains map[string][]string, from, to string) bool {
+	seen := map[string]bool{}
+	stack := []string{from}
+	for len(stack) > 0 {
+		name := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		for _, next := range contains[name] {
+			if next == to {
+				return true
+			}
+			stack = append(stack, next)
+		}
+	}
+	return false
 }
 
 // rustTypeHasDefault reports whether the given Rust type expression is known
@@ -785,6 +841,20 @@ func toRustFieldName(name string) string {
 	return fieldName
 }
 
+func hasVersionFields(types []TypeInfo) bool {
+	for _, typ := range types {
+		if typ.Role != ir.RoleDBTable {
+			continue
+		}
+		for _, field := range typ.Fields {
+			if field.IsVersion {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func hasMapFields(types []TypeInfo) bool {
 	for _, typ := range types {
 		for _, field := range typ.Fields {
@@ -831,6 +901,9 @@ var hardcodedCrates = map[string]struct{}{
 }
 
 func usesScalarLib(output *ModuleOutput) bool {
+	if output.HasVersionedTypes {
+		return true
+	}
 	for _, union := range output.Unions {
 		if union.PreserveJSON {
 			return true

@@ -70,6 +70,9 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 		}},
 		{"FieldDef", "httpMethod", []string{"GET", "POST", "PUT", "PATCH", "DELETE"}},
 		{"FieldDef", "paramType", []string{"query"}},
+		{"FieldDef", "conflictUnit", []string{
+			ir.ConflictUnitAtomic, ir.ConflictUnitKeyed, ir.ConflictUnitJSONSchema, ir.ConflictUnitExcluded,
+		}},
 		{"OperationDocs", "lifecycle", []string{
 			string(ir.DocsLifecycleDraft), string(ir.DocsLifecycleExperimental),
 			string(ir.DocsLifecycleActive), string(ir.DocsLifecycleDeprecated),
@@ -223,7 +226,11 @@ func addEncoderDefaults(defs map[string]any) error {
 		for i := range t.NumField() {
 			field := t.Field(i)
 			name, options, _ := strings.Cut(field.Tag.Get("json"), ",")
-			if !field.IsExported() || name == "-" {
+			// A jsonschema:"-" field is IR the loader writes (an Origin
+			// marker), never a data-form key, so the reflected schema has
+			// no property for it.
+			schemaTag, _, _ := strings.Cut(field.Tag.Get("jsonschema"), ",")
+			if !field.IsExported() || name == "-" || schemaTag == "-" {
 				continue
 			}
 			if name == "" {

@@ -418,12 +418,18 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			properties := make(map[string]interface{})
 			required := []string{}
 
+			// A body argument is described as a field of an input type is.
 			for _, arg := range endpoint.ScalarArgs {
 				typeRef := ir.TypeRef{Name: arg.Type, IsArray: arg.IsArray, IsArrayOfArrays: arg.IsArrayOfArrays, IsMap: arg.IsMap}
 				if arg.Required {
 					required = append(required, arg.Name)
 				}
-				properties[arg.Name] = typeRefToOpenAPISchema(typeRef, !arg.Required, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
+				properties[arg.Name] = openAPIFieldSchema(typeRef, arg.Required, openAPIBounds{
+					min: arg.ValidateMin, max: arg.ValidateMax,
+					minLength: arg.ValidateMinLength, maxLength: arg.ValidateMaxLength,
+					pattern: arg.ValidatePattern,
+					listMin: arg.ValidateListMin, listMax: arg.ValidateListMax,
+				}, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
 			}
 
 			schemaObj := map[string]interface{}{
@@ -689,27 +695,12 @@ func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, sche
 	required := []string{}
 
 	for _, field := range typeDef.Fields {
-		fieldSchema := typeRefToOpenAPISchema(field.TypeRef, !field.Required, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
-		// A scalar's own constraints and the field's Validate<> bounds apply
-		// to each value: the items of an array, the values of a map.
-		valueSchema := openAPIConstraintTarget(fieldSchema, field.TypeRef)
-		applyOpenAPIScalarConstraints(valueSchema, field.TypeRef.Name, schema, dependencies)
-		applyOpenAPIValidationConstraints(
-			valueSchema,
-			field.ValidateMin,
-			field.ValidateMax,
-			field.ValidateMinLength,
-			field.ValidateMaxLength,
-			field.ValidatePattern,
-			nil,
-			nil,
-		)
-		// listMin/listMax bound the array itself, the outer one of an array
-		// of arrays. A required array without listMin may be empty; only
-		// listMin >= 1 forbids [].
-		if field.TypeRef.IsArray && !field.TypeRef.IsMap {
-			applyOpenAPIValidationConstraints(fieldSchema, nil, nil, nil, nil, "", field.ValidateListMin, field.ValidateListMax)
-		}
+		fieldSchema := openAPIFieldSchema(field.TypeRef, field.Required, openAPIBounds{
+			min: field.ValidateMin, max: field.ValidateMax,
+			minLength: field.ValidateMinLength, maxLength: field.ValidateMaxLength,
+			pattern: field.ValidatePattern,
+			listMin: field.ValidateListMin, listMax: field.ValidateListMax,
+		}, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
 
 		if doc := codegen.DocText(field.Description, field.Comment); doc != "" {
 			fieldSchema["description"] = doc
@@ -740,6 +731,32 @@ func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, sche
 	}
 
 	return schemaObj
+}
+
+// openAPIBounds are the Validate<> bounds of a field of a type or of a body
+// argument.
+type openAPIBounds struct {
+	min, max             *float64
+	minLength, maxLength *int
+	pattern              string
+	listMin, listMax     *int
+}
+
+// openAPIFieldSchema is the schema of a field of a type or of a body
+// argument: its type, nullable when optional. A scalar's own constraints
+// and the field's bounds apply to each value: the field, the items of an
+// array, the values of a map. listMin and listMax bound the array itself,
+// the outer one of an array of arrays; a map has none. A required array
+// without listMin may be empty; only listMin >= 1 forbids [].
+func openAPIFieldSchema(typeRef ir.TypeRef, required bool, bounds openAPIBounds, scalarExamples, scalarDescriptions, scalarMap map[string]string, schema *ir.Schema, dependencies map[string]*ir.Schema) map[string]interface{} {
+	fieldSchema := typeRefToOpenAPISchema(typeRef, !required, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
+	valueSchema := openAPIConstraintTarget(fieldSchema, typeRef)
+	applyOpenAPIScalarConstraints(valueSchema, typeRef.Name, schema, dependencies)
+	applyOpenAPIValidationConstraints(valueSchema, bounds.min, bounds.max, bounds.minLength, bounds.maxLength, bounds.pattern, nil, nil)
+	if typeRef.IsArray && !typeRef.IsMap {
+		applyOpenAPIValidationConstraints(fieldSchema, nil, nil, nil, nil, "", bounds.listMin, bounds.listMax)
+	}
+	return fieldSchema
 }
 
 // applyOpenAPIScalarConstraints copies a scalar's format, pattern, length

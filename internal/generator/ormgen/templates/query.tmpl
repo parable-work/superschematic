@@ -145,7 +145,7 @@ type {{ $typeName }}Fields struct {
 	// {{ toGoName .FieldName }} selects the {{ .DBColumnName }} foreign key field
 	{{ toGoName .FieldName }} bool
 	// {{ toGoName .FieldName }}Nested selects fields for the related {{ .TargetType }}
-	{{ toGoName .FieldName }}Nested {{ if eq .TargetType $typeName }}*{{ end }}{{ .TargetType }}Fields
+	{{ toGoName .FieldName }}Nested {{ if .NestedByPointer }}*{{ end }}{{ .TargetType }}Fields
 	{{- else }}
 	// {{ toGoName .FieldName }}Nested selects fields for related {{ .TargetType }} records
 	{{ toGoName .FieldName }}Nested *{{ .TargetType }}Fields
@@ -181,7 +181,7 @@ func (f {{ $typeName }}Fields) IsZero() bool {
 	if f.{{ toGoName .FieldName }}Nested != nil {
 		return false
 	}
-	{{- else if eq .TargetType $typeName }}
+	{{- else if .NestedByPointer }}
 	if f.{{ toGoName .FieldName }}Nested != nil && !f.{{ toGoName .FieldName }}Nested.IsZero() {
 		return false
 	}
