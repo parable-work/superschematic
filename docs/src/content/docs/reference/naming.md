@@ -169,6 +169,24 @@ for [projection views](/superschematic/reference/projections/):
 `<prefix>projection.settings` and the rest. Set it to the namespace the
 schemas' readers expect; the part after the prefix is fixed.
 
+### `history_actor_setting`
+
+Default: `superschematic.history_actor_id`
+
+The transaction-local Postgres setting the history trigger of a
+`@versioned` table reads a delete's actor from. A delete tombstone's image
+is the row before the delete, with its actor column set from this setting
+when it is set, else left as the row had it. The actor column is
+`deleted_by` when the table has one, else `updated_by`; a table with
+neither records no actor. The ORM's hard deletes on such a table set the
+setting to the context user for their statement and, inside a
+transaction, clear it after. A statement of your own sets it with
+`SELECT set_config('<setting>', '<user id>', true)`.
+
+The value is a custom setting name: two or more identifiers (letters,
+digits and `_`, not starting with a digit) joined by dots. Any other value
+fails the load.
+
 ### `scalar_jsdoc_tag`
 
 Default: unset (no tag line)

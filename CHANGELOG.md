@@ -13,6 +13,12 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- Naming file: `history_actor_setting` (default
+  `superschematic.history_actor_id`) names the transaction-local Postgres
+  setting a `@versioned` table's history trigger reads a delete's actor
+  from (D17). The value must be dotted identifiers, the form Postgres takes
+  for a custom setting; any other value fails the load. `sqlgen.Options`
+  gains `HistoryActorSetting`. Minor.
 - `@behavior(name, config?)` from `@superschematic/schema`, the TypeScript
   authoring form of a type's behaviors (D16): a core decorator on a class
   of any kind, appending one `behaviors` entry per use in source order,
