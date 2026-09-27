@@ -528,6 +528,7 @@ func validateRenderedUnionDiscriminatorDefaults(types []TypeInfo, unions []Union
 // convertTypes converts codegen.TypeInfo to rustgen.TypeInfo.
 func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enumLookup codegen.EnumLookup, discriminators map[string]string) []TypeInfo {
 	types := make([]TypeInfo, len(codegenTypes))
+	contains := inlineContainment(codegenTypes)
 	for i, t := range codegenTypes {
 		types[i] = TypeInfo{
 			Name:   t.Name,
@@ -546,8 +547,10 @@ func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enu
 			// the related object may not be loaded.
 			required := f.Required && !f.IsRelation
 
+			// A struct that holds itself inline, directly or through
+			// another struct that holds it back, has no finite size.
 			rustType := f.TargetType
-			if rustType == t.Name {
+			if rustType == t.Name || reachesInline(contains, rustType, t.Name) {
 				rustType = "Box<" + rustType + ">"
 			}
 			if !required {
@@ -617,6 +620,47 @@ func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enu
 		types[i].HasDefaults = hasDefaults && canImplDefault
 	}
 	return types
+}
+
+// inlineContainment maps each generated struct to the structs its fields
+// hold inline: a field whose Rust type is another struct's name, not a Vec
+// or a map of it.
+func inlineContainment(codegenTypes []codegen.TypeInfo) map[string][]string {
+	structs := make(map[string]bool, len(codegenTypes))
+	for _, t := range codegenTypes {
+		structs[t.Name] = true
+	}
+	contains := make(map[string][]string, len(codegenTypes))
+	for _, t := range codegenTypes {
+		for _, f := range t.Fields {
+			if structs[f.TargetType] {
+				contains[t.Name] = append(contains[t.Name], f.TargetType)
+			}
+		}
+	}
+	return contains
+}
+
+// reachesInline reports whether struct from holds struct to inline, through
+// any chain of inline fields.
+func reachesInline(contains map[string][]string, from, to string) bool {
+	seen := map[string]bool{}
+	stack := []string{from}
+	for len(stack) > 0 {
+		name := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		for _, next := range contains[name] {
+			if next == to {
+				return true
+			}
+			stack = append(stack, next)
+		}
+	}
+	return false
 }
 
 // rustTypeHasDefault reports whether the given Rust type expression is known

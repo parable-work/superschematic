@@ -888,6 +888,13 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- A struct that holds itself through a cycle of relations to other
+  structs compiles in Go and Rust. The Rust types box a field whose struct
+  holds the owner back inline, as they boxed a direct self-reference, and
+  the ORM's field selections (`<Type>Fields`) take a pointer for such a
+  relation's nested selection, as for a self-relation. Output for a schema
+  without such a cycle is unchanged. Patch.
+
 - Go ORM: `CreateOne` and `CreateMany` insert a required enum field's
   declared default when the Go value is `""`, for an enum declared in the
   schema or imported from a dependency. They inserted `''`, which is not a
