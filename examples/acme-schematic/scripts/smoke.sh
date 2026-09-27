@@ -73,10 +73,12 @@
 #      API modules that carry it compile;
 #  18. acme.Rating, the behavior acme declares, reaches the IR of the
 #      shop-ratings service (ext/testdata), whose data-form type composes
-#      it; json-schema limits behavior names to it and format converts the
-#      file to YAML; build refuses the service, naming the types generator,
-#      which does not render behaviors; the core-only binary refuses the
-#      behavior by name.
+#      it, and of its TypeScript twin, which writes @behavior with the
+#      config acme's authoring package types; json-schema limits behavior
+#      names to it and format converts the file to YAML and to TypeScript;
+#      build refuses the service, naming the types generator, which does
+#      not render behaviors; the core-only binary refuses the behavior by
+#      name.
 #
 # Step 16 also needs bun and installs hono and the generated types package's
 # dependencies from the npm registry.
@@ -394,10 +396,14 @@ echo "==> behaviors: acme.Rating on a data-form General schema"
 RATINGS="$EXAMPLE_DIR/ext/testdata/services/shop-ratings"
 "$OUT/acme-schematic" build "$RATINGS" --emit-ir --out "$OUT/ratings-dist" >"$OUT/ratings-ir.json"
 jq -e '.types.Product.behaviors == [{"name": "acme.Rating", "config": {"maxStars": 5}}]' "$OUT/ratings-ir.json" >/dev/null
+"$OUT/acme-schematic" build "$RATINGS-ts" --emit-ir --out "$OUT/ratings-dist" >"$OUT/ratings-ts-ir.json"
+jq -e '.types.Product.behaviors == [{"name": "acme.Rating", "config": {"maxStars": 5}}]' "$OUT/ratings-ts-ir.json" >/dev/null
 "$OUT/acme-schematic" json-schema >"$OUT/acme-schema-file.json"
 jq -e '."$defs".BehaviorRef.properties.name.enum == ["acme.Rating"]' "$OUT/acme-schema-file.json" >/dev/null
 "$OUT/acme-schematic" format --to=yaml --stdout "$RATINGS/src/product.schema.json" >"$OUT/ratings.schema.yaml"
 grep -qx '          maxStars: 5' "$OUT/ratings.schema.yaml"
+"$OUT/acme-schematic" format --to=ts --stdout "$RATINGS/src/product.schema.json" >"$OUT/ratings.schema.ts"
+grep -qx '@behavior("acme.Rating", { maxStars: 5 })' "$OUT/ratings.schema.ts"
 if "$OUT/acme-schematic" build "$RATINGS" --out "$OUT/ratings-dist" >"$OUT/ratings-build.log" 2>&1; then
   echo "ERROR: build generated a type whose behavior no generator renders" >&2
   exit 1

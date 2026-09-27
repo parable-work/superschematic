@@ -7,6 +7,7 @@
 // in both the TypeScript and the data form.
 
 export type { ConfirmPolicy } from "./mcp";
+export type { RatingConfig } from "./behaviors";
 
 // The scalars the acme extension adds to the core set. The brand names the
 // scalar; the catalog the extension registers (ext/scalars.go) gives its

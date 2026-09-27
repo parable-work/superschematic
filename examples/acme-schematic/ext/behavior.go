@@ -22,6 +22,8 @@ const RatingBehavior = Name + ".Rating"
 var ratingDeclaration json.RawMessage
 
 // registerBehavior declares acme.Rating. A type composes it with
+// @behavior("acme.Rating", { maxStars: 5 }), whose config
+// packages/schema/src/behaviors.ts types, or with
 // behaviors: [{name: acme.Rating, config: {maxStars: 5}}] in the data
 // forms.
 func registerBehavior(r *registry.Registry) error {

@@ -13,6 +13,17 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- `@behavior(name, config?)` from `@superschematic/schema`, the TypeScript
+  authoring form of a type's behaviors (D16): a core decorator on a class
+  of any kind, appending one `behaviors` entry per use in source order,
+  with the config stored canonically and checked against the behavior's
+  declaration at the argument. The config is typed per name through the
+  new `BehaviorConfigs` interface (with `BehaviorName` and
+  `BehaviorConfigArg`), which an extension's authoring package augments as
+  it augments `MCPToolOptions`; a name no augmentation declares does not
+  type-check. `format --to=ts` writes the decorators. The acme example
+  types `acme.Rating`'s config and has a TypeScript twin of its ratings
+  service. Minor.
 - `@superschematic/schema-ir` ships the schema-file data form: the
   `./schema-file` subpath has TypeScript types for the `Document`, the
   single-definition file forms (`SchemaFile` is their union) and every IR
@@ -80,8 +91,8 @@ of a generated artifact is always listed here with the bump it requires.
   whose types compose a behavior when an enabled generator does not set
   the new `GeneratorSpec.RendersBehaviors`, naming the generator; no core
   generator sets it, so `build` fails and `build --emit-ir`, `format` and
-  `json-schema` accept the schema. The TypeScript writer refuses behaviors.
-  The core declares none; the acme example declares `acme.Rating`. Minor,
+  `json-schema` accept the schema. The core declares none; the acme
+  example declares `acme.Rating`. Minor,
   except that `Registry.Use` now rejects an extension name that contains
   a dot, which separates an extension from its behaviors' names: an
   extension so named must be renamed. Major for that case only.
