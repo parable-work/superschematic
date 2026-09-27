@@ -57,7 +57,7 @@ func SingleDefinition(doc *Document) (SingleDefKind, any, bool) {
 	if len(doc.OperationSets) == 1 {
 		return SingleDefOperationSet, doc.OperationSets[0], true
 	}
-	// Combinators, primitives, plots, and ontology definitions have no
-	// single-definition file form; they always live in a document.
+	// Not reached: a total of one puts the definition in one of the
+	// collections above.
 	return SingleDefType, nil, false
 }

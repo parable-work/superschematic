@@ -2,7 +2,7 @@
 //
 // The on-disk JSON shape mirrors the IR directly, so reading is JSON Schema
 // validation followed by a strict decode. The byte-level entrypoint [Read] is
-// also the runtime-mode surface: persisted Plot rows and over-the-wire
+// also the runtime-mode surface: schemas persisted as rows and over-the-wire
 // schemas validate through the same pipeline as build-time files.
 package jsonreader
 
@@ -16,7 +16,7 @@ import (
 
 // Read validates and decodes a JSON schema payload against the core
 // registry. The source argument names the payload origin (a file path or a
-// runtime-mode label such as "plot-row") for error messages.
+// runtime-mode label such as "saved-view-row") for error messages.
 func Read(data []byte, source string) (*schemafile.Document, error) {
 	return schemafile.Decode(data, source)
 }

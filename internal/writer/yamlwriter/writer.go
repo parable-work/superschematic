@@ -195,30 +195,6 @@ func relocateDocumentComments(mapping *yaml.Node) {
 				}
 				relocateFieldSequenceComments(item, "operations")
 			}
-		case "plots":
-			for _, body := range mappingPairs2(value) {
-				relocateFieldSequenceComments(body, "inputs")
-			}
-		case "concepts":
-			for entryKey, body := range mappingPairs(value) {
-				if c := removeCommentEntry(body); c != "" {
-					setHeadComment(entryKey, c)
-				}
-				relocateFieldSequenceComments(body, "fields")
-			}
-		case "actions":
-			for entryKey, body := range mappingPairs(value) {
-				if c := removeCommentEntry(body); c != "" {
-					setHeadComment(entryKey, c)
-				}
-				relocateFieldSequenceComments(body, "fields")
-			}
-		case "relationships":
-			for entryKey, body := range mappingPairs(value) {
-				if c := removeCommentEntry(body); c != "" {
-					setHeadComment(entryKey, c)
-				}
-			}
 		}
 	}
 }

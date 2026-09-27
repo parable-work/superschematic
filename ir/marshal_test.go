@@ -166,7 +166,7 @@ func TestSchema_JSONFieldNamesVerbatim(t *testing.T) {
 	}
 
 	// Empty definition maps are omitted: this schema carries no types.
-	for _, key := range []string{"types", "scalars", "unions", "operationSets", "platforms", "combinators", "primitives", "plots", "queries", "mutations", "rootType"} {
+	for _, key := range []string{"types", "inputs", "scalars", "unions", "compositeDefaults", "operationSets", "documents", "extensions", "rootType"} {
 		if _, ok := raw[key]; ok {
 			t.Errorf("marshaled Schema should omit key %q", key)
 		}
