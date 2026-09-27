@@ -4,6 +4,16 @@ use serde::{Deserialize, Serialize};
 use crate::scalars::*;
 use crate::enums::*;
 
+/// HistoryRecord wraps one captured historical value and its version metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryRecord<T> {
+    pub version: i64,
+    pub operation: String,
+    #[serde(rename = "recordedAt")]
+    pub recorded_at: superscalar::DateTime,
+    pub value: T,
+}
+
 /// Base class providing audit fields to every table.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Auditable {
@@ -48,6 +58,8 @@ pub struct Tenant {
     pub metadata: GenericJSON,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub users: Option<Vec<TenantUser>>,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
 }
 
 /// A soft-deletable tenant membership.
@@ -67,4 +79,6 @@ pub struct TenantUser {
     pub deleted_at: Option<TemporalDateTime>,
     #[serde(default, rename = "deletedBy", skip_serializing_if = "Option::is_none")]
     pub deleted_by: Option<IdentityUUID>,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
 }

@@ -1,0 +1,79 @@
+{
+  "name": "compose_rejects_tree_that_is_not_an_object",
+  "op": "compose",
+  "input": {
+    "base": [],
+    "descriptor": {
+      "graph": "recipe",
+      "kinds": [
+        {
+          "author": "updated_by",
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "id": "id",
+          "key": "entity_key",
+          "kind": "step",
+          "order": "position",
+          "parent": {
+            "key": "parent_step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "tombstone": "deleted_on_ref",
+          "units": {
+            "inputs": "jsonSchema",
+            "timings": "keyed"
+          },
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "id": "id",
+          "key": "entity_key",
+          "kind": "ingredient",
+          "order": "position",
+          "parent": {
+            "key": "step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "id": "id",
+          "key": "entity_key",
+          "kind": "cover",
+          "ref": "ref",
+          "singleton": true,
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        }
+      ]
+    },
+    "overlay": {}
+  },
+  "expect": {
+    "error": {
+      "code": "invalid_request",
+      "message": "base: a tree is a JSON object of kind name to rows"
+    }
+  }
+}

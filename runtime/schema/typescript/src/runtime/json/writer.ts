@@ -213,33 +213,6 @@ function serializeField(field: FieldDef, scalarNames: Set<string>): JsonObject {
   if (field.temporalFormat) {
     output['x-temporal-format'] = field.temporalFormat;
   }
-  if (field.transformDedupKey) {
-    output['x-transformDedupKey'] = true;
-  }
-  if (field.transformOrdering) {
-    output['x-transformOrdering'] = true;
-  }
-  if (field.transformFingerprintInput) {
-    output['x-transformFingerprintInput'] = true;
-  }
-  if (field.transformPartitionDate) {
-    output['x-transformPartitionDate'] = true;
-  }
-  if (field.transformStructural) {
-    output['x-transformStructural'] = true;
-  }
-  if (field.transformPersonEmail) {
-    output['x-transformPersonEmail'] = true;
-  }
-  if (field.transformPersonName) {
-    output['x-transformPersonName'] = true;
-  }
-  if (field.transformAccountId) {
-    output['x-transformAccountId'] = true;
-  }
-  if (field.transformExternalUserId) {
-    output['x-transformExternalUserId'] = true;
-  }
   if (field.exclude) {
     output['x-exclude'] = true;
   }

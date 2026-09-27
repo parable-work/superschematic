@@ -1,0 +1,4 @@
+# Written by scripts/versiongraph-archive.sh for the host platform: the static
+# archive the binding links, and a stamp of its digest.
+/lib/
+/archive_stamp_*.go

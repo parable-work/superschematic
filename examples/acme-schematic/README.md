@@ -11,7 +11,7 @@ The extension adds one of each registration surface:
 | Surface | What acme adds | File |
 |---|---|---|
 | Kind | `Catalog`, with a `catalog` generator | `ext/kind.go` |
-| Decorator | `@shelf` from `@acme/schema`, into the field's `extensions.acme` slot | `ext/decorator.go`, `packages/schema` |
+| Decorators | `@shelf` (with an argument) and `@feedKey` (a marker) from `@acme/schema`, into the field's `extensions.acme` slot | `ext/decorator.go`, `packages/schema` |
 | Scalar catalog | the core scalars plus `Acme.Photo`, a file-upload scalar that `shop-catalog` bounds with `uploadMaxBytes` | `ext/scalars.go`, `packages/schema` |
 | Document | `catalog.config.yaml` next to a Catalog schema, with a generator | `ext/document.go` |
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
@@ -72,7 +72,7 @@ examples/acme-schematic/
   ext/                        the extension (package ext)
     extension.go              Extension: Name, Register, Commands; [extension.acme] config
     kind.go                   Catalog kind + catalog generator
-    decorator.go              @shelf + the field codec
+    decorator.go              @shelf, @feedKey + the field codec
     scalars.go                the scalar catalog: the core scalars plus the Acme.Photo upload scalar
     document.go               catalog.config document + generator
     manifest.go               acmeManifest generator on every kind
@@ -87,7 +87,7 @@ examples/acme-schematic/
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
-  packages/schema/            @acme/schema, the authoring package @shelf and the Acme.Photo brand are imported from, the confirm key's type and acme.Rating's config type
+  packages/schema/            @acme/schema, the authoring package @shelf, @feedKey and the Acme.Photo brand are imported from, the confirm key's type and acme.Rating's config type
   schemas/
     superschematic.toml       naming, auth_provider = "apikey", [package_aliases], [paths], [deps], [extension.acme]
     deps.json                 the committed copy of the dependency graph ([deps] copy)
@@ -96,7 +96,7 @@ examples/acme-schematic/
                               tables and the storefront.stock projection
     services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs, @mcp, @icon
     services/shop-config      General: ShopConfig with @envVars and field @docs/@purpose/@icon
-    services/shop-catalog     Catalog: Product, Bundle with @shelf; Product.photo, an Acme.Photo upload; catalog.config.yaml
+    services/shop-catalog     Catalog: Product, Bundle with @shelf and @feedKey; Product.photo, an Acme.Photo upload; catalog.config.yaml
     services/shop-storefront  API on the TypeScript server: carts, a public probe, a manual event stream
   storefront/                 app.ts implements the generated shop-storefront router; app.test.ts drives it
   labels/                     shelf-label.d.ts and location.d.ts, the declarations `fields` reads
@@ -205,7 +205,8 @@ r.RegisterGenerator(registry.GeneratorSpec{
   `c.Done(key, dir)` so the build log and `Result.Outputs` list them.
 
 `generateCatalog` walks every type's fields, reads the `@shelf` payload
-through the codec (next section), and writes `catalog.json`.
+and the `@feedKey` marker through the codec (next section), and writes
+`catalog.json`.
 
 The `acmeManifest` generator in `ext/manifest.go` is the other shape: a
 generator on kinds the extension did not define. It lists `Kinds: []string{"DB", "API", "General", "Catalog"}` and has no `OutputKey`, so it runs after
@@ -268,6 +269,42 @@ In the IR the payload appears as
 `{"name": "sku", ..., "extensions": {"acme": {"shelf": {"aisle": 3, "bay": "B"}}}}`,
 in the TypeScript form and the data form alike. `ShelfOf(fd)` is the read
 side the generators use.
+
+### A marker: @feedKey
+
+`@feedKey` marks a field as part of the key acme's supplier feed matches
+incoming rows on; several on one type form a composite key. It is the
+shape of a distribution's per-field directive: a flag the core IR has no
+field for. The core keeps no such flags of its own (`docs/DECISIONS.md`,
+D18); a distribution declares each one this way. The spec has no `Args`,
+so the decorator takes no argument:
+
+```ts
+export const feedKey: PropertyDecorator = () => {};
+```
+
+```go
+r.RegisterDecorator(registry.DecoratorSpec{
+	Name:      "feedKey",
+	Extension: Name,
+	Packages:  []string{"@acme/schema"},
+	Target:    registry.TargetField,
+	Kinds:     []string{"Catalog"},
+	Apply: func(n registry.Node, _ []any, _ registry.Site) error {
+		return ir.UpdateExtension(n.Field, Name, func(f *fieldExt) { f.FeedKey = true })
+	},
+})
+```
+
+A schema writes it bare (`@feedKey`), and the data forms write
+`"feedKey": true` in the same slot:
+`"extensions": {"acme": {"feedKey": true, "shelf": {"aisle": 3, "bay": "B"}}}`.
+`IsFeedKey(fd)` reads it back, and `catalog.json` lists each type's
+feed-key fields under `feedKeys`. `format` writes the TypeScript file
+through the IR as YAML or JSON with the slot intact, and each twin loads
+back to the same types; the smoke and `TestFieldDirectivesSurviveTheDataFormWriters`
+check both. `format --to=ts` cannot write extension data yet
+(`docs/extension-model.md`, section 11).
 
 ## A scalar catalog
 

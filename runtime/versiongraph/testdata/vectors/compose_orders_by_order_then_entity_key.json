@@ -1,0 +1,278 @@
+{
+  "name": "compose_orders_by_order_then_entity_key",
+  "op": "compose",
+  "input": {
+    "base": {
+      "step": [
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a004",
+          "id": "00000000-0000-4000-8000-0000000d0031",
+          "inputs": {
+            "type": "object"
+          },
+          "parent_step_key": null,
+          "position": 5,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "timings": {},
+          "title": "Serve",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        },
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a002",
+          "id": "00000000-0000-4000-8000-0000000d0032",
+          "inputs": {
+            "type": "object"
+          },
+          "parent_step_key": null,
+          "position": -3,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "timings": {},
+          "title": "Rest",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        },
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a003",
+          "id": "00000000-0000-4000-8000-0000000d0033",
+          "inputs": {
+            "type": "object"
+          },
+          "parent_step_key": null,
+          "position": 5,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "timings": {},
+          "title": "Season",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        },
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a001",
+          "id": "00000000-0000-4000-8000-0000000d0034",
+          "inputs": {
+            "type": "object"
+          },
+          "parent_step_key": null,
+          "position": 9007199254740991,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "timings": {},
+          "title": "Sear",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        }
+      ]
+    },
+    "descriptor": {
+      "graph": "recipe",
+      "kinds": [
+        {
+          "author": "updated_by",
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "id": "id",
+          "key": "entity_key",
+          "kind": "step",
+          "order": "position",
+          "parent": {
+            "key": "parent_step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "tombstone": "deleted_on_ref",
+          "units": {
+            "inputs": "jsonSchema",
+            "timings": "keyed"
+          },
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "id": "id",
+          "key": "entity_key",
+          "kind": "ingredient",
+          "order": "position",
+          "parent": {
+            "key": "step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "id": "id",
+          "key": "entity_key",
+          "kind": "cover",
+          "ref": "ref",
+          "singleton": true,
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        }
+      ]
+    },
+    "overlay": {
+      "step": [
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a005",
+          "id": "00000000-0000-4000-8000-0000000d0035",
+          "inputs": {
+            "type": "object"
+          },
+          "parent_step_key": null,
+          "position": -9007199254740991,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0002",
+          "timings": {},
+          "title": "Prep",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e002"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "findings": [],
+    "tree": {
+      "cover": [],
+      "ingredient": [],
+      "step": [
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a005",
+          "id": "00000000-0000-4000-8000-0000000d0035",
+          "inputs": {
+            "type": "object"
+          },
+          "parent_step_key": null,
+          "position": -9007199254740991,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0002",
+          "timings": {},
+          "title": "Prep",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e002"
+        },
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a002",
+          "id": "00000000-0000-4000-8000-0000000d0032",
+          "inputs": {
+            "type": "object"
+          },
+          "parent_step_key": null,
+          "position": -3,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "timings": {},
+          "title": "Rest",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        },
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a003",
+          "id": "00000000-0000-4000-8000-0000000d0033",
+          "inputs": {
+            "type": "object"
+          },
+          "parent_step_key": null,
+          "position": 5,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "timings": {},
+          "title": "Season",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        },
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a004",
+          "id": "00000000-0000-4000-8000-0000000d0031",
+          "inputs": {
+            "type": "object"
+          },
+          "parent_step_key": null,
+          "position": 5,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "timings": {},
+          "title": "Serve",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        },
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000a001",
+          "id": "00000000-0000-4000-8000-0000000d0034",
+          "inputs": {
+            "type": "object"
+          },
+          "parent_step_key": null,
+          "position": 9007199254740991,
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "timings": {},
+          "title": "Sear",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        }
+      ]
+    }
+  }
+}

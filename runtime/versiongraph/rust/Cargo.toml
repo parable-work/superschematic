@@ -1,0 +1,27 @@
+[package]
+name = "superschematic-versiongraph"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.95.0"
+description = "Compose, merge, diff, hash and validate version-graph trees described by a JSON descriptor"
+license = "Apache-2.0"
+# The Go binding links the static archive built from this checkout and the
+# browser loads the wasm build; nothing consumes the crate from a registry yet.
+publish = false
+
+[lib]
+name = "superschematic_versiongraph"
+# rlib for the Rust tests, staticlib for the Go binding (cgo), cdylib for the
+# wasm32-unknown-unknown module and C consumers that load a shared object.
+crate-type = ["rlib", "staticlib", "cdylib"]
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+# arbitrary_precision keeps a numeric column's JSON number as written, so a
+# value wider than f64 composes, merges and hashes without rounding.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision"] }
+sha2 = "0.10.9"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+cognitive_complexity = "warn"

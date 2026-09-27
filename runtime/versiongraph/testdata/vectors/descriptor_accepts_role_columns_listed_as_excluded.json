@@ -1,0 +1,96 @@
+{
+  "name": "descriptor_accepts_role_columns_listed_as_excluded",
+  "op": "content_hash",
+  "input": {
+    "descriptor": {
+      "graph": "recipe",
+      "kinds": [
+        {
+          "author": "updated_by",
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "id": "id",
+          "key": "entity_key",
+          "kind": "step",
+          "order": "position",
+          "parent": {
+            "key": "parent_step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "tombstone": "deleted_on_ref",
+          "units": {
+            "inputs": "jsonSchema",
+            "timings": "keyed"
+          },
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "id": "id",
+          "key": "entity_key",
+          "kind": "ingredient",
+          "order": "position",
+          "parent": {
+            "key": "step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id",
+            "id",
+            "ref",
+            "entity_key",
+            "deleted_on_ref",
+            "_version"
+          ],
+          "id": "id",
+          "key": "entity_key",
+          "kind": "cover",
+          "ref": "ref",
+          "singleton": true,
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        }
+      ]
+    },
+    "tree": {
+      "cover": [
+        {
+          "_version": 1,
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "deleted_on_ref": false,
+          "entity_key": "00000000-0000-4000-8000-00000000c001",
+          "headline": "Weeknight soup",
+          "id": "00000000-0000-4000-8000-0000000d0044",
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "updated_by": "00000000-0000-4000-8000-00000000e001"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "contentHash": "57d804bcfb9631e3f8e6eab4ba81773ad057c9e0a75c7561ec4176773f9108bd"
+  }
+}

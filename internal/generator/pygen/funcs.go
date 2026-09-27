@@ -36,6 +36,11 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 		"isList":                    isList,
 		"nullEntryCheck":            nullEntryCheck,
 		"pythonFieldDefault": func(field codegen.FieldInfo) string {
+			// The store writes _version; a value without it reads as 0,
+			// as Go decodes it.
+			if isVersionField(field) {
+				return "0"
+			}
 			expr, ok := pythonFieldDefaultExpr(field, enumLookup)
 			if !ok {
 				return ""

@@ -100,7 +100,12 @@ func ownerBase(owner string) (string, bool) {
 //
 // Owner fields are cleared on the emitted copies: a definition's location is
 // implicit in the file it is written to and is re-stamped at read time.
+//
+// What the loader added by expanding declarations (ir.OriginVersionGraph)
+// is left out: the declarations are written, and reading them back expands
+// them again.
 func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
+	schema = withoutExpansion(schema)
 	docs := make(map[string]*schemafile.Document)
 	docFor := func(base string) *schemafile.Document {
 		if doc, ok := docs[base]; ok {

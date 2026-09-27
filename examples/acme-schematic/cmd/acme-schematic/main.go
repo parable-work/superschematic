@@ -1,8 +1,8 @@
 // Command acme-schematic is the acme build of superschematic: the core with
-// the acme extension linked. It knows the Catalog kind, the @shelf
-// decorator, the catalog.config document, the acme manifest generator, the
-// "apikey" auth provider and the describe subcommand; the core-only
-// cmd/superschematic binary knows none of them.
+// the acme extension linked. It knows the Catalog kind, the @shelf and
+// @feedKey decorators, the catalog.config document, the acme manifest
+// generator, the "apikey" auth provider and the describe subcommand; the
+// core-only cmd/superschematic binary knows none of them.
 package main
 
 import (

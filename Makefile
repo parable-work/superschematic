@@ -13,9 +13,11 @@ export GOTOOLCHAIN := go$(GO_VERSION)
 # The Go binding of superscalar is cgo against a static archive that
 # scripts/superscalar-dep.sh builds under third_party/superscalar. Every go
 # command that links a scalar-dependent package needs this in CGO_LDFLAGS.
-export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print)
+# The version-graph binding (runtime/versiongraph/go) links the core's static
+# archive, which scripts/versiongraph-archive.sh (make versiongraph) stages.
+export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print)
 
-GO_MODULES := . ir runtime/schema/go runtime/http/go
+GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go
 BIN := bin/superschematic
 
 # build-all keys its cache on a hash of this binary. -trimpath drops the
@@ -27,7 +29,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check ts python rust \
-        docs cli-smoke scrub clean
+        versiongraph versiongraph-wasm docs cli-smoke scrub clean
 
 all: build test lint
 
@@ -35,6 +37,7 @@ all: build test lint
 # TypeScript binding). Needs git, a Rust toolchain, bun and node.
 setup:
 	scripts/superscalar-dep.sh
+	scripts/versiongraph-archive.sh
 	cd packages && bun install
 	cd runtime/schema/typescript && bun install
 	cd runtime/http/typescript && bun install
@@ -47,13 +50,13 @@ $(BIN): FORCE
 
 FORCE:
 
-go-build:
+go-build: versiongraph
 	@for m in $(GO_MODULES); do echo "==> go build $$m"; (cd $$m && go build ./...) || exit 1; done
 
 go-vet:
 	@for m in $(GO_MODULES); do echo "==> go vet $$m"; (cd $$m && go vet ./...) || exit 1; done
 
-go-test:
+go-test: versiongraph
 	@for m in $(GO_MODULES); do echo "==> go test $$m"; (cd $$m && go test -count=1 ./...) || exit 1; done
 
 go-fmt-check:
@@ -90,8 +93,21 @@ ts:
 python:
 	cd runtime/schema/python && uv run pytest -q
 
-rust:
+rust: versiongraph-wasm
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test
+
+# The version-graph core's static archive, staged where the Go binding links
+# it (runtime/versiongraph/go/lib/<goos>_<goarch>).
+versiongraph:
+	scripts/versiongraph-archive.sh >/dev/null
+
+# The core built for wasm32-unknown-unknown, and the bun test that runs every
+# vector through it.
+versiongraph-wasm:
+	cd runtime/versiongraph/rust && cargo build --release --target wasm32-unknown-unknown
+	cd runtime/versiongraph/wasm && bun test
 
 # Starlight site. CI runs this as the docs job (D9); release.yml deploys it.
 docs:
@@ -109,8 +125,8 @@ cli-smoke: $(BIN)
 # The extraction scrub: the only allowed maintainer mentions are the license
 # holder, the GitHub org in module paths and publisher registrations, and the
 # maintainer lines; source-tree identifiers, planning ids (wave, review and
-# phase numbers) and schema-kind names fail it, and so do transform* field
-# directives outside the core IR allowlist.
+# phase numbers) and schema-kind names fail it, and so does any transform*
+# field directive (D18).
 scrub:
 	scripts/scrub-check.sh
 
@@ -123,6 +139,7 @@ vet: go-vet
 fmt:
 	gofmt -w $$(git ls-files '*.go')
 	cd runtime/http/rust && cargo fmt
+	cd runtime/versiongraph/rust && cargo fmt
 
 clean:
 	rm -rf bin

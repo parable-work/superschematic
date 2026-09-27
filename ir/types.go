@@ -134,6 +134,19 @@ type TypeDef struct {
 	// contract and breaks a payload that must survive a newer producer.
 	DenyUnknownFields bool `json:"denyUnknownFields,omitempty" yaml:"denyUnknownFields,omitempty"`
 
+	// VersionGraph marks the root of a version graph (@versionGraph). Nil
+	// for every other type. See [VersionGraphConfig].
+	VersionGraph *VersionGraphConfig `json:"versionGraph,omitempty" yaml:"versionGraph,omitempty"`
+
+	// GraphMember marks an entity kind of a version graph (@graphMember).
+	// Nil for every other type. See [GraphMemberConfig].
+	GraphMember *GraphMemberConfig `json:"graphMember,omitempty" yaml:"graphMember,omitempty"`
+
+	// Origin names the declaration the loader expanded this type from:
+	// [OriginVersionGraph] for the graph tables a version graph adds.
+	// Empty for every authored type. The data forms have no key for it.
+	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
+
 	// Projection is the @projection declaration of a RoleProjection type: the
 	// view's address, the table it reads and the tables it joins, its row
 	// rules and its collapse. Fields are the view's columns. Nil for every
@@ -179,6 +192,10 @@ type PruneReference struct {
 
 	// VersionColumn is the referencing table's column holding the pinned _version.
 	VersionColumn string `json:"versionColumn" yaml:"versionColumn"`
+
+	// Origin is [OriginVersionGraph] for the pin a version graph adds to
+	// each member with retentionDays; empty for an authored pin.
+	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
 }
 
 // TraitRef references a trait implemented by a type, with any resolved
@@ -393,52 +410,9 @@ type FieldDef struct {
 
 	// TemporalFormat declares the wire encoding of a Temporal.DateTime field
 	// whose source sends a bare epoch count instead of ISO text
-	// (@temporalFormat / x-temporal-format). Values are the epoch members of
-	// IncrementalTimeFormatEnum: unix, unix_millis, unix_micros, unix_nanos.
-	// Empty means ISO text.
+	// (@temporalFormat / x-temporal-format). Values are the epoch units unix,
+	// unix_millis, unix_micros and unix_nanos. Empty means ISO text.
 	TemporalFormat string `json:"temporalFormat,omitempty" yaml:"temporalFormat,omitempty"`
-
-	// TransformDedupKey marks this field as part of the tap's business/dedup key
-	// (@transformDedupKey / x-transformDedupKey).
-	TransformDedupKey bool `json:"transformDedupKey,omitempty" yaml:"transformDedupKey,omitempty"`
-
-	// TransformOrdering marks this field as the promote-path merge-ordering column
-	// (@transformOrdering / x-transformOrdering). At most one per type.
-	TransformOrdering bool `json:"transformOrdering,omitempty" yaml:"transformOrdering,omitempty"`
-
-	// TransformFingerprintInput marks this field as an input to the change-detection
-	// fingerprint (@transformFingerprintInput / x-transformFingerprintInput).
-	TransformFingerprintInput bool `json:"transformFingerprintInput,omitempty" yaml:"transformFingerprintInput,omitempty"`
-
-	// TransformPartitionDate marks this field as the partition / domain-date column
-	// (@transformPartitionDate / x-transformPartitionDate). At most one per type.
-	TransformPartitionDate bool `json:"transformPartitionDate,omitempty" yaml:"transformPartitionDate,omitempty"`
-
-	// TransformStructural marks this field structural outside the derived roles
-	// (@transformStructural / x-transformStructural).
-	TransformStructural bool `json:"transformStructural,omitempty" yaml:"transformStructural,omitempty"`
-
-	// TransformPersonEmail marks an email that identifies a real person
-	// (@transformPersonEmail / x-transformPersonEmail). Identity role tag.
-	TransformPersonEmail bool `json:"transformPersonEmail,omitempty" yaml:"transformPersonEmail,omitempty"`
-
-	// TransformPersonName marks a human name component used for fuzzy matching
-	// (@transformPersonName / x-transformPersonName). Identity role tag.
-	TransformPersonName bool `json:"transformPersonName,omitempty" yaml:"transformPersonName,omitempty"`
-
-	// TransformAccountId marks the connector-native account/user id - the row's
-	// principal key (@transformAccountId / x-transformAccountId). Identity role tag.
-	TransformAccountId bool `json:"transformAccountId,omitempty" yaml:"transformAccountId,omitempty"`
-
-	// TransformExternalUserId marks a foreign principal id for another system
-	// (@transformExternalUserId / x-transformExternalUserId). Identity role tag.
-	TransformExternalUserId bool `json:"transformExternalUserId,omitempty" yaml:"transformExternalUserId,omitempty"`
-
-	// TransformForeignKey marks an object-typed field as a foreign-key
-	// reference to another tap (@transformForeignKey / x-transformForeignKey).
-	// The promote path stores only the referenced id column. Nil when the
-	// field is not a foreign key.
-	TransformForeignKey *TransformForeignKeyDef `json:"transformForeignKey,omitempty" yaml:"transformForeignKey,omitempty"`
 
 	// UIHidden marks this field as hidden in UI schema renderers (@uiHidden).
 	UIHidden bool `json:"uiHidden,omitempty" yaml:"uiHidden,omitempty"`
@@ -514,6 +488,15 @@ type FieldDef struct {
 	// from the OperationSet).
 	Middleware *MiddlewareConfig `json:"middleware,omitempty" yaml:"middleware,omitempty"`
 
+	// ConflictUnit is the merge unit of a graph member's field
+	// (@conflictUnit): one of the ConflictUnit* strategies. Empty means
+	// [ConflictUnitAtomic].
+	ConflictUnit string `json:"conflictUnit,omitempty" yaml:"conflictUnit,omitempty"`
+
+	// Origin is [OriginVersionGraph] for a field a version graph adds to a
+	// member type; empty for every authored field.
+	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
+
 	// Extensions holds extension decorator data keyed by extension name; see
 	// [Schema.Extensions]. Operations are FieldDefs, so this is also the
 	// slot for operation-level extension decorators.
@@ -580,6 +563,10 @@ type IndexDef struct {
 
 	// Name is an optional purpose token used to build {idx|uq}_{table}_{name}.
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+
+	// Origin is [OriginVersionGraph] for an index a version graph adds;
+	// empty for an authored index.
+	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
 }
 
 // RelationDef represents a foreign key relation to another type.
@@ -594,20 +581,6 @@ type RelationDef struct {
 	// OnDelete is the FK ON DELETE action (CASCADE|RESTRICT|NO ACTION). Empty
 	// means the generator default (CASCADE).
 	OnDelete string `json:"onDelete,omitempty" yaml:"onDelete,omitempty"`
-}
-
-// TransformForeignKeyDef captures the promote-path foreign-key reference for
-// an object-typed field.
-//
-// In GraphQL: @transformForeignKey(tap: "repositories", idField: "id")
-// In JSON Schema: "x-transformForeignKey": {"tap": "repositories", "idField": "id"}
-type TransformForeignKeyDef struct {
-	// Tap is the tap whose rows this field references.
-	Tap string `json:"tap" yaml:"tap"`
-
-	// IdField is the property of the referenced object that carries its id.
-	// Defaults to "id".
-	IdField string `json:"idField,omitempty" yaml:"idField,omitempty"`
 }
 
 // ArgumentDef represents an argument on a field or operation.

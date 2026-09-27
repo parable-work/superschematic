@@ -20,12 +20,15 @@
 #      schema.config.ts files import the config package under acme's own
 #      name ([package_aliases] "@acme/schema-config"), and the sentinels it
 #      writes import that name too;
-#   4. the catalog generator wrote catalog.json for the Catalog service;
-#   5. the @shelf payload reached the IR (--emit-ir + jq), and so did the
-#      shop-db projection that satisfies acme's projection policy, and
-#      Acme.Photo, the file-upload scalar acme's scalar catalog adds, with
-#      its upload metadata and the uploadMaxBytes bound Product.photo puts
-#      on it;
+#   4. the catalog generator wrote catalog.json for the Catalog service,
+#      with every @shelf field and each type's @feedKey fields;
+#   5. the @shelf payload and the @feedKey marker reached the IR (--emit-ir
+#      + jq), and survive format: the TypeScript file written as YAML and
+#      as JSON loads back to the same types, extension slots included; the
+#      shop-db projection that satisfies acme's projection policy reached
+#      the IR, and so did Acme.Photo, the file-upload scalar acme's scalar
+#      catalog adds, with its upload metadata and the uploadMaxBytes bound
+#      Product.photo puts on it;
 #   6. the catalog.config document was loaded and its generator ran;
 #   7. the manifest generator ran on every kind, core and acme, and the
 #      acmeInventory build-all hook merged the manifests from every service's
@@ -137,6 +140,7 @@ echo "==> catalog generator wrote the Catalog service's file"
 test -s "$DIST/acme/catalog/shop-catalog/catalog.json"
 jq -e '.service == "shop-catalog" and (.shelves | length) == 3 and .shelves["Product.sku"] == {"aisle": 3, "bay": "B"}' \
   "$DIST/acme/catalog/shop-catalog/catalog.json" >/dev/null
+jq -e '.feedKeys == {"Bundle": ["code"], "Product": ["sku"]}' "$DIST/acme/catalog/shop-catalog/catalog.json" >/dev/null
 
 echo "==> @shelf payload is in the IR"
 "$OUT/acme-schematic" build "$SCHEMAS/services/shop-catalog" --emit-ir --out "$OUT/ir-dist" >"$OUT/catalog-ir.json"
@@ -148,6 +152,24 @@ jq -e '.types.Product.fields[] | select(.name == "name") | has("extensions") | n
 # Every acme decorator the Catalog service uses, for check_second_decorator.sh.
 DECORATORS="$(jq -r '[.types[].fields[]? | .extensions.acme? // {} | keys[]] | unique | join(" ")' "$OUT/catalog-ir.json")"
 echo "ir decorators on shop-catalog: $DECORATORS"
+
+echo "==> @feedKey, a marker in the acme slot, is in the IR and survives the data-form writers"
+jq -e '[.types.Product.fields[], .types.Bundle.fields[] | select(.extensions.acme.feedKey == true) | .name] == ["sku", "code"]' \
+  "$OUT/catalog-ir.json" >/dev/null
+# format writes the TypeScript file through the IR as YAML and as JSON. Each
+# twin, loaded as its own service, gives the same types, extension slots
+# included; only the file that owns each type differs.
+for format in yaml json; do
+  TWIN="$OUT/catalog-$format"
+  mkdir -p "$TWIN/src"
+  "$OUT/acme-schematic" format --to="$format" --stdout "$SCHEMAS/services/shop-catalog/src/catalog.schema.ts" \
+    >"$TWIN/src/catalog.schema.$format"
+  cp "$SCHEMAS/services/shop-catalog/catalog.config.yaml" "$TWIN/"
+  printf '{"name": "shop-catalog", "kind": "Catalog", "outputs": {"catalog": {"enabled": true}}}\n' >"$TWIN/schema.config.json"
+  "$OUT/acme-schematic" build "$TWIN" --emit-ir --naming "$SCHEMAS/superschematic.toml" --out "$OUT/ir-dist" >"$OUT/catalog-$format-ir.json"
+  cmp <(jq -S 'del(.types[].owner)' "$OUT/catalog-ir.json") <(jq -S 'del(.types[].owner)' "$OUT/catalog-$format-ir.json")
+done
+grep -qx '            feedKey: true' "$OUT/catalog-yaml/src/catalog.schema.yaml"
 
 echo "==> Acme.Photo is a file upload from acme's scalar catalog, bounded by uploadMaxBytes"
 jq -e '.scalars["Acme.Photo"].fileUpload == {"maxSize": 8388608, "allowedTypes": ["image/jpeg", "image/png", "image/webp"], "category": "image"}' \

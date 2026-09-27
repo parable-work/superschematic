@@ -72,7 +72,7 @@ func TestApplyDefault_EnumLikeString(t *testing.T) {
 	def := "flatten_json"
 	field := &ir.FieldDef{
 		Name:    "type",
-		TypeRef: ir.TypeRef{Name: "TransformStepTypeEnum"},
+		TypeRef: ir.TypeRef{Name: "StepKindEnum"},
 		Default: &def,
 	}
 	v, ok := applyDefault(field, nil)

@@ -13,6 +13,104 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- The version-graph core (D17), `runtime/versiongraph`: a Rust crate,
+  `superschematic-versiongraph` (rlib, staticlib, cdylib; depends on serde,
+  serde_json and sha2 only), with no IO, clock or randomness. Its five
+  operations take and return JSON: `compose` lays one ref's rows over a
+  base tree by entity key (a tombstone removes the entity and its
+  descendants; a row whose parent is absent is kept and reported), `merge`
+  is a three-way merge per entity and then per conflict unit (`atomic`,
+  `keyed`, `jsonSchema`), reporting conflicts by kind, entity key and JSON
+  Pointer unit path with the base, ours and theirs values, settling them
+  from `resolutions`, and saying for each entity which side won, `diff`
+  lists `ADD`, `UPDATE` and `DELETE` changes, `content_hash` is SHA-256
+  over canonical JSON of the content columns, and `validate` reports
+  duplicate entity keys, singleton, absent parent, parent cycle and
+  out-of-range order findings. A graph descriptor names each kind's key,
+  id, ref, tombstone, version and author columns, its parent edge, order
+  column, singleton rule, conflict units and excluded columns; rows are
+  the JSON Postgres `to_jsonb` gives them. `runtime/versiongraph/README.md`
+  is the contract. A C ABI (`vg_compose`, `vg_merge`, `vg_diff`,
+  `vg_content_hash`, `vg_validate`, `vg_free`, and `vg_alloc`/`vg_dealloc`
+  on wasm32) serves a new fifth Go module, `runtime/versiongraph/go`
+  (`Compose`, `Merge`, `Diff`, `ContentHash`, `Validate` over
+  `json.RawMessage`, cgo over the static archive), and the same exports
+  build for `wasm32-unknown-unknown`. `runtime/versiongraph/testdata/vectors`
+  holds the vectors the Rust tests, the Go binding and a bun test over the
+  wasm module all run (`UPDATE_VECTORS=1 cargo test` rewrites them).
+  `make versiongraph` (`scripts/versiongraph-archive.sh`) builds the archive,
+  the Makefile adds its directory to `CGO_LDFLAGS` and the module to its Go
+  module list, `make rust` runs the crate's gates, the wasm build and the
+  bun test, and CI runs them in a new `versiongraph` job. The crate and the
+  module are version sites of `scripts/bump_version.py`, and
+  `go-module-tag.yml` cuts `runtime/versiongraph/go/vX.Y.Z`. The crate is
+  not published to crates.io. Minor.
+- Version graph declarations (D17). `@superschematic/db` exports
+  `@versionGraph({ name?, schemaEpoch? })` for a graph root,
+  `@graphMember({ graph, parent?: { key, of }, order?, singleton? })` for
+  an entity kind of the graph and `@conflictUnit('atomic' | 'keyed' |
+  'jsonSchema' | 'excluded')` for a member field's merge unit, with the
+  `VersionGraphOptions`, `GraphMemberOptions`, `GraphParent`,
+  `ConflictUnitStrategy` and `SchemaClass` types; `graph` and `parent.of`
+  name classes as values. The core registry declares the three
+  decorators. The IR gains `TypeDef.versionGraph`
+  (`ir.VersionGraphConfig`), `TypeDef.graphMember`
+  (`ir.GraphMemberConfig`, `ir.GraphParent`), `FieldDef.conflictUnit`, the
+  `ir.ConflictUnit*` constants and `TypeDef.VersionGraphName`; the JSON and
+  YAML forms, the schema-file JSON Schema and TypeScript types, and
+  `format` carry them. Verification checks the rules D17 states: a root
+  and each member have one UUID `@key`; a member is `@versioned`, has
+  exactly one relation to its root and no `deletedAt`, and belongs to one
+  graph; `parent.of` is a member of the same graph and `parent.key` a UUID
+  field; `order` names a `Generic.Int64` field; `keyed` and `jsonSchema`
+  sit only on a member's JSON object field; a graph has a member, a
+  PascalCase name and a non-negative epoch, and generates no name the
+  schema already defines. The loader then expands each graph into ordinary
+  types: `<Name>Ref` (`@versioned`, soft-deletable, name unique per root
+  among live refs), `<Name>Commit` (`sequence` unique per root),
+  `<Name>Patch` (unique on `(commit, entityKind, entityKey)`, indexed on
+  `(entityId, entityVersion)`), the enums `<Name>EntityKind` and
+  `<Name>PatchOperation`, and on each member `entityKey` (generated on
+  insert), `ref`, `deletedOnRef`, a unique `(entityKey, ref)` index and,
+  with `retentionDays`, a prune pin on `<name>_patch(entity_id,
+  entity_version)`. Every generated relation is `RESTRICT`, and the actor
+  fields take the type the ORM resolves its user id to. The `sql`, `orm`
+  and `types` generators emit them as any other tables. What the expansion
+  adds carries `origin: "versionGraph"` (`ir.OriginVersionGraph`) on
+  `TypeDef`, `FieldDef`, `EnumDef`, `IndexDef` and `PruneReference`; the
+  data forms have no `origin` key and refuse one, and `format` leaves the
+  expanded definitions out and writes the declarations. Every new key is
+  omitted when unset, so the IR and every generated artifact of a schema
+  without a graph are unchanged. Minor.
+- Generated Rust and Python types give a `@versioned` table the `_version`
+  field and declare a generic `HistoryRecord`, as the Go and TypeScript
+  types do (D17). In Rust the field is `version: i64`, renamed to
+  `_version` and defaulted to 0 when absent, and
+  `HistoryRecord<T> { version, operation, recorded_at, value }` takes
+  `recordedAt` as the scalar crate's `DateTime`, so the crate of a
+  versioned schema always depends on the scalar crate. In Python the field
+  is `version_: int = 0` with alias `_version`, and the pydantic model
+  `HistoryRecord[T]` (exported from the package) reads `recordedAt` as a
+  `datetime` and writes wire names from `to_json` and `to_json_dict`. Both
+  read and write the JSON Go's `HistoryRecord[T]` writes. Schemas without
+  `@versioned` generate the same output as before. Minor.
+- Naming file: `history_actor_setting` (default
+  `superschematic.history_actor_id`) names the transaction-local Postgres
+  setting a `@versioned` table's history trigger reads a delete's actor
+  from (D17). The value must be dotted identifiers, the form Postgres takes
+  for a custom setting; any other value fails the load. `sqlgen.Options`
+  gains `HistoryActorSetting`. Minor.
+- Go ORM: every `@versioned` repository has `DeleteOneIfVersion(ctx, id,
+  expectedVersion)`, on the repository interface and the no-op repository
+  too (D17). It deletes the row only when its stored `_version` equals
+  `expectedVersion`: a soft delete when the table has `deletedAt`, a hard
+  delete otherwise. It and `UpdateOneIfVersion` return the new
+  `ErrVersionConflict` when the row exists at another version and
+  `ErrNotFound` when it does not; `ErrVersionConflict` wraps `ErrNotFound`,
+  so `errors.Is(err, ErrNotFound)` holds as before. A hand-written
+  implementation of a versioned repository interface must add the method.
+  Minor.
+
 - `@behavior(name, config?)` from `@superschematic/schema`, the TypeScript
   authoring form of a type's behaviors (D16): a core decorator on a class
   of any kind, appending one `behaviors` entry per use in source order,
@@ -595,6 +693,45 @@ of a generated artifact is always listed here with the bump it requires.
   `maximum` sit on each value (the items of a list, the values of a map),
   and `listMin` and `listMax` are `minItems` and `maxItems` on a list.
   They were left out. Patch.
+- IR, breaking: `ir.FieldDef` drops ten per-field directives it carried
+  from the source tree, which only one distribution reads:
+  `transformDedupKey`, `transformOrdering`, `transformFingerprintInput`,
+  `transformPartitionDate`, `transformStructural`,
+  `transformPersonEmail`, `transformPersonName`, `transformAccountId`,
+  `transformExternalUserId` and `transformForeignKey`, with its type
+  `ir.TransformForeignKeyDef`. No core decorator set them and no generator
+  read them. They also leave the `FieldDef` types of
+  `@superschematic/schema-ir` (the package root and `./schema-file`), the
+  schema-file JSON Schema (`./schema-file.json` and `superschematic
+  json-schema`), and `@superschematic/schema-runtime`, whose IR reader
+  read them and whose JSON Schema reader and writer read and wrote them as
+  `x-transform*` keys. A JSON or YAML schema file whose field carries one
+  now fails validation (`additional properties 'transformDedupKey' not
+  allowed`). The replacement is an extension decorator: a `DecoratorSpec`
+  on `TargetField` whose `Apply` writes the field's
+  `extensions.<extension>` slot, which every form carries as
+  `"extensions": {"<extension>": {"<directive>": <value>}}` (D18); acme's
+  `@feedKey` shows it. `temporalFormat` stays in the core. Major.
+- SQL and Go ORM: the history of every `@versioned` table (D17). Every
+  versioned table's `create.sql` and `drop.sql` change: a database built
+  from an older `create.sql` needs the capture function replaced and its
+  triggers recreated. A `BEFORE UPDATE` trigger
+  (`trg_<table>_bump_version`) sets `NEW._version = OLD._version + 1`, and
+  `trg_<table>_capture_history_write` is now `AFTER INSERT OR UPDATE` and
+  records the row as stored, so an `INSERT ... ON CONFLICT DO UPDATE`
+  records one `UPDATE` with the stored values; it recorded the proposed
+  insert as well. A delete tombstone's image is the pre-delete row with
+  `_version` set to the tombstone's version; its `deleted_by` (else
+  `updated_by`) is the actor in the `history_actor_setting` setting when
+  set, else the row's own. The ORM's hard deletes on a versioned table with
+  such a column (`DeleteOne`, `DeleteMany` and `DeleteOneIfVersion` without
+  `deletedAt`, `HardDeleteOne` with it) set the setting to the context user
+  for the statement and clear it after, inside a transaction. `GetVersion`
+  no longer returns a tombstone's image, and `GetAsOf` and the
+  `ListAsOfBy<Relation>ID` readers treat a key whose latest history row at
+  the time is a `DELETE`, or a soft-deleted image, as absent: `GetAsOf`
+  returned the pre-delete image as if the row were live. Major.
+
 - `@superschematic/schema-ir` carries the repository's one version, which
   `scripts/bump_version.py` writes, in place of a fixed `0.1.0`, and the
   release packs and publishes it with the other npm packages. Its
@@ -944,6 +1081,13 @@ of a generated artifact is always listed here with the bump it requires.
   type. An optional one that is absent reaches the implementation as its
   zero value, and a timestamp is parsed as a `QueryParam` one is; a
   malformed one answers 400. Patch.
+- A struct that holds itself through a cycle of relations to other
+  structs compiles in Go and Rust. The Rust types box a field whose struct
+  holds the owner back inline, as they boxed a direct self-reference, and
+  the ORM's field selections (`<Type>Fields`) take a pointer for such a
+  relation's nested selection, as for a self-relation. Output for a schema
+  without such a cycle is unchanged. Patch.
+
 - Go ORM: `CreateOne` and `CreateMany` insert a required enum field's
   declared default when the Go value is `""`, for an enum declared in the
   schema or imported from a dependency. They inserted `''`, which is not a

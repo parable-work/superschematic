@@ -1,0 +1,87 @@
+{
+  "name": "merge_rejects_resolution_without_take_or_value",
+  "op": "merge",
+  "input": {
+    "base": {},
+    "descriptor": {
+      "graph": "recipe",
+      "kinds": [
+        {
+          "author": "updated_by",
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "id": "id",
+          "key": "entity_key",
+          "kind": "step",
+          "order": "position",
+          "parent": {
+            "key": "parent_step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "tombstone": "deleted_on_ref",
+          "units": {
+            "inputs": "jsonSchema",
+            "timings": "keyed"
+          },
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "id": "id",
+          "key": "entity_key",
+          "kind": "ingredient",
+          "order": "position",
+          "parent": {
+            "key": "step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "id": "id",
+          "key": "entity_key",
+          "kind": "cover",
+          "ref": "ref",
+          "singleton": true,
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        }
+      ]
+    },
+    "ours": {},
+    "resolutions": [
+      {
+        "entityKey": "00000000-0000-4000-8000-00000000a002",
+        "kind": "step",
+        "path": "/title"
+      }
+    ],
+    "theirs": {}
+  },
+  "expect": {
+    "error": {
+      "code": "invalid_resolution",
+      "message": "resolutions[0]: give exactly one of take and value"
+    }
+  }
+}

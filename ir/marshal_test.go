@@ -71,7 +71,7 @@ func TestTypeDef_JSONFieldNamesVerbatim(t *testing.T) {
 	}
 
 	// Zero-valued optional fields must be omitted.
-	for _, key := range []string{"owner", "description", "isTrait", "traitConfig", "jsonField", "versioned", "envVars", "denyUnknownFields", "strictJSON"} {
+	for _, key := range []string{"owner", "description", "isTrait", "traitConfig", "jsonField", "versioned", "envVars", "denyUnknownFields", "strictJSON", "versionGraph", "graphMember", "origin"} {
 		if _, ok := raw[key]; ok {
 			t.Errorf("marshaled TypeDef should omit zero-valued key %q", key)
 		}
@@ -207,5 +207,70 @@ func TestTypeDefFlagKeyOrder(t *testing.T) {
 	want := `{"name":"Payload","role":"EmbeddedStruct","jsonField":true,"strictJSON":true,"versioned":true,"envVars":true,"denyUnknownFields":true}`
 	if string(got) != want {
 		t.Errorf("TypeDef JSON =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// TestVersionGraphIRRoundTrip: the version graph declarations and the
+// Origin markers survive a JSON and a YAML round trip, and a type, field,
+// index or enum without them marshals exactly as before they existed.
+func TestVersionGraphIRRoundTrip(t *testing.T) {
+	root := &TypeDef{Name: "Recipe", Role: RoleDBTable, VersionGraph: &VersionGraphConfig{Name: "Cookbook", SchemaEpoch: 2}}
+	member := &TypeDef{
+		Name: "Step", Role: RoleDBTable, Versioned: true,
+		GraphMember: &GraphMemberConfig{Graph: "Recipe", Parent: &GraphParent{Key: "parentKey", Of: "Step"}, Order: "position", Singleton: true},
+		Fields: []*FieldDef{
+			{Name: "timings", TypeRef: TypeRef{Name: "Generic.JSON"}, ConflictUnit: ConflictUnitKeyed},
+			{Name: "entityKey", TypeRef: TypeRef{Name: "Identity.UUID"}, Origin: OriginVersionGraph},
+		},
+		Indexes: []IndexDef{{Keys: []string{"entityKey", "ref"}, Unique: true, Origin: OriginVersionGraph}},
+	}
+	generated := &TypeDef{Name: "CookbookRef", Role: RoleDBTable, Origin: OriginVersionGraph}
+	for _, td := range []*TypeDef{root, member, generated} {
+		data, err := json.Marshal(td)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fromJSON TypeDef
+		if err := json.Unmarshal(data, &fromJSON); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(td, &fromJSON) {
+			t.Errorf("JSON round trip of %s:\n%+v\n%+v", td.Name, td, &fromJSON)
+		}
+		out, err := yaml.Marshal(td)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fromYAML TypeDef
+		if err := yaml.Unmarshal(out, &fromYAML); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(td, &fromYAML) {
+			t.Errorf("YAML round trip of %s:\n%+v\n%+v", td.Name, td, &fromYAML)
+		}
+	}
+	if root.VersionGraphName() != "Cookbook" || (&TypeDef{Name: "Menu", VersionGraph: &VersionGraphConfig{}}).VersionGraphName() != "Menu" || member.VersionGraphName() != "" {
+		t.Error("VersionGraphName must be the declared name, else the root's name, and empty off a root")
+	}
+
+	for _, v := range []any{
+		FieldDef{Name: "title", TypeRef: TypeRef{Name: "string"}},
+		IndexDef{Keys: []string{"title"}},
+		EnumDef{Name: "Status", Values: []EnumValueDef{{Name: "Open"}}},
+		PruneReference{Table: "t", KeyColumn: "k", VersionColumn: "v"},
+	} {
+		data, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var keys map[string]any
+		if err := json.Unmarshal(data, &keys); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"origin", "conflictUnit"} {
+			if _, ok := keys[key]; ok {
+				t.Errorf("%T writes %q at its zero value: %s", v, key, data)
+			}
+		}
 	}
 }

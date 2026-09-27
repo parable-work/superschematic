@@ -169,6 +169,12 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if def.Versioned {
 		fmt.Fprintf(&e.body, "@%s%s\n", e.use("versioned"), versionedConfigArgs(def.VersionedConfig))
 	}
+	if def.VersionGraph != nil {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), versionGraphArgs(def.VersionGraph))
+	}
+	if def.GraphMember != nil {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("graphMember"), e.graphMemberArgs(def.GraphMember))
+	}
 	if def.EnvVars {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("envVars"))
 	}
@@ -240,6 +246,40 @@ func versionedConfigArgs(cfg *ir.VersionedConfig) string {
 		}
 	}
 	return fmt.Sprintf("({ %s })", strings.Join(parts, ", "))
+}
+
+// versionGraphArgs renders the @versionGraph config, or nothing for the
+// zero config.
+func versionGraphArgs(cfg *ir.VersionGraphConfig) string {
+	var parts []string
+	if cfg.Name != "" {
+		parts = append(parts, "name: "+quote(cfg.Name))
+	}
+	if cfg.SchemaEpoch != 0 {
+		parts = append(parts, fmt.Sprintf("schemaEpoch: %d", cfg.SchemaEpoch))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
+}
+
+// graphMemberArgs renders the @graphMember config. graph and parent.of name
+// classes as values, imported when a sibling file declares them.
+func (e *emitter) graphMemberArgs(cfg *ir.GraphMemberConfig) string {
+	e.recordHeritageImports(cfg.Graph)
+	parts := []string{"graph: " + cfg.Graph}
+	if p := cfg.Parent; p != nil {
+		e.recordHeritageImports(p.Of)
+		parts = append(parts, fmt.Sprintf("parent: { key: %s, of: %s }", quote(p.Key), p.Of))
+	}
+	if cfg.Order != "" {
+		parts = append(parts, "order: "+quote(cfg.Order))
+	}
+	if cfg.Singleton {
+		parts = append(parts, "singleton: true")
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
 // heritageClause renders " extends Base implements A, B" from RawHeritage
@@ -348,6 +388,9 @@ func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 	if fd.TemporalFormat != "" {
 		out = append(out, e.use("temporalFormat")+fmt.Sprintf("(%s)", quote(fd.TemporalFormat)))
 	}
+	if fd.ConflictUnit != "" {
+		out = append(out, e.use("conflictUnit")+fmt.Sprintf("(%s)", quote(fd.ConflictUnit)))
+	}
 	return out
 }
 
@@ -372,6 +415,7 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 	rest.SourceMustProject = false
 	rest.Exclude = false
 	rest.TemporalFormat = ""
+	rest.ConflictUnit = ""
 	rest.Relation = nil
 	rest.HasMany, rest.ManyToMany = false, false
 	if !isZeroField(&rest) {
