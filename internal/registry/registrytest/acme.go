@@ -2,11 +2,12 @@
 // against: "acme", modelled on the acme-schematic worked example in
 // docs/extension-model.md section 10. It exercises every registration seam
 // an extension has (a kind, decorators on every target, a document, a
-// generator) without touching a core file, which is the property the
-// extension model promises.
+// generator, behaviors) without touching a core file, which is the property
+// the extension model promises.
 package registrytest
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,13 +61,23 @@ type CatalogConfig struct {
 // carries it verbatim under FieldDef.extensions.acme.shelf.
 var ShelfArgs = json.RawMessage(`{"type":"object","required":["aisle"],"properties":{"aisle":{"type":"integer","minimum":0},"bay":{"type":"string"}},"additionalProperties":false}`)
 
+// The behavior declarations, each a JSON file beside this package (D16):
+// acme.Stock takes a config, adds a field and two operations; acme.Audited
+// takes none and requires acme.Stock.
+var (
+	//go:embed stock.behavior.json
+	StockBehavior json.RawMessage
+	//go:embed audited.behavior.json
+	AuditedBehavior json.RawMessage
+)
+
 // OutDir is where the catalog generator writes for a service.
 func OutDir(outputRoot, service string) string {
 	return filepath.Join(outputRoot, "catalog", service)
 }
 
 // Register adds the Catalog kind, the four decorators, the catalogConfig
-// document and the catalog generator.
+// document, the catalog generator and the two behaviors.
 func (Acme) Register(r *registry.Registry) error {
 	pkgs := []string{Package}
 	return errors.Join(
@@ -138,6 +149,8 @@ func (Acme) Register(r *registry.Registry) error {
 			},
 			Generate: generateCatalog,
 		}),
+		r.RegisterBehavior(registry.BehaviorSpec{Extension: "acme", Declaration: StockBehavior}),
+		r.RegisterBehavior(registry.BehaviorSpec{Extension: "acme", Declaration: AuditedBehavior}),
 	)
 }
 

@@ -225,7 +225,8 @@ func mapKeys2[V any](m map[string]V) []string {
 // default is that value. For each field of each IR struct a document
 // reaches, the test encodes the struct with that field at its empty value
 // (a pointer to a zero value, an empty slice or map, a zero scalar) and
-// looks for the key in the output, through the struct's own encoder.
+// looks for the key in the output, through the struct's own encoder. A raw
+// JSON value's default is {}, which the readers store as the empty value.
 func TestDefaultsAreWhatTheEncoderOmits(t *testing.T) {
 	data, err := Definition()
 	if err != nil {
@@ -288,6 +289,11 @@ func TestDefaultsAreWhatTheEncoderOmits(t *testing.T) {
 			case hasDefault:
 				sawDefault = true
 				want, _ := json.Marshal(empty.Interface())
+				if field.Type == reflect.TypeFor[json.RawMessage]() {
+					// Empty raw JSON is no JSON text; the readers store a
+					// value of {} as it (TestDecodeBehaviors).
+					want = []byte("{}")
+				}
 				if got, _ := json.Marshal(fallback); string(got) != string(want) {
 					t.Errorf("$defs/%s/properties/%s default = %s, want %s", typ.Name(), name, got, want)
 				}

@@ -9,8 +9,8 @@ An extension is a Go package that implements `registry.Extension` and,
 optionally, `cli.CommandProvider`. You pass it to `cli.New`. The core
 binary (`cmd/superschematic`) passes none. Everything project-specific
 registers here: kinds, decorators, documents, generators, build-all
-hooks, auth providers, checks, OpenAPI hooks, tool hooks and extra
-commands.
+hooks, auth providers, checks, OpenAPI hooks, tool hooks, behaviors and
+extra commands.
 
 `examples/acme-schematic` is the acceptance test of this model. It adds one
 of each surface without editing a file under the core, and
@@ -121,8 +121,9 @@ func (Extension) Register(r *registry.Registry) error {
 ```
 
 `Name()` is the key of the extension's slot everywhere: `extensions.acme`
-on every IR node, `[extension.acme]` in `superschematic.toml`, and the
-`Extension` field of every spec it registers. `Register` runs once per
+on every IR node, `[extension.acme]` in `superschematic.toml`, the
+`Extension` field of every spec it registers, and the `acme.` prefix of
+its behaviors' names. It may not contain a dot. `Register` runs once per
 registry assembly, before `Finalize` checks the result (a generator naming
 a kind nobody registered, two decorators with the same name, a document on
 an unknown kind are assembly errors).
@@ -474,6 +475,80 @@ names in `[extension.acme]`. A policy's settings belong in the extension's
 own table, not in the core's naming keys. See
 [Projection views](/superschematic/reference/projections/).
 
+## A behavior
+
+A behavior is code that adds fields, operations, checks and storage to a
+type when an engine runs the schema. The compiler declares, carries and
+checks behaviors; it runs none. An extension declares one in a JSON file
+beside its Go package, embeds it and registers it:
+
+```go
+//go:embed rating.behavior.json
+var ratingDeclaration json.RawMessage
+
+r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDeclaration})
+```
+
+```json
+{
+  "name": "acme.Rating",
+  "description": "Shoppers rate a catalog item from one star to the configured maximum.",
+  "configSchema": {
+    "type": "object",
+    "required": ["maxStars"],
+    "additionalProperties": false,
+    "properties": { "maxStars": { "type": "integer", "minimum": 3, "maximum": 10 } }
+  },
+  "fields": [
+    { "name": "ratingCount", "description": "How many ratings the item has." },
+    { "name": "ratingAverage", "description": "The mean rating; 0 before the first." }
+  ],
+  "operations": [
+    {
+      "name": "rate",
+      "description": "Records one shopper's rating of the item.",
+      "paramsSchema": { "type": "object", "required": ["stars"], "properties": { "stars": { "type": "integer", "minimum": 1 } } },
+      "resultSchema": { "type": "object", "properties": { "ratingCount": { "type": "integer" }, "ratingAverage": { "type": "number" } } },
+      "writes": true,
+      "invocationPolicy": "always"
+    }
+  ]
+}
+```
+
+- `name` is `<extension>.<Name>`, with the extension's own `Name()` as
+  the prefix. Only the core declares bare names.
+- `configSchema` is the JSON Schema of what a type passes; leave it out
+  for a behavior that takes no config.
+- `requires` and `conflicts` name other behaviors a type must, or may not,
+  list with this one.
+- `fields` carry a name and a description. The loader refuses a field
+  that collides with the type's own or another behavior's.
+- `operations` are camelCase and may not be `create`, `get`, `list`,
+  `update` or `delete`, which every schema has. `paramsSchema` is an
+  object schema. `invocationPolicy` is a value of the registry's tool
+  invocation policy; left out, the policy's default applies.
+
+Assembly fails on a malformed declaration, and `Finalize` on a
+`requires` or `conflicts` name nobody registered or an invocation policy
+value the registry's policy does not have.
+
+A type composes behaviors in the data forms. The list is ordered, and a
+type lists a behavior once:
+
+```json
+"behaviors": [{ "name": "acme.Rating", "config": { "maxStars": 5 } }]
+```
+
+The loader checks each entry against its declaration and names the type
+and the behavior when it fails; `json-schema` limits the names to the
+registered behaviors and holds each config to its schema. No generator
+renders behaviors yet, so `build` refuses such a schema and names the
+generator; `build --emit-ir`, `format` and `json-schema` accept it. A
+generator whose output covers what behaviors add sets
+`GeneratorSpec.RendersBehaviors`. acme's `shop-ratings` service
+(`ext/testdata/services`) composes `acme.Rating`.
+
 ## A command
 
 `cli.New` returns `build`, `build-all`, `json-schema` and `format`. An
@@ -487,7 +562,7 @@ func (Extension) Commands() []*cobra.Command {
 
 acme's `describe [<schemas-root>]` assembles the registry the way `build`
 does and prints every kind, document, output key, auth provider and check,
-and the tool invocation policy. Run it when a schema is rejected: it shows
+the tool invocation policy and every behavior. Run it when a schema is rejected: it shows
 what the binary knows.
 
 A command that works on built output, such as one that pins consumers to

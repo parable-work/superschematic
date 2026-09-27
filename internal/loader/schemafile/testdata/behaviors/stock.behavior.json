@@ -1,0 +1,43 @@
+{
+  "name": "acme.Stock",
+  "description": "Counts the units of an item on hand.",
+  "configSchema": {
+    "type": "object",
+    "required": ["aisles"],
+    "additionalProperties": false,
+    "properties": {
+      "aisles": { "type": "integer", "minimum": 1 },
+      "unit": { "type": "string" }
+    }
+  },
+  "fields": [
+    { "name": "onHand", "description": "Units on hand." }
+  ],
+  "operations": [
+    {
+      "name": "restock",
+      "description": "Adds units to the count on hand.",
+      "paramsSchema": {
+        "type": "object",
+        "required": ["quantity"],
+        "additionalProperties": false,
+        "properties": { "quantity": { "type": "integer", "minimum": 1 } }
+      },
+      "resultSchema": {
+        "type": "object",
+        "properties": { "onHand": { "type": "integer" } }
+      },
+      "writes": true,
+      "invocationPolicy": "ask"
+    },
+    {
+      "name": "countStock",
+      "description": "Returns the count on hand.",
+      "paramsSchema": { "type": "object", "additionalProperties": false },
+      "resultSchema": {
+        "type": "object",
+        "properties": { "onHand": { "type": "integer" } }
+      }
+    }
+  ]
+}

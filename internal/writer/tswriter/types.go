@@ -44,6 +44,13 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 	if len(def.Extensions) > 0 {
 		e.failf("type %s: extension data (%s) has no TypeScript authoring form in this writer", def.Name, strings.Join(sortedKeys(def.Extensions), ", "))
 	}
+	if len(def.Behaviors) > 0 {
+		names := make([]string, len(def.Behaviors))
+		for i, ref := range def.Behaviors {
+			names[i] = ref.Name
+		}
+		e.failf("type %s: behaviors (%s) have no TypeScript authoring form in this writer yet", def.Name, strings.Join(names, ", "))
+	}
 
 	switch def.Role {
 	case ir.RoleDBTable:

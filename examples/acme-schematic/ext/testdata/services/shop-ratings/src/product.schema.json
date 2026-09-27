@@ -1,0 +1,22 @@
+{
+  "scalars": {
+    "Identity.Slug": {
+      "name": "Identity.Slug",
+      "languagePrimitive": "string"
+    }
+  },
+  "types": {
+    "Product": {
+      "name": "Product",
+      "comment": "A catalog item shoppers rate. The behavior adds its rating fields and operations.",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        { "name": "acme.Rating", "config": { "maxStars": 5 } }
+      ],
+      "fields": [
+        { "name": "sku", "typeRef": { "name": "Identity.Slug" }, "required": true },
+        { "name": "name", "typeRef": { "name": "string" }, "required": true }
+      ]
+    }
+  }
+}

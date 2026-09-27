@@ -18,7 +18,8 @@
 //   - Adds the TypeScript-shaped concepts the schema language needs:
 //     [TypeDef.Role], pre-flattened inheritance ([TypeDef.Extends] with
 //     [FieldDef.InheritedFrom]), traits ([TypeDef.Implements],
-//     [TypeDef.IsTrait], [TypeDef.TraitConfig]), raw heritage clauses
+//     [TypeDef.IsTrait], [TypeDef.TraitConfig]), behaviors
+//     ([TypeDef.Behaviors]), raw heritage clauses
 //     ([RawHeritage]), verified cross-layer projections ([SourceRef],
 //     [FieldDef.Virtual]), node-attached comments (Comment fields are IR
 //     metadata and round-trip through every format), language primitives

@@ -1,0 +1,22 @@
+{
+  "scalars": {
+    "Identity.Slug": {
+      "name": "Identity.Slug",
+      "languagePrimitive": "string"
+    }
+  },
+  "types": {
+    "Item": {
+      "name": "Item",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        { "name": "acme.Stock", "config": { "aisles": 3, "unit": "box" } },
+        { "name": "acme.Audited" }
+      ],
+      "fields": [
+        { "name": "sku", "typeRef": { "name": "Identity.Slug" }, "required": true },
+        { "name": "name", "typeRef": { "name": "string" }, "required": true }
+      ]
+    }
+  }
+}

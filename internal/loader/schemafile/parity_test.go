@@ -53,7 +53,9 @@ type parityVector struct {
 // parityRegistry is the core registry plus what a deployment's registry
 // may add and the loader must read from its JSON Schema: a kind, extension
 // decorators on every target that has a slot, documents with and without
-// a schema, and an invocation policy under another key.
+// a schema, an invocation policy under another key, and behaviors
+// (testdata/behaviors): acme.Stock takes a required config, acme.Audited
+// none.
 func parityRegistry(t *testing.T) *registry.Registry {
 	t.Helper()
 	reg := fixtureRegistry(t)
@@ -64,6 +66,15 @@ func parityRegistry(t *testing.T) *registry.Registry {
 		Extension: "acme", Key: "review", Values: []string{"never", "always"}, Default: "never",
 	}); err != nil {
 		t.Fatal(err)
+	}
+	for _, file := range []string{"stock.behavior.json", "audited.behavior.json"} {
+		declaration, err := os.ReadFile(filepath.Join("testdata", "behaviors", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.RegisterBehavior(registry.BehaviorSpec{Extension: "acme", Declaration: declaration}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return reg
 }
@@ -250,6 +261,34 @@ var parityInputs = []struct{ name, registry, input string }{
 		{"name": "deleteOrder", "typeRef": {"name": "Order"}, "mcp": {"handle": "delete_order", "hidden": false, "review": "always"}}]}`},
 	{"the core policy key under a registry's policy", "extended", `{"kind": "OperationSet", "name": "Ops", "operations": [
 		{"name": "deleteOrder", "typeRef": {"name": "Order"}, "mcp": {"handle": "delete_order", "hidden": false, "invocationPolicy": "ask"}}]}`},
+
+	// A registry's behaviors: the names it registers, each config held to
+	// its declaration's config schema and stored canonically, {} as none.
+	// The Go reader checks names and configs before the JSON Schema runs;
+	// the verdicts are the JSON Schema's.
+	{"behaviors with and without a config", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [
+		{"name": "acme.Stock", "config": {"unit": "box", "aisles": 2}}, {"name": "acme.Audited"}]}`},
+	{"a behavior config of {} is stored as none", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [
+		{"name": "acme.Stock", "config": {"aisles": 1}}, {"name": "acme.Audited", "config": { }}]}`},
+	{"behavior config numbers and key order", "extended", `{"types": {"Item": {"name": "Item", "role": "DBTable", "behaviors": [
+		{"config": {"unit": "<crate>", "aisles": 1E1}, "name": "acme.Stock"}]},
+		"Bin": {"name": "Bin", "role": "DBTable", "behaviors": [{"name": "acme.Stock", "config": {"aisles": 12345678901234567890}}]},
+		"Box": {"name": "Box", "role": "DBTable", "behaviors": [{"name": "acme.Stock", "config": {"aisles": 3.0, "unit": ""}}]}}}`},
+	{"an empty behavior list is dropped", "extended", `{"name": "Item", "role": "DBTable", "behaviors": []}`},
+	{"an empty behavior list under the core", "core", `{"name": "Item", "role": "DBTable", "behaviors": []}`},
+	{"a behavior under the core", "core", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Audited"}]}`},
+	{"an unregistered behavior", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Ghost"}]}`},
+	{"an unregistered behavior in a document", "extended", `{"types": {"Item": {"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Ghost"}]}}}`},
+	{"a behavior config its schema rejects", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Stock", "config": {"aisles": 0}}]}`},
+	{"a behavior config with a key its schema lacks", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Stock", "config": {"aisles": 1, "colour": "red"}}]}`},
+	{"a behavior config with a fraction for an integer", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Stock", "config": {"aisles": 1.5}}]}`},
+	{"a missing required behavior config", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Stock"}]}`},
+	{"a required behavior config of {}", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Stock", "config": {}}]}`},
+	{"a config for a behavior that takes none", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Audited", "config": {"on": true}}]}`},
+	{"a null behavior config", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Audited", "config": null}]}`},
+	{"an unknown key on a behavior entry", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Audited", "extra": 1}]}`},
+	{"a behavior entry without its name", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"config": {"aisles": 1}}]}`},
+	{"a behavior name that is not a string", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": 3}]}`},
 }
 
 // parityFiles are data-form files the JSON writer wrote for the loader's

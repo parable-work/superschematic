@@ -20,6 +20,8 @@
 //   - a policy over the core @mcp decorator: every operation of the shop
 //     API is classified, the tool documents carry acme's vendor keys, and
 //     acme's confirm key replaces the core invocation policy (mcp.go);
+//   - a behavior, acme.Rating, declared in rating.behavior.json, that a
+//     type composes in the data forms (behavior.go);
 //   - two subcommands through cli.CommandProvider: describe (command.go) and
 //     fields, which type-checks a declaration file with the loader's
 //     compiler (fields.go).
@@ -98,6 +100,9 @@ func (Extension) Register(r *registry.Registry) error {
 		return err
 	}
 	if err := registerProjectionPolicy(r, cfg); err != nil {
+		return err
+	}
+	if err := registerBehavior(r); err != nil {
 		return err
 	}
 	return r.RegisterAuthProvider(auth.Provider{})

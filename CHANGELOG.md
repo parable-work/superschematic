@@ -19,9 +19,10 @@ of a generated artifact is always listed here with the bump it requires.
   node type the JSON Schema defines, and `./schema-file.json` is the JSON
   Schema `superschematic json-schema` prints with no extension linked and
   the built-in names. The types leave open what a registry closes: the
-  extension slots, the documents, the schema kinds and the MCP invocation
-  policy key. `internal/tools/schemafiletypes` writes both from the IR
-  structs; `make schema-file-types` regenerates them, and
+  extension slots, the documents, the schema kinds, the MCP invocation
+  policy key and the behavior names and configs.
+  `internal/tools/schemafiletypes` writes both from the IR structs;
+  `make schema-file-types` regenerates them, and
   `make schema-file-types-check` and CI fail when a committed copy
   differs. The package root (`index.d.ts`) is unchanged. Minor.
 - The schema-file JSON Schema gives the MCP invocation policy key its
@@ -48,6 +49,42 @@ of a generated artifact is always listed here with the bump it requires.
   number that is not a pointer (`""`, `false`, `0`) and an `omitempty`
   list or map (`[]`, `{}`). The readers accept and decode the same
   payloads as before. Minor.
+- Behavior declarations in the compiler (D16). A behavior adds fields,
+  operations, checks and storage to a type when an engine runs the schema;
+  the compiler declares, carries and checks behaviors and runs none.
+  `Registry.RegisterBehavior(BehaviorSpec{Extension, Declaration})` parses
+  one JSON declaration (`BehaviorDeclaration`: `name`, `description`,
+  `configSchema`, `requires`, `conflicts`, `fields`, `operations` with
+  `paramsSchema`, `resultSchema`, `writes` and `invocationPolicy`) and
+  fails assembly on a malformed one: a core name is bare, an extension's
+  is `<extension>.<Name>`, operations are camelCase and not `create`,
+  `get`, `list`, `update` or `delete`, and `Finalize` checks `requires`,
+  `conflicts` and the invocation policy values. `Registry.Behavior`,
+  `Behaviors` and `BehaviorNames` read them back; the public `registry`
+  package aliases the types. The IR `TypeDef` gains `behaviors`
+  (`ir.BehaviorRef{Name, Config}`, after `implements`, omitted when empty,
+  so existing IR is unchanged), with `ir.CanonicalizeBehaviors` and
+  `Schema.FindBehavior`. The JSON and YAML forms carry
+  `behaviors: [{name, config}]` with the config stored canonically, and the
+  schema-file JSON Schema gains `TypeDef.behaviors` and `$defs/BehaviorRef`,
+  closed to the registered behaviors with each config held to its schema
+  (no entry is valid when none is registered) and `{}` as the config's
+  default. The schema-file TypeScript types carry `behaviors` and
+  `BehaviorRef`, and the strict loader in `@superschematic/schema-runtime`
+  reads them as the Go reader does, storing a config of `{}` as none; the
+  parity vectors cover behaviors. The compiler's loader refuses, naming
+  the type and the behavior, an unregistered behavior, one listed twice, a
+  config its schema rejects, a missing requirement, a conflict, a field
+  that collides with the type's own or another behavior's, and two
+  behaviors adding the same operation. `generator.Run` refuses a schema
+  whose types compose a behavior when an enabled generator does not set
+  the new `GeneratorSpec.RendersBehaviors`, naming the generator; no core
+  generator sets it, so `build` fails and `build --emit-ir`, `format` and
+  `json-schema` accept the schema. The TypeScript writer refuses behaviors.
+  The core declares none; the acme example declares `acme.Rating`. Minor,
+  except that `Registry.Use` now rejects an extension name that contains
+  a dot, which separates an extension from its behaviors' names: an
+  extension so named must be renamed. Major for that case only.
 - Go types: every generated enum has a `Values()` method that returns its
   members in schema declaration order, as a new slice on each call. It is
   the Go counterpart of Rust's `ALL`, and it works through the alias a

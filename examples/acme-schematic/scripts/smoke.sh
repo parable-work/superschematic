@@ -14,7 +14,8 @@
 #   1. the acme module builds, vets and passes its tests;
 #   2. `describe` lists the Catalog kind, the document, the apikey provider
 #      the checks (the icon and audience checks, the @mcp check on API and
-#      the projection check on DB) and acme's tool invocation policy;
+#      the projection check on DB), acme's tool invocation policy and its
+#      behavior;
 #   3. build-all over the schemas root builds all five services, whose
 #      schema.config.ts files import the config package under acme's own
 #      name ([package_aliases] "@acme/schema-config"), and the sentinels it
@@ -69,7 +70,13 @@
 #      argument of replaceVariants reached the IR, the SQL (JSONB), the ORM's
 #      JSON codec, the Go and TypeScript types, the Go routes, the OpenAPI
 #      document and the tool documents as a list of lists, and the ORM and
-#      API modules that carry it compile.
+#      API modules that carry it compile;
+#  18. acme.Rating, the behavior acme declares, reaches the IR of the
+#      shop-ratings service (ext/testdata), whose data-form type composes
+#      it; json-schema limits behavior names to it and format converts the
+#      file to YAML; build refuses the service, naming the types generator,
+#      which does not render behaviors; the core-only binary refuses the
+#      behavior by name.
 #
 # Step 16 also needs bun and installs hono and the generated types package's
 # dependencies from the npm registry.
@@ -114,6 +121,7 @@ grep -q '^documents: catalog.config (catalog.config.yaml)$' "$OUT/describe.txt"
 grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.txt"
 grep -q '^checks: acmeIcons (every kind), acmeDocsAudience (every kind), acmeToolsClassified (API), acmeProjectionScope (DB)$' "$OUT/describe.txt"
 grep -q '^tool invocation policy: confirm (never, always; default never)$' "$OUT/describe.txt"
+grep -q '^behaviors: acme.Rating$' "$OUT/describe.txt"
 
 echo "==> build-all over the schemas root, every config importing the aliased config package"
 rm -rf "$DIST"
@@ -379,5 +387,26 @@ jq -e '.tools[] | select(.name == "product.createProduct") | .parameters.propert
 # The ORM module compiles with the JSONB column; the API module that
 # imports it compiled above.
 go_module_compiles "$DIST/orm/shop-db"
+
+echo "==> behaviors: acme.Rating on a data-form General schema"
+# shop-ratings sits outside the schemas root: build-all would refuse it,
+# since no generator renders behaviors yet.
+RATINGS="$EXAMPLE_DIR/ext/testdata/services/shop-ratings"
+"$OUT/acme-schematic" build "$RATINGS" --emit-ir --out "$OUT/ratings-dist" >"$OUT/ratings-ir.json"
+jq -e '.types.Product.behaviors == [{"name": "acme.Rating", "config": {"maxStars": 5}}]' "$OUT/ratings-ir.json" >/dev/null
+"$OUT/acme-schematic" json-schema >"$OUT/acme-schema-file.json"
+jq -e '."$defs".BehaviorRef.properties.name.enum == ["acme.Rating"]' "$OUT/acme-schema-file.json" >/dev/null
+"$OUT/acme-schematic" format --to=yaml --stdout "$RATINGS/src/product.schema.json" >"$OUT/ratings.schema.yaml"
+grep -qx '          maxStars: 5' "$OUT/ratings.schema.yaml"
+if "$OUT/acme-schematic" build "$RATINGS" --out "$OUT/ratings-dist" >"$OUT/ratings-build.log" 2>&1; then
+  echo "ERROR: build generated a type whose behavior no generator renders" >&2
+  exit 1
+fi
+grep -q 'generator: types does not render behaviors yet: type Product composes behavior acme.Rating' "$OUT/ratings-build.log"
+if "$OUT/superschematic" build "$RATINGS" --emit-ir --naming "$OUT/session.toml" --out "$OUT/core-ratings-dist" >"$OUT/core-ratings.log" 2>&1; then
+  echo "ERROR: the core-only binary accepted acme.Rating" >&2
+  exit 1
+fi
+grep -q 'behavior "acme.Rating" on type "Product" is not a registered behavior (none are registered)' "$OUT/core-ratings.log"
 
 echo "acme smoke: ok"

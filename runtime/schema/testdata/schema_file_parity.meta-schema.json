@@ -57,6 +57,76 @@
       ],
       "type": "object"
     },
+    "BehaviorRef": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "acme.Audited"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "acme.Stock"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "aisles": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "unit": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "aisles"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "config": {
+          "default": {}
+        },
+        "name": {
+          "enum": [
+            "acme.Audited",
+            "acme.Stock"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "Document": {
       "additionalProperties": false,
       "properties": {
@@ -1582,6 +1652,13 @@
     "TypeDef": {
       "additionalProperties": false,
       "properties": {
+        "behaviors": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BehaviorRef"
+          },
+          "type": "array"
+        },
         "comment": {
           "default": "",
           "type": "string"

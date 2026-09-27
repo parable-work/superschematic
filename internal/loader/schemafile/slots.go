@@ -12,9 +12,11 @@ import (
 
 // checkSlotNames rejects, by name, an "extensions" key that is not a
 // registered extension or a "documents" key that is not a registered
-// document, anywhere the decoded form carries such a slot. The JSON Schema
-// would reject the same payloads through additionalProperties: false, but
-// its message names a JSON pointer; this one names the key and where it sits.
+// document, anywhere the decoded form carries such a slot, and a type's
+// behavior entry that names no registered behavior or has a config its
+// declaration rejects. The JSON Schema would reject the same payloads, but
+// its message names a JSON pointer; this one names the key or behavior and
+// where it sits.
 func checkSlotNames(payload map[string]any, f form, reg *registry.Registry) error {
 	switch f {
 	case formDocument:
@@ -33,6 +35,9 @@ func checkSlotNames(payload map[string]any, f form, reg *registry.Registry) erro
 				if err := checkTypeExtensionNames(td, fmt.Sprintf("type %q", name), reg); err != nil {
 					return err
 				}
+				if err := checkBehaviorRefs(td, fmt.Sprintf("type %q", name), reg); err != nil {
+					return err
+				}
 			}
 		}
 		if sets, ok := payload["operationSets"].([]any); ok {
@@ -48,7 +53,10 @@ func checkSlotNames(payload map[string]any, f form, reg *registry.Registry) erro
 		}
 	case formType:
 		name, _ := payload["name"].(string)
-		return checkTypeExtensionNames(payload, fmt.Sprintf("type %q", name), reg)
+		if err := checkTypeExtensionNames(payload, fmt.Sprintf("type %q", name), reg); err != nil {
+			return err
+		}
+		return checkBehaviorRefs(payload, fmt.Sprintf("type %q", name), reg)
 	case formOperationSet:
 		return checkOperationSetExtensionNames(payload, reg)
 	}
@@ -118,6 +126,44 @@ func checkDocumentNames(payload map[string]any, reg *registry.Registry) error {
 	for _, name := range sortedKeys(docs) {
 		if !slices.Contains(registered, name) {
 			return unknownSlotName("documents", name, "the document", registered)
+		}
+	}
+	return nil
+}
+
+// checkBehaviorRefs checks each entry of a type's "behaviors" list against
+// the registry: the name is a registered behavior and the config passes
+// its declaration's config schema. Entries whose shape is wrong are left to
+// the JSON Schema.
+func checkBehaviorRefs(td map[string]any, where string, reg *registry.Registry) error {
+	refs, _ := td["behaviors"].([]any)
+	for _, raw := range refs {
+		ref, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, ok := ref["name"].(string)
+		if !ok {
+			continue
+		}
+		behavior, ok := reg.Behavior(name)
+		if !ok {
+			known := "none are registered"
+			if names := reg.BehaviorNames(); len(names) > 0 {
+				known = "registered: " + strings.Join(names, ", ")
+			}
+			return fmt.Errorf("behavior %q on %s is not a registered behavior (%s)", name, where, known)
+		}
+		var config json.RawMessage
+		if value, present := ref["config"]; present {
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				return fmt.Errorf("%s: behavior %s config: %w", where, name, err)
+			}
+			config = encoded
+		}
+		if err := behavior.ValidateConfig(config); err != nil {
+			return fmt.Errorf("%s: %w", where, err)
 		}
 	}
 	return nil

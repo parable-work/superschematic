@@ -32,7 +32,8 @@ func defProperties(root map[string]any, def string) map[string]any {
 func TestTypeScriptDeclarationsRefuseWhatTheyCannotExpress(t *testing.T) {
 	policyKey := core().ToolInvocationPolicy().Key
 	kinds := core().Kinds()
-	if _, err := renderDeclarations(coreDefinition(t), kinds, policyKey); err != nil {
+	behaviors := core().BehaviorNames()
+	if _, err := renderDeclarations(coreDefinition(t), kinds, policyKey, behaviors); err != nil {
 		t.Fatalf("the core schema: %v", err)
 	}
 
@@ -88,11 +89,35 @@ func TestTypeScriptDeclarationsRefuseWhatTheyCannotExpress(t *testing.T) {
 			},
 			want: "$defs/TypeDef has no extensions property",
 		},
+		"behavior names that are not the registry's": {
+			edit: func(root map[string]any) {
+				defProperties(root, "BehaviorRef")["name"].(map[string]any)["enum"] = []any{"acme.Stock"}
+			},
+			want: "$defs/BehaviorRef/properties/name: expected a string enum of the registry's behaviors",
+		},
+		"a behavior config closed in the core": {
+			edit: func(root map[string]any) {
+				defProperties(root, "BehaviorRef")["config"].(map[string]any)["type"] = "object"
+			},
+			want: `$defs/BehaviorRef/properties/config: unsupported JSON Schema keyword "type"`,
+		},
+		"a behavior list the core does not limit": {
+			edit: func(root map[string]any) {
+				delete(defProperties(root, "TypeDef")["behaviors"].(map[string]any), "maxItems")
+			},
+			want: "$defs/TypeDef/properties/behaviors: expected a list of BehaviorRef, with maxItems 0 when the registry has no behavior",
+		},
+		"no behavior config": {
+			edit: func(root map[string]any) {
+				delete(defProperties(root, "BehaviorRef"), "config")
+			},
+			want: "$defs/BehaviorRef has no name or no config property",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := coreDefinition(t)
 			tc.edit(root)
-			_, err := renderDeclarations(root, kinds, policyKey)
+			_, err := renderDeclarations(root, kinds, policyKey, behaviors)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want %q", err, tc.want)
 			}
