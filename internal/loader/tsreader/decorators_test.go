@@ -242,6 +242,53 @@ export abstract class Tenant {
 			},
 		},
 		{
+			name: "version graph argument errors",
+			kind: "DB",
+			source: `import { Identity } from "superscalar";
+import { Relation, conflictUnit, graphMember, key, versionGraph, versioned } from "@superschematic/db";
+// @ts-expect-error schemaEpoch is not a number
+@versionGraph({ schemaEpoch: "one" })
+export abstract class Recipe {
+  @key
+  id: Identity.UUID;
+}
+@versioned
+// @ts-expect-error graph is not a class
+@graphMember({ graph: "Recipe" })
+export abstract class Step {
+  @key
+  id: Identity.UUID;
+  recipe: Relation<Recipe>;
+}
+@versioned
+// @ts-expect-error unknown key
+@graphMember({ graph: Recipe, rank: "position" })
+export abstract class Note {
+  @key
+  id: Identity.UUID;
+  recipe: Relation<Recipe>;
+}
+@versioned
+@graphMember({ graph: Recipe })
+@graphMember({ graph: Recipe })
+export abstract class Cover {
+  @key
+  id: Identity.UUID;
+  recipe: Relation<Recipe>;
+  // @ts-expect-error not a strategy
+  @conflictUnit("rows")
+  caption: string;
+}
+`,
+			want: []string{
+				"a.schema.ts:4:1: @versionGraph schemaEpoch must be an integer literal",
+				"a.schema.ts:11:23: @graphMember expects a schema class here",
+				`a.schema.ts:19:37: @graphMember config has unknown key "rank"`,
+				"a.schema.ts:27:1: a type belongs to at most one version graph: @graphMember appears 2 times",
+				`a.schema.ts:33:3: @conflictUnit "rows" is not a strategy (atomic, keyed, jsonSchema, excluded)`,
+			},
+		},
+		{
 			name: "middleware errors keep the operation",
 			kind: "API",
 			source: `import { rateLimit } from "@superschematic/api";

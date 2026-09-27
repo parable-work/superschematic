@@ -156,25 +156,50 @@ CREATE INDEX idx_{{ $table.Name }}_search_trgm ON {{ $table.QuotedName }} USING 
 
 CREATE OR REPLACE FUNCTION {{ $history.FunctionName }}() RETURNS trigger AS $$
 BEGIN
+  IF (TG_WHEN = 'BEFORE') THEN
+    -- BEFORE UPDATE: the stored row takes the next version.
+    NEW._version := OLD._version + 1;
+    RETURN NEW;
+  END IF;
   IF (TG_OP = 'DELETE') THEN
     -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
     -- the unique history index holds and the latest history row for a deleted key
-    -- is the DELETE. The data payload is the pre-delete image.
+    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
+    -- version.
+{{- if $history.ActorColumn }} Its {{ $history.ActorColumn }} is the actor a hard delete set in
+    -- {{ $history.ActorSetting }} for the statement, else the row's own value.
+{{- end }}
     INSERT INTO {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version, operation, data)
-    VALUES (OLD.{{ $history.QuotedKeyColumn }}, OLD._version + 1, 'DELETE', to_jsonb(OLD));
+    VALUES (
+      OLD.{{ $history.QuotedKeyColumn }},
+      OLD._version + 1,
+      'DELETE',
+      to_jsonb(OLD) || jsonb_build_object(
+        '_version', OLD._version + 1
+{{- if $history.ActorColumn }},
+        '{{ $history.ActorColumn }}', COALESCE(
+          NULLIF(current_setting('{{ $history.ActorSetting }}', true), '')::{{ $history.ActorColumnType }},
+          OLD.{{ $history.QuotedActorColumn }}
+        )
+{{- end }}
+      )
+    );
     RETURN OLD;
   END IF;
-  IF (TG_OP = 'UPDATE') THEN
-    NEW._version := OLD._version + 1;
-  END IF;
+  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
+  -- CONFLICT DO UPDATE records the one UPDATE it made.
   INSERT INTO {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version, operation, data)
   VALUES (NEW.{{ $history.QuotedKeyColumn }}, NEW._version, TG_OP, to_jsonb(NEW));
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE TRIGGER {{ $history.VersionTriggerName }}
+  BEFORE UPDATE ON {{ $history.QuotedSourceTableName }}
+  FOR EACH ROW EXECUTE FUNCTION {{ $history.FunctionName }}();
+
 CREATE TRIGGER {{ $history.WriteTriggerName }}
-  BEFORE INSERT OR UPDATE ON {{ $history.QuotedSourceTableName }}
+  AFTER INSERT OR UPDATE ON {{ $history.QuotedSourceTableName }}
   FOR EACH ROW EXECUTE FUNCTION {{ $history.FunctionName }}();
 
 CREATE TRIGGER {{ $history.DeleteTriggerName }}

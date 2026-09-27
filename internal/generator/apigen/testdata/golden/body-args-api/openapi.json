@@ -186,6 +186,229 @@
         ]
       }
     },
+    "/api/posts/search": {
+      "get": {
+        "description": "Search posts by score, rank, flag, related post, date and code.",
+        "operationId": "TagSearchPostsHandler",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "scores",
+            "required": false,
+            "schema": {
+              "items": {
+                "format": "double",
+                "maximum": 10,
+                "minimum": 0,
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "ranks",
+            "required": false,
+            "schema": {
+              "items": {
+                "description": "Positive JavaScript-safe ordering rank",
+                "format": "int64",
+                "type": "integer"
+              },
+              "maxItems": 3,
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "flags",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "boolean"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "related",
+            "required": false,
+            "schema": {
+              "items": {
+                "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "items": {
+                "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "codes",
+            "required": false,
+            "schema": {
+              "items": {
+                "maxLength": 4,
+                "minLength": 2,
+                "pattern": "^[a-z]+$",
+                "type": "string"
+              },
+              "maxItems": 4,
+              "minItems": 2,
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "caption",
+            "required": false,
+            "schema": {
+              "maxLength": 5,
+              "minLength": 2,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "description": "Positive JavaScript-safe ordering rank",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pinned",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "author",
+            "required": false,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "tags",
+            "required": false,
+            "schema": {
+              "items": {
+                "minLength": 2,
+                "type": "string"
+              },
+              "maxItems": 2,
+              "type": "array"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "searchPosts",
+        "tags": [
+          "tag"
+        ]
+      }
+    },
     "/api/posts/tags": {
       "get": {
         "description": "Find posts by label; the labels travel in the query string.",
@@ -282,6 +505,7 @@
               "schema": {
                 "properties": {
                   "caption": {
+                    "minLength": 2,
                     "type": "string"
                   },
                   "pinned": {
@@ -297,11 +521,14 @@
                   "rank": {
                     "description": "Positive JavaScript-safe ordering rank",
                     "format": "int64",
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
                     "type": "integer"
                   },
                   "related": {
                     "items": {
                       "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+                      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
                       "type": "string"
                     },
                     "nullable": true,
@@ -309,6 +536,7 @@
                   },
                   "score": {
                     "format": "double",
+                    "maximum": 10,
                     "type": "number"
                   }
                 },
@@ -490,6 +718,9 @@
                     "additionalProperties": {
                       "items": {
                         "description": "Valid HTTP/HTTPS URL",
+                        "format": "uri",
+                        "maxLength": 2048,
+                        "pattern": "^https://",
                         "type": "string"
                       },
                       "type": "array"
@@ -590,13 +821,19 @@
                     "items": {
                       "type": "string"
                     },
+                    "maxItems": 3,
                     "type": "array"
                   },
                   "links": {
                     "items": {
                       "description": "Valid HTTP/HTTPS URL",
+                      "format": "uri",
+                      "maxLength": 2048,
+                      "pattern": "^https://",
                       "type": "string"
                     },
+                    "maxItems": 2,
+                    "minItems": 1,
                     "nullable": true,
                     "type": "array"
                   },
@@ -609,6 +846,8 @@
                     "items": {
                       "description": "Positive JavaScript-safe ordering rank",
                       "format": "int64",
+                      "maximum": 9007199254740991,
+                      "minimum": 1,
                       "type": "integer"
                     },
                     "nullable": true,

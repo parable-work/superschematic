@@ -25,6 +25,7 @@ type TenantRepositoryInterface interface {
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *TenantUpdate) (*types.Tenant, error)
 	UpdateMany(ctx context.Context, filter *TenantFilter, update *TenantUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
 	DeleteMany(ctx context.Context, filter *TenantFilter) (int, error)
 }
 
@@ -44,6 +45,7 @@ type TenantUserRepositoryInterface interface {
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *TenantUserUpdate) (*types.TenantUser, error)
 	UpdateMany(ctx context.Context, filter *TenantUserFilter, update *TenantUserUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
 	DeleteMany(ctx context.Context, filter *TenantUserFilter) (int, error)
 	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
 }
@@ -172,6 +174,10 @@ func (r *NoOpTenantRepository) DeleteOne(_ context.Context, _ types.IdentityUUID
 	return nil
 }
 
+func (r *NoOpTenantRepository) DeleteOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64) error {
+	return nil
+}
+
 func (r *NoOpTenantRepository) DeleteMany(_ context.Context, _ *TenantFilter) (int, error) {
 	return 0, nil
 }
@@ -243,6 +249,10 @@ func (r *NoOpTenantUserRepository) UpdateMany(_ context.Context, _ *TenantUserFi
 }
 
 func (r *NoOpTenantUserRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpTenantUserRepository) DeleteOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64) error {
 	return nil
 }
 

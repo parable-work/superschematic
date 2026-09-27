@@ -184,6 +184,74 @@ export function versioned<TFunction extends Function>(_arg?: VersionedOptions | 
   return noopClassDecorator;
 }
 
+/** A schema class, referenced as a value in a decorator argument. */
+export type SchemaClass = abstract new (...args: never[]) => unknown;
+
+export interface VersionGraphOptions {
+  /**
+   * Prefixes the generated graph tables (snake_case) and types (PascalCase).
+   * Defaults to the root's name.
+   */
+  readonly name?: string;
+  /** Recorded on every commit of the graph. Defaults to 0. */
+  readonly schemaEpoch?: number;
+}
+
+/**
+ * Containment: the field `key` holds the parent row's entityKey, and `of` is
+ * a member type of the same graph, the member itself included.
+ */
+export interface GraphParent {
+  readonly key: string;
+  readonly of: SchemaClass;
+}
+
+export interface GraphMemberOptions {
+  /** The graph's root: the @versionGraph type. */
+  readonly graph: SchemaClass;
+  readonly parent?: GraphParent;
+  /** An Int64 field that orders siblings. */
+  readonly order?: string;
+  /** At most one live row of the kind per ref. */
+  readonly singleton?: boolean;
+}
+
+/**
+ * The merge unit of a graph member's field. `atomic` (the default) is the
+ * whole field; `keyed` is each top-level key of a JSON object; `jsonSchema`
+ * treats a JSON Schema object as units; `excluded` is not content.
+ */
+export type ConflictUnitStrategy = "atomic" | "keyed" | "jsonSchema" | "excluded";
+
+/**
+ * Marks the root of a version graph: the stable identity its member rows
+ * and generated graph tables reference. The root has one UUID @key and is
+ * never overlaid. superschematic generates the graph's ref, commit and
+ * patch tables and their enums from the declarations.
+ */
+export function versionGraph<TFunction extends Function>(target: TFunction): void;
+export function versionGraph(_options?: VersionGraphOptions): ClassDecorator;
+export function versionGraph<TFunction extends Function>(_arg?: VersionGraphOptions | TFunction): ClassDecorator | void {
+  if (typeof _arg === "function") {
+    return;
+  }
+  return noopClassDecorator;
+}
+
+/**
+ * Marks an entity kind of a version graph. The member must be @versioned,
+ * with one UUID @key, exactly one relation to the root and no deletedAt.
+ * superschematic adds its entityKey, ref and deletedOnRef fields.
+ */
+export function graphMember(_options: GraphMemberOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** Sets the merge unit of a graph member's field. */
+export function conflictUnit(_strategy: ConflictUnitStrategy): PropertyDecorator {
+  return noopPropertyDecorator;
+}
+
 export const key: PropertyDecorator = noopPropertyDecorator;
 export const unique: PropertyDecorator = noopPropertyDecorator;
 export const searchField: PropertyDecorator = noopPropertyDecorator;

@@ -100,6 +100,13 @@ type Naming struct {
 	// the schemas' readers expect.
 	MetadataKeyPrefix string `toml:"metadata_key_prefix"`
 
+	// HistoryActorSetting names the transaction-local Postgres setting the
+	// history trigger of a versioned table reads a hard delete's actor from:
+	// the tombstone's image carries it in deleted_by (or updated_by), and
+	// generated hard deletes set it from the context user for the statement.
+	// It is a custom setting, so it needs a dot: "<prefix>.<name>".
+	HistoryActorSetting string `toml:"history_actor_setting"`
+
 	// ScalarJSDocTag names the JSDoc tag the generated TypeScript types
 	// write above every scalar-typed field, followed by the scalar's
 	// canonical name: "scalar" gives `/** @scalar Contact.Email */`. A tool
@@ -301,6 +308,7 @@ func Default() Naming {
 		PackageAuthor:           "superschematic",
 		MetaSchemaURLPrefix:     "superschematic://",
 		MetadataKeyPrefix:       "superschematic.",
+		HistoryActorSetting:     "superschematic.history_actor_id",
 		AuthProvider:            "session",
 		AuthoringPackages: []string{
 			"@superschematic/api",
@@ -343,6 +351,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.PackageAuthor, d.PackageAuthor)
 	fill(&n.MetaSchemaURLPrefix, d.MetaSchemaURLPrefix)
 	fill(&n.MetadataKeyPrefix, d.MetadataKeyPrefix)
+	fill(&n.HistoryActorSetting, d.HistoryActorSetting)
 	fill(&n.AuthProvider, d.AuthProvider)
 	if len(n.AuthoringPackages) == 0 {
 		n.AuthoringPackages = append([]string(nil), d.AuthoringPackages...)
@@ -577,8 +586,17 @@ func Parse(data []byte, name string) (Naming, error) {
 	if n.ScalarJSDocTag != "" && !jsdocTagRE.MatchString(n.ScalarJSDocTag) {
 		return Naming{}, fmt.Errorf("naming: %s: scalar_jsdoc_tag %q is not a JSDoc tag name: use letters, digits and _, not starting with a digit, without the @", name, n.ScalarJSDocTag)
 	}
-	return n.OrDefault(), nil
+	n = n.OrDefault()
+	if !historyActorSettingRE.MatchString(n.HistoryActorSetting) {
+		return Naming{}, fmt.Errorf("naming: %s: history_actor_setting %q is not a custom Postgres setting name: use two or more identifiers (letters, digits and _, not starting with a digit) joined by dots", name, n.HistoryActorSetting)
+	}
+	return n, nil
 }
+
+// historyActorSettingRE is the setting names history_actor_setting accepts:
+// dotted identifiers, the form Postgres takes for a custom setting, so the
+// name also sits in a generated SQL string literal without quoting.
+var historyActorSettingRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$`)
 
 // jsdocTagRE is the tag names scalar_jsdoc_tag accepts: an identifier, so
 // the tag parses as one in a JSDoc comment and cannot close the comment.

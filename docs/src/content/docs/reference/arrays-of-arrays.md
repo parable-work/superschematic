@@ -187,9 +187,10 @@ The same paths appear where each target checks a payload:
   the same way.
 - The Go ORM reads a JSON column that holds an object type through that
   type's decoder, so a null element stored in one of its lists fails the
-  read. A list or list-of-lists column is decoded into its Go list
-  directly: a null element another writer stored there reads as the
-  element type's zero value.
+  read. A list or list-of-lists column fails the read too, with
+  `labels[0][1]: null element`; a null inner list reads as a nil list. A
+  `Generic.JSON[]` column reads a stored null element as the JSON null
+  token.
 - The Rust types carry no validators: serde refuses a null inner list, and
   list bounds are not checked.
 

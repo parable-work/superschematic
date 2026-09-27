@@ -22,8 +22,9 @@ Path and query parameters arrive as strings: decodeParam reads them, and a
 query list accepts repeated keys and comma-separated values. Every body
 parameter arrives as a JSON value, so decodeJsonParam reads it as one: a
 number is not accepted for a string nor a string for a number, a list is a
-JSON array whose elements are never split or dropped, and an object value
-is parsed by the generated strict parser the spec carries.
+JSON array whose elements are never split or dropped, a map is a JSON
+object whose values are checked as list elements, and an object value is
+parsed by the generated strict parser the spec carries.
 */
 
 /**
@@ -57,6 +58,11 @@ export interface ParamSpec {
   readonly isArray?: boolean;
   /** A list of lists (T[][]), always a body parameter; isArray is also set. See decodeListOfLists. */
   readonly isArrayOfArrays?: boolean;
+  /**
+   * A map (Record<string, T>), always a body parameter; with isArray, a map
+   * of lists (Record<string, T[]>). See decodeMap.
+   */
+  readonly isMap?: boolean;
   /** Serialized member values when kind is 'enum'. */
   readonly enumValues?: readonly string[];
   /** Applied when the parameter is absent. */
@@ -343,9 +349,47 @@ export function decodeListOfLists(location: ParamLocation, spec: ParamSpec, valu
 }
 
 /**
+ * Decodes a map (Record<string, T>, or Record<string, T[]> when isArray is
+ * set) from its JSON body value, with the rules the Go router's map
+ * arguments follow:
+ *
+ * - the map is the parameter: absent or null is refused when required, and
+ *   anything but a JSON object is `type` ("expected an object"); an empty
+ *   object is valid;
+ * - a value is never null (`required`, "required field", at name[key]) and
+ *   passes the checks of a T[] element at name[key];
+ * - in a map of lists a value is a list (`type`, "expected an array", at
+ *   name[key]), and each element is never null and passes the checks of a
+ *   T[] element at name[key][i]. An empty list is valid.
+ *
+ * listMin and listMax do not bound a map or its lists, as in the generated
+ * types. A key is data: the result is built with Object.fromEntries, so
+ * `__proto__` stays an own key.
+ */
+export function decodeMap(location: ParamLocation, spec: ParamSpec, value: unknown): Record<string, unknown> | undefined {
+  if (value === undefined || value === null) {
+    if (spec.required) refuse(location, spec, 'required');
+    return undefined;
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return refuse(location, spec, 'expected an object', [{ validator: 'type', message: 'expected an object' }]);
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]): [string, unknown] => {
+      const path = `${spec.name}[${key}]`;
+      if (!spec.isArray) return [key, decodeListElement(location, spec, path, entry)];
+      if (entry === null || entry === undefined) refuseAt(location, spec, path, 'required', 'required field');
+      if (!Array.isArray(entry)) refuseAt(location, spec, path, 'type', 'expected an array');
+      return [key, entry.map((item: unknown, i) => decodeListElement(location, spec, `${path}[${i}]`, item))];
+    })
+  );
+}
+
+/**
  * Decodes a body parameter from its JSON value. The Hono adapter reads every
  * body parameter this way; only path and query values are strings.
  *
+ * - a map is decodeMap;
  * - T[][] is decodeListOfLists;
  * - T[] follows the same list rules one level down: the list is the
  *   parameter (required means present, an empty list is valid, listMin and
@@ -365,6 +409,7 @@ export function decodeListOfLists(location: ParamLocation, spec: ParamSpec, valu
  * path or query value would.
  */
 export function decodeJsonParam(location: ParamLocation, spec: ParamSpec, value: unknown): unknown {
+  if (spec.isMap) return decodeMap(location, spec, value);
   if ((value === undefined || value === null) && spec.defaultValue !== undefined && !spec.isArrayOfArrays && spec.kind !== 'object') {
     return decodeParam(location, spec, undefined);
   }

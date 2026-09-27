@@ -35,6 +35,11 @@
 // A generated route builds one Arg per body argument when it is created
 // and decodes a request's arguments with Value, List, ListOfLists, Map or
 // MapOfLists.
+//
+// The list arguments of a GET operation travel in the query string instead.
+// QueryList reads one with the same Arg and the same rules: each item is
+// read as its kind's JSON value and then checked as a list element at
+// name[i].
 package bodyargs
 
 import (
@@ -44,9 +49,11 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/url"
 	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/parable-work/superschematic/runtime/schema/go/validate"
 )
@@ -355,6 +362,66 @@ func MapOfLists[T any](errs validate.ValidationErrors, body Body, arg *Arg) map[
 	return values
 }
 
+// QueryList decodes a list argument of a GET operation from the query
+// string: every occurrence of the argument's key, each split on commas, each
+// item trimmed and an empty item dropped (?labels=a,b&labels=c is [a b c]).
+// No item is an absent list: nil, and "required" when the argument is
+// required. ListMin and ListMax bound the number of items.
+//
+// Each item is read as its kind's JSON value, then checked and decoded as a
+// list element at name[i]. A Number or Integer item is a JSON number ("type"
+// otherwise, so NaN, Infinity and 0x10 are refused, and an Integer's 1.5 is
+// "type" when it decodes), a Boolean item is one strconv.ParseBool accepts,
+// and an item of any other kind is its text as a JSON string.
+func QueryList[T any](errs validate.ValidationErrors, query url.Values, arg *Arg) []T {
+	var items []string
+	for _, raw := range query[arg.name] {
+		for _, item := range strings.Split(raw, ",") {
+			if item = strings.TrimSpace(item); item != "" {
+				items = append(items, item)
+			}
+		}
+	}
+	if len(items) == 0 {
+		if arg.required {
+			errs.AddFieldError(arg.name, "required", "required field")
+		}
+		return nil
+	}
+	arg.checkBounds(errs, len(items))
+	values := make([]T, len(items))
+	for i, item := range items {
+		path := fmt.Sprintf("%s[%d]", arg.name, i)
+		raw, ok := arg.kind.fromQuery(item)
+		if !ok {
+			errs.AddFieldError(path, "type", arg.kind.typeMessage())
+			continue
+		}
+		decode(errs, arg, path, raw, &values[i])
+	}
+	return values
+}
+
+// fromQuery reads a query string item as a JSON value of the kind. ok is
+// false for a Number or Integer item that is not a JSON number and a Boolean
+// item strconv.ParseBool refuses.
+func (k Kind) fromQuery(item string) (json.RawMessage, bool) {
+	switch k {
+	case Number, Integer:
+		raw := json.RawMessage(item)
+		return raw, k.matches(raw) && json.Valid(raw)
+	case Boolean:
+		b, err := strconv.ParseBool(item)
+		if err != nil {
+			return nil, false
+		}
+		return json.RawMessage(strconv.FormatBool(b)), true
+	default:
+		raw, err := json.Marshal(item)
+		return raw, err == nil
+	}
+}
+
 // object reads a map argument: absent or null is "required" when the
 // argument is required, and anything but a JSON object is "type". ok is
 // false when there is no map to decode.
@@ -392,13 +459,18 @@ func (a *Arg) list(errs validate.ValidationErrors, body Body) (elements []json.R
 	if elements == nil {
 		elements = []json.RawMessage{}
 	}
-	if a.listMin >= 0 && len(elements) < a.listMin {
+	a.checkBounds(errs, len(elements))
+	return elements, true
+}
+
+// checkBounds applies ListMin and ListMax to a list of n elements.
+func (a *Arg) checkBounds(errs validate.ValidationErrors, n int) {
+	if a.listMin >= 0 && n < a.listMin {
 		errs.AddFieldError(a.name, "listMin", fmt.Sprintf("must contain at least %d items", a.listMin))
 	}
-	if a.listMax >= 0 && len(elements) > a.listMax {
+	if a.listMax >= 0 && n > a.listMax {
 		errs.AddFieldError(a.name, "listMax", fmt.Sprintf("must contain at most %d items", a.listMax))
 	}
-	return elements, true
 }
 
 // decode checks one non-null value and decodes it into target, recording at

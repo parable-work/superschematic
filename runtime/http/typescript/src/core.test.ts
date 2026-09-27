@@ -377,6 +377,75 @@ describe('JSON body parameters of a scalar, enum or JSON type', () => {
   });
 });
 
+describe('JSON body parameters that are maps', () => {
+  const shades = (over: Partial<ParamSpec> = {}): ParamSpec => ({ name: 'shades', kind: 'enum', enumValues: ['light', 'dark'], required: true, isMap: true, ...over });
+  const refusedAt = (spec: ParamSpec, value: unknown, path: string | undefined, validator: string, message: string) => {
+    expect(() => decodeJsonParam('body', spec, value)).toThrow(
+      expect.objectContaining({
+        status: 400,
+        code: 'bad_request',
+        message: `Invalid body parameter ${path ?? spec.name}: ${message}`,
+        details: { location: 'body', parameter: spec.name, ...(path !== undefined ? { path } : {}), reason: message, errors: [{ validator, message }] },
+      })
+    );
+  };
+
+  test('a map is a JSON object whose values reach the implementation as they are checked', () => {
+    expect(decodeJsonParam('body', shades(), { a: 'light', b: 'dark' })).toEqual({ a: 'light', b: 'dark' });
+    expect(decodeJsonParam('body', shades(), {})).toEqual({});
+    const links = shades({ name: 'links', kind: 'string', enumValues: undefined, isArray: true });
+    expect(decodeJsonParam('body', links, { en: ['https://a.test'], fr: [] })).toEqual({ en: ['https://a.test'], fr: [] });
+    // A key is data: __proto__ stays an own key and changes no prototype.
+    const decoded = decodeJsonParam('body', shades(), JSON.parse('{"__proto__": "light"}')) as Record<string, unknown>;
+    expect(Object.keys(decoded)).toEqual(['__proto__']);
+    expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
+  });
+
+  test('the map is the parameter: required means present, and it must be an object', () => {
+    for (const value of [undefined, null]) {
+      expect(() => decodeJsonParam('body', shades(), value)).toThrow(expect.objectContaining({ details: { location: 'body', parameter: 'shades', reason: 'required' } }));
+      expect(decodeJsonParam('body', shades({ required: false }), value)).toBeUndefined();
+    }
+    for (const value of ['light', ['light'], 5, true]) {
+      refusedAt(shades(), value, undefined, 'type', 'expected an object');
+    }
+  });
+
+  test('a value is never null and passes the checks of a list element, reported at name[key]', () => {
+    refusedAt(shades(), { a: 'light', b: null }, 'shades[b]', 'required', 'required field');
+    refusedAt(shades({ required: false }), { a: null }, 'shades[a]', 'required', 'required field');
+    refusedAt(shades(), { a: 5 }, 'shades[a]', 'type', 'expected a string');
+    expect(() => decodeJsonParam('body', shades(), { a: 'dim' })).toThrow(
+      expect.objectContaining({ details: expect.objectContaining({ path: 'shades[a]', reason: 'expected one of light, dark' }) })
+    );
+    const weights = shades({ name: 'weights', kind: 'number', enumValues: undefined, max: 1 });
+    refusedAt(weights, { w: '0.5' }, 'weights[w]', 'type', 'expected a number');
+    refusedAt(weights, { w: 2 }, 'weights[w]', 'max', 'must be at most 1');
+    const parse = (value: unknown) => {
+      if (typeof (value as { x?: unknown }).x !== 'number') throw new Error('parsePoint json validation failed');
+      return { ...(value as object), parsed: true };
+    };
+    const points = shades({ name: 'points', kind: 'object', enumValues: undefined, parse });
+    expect(decodeJsonParam('body', points, { p: { x: 1 } })).toEqual({ p: { x: 1, parsed: true } });
+    refusedAt(points, { p: [1] }, 'points[p]', 'type', 'expected an object');
+    expect(() => decodeJsonParam('body', points, { p: { x: 'far' } })).toThrow(
+      expect.objectContaining({ details: { location: 'body', parameter: 'points', path: 'points[p]', reason: 'does not match the declared type' } })
+    );
+  });
+
+  test('a map of lists: each value is a list, never null, its elements checked at name[key][i]; list bounds do not bound a map', () => {
+    const scalar = { name: 'Network.Url', pattern: '^https?://[a-z.]+$' };
+    const links = shades({ name: 'links', kind: 'string', enumValues: undefined, isArray: true, scalar, pattern: '^https://', listMin: 1, listMax: 1 });
+    expect(decodeJsonParam('body', links, { en: ['https://a.test', 'https://b.test'], fr: [] })).toEqual({ en: ['https://a.test', 'https://b.test'], fr: [] });
+    refusedAt(links, { en: null }, 'links[en]', 'required', 'required field');
+    refusedAt(links, { en: 'https://a.test' }, 'links[en]', 'type', 'expected an array');
+    refusedAt(links, { en: ['https://a.test', null] }, 'links[en][1]', 'required', 'required field');
+    refusedAt(links, { en: [5] }, 'links[en][0]', 'type', 'expected a string');
+    refusedAt(links, { en: ['not a url'] }, 'links[en][0]', 'pattern', 'is not a valid Network.Url');
+    refusedAt(links, { en: ['http://a.test'] }, 'links[en][0]', 'pattern', 'does not match the required pattern');
+  });
+});
+
 describe('permission gate', () => {
   test('mirrors the Go session runtime: exact and dotted prefix cover, no root permission', () => {
     expect(covers('reports', 'reports.export')).toBe(true);

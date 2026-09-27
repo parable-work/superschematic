@@ -43,6 +43,11 @@ type ORMOutput struct {
 	// it emits the encoder those columns write through.
 	HasArraysOfArrays bool
 
+	// HasJSONListFields is true when a JSONB column holds a list or a list
+	// of lists of a non-union type; it emits the decoder that refuses a null
+	// element in one (Field.JSONListDepth).
+	HasJSONListFields bool
+
 	// UUIDGoType is the Go type used for primary-key / foreign-key plumbing
 	// (e.g. "types.IdentityUUID"). Resolved from the schema's UUID-like
 	// scalar; all UUID-like superscalar aliases share one underlying type, so
@@ -56,6 +61,11 @@ type ORMOutput struct {
 
 	// Naming supplies the scalar and schema-ir module paths go.mod requires.
 	Naming naming.Naming
+
+	// HasHistoryActor is true when a versioned repository has a history
+	// actor column (Repository.HistoryActorCol); it emits the helpers its
+	// hard deletes set and clear Naming.HistoryActorSetting through.
+	HasHistoryActor bool
 
 	// ScalarLibReplacePath is the go.mod replace target for superscalar,
 	// relative to the output directory. Empty omits the directive.
@@ -101,6 +111,12 @@ type Repository struct {
 	Relationships          []Relationship
 	ReferencedBy           []InboundReference
 	OrderedMembers         []ColumnMember // fields + to-one FKs in schema order (matches DDL column order)
+
+	// HistoryActorCol is, on a versioned table, the column a delete
+	// tombstone records its actor in: deleted_by when the table has one,
+	// else updated_by, else empty. When it is set, generated hard deletes set
+	// the history actor setting from the context user for the statement.
+	HistoryActorCol string
 
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
@@ -160,6 +176,11 @@ type Field struct {
 	// Its four-byte JSON `null` token is a value, distinct from SQL NULL.
 	PreservesExplicitJSONNull bool
 
+	// HoldsAnyJSON is true for a scalar whose value is any JSON value
+	// (Generic.JSON). Its Go type keeps a JSON null as the null token, so a
+	// null element of a list of it reads as that token, not a zero value.
+	HoldsAnyJSON bool
+
 	// OptionalNilCheck is true when the optional/auto-generated insert path
 	// detects a set value with `input.X != nil` (pointer, slice, or map Go
 	// representations); false means reflect.ValueOf(...).IsZero() is used.
@@ -179,6 +200,34 @@ type Field struct {
 // ArrayDepth is 0 for T, 1 for T[] and 2 for T[][], as ir.TypeRef reports it.
 func (f Field) ArrayDepth() int {
 	return ir.TypeRef{IsArray: f.IsArray, IsArrayOfArrays: f.IsArrayOfArrays}.ArrayDepth()
+}
+
+// JSONListDepth is 1 for a JSONB column that holds a list (T[]) and 2 for
+// one that holds a list of lists (T[][]), and 0 for any other column. Two
+// lists are left out. A union list's decoder reads each element through the
+// union's wrapper, which refuses a null element itself. A Generic.JSON
+// list keeps a stored null element as the null token, which a reader can
+// tell from every value, and the ORM's tests pin that.
+func (f Field) JSONListDepth() int {
+	if !f.IsJSONField || f.IsMap || f.IsUnion || f.HoldsAnyJSON {
+		return 0
+	}
+	return f.ArrayDepth()
+}
+
+// JSONDecodeCall is the call that decodes the field's JSONB column payload,
+// src, into dst. A list column's decoder refuses a null element, as the
+// generated types' UnmarshalJSON does for a list field (D12, amended); a
+// Generic.JSON column's keeps the JSON null token as a value.
+func (f Field) JSONDecodeCall(src, dst string) string {
+	switch {
+	case f.PreservesExplicitJSONNull:
+		return "unmarshalGenericJSONFieldValue(" + src + ", " + dst + ")"
+	case f.JSONListDepth() > 0:
+		return fmt.Sprintf("unmarshalJSONListFieldValue(%s, %s, %q, %d)", src, dst, f.Name, f.JSONListDepth())
+	default:
+		return "unmarshalJSONFieldValue(" + src + ", " + dst + ")"
+	}
 }
 
 // ValueGoType is the Go type typegen emits for the field's value: GoType
@@ -207,6 +256,12 @@ type Relationship struct {
 	IsRequired                bool
 	IsArray                   bool // true for hasMany relationships
 	TargetPrimaryKeyIsPointer bool
+
+	// NestedByPointer makes a to-one relationship's Nested field selection
+	// a pointer: the target's field selection holds this type's, directly
+	// (a self-relation) or through a cycle of to-one relationships, so a
+	// value would give the selection struct no finite size.
+	NestedByPointer bool
 
 	// For hasMany relationships, these deterministic names point to the
 	// child's relation field back to this parent (e.g. "Connector") and the
@@ -303,11 +358,14 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	}
 
 	attachInboundReferences(repositories)
+	markNestedCycles(repositories)
 
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
+	hasHistoryActor := false
 	hasGenericJSON := false
 	hasArraysOfArrays := false
+	hasJSONListFields := false
 	for _, repo := range repositories {
 		if repo.HasSoftDelete {
 			hasSoftDeletes = true
@@ -315,12 +373,18 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		if repo.Versioned {
 			hasVersionedRepositories = true
 		}
+		if repo.HistoryActorCol != "" {
+			hasHistoryActor = true
+		}
 		for _, field := range repo.Fields {
 			if field.PreservesExplicitJSONNull {
 				hasGenericJSON = true
 			}
 			if field.IsArrayOfArrays {
 				hasArraysOfArrays = true
+			}
+			if field.JSONListDepth() > 0 {
+				hasJSONListFields = true
 			}
 		}
 	}
@@ -334,8 +398,10 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Repositories:             repositories,
 		HasSoftDeletes:           hasSoftDeletes,
 		HasVersionedRepositories: hasVersionedRepositories,
+		HasHistoryActor:          hasHistoryActor,
 		HasGenericJSON:           hasGenericJSON,
 		HasArraysOfArrays:        hasArraysOfArrays,
+		HasJSONListFields:        hasJSONListFields,
 		Timestamp:                opts.Clock.RFC3339(),
 		UUIDGoType:               uuidGoType,
 		UserIDGoType:             resolveUserIDGoType(tableTypes, scalarMap, uuidGoType),
@@ -673,6 +739,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 	}
 	if repo.Versioned {
 		appendVersionField(&repo)
+		repo.HistoryActorCol = historyActorColumn(repo.Fields)
 	}
 
 	reanchorOrderedMembers(&repo)
@@ -789,6 +856,7 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsDateLike:                traits.IsDateLike,
 		IsJSONLike:                traits.IsJSONLike || traits.IsObjectLike || fieldDef.TypeRef.IsMap,
 		PreservesExplicitJSONNull: preservesExplicitJSONNull,
+		HoldsAnyJSON:              isScalar && traits.IsAnyJSON,
 	}
 
 	nilCheckedJSONScalar := field.IsScalarType && field.IsJSONLike && !field.IsArray
@@ -911,6 +979,42 @@ func attachInboundReferences(repositories []Repository) {
 	}
 }
 
+// markNestedCycles sets NestedByPointer on every to-one relationship whose
+// target's field selection reaches back to the owner's.
+func markNestedCycles(repositories []Repository) {
+	toOne := make(map[string][]string, len(repositories))
+	for _, repo := range repositories {
+		for _, rel := range repo.Relationships {
+			if !rel.IsArray {
+				toOne[repo.TypeName] = append(toOne[repo.TypeName], rel.TargetType)
+			}
+		}
+	}
+	reaches := func(from, to string) bool {
+		seen := map[string]bool{}
+		stack := []string{from}
+		for len(stack) > 0 {
+			name := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if name == to {
+				return true
+			}
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			stack = append(stack, toOne[name]...)
+		}
+		return false
+	}
+	for i := range repositories {
+		for j := range repositories[i].Relationships {
+			rel := &repositories[i].Relationships[j]
+			rel.NestedByPointer = !rel.IsArray && reaches(rel.TargetType, repositories[i].TypeName)
+		}
+	}
+}
+
 // isAuditField reports whether name is one of the audit columns.
 func isAuditField(name string) bool {
 	switch name {
@@ -939,6 +1043,20 @@ func mapIRToGoType(irType string, scalars map[string]scalarLookup) string {
 	// Enums, object types, and unions all live in the types package under
 	// their own name.
 	return "types." + irType
+}
+
+// historyActorColumn returns the column a versioned table's delete
+// tombstone records its actor in, as sqlgen's history trigger picks it:
+// deleted_by when the table has one, else updated_by, else "".
+func historyActorColumn(fields []Field) string {
+	for _, name := range []string{"deleted_by", "updated_by"} {
+		for _, field := range fields {
+			if field.DBName == name {
+				return name
+			}
+		}
+	}
+	return ""
 }
 
 // computeImportNeeds derives the repository file's conditional imports from

@@ -404,7 +404,7 @@ jobs:
             echo "Every binary was built from commit \`$GITHUB_SHA\` and is listed in \`SHA256SUMS\`."
             echo "Verify provenance with: \`gh attestation verify <asset> --repo ${GITHUB_REPOSITORY}\`."
             echo
-            echo "Go modules: \`go get github.com/${GITHUB_REPOSITORY}@$TAG\`, \`.../ir@$TAG\`, \`.../runtime/schema/go@$TAG\`, \`.../runtime/http/go@$TAG\`."
+            echo "Go modules: \`go get github.com/${GITHUB_REPOSITORY}@$TAG\`, \`.../ir@$TAG\`, \`.../runtime/schema/go@$TAG\`, \`.../runtime/http/go@$TAG\`, \`.../runtime/versiongraph/go@$TAG\`."
           } > notes.md
           flags=()
           if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
@@ -427,15 +427,17 @@ jobs:
   publish-npm:
     name: publish npm
     # Registration (npmjs.com -> package -> Settings -> Trusted Publisher, once
-    # per package; the six exact names are
+    # per package; the seven exact names are
     #   @superschematic/schema
     #   @superschematic/db
     #   @superschematic/api
     #   @superschematic/schema-config
     #   @superschematic/schema-ir
     #   @superschematic/schema-runtime
+    #   @superschematic/http-runtime
     # with organization or user: parable-work, repository: superschematic,
-    #   workflow filename: release.yml, environment name: npm).
+    #   workflow filename: release.yml, environment name: npm, allowed
+    #   actions: npm publish as well as npm stage publish).
     # The @superschematic scope is an organization on npmjs.com that must
     # exist and be owned by the publisher before RELEASE_PUBLISH_ENABLED is
     # set. npm generates provenance on its own for trusted publishing.
@@ -468,12 +470,12 @@ jobs:
           name: release-assets
           path: release-assets
 
-      - name: Publish the six packages
+      - name: Publish the seven packages
         # The tarballs are the attested release assets, byte for byte. Order:
         # @superschematic/schema first, since the other authoring packages
         # name it in their docs, and @superschematic/schema-ir before the
         # schema runtime, which a consumer installs next to it; none of the
-        # six depends on another at install time.
+        # seven depends on another at install time.
         env:
           DIST_TAG: ${{ needs.preflight.outputs.npm_dist_tag }}
           VERSION: ${{ needs.preflight.outputs.version }}
@@ -483,7 +485,7 @@ jobs:
           npm --version
           node -e 'const [maj, min, pat] = process.versions.npm.split(".").map(Number); if (maj < 11 || (maj === 11 && (min < 5 || (min === 5 && pat < 1)))) { console.error("npm >= 11.5.1 is required for trusted publishing"); process.exit(1); }'
           cd release-assets/npm
-          for name in schema db api schema-config schema-ir schema-runtime; do
+          for name in schema db api schema-config schema-ir schema-runtime http-runtime; do
             tgz="superschematic-${name}-${VERSION}.tgz"
             echo "==> $tgz"
             npm publish "./$tgz" --access public --tag "$DIST_TAG"

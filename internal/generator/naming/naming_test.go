@@ -416,3 +416,37 @@ func TestScalarJSDocTagIsUnsetByDefaultAndMustBeATagName(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoryActorSettingDefaultsAndOverrides(t *testing.T) {
+	if got := Default().HistoryActorSetting; got != "superschematic.history_actor_id" {
+		t.Errorf("default HistoryActorSetting = %q", got)
+	}
+	got, err := Parse([]byte("history_actor_setting = \"acme.audit.actor\"\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HistoryActorSetting != "acme.audit.actor" {
+		t.Errorf("HistoryActorSetting = %q, want the file's value", got.HistoryActorSetting)
+	}
+	if (Naming{}).OrDefault().HistoryActorSetting != "superschematic.history_actor_id" {
+		t.Error("an empty HistoryActorSetting must fill from the defaults")
+	}
+	empty, err := Parse([]byte("history_actor_setting = \"\"\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("an empty value keeps the default, got %v", err)
+	}
+	if empty.HistoryActorSetting != "superschematic.history_actor_id" {
+		t.Errorf("empty HistoryActorSetting = %q, want the default", empty.HistoryActorSetting)
+	}
+}
+
+// TestHistoryActorSettingRejectsNonSettingNames: the value lands in a SQL
+// string literal and must be a name Postgres takes for a custom setting.
+func TestHistoryActorSettingRejectsNonSettingNames(t *testing.T) {
+	for _, value := range []string{"actor", "acme.", ".actor", "acme.1actor", "acme.actor'; DROP TABLE recipe; --", "acme actor.id"} {
+		_, err := Parse([]byte("history_actor_setting = \""+value+"\"\n"), "superschematic.toml")
+		if err == nil || !strings.Contains(err.Error(), "history_actor_setting") {
+			t.Errorf("history_actor_setting %q: err = %v, want a history_actor_setting error", value, err)
+		}
+	}
+}

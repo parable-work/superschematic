@@ -3,7 +3,8 @@
 // generated routes with an implementation that records what each call
 // received, and drives them over httptest with the vectors the TypeScript
 // server's scalar list test uses, plus required single values of every
-// builtin type, a UUID list and a list of objects.
+// builtin type, a UUID list and a list of objects, and the query string of
+// a GET operation.
 package bodyargsapi_test
 
 import (
@@ -16,6 +17,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -66,6 +68,14 @@ func (s *tags) PlacePoints(_ context.Context, id string, pointByName map[string]
 func (s *tags) FindTags(_ context.Context, labels []string) ([]string, error) {
 	s.record(map[string]any{"labels": labels})
 	return labels, nil
+}
+
+func (s *tags) SearchPosts(_ context.Context, tags []string, scores []float64, ranks []int64, flags []bool, related []types.IdentityUUID, days []types.TemporalDateTime, codes []string, caption string, limit float64, page int64, pinned bool, author types.IdentityUUID, since types.TemporalDateTime) ([]string, error) {
+	s.record(map[string]any{
+		"tags": tags, "scores": scores, "ranks": ranks, "flags": flags, "related": related, "days": days, "codes": codes,
+		"caption": caption, "limit": limit, "page": page, "pinned": pinned, "author": author, "since": since,
+	})
+	return codes, nil
 }
 
 func serve(t *testing.T) (*httptest.Server, *tags) {
@@ -119,6 +129,7 @@ const (
 	nameShadesPath    = "/api/posts/p1/shade-names"
 	placePointsPath   = "/api/posts/p1/points"
 	findTagsPath      = "/api/posts/tags"
+	searchPostsPath   = "/api/posts/search"
 )
 
 // accepted sends body and checks the implementation was called with it.
@@ -499,5 +510,128 @@ func TestAGETListReadsEveryQueryKey(t *testing.T) {
 	if want := []string{"a", "b", "c"}; !reflect.DeepEqual(impl.last["labels"], want) {
 		t.Errorf("labels = %#v, want %#v", impl.last["labels"], want)
 	}
-	refused(t, server, impl, http.MethodGet, findTagsPath, "")
+	// No value is an absent list: a required one is refused.
+	for _, query := range []string{"", "?labels=", "?labels=,%20"} {
+		refusedWith(t, server, impl, http.MethodGet, findTagsPath+query, "", fieldError{"labels", "required", "required field"})
+	}
+}
+
+// search sends a GET to searchPosts with query and returns what the
+// implementation received.
+func search(t *testing.T, server *httptest.Server, impl *tags, query string) map[string]any {
+	t.Helper()
+	accepted(t, server, impl, http.MethodGet, searchPostsPath+query, "")
+	return impl.last
+}
+
+func TestAGETListOfNumbersIntegersAndBooleansIsParsed(t *testing.T) {
+	server, impl := serve(t)
+	got := search(t, server, impl, "?scores=1.5,0&scores=10&ranks=1,2&flags=true,false&flags=1&scores=,")
+	if want := []float64{1.5, 0, 10}; !reflect.DeepEqual(got["scores"], want) {
+		t.Errorf("scores = %#v, want %#v", got["scores"], want)
+	}
+	if want := []int64{1, 2}; !reflect.DeepEqual(got["ranks"], want) {
+		t.Errorf("ranks = %#v, want %#v", got["ranks"], want)
+	}
+	if want := []bool{true, false, true}; !reflect.DeepEqual(got["flags"], want) {
+		t.Errorf("flags = %#v, want %#v", got["flags"], want)
+	}
+	if codes := got["codes"].([]string); codes != nil {
+		t.Errorf("an absent optional list = %#v, want nil", codes)
+	}
+}
+
+func TestAGETListOfUUIDsAndTimestampsIsParsed(t *testing.T) {
+	server, impl := serve(t)
+	const uuid = "0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e40"
+	got := search(t, server, impl, "?related="+uuid+"&days=2026-01-02T03:04:05Z")
+	if related := got["related"].([]types.IdentityUUID); len(related) != 1 || related[0].IsZero() {
+		t.Errorf("related = %v", related)
+	}
+	if days := got["days"].([]types.TemporalDateTime); len(days) != 1 || !time.Time(days[0]).Equal(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)) {
+		t.Errorf("days = %v", days)
+	}
+}
+
+func TestAGETListElementOfTheWrongTypeIsATypeErrorAtItsIndex(t *testing.T) {
+	server, impl := serve(t)
+	for _, tc := range []struct {
+		query string
+		want  fieldError
+	}{
+		{"?scores=1,x", fieldError{"scores[1]", "type", "expected a number"}},
+		{"?scores=NaN", fieldError{"scores[0]", "type", "expected a number"}},
+		{"?scores=1&scores=Infinity", fieldError{"scores[1]", "type", "expected a number"}},
+		{"?ranks=1,1.5", fieldError{"ranks[1]", "type", "expected an integer"}},
+		{"?ranks=two", fieldError{"ranks[0]", "type", "expected an integer"}},
+		{"?flags=true,yes", fieldError{"flags[1]", "type", "expected a boolean"}},
+		{"?related=0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e40,not%20a%20uuid", fieldError{"related[1]", "pattern", "invalid format"}},
+		{"?days=2026-01-02T03:04:05Z,yesterday", fieldError{"days[1]", "pattern", "invalid format"}},
+	} {
+		refusedWith(t, server, impl, http.MethodGet, searchPostsPath+tc.query, "", tc.want)
+	}
+}
+
+func TestAGETListAppliesTheListAndValueRulesNamedInCamelCase(t *testing.T) {
+	server, impl := serve(t)
+	for _, tc := range []struct {
+		query string
+		want  fieldError
+	}{
+		{"?scores=1,11", fieldError{"scores[1]", "max", "must be at most 10"}},
+		{"?scores=-1", fieldError{"scores[0]", "min", "must be at least 0"}},
+		// The scalar's own range: Ordering.Rank starts at 1.
+		{"?ranks=0", fieldError{"ranks[0]", "min", "must be at least 1"}},
+		{"?ranks=1,2,3,4", fieldError{"ranks", "listMax", "must contain at most 3 items"}},
+		{"?codes=ab", fieldError{"codes", "listMin", "must contain at least 2 items"}},
+		{"?codes=ab,x", fieldError{"codes[1]", "minLength", "must be at least 2 characters"}},
+		{"?codes=ab,abcde", fieldError{"codes[1]", "maxLength", "must be at most 4 characters"}},
+		{"?codes=ab,A1", fieldError{"codes[1]", "pattern", "invalid format"}},
+	} {
+		refusedWith(t, server, impl, http.MethodGet, searchPostsPath+tc.query, "", tc.want)
+	}
+	if got := search(t, server, impl, "?codes=ab,cd"); !reflect.DeepEqual(got["codes"], []string{"ab", "cd"}) {
+		t.Errorf("codes = %#v", got["codes"])
+	}
+}
+
+func TestAGETSingleValueAndAQueryParameterNameTheirRulesInCamelCase(t *testing.T) {
+	server, impl := serve(t)
+	for _, tc := range []struct {
+		query string
+		want  fieldError
+	}{
+		{"?caption=a", fieldError{"caption", "minLength", "must be at least 2 characters"}},
+		{"?caption=abcdef", fieldError{"caption", "maxLength", "must be at most 5 characters"}},
+		{"?tags=ab,cd,ef", fieldError{"tags", "listMax", "must contain at most 2 items"}},
+		{"?tags=a", fieldError{"tags", "minLength", ""}},
+	} {
+		refusedWith(t, server, impl, http.MethodGet, searchPostsPath+tc.query, "", tc.want)
+	}
+}
+
+func TestOptionalGETSingleValuesReachTheImplementation(t *testing.T) {
+	server, impl := serve(t)
+	const uuid = "0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e40"
+	got := search(t, server, impl, "?caption=hi&limit=2.5&page=3&pinned=true&author="+uuid+"&since=2026-01-02T03:04:05Z")
+	if got["caption"] != "hi" || got["limit"] != 2.5 || got["page"] != int64(3) || got["pinned"] != true {
+		t.Errorf("the implementation received %v", got)
+	}
+	if author := got["author"].(types.IdentityUUID); author.IsZero() {
+		t.Errorf("author = %v", author)
+	}
+	if since := got["since"].(types.TemporalDateTime); !time.Time(since).Equal(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)) {
+		t.Errorf("since = %v", since)
+	}
+	got = search(t, server, impl, "")
+	if got["caption"] != "" || got["limit"] != 0.0 || got["page"] != int64(0) || got["pinned"] != false {
+		t.Errorf("absent optional values reached the implementation as %v, want zero values", got)
+	}
+	if author := got["author"].(types.IdentityUUID); !author.IsZero() {
+		t.Errorf("an absent author = %v, want the zero UUID", author)
+	}
+	if since := got["since"].(types.TemporalDateTime); !time.Time(since).IsZero() {
+		t.Errorf("an absent since = %v, want the zero time", since)
+	}
+	refused(t, server, impl, http.MethodGet, searchPostsPath+"?since=yesterday", "")
 }

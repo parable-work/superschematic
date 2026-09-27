@@ -62,7 +62,7 @@ func New{{.Namespace.StructName}}(
 {{- if .HasScalarArgs}}
 type {{.ScalarInputStructName}} struct {
 	{{- range .ScalarArgs}}
-	{{- if .IsArray}}
+	{{- if or .IsArray .IsMap}}
 	{{- if not .Required}}
 	{{.GoName}} {{.GoType}} `json:"{{.Name}},omitzero"`
 	{{- else}}
@@ -251,7 +251,37 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- end}}
 	{{- if .HasScalarArgs}}
 	{{- range .ScalarArgs}}
-	{{- if .IsArrayOfArrays}}
+	{{- if .IsMap}}
+	// {{.Name}} is a map, sent as a JSON object; {} is a value.
+	{{- if .IsArray}}
+	// A list value is never nil, reported at {{.Name}}[key].
+	{{- end}}
+	{{- if not .IsGoPrimitive}}
+	// Each {{if .IsArray}}element{{else}}value{{end}} runs its own validation, reported at {{.Name}}[key]{{if .IsArray}}[i]{{end}}.
+	{{- end}}
+	{{- if .Required}}
+	if input.{{.GoName}} == nil {
+		validationErrors.AddFieldError("{{.Name}}", "required", "required field")
+	}
+	{{- end}}
+	{{- if .ValidatesMapValues}}
+	for key, value := range input.{{.GoName}} {
+		{{- if .IsArray}}
+		if value == nil {
+			validationErrors.AddFieldError(fmt.Sprintf("{{.Name}}[%s]", key), "required", "required field")
+			continue
+		}
+		{{- if not .IsGoPrimitive}}
+		for i := range value {
+			validateListElement(validationErrors, fmt.Sprintf("{{.Name}}[%s][%d]", key, i), &value[i])
+		}
+		{{- end}}
+		{{- else}}
+		validateListElement(validationErrors, fmt.Sprintf("{{.Name}}[%s]", key), &value)
+		{{- end}}
+	}
+	{{- end}}
+	{{- else if .IsArrayOfArrays}}
 	// {{.Name}} is an array of arrays: an inner list is never nil, reported
 	// at {{.Name}}[i]; an empty one is valid.
 	{{- if not .IsGoPrimitive}} Each element runs its own validation,

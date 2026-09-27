@@ -33,6 +33,7 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-general"},
 		{service: "fixture-nested-arrays"},
 		{service: "fixture-nested-arrays-db"},
+		{service: "fixture-version-graph-db"},
 		{service: "fixture-nested-arrays-api"},
 	}
 

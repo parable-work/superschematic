@@ -374,13 +374,22 @@ fields.
 | The check reads the raw bytes after `json.Unmarshal` has accepted them. A payload without a `null` token costs one byte search; one with a null anywhere costs one pass over the object's members. Each list is still decoded once. | Decoding each list through `[]json.RawMessage` and each element again |
 | A null inner list of `T[][]` still decodes, to a nil list, which `Validate` reports at `field[i]`. A map whose values are lists is not checked: no validator checks the elements of a map value. | Refusing a null inner list in the decoder too |
 
-One Go decode path does not go through a generated type's `UnmarshalJSON`
-and still decodes a null element to its zero value: a list or
-list-of-lists column the ORM reads, which it decodes into the Go list
-directly. The ORM writes no null elements; a row another writer stored
-with one reads with a zero value in its place. A list argument of an API
-operation without an input type, which the Go route decodes itself, is
-refused with a null element (below).
+A list or list-of-lists column the ORM reads does not go through a
+generated type's `UnmarshalJSON`: the ORM decodes its JSONB into the Go
+list directly, so a null element another writer stored read as the
+element type's zero value (`[["a", null]]` as `[["a", ""]]`) while an
+object column refused it. The ORM writes no null elements. It now decodes
+a list column through `unmarshalJSONListFieldValue`, which fails the read
+with `<field>[i]: null element` (`<field>[i][j]` for a list of lists)
+before `json.Unmarshal` runs; a payload without a `null` token is decoded
+once, and a null inner list still reads as a nil list. A union list
+refuses a null element in the union's wrapper, as before. A
+`Generic.JSON[]` column is left as it was: its Go type keeps a stored null
+element as the null token, which a reader can tell from every value, and
+the ORM's tests pin that reading. Whether it should refuse the element, as
+the generated types do, is open. A list argument of an API operation
+without an input type, which the Go route decodes itself, is refused with
+a null element (below).
 
 The generated TypeScript validator rejects a null element, validates a
 nested object element of every type, and reports a non-string element of a
@@ -419,9 +428,26 @@ that is absent or null reaches the implementation empty, as in the
 TypeScript server below. A map argument (`Record<string, T>`) is a JSON
 object whose values follow the element rules at `name[key]`, and a map of
 lists (`Record<string, T[]>`) has its elements at `name[key][i]`; list
-bounds do not bound a map, as in the generated types. A list argument of
-a `GET` operation is read from repeated query keys and comma-separated
-values, as in the TypeScript server.
+bounds do not bound a map, as in the generated types. The Go SDK types
+a map argument as the route takes it, `map[string]T` or
+`map[string][]T`, and checks each value at `name[key]` before it sends
+the request; it typed one as its value type.
+
+A list argument of a `GET` operation is read from repeated query keys and
+comma-separated values, as in the TypeScript server, by
+`bodyargs.QueryList` with the same `Arg` and the same rules. Each item is
+trimmed and an empty one dropped, and no item is an absent list
+(`required` when the argument is required). `listMin` and `listMax` bound
+the items. Each item is read as its type's JSON value (a number, an
+integer, a boolean as `strconv.ParseBool` reads it, or a string) and then
+checked as an element at `name[i]`: an item that is not a number is
+`type`, and the scalar's and the argument's rules and the type's own
+`Validate` follow. Before, the route cast each item's string to the
+element's Go type, which does not compile for a list of numbers,
+booleans, UUIDs or timestamps; reported an element's failure at `name`;
+answered a missing required list with a plain 400 message; and checked
+an element only against the argument's pattern and its type's
+`Validate`, which a number does not have.
 
 The TypeScript API server decodes every body argument from its JSON value
 with these rules, for a scalar, enum, object or `Generic.JSON` type, alone,
@@ -434,7 +460,12 @@ is `required` at `name[i]` or `name[i][j]`, `[]` satisfies a required list,
 and `listMin` and `listMax` bound the outer list. A scalar's own lengths,
 pattern and range apply to each value, and a failure is named by the rule
 it breaks (D14). A list in the query string is still read from repeated
-keys and comma-separated values.
+keys and comma-separated values. A map argument (`Record<string, T>`,
+`Record<string, T[]>`) follows the Go routes' map rules: a JSON object
+(`type` otherwise) whose values are checked as list elements at
+`name[key]`, a list value's elements at `name[key][i]`, and no list
+bounds. Before, the server typed and decoded a map argument as its value
+type.
 
 For `Generic.JSON` the server follows the rule every validator follows
 (D14, amended): a null value of a required field is `required`, a null
@@ -561,6 +592,11 @@ a list element and a list-of-lists element (`Network.Url`, and
 for length and range failures as a single field and a list element
 (`Network.Url` and `Identity.Name` for length, `Ordering.Rank`, an
 integer, and `Generic.Probability`, a float, for range).
+
+The Go API routes named a failure of a query parameter or a `GET`
+argument `min_length`, `max_length`, `list_min` or `list_max`. They use
+the names every other validator uses: `minLength`, `maxLength`, `listMin`
+and `listMax`.
 
 The names and the one-error rule are reversible until the first release.
 
@@ -766,12 +802,23 @@ the acme example declares one behavior (`acme.<Name>`) with its
 TypeScript implementation and no core edit, asserted by
 `scripts/smoke.sh` (section 10 of `docs/extension-model.md`).
 
-Status: nothing is built. The TypeScript types and the strict loader come
-first, because the engine and its publish checks read schemas through
-them; behavior declarations in the compiler follow. Each change that
-lands a piece updates this paragraph, the README layout table and the
-pages that describe it. The names and rules are reversible until the
-first release.
+Status: three pieces are built. `internal/tools/schemafiletypes` writes
+the data form's TypeScript types and meta-schema into
+`@superschematic/schema-ir` (`./schema-file`, `./schema-file.json`). The
+strict loader is in `@superschematic/schema-runtime`, held to the Go
+reader by `runtime/schema/testdata/schema_file_parity.json`
+(`runtime/schema/README.md`). Behavior declarations and the `@behavior`
+decorator are in the compiler (section 3.16 of `docs/extension-model.md`);
+the core declares no behavior yet, acme declares `acme.Rating`, and every
+generator refuses a type that declares one. To match the Go reader's
+canonical bytes, which drop a value its decoder cannot tell from an
+absent key, the meta-schema gives each such property that value as its
+default (section 5), and the loader needs `JSON.parse` source text access
+(Node.js 21 or later, or Bun). Not built: the tool that copies a
+declaration into its npm package, and the engine with its packages. Each
+change that lands a piece updates this paragraph, the README layout table
+and the pages that describe it. The names and rules are reversible until
+the first release.
 
 ## D17. A version graph over versioned tables, with one merge core
 
@@ -941,3 +988,65 @@ declaration into its npm package, and the engine with its packages. Each
 change that lands a piece updates this paragraph, the README layout table
 and the pages that describe it. The names and rules are reversible until
 the first release.
+
+## D18. A distribution's field directives live in its extension slot
+
+`ir.FieldDef` carried ten per-field directives from the source tree that
+only one distribution reads, the `transform*` fields: a data pipeline's
+dedup key and ordering column, its fingerprint inputs, its partition
+date, a structural flag, four identity tags and a foreign key to another
+source. No core decorator set them and no generator read them, but the
+schema-file JSON Schema admitted them, the TypeScript IR types declared
+them and the TypeScript schema runtime read and wrote them. They are
+removed, on this rule:
+
+- A per-field directive is a typed `FieldDef` field only when it means
+  the same in every deployment and the core owns that meaning: a core
+  decorator checks it, every form writes it, and the core's generators
+  and runtimes read it where they need it. `@docs` and `@mcp` on
+  operations and `@docs`, `@purpose` and `@icon` on fields are core on
+  that ground: operation docs and the MCP classification feed OpenAPI,
+  the SDKs and the tool documents, and field presentation is the same for
+  any settings UI. A distribution's policy over them is a check or a hook
+  (D10), and the one value of its own the loader needs, the MCP
+  invocation policy key, is a registration (D11).
+- Any other directive is an extension decorator. The extension registers
+  a `DecoratorSpec` on `TargetField` with its authoring package in
+  `Packages`, the kinds that allow it in `Kinds` and its argument's JSON
+  Schema in `Args` (none for a flag). `Apply` writes the field's
+  `Extensions[<extension>]` slot through `ir.UpdateExtension`, one member
+  of the extension's field struct per directive, and the extension's
+  generators and checks read it back with `ir.GetExtension`
+  (`docs/extension-model.md`, sections 3.4 and 4).
+- The seam carries the rest. Both frontends validate a use against
+  `Args` before `Apply` runs, the schema-file JSON Schema a binary prints
+  closes the slot to the registered directives, the IR and the JSON and
+  YAML forms carry `"extensions": {"<extension>": {"<directive>": <value>}}`,
+  and `format` writes the slot from TypeScript to JSON and YAML and
+  between the two. The TypeScript writer cannot render extension data yet
+  (`docs/extension-model.md`, section 11, gap 6); it could not render the
+  removed fields either.
+- Names follow D10. A key the core writes into output under a
+  distribution's namespace is a naming key, as `metadata_key_prefix` is
+  for the projection Arrow metadata; a key only the extension's own
+  generator writes is the extension's.
+
+`temporalFormat` stays a core field. It declares the wire encoding of a
+`Temporal.DateTime` value, an epoch unit instead of ISO text, which is a
+fact about any source that sends epochs. superscalar's description of
+`Temporal.DateTime` tells authors to declare it (`x-temporal-format`),
+the core `@temporalFormat` decorator checks the unit and the field's
+scalar, and the TypeScript writer and the schema runtime carry it.
+
+acme's `@feedKey` is the pattern: a flag on Catalog fields, stored as
+`extensions.acme.feedKey: true`, read by acme's catalog generator, and
+written by `format` as YAML and as JSON that load back to the same IR,
+which `examples/acme-schematic/scripts/smoke.sh` and the example's Go
+tests assert. A distribution
+that wrote the removed keys registers one decorator per directive and
+moves each value into its slot: a flag a field set to `true` becomes
+`"extensions": {"<extension>": {"<name>": true}}`.
+`scripts/scrub-check.sh` fails on any `transform*` identifier outside
+`CHANGELOG.md`, so none comes back into the core.
+
+The removal is reversible until the first release.

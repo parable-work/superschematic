@@ -39,6 +39,11 @@ meta_schema_url_prefix = "superschematic://"
 # (<prefix>scalar.canonical_name, <prefix>projection.settings, ...).
 metadata_key_prefix = "superschematic."
 
+# The transaction-local Postgres setting a versioned table's history trigger
+# reads a hard delete's actor from; generated hard deletes set it from the
+# context user. A custom setting name, so it needs a dot.
+history_actor_setting = "superschematic.history_actor_id"
+
 # The JSDoc tag the generated TypeScript types write above every
 # scalar-typed field, with the scalar's canonical name. Unset by default,
 # which writes no tag line. A distribution whose tools read the tag from

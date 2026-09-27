@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/cli"
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/loader"
 	"github.com/parable-work/superschematic/registry"
@@ -200,6 +201,14 @@ func TestCatalogServiceLoadsAndGenerates(t *testing.T) {
 	if _, ok, _ := ext.ShelfOf(field(t, schema, "Product", "name")); ok {
 		t.Fatal("Product.name carries a shelf it never declared")
 	}
+	for _, c := range []struct {
+		typeName, fieldName string
+		want                bool
+	}{{"Product", "sku", true}, {"Product", "barcode", false}, {"Bundle", "code", true}} {
+		if got, err := ext.IsFeedKey(field(t, schema, c.typeName, c.fieldName)); err != nil || got != c.want {
+			t.Fatalf("IsFeedKey(%s.%s) = %v, %v; want %v", c.typeName, c.fieldName, got, err, c.want)
+		}
+	}
 
 	// Acme.Photo comes from the acme scalar catalog with its upload
 	// metadata, so Validate<Acme.Photo, { uploadMaxBytes }> passes the
@@ -247,6 +256,9 @@ func TestCatalogServiceLoadsAndGenerates(t *testing.T) {
 	if len(catalog.Shelves) != 3 || catalog.Shelves["Bundle.code"].Aisle != 12 {
 		t.Fatalf("catalog.json = %+v, want the three shelved fields", catalog)
 	}
+	if len(catalog.FeedKeys) != 2 || strings.Join(catalog.FeedKeys["Product"], ",") != "sku" || strings.Join(catalog.FeedKeys["Bundle"], ",") != "code" {
+		t.Fatalf("catalog.json feedKeys = %v, want Product sku and Bundle code", catalog.FeedKeys)
+	}
 	var config ext.CatalogConfig
 	readJSON(t, filepath.Join(ext.CatalogDir(out, "shop-catalog"), "config.json"), &config)
 	if config != doc {
@@ -257,6 +269,81 @@ func TestCatalogServiceLoadsAndGenerates(t *testing.T) {
 	if manifest.Kind != ext.Kind || manifest.Region != "eu" || strings.Join(manifest.Types, ",") != "Bundle,Product" {
 		t.Fatalf("manifest.json = %+v, want Catalog kind, region eu, both types", manifest)
 	}
+}
+
+// TestFieldDirectivesSurviveTheDataFormWriters: format writes the Catalog
+// service's TypeScript file through the IR as YAML and as JSON, and each
+// twin, loaded as its own service, gives the TypeScript load's types, with
+// @feedKey and @shelf in every field's extensions.acme slot. Only the file
+// that owns each type differs.
+func TestFieldDirectivesSurviveTheDataFormWriters(t *testing.T) {
+	reg, names := assemble(t)
+	servicePath := filepath.Join(schemasRoot, "services", "shop-catalog")
+	fromTS, err := loader.LoadService(servicePath, loader.WithRegistry(reg), loader.WithNaming(names))
+	if err != nil {
+		t.Fatalf("LoadService(TypeScript): %v", err)
+	}
+	want := typesWithoutOwner(t, fromTS)
+
+	for _, format := range []string{"yaml", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			cmd := cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})
+			cmd.SetOut(&out)
+			cmd.SetErr(&errOut)
+			cmd.SetArgs([]string{"format", "--to=" + format, "--stdout", filepath.Join(servicePath, "src", "catalog.schema.ts")})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("format --to=%s: %v\n%s", format, err, errOut.String())
+			}
+
+			twin := t.TempDir()
+			sidecar, err := os.ReadFile(filepath.Join(servicePath, "catalog.config.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			files := map[string][]byte{
+				"schema.config.json":           []byte(`{"name": "shop-catalog", "kind": "Catalog", "outputs": {"catalog": {"enabled": true}}}`),
+				"catalog.config.yaml":          sidecar,
+				"src/catalog.schema." + format: out.Bytes(),
+			}
+			for name, body := range files {
+				path := filepath.Join(twin, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, body, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fromData, err := loader.LoadService(twin, loader.WithRegistry(reg), loader.WithNaming(names))
+			if err != nil {
+				t.Fatalf("LoadService(%s twin): %v\n%s", format, err, out.String())
+			}
+			if got := typesWithoutOwner(t, fromData); got != want {
+				t.Fatalf("%s twin types differ from the TypeScript load:\n got %s\nwant %s", format, got, want)
+			}
+			if key, err := ext.IsFeedKey(field(t, fromData, "Product", "sku")); err != nil || !key {
+				t.Fatalf("%s twin: IsFeedKey(Product.sku) = %v, %v; want true", format, key, err)
+			}
+		})
+	}
+}
+
+// typesWithoutOwner is the IR of a schema's types as JSON, without the
+// file each type came from.
+func typesWithoutOwner(t *testing.T, schema *ir.Schema) string {
+	t.Helper()
+	types := make(map[string]ir.TypeDef, len(schema.Types))
+	for name, td := range schema.Types {
+		copied := *td
+		copied.Owner = ""
+		types[name] = copied
+	}
+	b, err := json.Marshal(types)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 func TestShelfOnNonCatalogSchemaIsRejected(t *testing.T) {

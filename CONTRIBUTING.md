@@ -73,21 +73,25 @@ By making a contribution to this project, I certify that:
 | Bun           | 1.4.0   | `tools.env` (`BUN_VERSION`)                        |
 | Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`) |
 | uv            | 0.12.9  | `tools.env` (`UV_VERSION`)                         |
-| Rust          | 1.95.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive and `runtime/http/rust` |
+| Rust          | 1.95.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust` and `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target) |
+| Postgres      | 16      | `tools.env` (`POSTGRES_VERSION`); CI's database tests run against it |
 | superscalar   | commit  | `superscalar.pin`; `go.mod` carries the same commit as a pseudo-version |
 
 Setup on a fresh machine:
 
 ```
 export GOTOOLCHAIN=go1.26.4
-rustup toolchain install 1.95.0
+rustup toolchain install 1.95.0 --target wasm32-unknown-unknown
 make setup
 ```
 
 `make setup` runs `scripts/superscalar-dep.sh`, which clones superscalar at
 the pinned commit under `third_party/superscalar` (gitignored), builds its Go
 static archive and TypeScript binding, and prints the `CGO_LDFLAGS` value.
-The Makefile exports that value for every Go target; outside make, run
+It then runs `scripts/versiongraph-archive.sh`, which builds the
+version-graph core's static archive and stages it under
+`runtime/versiongraph/go/lib`, where that binding links it. The Makefile
+exports both link directories for every Go target; outside make, run
 `eval "$(scripts/superscalar-dep.sh --export)"` first. Bump a tool version in
 `tools.env` only; workflows read that file and never inline a version. Bump
 the superscalar commit in `superscalar.pin` and `go.mod` together (a test
@@ -101,17 +105,18 @@ of them; run them locally before pushing.
 
 | Target                | What it checks                                                      |
 | --------------------- | ------------------------------------------------------------------- |
-| `make go-build`       | `go build ./...` in the four Go modules                              |
-| `make go-vet`         | `go vet ./...` in the four Go modules                                |
-| `make go-test`        | `go test -count=1 ./...` in the four Go modules                      |
+| `make go-build`       | `go build ./...` in the five Go modules                              |
+| `make go-vet`         | `go vet ./...` in the five Go modules                                |
+| `make go-test`        | `go test -count=1 ./...` in the five Go modules                      |
 | `make go-fmt-check`   | `gofmt -l` is empty                                                  |
-| `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the four Go modules      |
+| `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the five Go modules      |
 | `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
 | `make cli-smoke`      | `bin/superschematic build` with no extension builds the DB, API and General fixtures |
 | `make ts`             | `packages/`, `runtime/schema/typescript` and `runtime/http/typescript` typecheck, build and test |
 | `make python`         | `runtime/schema/python` pytest                                       |
-| `make rust`           | `runtime/http/rust` fmt, clippy `-D warnings`, test                  |
+| `make rust`           | `runtime/http/rust` and `runtime/versiongraph/rust` fmt, clippy `-D warnings`, test; the version-graph wasm build and its bun vector test |
+| `make versiongraph`   | Builds the version-graph core's static archive the Go binding links (`scripts/versiongraph-archive.sh`) |
 | `make docs`           | Starlight site in `docs/` (`npm ci && npm run build`)                |
 | `make scrub`          | No leftover mentions, identifiers or planning ids from the source tree this repository was extracted from, dot-paths such as `.github/` included |
 | `make all`            | build, test and lint: everything above except `docs`                 |
@@ -122,6 +127,19 @@ tests and the schema-config JSON Schema check. They skip when bun, or an
 install they need, is missing. CI sets `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`,
 which turns each of those skips into a failure. Set it locally after
 `make setup` to run the same gates.
+
+The database tests (the generated ORM and history triggers, the projection
+migrations) skip unless `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` and
+`SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL` name a Postgres whose role may
+create schemas, databases and roles; each test creates and drops its own.
+CI runs them against a `postgres:16-alpine` container. Locally a throwaway
+container is enough:
+
+```
+docker run -d --name superschematic-pg -e POSTGRES_PASSWORD=superschematic -p 55432:5432 postgres:16-alpine
+export SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL='postgres://postgres:superschematic@localhost:55432/postgres?sslmode=disable'
+export SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL="$SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL"
+```
 
 ## Rules
 
@@ -163,18 +181,20 @@ and concrete.
 ## Releases
 
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
-`api`, `schema-config`, `schema-ir`, `schema-runtime`), the PyPI distribution
-(`superschematic-schema-runtime`), the crate (`superschematic-http-runtime`)
-and the four Go modules all carry the SemVer version in `versions.env`, and
-`scripts/bump_version.py` is the only thing that writes it. `bump_version.py
-check` fails when any site disagrees; CI runs it on every pull request and the
-release workflow runs it before building anything. `0.0.0` means unreleased.
+`api`, `schema-config`, `schema-ir`, `schema-runtime`, `http-runtime`), the
+PyPI distribution (`superschematic-schema-runtime`), the crate
+(`superschematic-http-runtime`) and the four Go modules all carry the SemVer
+version in `versions.env`, and `scripts/bump_version.py` is the only thing
+that writes it. `bump_version.py check` fails when any site disagrees; CI
+runs it on every pull request and the release workflow runs it before
+building anything. `0.0.0` means unreleased.
 
 The Go modules are versioned by tags, one per module because each is its own
-module: `vX.Y.Z` (root), `ir/vX.Y.Z`, `runtime/schema/go/vX.Y.Z` and
-`runtime/http/go/vX.Y.Z`. The `require` lines between them carry the release
-version so a consumer at a tag resolves the siblings from their tags; the
-`replace` lines next to them keep local builds on the checkout.
+module: `vX.Y.Z` (root), `ir/vX.Y.Z`, `runtime/schema/go/vX.Y.Z`,
+`runtime/http/go/vX.Y.Z` and `runtime/versiongraph/go/vX.Y.Z`. The `require`
+lines between them carry the release version so a consumer at a tag resolves
+the siblings from their tags; the `replace` lines next to them keep local
+builds on the checkout.
 
 `release-pr.yml` opens a pull request with the workflow token, which the
 repository setting "Allow GitHub Actions to create and approve pull requests"
@@ -211,8 +231,9 @@ A release is three steps, each started by a person. For the first release,
    `release.yml` and `go-module-tag.yml`.
 3. `go-module-tag.yml` checks the tree carries the tag's version and that
    every sub-module's path matches its directory, then creates
-   `ir/v0.1.0-alpha.1`, `runtime/schema/go/v0.1.0-alpha.1` and
-   `runtime/http/go/v0.1.0-alpha.1` on the same commit. `release.yml` runs
+   `ir/v0.1.0-alpha.1`, `runtime/schema/go/v0.1.0-alpha.1`,
+   `runtime/http/go/v0.1.0-alpha.1` and
+   `runtime/versiongraph/go/v0.1.0-alpha.1` on the same commit. `release.yml` runs
    the full CI, builds the CLI for linux and darwin on x64 and arm64 (each on
    a runner of that os/arch, linked against the superscalar archive built
    from the pinned checkout), refuses a set not built from the tag's commit,
@@ -222,11 +243,14 @@ A release is three steps, each started by a person. For the first release,
    crates.io. Do not create any of the tags by hand.
 
 After the release, `go get github.com/parable-work/superschematic@v0.1.0-alpha.1`
-(and `.../ir@`, `.../runtime/schema/go@`, `.../runtime/http/go@` at the same
-version) resolves. The Go modules still link superscalar through cgo from a
-pseudo-version pin, so a consumer needs `CGO_LDFLAGS` from
-`scripts/superscalar-dep.sh --print` until superscalar publishes its
-`go/vX.Y.Z` tags; the docs quickstart says so.
+(and `.../ir@`, `.../runtime/schema/go@`, `.../runtime/http/go@`,
+`.../runtime/versiongraph/go@` at the same version) resolves. The Go modules
+still link superscalar through cgo from a pseudo-version pin, so a consumer
+needs `CGO_LDFLAGS` from `scripts/superscalar-dep.sh --print` until
+superscalar publishes its `go/vX.Y.Z` tags; the docs quickstart says so. The
+version-graph binding links the core's static archive the same way: a
+consumer builds it from the checkout (`scripts/versiongraph-archive.sh`) and
+adds the directory it prints to `CGO_LDFLAGS`.
 
 Pre-releases: `vX.Y.Z-alpha.N`, `-beta.N` and `-rc.N` are the supported
 forms. The GitHub release is marked as a pre-release, npm publishes under the

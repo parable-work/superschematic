@@ -25,6 +25,7 @@ func TestLoadServiceGolden(t *testing.T) {
 		"fixture-projection",
 		"fixture-nested-arrays",
 		"fixture-nested-arrays-db",
+		"fixture-version-graph-db",
 		"fixture-nested-arrays-api",
 	}
 	for _, svc := range services {

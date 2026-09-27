@@ -178,6 +178,12 @@ JSON value it holds, alone, as a list (`T[]`) or as a list of lists
 - A list is its JSON array. A comma inside an element stays there, and an
   empty string is an element. Only a list in the query string is read from
   repeated keys and comma-separated values.
+- A map (`Record<string, T>`) is a JSON object, and the implementation
+  receives a `Record<string, T>`. Each value follows the element rules at
+  `name[key]`; a map of lists (`Record<string, T[]>`) has each list at
+  `name[key]` and its elements at `name[key][i]`. `{}` satisfies a
+  required map, and list bounds do not bound a map. A map travels only in
+  the body.
 
 A list follows the
 [list rules](/superschematic/reference/arrays-of-arrays/#list-rules):

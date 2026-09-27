@@ -60,6 +60,11 @@ type ParamInfo struct {
 	// runtime decodes it from the JSON body with the list rules: an inner
 	// list is never null and each element is checked at name[i][j].
 	IsArrayOfArrays bool
+	// IsMap marks a map body argument (Record<string, T>, or
+	// Record<string, T[]> with IsArray). The runtime decodes it from a JSON
+	// object whose values are checked as list elements at name[key], and a
+	// list value's elements at name[key][i].
+	IsMap bool
 	// SpecLiteral is the ParamSpec object literal the router carries.
 	SpecLiteral string
 }
@@ -404,10 +409,12 @@ const (
 
 // param resolves the runtime kind, the TypeScript type, and the ParamSpec
 // literal of one parameter from apigen's parse flags. A body argument
-// arrives as a JSON value, so its type may also be an object type, alone
-// or as the element of T[] or T[][] (apigen admits an array of arrays only
-// in the body); the runtime parses each value with the generated strict
-// parser of that type. A body argument of a JSON-valued scalar
+// arrives as a JSON value, so its type may also be an object type, alone,
+// as the element of T[] or T[][] (apigen admits an array of arrays only in
+// the body) or as the value of a map; the runtime parses each value with
+// the generated strict parser of that type. A map body argument is
+// Record<string, T> (Record<string, T[]>); apigen admits a map only in the
+// body. A body argument of a JSON-valued scalar
 // (Generic.JSON) is taken as the JSON value it is. param fails for a body
 // argument of any other type that is not a scalar or an enum: a union has
 // no parser. A scalar-typed parameter carries the scalar's own lengths,
@@ -419,6 +426,12 @@ func (b *builder) param(p apigen.Param, place paramPlace) (ParamInfo, error) {
 		Required:        p.Required || place == inPath,
 		IsArray:         p.IsArray,
 		IsArrayOfArrays: p.IsArrayOfArrays,
+		IsMap:           p.IsMap,
+	}
+	if p.IsMap && place != inBody {
+		// apigen refuses a map outside the body; the query string and the
+		// path have no encoding for one.
+		return info, fmt.Errorf("a map travels only in the request body")
 	}
 	var enumValues []string
 	var valueParser string
@@ -480,6 +493,9 @@ func (b *builder) param(p apigen.Param, place paramPlace) (ParamInfo, error) {
 		}
 	}
 	info.TSType = tsListType(info.TSType, p.ArrayDepth())
+	if p.IsMap {
+		info.TSType = "Record<string, " + info.TSType + ">"
+	}
 
 	fields := []string{
 		"name: " + tsString(p.Name),
@@ -491,6 +507,9 @@ func (b *builder) param(p apigen.Param, place paramPlace) (ParamInfo, error) {
 	}
 	if p.IsArrayOfArrays {
 		fields = append(fields, "isArrayOfArrays: true")
+	}
+	if p.IsMap {
+		fields = append(fields, "isMap: true")
 	}
 	if len(enumValues) > 0 {
 		fields = append(fields, "enumValues: "+tsStringList(enumValues))
@@ -510,10 +529,12 @@ func (b *builder) param(p apigen.Param, place paramPlace) (ParamInfo, error) {
 	if p.ValidateMaxLength != nil {
 		fields = append(fields, fmt.Sprintf("maxLength: %d", *p.ValidateMaxLength))
 	}
-	if p.ValidateListMin != nil {
+	// List bounds bound a list, not a map or its lists, as in the generated
+	// types and the Go router.
+	if p.ValidateListMin != nil && !p.IsMap {
 		fields = append(fields, fmt.Sprintf("listMin: %d", *p.ValidateListMin))
 	}
-	if p.ValidateListMax != nil {
+	if p.ValidateListMax != nil && !p.IsMap {
 		fields = append(fields, fmt.Sprintf("listMax: %d", *p.ValidateListMax))
 	}
 	if p.ValidatePattern != "" {

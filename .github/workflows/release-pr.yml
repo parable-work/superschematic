@@ -63,6 +63,7 @@ jobs:
           set -euo pipefail
           python3 scripts/bump_version.py set "$VERSION"
           (cd runtime/http/rust && cargo metadata --locked --format-version 1 >/dev/null)
+          (cd runtime/versiongraph/rust && cargo metadata --locked --format-version 1 >/dev/null)
           # The sibling requires now name the release version; the replace
           # lines keep them on the checkout, so the graph must still resolve.
           for m in . runtime/schema/go runtime/http/go; do

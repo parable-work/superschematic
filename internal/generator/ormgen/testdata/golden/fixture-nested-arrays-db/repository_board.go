@@ -170,22 +170,22 @@ func (r *BoardRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 			var jsonFieldDecodeErr error
 
 			if len(tempLabels) > 0 {
-				if err := unmarshalJSONFieldValue(tempLabels, &result.Labels); err != nil {
+				if err := unmarshalJSONListFieldValue(tempLabels, &result.Labels, "labels", 2); err != nil {
 					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field labels: %w", err)
 				}
 			}
 			if len(tempStates) > 0 {
-				if err := unmarshalJSONFieldValue(tempStates, &result.States); err != nil {
+				if err := unmarshalJSONListFieldValue(tempStates, &result.States, "states", 2); err != nil {
 					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field states: %w", err)
 				}
 			}
 			if len(tempWalls) > 0 {
-				if err := unmarshalJSONFieldValue(tempWalls, &result.Walls); err != nil {
+				if err := unmarshalJSONListFieldValue(tempWalls, &result.Walls, "walls", 2); err != nil {
 					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field walls: %w", err)
 				}
 			}
 			if len(tempScores) > 0 {
-				if err := unmarshalJSONFieldValue(tempScores, &result.Scores); err != nil {
+				if err := unmarshalJSONListFieldValue(tempScores, &result.Scores, "scores", 2); err != nil {
 					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field scores: %w", err)
 				}
 			}
@@ -213,22 +213,22 @@ func (r *BoardRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 			// Copy nullable fields when present
 
 			if len(tempLabels) > 0 {
-				if err := unmarshalJSONFieldValue(tempLabels, &result.Labels); err != nil {
+				if err := unmarshalJSONListFieldValue(tempLabels, &result.Labels, "labels", 2); err != nil {
 					return nil, fmt.Errorf("failed to decode JSON field labels: %w", err)
 				}
 			}
 			if len(tempStates) > 0 {
-				if err := unmarshalJSONFieldValue(tempStates, &result.States); err != nil {
+				if err := unmarshalJSONListFieldValue(tempStates, &result.States, "states", 2); err != nil {
 					return nil, fmt.Errorf("failed to decode JSON field states: %w", err)
 				}
 			}
 			if len(tempWalls) > 0 {
-				if err := unmarshalJSONFieldValue(tempWalls, &result.Walls); err != nil {
+				if err := unmarshalJSONListFieldValue(tempWalls, &result.Walls, "walls", 2); err != nil {
 					return nil, fmt.Errorf("failed to decode JSON field walls: %w", err)
 				}
 			}
 			if len(tempScores) > 0 {
-				if err := unmarshalJSONFieldValue(tempScores, &result.Scores); err != nil {
+				if err := unmarshalJSONListFieldValue(tempScores, &result.Scores, "scores", 2); err != nil {
 					return nil, fmt.Errorf("failed to decode JSON field scores: %w", err)
 				}
 			}
@@ -321,22 +321,22 @@ func (r *BoardRepository) GetManyByIDs(ctx context.Context, ids []types.Identity
 		// Copy nullable fields when present
 
 		if len(tempLabels) > 0 {
-			if err := unmarshalJSONFieldValue(tempLabels, &entity.Labels); err != nil {
+			if err := unmarshalJSONListFieldValue(tempLabels, &entity.Labels, "labels", 2); err != nil {
 				return nil, fmt.Errorf("failed to decode JSON field labels: %w", err)
 			}
 		}
 		if len(tempStates) > 0 {
-			if err := unmarshalJSONFieldValue(tempStates, &entity.States); err != nil {
+			if err := unmarshalJSONListFieldValue(tempStates, &entity.States, "states", 2); err != nil {
 				return nil, fmt.Errorf("failed to decode JSON field states: %w", err)
 			}
 		}
 		if len(tempWalls) > 0 {
-			if err := unmarshalJSONFieldValue(tempWalls, &entity.Walls); err != nil {
+			if err := unmarshalJSONListFieldValue(tempWalls, &entity.Walls, "walls", 2); err != nil {
 				return nil, fmt.Errorf("failed to decode JSON field walls: %w", err)
 			}
 		}
 		if len(tempScores) > 0 {
-			if err := unmarshalJSONFieldValue(tempScores, &entity.Scores); err != nil {
+			if err := unmarshalJSONListFieldValue(tempScores, &entity.Scores, "scores", 2); err != nil {
 				return nil, fmt.Errorf("failed to decode JSON field scores: %w", err)
 			}
 		}
@@ -452,22 +452,22 @@ func (r *BoardRepository) FindOne(ctx context.Context, filter *BoardFilter, opts
 			var jsonFieldDecodeErr error
 
 			if len(tempLabels) > 0 {
-				if err := unmarshalJSONFieldValue(tempLabels, &result.Labels); err != nil {
+				if err := unmarshalJSONListFieldValue(tempLabels, &result.Labels, "labels", 2); err != nil {
 					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field labels: %w", err)
 				}
 			}
 			if len(tempStates) > 0 {
-				if err := unmarshalJSONFieldValue(tempStates, &result.States); err != nil {
+				if err := unmarshalJSONListFieldValue(tempStates, &result.States, "states", 2); err != nil {
 					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field states: %w", err)
 				}
 			}
 			if len(tempWalls) > 0 {
-				if err := unmarshalJSONFieldValue(tempWalls, &result.Walls); err != nil {
+				if err := unmarshalJSONListFieldValue(tempWalls, &result.Walls, "walls", 2); err != nil {
 					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field walls: %w", err)
 				}
 			}
 			if len(tempScores) > 0 {
-				if err := unmarshalJSONFieldValue(tempScores, &result.Scores); err != nil {
+				if err := unmarshalJSONListFieldValue(tempScores, &result.Scores, "scores", 2); err != nil {
 					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field scores: %w", err)
 				}
 			}
@@ -496,22 +496,22 @@ func (r *BoardRepository) FindOne(ctx context.Context, filter *BoardFilter, opts
 			// Copy nullable fields when present
 
 			if len(tempLabels) > 0 {
-				if err := unmarshalJSONFieldValue(tempLabels, &result.Labels); err != nil {
+				if err := unmarshalJSONListFieldValue(tempLabels, &result.Labels, "labels", 2); err != nil {
 					return nil, fmt.Errorf("failed to decode JSON field labels: %w", err)
 				}
 			}
 			if len(tempStates) > 0 {
-				if err := unmarshalJSONFieldValue(tempStates, &result.States); err != nil {
+				if err := unmarshalJSONListFieldValue(tempStates, &result.States, "states", 2); err != nil {
 					return nil, fmt.Errorf("failed to decode JSON field states: %w", err)
 				}
 			}
 			if len(tempWalls) > 0 {
-				if err := unmarshalJSONFieldValue(tempWalls, &result.Walls); err != nil {
+				if err := unmarshalJSONListFieldValue(tempWalls, &result.Walls, "walls", 2); err != nil {
 					return nil, fmt.Errorf("failed to decode JSON field walls: %w", err)
 				}
 			}
 			if len(tempScores) > 0 {
-				if err := unmarshalJSONFieldValue(tempScores, &result.Scores); err != nil {
+				if err := unmarshalJSONListFieldValue(tempScores, &result.Scores, "scores", 2); err != nil {
 					return nil, fmt.Errorf("failed to decode JSON field scores: %w", err)
 				}
 			}
@@ -647,22 +647,22 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 		var jsonFieldDecodeErr error
 
 		if len(tempLabels) > 0 {
-			if err := unmarshalJSONFieldValue(tempLabels, &result.Labels); err != nil {
+			if err := unmarshalJSONListFieldValue(tempLabels, &result.Labels, "labels", 2); err != nil {
 				jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field labels: %w", err)
 			}
 		}
 		if len(tempStates) > 0 {
-			if err := unmarshalJSONFieldValue(tempStates, &result.States); err != nil {
+			if err := unmarshalJSONListFieldValue(tempStates, &result.States, "states", 2); err != nil {
 				jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field states: %w", err)
 			}
 		}
 		if len(tempWalls) > 0 {
-			if err := unmarshalJSONFieldValue(tempWalls, &result.Walls); err != nil {
+			if err := unmarshalJSONListFieldValue(tempWalls, &result.Walls, "walls", 2); err != nil {
 				jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field walls: %w", err)
 			}
 		}
 		if len(tempScores) > 0 {
-			if err := unmarshalJSONFieldValue(tempScores, &result.Scores); err != nil {
+			if err := unmarshalJSONListFieldValue(tempScores, &result.Scores, "scores", 2); err != nil {
 				jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field scores: %w", err)
 			}
 		}
@@ -794,22 +794,22 @@ func (r *BoardRepository) CreateOne(ctx context.Context, input *types.Board) (*t
 	// Copy nullable fields when present
 
 	if len(tempLabels) > 0 {
-		if err := unmarshalJSONFieldValue(tempLabels, &result.Labels); err != nil {
+		if err := unmarshalJSONListFieldValue(tempLabels, &result.Labels, "labels", 2); err != nil {
 			return nil, fmt.Errorf("failed to decode JSON field labels: %w", err)
 		}
 	}
 	if len(tempStates) > 0 {
-		if err := unmarshalJSONFieldValue(tempStates, &result.States); err != nil {
+		if err := unmarshalJSONListFieldValue(tempStates, &result.States, "states", 2); err != nil {
 			return nil, fmt.Errorf("failed to decode JSON field states: %w", err)
 		}
 	}
 	if len(tempWalls) > 0 {
-		if err := unmarshalJSONFieldValue(tempWalls, &result.Walls); err != nil {
+		if err := unmarshalJSONListFieldValue(tempWalls, &result.Walls, "walls", 2); err != nil {
 			return nil, fmt.Errorf("failed to decode JSON field walls: %w", err)
 		}
 	}
 	if len(tempScores) > 0 {
-		if err := unmarshalJSONFieldValue(tempScores, &result.Scores); err != nil {
+		if err := unmarshalJSONListFieldValue(tempScores, &result.Scores, "scores", 2); err != nil {
 			return nil, fmt.Errorf("failed to decode JSON field scores: %w", err)
 		}
 	}
@@ -965,22 +965,22 @@ func (r *BoardRepository) CreateMany(ctx context.Context, inputs []*types.Board)
 		// Copy nullable fields when present
 
 		if len(tempLabels) > 0 {
-			if err := unmarshalJSONFieldValue(tempLabels, &result.Labels); err != nil {
+			if err := unmarshalJSONListFieldValue(tempLabels, &result.Labels, "labels", 2); err != nil {
 				return nil, fmt.Errorf("failed to decode JSON field labels: %w", err)
 			}
 		}
 		if len(tempStates) > 0 {
-			if err := unmarshalJSONFieldValue(tempStates, &result.States); err != nil {
+			if err := unmarshalJSONListFieldValue(tempStates, &result.States, "states", 2); err != nil {
 				return nil, fmt.Errorf("failed to decode JSON field states: %w", err)
 			}
 		}
 		if len(tempWalls) > 0 {
-			if err := unmarshalJSONFieldValue(tempWalls, &result.Walls); err != nil {
+			if err := unmarshalJSONListFieldValue(tempWalls, &result.Walls, "walls", 2); err != nil {
 				return nil, fmt.Errorf("failed to decode JSON field walls: %w", err)
 			}
 		}
 		if len(tempScores) > 0 {
-			if err := unmarshalJSONFieldValue(tempScores, &result.Scores); err != nil {
+			if err := unmarshalJSONListFieldValue(tempScores, &result.Scores, "scores", 2); err != nil {
 				return nil, fmt.Errorf("failed to decode JSON field scores: %w", err)
 			}
 		}
@@ -1105,22 +1105,22 @@ func (r *BoardRepository) UpdateOne(ctx context.Context, id types.IdentityUUID, 
 	// Copy nullable fields when present
 
 	if len(tempLabels) > 0 {
-		if err := unmarshalJSONFieldValue(tempLabels, &result.Labels); err != nil {
+		if err := unmarshalJSONListFieldValue(tempLabels, &result.Labels, "labels", 2); err != nil {
 			return nil, fmt.Errorf("failed to decode JSON field labels: %w", err)
 		}
 	}
 	if len(tempStates) > 0 {
-		if err := unmarshalJSONFieldValue(tempStates, &result.States); err != nil {
+		if err := unmarshalJSONListFieldValue(tempStates, &result.States, "states", 2); err != nil {
 			return nil, fmt.Errorf("failed to decode JSON field states: %w", err)
 		}
 	}
 	if len(tempWalls) > 0 {
-		if err := unmarshalJSONFieldValue(tempWalls, &result.Walls); err != nil {
+		if err := unmarshalJSONListFieldValue(tempWalls, &result.Walls, "walls", 2); err != nil {
 			return nil, fmt.Errorf("failed to decode JSON field walls: %w", err)
 		}
 	}
 	if len(tempScores) > 0 {
-		if err := unmarshalJSONFieldValue(tempScores, &result.Scores); err != nil {
+		if err := unmarshalJSONListFieldValue(tempScores, &result.Scores, "scores", 2); err != nil {
 			return nil, fmt.Errorf("failed to decode JSON field scores: %w", err)
 		}
 	}
