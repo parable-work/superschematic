@@ -13,6 +13,38 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- The version-graph core (D17), `runtime/versiongraph`: a Rust crate,
+  `superschematic-versiongraph` (rlib, staticlib, cdylib; depends on serde,
+  serde_json and sha2 only), with no IO, clock or randomness. Its five
+  operations take and return JSON: `compose` lays one ref's rows over a
+  base tree by entity key (a tombstone removes the entity and its
+  descendants; a row whose parent is absent is kept and reported), `merge`
+  is a three-way merge per entity and then per conflict unit (`atomic`,
+  `keyed`, `jsonSchema`), reporting conflicts by kind, entity key and JSON
+  Pointer unit path with the base, ours and theirs values, settling them
+  from `resolutions`, and saying for each entity which side won, `diff`
+  lists `ADD`, `UPDATE` and `DELETE` changes, `content_hash` is SHA-256
+  over canonical JSON of the content columns, and `validate` reports
+  duplicate entity keys, singleton, absent parent, parent cycle and
+  out-of-range order findings. A graph descriptor names each kind's key,
+  id, ref, tombstone, version and author columns, its parent edge, order
+  column, singleton rule, conflict units and excluded columns; rows are
+  the JSON Postgres `to_jsonb` gives them. `runtime/versiongraph/README.md`
+  is the contract. A C ABI (`vg_compose`, `vg_merge`, `vg_diff`,
+  `vg_content_hash`, `vg_validate`, `vg_free`, and `vg_alloc`/`vg_dealloc`
+  on wasm32) serves a new fifth Go module, `runtime/versiongraph/go`
+  (`Compose`, `Merge`, `Diff`, `ContentHash`, `Validate` over
+  `json.RawMessage`, cgo over the static archive), and the same exports
+  build for `wasm32-unknown-unknown`. `runtime/versiongraph/testdata/vectors`
+  holds the vectors the Rust tests, the Go binding and a bun test over the
+  wasm module all run (`UPDATE_VECTORS=1 cargo test` rewrites them).
+  `make versiongraph` (`scripts/versiongraph-archive.sh`) builds the archive,
+  the Makefile adds its directory to `CGO_LDFLAGS` and the module to its Go
+  module list, `make rust` runs the crate's gates, the wasm build and the
+  bun test, and CI runs them in a new `versiongraph` job. The crate and the
+  module are version sites of `scripts/bump_version.py`, and
+  `go-module-tag.yml` cuts `runtime/versiongraph/go/vX.Y.Z`. The crate is
+  not published to crates.io. Minor.
 - Version graph declarations (D17). `@superschematic/db` exports
   `@versionGraph({ name?, schemaEpoch? })` for a graph root,
   `@graphMember({ graph, parent?: { key, of }, order?, singleton? })` for

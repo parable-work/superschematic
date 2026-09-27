@@ -404,7 +404,7 @@ jobs:
             echo "Every binary was built from commit \`$GITHUB_SHA\` and is listed in \`SHA256SUMS\`."
             echo "Verify provenance with: \`gh attestation verify <asset> --repo ${GITHUB_REPOSITORY}\`."
             echo
-            echo "Go modules: \`go get github.com/${GITHUB_REPOSITORY}@$TAG\`, \`.../ir@$TAG\`, \`.../runtime/schema/go@$TAG\`, \`.../runtime/http/go@$TAG\`."
+            echo "Go modules: \`go get github.com/${GITHUB_REPOSITORY}@$TAG\`, \`.../ir@$TAG\`, \`.../runtime/schema/go@$TAG\`, \`.../runtime/http/go@$TAG\`, \`.../runtime/versiongraph/go@$TAG\`."
           } > notes.md
           flags=()
           if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
