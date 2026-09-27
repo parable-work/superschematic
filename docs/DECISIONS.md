@@ -929,3 +929,65 @@ declaration into its npm package, and the engine with its packages. Each
 change that lands a piece updates this paragraph, the README layout table
 and the pages that describe it. The names and rules are reversible until
 the first release.
+
+## D18. A distribution's field directives live in its extension slot
+
+`ir.FieldDef` carried ten per-field directives from the source tree that
+only one distribution reads, the `transform*` fields: a data pipeline's
+dedup key and ordering column, its fingerprint inputs, its partition
+date, a structural flag, four identity tags and a foreign key to another
+source. No core decorator set them and no generator read them, but the
+schema-file JSON Schema admitted them, the TypeScript IR types declared
+them and the TypeScript schema runtime read and wrote them. They are
+removed, on this rule:
+
+- A per-field directive is a typed `FieldDef` field only when it means
+  the same in every deployment and the core owns that meaning: a core
+  decorator checks it, every form writes it, and the core's generators
+  and runtimes read it where they need it. `@docs` and `@mcp` on
+  operations and `@docs`, `@purpose` and `@icon` on fields are core on
+  that ground: operation docs and the MCP classification feed OpenAPI,
+  the SDKs and the tool documents, and field presentation is the same for
+  any settings UI. A distribution's policy over them is a check or a hook
+  (D10), and the one value of its own the loader needs, the MCP
+  invocation policy key, is a registration (D11).
+- Any other directive is an extension decorator. The extension registers
+  a `DecoratorSpec` on `TargetField` with its authoring package in
+  `Packages`, the kinds that allow it in `Kinds` and its argument's JSON
+  Schema in `Args` (none for a flag). `Apply` writes the field's
+  `Extensions[<extension>]` slot through `ir.UpdateExtension`, one member
+  of the extension's field struct per directive, and the extension's
+  generators and checks read it back with `ir.GetExtension`
+  (`docs/extension-model.md`, sections 3.4 and 4).
+- The seam carries the rest. Both frontends validate a use against
+  `Args` before `Apply` runs, the schema-file JSON Schema a binary prints
+  closes the slot to the registered directives, the IR and the JSON and
+  YAML forms carry `"extensions": {"<extension>": {"<directive>": <value>}}`,
+  and `format` writes the slot from TypeScript to JSON and YAML and
+  between the two. The TypeScript writer cannot render extension data yet
+  (`docs/extension-model.md`, section 11, gap 6); it could not render the
+  removed fields either.
+- Names follow D10. A key the core writes into output under a
+  distribution's namespace is a naming key, as `metadata_key_prefix` is
+  for the projection Arrow metadata; a key only the extension's own
+  generator writes is the extension's.
+
+`temporalFormat` stays a core field. It declares the wire encoding of a
+`Temporal.DateTime` value, an epoch unit instead of ISO text, which is a
+fact about any source that sends epochs. superscalar's description of
+`Temporal.DateTime` tells authors to declare it (`x-temporal-format`),
+the core `@temporalFormat` decorator checks the unit and the field's
+scalar, and the TypeScript writer and the schema runtime carry it.
+
+acme's `@feedKey` is the pattern: a flag on Catalog fields, stored as
+`extensions.acme.feedKey: true`, read by acme's catalog generator, and
+written by `format` as YAML and as JSON that load back to the same IR,
+which `examples/acme-schematic/scripts/smoke.sh` and the example's Go
+tests assert. A distribution
+that wrote the removed keys registers one decorator per directive and
+moves each value into its slot: a flag a field set to `true` becomes
+`"extensions": {"<extension>": {"<name>": true}}`.
+`scripts/scrub-check.sh` fails on any `transform*` identifier outside
+`CHANGELOG.md`, so none comes back into the core.
+
+The removal is reversible until the first release.
