@@ -13,6 +13,21 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- `@superschematic/schema-ir` ships the schema-file data form: the
+  `./schema-file` subpath has TypeScript types for the `Document`, the
+  single-definition file forms (`SchemaFile` is their union) and every IR
+  node type the JSON Schema defines, and `./schema-file.json` is the JSON
+  Schema `superschematic json-schema` prints with no extension linked and
+  the built-in names. The types leave open what a registry closes: the
+  extension slots, the documents, the schema kinds and the MCP invocation
+  policy key. `internal/tools/schemafiletypes` writes both from the IR
+  structs; `make schema-file-types` regenerates them, and
+  `make schema-file-types-check` and CI fail when a committed copy
+  differs. The package root (`index.d.ts`) is unchanged. Minor.
+- The schema-file JSON Schema gives the MCP invocation policy key its
+  registered default (`"default": "auto"` for the core's
+  `invocationPolicy`), the value the readers fill in for a visible tool
+  that omits it. Minor.
 - Go types: every generated enum has a `Values()` method that returns its
   members in schema declaration order, as a new slice on each call. It is
   the Go counterpart of Rust's `ALL`, and it works through the alias a
@@ -463,6 +478,10 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- `@superschematic/schema-ir` carries the repository's one version, which
+  `scripts/bump_version.py` writes, in place of a fixed `0.1.0`, and the
+  release packs and publishes it with the other npm packages. Its
+  `description` names the new subpaths. Patch.
 - Go API: a map body argument (`Record<string, T>`, or `Record<string,
   T[]>`) is decoded as a map. The route read it as one `T` (or `[]T`), so
   `{"toneByName": {"a": "warm"}}` failed as "Invalid request body" while

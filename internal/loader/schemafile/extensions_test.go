@@ -2,7 +2,6 @@ package schemafile
 
 import (
 	"encoding/json"
-	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +11,6 @@ import (
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
-
-var update = flag.Bool("update", false, "rewrite the JSON Schema golden")
 
 // shelf is the fixture field decorator's argument, as in the design doc's
 // acme-schematic example.
@@ -71,29 +68,21 @@ func fixtureRegistry(t *testing.T) *registry.Registry {
 	return reg
 }
 
-// TestDefinitionGolden pins the emitted JSON Schema byte for byte. Regenerate
-// with: go test ./internal/loader/schemafile -run TestDefinitionGolden -update
+// TestDefinitionGolden pins the emitted JSON Schema byte for byte against
+// the one committed copy, which the @superschematic/schema-ir package ships
+// next to the TypeScript types written from it. Regenerate both with:
+// go run ./internal/tools/schemafiletypes
 func TestDefinitionGolden(t *testing.T) {
 	got, err := Definition()
 	if err != nil {
 		t.Fatalf("Definition: %v", err)
 	}
-	goldenPath := filepath.Join("testdata", "schema-file.golden.json")
-	if *update {
-		if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	want, err := os.ReadFile(goldenPath)
+	want, err := os.ReadFile(filepath.Join("..", "..", "..", "ir", "typescript", "schema-file.json"))
 	if err != nil {
-		t.Fatalf("missing golden file (run with -update): %v", err)
+		t.Fatalf("reading the committed JSON Schema: %v", err)
 	}
 	if string(got) != string(want) {
-		t.Errorf("JSON Schema output changed; run with -update and review the diff")
+		t.Errorf("JSON Schema output changed; run go run ./internal/tools/schemafiletypes and review the diff")
 	}
 }
 

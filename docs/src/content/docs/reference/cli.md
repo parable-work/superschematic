@@ -138,6 +138,19 @@ superschematic json-schema --naming ./schemas/superschematic.toml
 | `--config` | false | emit the `schema.config.{json,yaml}` JSON Schema instead |
 | `--naming` | built-in names | naming config file; this command has no service directory to discover one from |
 
+The output of the binary with no extension linked, under the built-in
+names, ships in the `@superschematic/schema-ir` npm package as
+`schema-file.json`, next to TypeScript types for the same documents:
+
+```ts
+import type { Document, SchemaFile } from "@superschematic/schema-ir/schema-file";
+```
+
+The types leave open the parts a binary's registry closes: the extension
+slots, the documents, the schema kinds and the MCP invocation policy key.
+The JSON Schema gives the policy key its default, which the readers fill
+in for a visible tool that omits it.
+
 ## `format --to=ts\|json\|yaml <file>`
 
 Convert one schema file between the three authoring formats through the
