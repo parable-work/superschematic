@@ -134,10 +134,19 @@ pub(crate) fn parse_row(kind: &Kind, at: &str, value: Value) -> Result<Row, Erro
                     )))
                 }
             };
+            // With arbitrary_precision the number keeps its source digits,
+            // so an integer too wide for i64 is still recognized as one.
+            let text = number.to_string();
+            let digits = text.strip_prefix('-').unwrap_or(&text);
             if let Some(order) = number.as_i64() {
                 (order, (-MAX_EXACT_ORDER..=MAX_EXACT_ORDER).contains(&order))
-            } else if number.as_u64().is_some() {
-                (i64::MAX, false)
+            } else if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+                let order = if text.starts_with('-') {
+                    i64::MIN
+                } else {
+                    i64::MAX
+                };
+                (order, false)
             } else {
                 return Err(Error::row(format!(
                     "{at}: order column {column:?} must be an integer, not {number}"

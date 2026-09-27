@@ -89,7 +89,9 @@ tombstone row and an absent row are the same deleted state.
 
 An order must be an integer inside +/-(2^53-1), the integers a JavaScript
 number holds exactly; outside it, a browser would sort rows differently from
-the server.
+the server. An integer of any width outside the range, even one too wide for
+64 bits, is out of range; a number with a fraction or an exponent is not an
+integer.
 
 ## Operations
 
