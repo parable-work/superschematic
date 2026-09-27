@@ -6,7 +6,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { isBun, openEngine, type DriverName, type Engine, type EngineOptions } from '../dist/index.js';
+import { allowAll, isBun, openEngine, type DriverName, type Engine, type EngineOptions, type Principal } from '../dist/index.js';
+
+/** The principal most tests act as; openTestEngine allows it everything. */
+export const alice: Principal = { subject: 'alice', permissions: [] };
 
 /** The adapters this runtime opens: node:sqlite everywhere, bun:sqlite too on Bun. */
 export const drivers: DriverName[] = isBun() ? ['bun', 'node'] : ['node'];
@@ -28,7 +31,7 @@ export function track<T extends { close(): void }>(item: T): T {
 }
 
 export function openTestEngine(options: Partial<EngineOptions> = {}): Engine {
-  return track(openEngine({ path: freshPath(), ...options }));
+  return track(openEngine({ path: freshPath(), policy: allowAll, ...options }));
 }
 
 /** cleanup closes what the test opened and removes its files; register it with afterEach. */

@@ -16,15 +16,8 @@ stored instance can hold:
 import { Runtime, parseSchemaIR } from '@superschematic/schema-runtime';
 import type { Document, FieldDef, TypeDef } from '@superschematic/schema-ir/schema-file';
 
+import type { ValidationIssue } from '../errors.js';
 import { arrayDepth, jsonKey, refKind, type SchemaModel } from './document.js';
-
-/** One reason a value is refused, at a path such as `lines[2].sku`; `` is the value itself. */
-export interface ValidationIssue {
-  path: string;
-  /** The rule it breaks: the schema runtime's (`required`, `type`, `pattern`, `enum`, ...) or `unknown` for an undeclared key. */
-  rule: string;
-  message: string;
-}
 
 type RuntimeErrors = ReturnType<Runtime['validateType']>;
 

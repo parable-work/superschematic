@@ -18,10 +18,17 @@ meta-schema. On top of the loader, the engine requires:
 import { BUILTIN_SCALARS, SchemaFileError, type LoadedSchemaFile, type SchemaFileLoader } from '@superschematic/schema-runtime';
 import type { Document, FieldDef, TypeDef, TypeRef } from '@superschematic/schema-ir/schema-file';
 
-import { SchemaDocumentError, type SchemaIssue } from '../errors.js';
+import { EngineError, SchemaDocumentError, type SchemaIssue } from '../errors.js';
 
 /** A schema name: a letter, then letters, digits, `_` and `-`, at most 128 characters. */
 export const SCHEMA_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
+
+/** checkSchemaName refuses a schema name the engine would never store. */
+export function checkSchemaName(name: string): void {
+  if (typeof name !== 'string' || !SCHEMA_NAME.test(name)) {
+    throw new EngineError('invalid_argument', `schema name "${String(name)}" must match ${SCHEMA_NAME.source}`);
+  }
+}
 
 /** A schema document the engine accepted. */
 export interface SchemaModel {
