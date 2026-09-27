@@ -42,6 +42,7 @@ from .enums import (
 
 from .types import (
     Auditable,
+    HistoryRecord,
     Tenant,
     TenantUser
 )
@@ -64,6 +65,7 @@ __all__ = [
 
     # Types
     "Auditable",
+    "HistoryRecord",
     "Tenant",
     "TenantUser",
 

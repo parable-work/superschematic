@@ -68,6 +68,10 @@ type FieldInfo struct {
 	// every number exactly as written.
 	PreserveJSON bool
 
+	// IsVersion marks the _version metadata field of a versioned table. It
+	// is always written and reads as 0 when absent, as Go decodes it.
+	IsVersion bool
+
 	// SkipSerializing is true for union discriminator fields with a
 	// renderable default. The enum wrapper writes the tag key, and the
 	// default reconstructs the member field during deserialization.
@@ -211,6 +215,11 @@ type ModuleOutput struct {
 	// types.rs imports crate::unions only in that case to avoid an
 	// unused-import warning.
 	UsesUnions bool
+
+	// HasVersionedTypes is true when a DB table carries the _version field;
+	// types.rs then declares HistoryRecord, whose recorded_at is the scalar
+	// crate's DateTime.
+	HasVersionedTypes bool
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -318,6 +327,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 
 	objectTypes := codegen.ExtractTypes(schema, codegenScalars, extraction, localObjectRoles...)
+	objectTypes = codegen.AddVersionFields(objectTypes, extraction)
 	inputTypes := codegen.ExtractTypes(schema, codegenScalars, extraction, ir.RoleAPIInput)
 
 	output.Types = convertTypes(objectTypes, defaultEnums, enumLookup, discriminators)
@@ -332,6 +342,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		output.Unions[i].PreserveJSON = containsGenericJSON(schema, output.Unions[i].Name, opts.Dependencies, map[string]bool{})
 	}
 
+	output.HasVersionedTypes = hasVersionFields(output.Types)
 	output.UsesHashMap = hasMapFields(output.Types)
 	output.UsesUnions = hasUnionFields(output.Types)
 	output.ExternalCrateDeps = collectExternalCrateDeps(output)
@@ -575,6 +586,7 @@ func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enu
 				Doc:         f.Doc(),
 				// The core's any-JSON scalar, as pygen's genericJSONScalar.
 				PreserveJSON: f.IsScalar && f.Type == "Generic.JSON",
+				IsVersion:    f.Name == "_version" && f.InternalMetadata,
 			}
 
 			if f.Default != nil {
@@ -785,6 +797,20 @@ func toRustFieldName(name string) string {
 	return fieldName
 }
 
+func hasVersionFields(types []TypeInfo) bool {
+	for _, typ := range types {
+		if typ.Role != ir.RoleDBTable {
+			continue
+		}
+		for _, field := range typ.Fields {
+			if field.IsVersion {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func hasMapFields(types []TypeInfo) bool {
 	for _, typ := range types {
 		for _, field := range typ.Fields {
@@ -831,6 +857,9 @@ var hardcodedCrates = map[string]struct{}{
 }
 
 func usesScalarLib(output *ModuleOutput) bool {
+	if output.HasVersionedTypes {
+		return true
+	}
 	for _, union := range output.Unions {
 		if union.PreserveJSON {
 			return true

@@ -44,6 +44,9 @@ type {{ .TypeName }}RepositoryInterface interface {
 	{{- end }}
 	UpdateMany(ctx context.Context, filter *{{ .TypeName }}Filter, update *{{ .TypeName }}Update) (int, error)
 	DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error
+	{{- if .Versioned }}
+	DeleteOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64) error
+	{{- end }}
 	DeleteMany(ctx context.Context, filter *{{ .TypeName }}Filter) (int, error)
 	{{- if .HasSoftDelete }}
 	HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error
@@ -206,6 +209,13 @@ func (r *NoOp{{ .Name }}) UpdateMany(_ context.Context, _ *{{ .TypeName }}Filter
 func (r *NoOp{{ .Name }}) DeleteOne(_ context.Context, _ {{ .PrimaryKeyType }}) error {
 	return nil
 }
+
+{{- if .Versioned }}
+
+func (r *NoOp{{ .Name }}) DeleteOneIfVersion(_ context.Context, _ {{ .PrimaryKeyType }}, _ int64) error {
+	return nil
+}
+{{- end }}
 
 func (r *NoOp{{ .Name }}) DeleteMany(_ context.Context, _ *{{ .TypeName }}Filter) (int, error) {
 	return 0, nil

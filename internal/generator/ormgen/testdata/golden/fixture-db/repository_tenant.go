@@ -166,9 +166,10 @@ func tenantUUIDPtr(value types.IdentityUUID) *types.IdentityUUID {
 	return &value
 }
 
-// GetVersion retrieves a historical Tenant value by version.
+// GetVersion retrieves a historical Tenant value by version. A delete
+// tombstone's version is not a value of the row, so it reads as ErrNotFound.
 func (r *TenantRepository) GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Tenant, error) {
-	query := `SELECT data FROM tenant_history WHERE id = $1 AND _version = $2`
+	query := `SELECT data FROM tenant_history WHERE id = $1 AND _version = $2 AND operation <> 'DELETE'`
 
 	var data []byte
 	var row pgx.Row
@@ -234,8 +235,18 @@ func (r *TenantRepository) ListVersions(ctx context.Context, id types.IdentityUU
 }
 
 // GetAsOf retrieves the latest historical Tenant value at or before ts.
+// It returns ErrNotFound when the row did not exist then: no history row at
+// or before ts, or the latest one is a delete tombstone.
 func (r *TenantRepository) GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Tenant, error) {
-	query := `SELECT data FROM tenant_history WHERE id = $1 AND recorded_at <= $2 ORDER BY recorded_at DESC, _version DESC LIMIT 1`
+	query := `SELECT data
+FROM (
+  SELECT operation, data
+  FROM tenant_history
+  WHERE id = $1 AND recorded_at <= $2
+  ORDER BY recorded_at DESC, _version DESC
+  LIMIT 1
+) latest
+WHERE operation <> 'DELETE'`
 
 	var data []byte
 	var row pgx.Row
@@ -1510,8 +1521,32 @@ func (r *TenantRepository) UpdateOne(ctx context.Context, id types.IdentityUUID,
 }
 
 // UpdateOneIfVersion updates a single Tenant only if its current _version matches expectedVersion.
+// It returns ErrVersionConflict when the row exists at another version and
+// ErrNotFound when it does not exist.
 func (r *TenantRepository) UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *TenantUpdate) (*types.Tenant, error) {
 	return r.updateOne(ctx, id, update, &expectedVersion)
+}
+
+// versionMiss tells apart why a write fenced on _version matched no row:
+// ErrVersionConflict when the row exists at another version, ErrNotFound when
+// it does not exist.
+func (r *TenantRepository) versionMiss(ctx context.Context, id types.IdentityUUID) error {
+	query := `SELECT _version FROM tenant WHERE id = $1`
+
+	var version int64
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, id.ToUUID())
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, id.ToUUID())
+	}
+	if err := row.Scan(&version); err != nil {
+		if err == pgx.ErrNoRows {
+			return ErrNotFound
+		}
+		return fmt.Errorf("failed to read Tenant version: %w", err)
+	}
+	return ErrVersionConflict
 }
 
 func (r *TenantRepository) updateOne(ctx context.Context, id types.IdentityUUID, update *TenantUpdate, expectedVersion *int64) (*types.Tenant, error) {
@@ -1629,6 +1664,9 @@ func (r *TenantRepository) updateOne(ctx context.Context, id types.IdentityUUID,
 		&result.Version,
 	); err != nil {
 		if err == pgx.ErrNoRows {
+			if expectedVersion != nil {
+				return nil, r.versionMiss(ctx, id)
+			}
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to scan result: %w", err)
@@ -1745,6 +1783,31 @@ func (r *TenantRepository) DeleteOne(ctx context.Context, id types.IdentityUUID)
 
 	if result.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+
+	return nil
+}
+
+// DeleteOneIfVersion permanently deletes a single Tenant only if its
+// current _version matches expectedVersion. It returns ErrVersionConflict when
+// the row exists at another version and ErrNotFound when it does not exist.
+func (r *TenantRepository) DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error {
+	query := `DELETE FROM tenant WHERE id = $1 AND _version = $2`
+	queryArgs := []interface{}{id.ToUUID(), expectedVersion}
+
+	var result pgconn.CommandTag
+	var err error
+	if r.tx != nil {
+		result, err = r.tx.Exec(ctx, query, queryArgs...)
+	} else {
+		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to delete record: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return r.versionMiss(ctx, id)
 	}
 
 	return nil

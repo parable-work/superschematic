@@ -518,9 +518,12 @@ the namespace of every metadata key in the Arrow schemas the `sql`
 generator writes for projection views; `scalar_jsdoc_tag` (default unset),
 the JSDoc tag the TypeScript types write above every scalar-typed field
 (`/** @<tag> Contact.Email */`) for a tool that reads the declaration
-files; and `[deps] copy`, the committed path of the dependency graph
-(section 3.8). The first two are names in the output, so they are naming
-keys rather than registrations (D10, D13).
+files; `history_actor_setting` (default
+`superschematic.history_actor_id`), the Postgres setting a versioned
+table's history trigger reads a delete's actor from; and `[deps] copy`,
+the committed path of the dependency graph (section 3.8). The first three
+are names in the output, so they are naming keys rather than registrations
+(D10, D13).
 
 ### 3.12 CheckSpec
 

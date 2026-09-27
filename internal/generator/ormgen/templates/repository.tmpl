@@ -457,9 +457,10 @@ func {{ lowerFirst .TypeName }}UUIDPtr(value {{ $.UUIDGoType }}) *{{ $.UUIDGoTyp
 
 {{- if .Versioned }}
 
-// GetVersion retrieves a historical {{ .TypeName }} value by version.
+// GetVersion retrieves a historical {{ .TypeName }} value by version. A delete
+// tombstone's version is not a value of the row, so it reads as ErrNotFound.
 func (r *{{ .Name }}) GetVersion(ctx context.Context, id {{ .PrimaryKeyType }}, version int64) (*types.{{ .TypeName }}, error) {
-	query := `SELECT {{ .HistoryDataCol }} FROM {{ .QuotedHistoryTableName }} WHERE {{ .QuotedPrimaryKey }} = $1 AND _version = $2`
+	query := `SELECT {{ .HistoryDataCol }} FROM {{ .QuotedHistoryTableName }} WHERE {{ .QuotedPrimaryKey }} = $1 AND _version = $2 AND {{ .HistoryOperationCol }} <> 'DELETE'`
 
 	var data []byte
 	var row pgx.Row
@@ -525,8 +526,18 @@ func (r *{{ .Name }}) ListVersions(ctx context.Context, id {{ .PrimaryKeyType }}
 }
 
 // GetAsOf retrieves the latest historical {{ .TypeName }} value at or before ts.
+// It returns ErrNotFound when the row did not exist then: no history row at
+// or before ts, or the latest one is a delete tombstone{{ if .HasSoftDelete }} or a soft-deleted image{{ end }}.
 func (r *{{ .Name }}) GetAsOf(ctx context.Context, id {{ .PrimaryKeyType }}, ts time.Time) (*types.{{ .TypeName }}, error) {
-	query := `SELECT {{ .HistoryDataCol }} FROM {{ .QuotedHistoryTableName }} WHERE {{ .QuotedPrimaryKey }} = $1 AND {{ .HistoryRecordedAtCol }} <= $2 ORDER BY {{ .HistoryRecordedAtCol }} DESC, _version DESC LIMIT 1`
+	query := `SELECT {{ .HistoryDataCol }}
+FROM (
+  SELECT {{ .HistoryOperationCol }}, {{ .HistoryDataCol }}
+  FROM {{ .QuotedHistoryTableName }}
+  WHERE {{ .QuotedPrimaryKey }} = $1 AND {{ .HistoryRecordedAtCol }} <= $2
+  ORDER BY {{ .HistoryRecordedAtCol }} DESC, _version DESC
+  LIMIT 1
+) latest
+WHERE {{ .HistoryOperationCol }} <> 'DELETE'{{ if .HasSoftDelete }} AND ({{ .HistoryDataCol }}->>'deleted_at') IS NULL{{ end }}`
 
 	var data []byte
 	var row pgx.Row
@@ -607,6 +618,8 @@ func (r *{{ .Name }}) PruneHistoryFunctionName() string {
 {{- if not .IsArray }}
 
 // ListAsOfBy{{ toGoName .FieldName }}ID retrieves the latest historical {{ $.TypeName }} values for {{ .FieldName }} at or before ts.
+// A row whose latest history row at ts is a delete tombstone{{ if $.HasSoftDelete }} or a soft-deleted
+// image{{ end }} is left out.
 func (r *{{ $.Name }}) ListAsOfBy{{ toGoName .FieldName }}ID(ctx context.Context, {{ lowerFirst .FieldName }}ID {{ $.UUIDGoType }}, ts time.Time, opts *{{ $.TypeName }}HistoryOptions) ([]types.HistoryRecord[*types.{{ $.TypeName }}], error) {
 	if opts == nil {
 		opts = &{{ $.TypeName }}HistoryOptions{}
@@ -619,7 +632,7 @@ func (r *{{ $.Name }}) ListAsOfBy{{ toGoName .FieldName }}ID(ctx context.Context
 )
 SELECT _version, {{ $.HistoryOperationCol }}, {{ $.HistoryRecordedAtCol }}, {{ $.HistoryDataCol }}
 FROM latest
-WHERE {{ $.HistoryOperationCol }} <> 'DELETE' AND {{ $.HistoryDataCol }}->>'{{ .DBColumnName }}' = $2
+WHERE {{ $.HistoryOperationCol }} <> 'DELETE'{{ if $.HasSoftDelete }} AND ({{ $.HistoryDataCol }}->>'deleted_at') IS NULL{{ end }} AND {{ $.HistoryDataCol }}->>'{{ .DBColumnName }}' = $2
 ORDER BY {{ $.HistoryRecordedAtCol }} ASC, _version ASC`
 	query += buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
 
@@ -2314,8 +2327,32 @@ func (r *{{ .Name }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 }
 
 // UpdateOneIfVersion updates a single {{ .TypeName }} only if its current _version matches expectedVersion.
+// It returns ErrVersionConflict when the row exists at another version and
+// ErrNotFound when it does not exist.
 func (r *{{ .Name }}) UpdateOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
 	return r.updateOne(ctx, id, update, &expectedVersion)
+}
+
+// versionMiss tells apart why a write fenced on _version matched no row:
+// ErrVersionConflict when the row exists at another version, ErrNotFound when
+// it does not exist{{ if .HasSoftDelete }} or is soft-deleted{{ end }}.
+func (r *{{ .Name }}) versionMiss(ctx context.Context, id {{ .PrimaryKeyType }}) error {
+	query := `SELECT _version FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1{{ if .HasSoftDelete }} AND deleted_at IS NULL{{ end }}`
+
+	var version int64
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }})
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }})
+	}
+	if err := row.Scan(&version); err != nil {
+		if err == pgx.ErrNoRows {
+			return ErrNotFound
+		}
+		return fmt.Errorf("failed to read {{ .TypeName }} version: %w", err)
+	}
+	return ErrVersionConflict
 }
 
 func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update, expectedVersion *int64) (*types.{{ .TypeName }}, error) {
@@ -2458,6 +2495,11 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		{{- end }}
 	); err != nil {
 		if err == pgx.ErrNoRows {
+			{{- if .Versioned }}
+			if expectedVersion != nil {
+				return nil, r.versionMiss(ctx, id)
+			}
+			{{- end }}
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to scan result: %w", err)
@@ -2636,6 +2678,43 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 	return nil
 }
 
+{{- if .Versioned }}
+
+// DeleteOneIfVersion soft deletes a single {{ .TypeName }} only if its current
+// _version matches expectedVersion. It returns ErrVersionConflict when the row
+// exists at another version and ErrNotFound when it does not exist.
+func (r *{{ .Name }}) DeleteOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64) error {
+	if !HasUserID(ctx) {
+		return ErrNoUserInContext
+	}
+
+	{{- if .HasDeletedBy }}
+	query := `UPDATE {{ .QuotedTableName }} SET deleted_at = $1, deleted_by = $2 WHERE {{ .QuotedPrimaryKey }} = $3 AND _version = $4 AND deleted_at IS NULL`
+	queryArgs := []interface{}{time.Now(), GetUserID(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
+	{{- else }}
+	query := `UPDATE {{ .QuotedTableName }} SET deleted_at = $1 WHERE {{ .QuotedPrimaryKey }} = $2 AND _version = $3 AND deleted_at IS NULL`
+	queryArgs := []interface{}{time.Now(), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
+	{{- end }}
+
+	var result pgconn.CommandTag
+	var err error
+	if r.tx != nil {
+		result, err = r.tx.Exec(ctx, query, queryArgs...)
+	} else {
+		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to delete record: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return r.versionMiss(ctx, id)
+	}
+
+	return nil
+}
+{{- end }}
+
 // DeleteMany soft deletes multiple {{ .TypeName }} records matching the filter
 func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Filter) (int, error) {
 	if !HasUserID(ctx) {
@@ -2677,15 +2756,26 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	return int(result.RowsAffected()), nil
 }
 
-// HardDeleteOne permanently deletes a single {{ .TypeName }} record by ID
+// HardDeleteOne permanently deletes a single {{ .TypeName }} record by ID{{ if .HistoryActorCol }}.
+// The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
 func (r *{{ .Name }}) HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
+	{{- if .HistoryActorCol }}
+	query := historyActorCTE + `DELETE FROM {{ .QuotedTableName }} USING history_actor WHERE {{ .QuotedPrimaryKey }} = $2`
+	queryArgs := []interface{}{historyActor(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
+	{{- else }}
 	query := `DELETE FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1`
 	queryArgs := []interface{}{id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
+	{{- end }}
 
 	var result pgconn.CommandTag
 	var err error
 	if r.tx != nil {
 		result, err = r.tx.Exec(ctx, query, queryArgs...)
+		{{- if .HistoryActorCol }}
+		if err == nil {
+			err = clearHistoryActor(ctx, r.tx)
+		}
+		{{- end }}
 	} else {
 		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
 	}
@@ -2702,8 +2792,24 @@ func (r *{{ .Name }}) HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }
 
 {{- else }}
 
-// DeleteOne permanently deletes a single {{ .TypeName }} record by ID
+// DeleteOne permanently deletes a single {{ .TypeName }} record by ID{{ if .HistoryActorCol }}.
+// The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
 func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
+	{{- if .HistoryActorCol }}
+	query := historyActorCTE + `DELETE FROM {{ .QuotedTableName }} USING history_actor WHERE {{ .QuotedPrimaryKey }} = $2`
+	queryArgs := []interface{}{historyActor(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
+
+	var result pgconn.CommandTag
+	var err error
+	if r.tx != nil {
+		result, err = r.tx.Exec(ctx, query, queryArgs...)
+		if err == nil {
+			err = clearHistoryActor(ctx, r.tx)
+		}
+	} else {
+		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
+	}
+	{{- else }}
 	query := `DELETE FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1`
 
 	var result pgconn.CommandTag
@@ -2713,6 +2819,7 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 	} else {
 		result, err = r.db.pool.Exec(ctx, query, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }})
 	}
+	{{- end }}
 	if err != nil {
 		return fmt.Errorf("failed to delete record: %w", err)
 	}
@@ -2723,9 +2830,64 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 
 	return nil
 }
+{{- if .Versioned }}
 
-// DeleteMany permanently deletes multiple {{ .TypeName }} records matching the filter
+// DeleteOneIfVersion permanently deletes a single {{ .TypeName }} only if its
+// current _version matches expectedVersion. It returns ErrVersionConflict when
+// the row exists at another version and ErrNotFound when it does not exist.{{ if .HistoryActorCol }}
+// The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
+func (r *{{ .Name }}) DeleteOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64) error {
+	{{- if .HistoryActorCol }}
+	query := historyActorCTE + `DELETE FROM {{ .QuotedTableName }} USING history_actor WHERE {{ .QuotedPrimaryKey }} = $2 AND _version = $3`
+	queryArgs := []interface{}{historyActor(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
+	{{- else }}
+	query := `DELETE FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1 AND _version = $2`
+	queryArgs := []interface{}{id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
+	{{- end }}
+
+	var result pgconn.CommandTag
+	var err error
+	if r.tx != nil {
+		result, err = r.tx.Exec(ctx, query, queryArgs...)
+		{{- if .HistoryActorCol }}
+		if err == nil {
+			err = clearHistoryActor(ctx, r.tx)
+		}
+		{{- end }}
+	} else {
+		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to delete record: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return r.versionMiss(ctx, id)
+	}
+
+	return nil
+}
+{{- end }}
+
+// DeleteMany permanently deletes multiple {{ .TypeName }} records matching the filter{{ if .HistoryActorCol }}.
+// Each history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
 func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Filter) (int, error) {
+	{{- if .HistoryActorCol }}
+	// Build WHERE clause after the actor, historyActorCTE's $1
+	values := []interface{}{historyActor(ctx)}
+	whereClause := filter.buildWhereClause(&values, 1)
+
+	query := historyActorCTE + fmt.Sprintf(`DELETE FROM {{ .QuotedTableName }} USING history_actor%s`, whereClause)
+
+	var result pgconn.CommandTag
+	var err error
+	if r.tx != nil {
+		result, err = r.tx.Exec(ctx, query, values...)
+		if err == nil {
+			err = clearHistoryActor(ctx, r.tx)
+		}
+	} else {
+	{{- else }}
 	// Build WHERE clause
 	var values []interface{}
 	whereClause := filter.buildWhereClause(&values, 0)
@@ -2737,6 +2899,7 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	if r.tx != nil {
 		result, err = r.tx.Exec(ctx, query, values...)
 	} else {
+	{{- end }}
 		result, err = r.db.pool.Exec(ctx, query, values...)
 	}
 	if err != nil {
