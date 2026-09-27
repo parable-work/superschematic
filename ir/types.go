@@ -134,6 +134,19 @@ type TypeDef struct {
 	// contract and breaks a payload that must survive a newer producer.
 	DenyUnknownFields bool `json:"denyUnknownFields,omitempty" yaml:"denyUnknownFields,omitempty"`
 
+	// VersionGraph marks the root of a version graph (@versionGraph). Nil
+	// for every other type. See [VersionGraphConfig].
+	VersionGraph *VersionGraphConfig `json:"versionGraph,omitempty" yaml:"versionGraph,omitempty"`
+
+	// GraphMember marks an entity kind of a version graph (@graphMember).
+	// Nil for every other type. See [GraphMemberConfig].
+	GraphMember *GraphMemberConfig `json:"graphMember,omitempty" yaml:"graphMember,omitempty"`
+
+	// Origin names the declaration the loader expanded this type from:
+	// [OriginVersionGraph] for the graph tables a version graph adds.
+	// Empty for every authored type. The data forms have no key for it.
+	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
+
 	// Projection is the @projection declaration of a RoleProjection type: the
 	// view's address, the table it reads and the tables it joins, its row
 	// rules and its collapse. Fields are the view's columns. Nil for every
@@ -179,6 +192,10 @@ type PruneReference struct {
 
 	// VersionColumn is the referencing table's column holding the pinned _version.
 	VersionColumn string `json:"versionColumn" yaml:"versionColumn"`
+
+	// Origin is [OriginVersionGraph] for the pin a version graph adds to
+	// each member with retentionDays; empty for an authored pin.
+	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
 }
 
 // TraitRef references a trait implemented by a type, with any resolved
@@ -514,6 +531,15 @@ type FieldDef struct {
 	// from the OperationSet).
 	Middleware *MiddlewareConfig `json:"middleware,omitempty" yaml:"middleware,omitempty"`
 
+	// ConflictUnit is the merge unit of a graph member's field
+	// (@conflictUnit): one of the ConflictUnit* strategies. Empty means
+	// [ConflictUnitAtomic].
+	ConflictUnit string `json:"conflictUnit,omitempty" yaml:"conflictUnit,omitempty"`
+
+	// Origin is [OriginVersionGraph] for a field a version graph adds to a
+	// member type; empty for every authored field.
+	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
+
 	// Extensions holds extension decorator data keyed by extension name; see
 	// [Schema.Extensions]. Operations are FieldDefs, so this is also the
 	// slot for operation-level extension decorators.
@@ -580,6 +606,10 @@ type IndexDef struct {
 
 	// Name is an optional purpose token used to build {idx|uq}_{table}_{name}.
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+
+	// Origin is [OriginVersionGraph] for an index a version graph adds;
+	// empty for an authored index.
+	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
 }
 
 // RelationDef represents a foreign key relation to another type.

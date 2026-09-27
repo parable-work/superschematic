@@ -17,6 +17,10 @@ type EnumDef struct {
 
 	// Values lists all enum values in declaration order.
 	Values []EnumValueDef `json:"values" yaml:"values"`
+
+	// Origin is [OriginVersionGraph] for an enum a version graph adds;
+	// empty for every authored enum.
+	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
 }
 
 // EnumValueDef represents a single value within an enumeration.
