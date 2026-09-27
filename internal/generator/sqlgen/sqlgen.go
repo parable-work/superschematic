@@ -135,12 +135,23 @@ type HistoryTable struct {
 	RetentionIndexName     string
 	FunctionName           string
 	PruneFunctionName      string
+	VersionTriggerName     string
 	WriteTriggerName       string
 	DeleteTriggerName      string
 	RetentionDays          int
 	PartitionBy            string
 	DefaultPartitionName   string
 	QuotedDefaultPartition string
+
+	// ActorColumn is the column a delete tombstone's image takes its actor
+	// in: deleted_by when the table has one, else updated_by, else empty (no
+	// actor). ActorColumnType is its SQL type, which the setting's text is
+	// cast to. ActorSetting is the transaction-local setting the trigger
+	// reads the actor from (Options.HistoryActorSetting).
+	ActorColumn       string
+	QuotedActorColumn string
+	ActorColumnType   string
+	ActorSetting      string
 
 	// PruneKeep adds one NOT EXISTS exclusion per entry to the generated prune
 	// function, so externally referenced (key, _version) pairs survive.
@@ -196,6 +207,11 @@ type Options struct {
 	// MetadataKeyPrefix prefixes the keys of the projection Arrow schemas'
 	// metadata (Naming.MetadataKeyPrefix). Empty means "superschematic.".
 	MetadataKeyPrefix string
+
+	// HistoryActorSetting names the transaction-local setting the history
+	// trigger reads a hard delete's actor from (Naming.HistoryActorSetting).
+	// Empty means DefaultHistoryActorSetting.
+	HistoryActorSetting string
 }
 
 // viewOwnerPattern constrains Options.ViewOwner to a plain role name.
@@ -204,6 +220,10 @@ var viewOwnerPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // DefaultMetadataKeyPrefix is the metadata key prefix when Options leaves it
 // empty; it matches naming.Default().
 const DefaultMetadataKeyPrefix = "superschematic."
+
+// DefaultHistoryActorSetting is the history actor setting when Options
+// leaves it empty; it matches naming.Default().
+const DefaultHistoryActorSetting = "superschematic.history_actor_id"
 
 // Generate generates PostgreSQL DDL from a v2 IR schema. Returns nil when
 // the schema declares no database tables.
@@ -339,6 +359,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		table.PrimaryKey = idColumn.QuotedName
 	}
 
+	historyActorSetting := opts.HistoryActorSetting
+	if historyActorSetting == "" {
+		historyActorSetting = DefaultHistoryActorSetting
+	}
 	var historyTables []HistoryTable
 	for _, typeDef := range tableTypes {
 		if !typeDef.Versioned {
@@ -350,7 +374,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 			continue
 		}
 		injectVersionColumn(table)
-		historyTable, err := buildHistoryTable(*table, typeDef.VersionedConfig)
+		historyTable, err := buildHistoryTable(*table, typeDef.VersionedConfig, historyActorSetting)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build history table for %s: %w", typeDef.Name, err)
 		}
@@ -729,7 +753,7 @@ func injectVersionColumn(table *Table) {
 	})
 }
 
-func buildHistoryTable(table Table, cfg *ir.VersionedConfig) (HistoryTable, error) {
+func buildHistoryTable(table Table, cfg *ir.VersionedConfig, actorSetting string) (HistoryTable, error) {
 	keyColumn := primaryKeyColumn(table)
 	if keyColumn == nil {
 		return HistoryTable{}, fmt.Errorf("table %s has no primary key", table.Name)
@@ -750,10 +774,17 @@ func buildHistoryTable(table Table, cfg *ir.VersionedConfig) (HistoryTable, erro
 		RetentionIndexName:     "idx_" + historyName + "_recorded",
 		FunctionName:           table.Name + "_capture_history",
 		PruneFunctionName:      table.Name + "_prune_history",
+		VersionTriggerName:     "trg_" + table.Name + "_bump_version",
 		WriteTriggerName:       "trg_" + table.Name + "_capture_history_write",
 		DeleteTriggerName:      "trg_" + table.Name + "_capture_history_delete",
 		DefaultPartitionName:   historyName + "_default",
 		QuotedDefaultPartition: sqlutil.QuoteIdentifier(historyName + "_default"),
+	}
+	if actor := historyActorColumn(table); actor != nil {
+		history.ActorColumn = actor.Name
+		history.QuotedActorColumn = actor.QuotedName
+		history.ActorColumnType = actor.Type
+		history.ActorSetting = actorSetting
 	}
 	if cfg != nil {
 		if cfg.RetentionDays != nil {
@@ -770,6 +801,19 @@ func buildHistoryTable(table Table, cfg *ir.VersionedConfig) (HistoryTable, erro
 		}
 	}
 	return history, nil
+}
+
+// historyActorColumn returns the column a delete tombstone records its
+// actor in: deleted_by when the table has one, else updated_by, else nil.
+func historyActorColumn(table Table) *Column {
+	for _, name := range []string{"deleted_by", "updated_by"} {
+		for i := range table.Columns {
+			if table.Columns[i].Name == name {
+				return &table.Columns[i]
+			}
+		}
+	}
+	return nil
 }
 
 func primaryKeyColumn(table Table) *Column {

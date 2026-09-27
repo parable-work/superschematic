@@ -96,25 +96,41 @@ CREATE UNIQUE INDEX idx_tenant_user_tenant_display_name ON tenant_user USING BTR
 
 CREATE OR REPLACE FUNCTION tenant_capture_history() RETURNS trigger AS $$
 BEGIN
+  IF (TG_WHEN = 'BEFORE') THEN
+    -- BEFORE UPDATE: the stored row takes the next version.
+    NEW._version := OLD._version + 1;
+    RETURN NEW;
+  END IF;
   IF (TG_OP = 'DELETE') THEN
     -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
     -- the unique history index holds and the latest history row for a deleted key
-    -- is the DELETE. The data payload is the pre-delete image.
+    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
+    -- version.
     INSERT INTO tenant_history (id, _version, operation, data)
-    VALUES (OLD.id, OLD._version + 1, 'DELETE', to_jsonb(OLD));
+    VALUES (
+      OLD.id,
+      OLD._version + 1,
+      'DELETE',
+      to_jsonb(OLD) || jsonb_build_object(
+        '_version', OLD._version + 1
+      )
+    );
     RETURN OLD;
   END IF;
-  IF (TG_OP = 'UPDATE') THEN
-    NEW._version := OLD._version + 1;
-  END IF;
+  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
+  -- CONFLICT DO UPDATE records the one UPDATE it made.
   INSERT INTO tenant_history (id, _version, operation, data)
   VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE TRIGGER trg_tenant_bump_version
+  BEFORE UPDATE ON tenant
+  FOR EACH ROW EXECUTE FUNCTION tenant_capture_history();
+
 CREATE TRIGGER trg_tenant_capture_history_write
-  BEFORE INSERT OR UPDATE ON tenant
+  AFTER INSERT OR UPDATE ON tenant
   FOR EACH ROW EXECUTE FUNCTION tenant_capture_history();
 
 CREATE TRIGGER trg_tenant_capture_history_delete
@@ -123,25 +139,46 @@ CREATE TRIGGER trg_tenant_capture_history_delete
 
 CREATE OR REPLACE FUNCTION tenant_user_capture_history() RETURNS trigger AS $$
 BEGIN
+  IF (TG_WHEN = 'BEFORE') THEN
+    -- BEFORE UPDATE: the stored row takes the next version.
+    NEW._version := OLD._version + 1;
+    RETURN NEW;
+  END IF;
   IF (TG_OP = 'DELETE') THEN
     -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
     -- the unique history index holds and the latest history row for a deleted key
-    -- is the DELETE. The data payload is the pre-delete image.
+    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
+    -- version. Its deleted_by is the actor a hard delete set in
+    -- superschematic.history_actor_id for the statement, else the row's own value.
     INSERT INTO tenant_user_history (id, _version, operation, data)
-    VALUES (OLD.id, OLD._version + 1, 'DELETE', to_jsonb(OLD));
+    VALUES (
+      OLD.id,
+      OLD._version + 1,
+      'DELETE',
+      to_jsonb(OLD) || jsonb_build_object(
+        '_version', OLD._version + 1,
+        'deleted_by', COALESCE(
+          NULLIF(current_setting('superschematic.history_actor_id', true), '')::UUID,
+          OLD.deleted_by
+        )
+      )
+    );
     RETURN OLD;
   END IF;
-  IF (TG_OP = 'UPDATE') THEN
-    NEW._version := OLD._version + 1;
-  END IF;
+  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
+  -- CONFLICT DO UPDATE records the one UPDATE it made.
   INSERT INTO tenant_user_history (id, _version, operation, data)
   VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE TRIGGER trg_tenant_user_bump_version
+  BEFORE UPDATE ON tenant_user
+  FOR EACH ROW EXECUTE FUNCTION tenant_user_capture_history();
+
 CREATE TRIGGER trg_tenant_user_capture_history_write
-  BEFORE INSERT OR UPDATE ON tenant_user
+  AFTER INSERT OR UPDATE ON tenant_user
   FOR EACH ROW EXECUTE FUNCTION tenant_user_capture_history();
 
 CREATE TRIGGER trg_tenant_user_capture_history_delete

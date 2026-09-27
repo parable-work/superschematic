@@ -173,6 +173,37 @@ func HasUserID(ctx context.Context) bool {
 	_, ok := ctx.Value(userContextKey).({{ .UserIDGoType }})
 	return ok
 }
+{{- if .HasHistoryActor }}
+
+// historyActorCTE prefixes a generated hard delete of a versioned table that
+// has an actor column. It sets the transaction-local history actor setting,
+// {{ .Naming.HistoryActorSetting }}, to $1; the history trigger reads the
+// delete tombstone's actor from it, and an empty value keeps the row's own.
+// The DELETE names history_actor in its USING clause so the CTE runs.
+const historyActorCTE = `WITH history_actor AS MATERIALIZED (
+	SELECT set_config('{{ .Naming.HistoryActorSetting }}', COALESCE($1::text, ''), true) AS _history_actor
+)
+`
+
+// historyActor is the $1 argument of historyActorCTE: the context user, or nil
+// when the context carries none.
+func historyActor(ctx context.Context) any {
+	if !HasUserID(ctx) {
+		return nil
+	}
+	return GetUserID(ctx)
+}
+
+// clearHistoryActor empties the history actor setting after a hard delete in
+// an open transaction, so a later statement in it does not record the same
+// actor. Outside a transaction the setting ends with the statement.
+func clearHistoryActor(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, `SELECT set_config('{{ .Naming.HistoryActorSetting }}', '', true)`); err != nil {
+		return fmt.Errorf("failed to clear the history actor: %w", err)
+	}
+	return nil
+}
+{{- end }}
 
 // Ping checks if the database connection is alive
 func (db *Database) Ping(ctx context.Context) error {
@@ -189,4 +220,12 @@ var (
 	ErrNotFound        = fmt.Errorf("record not found")
 	ErrAlreadyDeleted  = fmt.Errorf("record already deleted")
 	ErrNoUserInContext = fmt.Errorf("no user ID in context")
+{{- if .HasVersionedRepositories }}
+
+	// ErrVersionConflict is returned by UpdateOneIfVersion and
+	// DeleteOneIfVersion when the row exists at a version other than the
+	// expected one. It wraps ErrNotFound, so errors.Is(err, ErrNotFound)
+	// holds for callers written before the two were told apart.
+	ErrVersionConflict = fmt.Errorf("%w at the expected version", ErrNotFound)
+{{- end }}
 )

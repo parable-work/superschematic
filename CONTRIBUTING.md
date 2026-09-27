@@ -74,6 +74,7 @@ By making a contribution to this project, I certify that:
 | Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`) |
 | uv            | 0.12.9  | `tools.env` (`UV_VERSION`)                         |
 | Rust          | 1.95.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive and `runtime/http/rust` |
+| Postgres      | 16      | `tools.env` (`POSTGRES_VERSION`); CI's database tests run against it |
 | superscalar   | commit  | `superscalar.pin`; `go.mod` carries the same commit as a pseudo-version |
 
 Setup on a fresh machine:
@@ -122,6 +123,19 @@ tests and the schema-config JSON Schema check. They skip when bun, or an
 install they need, is missing. CI sets `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`,
 which turns each of those skips into a failure. Set it locally after
 `make setup` to run the same gates.
+
+The database tests (the generated ORM and history triggers, the projection
+migrations) skip unless `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` and
+`SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL` name a Postgres whose role may
+create schemas, databases and roles; each test creates and drops its own.
+CI runs them against a `postgres:16-alpine` container. Locally a throwaway
+container is enough:
+
+```
+docker run -d --name superschematic-pg -e POSTGRES_PASSWORD=superschematic -p 55432:5432 postgres:16-alpine
+export SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL='postgres://postgres:superschematic@localhost:55432/postgres?sslmode=disable'
+export SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL="$SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL"
+```
 
 ## Rules
 
