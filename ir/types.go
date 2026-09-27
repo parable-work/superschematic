@@ -393,52 +393,9 @@ type FieldDef struct {
 
 	// TemporalFormat declares the wire encoding of a Temporal.DateTime field
 	// whose source sends a bare epoch count instead of ISO text
-	// (@temporalFormat / x-temporal-format). Values are the epoch members of
-	// IncrementalTimeFormatEnum: unix, unix_millis, unix_micros, unix_nanos.
-	// Empty means ISO text.
+	// (@temporalFormat / x-temporal-format). Values are the epoch units unix,
+	// unix_millis, unix_micros and unix_nanos. Empty means ISO text.
 	TemporalFormat string `json:"temporalFormat,omitempty" yaml:"temporalFormat,omitempty"`
-
-	// TransformDedupKey marks this field as part of the tap's business/dedup key
-	// (@transformDedupKey / x-transformDedupKey).
-	TransformDedupKey bool `json:"transformDedupKey,omitempty" yaml:"transformDedupKey,omitempty"`
-
-	// TransformOrdering marks this field as the promote-path merge-ordering column
-	// (@transformOrdering / x-transformOrdering). At most one per type.
-	TransformOrdering bool `json:"transformOrdering,omitempty" yaml:"transformOrdering,omitempty"`
-
-	// TransformFingerprintInput marks this field as an input to the change-detection
-	// fingerprint (@transformFingerprintInput / x-transformFingerprintInput).
-	TransformFingerprintInput bool `json:"transformFingerprintInput,omitempty" yaml:"transformFingerprintInput,omitempty"`
-
-	// TransformPartitionDate marks this field as the partition / domain-date column
-	// (@transformPartitionDate / x-transformPartitionDate). At most one per type.
-	TransformPartitionDate bool `json:"transformPartitionDate,omitempty" yaml:"transformPartitionDate,omitempty"`
-
-	// TransformStructural marks this field structural outside the derived roles
-	// (@transformStructural / x-transformStructural).
-	TransformStructural bool `json:"transformStructural,omitempty" yaml:"transformStructural,omitempty"`
-
-	// TransformPersonEmail marks an email that identifies a real person
-	// (@transformPersonEmail / x-transformPersonEmail). Identity role tag.
-	TransformPersonEmail bool `json:"transformPersonEmail,omitempty" yaml:"transformPersonEmail,omitempty"`
-
-	// TransformPersonName marks a human name component used for fuzzy matching
-	// (@transformPersonName / x-transformPersonName). Identity role tag.
-	TransformPersonName bool `json:"transformPersonName,omitempty" yaml:"transformPersonName,omitempty"`
-
-	// TransformAccountId marks the connector-native account/user id - the row's
-	// principal key (@transformAccountId / x-transformAccountId). Identity role tag.
-	TransformAccountId bool `json:"transformAccountId,omitempty" yaml:"transformAccountId,omitempty"`
-
-	// TransformExternalUserId marks a foreign principal id for another system
-	// (@transformExternalUserId / x-transformExternalUserId). Identity role tag.
-	TransformExternalUserId bool `json:"transformExternalUserId,omitempty" yaml:"transformExternalUserId,omitempty"`
-
-	// TransformForeignKey marks an object-typed field as a foreign-key
-	// reference to another tap (@transformForeignKey / x-transformForeignKey).
-	// The promote path stores only the referenced id column. Nil when the
-	// field is not a foreign key.
-	TransformForeignKey *TransformForeignKeyDef `json:"transformForeignKey,omitempty" yaml:"transformForeignKey,omitempty"`
 
 	// UIHidden marks this field as hidden in UI schema renderers (@uiHidden).
 	UIHidden bool `json:"uiHidden,omitempty" yaml:"uiHidden,omitempty"`
@@ -594,20 +551,6 @@ type RelationDef struct {
 	// OnDelete is the FK ON DELETE action (CASCADE|RESTRICT|NO ACTION). Empty
 	// means the generator default (CASCADE).
 	OnDelete string `json:"onDelete,omitempty" yaml:"onDelete,omitempty"`
-}
-
-// TransformForeignKeyDef captures the promote-path foreign-key reference for
-// an object-typed field.
-//
-// In GraphQL: @transformForeignKey(tap: "repositories", idField: "id")
-// In JSON Schema: "x-transformForeignKey": {"tap": "repositories", "idField": "id"}
-type TransformForeignKeyDef struct {
-	// Tap is the tap whose rows this field references.
-	Tap string `json:"tap" yaml:"tap"`
-
-	// IdField is the property of the referenced object that carries its id.
-	// Defaults to "id".
-	IdField string `json:"idField,omitempty" yaml:"idField,omitempty"`
 }
 
 // ArgumentDef represents an argument on a field or operation.

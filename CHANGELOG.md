@@ -546,6 +546,25 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- IR, breaking: `ir.FieldDef` drops ten per-field directives it carried
+  from the source tree, which only one distribution reads:
+  `transformDedupKey`, `transformOrdering`, `transformFingerprintInput`,
+  `transformPartitionDate`, `transformStructural`,
+  `transformPersonEmail`, `transformPersonName`, `transformAccountId`,
+  `transformExternalUserId` and `transformForeignKey`, with its type
+  `ir.TransformForeignKeyDef`. No core decorator set them and no generator
+  read them. They also leave the `FieldDef` types of
+  `@superschematic/schema-ir` (the package root and `./schema-file`), the
+  schema-file JSON Schema (`./schema-file.json` and `superschematic
+  json-schema`), and `@superschematic/schema-runtime`, whose IR reader
+  read them and whose JSON Schema reader and writer read and wrote them as
+  `x-transform*` keys. A JSON or YAML schema file whose field carries one
+  now fails validation (`additional properties 'transformDedupKey' not
+  allowed`). The replacement is an extension decorator: a `DecoratorSpec`
+  on `TargetField` whose `Apply` writes the field's
+  `extensions.<extension>` slot, which every form carries as
+  `"extensions": {"<extension>": {"<directive>": <value>}}` (D18); acme's
+  `@feedKey` shows it. `temporalFormat` stays in the core. Major.
 - `@superschematic/schema-ir` carries the repository's one version, which
   `scripts/bump_version.py` writes, in place of a fixed `0.1.0`, and the
   release packs and publishes it with the other npm packages. Its

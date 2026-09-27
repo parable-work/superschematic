@@ -85,18 +85,6 @@ export interface FieldDef {
   // unix_micros, or unix_nanos. temporalFormat in the runtime-IR wire form,
   // x-temporal-format in the legacy JSON-Schema form. Empty = ISO text.
   temporalFormat: string;
-  // Promote-path transform directives: camelCase transform*
-  // flags in the runtime-IR wire form, x-transform* keys in the legacy
-  // JSON-Schema form, @transform* directives in GraphQL SDL.
-  transformDedupKey: boolean;
-  transformOrdering: boolean;
-  transformFingerprintInput: boolean;
-  transformPartitionDate: boolean;
-  transformStructural: boolean;
-  transformPersonEmail: boolean;
-  transformPersonName: boolean;
-  transformAccountId: boolean;
-  transformExternalUserId: boolean;
   exclude: boolean;
   internalMetadata: boolean;
   auth: boolean;
