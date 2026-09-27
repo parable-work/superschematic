@@ -405,12 +405,12 @@ export class {{.Namespace.ClassName}} {
       }
       {{- end}}
       {{- if .ValidateMinLength}}
-      if (typeof {{.TSName}}Value === 'string' && {{.TSName}}Value.length < {{.ValidateMinLength}}) {
+      if (typeof {{.TSName}}Value === 'string' && [...{{.TSName}}Value].length < {{.ValidateMinLength}}) {
         {{.TSName}}Errors.push({ validator: 'minLength', message: '{{.Name}} must be at least {{.ValidateMinLength}} characters.' });
       }
       {{- end}}
       {{- if .ValidateMaxLength}}
-      if (typeof {{.TSName}}Value === 'string' && {{.TSName}}Value.length > {{.ValidateMaxLength}}) {
+      if (typeof {{.TSName}}Value === 'string' && [...{{.TSName}}Value].length > {{.ValidateMaxLength}}) {
         {{.TSName}}Errors.push({ validator: 'maxLength', message: '{{.Name}} must be at most {{.ValidateMaxLength}} characters.' });
       }
       {{- end}}

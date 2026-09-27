@@ -54,6 +54,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/parable-work/superschematic/runtime/schema/go/validate"
 )
@@ -206,13 +207,14 @@ func ListMin(n int) Option { return func(a *Arg) { a.listMin = n } }
 // ListMax is the greatest number of elements of a list argument ("listMax").
 func ListMax(n int) Option { return func(a *Arg) { a.listMax = n } }
 
-// MinLength is the least length of a string value ("minLength"), in bytes as
-// every Go validator counts it.
+// MinLength is the least length of a string value ("minLength"), in Unicode
+// code points as every validator counts it.
 func MinLength(n int) Option {
 	return func(a *Arg) { a.rules = append(a.rules, rule{kind: ruleMinLength, length: n}) }
 }
 
-// MaxLength is the greatest length of a string value ("maxLength"), in bytes.
+// MaxLength is the greatest length of a string value ("maxLength"), in Unicode
+// code points.
 func MaxLength(n int) Option {
 	return func(a *Arg) { a.rules = append(a.rules, rule{kind: ruleMaxLength, length: n}) }
 }
@@ -533,11 +535,11 @@ func (a *Arg) checkString(s string) (validate.ValidationError, bool) {
 	for _, r := range a.rules {
 		switch r.kind {
 		case ruleMinLength:
-			if len(s) < r.length {
+			if utf8.RuneCountInString(s) < r.length {
 				return validate.ValidationError{Validator: "minLength", Message: fmt.Sprintf("must be at least %d characters", r.length)}, false
 			}
 		case ruleMaxLength:
-			if len(s) > r.length {
+			if utf8.RuneCountInString(s) > r.length {
 				return validate.ValidationError{Validator: "maxLength", Message: fmt.Sprintf("must be at most %d characters", r.length)}, false
 			}
 		case rulePattern:

@@ -152,12 +152,12 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 			}
 			{{- end}}
 			{{- if .ValidateMinLength}}
-			if len(queryParamValue) < {{.ValidateMinLength}} {
+			if len([]rune(queryParamValue)) < {{.ValidateMinLength}} {
 				queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "minLength", Message: "{{.Name}} must be at least {{.ValidateMinLength}} characters"})
 			}
 			{{- end}}
 			{{- if .ValidateMaxLength}}
-			if len(queryParamValue) > {{.ValidateMaxLength}} {
+			if len([]rune(queryParamValue)) > {{.ValidateMaxLength}} {
 				queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "maxLength", Message: "{{.Name}} must be at most {{.ValidateMaxLength}} characters"})
 			}
 			{{- end}}
@@ -185,12 +185,12 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 		}
 		{{- end}}
 		{{- if .ValidateMinLength}}
-		if len(queryParamValue) < {{.ValidateMinLength}} {
+		if len([]rune(queryParamValue)) < {{.ValidateMinLength}} {
 			queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "minLength", Message: "{{.Name}} must be at least {{.ValidateMinLength}} characters"})
 		}
 		{{- end}}
 		{{- if .ValidateMaxLength}}
-		if len(queryParamValue) > {{.ValidateMaxLength}} {
+		if len([]rune(queryParamValue)) > {{.ValidateMaxLength}} {
 			queryParamFieldErrors = append(queryParamFieldErrors, types.ValidationError{Validator: "maxLength", Message: "{{.Name}} must be at most {{.ValidateMaxLength}} characters"})
 		}
 		{{- end}}

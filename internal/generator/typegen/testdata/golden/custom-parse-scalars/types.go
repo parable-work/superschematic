@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 func toMapValue(value any) (map[string]any, error) {
@@ -316,7 +317,7 @@ func validateTemporalDurationValue(value TemporalDuration, required bool) (bool,
 		return false, coreErrs
 	}
 	var ruleErrs []ValidationError
-	if len(value.String()) > 32 {
+	if utf8.RuneCountInString(value.String()) > 32 {
 		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 32 characters"})
 	}
 	if matched, err := regexp.MatchString("^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$", value.String()); err != nil || !matched {

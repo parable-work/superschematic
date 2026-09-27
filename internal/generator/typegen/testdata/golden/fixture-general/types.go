@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 func toMapValue(value any) (map[string]any, error) {
@@ -354,7 +355,7 @@ func validateNetworkUrlValue(value NetworkUrl, required bool) (bool, []Validatio
 		return false, coreErrs
 	}
 	var ruleErrs []ValidationError
-	if len(string(value)) > 2048 {
+	if utf8.RuneCountInString(string(value)) > 2048 {
 		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 2048 characters"})
 	}
 	if matched, err := regexp.MatchString("^https?://[\\w\\-\\{\\}]+(\\.[\\w\\-\\{\\}]+)+([:/?#][\\w\\-\\._~:/?#\\[\\]@!\\$&'\\(\\)\\*\\+,;=\\{\\}%]*)?$", string(value)); err != nil || !matched {
@@ -681,7 +682,7 @@ func (t *FixtureFilter) Validate() ValidationErrors {
 	{
 		value := t.Kind
 
-		if len(string(value)) > 32 {
+		if utf8.RuneCountInString(string(value)) > 32 {
 			errors.AddFieldError("kind", "maxLength", "must be at most 32 characters")
 		}
 
@@ -691,7 +692,7 @@ func (t *FixtureFilter) Validate() ValidationErrors {
 		value := t.Values
 
 		for i, item := range value {
-			if len(string(item)) > 64 {
+			if utf8.RuneCountInString(string(item)) > 64 {
 				fieldKey := fmt.Sprintf("values[%d]", i)
 				errors.AddFieldError(fieldKey, "maxLength", "must be at most 64 characters")
 			}

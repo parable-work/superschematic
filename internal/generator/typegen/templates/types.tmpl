@@ -15,6 +15,9 @@ import (
 	"regexp"
 {{- end}}
 	"strings"
+{{- if .NeedsRuneCount}}
+	"unicode/utf8"
+{{- end}}
 	"gopkg.in/yaml.v3"
 {{- end}}
 {{- if .HasVersionedTypes}}
@@ -486,9 +489,9 @@ func validate{{.Symbol}}Value(value {{.Symbol}}, required bool) (bool, []Validat
 	var ruleErrs []ValidationError
 {{- range .Rules}}
 {{- if eq .Validator "minLength"}}
-	if len({{validationStringExpr $check.Field "value"}}) < {{printf "%v" .Value}} {
+	if utf8.RuneCountInString({{validationStringExpr $check.Field "value"}}) < {{printf "%v" .Value}} {
 {{- else if eq .Validator "maxLength"}}
-	if len({{validationStringExpr $check.Field "value"}}) > {{printf "%v" .Value}} {
+	if utf8.RuneCountInString({{validationStringExpr $check.Field "value"}}) > {{printf "%v" .Value}} {
 {{- else if eq .Validator "pattern"}}
 	if matched, err := regexp.MatchString("{{escapeString (printf "%v" .Value)}}", {{validationStringExpr $check.Field "value"}}); err != nil || !matched {
 {{- else if eq .Validator "min"}}
@@ -954,9 +957,9 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 		value := item
 		{{end}}
 		{{if eq .Validator "minLength"}}
-		if len({{validationStringExpr $field "value"}}) < {{printf "%v" .Value}} {
+		if utf8.RuneCountInString({{validationStringExpr $field "value"}}) < {{printf "%v" .Value}} {
 		{{else if eq .Validator "maxLength"}}
-		if len({{validationStringExpr $field "value"}}) > {{printf "%v" .Value}} {
+		if utf8.RuneCountInString({{validationStringExpr $field "value"}}) > {{printf "%v" .Value}} {
 		{{else if eq .Validator "pattern"}}
 		if matched, err := regexp.MatchString("{{escapeString (printf "%v" .Value)}}", {{validationStringExpr $field "value"}}); err != nil || !matched {
 		{{else if eq .Validator "min"}}
@@ -994,26 +997,26 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 		{{else if eq .Validator "minLength"}}
 		{{if $field.IsArray}}
 		for i, item := range value {
-			if len({{validationStringExpr $field "item"}}) < {{printf "%v" .Value}} {
+			if utf8.RuneCountInString({{validationStringExpr $field "item"}}) < {{printf "%v" .Value}} {
 				fieldKey := fmt.Sprintf("{{$field.Name}}[%d]", i)
 				errors.AddFieldError(fieldKey, "minLength", "{{escapeString .Message}}")
 			}
 		}
 		{{else}}
-		if len({{validationStringExpr $field "value"}}) < {{printf "%v" .Value}} {
+		if utf8.RuneCountInString({{validationStringExpr $field "value"}}) < {{printf "%v" .Value}} {
 			errors.AddFieldError("{{$field.Name}}", "minLength", "{{escapeString .Message}}")
 		}
 		{{end}}
 		{{else if eq .Validator "maxLength"}}
 		{{if $field.IsArray}}
 		for i, item := range value {
-			if len({{validationStringExpr $field "item"}}) > {{printf "%v" .Value}} {
+			if utf8.RuneCountInString({{validationStringExpr $field "item"}}) > {{printf "%v" .Value}} {
 				fieldKey := fmt.Sprintf("{{$field.Name}}[%d]", i)
 				errors.AddFieldError(fieldKey, "maxLength", "{{escapeString .Message}}")
 			}
 		}
 		{{else}}
-		if len({{validationStringExpr $field "value"}}) > {{printf "%v" .Value}} {
+		if utf8.RuneCountInString({{validationStringExpr $field "value"}}) > {{printf "%v" .Value}} {
 			errors.AddFieldError("{{$field.Name}}", "maxLength", "{{escapeString .Message}}")
 		}
 		{{end}}
@@ -1082,26 +1085,26 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 		{{else if eq .Validator "minLength"}}
 		{{if $field.IsArray}}
 		for i, item := range value {
-			if len({{validationStringExpr $field "item"}}) < {{printf "%v" .Value}} {
+			if utf8.RuneCountInString({{validationStringExpr $field "item"}}) < {{printf "%v" .Value}} {
 				fieldKey := fmt.Sprintf("{{$field.Name}}[%d]", i)
 				errors.AddFieldError(fieldKey, "minLength", "{{escapeString .Message}}")
 			}
 		}
 		{{else}}
-		if len({{validationStringExpr $field "value"}}) < {{printf "%v" .Value}} {
+		if utf8.RuneCountInString({{validationStringExpr $field "value"}}) < {{printf "%v" .Value}} {
 			errors.AddFieldError("{{$field.Name}}", "minLength", "{{escapeString .Message}}")
 		}
 		{{end}}
 		{{else if eq .Validator "maxLength"}}
 		{{if $field.IsArray}}
 		for i, item := range value {
-			if len({{validationStringExpr $field "item"}}) > {{printf "%v" .Value}} {
+			if utf8.RuneCountInString({{validationStringExpr $field "item"}}) > {{printf "%v" .Value}} {
 				fieldKey := fmt.Sprintf("{{$field.Name}}[%d]", i)
 				errors.AddFieldError(fieldKey, "maxLength", "{{escapeString .Message}}")
 			}
 		}
 		{{else}}
-		if len({{validationStringExpr $field "value"}}) > {{printf "%v" .Value}} {
+		if utf8.RuneCountInString({{validationStringExpr $field "value"}}) > {{printf "%v" .Value}} {
 			errors.AddFieldError("{{$field.Name}}", "maxLength", "{{escapeString .Message}}")
 		}
 		{{end}}
@@ -1166,14 +1169,14 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 		}
 		{{else if eq .Validator "minLength"}}
 		for i, item := range value {
-			if len({{validationStringExpr $field "item"}}) < {{printf "%v" .Value}} {
+			if utf8.RuneCountInString({{validationStringExpr $field "item"}}) < {{printf "%v" .Value}} {
 				fieldKey := fmt.Sprintf("{{$field.Name}}[%d]", i)
 				errors.AddFieldError(fieldKey, "minLength", "{{escapeString .Message}}")
 			}
 		}
 		{{else if eq .Validator "maxLength"}}
 		for i, item := range value {
-			if len({{validationStringExpr $field "item"}}) > {{printf "%v" .Value}} {
+			if utf8.RuneCountInString({{validationStringExpr $field "item"}}) > {{printf "%v" .Value}} {
 				fieldKey := fmt.Sprintf("{{$field.Name}}[%d]", i)
 				errors.AddFieldError(fieldKey, "maxLength", "{{escapeString .Message}}")
 			}
@@ -1209,11 +1212,11 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 		{{range .Validations}}
 		{{if ne .Validator "required"}}
 		{{if eq .Validator "minLength"}}
-		if len({{validationStringExpr $field "value"}}) < {{printf "%v" .Value}} {
+		if utf8.RuneCountInString({{validationStringExpr $field "value"}}) < {{printf "%v" .Value}} {
 			errors.AddFieldError("{{$field.Name}}", "minLength", "{{escapeString .Message}}")
 		}
 		{{else if eq .Validator "maxLength"}}
-		if len({{validationStringExpr $field "value"}}) > {{printf "%v" .Value}} {
+		if utf8.RuneCountInString({{validationStringExpr $field "value"}}) > {{printf "%v" .Value}} {
 			errors.AddFieldError("{{$field.Name}}", "maxLength", "{{escapeString .Message}}")
 		}
 		{{else if eq .Validator "pattern"}}
@@ -1238,11 +1241,11 @@ func (t *{{.Name}}) Validate() ValidationErrors {
 		{{range .Validations}}
 		{{if ne .Validator "required"}}
 		{{if eq .Validator "minLength"}}
-		if len({{validationStringExpr $field "value"}}) < {{printf "%v" .Value}} {
+		if utf8.RuneCountInString({{validationStringExpr $field "value"}}) < {{printf "%v" .Value}} {
 			errors.AddFieldError("{{$field.Name}}", "minLength", "{{escapeString .Message}}")
 		}
 		{{else if eq .Validator "maxLength"}}
-		if len({{validationStringExpr $field "value"}}) > {{printf "%v" .Value}} {
+		if utf8.RuneCountInString({{validationStringExpr $field "value"}}) > {{printf "%v" .Value}} {
 			errors.AddFieldError("{{$field.Name}}", "maxLength", "{{escapeString .Message}}")
 		}
 		{{else if eq .Validator "pattern"}}
@@ -1915,11 +1918,11 @@ func {{.AccessorName}}() {{.Type}} {
 {{- end}}
 {{- range .ElemRules}}
 {{- if eq .Validator "minLength"}}
-				if len({{validationStringExpr $f "item"}}) < {{printf "%v" .Value}} {
+				if utf8.RuneCountInString({{validationStringExpr $f "item"}}) < {{printf "%v" .Value}} {
 					errors.AddFieldError(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), "minLength", "{{escapeString .Message}}")
 				}
 {{- else if eq .Validator "maxLength"}}
-				if len({{validationStringExpr $f "item"}}) > {{printf "%v" .Value}} {
+				if utf8.RuneCountInString({{validationStringExpr $f "item"}}) > {{printf "%v" .Value}} {
 					errors.AddFieldError(fmt.Sprintf("{{$f.Name}}[%d][%d]", i, j), "maxLength", "{{escapeString .Message}}")
 				}
 {{- else if eq .Validator "pattern"}}

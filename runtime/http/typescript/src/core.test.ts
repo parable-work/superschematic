@@ -370,6 +370,10 @@ describe('JSON body parameters of a scalar, enum or JSON type', () => {
     // The argument's own constraints apply after the scalar's, and name their rule too.
     refusedAt(p({ isArray: true, scalar: url, pattern: '^https://' }), ['http://a.test'], 'x[0]', 'pattern', 'does not match the required pattern');
     refusedAt(p({ maxLength: 2 }), 'abc', undefined, 'maxLength', 'must be at most 2 characters');
+    // So do the argument's own lengths.
+    expect(decodeJsonParam('body', p({ minLength: 2, maxLength: 2 }), '\u{1F600}\u{1F600}')).toBe('\u{1F600}\u{1F600}');
+    refusedAt(p({ maxLength: 2 }), '\u{1F600}\u{1F600}\u{1F600}', undefined, 'maxLength', 'must be at most 2 characters');
+    refusedAt(p({ minLength: 2 }), '\u{1F600}', undefined, 'minLength', 'must be at least 2 characters');
     // A path or query value is checked against its scalar too.
     expect(() => decodeParam('query', p({ scalar: url }), ['nope'])).toThrow(
       expect.objectContaining({ details: expect.objectContaining({ parameter: 'x', reason: 'is not a valid Network.Url', errors: [{ validator: 'pattern', message: 'is not a valid Network.Url' }] }) })
