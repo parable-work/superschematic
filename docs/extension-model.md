@@ -52,10 +52,12 @@ links is active for every command it runs.
 | OpenAPI hook | `RegisterOpenAPIHook(OpenAPIHook)` | 3.13 |
 | Tool hook | `RegisterToolHook(ToolHook)` | 3.14 |
 | MCP tool invocation policy | `RegisterToolInvocationPolicy(ToolInvocationPolicy)` | 3.15 |
+| Behavior | `RegisterBehavior(BehaviorSpec)` | 3.16 |
 
 `Name()` is the key of everything the extension owns: the `Extension` field
 of each spec it registers, the `extensions.<name>` slot on IR nodes
-(section 4) and the `[extension.<name>]` table of the naming file.
+(section 4), the `[extension.<name>]` table of the naming file and the
+prefix of its behaviors' names (section 3.16). It may not contain a dot.
 
 An extension cannot:
 
@@ -85,8 +87,8 @@ Goals:
    authoring forms and the persisted IR, and the core never knows its shape.
 4. Mistakes fail closed and early. A bad registration fails when the
    registry is assembled, before any schema loads. An unknown kind,
-   decorator, `extensions` key or `documents` key fails the load and names
-   the key.
+   decorator, `extensions` key, `documents` key or behavior fails the load
+   and names it.
 
 Limits:
 
@@ -99,8 +101,8 @@ Limits:
 ## 3. The Extension interface and the Registry
 
 `registry.Registry` holds every kind, decorator, document, generator, auth
-provider, build-all hook, check, OpenAPI hook, tool hook and the scalar
-catalog a run knows about. It is
+provider, build-all hook, check, OpenAPI hook, tool hook, behavior and the
+scalar catalog a run knows about. It is
 built per command (or per test) and threaded through the loader
 (`loader.WithRegistry`) and the generators (`Options.Registry`). There is no
 package-level registry.
@@ -133,7 +135,7 @@ public packages at the module root:
 
 | Package | What it is |
 | --- | --- |
-| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`) and the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) are aliased here too |
+| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`) and the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) are aliased here too |
 | `loader` | `LoadService` and `LoadServiceWithConfig` with `WithRegistry`, `WithNaming` and `WithSchemaCatalog`, for extension tests against real fixtures; `NewDeclarationProgram`, a type-checked TypeScript program over in-memory files with the loader's compiler, lib files and module resolution, for an extension that checks declarations the schema frontend does not walk; `SchemaError` and `SchemaErrorList`, its located diagnostics |
 | `cli` | `cli.New`, `cli.Config`, `cli.CommandProvider` |
 | `ir` | The IR, its own Go module, with the extension codecs (section 4.2) |
@@ -161,9 +163,10 @@ error. `generator.Run` falls back to a core-only registry when
 `Options.Registry` is nil and returns an error when the naming selects an
 auth provider the core does not have.
 
-`Use` is fail-closed. An extension with an empty name, or a `Register` that
-returns an error, stops `Use`; the error is recorded and `Finalize` returns
-it, so a half-registered extension cannot be used.
+`Use` is fail-closed. An extension with an empty name or a name that
+contains a dot, or a `Register` that returns an error, stops `Use`; the
+error is recorded and `Finalize` returns it, so a half-registered extension
+cannot be used.
 
 Each `Register*` method checks its own spec:
 
@@ -180,6 +183,7 @@ Each `Register*` method checks its own spec:
 | `RegisterToolHook` | an empty name, no `Edit`, a duplicate name |
 | `RegisterScalars` | an empty owner, a nil catalog, a second catalog |
 | `RegisterToolInvocationPolicy` | no `Extension`, a key, value list or default that fails `Validate`, a second policy |
+| `RegisterBehavior` | a declaration that does not decode or has an unknown key, a malformed name or one that does not belong to the registering extension, a duplicate name, a schema that does not compile, a params schema that is not an object schema, an operation or field name that is malformed or repeats, an operation named like one every schema has (section 3.16) |
 
 Every one of them fails after `Finalize`.
 
@@ -193,6 +197,10 @@ Every one of them fails after `Finalize`.
   registered kinds. A misspelt or missing kind fails assembly instead of
   leaving the spec inert for it.
 - No two generators claim the same `OutputKey`.
+- Every behavior's `requires` and `conflicts` name registered behaviors,
+  other than itself and not the same one in both, and each of its
+  operations' `invocationPolicy` is a value of the policy in force
+  (section 3.15), whichever extension registered it.
 
 `Registry.Extensions()` is the set of names passed to `Use` or set on a
 spec. It closes the data-form `extensions` objects (section 5).
@@ -332,6 +340,7 @@ Document generators are driven by presence, not by the kind's pipeline
 | `Dirs` | the directories the generator writes for this run |
 | `Enabled` | whether it runs; a non-empty reason is recorded in `Result.Skipped`. nil means enabled |
 | `Generate` | writes the outputs |
+| `RendersBehaviors` | the generator's output covers what a type's behaviors add; without it, `Run` refuses a schema whose types compose behaviors (section 3.16) |
 
 A generator reaches a kind in one of two ways. The kind's `Pipeline` names
 it, and it runs at that position. Or the generator lists the kind in
@@ -626,6 +635,118 @@ extension's authoring package adds its key by module augmentation. The
 TypeScript frontend type-checks schema files, so a schema whose program
 does not include the augmentation fails the load at the key.
 
+### 3.16 BehaviorSpec
+
+A behavior is code that adds fields, operations, checks and storage to a
+type when an engine runs the schema: a state machine, dependency edges
+between instances, a rating. A type composes several. D16 in
+`docs/DECISIONS.md` is the design; this section is what the compiler does
+with them. It declares, carries and checks behaviors; it runs none.
+
+```go
+type BehaviorSpec struct {
+    Extension   string
+    Declaration json.RawMessage
+}
+```
+
+A behavior is declared once, in a JSON file beside the Go package that
+registers it, which embeds it and passes it to `RegisterBehavior`. Its
+shape is `BehaviorDeclaration`:
+
+| Key | Meaning |
+| --- | --- |
+| `name` | bare (`StateMachine`) for a core behavior, `<extension>.<Name>` for an extension's |
+| `description` | what the behavior adds |
+| `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
+| `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
+| `fields` | the fields it adds: `name` and `description` |
+| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema), `resultSchema`, `writes`, and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+
+A field carries only a name and a description. A field's type can depend
+on the behavior's config, and the loader needs only the name to refuse a
+collision.
+
+`RegisterBehavior` rejects what section 3.2 lists. The name after the dot
+follows the bare-name rule (`^[A-Z][A-Za-z0-9]*$`), and the prefix is the
+registering extension's `Name()`; inside `Use` the spec's `Extension` must
+be the extension whose `Register` is running, so an extension cannot
+declare a core name. An operation may not be named `create`, `get`,
+`list`, `update` or `delete`, which every schema has (D16). `Finalize`
+checks `requires`, `conflicts` and the invocation policy values, since the
+policy is fixed only once every extension has registered.
+`Registry.Behavior(name)` returns a registered `Behavior`: the declaration,
+the registering extension, `ConfigRequired()` (its config schema rejects
+`{}`) and `ValidateConfig`.
+
+In the IR a type lists its behaviors in `TypeDef.Behaviors`, a list of
+`ir.BehaviorRef{Name, Config}` written after `implements` and omitted when
+empty. `Config` is canonical JSON (section 4.2); a config of `{}` is
+stored as none, and an absent config is checked as `{}`. The data forms
+write the same list:
+
+```json
+"behaviors": [{ "name": "acme.Rating", "config": { "maxStars": 5 } }]
+```
+
+The TypeScript form is the core decorator `@behavior(name, config?)` from
+`@superschematic/schema`, on a class of any kind (a `DecoratorSpec` on
+`TargetType`), so a General schema needs no other authoring package. Each
+use appends one entry, so several on one class keep their source order.
+Its `Apply` evaluates the config as any decorator argument (section 3.4),
+stores it canonically, and fails at the argument, naming the type and the
+behavior, when the behavior is not registered or the config fails its
+schema; a behavior used twice fails at the second use. The TypeScript
+half types the config per name through `BehaviorConfigs`, an empty
+interface an extension's authoring package augments, as it augments
+`MCPToolOptions` (section 3.15):
+
+```ts
+import "@superschematic/schema";
+
+declare module "@superschematic/schema" {
+  interface BehaviorConfigs {
+    "acme.Rating": { readonly maxStars: number };
+  }
+}
+```
+
+A behavior that takes no config maps to `undefined`. There is no
+fallback for a name the program's augmentations do not declare: as with
+an unaugmented `@mcp` key, it does not type-check, so a schema's program
+must include the augmentation, through an import of the authoring package
+or a `tsconfig.json` `include` entry. The registry still decides: a
+declared name the binary does not register fails the load. `format
+--to=ts` writes one `@behavior` per entry, in list order.
+
+The loader checks every type's list in every frontend (verify, after the
+core checks and before the kind's `Verify`), and each failure names the
+type and the behavior: a behavior that is not registered, one listed
+twice, a config its schema rejects, a requirement the type does not list,
+a conflict it does, a field that collides with the type's own fields or
+another behavior's, and two behaviors that add an operation of the same
+name. The data-form readers check names and configs before JSON Schema
+validation, with the same wording (section 5). The strict loader in
+`@superschematic/schema-runtime` checks them through the meta-schema
+alone, with the same verdicts, and the schema-file TypeScript types in
+`@superschematic/schema-ir` type an entry as `BehaviorRef`, with the name
+and config left open.
+
+Until a generator renders behaviors, it refuses a type that composes one.
+`generator.Run` checks once, before any generator in the pipeline runs:
+the first enabled generator without `GeneratorSpec.RendersBehaviors` fails
+the run with `generator: <name> does not render behaviors yet: type <T>
+composes behavior <B>`. The check covers core and extension generators
+alike; document generators, which render their documents, are not asked.
+No core generator sets the flag. `build --emit-ir`, `format` and
+`json-schema` run no generator and accept the schema.
+
+The core registers no behavior. acme declares `acme.Rating` and types its
+config in `packages/schema/src/behaviors.ts` (section 10);
+`internal/registry/registrytest` declares two, `acme.Stock` and
+`acme.Audited`, which requires it, with a TypeScript fixture and its JSON
+and YAML twins.
+
 ## 4. The open IR
 
 ### 4.1 Slots
@@ -639,7 +760,13 @@ The IR has two open slots, both `map[string]json.RawMessage`:
 
 Core decorators never write `Extensions`; they write typed fields. The
 values are raw JSON rather than interfaces so the persisted IR decodes back
-into the same Go types. The IR is its own module (D1), so an extension, a
+into the same Go types.
+
+Behaviors are the one place an extension's data sits outside its
+`extensions.<name>` slot: `TypeDef.Behaviors` is a core field that holds
+core and extension behaviors alike, and an extension's are told apart by
+the `<extension>.` prefix of their names (section 3.16). That is why an
+extension name may not contain a dot. The IR is its own module (D1), so an extension, a
 runtime or a tool reads it without linking the compiler.
 
 A field that carries acme's `@shelf({ aisle: 3, bay: "B" })` in the
@@ -662,9 +789,10 @@ write the same object:
 | `GetDocument[T](schema, name)`, `SetDocument[T]` | the same over `Documents`; `SetDocument` keeps `{}`, because a document's presence runs its generator |
 | `CanonicalJSON(raw)` | compact JSON, object keys sorted, arrays and number literals as written |
 
-Every path that stores extension or document data runs `CanonicalJSON`: the
-codecs, the data-form readers (`CanonicalizeExtensions`,
-`CanonicalizeDocuments`) and the document loader. The persisted IR is the
+Every path that stores extension or document data or a behavior's config
+runs `CanonicalJSON`: the codecs, the data-form readers
+(`CanonicalizeExtensions`, `CanonicalizeDocuments`,
+`CanonicalizeBehaviors`) and the document loader. The persisted IR is the
 same whether a value came from TypeScript, JSON or YAML.
 
 An extension defines one Go struct per node type it writes (acme's
@@ -702,16 +830,34 @@ Schema, which `schemafile.DefinitionFor(reg)` builds per registry:
    with its `DocumentSpec.Schema`.
 5. Add the registry's tool invocation policy key to `OperationMCP`, with
    its values as the enum and its default as the default (section 3.15).
+6. Close `BehaviorRef`, the entries of a type's `behaviors`, to the
+   registered behaviors: `name` is one of their names, and an `if`/`then`
+   per behavior holds its `config` to its `configSchema`, the way a
+   decorator's value is its `Args`. A behavior without a config schema
+   takes the empty closed object, and a config schema that rejects `{}`
+   makes `config` required (section 3.16). With no behavior registered,
+   `behaviors` takes no entry (`maxItems: 0`) and `name` has no enum,
+   since ajv refuses an empty one.
+7. Give every property the Go encoder omits at one value that value as its
+   default: an `omitempty` string, bool or number that is not a pointer
+   (`""`, `false`, `0`) and an `omitempty` slice or map (`[]`, `{}`). A
+   behavior's `config` is raw JSON, which the readers store as absent when
+   it is `{}`, so its default is `{}`. A pointer keeps its zero value and
+   has no default. A reader in another language drops a property that
+   holds this default and so writes a document as the Go reader decodes it
+   (`@superschematic/schema-runtime`'s strict loader does).
 
-With only the core registered, `extensions` and `documents` admit no key.
+With only the core registered, `extensions` and `documents` admit no key
+and `behaviors` admits no entry.
 The compiled definition is cached per registry, keyed by a weak pointer and
 the extension list. `superschematic json-schema` prints it for the binary's
 registry; `--naming` selects the naming file, since the command has no
 service directory.
 
-After validation the readers check slot names again to give an error that
-names the key and its location, then run every extension decorator through
-the registry the way the TypeScript frontend does
+Before validation the readers check slot names and behavior entries, to
+give an error that names the key or behavior and where it sits. After it
+they run every extension decorator through the registry the way the
+TypeScript frontend does
 (`internal/loader/schemafile/slots.go`): the decorator must belong to the
 extension whose slot holds it, the kind must allow it, the argument is
 validated against `Args`, and `Apply` runs. A decorator's `Apply` sees the
@@ -822,7 +968,9 @@ program.
 3. Take `reg.Pipeline(kind)`: the kind's `Pipeline` in order, then every
    other generator whose `Kinds` lists the kind, in registration order.
 4. Call each generator's `Enabled`. Collect the `Dirs` of the enabled ones
-   and fail, before any runs, if two claim the same directory.
+   and fail, before any runs, if two claim the same directory, or if a
+   type composes a behavior and an enabled generator does not set
+   `RendersBehaviors` (section 3.16).
 5. Run the enabled generators in order.
 6. Run the document generators: for every registered `DocumentSpec` with a
    `Generate` whose name is present in `Schema.Documents`, in name order.
@@ -994,11 +1142,12 @@ its provider, which supplies those two functions. D15 in
 | Surface | Core registration |
 | --- | --- |
 | Kinds | `DB`, `API`, `General` (section 3.3) |
-| Decorators | 41 specs over the four targets in `internal/registry/core_decorators.go`, `core_projection.go` and `docs_decorators.go`, declared in `@superschematic/{schema,db,api,schema-config}` |
+| Decorators | 42 specs over the four targets in `internal/registry/core_decorators.go`, `core_projection.go`, `docs_decorators.go` and `behaviors.go`, declared in `@superschematic/{schema,db,api,schema-config}` |
 | Generators | `types`, `sql`, `orm`, `api`, `sdks`, `envConfig` (section 3.6) |
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
+| Behaviors | none (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |
@@ -1033,6 +1182,7 @@ each surface:
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Configuration | `[extension.acme] region` and `projection_scope_setting`; `metadata_key_prefix`, `scalar_jsdoc_tag`, `[package_aliases]` (`@acme/schema-config`) and `[deps] copy` | `ext/extension.go`, `schemas/superschematic.toml` |
 | Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
+| Behavior | `acme.Rating`, which a General data-form service in `ext/testdata/services/shop-ratings` composes, and its TypeScript twin `shop-ratings-ts` with `@behavior`; its `BehaviorConfigs` augmentation | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts` |
 | Binary | `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
 The acceptance criterion: an extension adds every surface above without
@@ -1052,8 +1202,12 @@ that way. Two scripts check it, and the `acme` job in
   generated API compiles against `apikey`; the committed graph copy is
   current; `fields` type-checks the label declarations; the `@docs`
   records reach the OpenAPI document under `x-acme-docs` and the tool
-  documents carry acme's keys. It also asserts that the core-only binary
-  rejects the Catalog service and the naming file that selects `apikey`,
+  documents carry acme's keys; `acme.Rating` reaches the IR of
+  `shop-ratings` and of its TypeScript twin, `json-schema` and `format`
+  accept it (to YAML and to TypeScript), and `build` refuses the service,
+  naming the `types` generator. It also asserts that the
+  core-only binary rejects the Catalog service, the `acme.Rating` behavior
+  and the naming file that selects `apikey`,
   that it builds the DB and API services with `session` and the result
   compiles, and that it writes the core keys where acme's hooks write its
   own.
@@ -1066,8 +1220,8 @@ Inside the core module, three extensions test the seams against the real
 loader and generators:
 
 - `internal/registry/registrytest` is an in-tree fixture extension with a
-  kind, decorators on all four targets, a data-form document and a
-  generator. `TestAcmeExtensionEndToEnd` loads a TypeScript fixture and its
+  kind, decorators on all four targets, a data-form document, a generator
+  and two behaviors. `TestAcmeExtensionEndToEnd` loads a TypeScript fixture and its
   data-form twin, checks both produce the same IR with the decorator values
   in their slots, and runs the generator.
 - `extensions/deploy` registers a document and nothing else. Its test loads
@@ -1130,6 +1284,7 @@ a candidate for a change with its own test.
 | `internal/registry/spec.go` | `KindSpec`, `DecoratorSpec`, `DocumentSpec`, `GeneratorSpec`, the contexts, `BuildAllHook` |
 | `internal/registry/core.go`, `core_decorators.go`, `core_projection.go`, `docs_decorators.go` | the core kinds and decorators |
 | `internal/registry/scalars.go`, `outputs.go` | the scalar catalog seam, `ParseOutputs` |
+| `internal/registry/behaviors.go`, `internal/loader/verify/behaviors.go`, `ir/behaviors.go` | behavior declarations, the loader's checks, `ir.BehaviorRef` |
 | `internal/generator/core.go`, `generator.go` | the core generators, `Run` |
 | `internal/generator/apigen/auth.go`, `apigen/sessionauth` | the provider interface, the snippet hooks, the core provider |
 | `internal/generator/apigen/openapi_hooks.go`, `apigen/tools.go` | `OpenAPIHook`, `ToolHook` and where the `api` generator runs them |
@@ -1142,4 +1297,4 @@ a candidate for a change with its own test.
 | `cli/cli.go` | `cli.New`, `CommandProvider` |
 | `loader/loader.go` | the public loader package |
 | `examples/acme-schematic/` | the worked example and its acceptance scripts |
-| `docs/DECISIONS.md` | the decisions this design rests on (D1, D2, D3, D4, D6, D10, D11, D13, D15) |
+| `docs/DECISIONS.md` | the decisions this design rests on (D1, D2, D3, D4, D6, D10, D11, D13, D15, D16) |

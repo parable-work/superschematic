@@ -20,7 +20,7 @@ func (e *emitter) emitProjection(def *ir.TypeDef) {
 	}
 	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil || def.IsTrait ||
 		def.TraitConfig != nil || def.Source != nil || len(def.Indexes) > 0 || def.JsonField ||
-		def.Versioned || def.EnvVars || def.DenyUnknownFields || def.StrictJSON {
+		def.Versioned || def.EnvVars || def.DenyUnknownFields || def.StrictJSON || len(def.Behaviors) > 0 {
 		e.failf("type %s: a projection class carries only @projection and @join", def.Name)
 		return
 	}

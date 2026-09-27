@@ -1,0 +1,20 @@
+{
+  "name": "acme.Audited",
+  "description": "Records when an item's count was last checked.",
+  "requires": ["acme.Stock"],
+  "fields": [
+    { "name": "auditedAt", "description": "When the count was last checked." }
+  ],
+  "operations": [
+    {
+      "name": "audit",
+      "description": "Marks the count checked now.",
+      "paramsSchema": { "type": "object", "additionalProperties": false },
+      "resultSchema": {
+        "type": "object",
+        "properties": { "auditedAt": { "type": "string" } }
+      },
+      "writes": true
+    }
+  ]
+}

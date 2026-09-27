@@ -107,7 +107,7 @@ var symbolPackages = map[string]string{
 	"Validate": "@superschematic/schema", "Secret": "@superschematic/schema", "trait": "@superschematic/schema",
 	"source": "@superschematic/schema", "temporalFormat": "@superschematic/schema", "virtual": "@superschematic/schema",
 	"denyUnknownFields": "@superschematic/schema", "strictJSON": "@superschematic/schema",
-	"purpose": "@superschematic/schema",
+	"purpose": "@superschematic/schema", "behavior": "@superschematic/schema",
 	// jsonField is exported by both @superschematic/schema and @superschematic/db; emit the
 	// @superschematic/schema import so General schemas (which do not stage @superschematic/db)
 	// round-trip.

@@ -39,8 +39,8 @@ var corpus = []string{
 }
 
 // openParts are documents the types accept because a registry, not the
-// core, closes what they use: a kind, extension data, a document and a
-// renamed invocation policy key.
+// core, closes what they use: a kind, extension data, a document, a
+// renamed invocation policy key and behaviors with their configs.
 const openParts = `
 export const extensionKind: Document = { name: 'jobs', kind: 'Worker' };
 export const extensionData: Document = {
@@ -54,6 +54,11 @@ export const extensionData: Document = {
       fields: [{ name: 'slug', typeRef: { name: 'Identity.Slug' }, extensions: { acme: { shelf: { aisle: 3 } } } }],
     },
   },
+};
+export const behaviors: TypeDef = {
+  name: 'Item',
+  role: 'DBTable',
+  behaviors: [{ name: 'acme.Stock', config: { aisles: 3, unit: 'box' } }, { name: 'acme.Audited' }],
 };
 export const renamedPolicy: OperationSetFile = {
   kind: 'OperationSet',
@@ -76,14 +81,20 @@ export const missingTypeRef: FieldDef = { name: 'slug' };
 export const enumWithoutKind: EnumFile = { name: 'Colour', values: [] };
 // @ts-expect-error a string where the mcp record takes a boolean
 export const hiddenAsString: OperationMCP = { hidden: 'no' };
+// @ts-expect-error a behavior without its name
+export const behaviorWithoutName: BehaviorRef = { config: { aisles: 3 } };
+// @ts-expect-error an unknown key on a behavior
+export const behaviorExtraKey: TypeDef = { name: 'Item', role: 'DBTable', behaviors: [{ name: 'acme.Audited', extra: 1 }] };
 `
 
 // TestTypesCheckTheCorpus type-checks the generated types with the
 // compiler the schema loader uses. The package is mounted as a consumer
 // installs it, with its package.json, and imported through the exports
 // map. Every data-form file the JSON writer produces for the fixture
-// corpus is assigned to the type of its form, the open parts accept what a
-// registry may add, and the closed parts refuse what no registry accepts.
+// corpus is assigned to the type of its form, every document the Go reader
+// decodes in the schema-file parity corpus to Document, the open parts
+// accept what a registry may add, and the closed parts refuse what no
+// registry accepts.
 func TestTypesCheckTheCorpus(t *testing.T) {
 	root := testpaths.RepoRoot(t)
 	outputs, err := render()
@@ -100,7 +111,7 @@ func TestTypesCheckTheCorpus(t *testing.T) {
 	}
 
 	var check strings.Builder
-	check.WriteString("import type { Document, EnumFile, FieldDef, OperationMCP, OperationSetFile, ScalarFile, TypeDef, UnionFile } from '@superschematic/schema-ir/schema-file';\n")
+	check.WriteString("import type { BehaviorRef, Document, EnumFile, FieldDef, OperationMCP, OperationSetFile, ScalarFile, TypeDef, UnionFile } from '@superschematic/schema-ir/schema-file';\n")
 	count := 0
 	for _, dir := range corpus {
 		schema, err := loader.LoadService(filepath.Join(root, dir))
@@ -123,6 +134,25 @@ func TestTypesCheckTheCorpus(t *testing.T) {
 	}
 	if count == 0 {
 		t.Fatal("the corpus wrote no documents")
+	}
+	// Every document the Go reader accepts in the schema-file parity
+	// corpus, core and extended registry alike, is a Document as the
+	// reader decodes it.
+	var parity struct {
+		Vectors []struct {
+			Name      string `json:"name"`
+			Accept    bool   `json:"accept"`
+			Canonical string `json:"canonical"`
+		} `json:"vectors"`
+	}
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(root, "runtime", "schema", "testdata", "schema_file_parity.json"))), &parity); err != nil {
+		t.Fatal(err)
+	}
+	for _, vector := range parity.Vectors {
+		if vector.Accept {
+			fmt.Fprintf(&check, "// parity: %s\nexport const doc%d: Document = %s;\n", vector.Name, count, vector.Canonical)
+			count++
+		}
 	}
 	check.WriteString(openParts)
 	check.WriteString(closedParts)

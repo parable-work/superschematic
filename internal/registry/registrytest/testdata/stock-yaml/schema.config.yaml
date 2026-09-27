@@ -1,0 +1,5 @@
+name: stock
+kind: General
+outputs:
+  types:
+    typescript: { enabled: true }

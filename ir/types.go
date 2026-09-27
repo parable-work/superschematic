@@ -77,6 +77,12 @@ type TypeDef struct {
 	// Implements lists the marker and configurable traits implemented by this type.
 	Implements []TraitRef `json:"implements,omitempty" yaml:"implements,omitempty"`
 
+	// Behaviors lists the behaviors this type composes, in the order their
+	// checks run. A trait's fields are copied onto a type when it is read;
+	// a behavior adds fields, operations, checks and storage when an engine
+	// runs the schema. See [BehaviorRef].
+	Behaviors []BehaviorRef `json:"behaviors,omitempty" yaml:"behaviors,omitempty"`
+
 	// RawHeritage records the heritage clauses as written, before flattening.
 	// Every reader records this unconditionally: recording is cheap at walk
 	// time and unrecoverable later. Flattened Fields remain the canonical
