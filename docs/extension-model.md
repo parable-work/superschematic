@@ -702,6 +702,13 @@ Schema, which `schemafile.DefinitionFor(reg)` builds per registry:
    with its `DocumentSpec.Schema`.
 5. Add the registry's tool invocation policy key to `OperationMCP`, with
    its values as the enum and its default as the default (section 3.15).
+6. Give every property the Go encoder omits at one value that value as its
+   default: an `omitempty` string, bool or number that is not a pointer
+   (`""`, `false`, `0`) and an `omitempty` slice or map (`[]`, `{}`). A
+   pointer keeps its zero value and has no default. A reader in another
+   language drops a property that holds this default and so writes a
+   document as the Go reader decodes it (`@superschematic/schema-runtime`'s
+   strict loader does).
 
 With only the core registered, `extensions` and `documents` admit no key.
 The compiled definition is cached per registry, keyed by a weak pointer and

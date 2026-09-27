@@ -28,6 +28,26 @@ of a generated artifact is always listed here with the bump it requires.
   registered default (`"default": "auto"` for the core's
   `invocationPolicy`), the value the readers fill in for a visible tool
   that omits it. Minor.
+- `@superschematic/schema-runtime` has a strict schema-file loader:
+  `SchemaFileLoader` (and `loadSchemaFile`) reads a JSON schema file as
+  the Go data-form reader does, dispatching its form, validating it
+  against a meta-schema, decoding it as Go decodes it into the IR and
+  filling in the invocation policy default, and returns the document with
+  its canonical form, byte for byte what `ir.CanonicalJSON` writes for the
+  document Go decodes. The meta-schema is an option, the `superschematic
+  json-schema` output of a deployment's binary; the default is
+  `@superschematic/schema-ir/schema-file.json`, which the package now reads
+  at run time. `canonicalJSON` writes any JSON text in that form, and a
+  refused payload throws `SchemaFileError`. The package depends on `ajv`
+  (8.20.0) and needs `JSON.parse` source text access (Node.js 21 or
+  later, or Bun). `runtime/schema/testdata/schema_file_parity.json`, which
+  `internal/loader/schemafile` writes from the Go reader, holds the vectors
+  the TypeScript suite asserts. Minor.
+- The schema-file JSON Schema gives every property the Go encoder omits at
+  one value that value as its default: an `omitempty` string, bool or
+  number that is not a pointer (`""`, `false`, `0`) and an `omitempty`
+  list or map (`[]`, `{}`). The readers accept and decode the same
+  payloads as before. Minor.
 - Go types: every generated enum has a `Values()` method that returns its
   members in schema declaration order, as a new slice on each call. It is
   the Go counterpart of Rust's `ALL`, and it works through the alias a

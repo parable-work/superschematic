@@ -71,6 +71,22 @@
         "documents": {
           "additionalProperties": false,
           "default": {},
+          "properties": {
+            "catalogConfig": {
+              "properties": {
+                "shelves": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "cfg": {
+              "type": "object"
+            },
+            "otherConfig": {
+              "type": "object"
+            }
+          },
           "type": "object"
         },
         "enums": {
@@ -83,6 +99,17 @@
         "extensions": {
           "additionalProperties": false,
           "default": {},
+          "properties": {
+            "acme": {
+              "type": "object"
+            },
+            "empty": {
+              "type": "object"
+            },
+            "other": {
+              "type": "object"
+            }
+          },
           "type": "object"
         },
         "imports": {
@@ -96,6 +123,7 @@
           "default": "",
           "enum": [
             "API",
+            "Catalog",
             "DB",
             "General"
           ],
@@ -269,6 +297,41 @@
         "extensions": {
           "additionalProperties": false,
           "default": {},
+          "properties": {
+            "acme": {
+              "additionalProperties": false,
+              "properties": {
+                "audited": {
+                  "const": true
+                },
+                "shelf": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "aisle": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "z": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "aisle"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "empty": {
+              "additionalProperties": false,
+              "type": "object"
+            },
+            "other": {
+              "additionalProperties": false,
+              "type": "object"
+            }
+          },
           "type": "object"
         },
         "filterable": {
@@ -800,16 +863,16 @@
         "icon": {
           "$ref": "#/$defs/MCPIcon"
         },
-        "invocationPolicy": {
-          "default": "auto",
-          "enum": [
-            "auto",
-            "ask"
-          ],
-          "type": "string"
-        },
         "name": {
           "default": "",
+          "type": "string"
+        },
+        "review": {
+          "default": "never",
+          "enum": [
+            "never",
+            "always"
+          ],
           "type": "string"
         }
       },
@@ -836,6 +899,25 @@
         "extensions": {
           "additionalProperties": false,
           "default": {},
+          "properties": {
+            "acme": {
+              "additionalProperties": false,
+              "properties": {
+                "audited": {
+                  "const": true
+                }
+              },
+              "type": "object"
+            },
+            "empty": {
+              "additionalProperties": false,
+              "type": "object"
+            },
+            "other": {
+              "additionalProperties": false,
+              "type": "object"
+            }
+          },
           "type": "object"
         },
         "middleware": {
@@ -875,6 +957,25 @@
         "extensions": {
           "additionalProperties": false,
           "default": {},
+          "properties": {
+            "acme": {
+              "additionalProperties": false,
+              "properties": {
+                "audited": {
+                  "const": true
+                }
+              },
+              "type": "object"
+            },
+            "empty": {
+              "additionalProperties": false,
+              "type": "object"
+            },
+            "other": {
+              "additionalProperties": false,
+              "type": "object"
+            }
+          },
           "type": "object"
         },
         "kind": {
@@ -1504,6 +1605,25 @@
         "extensions": {
           "additionalProperties": false,
           "default": {},
+          "properties": {
+            "acme": {
+              "additionalProperties": false,
+              "properties": {
+                "tagged": {
+                  "const": true
+                }
+              },
+              "type": "object"
+            },
+            "empty": {
+              "additionalProperties": false,
+              "type": "object"
+            },
+            "other": {
+              "additionalProperties": false,
+              "type": "object"
+            }
+          },
           "type": "object"
         },
         "fields": {

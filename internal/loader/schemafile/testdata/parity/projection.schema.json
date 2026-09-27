@@ -1,0 +1,314 @@
+{
+  "name": "fixture-projection",
+  "kind": "DB",
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "description": "Any valid JSON value: object, array, primitive, or null",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "GenericJSON",
+        "json_schema": "any",
+        "python": "Any",
+        "rust": "serde_json::Value",
+        "sql": "JSONB",
+        "typescript": "JSONValue"
+      },
+      "hasCustomValidate": true
+    },
+    "Identity.Name": {
+      "name": "Identity.Name",
+      "description": "An objects name",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityName",
+        "json_schema": "string",
+        "python": "str",
+        "rust": "String",
+        "sql": "VARCHAR(80)",
+        "typescript": "string"
+      },
+      "maxLength": 80,
+      "minLength": 2
+    },
+    "Identity.Slug": {
+      "name": "Identity.Slug",
+      "description": "A URL friendly version of a string",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentitySlug",
+        "json_schema": "string",
+        "python": "str",
+        "rust": "String",
+        "sql": "CITEXT",
+        "typescript": "string"
+      },
+      "maxLength": 255,
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    },
+    "Temporal.DateTime": {
+      "name": "Temporal.DateTime",
+      "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "TemporalDateTime",
+        "json_schema": "string",
+        "python": "datetime.datetime",
+        "rust": "chrono::DateTime\u003cchrono::Utc\u003e",
+        "sql": "TIMESTAMPTZ",
+        "typescript": "JSDate"
+      },
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "AppPreference": {
+      "name": "AppPreference",
+      "comment": "Preference values visible to the current account, channel and user: app\nand team rows for the selected channel, and user rows only for the user\nwhose session runs the query. App rows resolve by the branch or the\nreleased commit the caller names (either setting may be left unset), and\none row per slot survives: user over team over app, and a branch row\nbefore the released commit's.",
+      "role": "Projection",
+      "fields": [
+        {
+          "name": "slotKey",
+          "comment": "Stable identity of the slot the value belongs to.",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "handle",
+          "typeRef": {
+            "name": "Identity.Slug"
+          },
+          "required": true
+        },
+        {
+          "name": "scope",
+          "typeRef": {
+            "name": "PreferenceScope"
+          },
+          "required": true
+        },
+        {
+          "name": "userId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          }
+        },
+        {
+          "name": "channelId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "projectedFrom": "base.channel"
+        },
+        {
+          "name": "channelHandle",
+          "typeRef": {
+            "name": "Identity.Slug"
+          },
+          "required": true,
+          "projectedFrom": "channel.handle"
+        },
+        {
+          "name": "branchName",
+          "typeRef": {
+            "name": "Identity.Name"
+          },
+          "projectedFrom": "branch.name"
+        },
+        {
+          "name": "value",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "required": true
+        },
+        {
+          "name": "revision",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true
+        },
+        {
+          "name": "tags",
+          "typeRef": {
+            "name": "Identity.Slug",
+            "isArray": true
+          },
+          "required": true
+        },
+        {
+          "name": "updatedAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "projectedFrom": "base.updatedAt"
+        }
+      ],
+      "projection": {
+        "pool": "app",
+        "name": "preferences",
+        "migration": "20260902120000",
+        "source": "Preference",
+        "joins": [
+          {
+            "type": "Channel",
+            "alias": "channel",
+            "kind": "inner",
+            "on": [
+              {
+                "left": "channel.id",
+                "right": "base.channel"
+              }
+            ]
+          },
+          {
+            "type": "Channel",
+            "alias": "branch",
+            "kind": "left",
+            "on": [
+              {
+                "left": "branch.id",
+                "right": "base.branch"
+              }
+            ]
+          }
+        ],
+        "predicates": [
+          {
+            "column": "base.account",
+            "setting": "app.account_id"
+          },
+          {
+            "column": "base.channel",
+            "setting": "app.channel_id"
+          },
+          {
+            "column": "base.userId",
+            "setting": "app.user_id",
+            "when": {
+              "column": "base.scope",
+              "equals": "user"
+            }
+          },
+          {
+            "anyOf": [
+              {
+                "column": "base.branch",
+                "setting": "app.branch_id",
+                "optional": true
+              },
+              {
+                "column": "base.commit",
+                "setting": "app.commit_id",
+                "optional": true
+              }
+            ],
+            "when": {
+              "column": "base.scope",
+              "equals": "app"
+            }
+          },
+          {
+            "column": "base.archivedAt",
+            "isNull": true
+          },
+          {
+            "column": "base.hidden",
+            "equals": {
+              "bool": false
+            }
+          },
+          {
+            "column": "base.userId",
+            "notNull": true,
+            "when": {
+              "column": "base.scope",
+              "equals": "user"
+            }
+          }
+        ],
+        "collapse": {
+          "by": [
+            "base.slotKey"
+          ],
+          "order": [
+            {
+              "column": "base.scope",
+              "rank": [
+                "user",
+                "team",
+                "app"
+              ]
+            },
+            {
+              "column": "base.branch",
+              "direction": "asc",
+              "nulls": "last"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "enums": {
+    "PreferenceScope": {
+      "name": "PreferenceScope",
+      "values": [
+        {
+          "name": "App",
+          "serializedAs": "app"
+        },
+        {
+          "name": "Team",
+          "serializedAs": "team"
+        },
+        {
+          "name": "User",
+          "serializedAs": "user"
+        }
+      ]
+    }
+  }
+}
