@@ -374,13 +374,22 @@ fields.
 | The check reads the raw bytes after `json.Unmarshal` has accepted them. A payload without a `null` token costs one byte search; one with a null anywhere costs one pass over the object's members. Each list is still decoded once. | Decoding each list through `[]json.RawMessage` and each element again |
 | A null inner list of `T[][]` still decodes, to a nil list, which `Validate` reports at `field[i]`. A map whose values are lists is not checked: no validator checks the elements of a map value. | Refusing a null inner list in the decoder too |
 
-One Go decode path does not go through a generated type's `UnmarshalJSON`
-and still decodes a null element to its zero value: a list or
-list-of-lists column the ORM reads, which it decodes into the Go list
-directly. The ORM writes no null elements; a row another writer stored
-with one reads with a zero value in its place. A list argument of an API
-operation without an input type, which the Go route decodes itself, is
-refused with a null element (below).
+A list or list-of-lists column the ORM reads does not go through a
+generated type's `UnmarshalJSON`: the ORM decodes its JSONB into the Go
+list directly, so a null element another writer stored read as the
+element type's zero value (`[["a", null]]` as `[["a", ""]]`) while an
+object column refused it. The ORM writes no null elements. It now decodes
+a list column through `unmarshalJSONListFieldValue`, which fails the read
+with `<field>[i]: null element` (`<field>[i][j]` for a list of lists)
+before `json.Unmarshal` runs; a payload without a `null` token is decoded
+once, and a null inner list still reads as a nil list. A union list
+refuses a null element in the union's wrapper, as before. A
+`Generic.JSON[]` column is left as it was: its Go type keeps a stored null
+element as the null token, which a reader can tell from every value, and
+the ORM's tests pin that reading. Whether it should refuse the element, as
+the generated types do, is open. A list argument of an API operation
+without an input type, which the Go route decodes itself, is refused with
+a null element (below).
 
 The generated TypeScript validator rejects a null element, validates a
 nested object element of every type, and reports a non-string element of a

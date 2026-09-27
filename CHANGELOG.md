@@ -895,6 +895,16 @@ of a generated artifact is always listed here with the bump it requires.
   `Default<OrderStatus, OrderStatus.Pending>` failed the column's `CHECK`.
   A set value is inserted as before. Optional enums, enum lists and
   required enums without a default are unchanged. Patch.
+- Go ORM: a list or list-of-lists column it decodes from JSONB (a `T[][]`,
+  or a `T[]` it stores as JSON) refuses a null element when it is read, as
+  an object column and the generated types' `UnmarshalJSON` already did:
+  `GetOne`, `FindMany` and the history decoder fail with
+  `failed to decode JSON field labels: labels[0][1]: null element`. The
+  column was decoded into the Go list directly, so a null element another
+  writer stored read as the element's zero value (`[["a", null]]` as
+  `[["a", ""]]`). A null inner list still reads as a nil list, and a
+  `Generic.JSON[]` column still reads a null element as the JSON null
+  token (D12, amended). Patch.
 - Go SDK: an error response's message is read from the RFC 9457 `detail`
   member first, then `error`, then `message`. A generated Go server writes
   its message only in `detail`, which the Go SDK did not read, so an error
