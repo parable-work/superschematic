@@ -26,7 +26,8 @@ BIN := bin/superschematic
 GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
-        go-goldens catalog-check ts python rust docs cli-smoke scrub clean
+        go-goldens catalog-check schema-file-types schema-file-types-check ts python rust \
+        docs cli-smoke scrub clean
 
 all: build test lint
 
@@ -62,8 +63,9 @@ go-fmt-check:
 go-lint:
 	@for m in $(GO_MODULES); do echo "==> golangci-lint $$m"; (cd $$m && golangci-lint run ./...) || exit 1; done
 
-# Rewrite every golden file from the generators. Review the diff by eye.
-go-goldens:
+# Rewrite every golden file from the generators, and the schema-file JSON
+# Schema and TypeScript types. Review the diff by eye.
+go-goldens: schema-file-types
 	@for p in $$(grep -rl 'flag.Bool("update' --include='*_test.go' . | xargs -n1 dirname | sort -u); do \
 		go test -count=1 $$p -update || exit 1; done
 
@@ -71,6 +73,14 @@ go-goldens:
 # Go package. CI fails when a committed catalog differs.
 catalog-check:
 	go run ./internal/tools/scalarcatalog -check
+
+# The schema-file JSON Schema and TypeScript types in ir/typescript are
+# written from the IR structs. CI fails when a committed file differs.
+schema-file-types:
+	go run ./internal/tools/schemafiletypes
+
+schema-file-types-check:
+	go run ./internal/tools/schemafiletypes -check
 
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
@@ -104,7 +114,7 @@ cli-smoke: $(BIN)
 scrub:
 	scripts/scrub-check.sh
 
-test: go-test catalog-check ts python rust cli-smoke
+test: go-test catalog-check schema-file-types-check ts python rust cli-smoke
 
 lint: go-vet go-fmt-check go-lint scrub
 

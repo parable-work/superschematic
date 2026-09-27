@@ -27,10 +27,14 @@ runtime reads, equal to it (`UPDATE_PARITY_DOCUMENT=1 bun run test`).
 (types only)                    (scalars)        (this package)
 ```
 
-`@superschematic/schema-ir` (`ir/typescript`) is one `index.d.ts` with the
-IR document types. superscalar supplies parse, normalize and validate for
-every scalar; this package imports both. Nothing in superscalar imports this
-package, which keeps the scalar library free of schema knowledge.
+`@superschematic/schema-ir` (`ir/typescript`) holds types and JSON, no
+code: `index.d.ts` at the package root types the runtime document this
+package reads, and the `./schema-file` and `./schema-file.json` subpaths
+are the schema-file data form's types and its JSON Schema, which
+`internal/tools/schemafiletypes` writes. superscalar supplies parse,
+normalize and validate for every scalar; this package imports both.
+Nothing in superscalar imports this package, which keeps the scalar
+library free of schema knowledge.
 
 ## Scalar catalogs
 

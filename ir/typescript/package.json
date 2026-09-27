@@ -1,14 +1,20 @@
 {
   "name": "@superschematic/schema-ir",
-  "version": "0.1.0",
-  "description": "superschematic schema IR types for TypeScript (types only, no runtime code).",
+  "version": "0.0.0",
+  "description": "superschematic schema IR types for TypeScript: the runtime schema document (the package root) and the schema-file data form with its JSON Schema (./schema-file, ./schema-file.json). Types and JSON only, no runtime code.",
   "types": "./index.d.ts",
   "exports": {
     ".": {
       "types": "./index.d.ts"
-    }
+    },
+    "./schema-file": {
+      "types": "./schema-file.d.ts"
+    },
+    "./schema-file.json": "./schema-file.json"
   },
   "files": [
-    "index.d.ts"
+    "index.d.ts",
+    "schema-file.d.ts",
+    "schema-file.json"
   ]
 }

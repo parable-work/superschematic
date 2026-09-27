@@ -107,6 +107,7 @@ of them; run them locally before pushing.
 | `make go-fmt-check`   | `gofmt -l` is empty                                                  |
 | `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the four Go modules      |
 | `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar |
+| `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
 | `make cli-smoke`      | `bin/superschematic build` with no extension builds the DB, API and General fixtures |
 | `make ts`             | `packages/`, `runtime/schema/typescript` and `runtime/http/typescript` typecheck, build and test |
 | `make python`         | `runtime/schema/python` pytest                                       |
@@ -126,12 +127,15 @@ which turns each of those skips into a failure. Set it locally after
 
 ### Generated files are never hand-edited
 
-Golden files under `testdata/golden` and the scalar catalogs
+Golden files under `testdata/golden`, the scalar catalogs
 (`runtime/schema/typescript/src/runtime/builtin-scalars.generated.ts`,
 `runtime/schema/python/superschematic_schema_runtime/_generated_default_registry.py`)
-are regenerated, not edited. Change the generator or the pin, run
-`make go-goldens` or `go run ./internal/tools/scalarcatalog`, review the diff
-by eye, and commit it. CI fails on catalog drift.
+and the schema-file JSON Schema and TypeScript types
+(`ir/typescript/schema-file.json`, `ir/typescript/schema-file.d.ts`) are
+regenerated, not edited. Change the generator or the pin, run
+`make go-goldens`, `go run ./internal/tools/scalarcatalog` or
+`go run ./internal/tools/schemafiletypes`, review the diff by eye, and
+commit it. CI fails on catalog or schema-file drift.
 
 ### Names come from the naming file
 
@@ -159,7 +163,7 @@ and concrete.
 ## Releases
 
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
-`api`, `schema-config`, `schema-runtime`), the PyPI distribution
+`api`, `schema-config`, `schema-ir`, `schema-runtime`), the PyPI distribution
 (`superschematic-schema-runtime`), the crate (`superschematic-http-runtime`)
 and the four Go modules all carry the SemVer version in `versions.env`, and
 `scripts/bump_version.py` is the only thing that writes it. `bump_version.py

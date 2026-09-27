@@ -25,6 +25,7 @@ Version sites (relative to the repository root):
   packages/{api,db,schema,schema-config}/package.json
                                       version
   packages/bun.lock                   the four workspace entries
+  ir/typescript/package.json          version
   runtime/schema/typescript/package.json
                                       version
   runtime/http/typescript/package.json
@@ -138,6 +139,13 @@ def sites():
                 )
                 for pkg in NPM_WORKSPACE_PACKAGES
             ],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "ir" / "typescript" / "package.json",
+            [(r'(\n  "version": ")' + V + r'(",)', 1)],
             "semver",
         )
     )

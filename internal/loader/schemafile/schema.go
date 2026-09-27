@@ -164,8 +164,10 @@ func constrainProperty(defs map[string]any, defName, property string, values []s
 }
 
 // addMCPInvocationProperty adds the registry's invocation policy key to the
-// mcp record, with its values as the enum. The IR struct carries the policy
-// without a fixed key (ir.MCPInvocation), so the reflector cannot see it.
+// mcp record, with its values as the enum and its default as the default,
+// which the readers fill in for a visible tool that omits the key. The IR
+// struct carries the policy without a fixed key (ir.MCPInvocation), so the
+// reflector cannot see it.
 func addMCPInvocationProperty(defs map[string]any, policy registry.ToolInvocationPolicy) error {
 	props, err := propertiesOf(defs, "OperationMCP")
 	if err != nil {
@@ -178,7 +180,7 @@ func addMCPInvocationProperty(defs map[string]any, policy registry.ToolInvocatio
 	for i, value := range policy.Values {
 		enum[i] = value
 	}
-	props[policy.Key] = map[string]any{"type": "string", "enum": enum}
+	props[policy.Key] = map[string]any{"type": "string", "enum": enum, "default": policy.Default}
 	return nil
 }
 

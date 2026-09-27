@@ -42,6 +42,7 @@ Pages on a release tag once the repository is public.
 | `registry/`, `loader/`, `schemadeps/` | Public packages an extension imports |
 | `internal/` | Loader, generators, writers, build plan and cache |
 | `ir/` | The schema IR (own Go module; the runtimes import it) |
+| `ir/typescript/` | `@superschematic/schema-ir`: the runtime document's types, and the schema-file data form's types and JSON Schema |
 | `runtime/schema/{go,typescript,python}/` | Schema runtime the generated code links |
 | `runtime/http/{go,rust,typescript}/` | HTTP runtime the generated servers link |
 | `packages/` | `@superschematic/{api,db,schema,schema-config}`: the TypeScript authoring packages |

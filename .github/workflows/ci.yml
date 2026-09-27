@@ -1,7 +1,8 @@
 name: ci
 
 # Gates for the superschematic repository: DCO sign-off, the four Go modules
-# (build, vet, test, gofmt, golangci-lint, scalar catalog drift, CLI smoke
+# (build, vet, test, gofmt, golangci-lint, scalar catalog and schema-file
+# types drift, CLI smoke
 # over the fixture corpus), the acme example extension (smoke plus the
 # no-core-edits check), the TypeScript authoring packages, schema runtime
 # and http runtime, the Python schema runtime, the Rust http runtime, the Starlight
@@ -174,6 +175,13 @@ jobs:
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           go run ./internal/tools/scalarcatalog -check
+
+      - name: Schema-file types drift (ir/typescript JSON Schema + TypeScript types match the IR)
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: |
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+          go run ./internal/tools/schemafiletypes -check
 
       - name: CLI smoke (no extension builds DB, API and General fixtures)
         env:
