@@ -6,7 +6,7 @@ import {
   setFieldErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
-import { expectString } from '../primitives';
+import { expectList, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import type { FixtureFilter } from '../../types';
 
@@ -29,11 +29,13 @@ export function validateFixtureFilter(value: FixtureFilter | null | undefined): 
   {
     const fieldValue = value.kind;
 
-    if (typeof fieldValue === "string" && fieldValue.length > 32) {
+    if (typeof fieldValue === "string" && [...fieldValue].length > 32) {
       addFieldError(errors, "kind", "maxLength", "must be at most 32 characters");
     }
 
   }
+
+  expectList(errors, "values", value.values);
 
   if (Array.isArray(value.values)) {
     value.values.forEach((item, index) => expectString(errors, `values[${index}]`, item));
@@ -43,7 +45,7 @@ export function validateFixtureFilter(value: FixtureFilter | null | undefined): 
     const fieldValue = value.values;
 
     fieldValue.forEach((item, index) => {
-      if (typeof item === "string" && item.length > 64) {
+      if (typeof item === "string" && [...item].length > 64) {
         addFieldError(errors, `values[${index}]`, "maxLength", "must be at most 64 characters");
       }
     });

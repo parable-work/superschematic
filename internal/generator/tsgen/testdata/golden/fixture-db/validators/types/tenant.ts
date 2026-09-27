@@ -7,7 +7,7 @@ import {
   addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
-import { expectBoolean, expectNumber, expectString } from '../primitives';
+import { expectBoolean, expectList, expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import type { Tenant, JSDate, TenantUser, TenantStatus } from '../../types';
 
@@ -113,11 +113,18 @@ export function validateTenant(value: Tenant | null | undefined): ValidationResu
     }
   }
 
+  expectList(errors, "users", value.users);
+
   {
     // A nested object is validated as its own type, its errors under the
-    // field's path; any other value is left to the field's other checks.
+    // field's path. Any other JSON value is "type"; null is left to the
+    // field's presence checks.
     const validateNested = (nested: unknown, path: string) => {
-      if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) {
+      if (nested === null || nested === undefined) {
+        return;
+      }
+      if (typeof nested !== 'object' || Array.isArray(nested)) {
+        addFieldError(errors, path, "type", "expected an object");
         return;
       }
       const nestedErrors = validateTenantUser(nested as TenantUser);
@@ -132,7 +139,7 @@ export function validateTenant(value: Tenant | null | undefined): ValidationResu
 
   }
 
-  if (!Array.isArray(value.users)) {
+  if (value.users === null || value.users === undefined) {
     addFieldError(errors, "users", "required", "required field");
   }
 

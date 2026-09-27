@@ -7,7 +7,7 @@ import {
   addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
-import { expectNumber, expectString } from '../primitives';
+import { expectList, expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import type { Board, BoardPoint } from '../../types';
 
@@ -34,6 +34,8 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     }
   }
 
+  expectList(errors, "labels", value.labels);
+
   if (Array.isArray(value.labels)) {
     value.labels.forEach((row, rowIndex) => {
       if (row === null || row === undefined) {
@@ -44,7 +46,7 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     });
   }
 
-  if (!Array.isArray(value.labels)) {
+  if (value.labels === null || value.labels === undefined) {
     addFieldError(errors, "labels", "required", "required field");
   }
 
@@ -70,6 +72,8 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     });
   }
 
+  expectList(errors, "states", value.states);
+
   if (Array.isArray(value.states)) {
     value.states.forEach((row, rowIndex) => {
       if (row === null || row === undefined) {
@@ -87,7 +91,7 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
         }
       });
     });
-  } else {
+  } else if (value.states === null || value.states === undefined) {
     addFieldError(errors, "states", "required", "required field");
   }
 
@@ -105,11 +109,18 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     });
   }
 
+  expectList(errors, "walls", value.walls);
+
   {
     // A nested object is validated as its own type, its errors under the
-    // field's path; any other value is left to the field's other checks.
+    // field's path. Any other JSON value is "type"; null is left to the
+    // field's presence checks.
     const validateNested = (nested: unknown, path: string) => {
-      if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) {
+      if (nested === null || nested === undefined) {
+        return;
+      }
+      if (typeof nested !== 'object' || Array.isArray(nested)) {
+        addFieldError(errors, path, "type", "expected an object");
         return;
       }
       const nestedErrors = validateBoardPoint(nested as BoardPoint);
@@ -138,7 +149,7 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
     });
   }
 
-  if (!Array.isArray(value.walls)) {
+  if (value.walls === null || value.walls === undefined) {
     addFieldError(errors, "walls", "required", "required field");
   }
 
@@ -155,6 +166,8 @@ export function validateBoard(value: Board | null | undefined): ValidationResult
       }
     });
   }
+
+  expectList(errors, "scores", value.scores);
 
   if (Array.isArray(value.scores)) {
     value.scores.forEach((row, rowIndex) => {

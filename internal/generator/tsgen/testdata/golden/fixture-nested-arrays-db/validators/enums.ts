@@ -24,6 +24,12 @@ export function validateCellState(
     return [true, null];
   }
 
+  // A value of another JSON type is "type"; a string outside the enum is
+  // "enum".
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected a string" }]];
+  }
+
   if (!isValidCellState(value)) {
     errors.push({ validator: "enum", message: `must be a valid CellState value` });
   }
@@ -44,9 +50,5 @@ export function validateCellStateRequired(
     return [false, errors];
   }
 
-  if (!isValidCellState(value)) {
-    errors.push({ validator: "enum", message: `must be a valid CellState value` });
-  }
-
-  return errors.length > 0 ? [false, errors] : [true, null];
+  return validateCellState(value);
 }

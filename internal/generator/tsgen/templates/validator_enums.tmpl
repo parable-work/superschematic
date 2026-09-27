@@ -26,6 +26,12 @@ export function validate{{.Name}}(
     return [true, null];
   }
 
+  // A value of another JSON type is "type"; a string outside the enum is
+  // "enum".
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected a string" }]];
+  }
+
   if (!isValid{{.Name}}(value)) {
     errors.push({ validator: "enum", message: `must be a valid {{.Name}} value` });
   }
@@ -46,10 +52,6 @@ export function validate{{.Name}}Required(
     return [false, errors];
   }
 
-  if (!isValid{{.Name}}(value)) {
-    errors.push({ validator: "enum", message: `must be a valid {{.Name}} value` });
-  }
-
-  return errors.length > 0 ? [false, errors] : [true, null];
+  return validate{{.Name}}(value);
 }
 {{end}}

@@ -18,12 +18,17 @@ export function validateNetworkUrl(
 
   // A value of another JSON type is "type", and its length and format are
   // not checked.
-  if (typeof value !== "string") {
+  const candidate: unknown = value;
+
+  if (typeof candidate !== "string") {
     return [false, [{ validator: "type", message: "expected string value" }]];
   }
-  const s = value;
+  const s = candidate;
 
-  if (s.length > 2048) {
+  // Lengths count code points, not UTF-16 units.
+  const length = [...s].length;
+
+  if (length > 2048) {
     errors.push({ validator: "maxLength", message: "must be at most 2048 characters" });
   }
 
