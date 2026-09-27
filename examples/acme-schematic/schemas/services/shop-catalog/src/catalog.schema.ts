@@ -1,12 +1,13 @@
 import { Identity } from "superscalar";
 import { Validate } from "@superschematic/schema";
-import { Acme, shelf } from "@acme/schema";
+import { Acme, feedKey, shelf } from "@acme/schema";
 
 // A Catalog schema's classes are embedded structs (KindSpec.StructRole).
-// @shelf comes from @acme/schema and is only allowed in Catalog schemas; it
-// lands in the field's extensions.acme slot in the IR.
+// @shelf and @feedKey come from @acme/schema and are only allowed in Catalog
+// schemas; they land in the field's extensions.acme slot in the IR.
 export abstract class Product {
   @shelf({ aisle: 3, bay: "B" })
+  @feedKey
   sku: Identity.Slug;
 
   @shelf({ aisle: 7 })
@@ -22,6 +23,7 @@ export abstract class Product {
 
 export abstract class Bundle {
   @shelf({ aisle: 12 })
+  @feedKey
   code: Identity.Slug;
 
   products: Product[];
