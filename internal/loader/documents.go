@@ -112,7 +112,9 @@ func decodeDataDocument(servicePath, file string, schema json.RawMessage) (json.
 		if err := dec.Decode(&value); err != nil {
 			return nil, fmt.Errorf("%s: %w", file, err)
 		}
-		if dec.More() {
+		// Decoder.More reports false before a closing bracket or brace;
+		// read the rest of the input instead.
+		if len(bytes.TrimLeft(data[dec.InputOffset():], " \t\r\n")) > 0 {
 			return nil, fmt.Errorf("%s: trailing data after JSON value", file)
 		}
 	}

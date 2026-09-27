@@ -1215,7 +1215,21 @@ of a generated artifact is always listed here with the bump it requires.
   satisfy a `maxLength` of 5 everywhere, and an accented `e` (U+00E9)
   counts one. A generated `types.go` with a length rule imports
   `unicode/utf8` (D14, amended). Minor.
-
+- JSON and YAML readers: a schema file in which an object repeats a key
+  is refused, with an error that names the key and its JSON pointer, such
+  as `repeated object key "fields" at '/types/Item/fields'`. The slot
+  check and the JSON Schema validation read the last copy of a repeated
+  key, but the decode read every copy into the same map or struct, so an
+  earlier copy reached the IR unvalidated: a type with an unknown role in
+  a first `types` copy, a field's unknown `httpMethod` in a first `fields`
+  copy, or an extension the registry does not link in a first
+  `extensions` copy. Keys compare after their escapes are read. A file
+  that repeats a key now fails to load. The YAML reader already refused a
+  repeated mapping key. Patch.
+- IR: `ir.CanonicalJSON` refuses any text but whitespace after the value.
+  It checked `Decoder.More`, which reports false before a closing bracket
+  or brace, so it accepted `{}]` and `{}}` and wrote `{}`. A JSON sidecar
+  document had the same check and now refuses such text too. Patch.
 - Go ORM: `CreateOne` and `CreateMany` insert a required enum field's
   declared default when the Go value is `""`, for an enum declared in the
   schema or imported from a dependency. They inserted `''`, which is not a
