@@ -906,7 +906,7 @@ the acme example declares one behavior (`acme.<Name>`) with its
 TypeScript implementation and no core edit, asserted by
 `scripts/smoke.sh` (section 10 of `docs/extension-model.md`).
 
-Status: three pieces are built. `internal/tools/schemafiletypes` writes
+Status: four pieces are built. `internal/tools/schemafiletypes` writes
 the data form's TypeScript types and meta-schema into
 `@superschematic/schema-ir` (`./schema-file`, `./schema-file.json`). The
 strict loader is in `@superschematic/schema-runtime`, held to the Go
@@ -918,8 +918,18 @@ generator refuses a type that declares one. To match the Go reader's
 canonical bytes, which drop a value its decoder cannot tell from an
 absent key, the meta-schema gives each such property that value as its
 default (section 5), and the loader needs `JSON.parse` source text access
-(Node.js 21 or later, or Bun). Not built: the tool that copies a
-declaration into its npm package, and the engine with its packages. Each
+(Node.js 21 or later, or Bun). `@superschematic/engine`
+(`runtime/engine/typescript`, `runtime/engine/README.md`) has its storage
+and the schema registry: one SQLite file behind a synchronous driver with
+adapters over `node:sqlite` and `bun:sqlite`, migrations recorded per
+owner, `define` and `publish` with the compatibility rule, namespaces
+with a shared one, and a validator per version. It runs on Node.js 24 and
+Bun. It also refuses union and map fields, which the schema runtime does
+not validate, refuses an object key a type does not declare, which the
+compatibility rule needs, and keeps each schema name on one side of the
+shared namespace's lookup. Not built: the tool that copies a declaration
+into its npm package, and the engine's instances, event log, access
+policy, HTTP API, MCP tools and behaviors, and its other packages. Each
 change that lands a piece updates this paragraph, the README layout table
 and the pages that describe it. The names and rules are reversible until
 the first release.
