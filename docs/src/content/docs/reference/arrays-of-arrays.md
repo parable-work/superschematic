@@ -119,7 +119,7 @@ set of rules, to `T[]` and to the outer list of `T[][]` alike:
 
 - **Required means present, not non-empty.** `[]` satisfies a required
   list, and so does an empty outer list. Declare non-emptiness with
-  `listMin`.
+  `listMin`. A value that is not a list is `type`, required or optional.
 - **Bounds apply to the outer list.** `listMin` and `listMax` count the
   inner lists; the inner lists have no bounds of their own.
 - **Element constraints apply to every innermost element.** A field's
@@ -136,11 +136,13 @@ A validation error names the field and both indexes:
 | Payload | Path | Code | Message |
 | --- | --- | --- | --- |
 | A required list of lists is absent or null | `field` | `required` | `required field` |
+| A list of lists, required or optional, is not a list | `field` | `type` | `expected an array` |
 | An inner list is null | `field[i]` | `required` | `required field` |
 | An inner value is not a list | `field[i]` | `type` | `expected an array` |
 | An innermost element is null | `field[i][j]` | `required` | `required field` |
 | An innermost element has the wrong JSON type, such as a number in a `string[][]` | `field[i][j]` | `type` | `expected a string`, `expected a number`, `expected a boolean` |
 | An innermost element breaks its type's rule | `field[i][j]` | that rule's code, such as `enum`, `maxLength` or `min` | that rule's message |
+| An innermost element of an object type is not an object | `field[i][j]` | `type` | `expected an object` |
 | A nested object element has a bad field | `field[i][j].name` | that field's code | that field's message |
 | The outer list is too short or too long | `field` | `listMin`, `listMax` | `must contain at least N items`, `must contain at most N items` |
 
@@ -151,7 +153,9 @@ is one `pattern` error at `field[i][j]`, as a malformed scalar field is at
 ([D14](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-a-failing-scalar-value-is-one-error-named-by-the-rule-it-breaks)).
 An element of the wrong JSON type, such as a number in a `string[][]` or
 in a list of a string scalar, is one `type` error, and the field's length,
-pattern and range rules do not check it. A `Generic.JSON` element has no
+pattern and range rules do not check it. A length counts Unicode code
+points: an emoji is one character
+([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-string-lengths-count-code-points)). A `Generic.JSON` element has no
 wrong JSON type: an object, array, string, number or boolean is valid, and
 only a null element is `required`
 ([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-genericjson-is-any-json-value-but-null)).

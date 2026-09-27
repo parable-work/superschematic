@@ -1099,6 +1099,32 @@ of a generated artifact is always listed here with the bump it requires.
   the ORM's field selections (`<Type>Fields`) take a pointer for such a
   relation's nested selection, as for a self-relation. Output for a schema
   without such a cycle is unchanged. Patch.
+- TypeScript types and the Go, TypeScript and Python schema runtimes: a
+  list field given a value that is not a list is `type` ("expected an
+  array"), required or optional; a required one was `required` and an
+  optional one passed. An object-typed field, list element or innermost
+  element given a value that is not an object is `type` ("expected an
+  object"); it passed. An enum given a value that is not a string is `type`
+  in the TypeScript validator, where it was `enum`. A string scalar whose
+  TypeScript type is not `string` is checked as a string in the TypeScript
+  validator: `Temporal.DateTime` takes a string or a valid `Date` and
+  refuses `42`, which `String(value)` let through, and a `Geo.Location`
+  object is `type`, where it was `pattern`. A `@strictJSON` type's list of
+  objects given a value that is not a list is `type`, where it was `array`.
+  The runtimes' lenient parse coerces a numeric or boolean string for the
+  IR's `number` and `boolean` as it does for `Float` and `Boolean`, so a
+  lenient load of `"5"` into a `number` field is `5`; the Python runtime's
+  `Float` coercion no longer reads a boolean as `1.0` or `0.0` (D14,
+  amended). Minor.
+- String lengths (`minLength`, `maxLength`) count Unicode code points in
+  every validator: the generated TypeScript validator, the TypeScript SDK
+  and the TypeScript API server's argument lengths counted UTF-16 units,
+  and the generated Go validator, the Go runtime's scalar lengths,
+  `runtime/http/go/bodyargs`, the Go routes' query parameters and `GET`
+  arguments, and the Go and Rust SDKs counted UTF-8 bytes. Five emoji now
+  satisfy a `maxLength` of 5 everywhere, and an accented `e` (U+00E9)
+  counts one. A generated `types.go` with a length rule imports
+  `unicode/utf8` (D14, amended). Minor.
 
 - Go ORM: `CreateOne` and `CreateMany` insert a required enum field's
   declared default when the Go value is `""`, for an enum declared in the
@@ -1168,9 +1194,8 @@ of a generated artifact is always listed here with the bump it requires.
   string where a number scalar belongs. Before, `parse<Type>Json` accepted
   `{"x": "far"}` for a number `x`, and a missing required string with a
   `maxLength` below 9 was `required` and `maxLength`, because the
-  validator measured `String(undefined)`. A required list given a value
-  that is not a list is `required` in the TypeScript validator, as in the
-  runtimes (D14). Minor.
+  validator measured `String(undefined)` (D14). A list given a value that
+  is not a list is `type`, required or optional (D14, amended). Minor.
 - SDK tool documents (TypeScript, Go and Rust): an enum argument or field
   was written as a plain string, so a model was never told the allowed
   values. Its schema now carries `enum` with the serialized values at every
