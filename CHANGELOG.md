@@ -25,6 +25,23 @@ of a generated artifact is always listed here with the bump it requires.
   `datetime` and writes wire names from `to_json` and `to_json_dict`. Both
   read and write the JSON Go's `HistoryRecord[T]` writes. Schemas without
   `@versioned` generate the same output as before. Minor.
+- Naming file: `history_actor_setting` (default
+  `superschematic.history_actor_id`) names the transaction-local Postgres
+  setting a `@versioned` table's history trigger reads a delete's actor
+  from (D17). The value must be dotted identifiers, the form Postgres takes
+  for a custom setting; any other value fails the load. `sqlgen.Options`
+  gains `HistoryActorSetting`. Minor.
+- Go ORM: every `@versioned` repository has `DeleteOneIfVersion(ctx, id,
+  expectedVersion)`, on the repository interface and the no-op repository
+  too (D17). It deletes the row only when its stored `_version` equals
+  `expectedVersion`: a soft delete when the table has `deletedAt`, a hard
+  delete otherwise. It and `UpdateOneIfVersion` return the new
+  `ErrVersionConflict` when the row exists at another version and
+  `ErrNotFound` when it does not; `ErrVersionConflict` wraps `ErrNotFound`,
+  so `errors.Is(err, ErrNotFound)` holds as before. A hand-written
+  implementation of a versioned repository interface must add the method.
+  Minor.
+
 - `@behavior(name, config?)` from `@superschematic/schema`, the TypeScript
   authoring form of a type's behaviors (D16): a core decorator on a class
   of any kind, appending one `behaviors` entry per use in source order,
@@ -557,6 +574,26 @@ of a generated artifact is always listed here with the bump it requires.
   hash. Minor.
 
 ### Changed
+
+- SQL and Go ORM: the history of every `@versioned` table (D17). Every
+  versioned table's `create.sql` and `drop.sql` change: a database built
+  from an older `create.sql` needs the capture function replaced and its
+  triggers recreated. A `BEFORE UPDATE` trigger
+  (`trg_<table>_bump_version`) sets `NEW._version = OLD._version + 1`, and
+  `trg_<table>_capture_history_write` is now `AFTER INSERT OR UPDATE` and
+  records the row as stored, so an `INSERT ... ON CONFLICT DO UPDATE`
+  records one `UPDATE` with the stored values; it recorded the proposed
+  insert as well. A delete tombstone's image is the pre-delete row with
+  `_version` set to the tombstone's version; its `deleted_by` (else
+  `updated_by`) is the actor in the `history_actor_setting` setting when
+  set, else the row's own. The ORM's hard deletes on a versioned table with
+  such a column (`DeleteOne`, `DeleteMany` and `DeleteOneIfVersion` without
+  `deletedAt`, `HardDeleteOne` with it) set the setting to the context user
+  for the statement and clear it after, inside a transaction. `GetVersion`
+  no longer returns a tombstone's image, and `GetAsOf` and the
+  `ListAsOfBy<Relation>ID` readers treat a key whose latest history row at
+  the time is a `DELETE`, or a soft-deleted image, as absent: `GetAsOf`
+  returned the pre-delete image as if the row were live. Major.
 
 - `@superschematic/schema-ir` carries the repository's one version, which
   `scripts/bump_version.py` writes, in place of a fixed `0.1.0`, and the

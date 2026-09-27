@@ -21,6 +21,7 @@ DROP INDEX IF EXISTS {{ $idx.Name }} CASCADE;
 
 -- Drop history capture triggers and functions
 {{- range $history := .HistoryTables | reverseHistoryTables }}
+DROP TRIGGER IF EXISTS {{ $history.VersionTriggerName }} ON {{ $history.QuotedSourceTableName }};
 DROP TRIGGER IF EXISTS {{ $history.WriteTriggerName }} ON {{ $history.QuotedSourceTableName }};
 DROP TRIGGER IF EXISTS {{ $history.DeleteTriggerName }} ON {{ $history.QuotedSourceTableName }};
 {{- if gt $history.RetentionDays 0 }}
