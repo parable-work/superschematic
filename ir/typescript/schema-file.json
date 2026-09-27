@@ -698,6 +698,7 @@
           "$ref": "#/$defs/MCPIcon"
         },
         "invocationPolicy": {
+          "default": "auto",
           "enum": [
             "auto",
             "ask"

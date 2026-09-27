@@ -12,7 +12,7 @@ name: release
 # the superscalar archive that scripts/superscalar-dep.sh builds from the
 # pinned checkout; each runner records the commit it built from. assemble
 # refuses a set whose binaries disagree on that commit, writes SHA256SUMS,
-# packs the six npm tarballs, and builds the PyPI sdist and wheel.
+# packs the seven npm tarballs, and builds the PyPI sdist and wheel.
 # github-release attaches everything to a GitHub release with build provenance
 # and an SBOM. The three publish jobs use trusted publishing (OIDC; no
 # registry tokens in this repository) and are gated on the repository variable
@@ -310,8 +310,9 @@ jobs:
 
       - name: Pack the npm tarballs
         # The four authoring packages and the http runtime ship their
-        # TypeScript source; the schema runtime ships its compiled dist. npm
-        # pack writes superschematic-<name>-<version>.tgz for a scoped
+        # TypeScript source; the schema runtime ships its compiled dist; the
+        # schema IR ships its declarations and the schema-file JSON Schema.
+        # npm pack writes superschematic-<name>-<version>.tgz for a scoped
         # @superschematic/<name>.
         run: |
           set -euo pipefail
@@ -319,10 +320,11 @@ jobs:
           for pkg in schema db api schema-config; do
             (cd "packages/$pkg" && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           done
+          (cd ir/typescript && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/http/typescript && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           ls -l release-assets/npm
-          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 6
+          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 7
 
       - name: Build the PyPI sdist and wheel
         working-directory: runtime/schema/python
@@ -425,11 +427,12 @@ jobs:
   publish-npm:
     name: publish npm
     # Registration (npmjs.com -> package -> Settings -> Trusted Publisher, once
-    # per package; the five exact names are
+    # per package; the six exact names are
     #   @superschematic/schema
     #   @superschematic/db
     #   @superschematic/api
     #   @superschematic/schema-config
+    #   @superschematic/schema-ir
     #   @superschematic/schema-runtime
     # with organization or user: parable-work, repository: superschematic,
     #   workflow filename: release.yml, environment name: npm).
@@ -465,11 +468,12 @@ jobs:
           name: release-assets
           path: release-assets
 
-      - name: Publish the five packages
+      - name: Publish the six packages
         # The tarballs are the attested release assets, byte for byte. Order:
         # @superschematic/schema first, since the other authoring packages
-        # name it in their docs; none of the five depends on another at
-        # install time.
+        # name it in their docs, and @superschematic/schema-ir before the
+        # schema runtime, which a consumer installs next to it; none of the
+        # six depends on another at install time.
         env:
           DIST_TAG: ${{ needs.preflight.outputs.npm_dist_tag }}
           VERSION: ${{ needs.preflight.outputs.version }}
@@ -479,7 +483,7 @@ jobs:
           npm --version
           node -e 'const [maj, min, pat] = process.versions.npm.split(".").map(Number); if (maj < 11 || (maj === 11 && (min < 5 || (min === 5 && pat < 1)))) { console.error("npm >= 11.5.1 is required for trusted publishing"); process.exit(1); }'
           cd release-assets/npm
-          for name in schema db api schema-config schema-runtime; do
+          for name in schema db api schema-config schema-ir schema-runtime; do
             tgz="superschematic-${name}-${VERSION}.tgz"
             echo "==> $tgz"
             npm publish "./$tgz" --access public --tag "$DIST_TAG"

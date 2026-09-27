@@ -608,7 +608,8 @@ The policy is read in four places, all through the registry:
   `Values`, fills in `Default` for a visible tool, and names the build's
   key when an author uses the core key under another policy.
 - The data-form JSON Schema adds `Key` to `OperationMCP` with `Values` as
-  its enum (section 5), and the readers fill in `Default`.
+  its enum and `Default` as its default (section 5), and the readers fill
+  in `Default`.
 - The `api` generator resolves every visible tool against it again, after
   the tool hooks, for IR that did not come through the loader.
 - The SDK generators write `Key` at fixed positions and type it in
@@ -700,7 +701,7 @@ Schema, which `schemafile.DefinitionFor(reg)` builds per registry:
 4. Close `documents` on the document to the registered document names, each
    with its `DocumentSpec.Schema`.
 5. Add the registry's tool invocation policy key to `OperationMCP`, with
-   its values as the enum (section 3.15).
+   its values as the enum and its default as the default (section 3.15).
 
 With only the core registered, `extensions` and `documents` admit no key.
 The compiled definition is cached per registry, keyed by a weak pointer and

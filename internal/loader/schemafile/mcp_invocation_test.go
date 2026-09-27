@@ -100,6 +100,9 @@ func TestDataFormsReadAnExtensionsInvocationPolicy(t *testing.T) {
 	if enum, _ := props["review"]["enum"].([]any); len(enum) != 2 || enum[0] != "never" || enum[1] != "always" {
 		t.Fatalf("review property = %v", props["review"])
 	}
+	if props["review"]["default"] != "never" {
+		t.Fatalf("review default = %v, want the registered default", props["review"]["default"])
+	}
 
 	got, err := decodedMCP(t, reg, `{"handle": "delete_order", "hidden": false, "review": "always"}`)
 	if err != nil {
