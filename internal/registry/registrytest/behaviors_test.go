@@ -55,6 +55,15 @@ func TestAcmeBehaviorsInTheDataForms(t *testing.T) {
 	if yamlOut := strings.ReplaceAll(persisted(t, yamlSchema), ".schema.yaml", ".schema.json"); yamlOut != out {
 		t.Errorf("JSON and YAML forms produced different IR\njson:\n%s\nyaml:\n%s", out, yamlOut)
 	}
+	// The TypeScript twin writes the same list with @behavior, the config
+	// keys in yet another order.
+	tsSchema, err := loader.LoadService("testdata/stock", loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("LoadService(stock): %v", err)
+	}
+	if tsOut := strings.ReplaceAll(persisted(t, tsSchema), ".schema.ts", ".schema.json"); tsOut != out {
+		t.Errorf("JSON and TypeScript forms produced different IR\njson:\n%s\nts:\n%s", out, tsOut)
+	}
 
 	_, err = generator.Run(jsonSchema, cfg, generator.Options{OutputRoot: t.TempDir(), ServicePath: "testdata/stock-json", Registry: reg})
 	if want := "generator: types does not render behaviors yet: type Item composes behavior acme.Stock"; err == nil || err.Error() != want {
@@ -64,16 +73,21 @@ func TestAcmeBehaviorsInTheDataForms(t *testing.T) {
 	n := naming.Default()
 	n.AuthProvider = sessionauth.Name
 	core := generator.CoreRegistry(n)
-	for _, dir := range []string{"testdata/stock-json", "testdata/stock-yaml"} {
+	for dir, want := range map[string]string{
+		"testdata/stock-json": `src/item.schema.json: behavior "acme.Stock" on type "Item" is not a registered behavior (none are registered)`,
+		"testdata/stock-yaml": `src/item.schema.yaml: behavior "acme.Stock" on type "Item" is not a registered behavior (none are registered)`,
+		"testdata/stock":      `src/item.schema.ts:4:11: type Item: behavior "acme.Stock" is not a registered behavior (none are registered)`,
+	} {
 		_, err := loader.LoadService(dir, loader.WithRegistry(core))
-		if err == nil || !strings.Contains(err.Error(), `behavior "acme.Stock" on type "Item" is not a registered behavior (none are registered)`) {
-			t.Errorf("%s with the core registry: err = %v", dir, err)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s with the core registry: err = %v, want %q", dir, err, want)
 		}
 	}
 }
 
 // format converts a data-form file with behaviors between JSON and YAML,
-// and each form reads back to the same document.
+// each form reads back to the same document, and the TypeScript form
+// writes one @behavior per entry in list order.
 func TestAcmeBehaviorsConvertBetweenTheDataForms(t *testing.T) {
 	reg := acmeRegistry(t)
 	fromJSON, err := jsonreader.ReadFileWith("testdata/stock-json/src/item.schema.json", "item.schema.json", reg)
@@ -102,8 +116,12 @@ func TestAcmeBehaviorsConvertBetweenTheDataForms(t *testing.T) {
 			t.Errorf("document changed across the conversion\nwant:\n%s\ngot:\n%s", want, got)
 		}
 	}
-	if _, err := writer.Write(fromJSON, writer.FormatTS); err == nil ||
-		!strings.Contains(err.Error(), "type Item: behaviors (acme.Stock, acme.Audited) have no TypeScript authoring form in this writer yet") {
-		t.Errorf("TypeScript writer: err = %v", err)
+	asTS, err := writer.Write(fromJSON, writer.FormatTS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTS := "@behavior(\"acme.Stock\", { aisles: 3, unit: \"box\" })\n@behavior(\"acme.Audited\")\nexport abstract class Item {"
+	if !strings.Contains(string(asTS), wantTS) || !strings.Contains(string(asTS), `import { behavior } from "@superschematic/schema";`) {
+		t.Errorf("TypeScript form lacks\n%s\n%s", wantTS, asTS)
 	}
 }

@@ -1,5 +1,7 @@
 // @acme/schematic: the fixture extension's authoring package. superschematic reads
 // the AST, so every decorator is a no-op at runtime, as in the core packages.
+import "./behaviors";
+
 const noopClassDecorator: ClassDecorator = () => {};
 const noopPropertyDecorator: PropertyDecorator = () => {};
 

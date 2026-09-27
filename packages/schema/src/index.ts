@@ -20,6 +20,8 @@ export type {
   Validate,
   ValidateConfig,
 } from "./wrappers";
+export { behavior } from "./behavior";
+export type { BehaviorConfigArg, BehaviorConfigs, BehaviorName } from "./behavior";
 export { trait } from "./trait";
 export type { Trait, TraitConfig, TraitOptions } from "./trait";
 export { schemaOf } from "./schema-ref";

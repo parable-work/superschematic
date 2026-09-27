@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
+
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // BehaviorSpec registers one behavior: code that adds fields, operations,
@@ -317,4 +319,58 @@ func (b Behavior) ValidateConfig(config json.RawMessage) error {
 		return fmt.Errorf("behavior %s config: %w", b.Name, err)
 	}
 	return nil
+}
+
+// behaviorDecorator is @behavior(name, config?) from @superschematic/schema,
+// the TypeScript authoring form of a type's behaviors. Each use appends one
+// ir.BehaviorRef to the type, so several on one class apply in source
+// order. The name must be a registered behavior and the config, canonical
+// as the data forms store it, must pass its config schema; verify checks
+// the list as a whole. lookup and names read the registry when Apply runs,
+// after every extension has registered.
+func behaviorDecorator(lookup func(string) (Behavior, bool), names func() []string) DecoratorSpec {
+	return DecoratorSpec{
+		Name: "behavior", Packages: []string{pkgSchema}, Target: TargetType,
+		Apply: func(n Node, args []any, _ Site) error {
+			if len(args) == 0 || len(args) > 2 {
+				return fmt.Errorf("@behavior takes a behavior name and an optional config")
+			}
+			name, ok := args[0].(string)
+			if !ok {
+				return ArgErrorf(0, "@behavior takes the behavior's name as a string literal")
+			}
+			behavior, ok := lookup(name)
+			if !ok {
+				known := "none are registered"
+				if registered := names(); len(registered) > 0 {
+					known = "registered: " + strings.Join(registered, ", ")
+				}
+				return ArgErrorf(0, "type %s: behavior %q is not a registered behavior (%s)", n.Type.Name, name, known)
+			}
+			for _, listed := range n.Type.Behaviors {
+				if listed.Name == name {
+					return fmt.Errorf("type %s lists behavior %s twice", n.Type.Name, name)
+				}
+			}
+			refs := []ir.BehaviorRef{{Name: name}}
+			if len(args) == 2 {
+				raw, err := json.Marshal(args[1])
+				if err != nil {
+					return ArgErrorf(1, "behavior %s config: %v", name, err)
+				}
+				refs[0].Config = raw
+			}
+			if err := ir.CanonicalizeBehaviors(refs); err != nil {
+				return err
+			}
+			if err := behavior.ValidateConfig(refs[0].Config); err != nil {
+				if len(args) == 2 {
+					return ArgErrorf(1, "type %s: %s", n.Type.Name, err)
+				}
+				return fmt.Errorf("type %s: %w", n.Type.Name, err)
+			}
+			n.Type.Behaviors = append(n.Type.Behaviors, refs[0])
+			return nil
+		},
+	}
 }

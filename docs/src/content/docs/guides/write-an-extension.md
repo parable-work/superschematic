@@ -533,12 +533,44 @@ Assembly fails on a malformed declaration, and `Finalize` on a
 `requires` or `conflicts` name nobody registered or an invocation policy
 value the registry's policy does not have.
 
-A type composes behaviors in the data forms. The list is ordered, and a
-type lists a behavior once:
+A type composes behaviors with `@behavior` from `@superschematic/schema`,
+which any kind may import. Several on one class apply in source order,
+and a type lists a behavior once:
+
+```ts
+import { behavior } from "@superschematic/schema";
+import { Identity } from "superscalar";
+
+@behavior("acme.Rating", { maxStars: 5 })
+export abstract class Product {
+  sku: Identity.Slug;
+}
+```
+
+The data forms write the same list:
 
 ```json
 "behaviors": [{ "name": "acme.Rating", "config": { "maxStars": 5 } }]
 ```
+
+The config type comes from `BehaviorConfigs`, which your authoring package
+augments, as it augments `MCPToolOptions` for an invocation policy key:
+
+```ts
+import "@superschematic/schema";
+
+declare module "@superschematic/schema" {
+  interface BehaviorConfigs {
+    "acme.Rating": { readonly maxStars: number };
+    "acme.Flagged": undefined; // takes no config
+  }
+}
+```
+
+A name no augmentation declares does not type-check. A General schema
+cannot import an authoring package whose decorators are for other kinds,
+so the service lists the file in its `tsconfig.json` `include`, as acme's
+`shop-ratings-ts` does with `packages/schema/src/behaviors.ts`.
 
 The loader checks each entry against its declaration and names the type
 and the behavior when it fails; `json-schema` limits the names to the
@@ -546,8 +578,9 @@ registered behaviors and holds each config to its schema. No generator
 renders behaviors yet, so `build` refuses such a schema and names the
 generator; `build --emit-ir`, `format` and `json-schema` accept it. A
 generator whose output covers what behaviors add sets
-`GeneratorSpec.RendersBehaviors`. acme's `shop-ratings` service
-(`ext/testdata/services`) composes `acme.Rating`.
+`GeneratorSpec.RendersBehaviors`. acme's `shop-ratings` and
+`shop-ratings-ts` services (`ext/testdata/services`) compose
+`acme.Rating`.
 
 ## A command
 

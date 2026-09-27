@@ -689,6 +689,36 @@ write the same list:
 "behaviors": [{ "name": "acme.Rating", "config": { "maxStars": 5 } }]
 ```
 
+The TypeScript form is the core decorator `@behavior(name, config?)` from
+`@superschematic/schema`, on a class of any kind (a `DecoratorSpec` on
+`TargetType`), so a General schema needs no other authoring package. Each
+use appends one entry, so several on one class keep their source order.
+Its `Apply` evaluates the config as any decorator argument (section 3.4),
+stores it canonically, and fails at the argument, naming the type and the
+behavior, when the behavior is not registered or the config fails its
+schema; a behavior used twice fails at the second use. The TypeScript
+half types the config per name through `BehaviorConfigs`, an empty
+interface an extension's authoring package augments, as it augments
+`MCPToolOptions` (section 3.15):
+
+```ts
+import "@superschematic/schema";
+
+declare module "@superschematic/schema" {
+  interface BehaviorConfigs {
+    "acme.Rating": { readonly maxStars: number };
+  }
+}
+```
+
+A behavior that takes no config maps to `undefined`. There is no
+fallback for a name the program's augmentations do not declare: as with
+an unaugmented `@mcp` key, it does not type-check, so a schema's program
+must include the augmentation, through an import of the authoring package
+or a `tsconfig.json` `include` entry. The registry still decides: a
+declared name the binary does not register fails the load. `format
+--to=ts` writes one `@behavior` per entry, in list order.
+
 The loader checks every type's list in every frontend (verify, after the
 core checks and before the kind's `Verify`), and each failure names the
 type and the behavior: a behavior that is not registered, one listed
@@ -709,12 +739,13 @@ the run with `generator: <name> does not render behaviors yet: type <T>
 composes behavior <B>`. The check covers core and extension generators
 alike; document generators, which render their documents, are not asked.
 No core generator sets the flag. `build --emit-ir`, `format` and
-`json-schema` run no generator and accept the schema. The TypeScript writer
-cannot write behaviors yet; `format --to=ts` fails and names them.
+`json-schema` run no generator and accept the schema.
 
-The core registers no behavior. acme declares `acme.Rating` (section 10);
+The core registers no behavior. acme declares `acme.Rating` and types its
+config in `packages/schema/src/behaviors.ts` (section 10);
 `internal/registry/registrytest` declares two, `acme.Stock` and
-`acme.Audited`, which requires it.
+`acme.Audited`, which requires it, with a TypeScript fixture and its JSON
+and YAML twins.
 
 ## 4. The open IR
 
@@ -1111,7 +1142,7 @@ its provider, which supplies those two functions. D15 in
 | Surface | Core registration |
 | --- | --- |
 | Kinds | `DB`, `API`, `General` (section 3.3) |
-| Decorators | 41 specs over the four targets in `internal/registry/core_decorators.go`, `core_projection.go` and `docs_decorators.go`, declared in `@superschematic/{schema,db,api,schema-config}` |
+| Decorators | 42 specs over the four targets in `internal/registry/core_decorators.go`, `core_projection.go`, `docs_decorators.go` and `behaviors.go`, declared in `@superschematic/{schema,db,api,schema-config}` |
 | Generators | `types`, `sql`, `orm`, `api`, `sdks`, `envConfig` (section 3.6) |
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
@@ -1151,7 +1182,7 @@ each surface:
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Configuration | `[extension.acme] region` and `projection_scope_setting`; `metadata_key_prefix`, `scalar_jsdoc_tag`, `[package_aliases]` (`@acme/schema-config`) and `[deps] copy` | `ext/extension.go`, `schemas/superschematic.toml` |
 | Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
-| Behavior | `acme.Rating`, which a General data-form service in `ext/testdata/services/shop-ratings` composes | `ext/behavior.go`, `ext/rating.behavior.json` |
+| Behavior | `acme.Rating`, which a General data-form service in `ext/testdata/services/shop-ratings` composes, and its TypeScript twin `shop-ratings-ts` with `@behavior`; its `BehaviorConfigs` augmentation | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts` |
 | Binary | `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
 The acceptance criterion: an extension adds every surface above without
@@ -1172,8 +1203,9 @@ that way. Two scripts check it, and the `acme` job in
   current; `fields` type-checks the label declarations; the `@docs`
   records reach the OpenAPI document under `x-acme-docs` and the tool
   documents carry acme's keys; `acme.Rating` reaches the IR of
-  `shop-ratings`, `json-schema` and `format` accept it, and `build` refuses
-  the service, naming the `types` generator. It also asserts that the
+  `shop-ratings` and of its TypeScript twin, `json-schema` and `format`
+  accept it (to YAML and to TypeScript), and `build` refuses the service,
+  naming the `types` generator. It also asserts that the
   core-only binary rejects the Catalog service, the `acme.Rating` behavior
   and the naming file that selects `apikey`,
   that it builds the DB and API services with `session` and the result

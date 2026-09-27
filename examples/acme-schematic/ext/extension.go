@@ -21,7 +21,8 @@
 //     API is classified, the tool documents carry acme's vendor keys, and
 //     acme's confirm key replaces the core invocation policy (mcp.go);
 //   - a behavior, acme.Rating, declared in rating.behavior.json, that a
-//     type composes in the data forms (behavior.go);
+//     type composes with @behavior or in the data forms (behavior.go), its
+//     config typed in @acme/schema;
 //   - two subcommands through cli.CommandProvider: describe (command.go) and
 //     fields, which type-checks a declaration file with the loader's
 //     compiler (fields.go).

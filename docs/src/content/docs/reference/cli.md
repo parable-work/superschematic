@@ -201,8 +201,8 @@ The file is read with the binary's registry, so a file that uses a linked
 extension's kind, decorators, documents or behaviors converts between JSON
 and YAML with its extension data. The TypeScript writer cannot render an
 extension's decorators: converting such a file to `ts` fails and names the
-extension slot instead of dropping it. It cannot write behaviors yet
-either, and names them.
+extension slot instead of dropping it. It writes a type's behaviors as
+`@behavior` decorators.
 
 ## Extension commands
 
