@@ -207,8 +207,8 @@ func conflictUnit(args []any) (string, error) {
 }
 
 // temporalFormat reads @temporalFormat('unix_millis'). The unit is a fact
-// about the source API: only the epoch members of
-// IncrementalTimeFormatEnum are valid, and only on a plain Temporal.DateTime
+// about the source API: only the epoch units (unix, unix_millis,
+// unix_micros, unix_nanos) are valid, and only on a plain Temporal.DateTime
 // field -- an ISO field needs no declaration, and any other type would give
 // the annotation nothing to decode into.
 func temporalFormat(args []any, fd *ir.FieldDef) (string, error) {

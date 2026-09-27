@@ -90,6 +90,10 @@ type ModuleOutput struct {
 	HasCustomValidate  bool
 	HasCustomParse     bool
 
+	// HasVersionedTypes is true when a DB table carries the _version field;
+	// types.py then declares the generic HistoryRecord model.
+	HasVersionedTypes bool
+
 	// NeedsLiteralImport is true when generated types use typing.Literal for
 	// discriminated-union member discriminator fields.
 	NeedsLiteralImport bool
@@ -141,6 +145,9 @@ func (o *ModuleOutput) ExportedTypeNames() []string {
 	}
 	for _, t := range o.ImportedTypes {
 		names = append(names, t.Name)
+	}
+	if o.HasVersionedTypes {
+		names = append(names, "HistoryRecord")
 	}
 	sort.Strings(names)
 	return names
@@ -248,13 +255,27 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 
 	objectTypes := codegen.ExtractTypes(schema, output.Scalars, extraction, localObjectRoles...)
+	objectTypes = codegen.AddVersionFields(objectTypes, extraction)
 	inputTypes := codegen.ExtractTypes(schema, output.Scalars, extraction, ir.RoleAPIInput)
 	output.Types = append(objectTypes, inputTypes...)
+	for _, typeInfo := range objectTypes {
+		for _, field := range typeInfo.Fields {
+			if isVersionField(field) {
+				output.HasVersionedTypes = true
+			}
+		}
+	}
 
 	applyUnionDiscriminatorLiterals(output)
 	collectModelRebuildTypes(output, imported.enumNames)
 
 	return output, nil
+}
+
+// isVersionField reports whether field is the _version metadata field
+// codegen.AddVersionFields gives a versioned table.
+func isVersionField(field codegen.FieldInfo) bool {
+	return field.Name == "_version" && field.InternalMetadata
 }
 
 // applyUnionDiscriminatorLiterals rewrites each discriminated-union member's

@@ -277,7 +277,11 @@ data-form readers also fill the enclosing type or operation set, the
 TypeScript walker does not.
 
 Core decorators write typed IR fields. Extension decorators write the
-node's `Extensions[<extension name>]` slot (section 4). A spec with a nil
+node's `Extensions[<extension name>]` slot (section 4). A directive that
+only one distribution reads is an extension decorator, not a typed field:
+D18 in `docs/DECISIONS.md` removed ten such fields from the core IR on
+that rule. A spec with no `Args` takes no argument, as acme's `@feedKey`
+does, and the data forms write its value as `true`. A spec with a nil
 `Apply` is a marker the frontend interprets itself; only the core registers
 those (`trait`, `source`, `envVars`, `versioned`, `versionGraph`,
 `graphMember`), and `RegisterDecorator` refuses an extension decorator
@@ -516,9 +520,12 @@ the namespace of every metadata key in the Arrow schemas the `sql`
 generator writes for projection views; `scalar_jsdoc_tag` (default unset),
 the JSDoc tag the TypeScript types write above every scalar-typed field
 (`/** @<tag> Contact.Email */`) for a tool that reads the declaration
-files; and `[deps] copy`, the committed path of the dependency graph
-(section 3.8). The first two are names in the output, so they are naming
-keys rather than registrations (D10, D13).
+files; `history_actor_setting` (default
+`superschematic.history_actor_id`), the Postgres setting a versioned
+table's history trigger reads a delete's actor from; and `[deps] copy`,
+the committed path of the dependency graph (section 3.8). The first three
+are names in the output, so they are naming keys rather than registrations
+(D10, D13).
 
 ### 3.12 CheckSpec
 
@@ -778,6 +785,9 @@ write the same object:
 ```json
 "extensions": { "acme": { "shelf": { "aisle": 3, "bay": "B" } } }
 ```
+
+A marker such as acme's `@feedKey` is `true` in the same object:
+`"acme": { "feedKey": true, "shelf": { ... } }`.
 
 ### 4.2 Codecs
 
@@ -1172,7 +1182,7 @@ each surface:
 | Surface | acme | File |
 | --- | --- | --- |
 | Kind | `Catalog`, pipeline `types`, `catalog` | `ext/kind.go` |
-| Decorator | `@shelf` from `@acme/schema`, on Catalog fields | `ext/decorator.go`, `packages/schema` |
+| Decorators | `@shelf` (an argument) and `@feedKey` (a marker) from `@acme/schema`, on Catalog fields | `ext/decorator.go`, `packages/schema` |
 | Scalar catalog | the core scalars plus `Acme.Photo`, a file-upload scalar; `Product.photo` in the Catalog service bounds it with `uploadMaxBytes` | `ext/scalars.go`, `packages/schema` |
 | Document | `catalog.config.yaml` on Catalog services, with a generator | `ext/document.go` |
 | Generator on core kinds | `acmeManifest`, appended to DB, API, General and Catalog | `ext/manifest.go` |
@@ -1197,7 +1207,9 @@ that way. Two scripts check it, and the `acme` job in
   each surface did its work: `describe` lists the kind, document,
   provider and checks; `catalog.json`, the document's output and a
   manifest per service exist, and the inventory hook merges them again
-  when every service is restored from the cache; the `@shelf` payload,
+  when every service is restored from the cache; the `@shelf` payload and
+  the `@feedKey` marker, which `format` writes as YAML and as JSON and
+  which load back to the same IR,
   `Acme.Photo`'s upload metadata with the `uploadMaxBytes` bound on
   `Product.photo`, and the scoped projection view are in the IR, and the view, its migration and
   its Arrow schema are written under acme's metadata key prefix; the

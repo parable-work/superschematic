@@ -67,16 +67,18 @@ func CatalogDir(outputRoot, service string) string {
 	return filepath.Join(outputRoot, "acme", "catalog", service)
 }
 
-// Catalog is the generator's output: every shelved field of the service.
+// Catalog is the generator's output: every shelved field of the service,
+// and each type's feed key.
 type Catalog struct {
-	Service string           `json:"service"`
-	Shelves map[string]Shelf `json:"shelves"`
+	Service  string              `json:"service"`
+	Shelves  map[string]Shelf    `json:"shelves"`
+	FeedKeys map[string][]string `json:"feedKeys"`
 }
 
 // generateCatalog writes catalog.json: one entry per @shelf field, keyed
-// Type.field.
+// Type.field, and per type the @feedKey fields in declaration order.
 func generateCatalog(c registry.GenerateContext) error {
-	out := Catalog{Service: c.Config.Name, Shelves: map[string]Shelf{}}
+	out := Catalog{Service: c.Config.Name, Shelves: map[string]Shelf{}, FeedKeys: map[string][]string{}}
 	for _, tname := range sortedTypeNames(c.Schema) {
 		for _, fd := range c.Schema.Types[tname].Fields {
 			shelf, ok, err := ShelfOf(fd)
@@ -85,6 +87,13 @@ func generateCatalog(c registry.GenerateContext) error {
 			}
 			if ok {
 				out.Shelves[tname+"."+fd.Name] = *shelf
+			}
+			key, err := IsFeedKey(fd)
+			if err != nil {
+				return fmt.Errorf("type %s field %s: %w", tname, fd.Name, err)
+			}
+			if key {
+				out.FeedKeys[tname] = append(out.FeedKeys[tname], fd.Name)
 			}
 		}
 	}

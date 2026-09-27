@@ -2,8 +2,9 @@
 // of the extension model. It adds, without editing a core file,
 //
 //   - a schema kind, Catalog, with its own generator (kind.go);
-//   - a decorator, @shelf from @acme/schema, that writes into the open
-//     extensions slot of a field (decorator.go);
+//   - two field decorators from @acme/schema, @shelf and the @feedKey
+//     marker, that write into the open extensions slot of a field
+//     (decorator.go);
 //   - a scalar catalog: the core scalars plus Acme.Photo, a file-upload
 //     scalar the Catalog service bounds with uploadMaxBytes (scalars.go);
 //   - a sidecar document, catalog.config.yaml, with a generator (document.go);

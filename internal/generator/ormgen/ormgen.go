@@ -57,6 +57,11 @@ type ORMOutput struct {
 	// Naming supplies the scalar and schema-ir module paths go.mod requires.
 	Naming naming.Naming
 
+	// HasHistoryActor is true when a versioned repository has a history
+	// actor column (Repository.HistoryActorCol); it emits the helpers its
+	// hard deletes set and clear Naming.HistoryActorSetting through.
+	HasHistoryActor bool
+
 	// ScalarLibReplacePath is the go.mod replace target for superscalar,
 	// relative to the output directory. Empty omits the directive.
 	ScalarLibReplacePath string
@@ -101,6 +106,12 @@ type Repository struct {
 	Relationships          []Relationship
 	ReferencedBy           []InboundReference
 	OrderedMembers         []ColumnMember // fields + to-one FKs in schema order (matches DDL column order)
+
+	// HistoryActorCol is, on a versioned table, the column a delete
+	// tombstone records its actor in: deleted_by when the table has one,
+	// else updated_by, else empty. When it is set, generated hard deletes set
+	// the history actor setting from the context user for the statement.
+	HistoryActorCol string
 
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
@@ -313,6 +324,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
+	hasHistoryActor := false
 	hasGenericJSON := false
 	hasArraysOfArrays := false
 	for _, repo := range repositories {
@@ -321,6 +333,9 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		}
 		if repo.Versioned {
 			hasVersionedRepositories = true
+		}
+		if repo.HistoryActorCol != "" {
+			hasHistoryActor = true
 		}
 		for _, field := range repo.Fields {
 			if field.PreservesExplicitJSONNull {
@@ -341,6 +356,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Repositories:             repositories,
 		HasSoftDeletes:           hasSoftDeletes,
 		HasVersionedRepositories: hasVersionedRepositories,
+		HasHistoryActor:          hasHistoryActor,
 		HasGenericJSON:           hasGenericJSON,
 		HasArraysOfArrays:        hasArraysOfArrays,
 		Timestamp:                opts.Clock.RFC3339(),
@@ -680,6 +696,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 	}
 	if repo.Versioned {
 		appendVersionField(&repo)
+		repo.HistoryActorCol = historyActorColumn(repo.Fields)
 	}
 
 	reanchorOrderedMembers(&repo)
@@ -982,6 +999,20 @@ func mapIRToGoType(irType string, scalars map[string]scalarLookup) string {
 	// Enums, object types, and unions all live in the types package under
 	// their own name.
 	return "types." + irType
+}
+
+// historyActorColumn returns the column a versioned table's delete
+// tombstone records its actor in, as sqlgen's history trigger picks it:
+// deleted_by when the table has one, else updated_by, else "".
+func historyActorColumn(fields []Field) string {
+	for _, name := range []string{"deleted_by", "updated_by"} {
+		for _, field := range fields {
+			if field.DBName == name {
+				return name
+			}
+		}
+	}
+	return ""
 }
 
 // computeImportNeeds derives the repository file's conditional imports from

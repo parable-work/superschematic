@@ -27,3 +27,7 @@ export interface ShelfArgs {
 export function shelf(_args: ShelfArgs): PropertyDecorator {
   return () => {};
 }
+
+// feedKey marks a field of a Catalog schema as part of the key acme's
+// supplier feed matches rows on. It takes no argument.
+export const feedKey: PropertyDecorator = () => {};
