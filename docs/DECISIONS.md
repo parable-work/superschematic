@@ -754,38 +754,20 @@ the acme example declares one behavior (`acme.<Name>`) with its
 TypeScript implementation and no core edit, asserted by
 `scripts/smoke.sh` (section 10 of `docs/extension-model.md`).
 
-Status: the TypeScript types, the strict loader, and behavior declarations
-and authoring in the compiler are built. `internal/tools/schemafiletypes`
-writes `schema-file.d.ts` and `schema-file.json` into
-`@superschematic/schema-ir` (subpaths `./schema-file` and
-`./schema-file.json`), `make schema-file-types-check` and CI run its
-`-check`, and the package takes the repository's version. The types also
-leave open the schema kinds, since a registry adds kinds as it adds
-extension slots, and the behavior names and configs.
-`@superschematic/schema-runtime` exports the loader (`SchemaFileLoader`,
-`loadSchemaFile`) and the serializer (`canonicalJSON`), and
-`internal/loader/schemafile` writes the parity vectors, behaviors
-included, to `runtime/schema/testdata/schema_file_parity.json`. Besides
-the invocation policy's default, the meta-schema gives every property the
-Go encoder omits at one value (a non-pointer empty string, false or zero,
-an empty list or map) that value as its default. The Go reader's
-canonical form drops such a value, since its decoder cannot tell it from
-an absent key, and the loader reads which properties those are from the
-meta-schema rather than from a list of its own. A behavior's config has
-the default `{}`, which the Go reader stores as no config. The loader
-reads number literals through JSON.parse source text access, so it needs
-Node.js 21 or later or Bun. Behavior declarations and authoring follow
-section 3.16 of `docs/extension-model.md`: `TypeDef.Behaviors`,
-`Registry.RegisterBehavior` with its checks at registration and in
-`Finalize`, `behaviors` in the JSON and YAML data forms, the
-`json-schema` output, the TypeScript types and the strict loader, the
-`@behavior` decorator with its `BehaviorConfigs` interface and
-`format --to=ts`, the compiler loader's checks, and the refusal in
-`generator.Run`, which no generator lifts yet. The core declares no
-behavior; acme declares `acme.Rating` and types its config, and
-`scripts/smoke.sh` asserts that it reaches the IR from the JSON and
-TypeScript forms and that the core-only binary refuses it. Not built: the
-tool that copies a declaration into its npm package, and the engine with
-its packages. Each change that lands a piece updates this paragraph, the
-README layout table and the pages that describe it. The names and rules
-are reversible until the first release.
+Status: three pieces are built. `internal/tools/schemafiletypes` writes
+the data form's TypeScript types and meta-schema into
+`@superschematic/schema-ir` (`./schema-file`, `./schema-file.json`). The
+strict loader is in `@superschematic/schema-runtime`, held to the Go
+reader by `runtime/schema/testdata/schema_file_parity.json`
+(`runtime/schema/README.md`). Behavior declarations and the `@behavior`
+decorator are in the compiler (section 3.16 of `docs/extension-model.md`);
+the core declares no behavior yet, acme declares `acme.Rating`, and every
+generator refuses a type that declares one. To match the Go reader's
+canonical bytes, which drop a value its decoder cannot tell from an
+absent key, the meta-schema gives each such property that value as its
+default (section 5), and the loader needs `JSON.parse` source text access
+(Node.js 21 or later, or Bun). Not built: the tool that copies a
+declaration into its npm package, and the engine with its packages. Each
+change that lands a piece updates this paragraph, the README layout table
+and the pages that describe it. The names and rules are reversible until
+the first release.
