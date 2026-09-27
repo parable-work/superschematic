@@ -640,6 +640,132 @@
       "error": "the core policy key under a registry's policy: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/mcp': additional properties 'invocationPolicy' not allowed"
     },
     {
+      "name": "behaviors with and without a config",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [\n\t\t{\"name\": \"acme.Stock\", \"config\": {\"unit\": \"box\", \"aisles\": 2}}, {\"name\": \"acme.Audited\"}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"behaviors\":[{\"config\":{\"aisles\":2,\"unit\":\"box\"},\"name\":\"acme.Stock\"},{\"name\":\"acme.Audited\"}],\"name\":\"Item\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "a behavior config of {} is stored as none",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [\n\t\t{\"name\": \"acme.Stock\", \"config\": {\"aisles\": 1}}, {\"name\": \"acme.Audited\", \"config\": { }}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"behaviors\":[{\"config\":{\"aisles\":1},\"name\":\"acme.Stock\"},{\"name\":\"acme.Audited\"}],\"name\":\"Item\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "behavior config numbers and key order",
+      "registry": "extended",
+      "input": "{\"types\": {\"Item\": {\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [\n\t\t{\"config\": {\"unit\": \"<crate>\", \"aisles\": 1E1}, \"name\": \"acme.Stock\"}]},\n\t\t\"Bin\": {\"name\": \"Bin\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Stock\", \"config\": {\"aisles\": 12345678901234567890}}]},\n\t\t\"Box\": {\"name\": \"Box\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Stock\", \"config\": {\"aisles\": 3.0, \"unit\": \"\"}}]}}}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Bin\":{\"behaviors\":[{\"config\":{\"aisles\":12345678901234567890},\"name\":\"acme.Stock\"}],\"name\":\"Bin\",\"role\":\"DBTable\"},\"Box\":{\"behaviors\":[{\"config\":{\"aisles\":3.0,\"unit\":\"\"},\"name\":\"acme.Stock\"}],\"name\":\"Box\",\"role\":\"DBTable\"},\"Item\":{\"behaviors\":[{\"config\":{\"aisles\":1E1,\"unit\":\"\\u003ccrate\\u003e\"},\"name\":\"acme.Stock\"}],\"name\":\"Item\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "an empty behavior list is dropped",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": []}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"name\":\"Item\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "an empty behavior list under the core",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": []}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Item\":{\"name\":\"Item\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "a behavior under the core",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Audited\"}]}",
+      "accept": false,
+      "error": "a behavior under the core: behavior \"acme.Audited\" on type \"Item\" is not a registered behavior (none are registered)"
+    },
+    {
+      "name": "an unregistered behavior",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Ghost\"}]}",
+      "accept": false,
+      "error": "an unregistered behavior: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: acme.Audited, acme.Stock)"
+    },
+    {
+      "name": "an unregistered behavior in a document",
+      "registry": "extended",
+      "input": "{\"types\": {\"Item\": {\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Ghost\"}]}}}",
+      "accept": false,
+      "error": "an unregistered behavior in a document: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: acme.Audited, acme.Stock)"
+    },
+    {
+      "name": "a behavior config its schema rejects",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Stock\", \"config\": {\"aisles\": 0}}]}",
+      "accept": false,
+      "error": "a behavior config its schema rejects: type \"Item\": behavior acme.Stock config: jsonschema validation failed with 'superschematic://behaviors/acme.Stock/config.json#'\n- at '/aisles': minimum: got 0, want 1"
+    },
+    {
+      "name": "a behavior config with a key its schema lacks",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Stock\", \"config\": {\"aisles\": 1, \"colour\": \"red\"}}]}",
+      "accept": false,
+      "error": "a behavior config with a key its schema lacks: type \"Item\": behavior acme.Stock config: jsonschema validation failed with 'superschematic://behaviors/acme.Stock/config.json#'\n- at '': additional properties 'colour' not allowed"
+    },
+    {
+      "name": "a behavior config with a fraction for an integer",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Stock\", \"config\": {\"aisles\": 1.5}}]}",
+      "accept": false,
+      "error": "a behavior config with a fraction for an integer: type \"Item\": behavior acme.Stock config: jsonschema validation failed with 'superschematic://behaviors/acme.Stock/config.json#'\n- at '/aisles': got number, want integer"
+    },
+    {
+      "name": "a missing required behavior config",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Stock\"}]}",
+      "accept": false,
+      "error": "a missing required behavior config: type \"Item\": behavior acme.Stock config: jsonschema validation failed with 'superschematic://behaviors/acme.Stock/config.json#'\n- at '': missing property 'aisles'"
+    },
+    {
+      "name": "a required behavior config of {}",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Stock\", \"config\": {}}]}",
+      "accept": false,
+      "error": "a required behavior config of {}: type \"Item\": behavior acme.Stock config: jsonschema validation failed with 'superschematic://behaviors/acme.Stock/config.json#'\n- at '': missing property 'aisles'"
+    },
+    {
+      "name": "a config for a behavior that takes none",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Audited\", \"config\": {\"on\": true}}]}",
+      "accept": false,
+      "error": "a config for a behavior that takes none: type \"Item\": behavior acme.Audited takes no config"
+    },
+    {
+      "name": "a null behavior config",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Audited\", \"config\": null}]}",
+      "accept": false,
+      "error": "a null behavior config: type \"Item\": behavior acme.Audited takes no config"
+    },
+    {
+      "name": "an unknown key on a behavior entry",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Audited\", \"extra\": 1}]}",
+      "accept": false,
+      "error": "an unknown key on a behavior entry: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0': additional properties 'extra' not allowed"
+    },
+    {
+      "name": "a behavior entry without its name",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"config\": {\"aisles\": 1}}]}",
+      "accept": false,
+      "error": "a behavior entry without its name: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0': validation failed\n  - at '/behaviors/0': missing property 'name'\n  - at '/behaviors/0': 'allOf' failed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed"
+    },
+    {
+      "name": "a behavior name that is not a string",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": 3}]}",
+      "accept": false,
+      "error": "a behavior name that is not a string: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0/name': got number, want string"
+    },
+    {
       "name": "file docs.schema.json",
       "registry": "core",
       "input": "{\n  \"name\": \"fixture-docs\",\n  \"kind\": \"API\",\n  \"scalars\": {\n    \"Identity.UUID\": {\n      \"name\": \"Identity.UUID\",\n      \"description\": \"UUID v4 with automatic base62 encoding for client-facing APIs\",\n      \"languagePrimitive\": \"string\",\n      \"primitive\": \"String\",\n      \"typeMappings\": {\n        \"go\": \"IdentityUUID\",\n        \"json_schema\": \"string\",\n        \"python\": \"uuid.UUID\",\n        \"rust\": \"uuid::Uuid\",\n        \"sql\": \"UUID\",\n        \"typescript\": \"string\"\n      },\n      \"pattern\": \"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$\",\n      \"hasCustomParse\": true\n    }\n  },\n  \"types\": {\n    \"Order\": {\n      \"name\": \"Order\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"id\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"totalCents\",\n          \"title\": \"Total\",\n          \"purpose\": \"The order total in **cents**, tax included.\",\n          \"icon\": \"receipt\",\n          \"typeRef\": {\n            \"name\": \"number\"\n          },\n          \"required\": true\n        }\n      ]\n    },\n    \"ReturnRequest\": {\n      \"name\": \"ReturnRequest\",\n      \"role\": \"EmbeddedStruct\",\n      \"fields\": [\n        {\n          \"name\": \"orderId\",\n          \"typeRef\": {\n            \"name\": \"Identity.UUID\"\n          },\n          \"required\": true\n        },\n        {\n          \"name\": \"reason\",\n          \"typeRef\": {\n            \"name\": \"string\"\n          },\n          \"required\": true\n        }\n      ]\n    }\n  },\n  \"operationSets\": [\n    {\n      \"name\": \"OrderQueries\",\n      \"operations\": [\n        {\n          \"name\": \"getOrder\",\n          \"comment\": \"Fetch one order. OpenAPI takes the @docs description instead.\",\n          \"docs\": {\n            \"title\": \"Get an order\",\n            \"description\": \"Returns one order by its identifier.\",\n            \"capability\": \"orders.get\",\n            \"lifecycle\": \"active\",\n            \"visibility\": \"public\",\n            \"audience\": \"shoppers\",\n            \"mappingStatus\": \"mapped\",\n            \"useWhen\": \"Use when you have an order identifier.\",\n            \"doNotUseWhen\": \"Do not use to list orders; call listOrders.\",\n            \"success\": \"Returns the order with its total.\",\n            \"errors\": [\n              {\n                \"code\": \"order_not_found\",\n                \"description\": \"No order has that identifier.\",\n                \"commonCorrection\": \"Take the identifier from a listOrders result.\"\n              }\n            ]\n          },\n          \"typeRef\": {\n            \"name\": \"Order\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"id\",\n              \"typeRef\": {\n                \"name\": \"Identity.UUID\"\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"GET\",\n          \"restPath\": \"orders/{id}\"\n        },\n        {\n          \"name\": \"listOrders\",\n          \"comment\": \"Lists every order. Without @docs the summary is the operation name.\",\n          \"typeRef\": {\n            \"name\": \"Order\",\n            \"isArray\": true\n          },\n          \"required\": true,\n          \"httpMethod\": \"GET\",\n          \"restPath\": \"orders\"\n        }\n      ]\n    },\n    {\n      \"name\": \"ReturnMutations\",\n      \"operations\": [\n        {\n          \"name\": \"openReturn\",\n          \"docs\": {\n            \"title\": \"Open a return\",\n            \"description\": \"Opens a return for one delivered order.\",\n            \"capability\": \"orders.returns.open\",\n            \"lifecycle\": \"deprecated\",\n            \"visibility\": \"preview\",\n            \"mappingStatus\": \"uncertain\",\n            \"replacement\": \"orders.returns.create\",\n            \"sunset\": \"2027-01-31\"\n          },\n          \"typeRef\": {\n            \"name\": \"Order\"\n          },\n          \"required\": true,\n          \"arguments\": [\n            {\n              \"name\": \"input\",\n              \"typeRef\": {\n                \"name\": \"ReturnRequest\"\n              },\n              \"required\": true\n            }\n          ],\n          \"httpMethod\": \"POST\",\n          \"restPath\": \"returns\"\n        }\n      ]\n    }\n  ]\n}\n",

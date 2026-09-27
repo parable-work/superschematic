@@ -1,6 +1,7 @@
 package tswriter
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -85,7 +86,7 @@ func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil ||
 		len(def.Indexes) > 0 || def.JsonField || def.EnvVars ||
-		def.DenyUnknownFields || def.StrictJSON {
+		def.DenyUnknownFields || def.StrictJSON || len(def.Behaviors) > 0 {
 		e.failf("%s: embedded structs in a DB schema render as type aliases and cannot carry heritage or decorators", owner)
 		return
 	}
@@ -171,6 +172,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if def.EnvVars {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("envVars"))
 	}
+	for _, ref := range def.Behaviors {
+		e.emitBehavior(def.Name, ref)
+	}
 
 	fmt.Fprintf(&e.body, "export abstract class %s%s {\n", e.ident(def.Name, "type"), e.heritageClause(def))
 
@@ -193,6 +197,21 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 		fmt.Fprintf(&e.body, "  %s: %s;\n", e.ident(fd.Name, "field"), e.fieldTypeExpr(fd, fieldOwner, structField))
 	}
 	e.body.WriteString("}\n")
+}
+
+// emitBehavior renders one @behavior(name, config?) line. Several render in
+// list order, which is the source order the walker reads them back in.
+func (e *emitter) emitBehavior(typeName string, ref ir.BehaviorRef) {
+	if len(ref.Config) == 0 {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("behavior"), quote(ref.Name))
+		return
+	}
+	var config any
+	if err := json.Unmarshal(ref.Config, &config); err != nil {
+		e.failf("type %s: behavior %s config: %v", typeName, ref.Name, err)
+		return
+	}
+	fmt.Fprintf(&e.body, "@%s(%s, %s)\n", e.use("behavior"), quote(ref.Name), valueLiteral(config))
 }
 
 func versionedConfigArgs(cfg *ir.VersionedConfig) string {

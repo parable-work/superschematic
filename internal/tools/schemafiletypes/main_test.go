@@ -39,8 +39,8 @@ var corpus = []string{
 }
 
 // openParts are documents the types accept because a registry, not the
-// core, closes what they use: a kind, extension data, a document and a
-// renamed invocation policy key.
+// core, closes what they use: a kind, extension data, a document, a
+// renamed invocation policy key and behaviors with their configs.
 const openParts = `
 export const extensionKind: Document = { name: 'jobs', kind: 'Worker' };
 export const extensionData: Document = {
@@ -54,6 +54,11 @@ export const extensionData: Document = {
       fields: [{ name: 'slug', typeRef: { name: 'Identity.Slug' }, extensions: { acme: { shelf: { aisle: 3 } } } }],
     },
   },
+};
+export const behaviors: TypeDef = {
+  name: 'Item',
+  role: 'DBTable',
+  behaviors: [{ name: 'acme.Stock', config: { aisles: 3, unit: 'box' } }, { name: 'acme.Audited' }],
 };
 export const renamedPolicy: OperationSetFile = {
   kind: 'OperationSet',
@@ -76,6 +81,10 @@ export const missingTypeRef: FieldDef = { name: 'slug' };
 export const enumWithoutKind: EnumFile = { name: 'Colour', values: [] };
 // @ts-expect-error a string where the mcp record takes a boolean
 export const hiddenAsString: OperationMCP = { hidden: 'no' };
+// @ts-expect-error a behavior without its name
+export const behaviorWithoutName: BehaviorRef = { config: { aisles: 3 } };
+// @ts-expect-error an unknown key on a behavior
+export const behaviorExtraKey: TypeDef = { name: 'Item', role: 'DBTable', behaviors: [{ name: 'acme.Audited', extra: 1 }] };
 `
 
 // TestTypesCheckTheCorpus type-checks the generated types with the
@@ -102,7 +111,7 @@ func TestTypesCheckTheCorpus(t *testing.T) {
 	}
 
 	var check strings.Builder
-	check.WriteString("import type { Document, EnumFile, FieldDef, OperationMCP, OperationSetFile, ScalarFile, TypeDef, UnionFile } from '@superschematic/schema-ir/schema-file';\n")
+	check.WriteString("import type { BehaviorRef, Document, EnumFile, FieldDef, OperationMCP, OperationSetFile, ScalarFile, TypeDef, UnionFile } from '@superschematic/schema-ir/schema-file';\n")
 	count := 0
 	for _, dir := range corpus {
 		schema, err := loader.LoadService(filepath.Join(root, dir))

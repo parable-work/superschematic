@@ -25,7 +25,7 @@ payloads with the Go data-form reader's verdict and, for an accepted one,
 the decoded document as `ir.CanonicalJSON` writes it, plus JSON texts with
 `ir.CanonicalJSON`'s output. Some payloads load against the core registry,
 the rest against a registry with its own kind, extension decorators,
-documents and invocation policy, whose meta-schema is
+documents, invocation policy and behaviors, whose meta-schema is
 `testdata/schema_file_parity.meta-schema.json`. `internal/loader/schemafile`
 writes both (`go test ./internal/loader/schemafile -run
 TestSchemaFileParityCorpus -update`), and the TypeScript suite asserts
@@ -45,8 +45,9 @@ The strict loader reads a schema file in the JSON data form, the document
 - It decodes as Go decodes into the IR types: an integer field takes an
   integer literal within int64, a number field a float64, and a value Go
   holds as `any` becomes a float64. A property that holds its meta-schema
-  default is dropped, as Go's encoder omits it. Extension and document data
-  keep their number literals.
+  default is dropped, as Go's encoder omits it; a behavior's config of
+  `{}`, whose default it is, is dropped as Go stores it as none. Extension
+  and document data and behavior configs keep their number literals.
 - It puts a single definition into a document, drops empty extension
   entries on the holders Go canonicalizes, and gives every visible tool of
   an operation set that omits the invocation policy the meta-schema's
@@ -65,8 +66,9 @@ const loaded = loader.load(text, "orders.schema.json");
 The default meta-schema is the core registry's,
 `@superschematic/schema-ir/schema-file.json`. A deployment passes its
 binary's `superschematic json-schema` output, which adds its kinds,
-extension decorators, documents and invocation policy. A refused payload
-throws `SchemaFileError`, with the source and a JSON pointer per issue.
+extension decorators, documents, invocation policy and behaviors. A
+refused payload throws `SchemaFileError`, with the source and a JSON
+pointer per issue.
 
 `canonical` is the document as `ir.CanonicalJSON` writes the document the
 Go reader decodes: compact, object keys sorted by their UTF-8 bytes, arrays
@@ -83,10 +85,11 @@ Where the loader and the Go reader can still differ, and no vector covers:
 - A repeated object key: `JSON.parse` keeps the last value, while Go's
   decoder merges a repeated object into the struct or map it already
   decoded, after validating only the last value.
-- JSON Schema checks on extension and document data compare numbers as
-  float64 in ajv and exactly in the Go validator, so a literal such as
-  `1.0000000000000001` against `"type": "integer"` passes here and fails
-  in Go. A `pattern` in a decorator's or document's schema runs as an
+- JSON Schema checks on extension and document data and on behavior
+  configs compare numbers as float64 in ajv and exactly in the Go
+  validator, so a literal such as `1.0000000000000001` against
+  `"type": "integer"` passes here and fails in Go. A `pattern` in a
+  decorator's, document's or behavior config's schema runs as an
   ECMAScript regular expression here and as a Go one there.
 - `canonicalJSON` refuses text with a stray `]` or `}` after the value,
   which `ir.CanonicalJSON` ignores. The loader refuses it, as the Go

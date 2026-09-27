@@ -61,10 +61,11 @@ func Write(doc *schemafile.Document) ([]byte, error) {
 var rawJSONKeys = map[string]bool{"extensions": true, "documents": true}
 
 // expandRawJSON rewrites the values under "extensions" and "documents"
-// mappings from the byte sequences yaml.v3 emits for json.RawMessage into
-// the YAML mappings the reader expects. A mapping is rewritten only when
-// every entry is a byte sequence, so a definition that happens to be named
-// "extensions" is left alone.
+// mappings, and the "config" of each entry of a type's "behaviors" list,
+// from the byte sequences yaml.v3 emits for json.RawMessage into the YAML
+// values the reader expects. A mapping is rewritten only when every entry
+// is a byte sequence, and a config only when it is one, so a definition
+// that happens to be named "extensions" or "behaviors" is left alone.
 func expandRawJSON(node *yaml.Node) error {
 	if node == nil {
 		return nil
@@ -89,8 +90,38 @@ func expandRawJSON(node *yaml.Node) error {
 			}
 			continue
 		}
+		if key.Value == "behaviors" && value.Kind == yaml.SequenceNode {
+			if err := expandBehaviorConfigs(value); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := expandRawJSON(value); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// expandBehaviorConfigs rewrites the config of every behavior entry, a
+// json.RawMessage, into the YAML value it holds.
+func expandBehaviorConfigs(list *yaml.Node) error {
+	for _, item := range list.Content {
+		if item.Kind != yaml.MappingNode {
+			continue
+		}
+		name := ""
+		for key, value := range mappingPairs(item) {
+			if key.Value == "name" {
+				name = value.Value
+			}
+		}
+		for key, value := range mappingPairs(item) {
+			if key.Value == "config" && isByteSequence(value) {
+				if err := replaceWithJSON(value, "behavior", name); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
@@ -101,13 +132,22 @@ func allByteSequences(mapping *yaml.Node) bool {
 		return false
 	}
 	for _, value := range mappingPairs2(mapping) {
-		if value.Kind != yaml.SequenceNode {
+		if !isByteSequence(value) {
 			return false
 		}
-		for _, item := range value.Content {
-			if item.Kind != yaml.ScalarNode || item.Tag != "!!int" {
-				return false
-			}
+	}
+	return true
+}
+
+// isByteSequence reports whether node is the !!int sequence yaml.v3 emits
+// for a []byte.
+func isByteSequence(node *yaml.Node) bool {
+	if node == nil || node.Kind != yaml.SequenceNode {
+		return false
+	}
+	for _, item := range node.Content {
+		if item.Kind != yaml.ScalarNode || item.Tag != "!!int" {
+			return false
 		}
 	}
 	return true

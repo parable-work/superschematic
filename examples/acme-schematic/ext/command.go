@@ -18,12 +18,12 @@ import (
 func describeCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "describe [<schemas-root>]",
-		Short: "List the kinds, generators, documents, auth providers, checks and tool invocation policy this binary registers",
+		Short: "List the kinds, generators, documents, auth providers, checks, tool invocation policy and behaviors this binary registers",
 		Long: `describe assembles the registry the way build does, with the naming file at
 <schemas-root>/superschematic.toml (or the defaults when no root is given),
 and prints every kind with its generator pipeline, every document, every
-output key, every auth provider, every check with its kinds and the tool
-invocation policy.`,
+output key, every auth provider, every check with its kinds, the tool
+invocation policy and every behavior.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			names := registry.DefaultNaming()
@@ -73,6 +73,7 @@ invocation policy.`,
 			_, _ = fmt.Fprintf(out, "checks: %s\n", strings.Join(checks, ", "))
 			policy := reg.ToolInvocationPolicy()
 			_, _ = fmt.Fprintf(out, "tool invocation policy: %s (%s; default %s)\n", policy.Key, strings.Join(policy.Values, ", "), policy.Default)
+			_, _ = fmt.Fprintf(out, "behaviors: %s\n", strings.Join(reg.BehaviorNames(), ", "))
 			return nil
 		},
 	}

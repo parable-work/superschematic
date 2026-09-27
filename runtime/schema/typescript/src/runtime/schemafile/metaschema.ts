@@ -5,7 +5,8 @@
  * schema kinds, the single-definition file forms and their discriminators,
  * the document's collection keys, and the invocation policy's key and
  * default. A deployment's meta-schema may add kinds, extension slots,
- * documents and another policy, and the loader reads it the same way.
+ * documents, behaviors and another policy, and the loader reads it the
+ * same way.
  */
 
 /** A JSON Schema node, as the meta-schema writes them. */

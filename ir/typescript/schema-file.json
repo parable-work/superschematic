@@ -57,6 +57,21 @@
       ],
       "type": "object"
     },
+    "BehaviorRef": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "default": {}
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "Document": {
       "additionalProperties": false,
       "properties": {
@@ -1481,6 +1496,14 @@
     "TypeDef": {
       "additionalProperties": false,
       "properties": {
+        "behaviors": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BehaviorRef"
+          },
+          "maxItems": 0,
+          "type": "array"
+        },
         "comment": {
           "default": "",
           "type": "string"

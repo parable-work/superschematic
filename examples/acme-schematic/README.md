@@ -20,6 +20,7 @@ The extension adds one of each registration surface:
 | Checks and an OpenAPI hook | policy over the core documentation decorators: acme's `@docs` audiences and `@icon` names only, and the `x-acme-docs` vendor key | `ext/docs.go` |
 | Check, a tool hook and an invocation policy on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden; the SDK tool documents carry acme's vendor keys and icon variant; `confirm` replaces the core's `invocationPolicy` | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Check on a core kind | policy over core projection views: every view in a DB schema binds `acme.shop_id` first | `ext/projection_policy.go` |
+| Behavior | `acme.Rating`, declared in a JSON file; `ext/testdata/services/shop-ratings` composes it on a General data-form type and `shop-ratings-ts` with `@behavior`, typed by acme's `BehaviorConfigs` augmentation | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
@@ -79,11 +80,14 @@ examples/acme-schematic/
     docs.go                   audience and icon checks, x-acme-docs OpenAPI hook
     mcp.go                    every shop-api operation declares @mcp; acme tool keys and icon variant; the confirm policy
     projection_policy.go      projection policy: a check on DB views' first rule
+    behavior.go               registers acme.Rating from rating.behavior.json, its declaration
     testdata/services/returns-api  an API the tests load that declares confirm on @mcp
+    testdata/services/shop-ratings  a General data-form service whose Product composes acme.Rating
+    testdata/services/shop-ratings-ts  its TypeScript twin, with @behavior
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
-  packages/schema/            @acme/schema, the authoring package @shelf and the Acme.Photo brand are imported from, and the confirm key's type
+  packages/schema/            @acme/schema, the authoring package @shelf and the Acme.Photo brand are imported from, the confirm key's type and acme.Rating's config type
   schemas/
     superschematic.toml       naming, auth_provider = "apikey", [package_aliases], [paths], [deps], [extension.acme]
     deps.json                 the committed copy of the dependency graph ([deps] copy)
@@ -581,6 +585,61 @@ The sql generator writes the view into `create.sql`, its migration pair
 under `dist/sql/shop-db/projections/migrations`, and its Arrow schema with
 the `acme.` metadata keys the naming file's `metadata_key_prefix` sets.
 
+## A behavior
+
+A behavior adds fields, operations, checks and storage to a type when an
+engine runs the schema. The compiler only declares, carries and checks
+behaviors. acme declares one, `acme.Rating`: shoppers rate a catalog item
+from one star to a maximum each type sets. The declaration is one JSON file,
+`ext/rating.behavior.json`, which `ext/behavior.go` embeds and registers:
+
+```go
+//go:embed rating.behavior.json
+var ratingDeclaration json.RawMessage
+
+r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDeclaration})
+```
+
+The file names the behavior (`acme.` is acme's `Name()`), its config schema
+(`maxStars`, 3 to 10, required), the fields it adds (`ratingCount`,
+`ratingAverage`) and its operations: `rate`, which writes and whose MCP
+tool asks the person first (`invocationPolicy: "always"`, a value of acme's
+`confirm` policy), and `ratingSummary`, which reads.
+
+`ext/testdata/services/shop-ratings` is a General service in the JSON data
+form whose `Product` composes it:
+
+```json
+"behaviors": [{ "name": "acme.Rating", "config": { "maxStars": 5 } }]
+```
+
+Its twin `shop-ratings-ts` writes the same with the core `@behavior`
+decorator:
+
+```ts
+import { behavior } from "@superschematic/schema";
+
+@behavior("acme.Rating", { maxStars: 5 })
+export abstract class Product { ... }
+```
+
+`packages/schema/src/behaviors.ts` types the config: it augments the
+core's `BehaviorConfigs` with `"acme.Rating": RatingConfig`, so tsc
+rejects a config without `maxStars`, and the registry rejects one outside
+3 to 10. A General schema cannot import `@acme/schema`, whose decorators
+are for Catalog schemas, so the twin's `tsconfig.json` includes the file,
+as `returns-api` includes `mcp.ts`.
+
+`build --emit-ir` prints the behavior in the IR from both forms,
+`json-schema` limits a type's behavior names to `acme.Rating` and checks
+its config, and `format` converts the file to YAML and to TypeScript.
+`build` refuses the service: no generator renders behaviors yet, and the
+error names the `types` generator. The services sit outside `schemas/` so
+`build-all` does not meet them. The core-only binary refuses the behavior
+by name. The smoke asserts each of these (`TestRatingBehavior` covers the
+load). The TypeScript implementation an engine runs comes with the
+engine.
+
 ## A command
 
 `cli.New` returns the root cobra command with `build`, `build-all`,
@@ -596,8 +655,8 @@ func (Extension) Commands() []*cobra.Command {
 `describe [<schemas-root>]` assembles the registry the way `build` does
 (`registry.LoadNaming` on the root, then `registry.Assemble(names,
 Extension{})`) and prints every kind with its pipeline, every document,
-every output key, every auth provider, every check and the tool
-invocation policy. It is the first thing to run when a schema is
+every output key, every auth provider, every check, the tool invocation
+policy and every behavior. It is the first thing to run when a schema is
 rejected: it shows what the binary knows.
 
 `fields <file.d.ts> <type>` is a command on TypeScript the schema frontend

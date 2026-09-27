@@ -62,6 +62,16 @@ type (
 	// value type of LoadContext.Catalog.
 	SchemaCatalogEntry = registry.SchemaCatalogEntry
 
+	// BehaviorSpec registers a behavior from its JSON declaration, whose
+	// shape is BehaviorDeclaration with its BehaviorField and
+	// BehaviorOperation entries. Behavior is a registered one, as
+	// Registry.Behavior returns it.
+	BehaviorSpec        = registry.BehaviorSpec
+	BehaviorDeclaration = registry.BehaviorDeclaration
+	BehaviorField       = registry.BehaviorField
+	BehaviorOperation   = registry.BehaviorOperation
+	Behavior            = registry.Behavior
+
 	// EnvConfig is a schema's resolved @envVars contract: the fields an
 	// environment-driven configuration exposes, with their types, defaults
 	// and @secret marks. GenerateContext.EnvConfig returns one; EnvConfigOf

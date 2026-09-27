@@ -4,9 +4,10 @@
 // multi-definition Document or one definition in its file form. They are
 // written from the JSON Schema `superschematic json-schema` emits for the
 // core registry (schema-file.json in this package), which is reflected from
-// the Go IR structs. A registry closes four parts of that schema, which
+// the Go IR structs. A registry closes six parts of that schema, which
 // these types leave open: the extensions slots, the documents, the schema
-// kinds and the MCP invocation policy key. Regenerate with:
+// kinds, the MCP invocation policy key, and a behavior's name and config.
+// Regenerate with:
 //   go run ./internal/tools/schemafiletypes
 
 /** A schema kind: one of the core's, or one a registry adds. */
@@ -49,6 +50,20 @@ export interface ArgumentDef {
   validateMin?: number;
   validateMinLength?: number;
   validatePattern?: string;
+}
+
+export interface BehaviorRef {
+  /**
+   * The type's config of the behavior, which the registry holds to the
+   * behavior's config schema. A config of {} is stored as none.
+   */
+  config?: unknown;
+  /**
+   * The behavior's registered name: bare for a core behavior,
+   * <extension>.<Name> for an extension's. A registry admits the behaviors it
+   * registers.
+   */
+  name: string;
 }
 
 export interface Document {
@@ -419,6 +434,11 @@ export interface TransformForeignKeyDef {
 }
 
 export interface TypeDef {
+  /**
+   * The behaviors the type composes, in the order their checks run. A registry
+   * admits the behaviors it registers; the core registers none.
+   */
+  behaviors?: BehaviorRef[];
   comment?: string;
   denyUnknownFields?: boolean;
   description?: string;
