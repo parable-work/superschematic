@@ -233,6 +233,14 @@ r.RegisterDecorator(registry.DecoratorSpec{
   extension's name. `ir.UpdateExtension` / `ir.GetExtension` are the
   codec.
 
+A per-field directive that only your distribution reads is a decorator
+like this one; the core IR has no field for it (D18 in
+`docs/DECISIONS.md`). A flag is a spec without `Args`: a schema writes it
+bare (acme's `@feedKey`) and the data forms write `"feedKey": true` under
+`extensions.acme`. `format` carries the slot from TypeScript to JSON and
+YAML and between the two; the TypeScript writer cannot render extension
+data yet.
+
 ## A scalar catalog
 
 The loader hydrates every scalar a schema names from the registry's scalar

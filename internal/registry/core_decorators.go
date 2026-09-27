@@ -55,6 +55,11 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// move them after field resolution and lose that diagnostic.
 	marker(TargetType, "envVars", []string{pkgSchemaConfig})
 	marker(TargetType, "versioned", []string{pkgDB})
+	// @versionGraph and @graphMember name schema classes as values (graph,
+	// parent.of), which the argument evaluator does not read, so the walker
+	// reads them itself beside @versioned.
+	marker(TargetType, "versionGraph", []string{pkgDB})
+	marker(TargetType, "graphMember", []string{pkgDB})
 	flag(TargetType, "jsonField", []string{pkgDB, pkgSchema}, func(n Node) { n.Type.JsonField = true })
 	flag(TargetType, "denyUnknownFields", []string{pkgSchema}, func(n Node) { n.Type.DenyUnknownFields = true })
 	flag(TargetType, "strictJSON", []string{pkgSchema}, func(n Node) { n.Type.StrictJSON = true })
@@ -86,6 +91,17 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	fieldFlag("internalMetadata", []string{pkgSchema}, func(f *ir.FieldDef) { f.InternalMetadata = true })
 	fieldFlag("virtual", []string{pkgAPI, pkgSchema}, func(f *ir.FieldDef) { f.Virtual = true })
 	fieldFlag("sourceMustProject", []string{pkgDB}, func(f *ir.FieldDef) { f.SourceMustProject = true })
+	specs = append(specs, DecoratorSpec{
+		Name: "conflictUnit", Packages: []string{pkgDB}, Target: TargetField,
+		Apply: func(n Node, args []any, _ Site) error {
+			unit, err := conflictUnit(args)
+			if err != nil {
+				return err
+			}
+			n.Field.ConflictUnit = unit
+			return nil
+		},
+	})
 	specs = append(specs, DecoratorSpec{
 		Name: "temporalFormat", Packages: []string{pkgSchema}, Target: TargetField,
 		Apply: func(n Node, args []any, _ Site) error {
@@ -171,9 +187,28 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	return specs
 }
 
+// conflictUnit reads @conflictUnit('keyed'). Which fields may carry which
+// strategy is a verification rule (a member field; keyed and jsonSchema on a
+// JSON object), since it reads the type the field sits on.
+func conflictUnit(args []any) (string, error) {
+	if len(args) != 1 {
+		return "", fmt.Errorf("@conflictUnit takes exactly one strategy string")
+	}
+	unit, ok := args[0].(string)
+	if !ok {
+		return "", fmt.Errorf("@conflictUnit strategy must be a string literal")
+	}
+	switch unit {
+	case ir.ConflictUnitAtomic, ir.ConflictUnitKeyed, ir.ConflictUnitJSONSchema, ir.ConflictUnitExcluded:
+	default:
+		return "", fmt.Errorf("@conflictUnit %q is not a strategy (atomic, keyed, jsonSchema, excluded)", unit)
+	}
+	return unit, nil
+}
+
 // temporalFormat reads @temporalFormat('unix_millis'). The unit is a fact
-// about the source API: only the epoch members of
-// IncrementalTimeFormatEnum are valid, and only on a plain Temporal.DateTime
+// about the source API: only the epoch units (unix, unix_millis,
+// unix_micros, unix_nanos) are valid, and only on a plain Temporal.DateTime
 // field -- an ISO field needs no declaration, and any other type would give
 // the annotation nothing to decode into.
 func temporalFormat(args []any, fd *ir.FieldDef) (string, error) {

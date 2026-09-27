@@ -13,8 +13,8 @@ import (
 func TestNewRegistersCoreDecoratorsForEveryWalkerCase(t *testing.T) {
 	reg := New(naming.Naming{})
 	want := map[DecoratorTarget][]string{
-		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "versioned", "index", "projection", "join", "behavior"},
-		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "virtual", "sourceMustProject", "docs", "purpose", "icon", "column"},
+		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "versioned", "versionGraph", "graphMember", "index", "projection", "join", "behavior"},
+		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "conflictUnit", "virtual", "sourceMustProject", "docs", "purpose", "icon", "column"},
 		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout"},
 		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "docs", "mcp", "icon"},
 	}
@@ -213,7 +213,7 @@ func TestCoreApplyBodiesReproduceWalkerBehaviour(t *testing.T) {
 		t.Errorf("index name error = %v", err)
 	}
 
-	for _, name := range []string{"envVars", "versioned", "trait", "source"} {
+	for _, name := range []string{"envVars", "versioned", "versionGraph", "graphMember", "trait", "source"} {
 		if spec, _ := reg.Decorator(name, TargetType); spec.Apply != nil {
 			t.Errorf("@%s must stay a marker: the walker reads it before field resolution", name)
 		}
@@ -222,6 +222,14 @@ func TestCoreApplyBodiesReproduceWalkerBehaviour(t *testing.T) {
 		if spec, _ := reg.Decorator(name, TargetOperation); !spec.RecordsErrors() {
 			t.Errorf("@%s on an operation must record errors and keep the operation", name)
 		}
+	}
+
+	unit := &ir.FieldDef{TypeRef: ir.TypeRef{Name: "Generic.JSON"}}
+	if err := apply("conflictUnit", TargetField, Node{Field: unit}, "keyed"); err != nil || unit.ConflictUnit != ir.ConflictUnitKeyed {
+		t.Errorf("conflictUnit = %q, err %v", unit.ConflictUnit, err)
+	}
+	if err := apply("conflictUnit", TargetField, Node{Field: unit}, "rows"); err == nil || err.Error() != `@conflictUnit "rows" is not a strategy (atomic, keyed, jsonSchema, excluded)` {
+		t.Errorf("conflictUnit error = %v", err)
 	}
 
 	fd := &ir.FieldDef{TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}}

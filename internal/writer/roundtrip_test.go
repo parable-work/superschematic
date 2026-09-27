@@ -56,6 +56,10 @@ var corpus = []roundtripFixture{
 	{name: "fixture-nested-arrays", dir: tsFixtures + "/fixture-nested-arrays", native: FormatTS},
 	{name: "fixture-nested-arrays-db", dir: tsFixtures + "/fixture-nested-arrays-db", native: FormatTS},
 	{name: "fixture-nested-arrays-api", dir: tsFixtures + "/fixture-nested-arrays-api", native: FormatTS},
+	// A version graph: every format writes the declarations, not the types
+	// and fields the loader expands them into, and reading them back
+	// expands them to the same IR.
+	{name: "fixture-version-graph-db", dir: tsFixtures + "/fixture-version-graph-db", native: FormatTS},
 	{name: "fixture-db-json", dir: dataFixtures + "/fixture-db-json", native: FormatJSON},
 	{name: "fixture-db-yaml", dir: dataFixtures + "/fixture-db-yaml", native: FormatYAML},
 	{name: "fixture-general-json", dir: dataFixtures + "/fixture-general-json", native: FormatJSON},
@@ -505,4 +509,50 @@ func dumpService(t *testing.T, dir string) {
 		t.Logf("--- %s ---\n%s", rel, data)
 		return nil
 	})
+}
+
+// TestTSWriterRoundTripsVersionGraph: the corpus skips the TS leg of a
+// TS-native fixture, so this writes the version graph fixture back to
+// TypeScript and reloads it. The written file carries @versionGraph,
+// @graphMember and @conflictUnit and none of the types, fields, indexes or
+// prune pins the loader expands them into; reloading expands them again.
+func TestTSWriterRoundTripsVersionGraph(t *testing.T) {
+	schema, err := loader.LoadService(tsFixtures + "/fixture-version-graph-db")
+	if err != nil {
+		t.Fatalf("loading fixture: %v", err)
+	}
+	if schema.Types["RecipeRef"] == nil || schema.Enums["RecipeEntityKind"] == nil {
+		t.Fatal("precondition: the loaded fixture has no expanded graph types")
+	}
+	want := normalizeIR(t, schema)
+	if got := normalizeIR(t, writeAndReload(t, schema, FormatTS)); got != want {
+		t.Errorf("IR mismatch after TS -> TS round trip\nwant:\n%s\ngot:\n%s", want, got)
+	}
+
+	dir := t.TempDir()
+	if _, err := WriteService(schema, FormatTS, dir); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(dir, "src", "recipe.schema.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"@versionGraph({ schemaEpoch: 1 })",
+		`@graphMember({ graph: Recipe, order: "position" })`,
+		`@graphMember({ graph: Recipe, parent: { key: "stepKey", of: Step } })`,
+		`@graphMember({ graph: Recipe, parent: { key: "replyTo", of: Note } })`,
+		"@graphMember({ graph: Recipe, singleton: true })",
+		`@conflictUnit("keyed")`,
+		`@versioned({ retentionDays: 365 })`,
+	} {
+		if !strings.Contains(string(source), want) {
+			t.Errorf("written TypeScript lacks %s:\n%s", want, source)
+		}
+	}
+	for _, expanded := range []string{"RecipeRef", "RecipePatchOperation", "entityKey", "deletedOnRef", "recipe_patch", "entity_ref"} {
+		if strings.Contains(string(source), expanded) {
+			t.Errorf("written TypeScript carries the expanded %s:\n%s", expanded, source)
+		}
+	}
 }

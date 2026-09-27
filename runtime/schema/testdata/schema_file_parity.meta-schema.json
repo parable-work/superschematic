@@ -346,6 +346,16 @@
           "default": "",
           "type": "string"
         },
+        "conflictUnit": {
+          "default": "",
+          "enum": [
+            "atomic",
+            "keyed",
+            "jsonSchema",
+            "excluded"
+          ],
+          "type": "string"
+        },
         "default": {
           "type": "string"
         },
@@ -551,45 +561,6 @@
           "default": "",
           "type": "string"
         },
-        "transformAccountId": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformDedupKey": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformExternalUserId": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformFingerprintInput": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformForeignKey": {
-          "$ref": "#/$defs/TransformForeignKeyDef"
-        },
-        "transformOrdering": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformPartitionDate": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformPersonEmail": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformPersonName": {
-          "default": false,
-          "type": "boolean"
-        },
-        "transformStructural": {
-          "default": false,
-          "type": "boolean"
-        },
         "typeRef": {
           "$ref": "#/$defs/TypeRef"
         },
@@ -660,6 +631,45 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "GraphMemberConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "graph": {
+          "type": "string"
+        },
+        "order": {
+          "default": "",
+          "type": "string"
+        },
+        "parent": {
+          "$ref": "#/$defs/GraphParent"
+        },
+        "singleton": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "graph"
+      ],
+      "type": "object"
+    },
+    "GraphParent": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "of": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "of"
+      ],
       "type": "object"
     },
     "HTTPBinaryStreamDef": {
@@ -1633,22 +1643,6 @@
       ],
       "type": "object"
     },
-    "TransformForeignKeyDef": {
-      "additionalProperties": false,
-      "properties": {
-        "idField": {
-          "default": "",
-          "type": "string"
-        },
-        "tap": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "tap"
-      ],
-      "type": "object"
-    },
     "TypeDef": {
       "additionalProperties": false,
       "properties": {
@@ -1710,6 +1704,9 @@
           },
           "type": "array"
         },
+        "graphMember": {
+          "$ref": "#/$defs/GraphMemberConfig"
+        },
         "implements": {
           "default": [],
           "items": {
@@ -1770,6 +1767,9 @@
         },
         "traitConfig": {
           "$ref": "#/$defs/TraitConfigSchema"
+        },
+        "versionGraph": {
+          "$ref": "#/$defs/VersionGraphConfig"
         },
         "versioned": {
           "default": false,
@@ -1869,6 +1869,20 @@
         "types",
         "kind"
       ],
+      "type": "object"
+    },
+    "VersionGraphConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "schemaEpoch": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "VersionedConfig": {

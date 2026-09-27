@@ -1,8 +1,8 @@
 name: ci
 
 # Gates for the superschematic repository: DCO sign-off, the four Go modules
-# (build, vet, test, gofmt, golangci-lint, scalar catalog and schema-file
-# types drift, CLI smoke
+# (build, vet, test with the database tests against a Postgres container,
+# gofmt, golangci-lint, scalar catalog and schema-file types drift, CLI smoke
 # over the fixture corpus), the acme example extension (smoke plus the
 # no-core-edits check), the TypeScript authoring packages, schema runtime
 # and http runtime, the Python schema runtime, the Rust http runtime, the
@@ -149,6 +149,25 @@ jobs:
           test -n "$version"
           python -m pip install "pydantic==$version"
 
+      - name: Start Postgres
+        # The ORM and SQL tests that read SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL
+        # and SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL skip without a database.
+        # A container started here rather than a service container, whose
+        # image cannot read the version from tools.env.
+        run: |
+          docker run --detach --name superschematic-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 5432:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          # Over TCP: the image's first-start server listens only on its
+          # socket and restarts once initialised.
+          for _ in $(seq 1 60); do
+            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-pg
+          exit 1
+
       - name: Build, vet, test every module
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
@@ -158,6 +177,10 @@ jobs:
           # set up, so a skip is a broken gate and must fail
           # (testpaths.RequireOrSkipTS).
           SUPERSCHEMATIC_REQUIRE_TS_CHECKS: "1"
+          # The database tests run against the container above; each creates
+          # and drops its own schema, database or role.
+          SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+          SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           for m in . ir runtime/schema/go runtime/http/go; do
