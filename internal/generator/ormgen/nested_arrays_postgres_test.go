@@ -65,6 +65,18 @@ func addBoardMoves(schema *ir.Schema) {
 	})
 }
 
+// addBoardJSONLists adds two optional list columns stored as JSONB to a
+// loaded fixture-nested-arrays-db, as addBoardMoves adds its column: tags, a
+// @jsonField string[], and corners, a @jsonField BoardPoint[]. The fixture's
+// JSONB columns are otherwise all lists of lists.
+func addBoardJSONLists(schema *ir.Schema) {
+	board := schema.Types["Board"]
+	board.Fields = append(board.Fields,
+		&ir.FieldDef{Name: "tags", TypeRef: ir.TypeRef{Name: "string", IsArray: true}, JsonField: true},
+		&ir.FieldDef{Name: "corners", TypeRef: ir.TypeRef{Name: "BoardPoint", IsArray: true}, JsonField: true},
+	)
+}
+
 // nestedArraysCreateSQL writes the DDL sqlgen generates for schema into dir
 // and returns its create.sql path.
 func nestedArraysCreateSQL(t *testing.T, schema *ir.Schema, dir string) string {
@@ -132,11 +144,14 @@ func TestArraysOfArraysOnPostgres(t *testing.T) {
 
 // TestGeneratedArraysOfArraysORM generates the Go types module and the ORM
 // module for fixture-nested-arrays-db with the moves column of
-// addBoardMoves, then builds, vets and tests the ORM. Its generated test
-// writes lists of lists, a list of lists of a union among them, through
-// CreateOne, CreateMany and UpdateOne and reads them back through GetOne and
-// FindMany against the Postgres at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL,
-// and skips without it; the union decoder is also run without it.
+// addBoardMoves and the list columns of addBoardJSONLists, then builds, vets
+// and tests the ORM. Its generated test writes lists of lists, a list of
+// lists of a union among them, through CreateOne, CreateMany and UpdateOne
+// and reads them back through GetOne and FindMany against the Postgres at
+// SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, and skips without it. It then
+// stores a null element in each list and list-of-lists column with SQL and
+// reads the row, which must fail. The union decoder and the list column
+// decoder are also run without a database.
 func TestGeneratedArraysOfArraysORM(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -145,6 +160,7 @@ func TestGeneratedArraysOfArraysORM(t *testing.T) {
 
 	schema := loadNestedArraysFixture(t)
 	addBoardMoves(schema)
+	addBoardJSONLists(schema)
 	fixedClock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 	typesModule := "example.com/schemas/types/go/" + nestedArraysFixture
 	tempRoot := t.TempDir()
@@ -263,6 +279,40 @@ func TestDecodeBoardMovesJSONUnion(t *testing.T) {
 	_, err = decodeBoardMovesJSONUnion([]byte(` + "`" + `[[{"kind":"place","x":1,"y":2,"state":"filled"},{"kind":"flip"}]]` + "`" + `))
 	if err == nil || !strings.Contains(err.Error(), "decode item [0][1]") {
 		t.Fatalf("unknown member err = %v, want one naming item [0][1]", err)
+	}
+}
+
+// TestJSONListColumnsRefuseNullElements runs the list column decoder without
+// a database. A list element is never null (D12, amended): a null element of
+// a list or a list of lists fails at its path, where encoding/json would
+// decode it to the element's zero value. A null inner list is a nil list,
+// and a JSON null column is no list.
+func TestJSONListColumnsRefuseNullElements(t *testing.T) {
+	for _, tc := range []struct {
+		raw, field string
+		depth      int
+		target     any
+		want       string
+	}{
+		{` + "`" + `[["a", null]]` + "`" + `, "labels", 2, new([][]string), "labels[0][1]: null element"},
+		{` + "`" + `[[1.5], [2, null]]` + "`" + `, "scores", 2, new([][]float64), "scores[1][1]: null element"},
+		{` + "`" + `[[{"x": 1, "y": 2}, null]]` + "`" + `, "walls", 2, new([][]types.BoardPoint), "walls[0][1]: null element"},
+		{` + "`" + `["a", null]` + "`" + `, "tags", 1, new([]string), "tags[1]: null element"},
+		{` + "`" + `[null, {"x": 1, "y": 2}]` + "`" + `, "corners", 1, new([]types.BoardPoint), "corners[0]: null element"},
+	} {
+		err := unmarshalJSONListFieldValue([]byte(tc.raw), tc.target, tc.field, tc.depth)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("decode %s = %v, want %q", tc.raw, err, tc.want)
+		}
+	}
+	var labels [][]string
+	if err := unmarshalJSONListFieldValue([]byte(` + "`" + `[["a"], null, []]` + "`" + `), &labels, "labels", 2); err != nil ||
+		!reflect.DeepEqual(labels, [][]string{{"a"}, nil, {}}) {
+		t.Errorf("a null inner list = %#v, %v; want a nil inner list", labels, err)
+	}
+	var tags []string
+	if err := unmarshalJSONListFieldValue([]byte("null"), &tags, "tags", 1); err != nil || tags != nil {
+		t.Errorf("a JSON null column = %#v, %v; want nil, nil", tags, err)
 	}
 }
 
@@ -396,6 +446,48 @@ func TestBoardArraysOfArraysOnPostgres(t *testing.T) {
 			!reflect.DeepEqual(got.Moves, newMoves) {
 			t.Fatalf("%s = %+v, want new labels and moves, no scores, walls unchanged", label, got)
 		}
+	}
+
+	// The ORM writes no null element, but a row another writer stored with
+	// one fails the read at the element's path, in a list and a list of
+	// lists column alike; a union list refuses it in the union's decoder.
+	// A stored null inner list reads as a nil list.
+	stored, err := db.Board.CreateOne(ctx, &types.Board{Labels: [][]string{}, States: [][]types.CellState{}, Walls: [][]types.BoardPoint{}, Moves: [][]types.BoardMove{}})
+	if err != nil {
+		t.Fatalf("CreateOne for stored nulls: %v", err)
+	}
+	storedID := *stored.Id
+	storeJSON := func(column, value string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, "UPDATE board SET "+column+" = $1::jsonb WHERE id = $2", value, storedID.ToUUID()); err != nil {
+			t.Fatalf("store %s = %s: %v", column, value, err)
+		}
+	}
+	for _, tc := range []struct{ column, value, empty, want string }{
+		{"labels", ` + "`" + `[["a", null]]` + "`" + `, "[]", "labels[0][1]: null element"},
+		{"states", ` + "`" + `[[], ["filled", null]]` + "`" + `, "[]", "states[1][1]: null element"},
+		{"walls", ` + "`" + `[[{"x": 1, "y": 2}, null]]` + "`" + `, "[]", "walls[0][1]: null element"},
+		{"scores", ` + "`" + `[[1.5, null]]` + "`" + `, "null", "scores[0][1]: null element"},
+		{"tags", ` + "`" + `["a", null]` + "`" + `, "null", "tags[1]: null element"},
+		{"corners", ` + "`" + `[null, {"x": 1, "y": 2}]` + "`" + `, "null", "corners[0]: null element"},
+		{"moves", ` + "`" + `[[{"kind": "clear", "x": 1, "y": 2}, null]]` + "`" + `, "[]", "decode item [0][1]"},
+	} {
+		storeJSON(tc.column, tc.value)
+		_, err := db.Board.GetOne(ctx, storedID, nil)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("GetOne with %s = %s: err = %v, want one naming %q", tc.column, tc.value, err, tc.want)
+		}
+		if _, _, err := db.Board.FindMany(ctx, nil, &BoardFindOptions{Fields: BoardFields{}.All()}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("FindMany with %s = %s: err = %v, want one naming %q", tc.column, tc.value, err, tc.want)
+		}
+		storeJSON(tc.column, tc.empty)
+	}
+	storeJSON("labels", ` + "`" + `[["a"], null]` + "`" + `)
+	storeJSON("tags", ` + "`" + `["a", "b"]` + "`" + `)
+	storeJSON("corners", ` + "`" + `[{"x": 1, "y": 2}]` + "`" + `)
+	if got := mustGetBoard(t, db, storedID, nil); !reflect.DeepEqual(got.Labels, [][]string{{"a"}, nil}) ||
+		!reflect.DeepEqual(got.Tags, []string{"a", "b"}) || !reflect.DeepEqual(got.Corners, []types.BoardPoint{{X: 1, Y: 2}}) {
+		t.Fatalf("stored lists = labels %#v, tags %#v, corners %#v; want a nil inner list and the stored tags and corners", got.Labels, got.Tags, got.Corners)
 	}
 }
 
