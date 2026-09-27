@@ -1,0 +1,56 @@
+{
+  "name": "acme.Rating",
+  "description": "Shoppers rate a catalog item from one star to the configured maximum.",
+  "configSchema": {
+    "type": "object",
+    "required": ["maxStars"],
+    "additionalProperties": false,
+    "properties": {
+      "maxStars": {
+        "type": "integer",
+        "minimum": 3,
+        "maximum": 10,
+        "description": "The highest rating a shopper can give."
+      }
+    }
+  },
+  "fields": [
+    { "name": "ratingCount", "description": "How many ratings the item has." },
+    { "name": "ratingAverage", "description": "The mean rating; 0 before the first." }
+  ],
+  "operations": [
+    {
+      "name": "rate",
+      "description": "Records one shopper's rating of the item.",
+      "paramsSchema": {
+        "type": "object",
+        "required": ["stars"],
+        "additionalProperties": false,
+        "properties": { "stars": { "type": "integer", "minimum": 1 } }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["ratingCount", "ratingAverage"],
+        "properties": {
+          "ratingCount": { "type": "integer" },
+          "ratingAverage": { "type": "number" }
+        }
+      },
+      "writes": true,
+      "invocationPolicy": "always"
+    },
+    {
+      "name": "ratingSummary",
+      "description": "Returns the item's rating count and average.",
+      "paramsSchema": { "type": "object", "additionalProperties": false },
+      "resultSchema": {
+        "type": "object",
+        "required": ["ratingCount", "ratingAverage"],
+        "properties": {
+          "ratingCount": { "type": "integer" },
+          "ratingAverage": { "type": "number" }
+        }
+      }
+    }
+  ]
+}

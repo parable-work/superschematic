@@ -380,6 +380,12 @@ type GeneratorSpec struct {
 	Enabled func(ctx GenerateContext) (bool, string)
 	// Generate emits the outputs and records them on ctx.Result.
 	Generate func(ctx GenerateContext) error
+	// RendersBehaviors marks a generator whose output covers what a type's
+	// behaviors add (ir.TypeDef.Behaviors): their fields and operations,
+	// or nothing of a type at all. Run refuses to run a generator without
+	// it on a schema one of whose types composes a behavior, rather than
+	// generate the type without them (D16).
+	RendersBehaviors bool
 
 	compiledOutput *validator.Schema
 }

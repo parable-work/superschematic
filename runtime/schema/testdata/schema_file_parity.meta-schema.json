@@ -1,0 +1,1919 @@
+{
+  "$defs": {
+    "ArgumentDef": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "default": {
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "isQuery": {
+          "default": false,
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "default": false,
+          "type": "boolean"
+        },
+        "typeRef": {
+          "$ref": "#/$defs/TypeRef"
+        },
+        "validateListMax": {
+          "type": "integer"
+        },
+        "validateListMin": {
+          "type": "integer"
+        },
+        "validateMax": {
+          "type": "number"
+        },
+        "validateMaxLength": {
+          "type": "integer"
+        },
+        "validateMin": {
+          "type": "number"
+        },
+        "validateMinLength": {
+          "type": "integer"
+        },
+        "validatePattern": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "typeRef"
+      ],
+      "type": "object"
+    },
+    "BehaviorRef": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "acme.Audited"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "acme.Stock"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "aisles": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "unit": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "aisles"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "config": {
+          "default": {}
+        },
+        "name": {
+          "enum": [
+            "acme.Audited",
+            "acme.Stock"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "Document": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "documents": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "catalogConfig": {
+              "properties": {
+                "shelves": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "cfg": {
+              "type": "object"
+            },
+            "otherConfig": {
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "enums": {
+          "additionalProperties": {
+            "$ref": "#/$defs/EnumDef"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "extensions": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "acme": {
+              "type": "object"
+            },
+            "empty": {
+              "type": "object"
+            },
+            "other": {
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "imports": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Import"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "default": "",
+          "enum": [
+            "API",
+            "Catalog",
+            "DB",
+            "General"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "operationSets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OperationSet"
+          },
+          "type": "array"
+        },
+        "scalars": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ScalarDef"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "types": {
+          "additionalProperties": {
+            "$ref": "#/$defs/TypeDef"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "unions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/UnionDef"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "EnumDef": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner": {
+          "default": "",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "$ref": "#/$defs/EnumValueDef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "values"
+      ],
+      "type": "object"
+    },
+    "EnumFile": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "kind": {
+          "const": "Enum"
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner": {
+          "default": "",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "$ref": "#/$defs/EnumValueDef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "values",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "EnumValueDef": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "serializedAs": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "FieldDef": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ArgumentDef"
+          },
+          "type": "array"
+        },
+        "auth": {
+          "default": false,
+          "type": "boolean"
+        },
+        "autoGenerated": {
+          "default": false,
+          "type": "boolean"
+        },
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "default": {
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "docs": {
+          "$ref": "#/$defs/OperationDocs"
+        },
+        "encrypted": {
+          "default": false,
+          "type": "boolean"
+        },
+        "exclude": {
+          "default": false,
+          "type": "boolean"
+        },
+        "extensions": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "acme": {
+              "additionalProperties": false,
+              "properties": {
+                "audited": {
+                  "const": true
+                },
+                "shelf": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "aisle": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "z": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "aisle"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "empty": {
+              "additionalProperties": false,
+              "type": "object"
+            },
+            "other": {
+              "additionalProperties": false,
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "filterable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "hasMany": {
+          "default": false,
+          "type": "boolean"
+        },
+        "hmacVerifiedProvider": {
+          "default": "",
+          "type": "string"
+        },
+        "httpBinaryStream": {
+          "$ref": "#/$defs/HTTPBinaryStreamDef"
+        },
+        "httpMethod": {
+          "default": "",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ],
+          "type": "string"
+        },
+        "icon": {
+          "default": "",
+          "type": "string"
+        },
+        "inheritedFrom": {
+          "default": "",
+          "type": "string"
+        },
+        "internalMetadata": {
+          "default": false,
+          "type": "boolean"
+        },
+        "jsonField": {
+          "default": false,
+          "type": "boolean"
+        },
+        "jsonTag": {
+          "default": "",
+          "type": "string"
+        },
+        "key": {
+          "default": false,
+          "type": "boolean"
+        },
+        "manualRouteRegistration": {
+          "default": false,
+          "type": "boolean"
+        },
+        "manyToMany": {
+          "default": false,
+          "type": "boolean"
+        },
+        "mcp": {
+          "$ref": "#/$defs/OperationMCP"
+        },
+        "middleware": {
+          "$ref": "#/$defs/MiddlewareConfig"
+        },
+        "name": {
+          "type": "string"
+        },
+        "paramType": {
+          "default": "",
+          "enum": [
+            "query"
+          ],
+          "type": "string"
+        },
+        "permissions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "placeholder": {
+          "default": "",
+          "type": "string"
+        },
+        "platformDefault": {
+          "default": "",
+          "type": "string"
+        },
+        "projectedFrom": {
+          "default": "",
+          "type": "string"
+        },
+        "projectedFunction": {
+          "$ref": "#/$defs/ProjectionFunctionCall"
+        },
+        "public": {
+          "default": false,
+          "type": "boolean"
+        },
+        "purpose": {
+          "default": "",
+          "type": "string"
+        },
+        "relation": {
+          "$ref": "#/$defs/RelationDef"
+        },
+        "requireOwnership": {
+          "default": false,
+          "type": "boolean"
+        },
+        "required": {
+          "default": false,
+          "type": "boolean"
+        },
+        "restMethod": {
+          "default": "",
+          "type": "string"
+        },
+        "restPath": {
+          "default": "",
+          "type": "string"
+        },
+        "searchField": {
+          "default": false,
+          "type": "boolean"
+        },
+        "secret": {
+          "default": false,
+          "type": "boolean"
+        },
+        "semanticRole": {
+          "default": "",
+          "type": "string"
+        },
+        "sourceMustProject": {
+          "default": false,
+          "type": "boolean"
+        },
+        "temporalFormat": {
+          "default": "",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "type": "string"
+        },
+        "transformAccountId": {
+          "default": false,
+          "type": "boolean"
+        },
+        "transformDedupKey": {
+          "default": false,
+          "type": "boolean"
+        },
+        "transformExternalUserId": {
+          "default": false,
+          "type": "boolean"
+        },
+        "transformFingerprintInput": {
+          "default": false,
+          "type": "boolean"
+        },
+        "transformForeignKey": {
+          "$ref": "#/$defs/TransformForeignKeyDef"
+        },
+        "transformOrdering": {
+          "default": false,
+          "type": "boolean"
+        },
+        "transformPartitionDate": {
+          "default": false,
+          "type": "boolean"
+        },
+        "transformPersonEmail": {
+          "default": false,
+          "type": "boolean"
+        },
+        "transformPersonName": {
+          "default": false,
+          "type": "boolean"
+        },
+        "transformStructural": {
+          "default": false,
+          "type": "boolean"
+        },
+        "typeRef": {
+          "$ref": "#/$defs/TypeRef"
+        },
+        "uiHidden": {
+          "default": false,
+          "type": "boolean"
+        },
+        "unique": {
+          "default": false,
+          "type": "boolean"
+        },
+        "validateListMax": {
+          "type": "integer"
+        },
+        "validateListMin": {
+          "type": "integer"
+        },
+        "validateMax": {
+          "type": "number"
+        },
+        "validateMaxLength": {
+          "type": "integer"
+        },
+        "validateMin": {
+          "type": "number"
+        },
+        "validateMinLength": {
+          "type": "integer"
+        },
+        "validatePattern": {
+          "default": "",
+          "type": "string"
+        },
+        "validateUploadMaxBytes": {
+          "type": "integer"
+        },
+        "virtual": {
+          "default": false,
+          "type": "boolean"
+        },
+        "webhook": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "typeRef"
+      ],
+      "type": "object"
+    },
+    "FileUploadConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allowedTypes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "category": {
+          "default": "",
+          "type": "string"
+        },
+        "maxSize": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "HTTPBinaryStreamDef": {
+      "additionalProperties": false,
+      "properties": {
+        "contentType": {
+          "type": "string"
+        },
+        "responseHeaders": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "contentType"
+      ],
+      "type": "object"
+    },
+    "ImageConstraints": {
+      "additionalProperties": false,
+      "properties": {
+        "maxAspectRatio": {
+          "type": "number"
+        },
+        "maxHeight": {
+          "default": 0,
+          "type": "integer"
+        },
+        "maxWidth": {
+          "default": 0,
+          "type": "integer"
+        },
+        "minAspectRatio": {
+          "type": "number"
+        },
+        "requireTransparency": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "Import": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "default": "",
+          "type": "string"
+        },
+        "package": {
+          "type": "string"
+        },
+        "types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "package",
+        "types"
+      ],
+      "type": "object"
+    },
+    "IndexDef": {
+      "additionalProperties": false,
+      "properties": {
+        "keys": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "unique": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "keys"
+      ],
+      "type": "object"
+    },
+    "MCPIcon": {
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "style": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "MiddlewareConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "bodyLimit": {
+          "type": "integer"
+        },
+        "rateLimit": {
+          "type": "integer"
+        },
+        "timeout": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "OperationDocs": {
+      "additionalProperties": false,
+      "properties": {
+        "audience": {
+          "default": "",
+          "type": "string"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "doNotUseWhen": {
+          "default": "",
+          "type": "string"
+        },
+        "errors": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OperationDocsError"
+          },
+          "type": "array"
+        },
+        "expectedRevisionPointers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "idempotencyKeyPointers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "experimental",
+            "active",
+            "deprecated",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "mappingStatus": {
+          "enum": [
+            "mapped",
+            "uncertain"
+          ],
+          "type": "string"
+        },
+        "replacement": {
+          "default": "",
+          "type": "string"
+        },
+        "replayMode": {
+          "default": "",
+          "enum": [
+            "read_only",
+            "idempotent",
+            "compare_and_swap"
+          ],
+          "type": "string"
+        },
+        "success": {
+          "default": "",
+          "type": "string"
+        },
+        "sunset": {
+          "default": "",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "useWhen": {
+          "default": "",
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "public",
+            "internal",
+            "preview"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "capability",
+        "lifecycle",
+        "visibility",
+        "mappingStatus"
+      ],
+      "type": "object"
+    },
+    "OperationDocsError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "commonCorrection": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "description",
+        "commonCorrection"
+      ],
+      "type": "object"
+    },
+    "OperationMCP": {
+      "additionalProperties": false,
+      "properties": {
+        "_meta": {
+          "default": {},
+          "type": "object"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "handle": {
+          "default": "",
+          "type": "string"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "hiddenReason": {
+          "default": "",
+          "type": "string"
+        },
+        "icon": {
+          "$ref": "#/$defs/MCPIcon"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "review": {
+          "default": "never",
+          "enum": [
+            "never",
+            "always"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "hidden"
+      ],
+      "type": "object"
+    },
+    "OperationSet": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "encrypted": {
+          "default": false,
+          "type": "boolean"
+        },
+        "extensions": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "acme": {
+              "additionalProperties": false,
+              "properties": {
+                "audited": {
+                  "const": true
+                }
+              },
+              "type": "object"
+            },
+            "empty": {
+              "additionalProperties": false,
+              "type": "object"
+            },
+            "other": {
+              "additionalProperties": false,
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "middleware": {
+          "$ref": "#/$defs/MiddlewareConfig"
+        },
+        "name": {
+          "type": "string"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/FieldDef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "operations"
+      ],
+      "type": "object"
+    },
+    "OperationSetFile": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "encrypted": {
+          "default": false,
+          "type": "boolean"
+        },
+        "extensions": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "acme": {
+              "additionalProperties": false,
+              "properties": {
+                "audited": {
+                  "const": true
+                }
+              },
+              "type": "object"
+            },
+            "empty": {
+              "additionalProperties": false,
+              "type": "object"
+            },
+            "other": {
+              "additionalProperties": false,
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "kind": {
+          "const": "OperationSet"
+        },
+        "middleware": {
+          "$ref": "#/$defs/MiddlewareConfig"
+        },
+        "name": {
+          "type": "string"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/FieldDef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "operations",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ProjectionCollapse": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "order": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionOrder"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "by"
+      ],
+      "type": "object"
+    },
+    "ProjectionCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "type": "string"
+        },
+        "equals": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "column",
+        "equals"
+      ],
+      "type": "object"
+    },
+    "ProjectionDef": {
+      "additionalProperties": false,
+      "properties": {
+        "collapse": {
+          "$ref": "#/$defs/ProjectionCollapse"
+        },
+        "joins": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionJoin"
+          },
+          "type": "array"
+        },
+        "migration": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pool": {
+          "type": "string"
+        },
+        "predicates": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionPredicate"
+          },
+          "type": "array"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pool",
+        "name",
+        "migration",
+        "source"
+      ],
+      "type": "object"
+    },
+    "ProjectionFunctionCall": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "function": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "function",
+        "args"
+      ],
+      "type": "object"
+    },
+    "ProjectionJoin": {
+      "additionalProperties": false,
+      "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "on": {
+          "items": {
+            "$ref": "#/$defs/ProjectionJoinKey"
+          },
+          "type": "array"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "alias",
+        "kind",
+        "on"
+      ],
+      "type": "object"
+    },
+    "ProjectionJoinKey": {
+      "additionalProperties": false,
+      "properties": {
+        "left": {
+          "type": "string"
+        },
+        "right": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "left",
+        "right"
+      ],
+      "type": "object"
+    },
+    "ProjectionLiteral": {
+      "additionalProperties": false,
+      "properties": {
+        "bool": {
+          "type": "boolean"
+        },
+        "number": {
+          "type": "number"
+        },
+        "string": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ProjectionOrder": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "type": "string"
+        },
+        "direction": {
+          "default": "",
+          "type": "string"
+        },
+        "nulls": {
+          "default": "",
+          "type": "string"
+        },
+        "rank": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "column"
+      ],
+      "type": "object"
+    },
+    "ProjectionPredicate": {
+      "additionalProperties": false,
+      "properties": {
+        "anyOf": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionPredicate"
+          },
+          "type": "array"
+        },
+        "args": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "column": {
+          "default": "",
+          "type": "string"
+        },
+        "equals": {
+          "$ref": "#/$defs/ProjectionLiteral"
+        },
+        "function": {
+          "default": "",
+          "type": "string"
+        },
+        "isNull": {
+          "default": false,
+          "type": "boolean"
+        },
+        "notNull": {
+          "default": false,
+          "type": "boolean"
+        },
+        "optional": {
+          "default": false,
+          "type": "boolean"
+        },
+        "requiredSettings": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "setting": {
+          "default": "",
+          "type": "string"
+        },
+        "when": {
+          "$ref": "#/$defs/ProjectionCondition"
+        }
+      },
+      "type": "object"
+    },
+    "PruneReference": {
+      "additionalProperties": false,
+      "properties": {
+        "keyColumn": {
+          "type": "string"
+        },
+        "table": {
+          "type": "string"
+        },
+        "versionColumn": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "table",
+        "keyColumn",
+        "versionColumn"
+      ],
+      "type": "object"
+    },
+    "RawHeritage": {
+      "additionalProperties": false,
+      "properties": {
+        "extends": {
+          "default": "",
+          "type": "string"
+        },
+        "implements": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RelationDef": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "default": "",
+          "type": "string"
+        },
+        "onDelete": {
+          "default": "",
+          "type": "string"
+        },
+        "type": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ScalarDef": {
+      "additionalProperties": false,
+      "properties": {
+        "caseInsensitive": {
+          "default": false,
+          "type": "boolean"
+        },
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "example": {
+          "default": "",
+          "type": "string"
+        },
+        "fileUpload": {
+          "$ref": "#/$defs/FileUploadConfig"
+        },
+        "format": {
+          "default": "",
+          "type": "string"
+        },
+        "hasCustomNormalize": {
+          "default": false,
+          "type": "boolean"
+        },
+        "hasCustomParse": {
+          "default": false,
+          "type": "boolean"
+        },
+        "hasCustomValidate": {
+          "default": false,
+          "type": "boolean"
+        },
+        "imageConstraints": {
+          "$ref": "#/$defs/ImageConstraints"
+        },
+        "languagePrimitive": {
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "object"
+          ],
+          "type": "string"
+        },
+        "maxLength": {
+          "default": 0,
+          "type": "integer"
+        },
+        "maximum": {
+          "type": "integer"
+        },
+        "minLength": {
+          "default": 0,
+          "type": "integer"
+        },
+        "minimum": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pattern": {
+          "default": "",
+          "type": "string"
+        },
+        "primitive": {
+          "default": "",
+          "type": "string"
+        },
+        "reservedWords": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reservedWordsCaseInsensitive": {
+          "default": false,
+          "type": "boolean"
+        },
+        "reservedWordsMatchPartial": {
+          "default": false,
+          "type": "boolean"
+        },
+        "typeMappings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "languagePrimitive"
+      ],
+      "type": "object"
+    },
+    "ScalarFile": {
+      "additionalProperties": false,
+      "properties": {
+        "caseInsensitive": {
+          "default": false,
+          "type": "boolean"
+        },
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "example": {
+          "default": "",
+          "type": "string"
+        },
+        "fileUpload": {
+          "$ref": "#/$defs/FileUploadConfig"
+        },
+        "format": {
+          "default": "",
+          "type": "string"
+        },
+        "hasCustomNormalize": {
+          "default": false,
+          "type": "boolean"
+        },
+        "hasCustomParse": {
+          "default": false,
+          "type": "boolean"
+        },
+        "hasCustomValidate": {
+          "default": false,
+          "type": "boolean"
+        },
+        "imageConstraints": {
+          "$ref": "#/$defs/ImageConstraints"
+        },
+        "kind": {
+          "const": "Scalar"
+        },
+        "languagePrimitive": {
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "object"
+          ],
+          "type": "string"
+        },
+        "maxLength": {
+          "default": 0,
+          "type": "integer"
+        },
+        "maximum": {
+          "type": "integer"
+        },
+        "minLength": {
+          "default": 0,
+          "type": "integer"
+        },
+        "minimum": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pattern": {
+          "default": "",
+          "type": "string"
+        },
+        "primitive": {
+          "default": "",
+          "type": "string"
+        },
+        "reservedWords": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reservedWordsCaseInsensitive": {
+          "default": false,
+          "type": "boolean"
+        },
+        "reservedWordsMatchPartial": {
+          "default": false,
+          "type": "boolean"
+        },
+        "typeMappings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "languagePrimitive",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "omittedFromSource": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "target": {
+          "type": "string"
+        },
+        "virtual": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "type": "object"
+    },
+    "TraitConfigSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FieldDef"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "TraitRef": {
+      "additionalProperties": false,
+      "properties": {
+        "configArgs": {
+          "default": {},
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "TransformForeignKeyDef": {
+      "additionalProperties": false,
+      "properties": {
+        "idField": {
+          "default": "",
+          "type": "string"
+        },
+        "tap": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tap"
+      ],
+      "type": "object"
+    },
+    "TypeDef": {
+      "additionalProperties": false,
+      "properties": {
+        "behaviors": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BehaviorRef"
+          },
+          "type": "array"
+        },
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "denyUnknownFields": {
+          "default": false,
+          "type": "boolean"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "envVars": {
+          "default": false,
+          "type": "boolean"
+        },
+        "extends": {
+          "default": "",
+          "type": "string"
+        },
+        "extensions": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "acme": {
+              "additionalProperties": false,
+              "properties": {
+                "tagged": {
+                  "const": true
+                }
+              },
+              "type": "object"
+            },
+            "empty": {
+              "additionalProperties": false,
+              "type": "object"
+            },
+            "other": {
+              "additionalProperties": false,
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "fields": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FieldDef"
+          },
+          "type": "array"
+        },
+        "implements": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TraitRef"
+          },
+          "type": "array"
+        },
+        "indexes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/IndexDef"
+          },
+          "type": "array"
+        },
+        "isTrait": {
+          "default": false,
+          "type": "boolean"
+        },
+        "jsonField": {
+          "default": false,
+          "type": "boolean"
+        },
+        "kind": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner": {
+          "default": "",
+          "type": "string"
+        },
+        "projection": {
+          "$ref": "#/$defs/ProjectionDef"
+        },
+        "rawHeritage": {
+          "$ref": "#/$defs/RawHeritage"
+        },
+        "role": {
+          "enum": [
+            "DBTable",
+            "APIView",
+            "APIInput",
+            "EmbeddedStruct",
+            "APIOperationSet",
+            "Trait",
+            "Projection"
+          ],
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "strictJSON": {
+          "default": false,
+          "type": "boolean"
+        },
+        "traitConfig": {
+          "$ref": "#/$defs/TraitConfigSchema"
+        },
+        "versioned": {
+          "default": false,
+          "type": "boolean"
+        },
+        "versionedConfig": {
+          "$ref": "#/$defs/VersionedConfig"
+        }
+      },
+      "required": [
+        "name",
+        "role"
+      ],
+      "type": "object"
+    },
+    "TypeRef": {
+      "additionalProperties": false,
+      "properties": {
+        "elemNonNull": {
+          "default": false,
+          "type": "boolean"
+        },
+        "isArray": {
+          "default": false,
+          "type": "boolean"
+        },
+        "isArrayOfArrays": {
+          "default": false,
+          "type": "boolean"
+        },
+        "isMap": {
+          "default": false,
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "UnionDef": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "types"
+      ],
+      "type": "object"
+    },
+    "UnionFile": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "default": "",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "kind": {
+          "const": "Union"
+        },
+        "name": {
+          "type": "string"
+        },
+        "types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "types",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "VersionedConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "partitionBy": {
+          "default": "",
+          "type": "string"
+        },
+        "pruneKeepReferencedBy": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PruneReference"
+          },
+          "type": "array"
+        },
+        "retentionDays": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "superschematic://schema-file.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A Superschematic source file in the JSON or YAML projection: a multi-definition document mirroring the Schema IR, or a single definition object.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Document"
+    },
+    {
+      "$ref": "#/$defs/TypeDef"
+    },
+    {
+      "$ref": "#/$defs/EnumFile"
+    },
+    {
+      "$ref": "#/$defs/UnionFile"
+    },
+    {
+      "$ref": "#/$defs/ScalarFile"
+    },
+    {
+      "$ref": "#/$defs/OperationSetFile"
+    }
+  ],
+  "title": "Superschematic schema file"
+}

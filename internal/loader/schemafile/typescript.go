@@ -12,9 +12,10 @@ import (
 // TypeScriptDeclarations returns the TypeScript types of the schema-file
 // data form: the root union, the Document and every IR node type under
 // $defs of the core registry's JSON Schema (Definition), written from that
-// schema. A registry closes four parts of it, which the types leave open so
+// schema. A registry closes six parts of it, which the types leave open so
 // a document any registry accepts type-checks: the extensions slots, the
-// documents, the schema kinds and the MCP invocation policy key.
+// documents, the schema kinds, the MCP invocation policy key, and a
+// behavior's name and config.
 //
 // The emitter reads the subset of JSON Schema the reflection produces.
 // Any other keyword or shape is an error that names where it sits, so a
@@ -30,7 +31,7 @@ func TypeScriptDeclarations() ([]byte, error) {
 	if err := json.Unmarshal(data, &root); err != nil {
 		return nil, fmt.Errorf("decoding the schema-file JSON Schema: %w", err)
 	}
-	return renderDeclarations(root, reg.Kinds(), reg.ToolInvocationPolicy().Key)
+	return renderDeclarations(root, reg.Kinds(), reg.ToolInvocationPolicy().Key, reg.BehaviorNames())
 }
 
 // declarationsHeader opens schema-file.d.ts; the open types follow it.
@@ -40,9 +41,10 @@ const declarationsHeader = `// @generated; do not edit
 // multi-definition Document or one definition in its file form. They are
 // written from the JSON Schema ` + "`superschematic json-schema`" + ` emits for the
 // core registry (schema-file.json in this package), which is reflected from
-// the Go IR structs. A registry closes four parts of that schema, which
+// the Go IR structs. A registry closes six parts of that schema, which
 // these types leave open: the extensions slots, the documents, the schema
-// kinds and the MCP invocation policy key. Regenerate with:
+// kinds, the MCP invocation policy key, and a behavior's name and config.
+// Regenerate with:
 //   go run ./internal/tools/schemafiletypes
 
 /** A schema kind: one of the core's, or one a registry adds. */
@@ -69,15 +71,17 @@ type declarations struct {
 	defs      map[string]any
 	kinds     []string
 	policyKey string
+	behaviors []string
 	out       bytes.Buffer
 
 	// The parts a registry closes, recorded as they are written so a
 	// schema that lost one fails instead of writing a closed type.
-	sawKind, sawDocuments, sawPolicy bool
-	sawExtensions                    map[string]bool
+	sawKind, sawDocuments, sawPolicy                    bool
+	sawBehaviorList, sawBehaviorName, sawBehaviorConfig bool
+	sawExtensions                                       map[string]bool
 }
 
-func renderDeclarations(root map[string]any, kinds []string, policyKey string) ([]byte, error) {
+func renderDeclarations(root map[string]any, kinds []string, policyKey string, behaviors []string) ([]byte, error) {
 	if err := onlyKeys(root, "the root", "$schema", "$id", "$defs", "oneOf", "title", "description"); err != nil {
 		return nil, err
 	}
@@ -85,7 +89,7 @@ func renderDeclarations(root map[string]any, kinds []string, policyKey string) (
 	if !ok {
 		return nil, fmt.Errorf("the root has no $defs object")
 	}
-	d := &declarations{defs: defs, kinds: kinds, policyKey: policyKey, sawExtensions: map[string]bool{}}
+	d := &declarations{defs: defs, kinds: kinds, policyKey: policyKey, behaviors: behaviors, sawExtensions: map[string]bool{}}
 
 	kindLiterals := make([]string, len(kinds))
 	for i, kind := range kinds {
@@ -110,6 +114,12 @@ func renderDeclarations(root map[string]any, kinds []string, policyKey string) (
 	}
 	if !d.sawPolicy {
 		return nil, fmt.Errorf("$defs/OperationMCP has no %q property", policyKey)
+	}
+	if !d.sawBehaviorList {
+		return nil, fmt.Errorf("$defs/TypeDef has no behaviors property")
+	}
+	if !d.sawBehaviorName || !d.sawBehaviorConfig {
+		return nil, fmt.Errorf("$defs/BehaviorRef has no name or no config property")
 	}
 	for _, slot := range extensionSlots {
 		if !d.sawExtensions[slot.def] {
@@ -197,6 +207,27 @@ func (d *declarations) writeDef(name string, schema any) error {
 			d.sawPolicy = true
 			policy = true
 			continue
+		case name == "TypeDef" && key == "behaviors":
+			if err := d.behaviorList(props[key], propAt); err != nil {
+				return err
+			}
+			d.sawBehaviorList = true
+			d.writeComment("  ", "The behaviors the type composes, in the order their checks run. A registry admits the behaviors it registers; the core registers none.")
+			typ = "BehaviorRef[]"
+		case name == "BehaviorRef" && key == "name":
+			if err := d.behaviorName(props[key], propAt); err != nil {
+				return err
+			}
+			d.sawBehaviorName = true
+			d.writeComment("  ", "The behavior's registered name: bare for a core behavior, <extension>.<Name> for an extension's. A registry admits the behaviors it registers.")
+			typ = "string"
+		case name == "BehaviorRef" && key == "config":
+			if err := d.behaviorConfig(props[key], propAt); err != nil {
+				return err
+			}
+			d.sawBehaviorConfig = true
+			d.writeComment("  ", "The type's config of the behavior, which the registry holds to the behavior's config schema. A config of {} is stored as none.")
+			typ = "unknown"
 		default:
 			typ, err = d.typeOf(props[key], propAt)
 			if err != nil {
@@ -325,6 +356,49 @@ func (d *declarations) kindProperty(schema any, at string) error {
 	values, err := stringList(node["enum"], at+"/enum")
 	if err != nil || !slices.Equal(values, d.kinds) {
 		return fmt.Errorf("%s: expected the enum of the registry's kinds %v", at, d.kinds)
+	}
+	return nil
+}
+
+// behaviorList checks that TypeDef.behaviors is a list of BehaviorRef,
+// limited to no entry when the registry has no behavior, before the types
+// open it.
+func (d *declarations) behaviorList(schema any, at string) error {
+	node, _ := schema.(map[string]any)
+	if err := onlyKeys(node, at, "type", "items", "default", "maxItems"); err != nil {
+		return err
+	}
+	items, _ := node["items"].(map[string]any)
+	maxItems, limited := node["maxItems"]
+	if node["type"] != "array" || items["$ref"] != "#/$defs/BehaviorRef" ||
+		limited != (len(d.behaviors) == 0) || limited && maxItems != float64(0) {
+		return fmt.Errorf("%s: expected a list of BehaviorRef, with maxItems 0 when the registry has no behavior", at)
+	}
+	return nil
+}
+
+// behaviorName checks that BehaviorRef.name lists the registry's behaviors
+// before the types open it: a string enum of them, or a plain string when
+// there are none.
+func (d *declarations) behaviorName(schema any, at string) error {
+	node, _ := schema.(map[string]any)
+	values, err := stringList(node["enum"], at+"/enum")
+	_, hasEnum := node["enum"]
+	if err != nil || node["type"] != "string" || hasEnum != (len(d.behaviors) > 0) || !slices.Equal(values, d.behaviors) {
+		return fmt.Errorf("%s: expected a string enum of the registry's behaviors %v", at, d.behaviors)
+	}
+	return nil
+}
+
+// behaviorConfig checks that BehaviorRef.config is the open value a
+// registry closes per behavior, with {} as its default.
+func (d *declarations) behaviorConfig(schema any, at string) error {
+	node, _ := schema.(map[string]any)
+	if err := onlyKeys(node, at, "default"); err != nil {
+		return err
+	}
+	if fallback, ok := node["default"].(map[string]any); !ok || len(fallback) != 0 {
+		return fmt.Errorf("%s: expected the default {}", at)
 	}
 	return nil
 }

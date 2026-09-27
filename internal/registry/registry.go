@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
+	"strings"
 
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
 
@@ -50,6 +51,8 @@ type Registry struct {
 	// toolInvocation is the policy RegisterToolInvocationPolicy installed;
 	// nil means ToolInvocationPolicy returns the core's.
 	toolInvocation *ToolInvocationPolicy
+	// behaviors holds every RegisterBehavior declaration by name.
+	behaviors map[string]Behavior
 
 	// authoring is Naming.AuthoringPackages plus every registered
 	// decorator's Packages: the set IsAuthoringPackage answers from.
@@ -62,6 +65,10 @@ type Registry struct {
 	// falls back to CoreScalars (scalars.go).
 	scalars      ScalarCatalog
 	scalarsOwner string
+
+	// registering is the name of the extension whose Register Use is
+	// running, so RegisterBehavior can hold a behavior's name to it.
+	registering string
 
 	failed    error
 	finalized bool
@@ -85,6 +92,7 @@ func New(n naming.Naming) *Registry {
 		documents:     map[string]DocumentSpec{},
 		generators:    map[string]GeneratorSpec{},
 		authProviders: map[string]AuthProvider{},
+		behaviors:     map[string]Behavior{},
 		authoring:     map[string]bool{},
 		extensions:    map[string]bool{},
 	}
@@ -116,16 +124,26 @@ func New(n naming.Naming) *Registry {
 
 // Use calls ext.Register for each extension in order and returns the first
 // error. Registration is fail-closed: after a failed Use, Finalize returns
-// that error and the registry must not be used.
+// that error and the registry must not be used. An extension name may not
+// contain a dot: an extension's behaviors are named <extension>.<Name>, so
+// the dot separates the two.
 func (r *Registry) Use(exts ...Extension) error {
 	for _, ext := range exts {
-		if ext.Name() == "" {
+		name := ext.Name()
+		if name == "" {
 			r.failed = fmt.Errorf("registry: extension has no name")
 			return r.failed
 		}
-		r.extensions[ext.Name()] = true
-		if err := ext.Register(r); err != nil {
-			r.failed = fmt.Errorf("registry: extension %s: %w", ext.Name(), err)
+		if strings.Contains(name, ".") {
+			r.failed = fmt.Errorf("registry: extension name %q contains a dot, which separates an extension's name from the names of its behaviors", name)
+			return r.failed
+		}
+		r.extensions[name] = true
+		r.registering = name
+		err := ext.Register(r)
+		r.registering = ""
+		if err != nil {
+			r.failed = fmt.Errorf("registry: extension %s: %w", name, err)
 			return r.failed
 		}
 	}
@@ -141,8 +159,10 @@ func (r *Registry) noteExtension(name string) {
 // Finalize checks cross-references once everything is registered: every
 // KindSpec.Pipeline entry names a registered generator that accepts the kind,
 // every Kinds list of a generator, decorator, document or check names
-// registered kinds, every OutputKey is unique, and Naming.AuthProvider names
-// a registered auth provider. Registration after Finalize is an error.
+// registered kinds, every OutputKey is unique, Naming.AuthProvider names
+// a registered auth provider, and every behavior's requires and conflicts
+// name registered behaviors and its operations' invocation policies are
+// values of the policy in force. Registration after Finalize is an error.
 func (r *Registry) Finalize() error {
 	if r.failed != nil {
 		return r.failed
@@ -174,6 +194,9 @@ func (r *Registry) Finalize() error {
 			return fmt.Errorf("registry: generators %s and %s both claim output key %q", prev, name, key)
 		}
 		owners[key] = name
+	}
+	if err := r.checkBehaviorReferences(); err != nil {
+		return err
 	}
 	r.finalized = true
 	return nil

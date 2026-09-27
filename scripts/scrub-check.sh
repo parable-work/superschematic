@@ -171,7 +171,7 @@ fi
 # core IR still carries ten of them in the files below. This allowlist
 # exists only until they are removed from the core IR; the change that
 # removes them deletes it, and any transform* identifier then fails here.
-core_ir_transform_allowlist_files='^\./(ir/types\.go|ir/typescript/(index\.d\.ts|schema-file\.d\.ts|schema-file\.json)|runtime/schema/typescript/src/runtime/(ir/reader|json/reader|json/writer)\.ts):[0-9]+:'
+core_ir_transform_allowlist_files='^\./(ir/types\.go|ir/typescript/(index\.d\.ts|schema-file\.d\.ts|schema-file\.json)|runtime/schema/testdata/schema_file_parity\.meta-schema\.json|runtime/schema/typescript/src/runtime/(ir/reader|json/reader|json/writer)\.ts):[0-9]+:'
 core_ir_transform_allowlist_names='^transform(DedupKey|Ordering|FingerprintInput|PartitionDate|Structural|PersonEmail|PersonName|AccountId|ExternalUserId|ForeignKey)$'
 transform_lines="$(scan 'transform[A-Z]' . -- "${hashes[@]}")"
 transforms=""

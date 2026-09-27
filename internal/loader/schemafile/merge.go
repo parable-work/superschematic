@@ -122,6 +122,12 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 		if def.Owner == "" {
 			def.Owner = owner
 		}
+		// As for extensions above: a hand-built document's behavior
+		// configs are stored canonically too.
+		if err := ir.CanonicalizeBehaviors(def.Behaviors); err != nil {
+			fail("type %q: %s", def.Name, err)
+			continue
+		}
 		schema.Types[def.Name] = def
 	}
 
@@ -271,6 +277,7 @@ func isEmptyTSForwardDeclaration(def *ir.TypeDef) bool {
 		def.Source == nil &&
 		def.Extends == "" &&
 		len(def.Implements) == 0 &&
+		len(def.Behaviors) == 0 &&
 		def.RawHeritage == nil &&
 		!def.IsTrait &&
 		def.TraitConfig == nil &&

@@ -1,0 +1,9 @@
+{
+  "name": "shop-ratings",
+  "kind": "General",
+  "outputs": {
+    "types": {
+      "typescript": { "enabled": true }
+    }
+  }
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -30,7 +31,8 @@ const schemaResourceName = "schema-file.json"
 //
 // The registry supplies what the structs cannot: the schema kinds, the
 // extension names and their decorators (closing every "extensions" slot),
-// and the sidecar documents (closing "documents").
+// the sidecar documents (closing "documents") and the behaviors (closing a
+// type's "behaviors" entries).
 //
 // The root is a oneOf over the multi-definition Document and the
 // single-definition forms (a TypeDef, or an Enum / Union / Scalar /
@@ -96,6 +98,14 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 	}
 
 	if err := closeExtensionSlots(defs, reg); err != nil {
+		return nil, err
+	}
+
+	if err := closeBehaviors(defs, reg); err != nil {
+		return nil, err
+	}
+
+	if err := addEncoderDefaults(defs); err != nil {
 		return nil, err
 	}
 
@@ -182,6 +192,82 @@ func addMCPInvocationProperty(defs map[string]any, policy registry.ToolInvocatio
 	}
 	props[policy.Key] = map[string]any{"type": "string", "enum": enum, "default": policy.Default}
 	return nil
+}
+
+// addEncoderDefaults gives every property the Go encoder omits at one value
+// that value as its default: an omitempty string, bool or number that is
+// not a pointer (its zero value) and an omitempty slice or map (empty). A
+// decoded document holds no such value, since the decoder cannot tell it
+// from an absent key, so a reader in another language that drops a
+// property equal to its default writes the document as the Go reader
+// decodes it. A raw JSON value (json.RawMessage, a behavior's config) is
+// omitted when empty, which is how the readers store {} (see
+// ir.CanonicalizeBehaviors), so its default is {}. A pointer keeps its zero
+// value and has no default, and neither does a struct, which the encoder
+// never omits. OperationMCP's encoder omits its keys as its struct tags say.
+func addEncoderDefaults(defs map[string]any) error {
+	seen := map[reflect.Type]bool{}
+	var visit func(t reflect.Type) error
+	visit = func(t reflect.Type) error {
+		for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Map {
+			t = t.Elem()
+		}
+		if t.Kind() != reflect.Struct || seen[t] {
+			return nil
+		}
+		seen[t] = true
+		props, err := propertiesOf(defs, t.Name())
+		if err != nil {
+			return err
+		}
+		for i := range t.NumField() {
+			field := t.Field(i)
+			name, options, _ := strings.Cut(field.Tag.Get("json"), ",")
+			if !field.IsExported() || name == "-" {
+				continue
+			}
+			if name == "" {
+				name = field.Name
+			}
+			if err := visit(field.Type); err != nil {
+				return err
+			}
+			omitted, ok := omittedValue(field.Type)
+			if !ok || !slices.Contains(strings.Split(options, ","), "omitempty") {
+				continue
+			}
+			prop, ok := props[name].(map[string]any)
+			if !ok {
+				return fmt.Errorf("$defs/%s has no %q property", t.Name(), name)
+			}
+			prop["default"] = omitted
+		}
+		return nil
+	}
+	return visit(reflect.TypeFor[Document]())
+}
+
+// omittedValue is the value an omitempty field of type t is omitted at,
+// and false for a type the encoder writes whatever its value.
+func omittedValue(t reflect.Type) (any, bool) {
+	if t == reflect.TypeFor[json.RawMessage]() {
+		return map[string]any{}, true
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "", true
+	case reflect.Bool:
+		return false, true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return 0, true
+	case reflect.Slice:
+		return []any{}, true
+	case reflect.Map:
+		return map[string]any{}, true
+	}
+	return nil, false
 }
 
 // singleDefVariant deep-copies a $defs entry and adds the required "kind"
@@ -297,6 +383,70 @@ func closeExtensionSlots(defs map[string]any, reg *registry.Registry) error {
 		documents[spec.Name] = schema
 	}
 	docProps["documents"] = closedObject(documents)
+	return nil
+}
+
+// closeBehaviors replaces the reflected $defs/BehaviorRef, whose config is
+// any JSON, with one closed to the registry's behaviors: name is one of the
+// registered names, and each behavior's config is checked against its
+// config schema, as a decorator's argument is checked against its Args. A
+// behavior without a config schema takes none, which the empty closed
+// object expresses ({} is also how an absent config is stored). A config
+// schema that rejects {} makes the key required. With no behavior
+// registered a type's behaviors list takes no entry (maxItems 0) and name
+// has no enum, since JSON Schema asks for at least one value in an enum and
+// ajv refuses an empty one.
+func closeBehaviors(defs map[string]any, reg *registry.Registry) error {
+	if _, ok := defs["BehaviorRef"]; !ok {
+		return fmt.Errorf("generated schema is missing the BehaviorRef definition")
+	}
+	typeProps, err := propertiesOf(defs, "TypeDef")
+	if err != nil {
+		return err
+	}
+	list, ok := typeProps["behaviors"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("$defs/TypeDef has no behaviors property")
+	}
+	behaviors := reg.Behaviors()
+	names := make([]any, 0, len(behaviors))
+	branches := make([]any, 0, len(behaviors))
+	for _, b := range behaviors {
+		names = append(names, b.Name)
+		config := any(closedObject(nil))
+		if b.ConfigSchema != nil {
+			if err := json.Unmarshal(b.ConfigSchema, &config); err != nil {
+				return fmt.Errorf("behavior %s configSchema: %w", b.Name, err)
+			}
+		}
+		then := map[string]any{"properties": map[string]any{"config": config}}
+		if b.ConfigRequired() {
+			then["required"] = []any{"config"}
+		}
+		branches = append(branches, map[string]any{
+			"if":   map[string]any{"properties": map[string]any{"name": map[string]any{"const": b.Name}}},
+			"then": then,
+		})
+	}
+	name := map[string]any{"type": "string"}
+	if len(names) > 0 {
+		name["enum"] = names
+	} else {
+		list["maxItems"] = 0
+	}
+	def := map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []any{"name"},
+		"properties": map[string]any{
+			"name":   name,
+			"config": map[string]any{},
+		},
+	}
+	if len(branches) > 0 {
+		def["allOf"] = branches
+	}
+	defs["BehaviorRef"] = def
 	return nil
 }
 

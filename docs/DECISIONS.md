@@ -912,6 +912,20 @@ declares the invocation policy's default. The types also leave the schema
 kinds open, since a registry adds kinds as it adds extension slots. The
 strict loader comes next, because the engine and its publish checks read
 schemas through it; behavior declarations in the compiler follow. Each
+Status: three pieces are built. `internal/tools/schemafiletypes` writes
+the data form's TypeScript types and meta-schema into
+`@superschematic/schema-ir` (`./schema-file`, `./schema-file.json`). The
+strict loader is in `@superschematic/schema-runtime`, held to the Go
+reader by `runtime/schema/testdata/schema_file_parity.json`
+(`runtime/schema/README.md`). Behavior declarations and the `@behavior`
+decorator are in the compiler (section 3.16 of `docs/extension-model.md`);
+the core declares no behavior yet, acme declares `acme.Rating`, and every
+generator refuses a type that declares one. To match the Go reader's
+canonical bytes, which drop a value its decoder cannot tell from an
+absent key, the meta-schema gives each such property that value as its
+default (section 5), and the loader needs `JSON.parse` source text access
+(Node.js 21 or later, or Bun). Not built: the tool that copies a
+declaration into its npm package, and the engine with its packages. Each
 change that lands a piece updates this paragraph, the README layout table
 and the pages that describe it. The names and rules are reversible until
 the first release.

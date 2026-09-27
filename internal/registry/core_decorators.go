@@ -25,8 +25,8 @@ var indexPurposeName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // case arm set and returns the same error text for the same bad input. The
 // walker still evaluates arguments and formats diagnostics; nothing about the
 // IR changes. r supplies what an Apply reads from the assembled registry:
-// @mcp reads its invocation policy when it runs, after every extension has
-// registered.
+// @mcp reads its invocation policy and @behavior the behaviors when they
+// run, after every extension has registered.
 func coreDecorators(r *Registry) []DecoratorSpec {
 	var specs []DecoratorSpec
 
@@ -167,6 +167,7 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 		},
 	})
 	specs = append(specs, docsDecorators(r.ToolInvocationPolicy)...)
+	specs = append(specs, behaviorDecorator(r.Behavior, r.BehaviorNames))
 	return specs
 }
 

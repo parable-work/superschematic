@@ -177,9 +177,31 @@ func (r run) runPipeline(pipeline []registry.GeneratorSpec) error {
 		}
 		enabled = append(enabled, gen)
 	}
+	if err := refuseBehaviors(r.Schema, enabled); err != nil {
+		return err
+	}
 	for _, gen := range enabled {
 		if err := gen.Generate(r.GenerateContext); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// refuseBehaviors fails, before any generator runs, when a type of the
+// schema composes a behavior and an enabled generator does not render
+// behaviors (GeneratorSpec.RendersBehaviors): that generator would write
+// the type without the fields and operations its behaviors add. The error
+// names the generator, the type and the behavior. build --emit-ir, format
+// and json-schema run no generator and accept the schema (D16).
+func refuseBehaviors(schema *ir.Schema, enabled []registry.GeneratorSpec) error {
+	typeName, behavior, found := schema.FindBehavior()
+	if !found {
+		return nil
+	}
+	for _, gen := range enabled {
+		if !gen.RendersBehaviors {
+			return fmt.Errorf("generator: %s does not render behaviors yet: type %s composes behavior %s", gen.Name, typeName, behavior)
 		}
 	}
 	return nil

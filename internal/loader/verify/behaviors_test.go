@@ -1,0 +1,111 @@
+package verify
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/registry"
+	ir "github.com/parable-work/superschematic/ir"
+)
+
+// behaviorRegistry registers test behaviors under core names, as the
+// registry allows for the core: Stock takes a required config, adds a field
+// and an operation; Audit requires Stock; Clearance conflicts with Stock;
+// Shelved adds Stock's field; Recount adds Stock's operation.
+func behaviorRegistry(t *testing.T) *registry.Registry {
+	t.Helper()
+	reg := registry.New(naming.Naming{})
+	op := func(name string) string {
+		return `{"name":"` + name + `","paramsSchema":{"type":"object"},"resultSchema":{"type":"object"}}`
+	}
+	for _, decl := range []string{
+		`{"name":"Stock","configSchema":{"type":"object","required":["aisles"],"properties":{"aisles":{"type":"integer","minimum":1}}},` +
+			`"fields":[{"name":"onHand"}],"operations":[` + op("restock") + `]}`,
+		`{"name":"Audit","requires":["Stock"],"fields":[{"name":"auditedAt"}],"operations":[` + op("audit") + `]}`,
+		`{"name":"Clearance","conflicts":["Stock"],"fields":[{"name":"markdown"}]}`,
+		`{"name":"Shelved","fields":[{"name":"onHand"},{"name":"shelf"}]}`,
+		`{"name":"Recount","operations":[` + op("restock") + `]}`,
+	} {
+		if err := reg.RegisterBehavior(registry.BehaviorSpec{Declaration: json.RawMessage(decl)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return reg
+}
+
+func behaviorSchema(refs ...ir.BehaviorRef) *ir.Schema {
+	schema := ir.NewSchema("inventory", ir.SchemaKindGeneral)
+	schema.Types["Item"] = &ir.TypeDef{
+		Name:      "Item",
+		Owner:     "src/item.schema.json",
+		Role:      ir.RoleEmbeddedStruct,
+		Behaviors: refs,
+		Fields: []*ir.FieldDef{
+			{Name: "sku", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			{Name: "shelf", TypeRef: ir.TypeRef{Name: "string"}},
+		},
+	}
+	return schema
+}
+
+func stock(config string) ir.BehaviorRef {
+	return ir.BehaviorRef{Name: "Stock", Config: json.RawMessage(config)}
+}
+
+func TestBehaviorsVerify(t *testing.T) {
+	reg := behaviorRegistry(t)
+	for _, test := range []struct {
+		name string
+		refs []ir.BehaviorRef
+		want []string
+	}{
+		{"accepted", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Audit"}}, nil},
+		{"requirement listed first", []ir.BehaviorRef{{Name: "Audit"}, stock(`{"aisles":2}`)}, nil},
+		{"unknown", []ir.BehaviorRef{{Name: "Ghost"}},
+			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Audit, Clearance, Recount, Shelved, Stock)`}},
+		{"config rejected", []ir.BehaviorRef{stock(`{"aisles":0}`)},
+			[]string{"src/item.schema.json: type Item: behavior Stock config: "}},
+		{"config missing", []ir.BehaviorRef{{Name: "Stock"}},
+			[]string{"src/item.schema.json: type Item: behavior Stock config: "}},
+		{"config on a behavior without one", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Audit", Config: json.RawMessage(`{"often":true}`)}},
+			[]string{"src/item.schema.json: type Item: behavior Audit takes no config"}},
+		{"listed twice", []ir.BehaviorRef{stock(`{"aisles":2}`), stock(`{"aisles":3}`)},
+			[]string{"src/item.schema.json: type Item lists behavior Stock twice"}},
+		{"missing requirement", []ir.BehaviorRef{{Name: "Audit"}},
+			[]string{"src/item.schema.json: type Item: behavior Audit requires behavior Stock, which the type does not list"}},
+		{"conflict", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Clearance"}},
+			[]string{"src/item.schema.json: type Item: behavior Clearance conflicts with behavior Stock, which the type also lists"}},
+		{"field collides with the type's own", []ir.BehaviorRef{{Name: "Shelved"}},
+			[]string{"src/item.schema.json: type Item: behavior Shelved adds field shelf, which the type declares"}},
+		{"field collides with another behavior's", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Shelved"}},
+			[]string{"src/item.schema.json: type Item: behaviors Stock and Shelved both add field onHand"}},
+		{"operation collides", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Recount"}},
+			[]string{"src/item.schema.json: type Item: behaviors Stock and Recount both add operation restock"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r := Run(behaviorSchema(test.refs...), Input{Registry: reg})
+			got := errorStrings(r)
+			if len(test.want) == 0 {
+				if len(got) != 0 {
+					t.Fatalf("errors = %v, want none", got)
+				}
+				return
+			}
+			for _, want := range test.want {
+				if !hasError(r, want) {
+					t.Errorf("errors = %v, want one with %q", got, want)
+				}
+			}
+		})
+	}
+}
+
+// With no behavior registered, which is the core today, every behavior a
+// type lists fails the load.
+func TestBehaviorsVerifyWithNoneRegistered(t *testing.T) {
+	r := Run(behaviorSchema(ir.BehaviorRef{Name: "Stock"}), Input{Registry: registry.New(naming.Naming{})})
+	if want := `type Item: behavior "Stock" is not a registered behavior (none are registered)`; !hasError(r, want) {
+		t.Fatalf("errors = %v, want %q", errorStrings(r), want)
+	}
+}
