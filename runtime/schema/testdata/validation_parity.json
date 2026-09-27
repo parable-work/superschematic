@@ -128,6 +128,21 @@
         },
         "minimum": 1,
         "maximum": 9007199254740991
+      },
+      "Temporal.DateTime": {
+        "name": "Temporal.DateTime",
+        "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+        "languagePrimitive": "string",
+        "primitive": "String",
+        "typeMappings": {
+          "go": "TemporalDateTime",
+          "json_schema": "string",
+          "python": "datetime.datetime",
+          "rust": "chrono::DateTime\u003cchrono::Utc\u003e",
+          "sql": "TIMESTAMPTZ",
+          "typescript": "JSDate"
+        },
+        "hasCustomParse": true
       }
     },
     "types": {
@@ -397,6 +412,31 @@
             "name": "optBools",
             "typeRef": {
               "name": "boolean",
+              "isArray": true
+            }
+          },
+          {
+            "name": "shade",
+            "typeRef": {
+              "name": "ParityShade"
+            }
+          },
+          {
+            "name": "point",
+            "typeRef": {
+              "name": "ParityPoint"
+            }
+          },
+          {
+            "name": "when",
+            "typeRef": {
+              "name": "Temporal.DateTime"
+            }
+          },
+          {
+            "name": "whens",
+            "typeRef": {
+              "name": "Temporal.DateTime",
               "isArray": true
             }
           }
@@ -1163,7 +1203,224 @@
       },
       "want": {
         "reqList": [
-          "required"
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "req_scalar_list_not_a_list",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": "https://a.test",
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ]
+      },
+      "want": {
+        "reqScalarList": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "opt_list_not_a_list",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "optList": "a",
+        "optNums": 5,
+        "optBools": true,
+        "names": "Ada",
+        "ranks": 3,
+        "whens": "2026-01-02T03:04:05Z"
+      },
+      "want": {
+        "names": [
+          "type"
+        ],
+        "optBools": [
+          "type"
+        ],
+        "optList": [
+          "type"
+        ],
+        "optNums": [
+          "type"
+        ],
+        "ranks": [
+          "type"
+        ],
+        "whens": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "enum_wrong_type",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "shade": 1
+      },
+      "want": {
+        "shade": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "enum_bad_value",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "shade": "purple"
+      },
+      "want": {
+        "shade": [
+          "enum"
+        ]
+      }
+    },
+    {
+      "name": "object_wrong_type",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "point": "dark"
+      },
+      "want": {
+        "point": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "date_time_valid",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "when": "2026-01-02T03:04:05Z",
+        "whens": [
+          "2026-01-02T03:04:05Z"
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "date_time_wrong_type",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "when": 42,
+        "whens": [
+          "2026-01-02T03:04:05Z",
+          {}
+        ]
+      },
+      "want": {
+        "when": [
+          "type"
+        ],
+        "whens[1]": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "lengths_count_code_points",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+        "optStr": "\u00e9\u00e9\u00e9\u00e9\u00e9",
+        "reqList": [
+          "\u00e9t\u00e9"
+        ],
+        "optList": [
+          "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+        ],
+        "name": "\ud83d\ude00\ud83d\ude00",
+        "names": [
+          "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "lengths_over_by_code_points",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+        "optStr": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9",
+        "reqList": [
+          "a"
+        ],
+        "optList": [
+          "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+        ],
+        "name": "\ud83d\ude00",
+        "names": [
+          "Ada",
+          "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"
+        ]
+      },
+      "want": {
+        "name": [
+          "minLength"
+        ],
+        "names[1]": [
+          "maxLength"
+        ],
+        "optList[0]": [
+          "maxLength"
+        ],
+        "optStr": [
+          "maxLength"
+        ],
+        "reqStr": [
+          "maxLength"
         ]
       }
     },
@@ -1383,6 +1640,100 @@
       }
     },
     {
+      "name": "list_not_a_list",
+      "type": "ListMatrix",
+      "payload": {
+        "flags": true,
+        "payloads": {
+          "a": 1
+        },
+        "pointList": {
+          "shade": "dark"
+        },
+        "reqGrid": [],
+        "reqShadeGrid": [],
+        "reqShadeList": "dark",
+        "reqUrlGrid": []
+      },
+      "want": {
+        "flags": [
+          "type"
+        ],
+        "payloads": [
+          "type"
+        ],
+        "pointList": [
+          "type"
+        ],
+        "reqShadeList": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "enum_element_wrong_type",
+      "type": "ListMatrix",
+      "payload": {
+        "pointList": [
+          {
+            "shade": 2
+          }
+        ],
+        "reqGrid": [],
+        "reqShadeGrid": [
+          [
+            "light",
+            false
+          ]
+        ],
+        "reqShadeList": [
+          "dark",
+          1
+        ],
+        "reqUrlGrid": []
+      },
+      "want": {
+        "pointList[0].shade": [
+          "type"
+        ],
+        "reqShadeGrid[0][1]": [
+          "type"
+        ],
+        "reqShadeList[1]": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "object_element_wrong_type",
+      "type": "ListMatrix",
+      "payload": {
+        "pointGrid": [
+          [
+            5
+          ]
+        ],
+        "pointList": [
+          {
+            "shade": "dark"
+          },
+          "dark"
+        ],
+        "reqGrid": [],
+        "reqShadeGrid": [],
+        "reqShadeList": [],
+        "reqUrlGrid": []
+      },
+      "want": {
+        "pointGrid[0][0]": [
+          "type"
+        ],
+        "pointList[1]": [
+          "type"
+        ]
+      }
+    },
+    {
       "name": "grid_valid_ragged",
       "type": "ListMatrix",
       "payload": {
@@ -1490,13 +1841,53 @@
       "type": "ListMatrix",
       "payload": {
         "reqGrid": "a",
+        "reqShadeGrid": "dark",
+        "reqShadeList": [],
+        "reqUrlGrid": "https://a.test"
+      },
+      "want": {
+        "reqGrid": [
+          "type"
+        ],
+        "reqShadeGrid": [
+          "type"
+        ],
+        "reqUrlGrid": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "grid_optional_outer_not_a_list",
+      "type": "ListMatrix",
+      "payload": {
+        "boolGrid": false,
+        "numGrid": 5,
+        "optGrid": "a",
+        "pointGrid": {
+          "shade": "dark"
+        },
+        "rankGrid": 1,
+        "reqGrid": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
       },
       "want": {
-        "reqGrid": [
-          "required"
+        "boolGrid": [
+          "type"
+        ],
+        "numGrid": [
+          "type"
+        ],
+        "optGrid": [
+          "type"
+        ],
+        "pointGrid": [
+          "type"
+        ],
+        "rankGrid": [
+          "type"
         ]
       }
     },
@@ -1958,6 +2349,29 @@
       }
     },
     {
+      "name": "grid_lengths_count_code_points",
+      "type": "ListMatrix",
+      "payload": {
+        "reqGrid": [
+          [
+            "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+            "\u00e9\u00e9\u00e9\u00e9\u00e9"
+          ],
+          [
+            "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+          ]
+        ],
+        "reqShadeGrid": [],
+        "reqShadeList": [],
+        "reqUrlGrid": []
+      },
+      "want": {
+        "reqGrid[1][0]": [
+          "maxLength"
+        ]
+      }
+    },
+    {
       "name": "json_object",
       "type": "JsonMatrix",
       "payload": {
@@ -2134,6 +2548,25 @@
         ],
         "jsonList[1]": [
           "required"
+        ]
+      }
+    },
+    {
+      "name": "json_list_not_a_list",
+      "type": "JsonMatrix",
+      "payload": {
+        "reqJson": 1,
+        "jsonList": {
+          "a": 1
+        },
+        "jsonGrid": "x"
+      },
+      "want": {
+        "jsonGrid": [
+          "type"
+        ],
+        "jsonList": [
+          "type"
         ]
       }
     },
@@ -2346,6 +2779,26 @@
         ],
         "vecList[0]": [
           "required"
+        ]
+      }
+    },
+    {
+      "name": "structured_list_not_a_list",
+      "type": "StructuredMatrix",
+      "payload": {
+        "reqMap": {},
+        "reqVec": [],
+        "mapList": {
+          "k": "v"
+        },
+        "vecList": "[1]"
+      },
+      "want": {
+        "mapList": [
+          "type"
+        ],
+        "vecList": [
+          "type"
         ]
       }
     }
