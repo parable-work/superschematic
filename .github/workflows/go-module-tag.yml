@@ -4,7 +4,7 @@ name: go-module-tag
 # subdirectory is versioned by tags prefixed with that directory, so `go get`
 # of github.com/parable-work/superschematic/ir@vX.Y.Z looks for ir/vX.Y.Z,
 # runtime/schema/go@vX.Y.Z for runtime/schema/go/vX.Y.Z, and so on. The
-# release pull request set every sibling require to vX.Y.Z, so all four
+# release pull request set every sibling require to vX.Y.Z, so all the
 # modules are consistent at the one commit vX.Y.Z points at and the sub-module
 # tags are cut on that same commit. Nothing needs to run on the new tags, so
 # creating them with the workflow token (which starts no workflows) is fine.

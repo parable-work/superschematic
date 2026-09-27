@@ -34,6 +34,10 @@ Version sites (relative to the repository root):
                                       [project] version, in PEP 440 form
   runtime/http/rust/Cargo.toml        [package] version
   runtime/http/rust/Cargo.lock        the superschematic-http-runtime package
+  runtime/versiongraph/rust/Cargo.toml
+                                      [package] version
+  runtime/versiongraph/rust/Cargo.lock
+                                      the superschematic-versiongraph package
   go.mod                              require .../superschematic/ir vX.Y.Z
   runtime/schema/go/go.mod            require .../superschematic/ir vX.Y.Z
   runtime/http/go/go.mod              require .../runtime/schema/go vX.Y.Z and
@@ -66,7 +70,7 @@ NPM_WORKSPACE_PACKAGES = ["api", "db", "schema", "schema-config"]
 # Directory of every Go module, in dependency order. The tag for a module in a
 # subdirectory is the directory followed by /vX.Y.Z; the root module's is
 # vX.Y.Z.
-GO_MODULES = ["ir", "runtime/schema/go", "runtime/http/go", ""]
+GO_MODULES = ["ir", "runtime/schema/go", "runtime/http/go", "runtime/versiongraph/go", ""]
 
 SEMVER = re.compile(
     r"^(?P<core>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"
@@ -181,6 +185,20 @@ def sites():
         (
             ROOT / "runtime" / "http" / "rust" / "Cargo.lock",
             [(r'(\[\[package\]\]\nname = "superschematic-http-runtime"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "versiongraph" / "rust" / "Cargo.toml",
+            [(r'(\[package\]\nname = "superschematic-versiongraph"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "versiongraph" / "rust" / "Cargo.lock",
+            [(r'(\[\[package\]\]\nname = "superschematic-versiongraph"\nversion = ")' + V + r'(")', 1)],
             "semver",
         )
     )
