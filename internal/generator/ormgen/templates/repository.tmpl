@@ -120,7 +120,7 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 		}
 		result.{{ toGoName .Name }} = decoded
 		{{- else if .IsJSONField }}
-		if err := {{ if .PreservesExplicitJSONNull }}unmarshalGenericJSONFieldValue{{ else }}unmarshalJSONFieldValue{{ end }}(rawValue, &result.{{ toGoName .Name }}); err != nil {
+		if err := {{ .JSONDecodeCall "rawValue" (printf "&result.%s" (toGoName .Name)) }}; err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
 		}
 		{{- else }}
@@ -178,7 +178,7 @@ if len(temp{{ toGoName $member.Field.Name }}) > 0 {
 }
 {{- else if $member.Field.IsJSONField }}
 if len(temp{{ toGoName $member.Field.Name }}) > 0 {
-	if err := {{ if $member.Field.PreservesExplicitJSONNull }}unmarshalGenericJSONFieldValue{{ else }}unmarshalJSONFieldValue{{ end }}(temp{{ toGoName $member.Field.Name }}, &result.{{ toGoName $member.Field.Name }}); err != nil {
+	if err := {{ $member.Field.JSONDecodeCall (printf "temp%s" (toGoName $member.Field.Name)) (printf "&result.%s" (toGoName $member.Field.Name)) }}; err != nil {
 		return nil, fmt.Errorf("failed to decode JSON field {{ $member.Field.Name }}: %w", err)
 	}
 }
@@ -226,7 +226,7 @@ if len(temp{{ toGoName $member.Field.Name }}) > 0 {
 }
 {{- else if $member.Field.IsJSONField }}
 if len(temp{{ toGoName $member.Field.Name }}) > 0 {
-	if err := {{ if $member.Field.PreservesExplicitJSONNull }}unmarshalGenericJSONFieldValue{{ else }}unmarshalJSONFieldValue{{ end }}(temp{{ toGoName $member.Field.Name }}, &entity.{{ toGoName $member.Field.Name }}); err != nil {
+	if err := {{ $member.Field.JSONDecodeCall (printf "temp%s" (toGoName $member.Field.Name)) (printf "&entity.%s" (toGoName $member.Field.Name)) }}; err != nil {
 		return nil, fmt.Errorf("failed to decode JSON field {{ $member.Field.Name }}: %w", err)
 	}
 }
@@ -341,7 +341,7 @@ if len(temp{{ toGoName $field.Name }}) > 0 {
 }
 {{- else if $field.IsJSONField }}
 if len(temp{{ toGoName $field.Name }}) > 0 {
-	if err := {{ if $field.PreservesExplicitJSONNull }}unmarshalGenericJSONFieldValue{{ else }}unmarshalJSONFieldValue{{ end }}(temp{{ toGoName $field.Name }}, &result.{{ toGoName $field.Name }}); err != nil {
+	if err := {{ $field.JSONDecodeCall (printf "temp%s" (toGoName $field.Name)) (printf "&result.%s" (toGoName $field.Name)) }}; err != nil {
 		jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field {{ $field.Name }}: %w", err)
 	}
 }

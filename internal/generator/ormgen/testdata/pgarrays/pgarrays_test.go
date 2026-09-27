@@ -10,7 +10,8 @@
 // Values are written and read the way the generated repositories do: a
 // required column always goes through marshalArrayOfArraysFieldValue, an
 // optional one only when its list is not nil, and every column is scanned as
-// bytes and decoded with unmarshalJSONFieldValue.
+// bytes and decoded with unmarshalJSONListFieldValue, which refuses a null
+// element another writer stored.
 package orm
 
 import (
@@ -60,12 +61,12 @@ func encode[T any](t *testing.T, value [][]T) any {
 	return encoded
 }
 
-func decode[T any](t *testing.T, raw []byte, target *[][]T) {
+func decode[T any](t *testing.T, raw []byte, field string, target *[][]T) {
 	t.Helper()
 	if len(raw) == 0 {
 		return
 	}
-	if err := unmarshalJSONFieldValue(raw, target); err != nil {
+	if err := unmarshalJSONListFieldValue(raw, target, field, 2); err != nil {
 		t.Fatalf("decode %s: %v", raw, err)
 	}
 }
@@ -211,13 +212,54 @@ labels::text, states::text, walls::text, scores::text FROM board WHERE id = $1`,
 			}
 
 			var got board
-			decode(t, raw[0], &got.Labels)
-			decode(t, raw[1], &got.States)
-			decode(t, raw[2], &got.Walls)
-			decode(t, raw[3], &got.Scores)
+			decode(t, raw[0], "labels", &got.Labels)
+			decode(t, raw[1], "states", &got.States)
+			decode(t, raw[2], "walls", &got.Walls)
+			decode(t, raw[3], "scores", &got.Scores)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("decoded %#v, want %#v", got, tc.want)
 			}
 		})
 	}
+
+	// The codec writes no null element, but another writer can store one. It
+	// fails the read at its path, as a generated type's UnmarshalJSON fails
+	// it; encoding/json alone would read ["a", ""]. A stored null inner list
+	// reads as a nil list.
+	t.Run("a stored null element fails the read", func(t *testing.T) {
+		var id string
+		if err := conn.QueryRow(ctx, `INSERT INTO board (labels, states, walls, scores)
+VALUES ($1::jsonb, $2::jsonb, $3::jsonb, $4::jsonb) RETURNING id::text`,
+			`[["a", null]]`, `[["filled"], null]`, `[[{"x": 1, "y": 2}, null]]`, `[[null]]`).Scan(&id); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+		var raw [4][]byte
+		if err := conn.QueryRow(ctx, `SELECT labels, states, walls, scores FROM board WHERE id = $1`, id).Scan(
+			&raw[0], &raw[1], &raw[2], &raw[3],
+		); err != nil {
+			t.Fatalf("select: %v", err)
+		}
+		var labels [][]string
+		var states [][]string
+		var walls [][]boardPoint
+		var scores [][]float64
+		for _, tc := range []struct {
+			field  string
+			raw    []byte
+			target any
+			want   string
+		}{
+			{"labels", raw[0], &labels, "labels[0][1]: null element"},
+			{"walls", raw[2], &walls, "walls[0][1]: null element"},
+			{"scores", raw[3], &scores, "scores[0][0]: null element"},
+		} {
+			if err := unmarshalJSONListFieldValue(tc.raw, tc.target, tc.field, 2); err == nil || err.Error() != tc.want {
+				t.Errorf("decode %s = %s: err = %v, want %q", tc.field, tc.raw, err, tc.want)
+			}
+		}
+		decode(t, raw[1], "states", &states)
+		if want := [][]string{{"filled"}, nil}; !reflect.DeepEqual(states, want) {
+			t.Errorf("states with a null inner list = %#v, want %#v", states, want)
+		}
+	})
 }

@@ -3,6 +3,7 @@
 package orm
 
 import (
+	"bytes"
 	"context"
 	"database/sql/driver"
 	"encoding/json"
@@ -271,6 +272,58 @@ func unmarshalJSONFieldValue(raw []byte, target any) error {
 		return nil
 	}
 	return json.Unmarshal(raw, target)
+}
+
+// unmarshalJSONListFieldValue decodes a JSONB column that holds a list
+// (depth 1) or a list of lists (depth 2) into target, and refuses a null
+// element, as the generated types' UnmarshalJSON does for a list field:
+// encoding/json would decode it to the element type's zero value, which no
+// reader can tell from a real one. A null inner list of a list of lists is
+// not an element; it decodes to a nil list. A payload without a null token
+// is decoded once.
+func unmarshalJSONListFieldValue(raw []byte, target any, field string, depth int) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if bytes.Contains(raw, []byte("null")) {
+		if err := rejectNullJSONListElement(raw, field, depth); err != nil {
+			return err
+		}
+	}
+	return json.Unmarshal(raw, target)
+}
+
+// rejectNullJSONListElement returns an error that names the first null element
+// of the JSON list raw, of depth 1 or 2, at field[i] or field[i][j]. A value
+// that is not a list has no elements; decoding it reports it.
+func rejectNullJSONListElement(raw []byte, field string, depth int) error {
+	var elements []json.RawMessage
+	if err := json.Unmarshal(raw, &elements); err != nil {
+		return nil
+	}
+	for i, element := range elements {
+		if depth < 2 {
+			if isJSONNullToken(element) {
+				return fmt.Errorf("%s[%d]: null element", field, i)
+			}
+			continue
+		}
+		var inner []json.RawMessage
+		if err := json.Unmarshal(element, &inner); err != nil {
+			continue
+		}
+		for j, item := range inner {
+			if isJSONNullToken(item) {
+				return fmt.Errorf("%s[%d][%d]: null element", field, i, j)
+			}
+		}
+	}
+	return nil
+}
+
+// isJSONNullToken reports whether a JSON value is the null token.
+func isJSONNullToken(value json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(value), []byte("null"))
 }
 
 // validateFields checks if all requested fields are in the allowed list.
