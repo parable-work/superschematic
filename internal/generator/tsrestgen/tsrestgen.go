@@ -321,6 +321,13 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 	if ep.HasFileUpload && !ep.ManualRouteRegistration {
 		return endpoint, fmt.Errorf("tsrestgen: operation %s.%s uploads files; the TypeScript router has no multipart adapter, declare it @manualRouteRegistration", ep.Namespace, ep.Name)
 	}
+	// The Go router decrypts an encrypted operation's body with the
+	// configured PayloadDecryptor before it parses it. The TypeScript router
+	// has no such step and would hand the ciphertext to the body parser, so
+	// the service mounts the route itself and decrypts in its handler.
+	if ep.Encrypted && !ep.ManualRouteRegistration {
+		return endpoint, fmt.Errorf("tsrestgen: operation %s.%s is encrypted (an Encrypted operation set, @encrypted or an EncryptedField<T> result); the TypeScript router has no decryption step, declare it @manualRouteRegistration and decrypt the payload in the service's handler", ep.Namespace, ep.Name)
+	}
 
 	if ep.HasInput {
 		pkg, ok := b.ownerPackage(ep.InputType)

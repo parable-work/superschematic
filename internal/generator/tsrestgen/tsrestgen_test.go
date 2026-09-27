@@ -24,11 +24,24 @@ const fixturesDir = "../../loader/tsreader/testdata/services"
 // is apigen's and is pinned by apigen's own golden.
 var goldenFiles = []string{"package.json", "tsconfig.json", "index.ts", "interfaces.ts", "router.ts", "README.md"}
 
+// loadFixtureAPI loads fixture-api, without encryption, and its fixture-db
+// dependency. The TypeScript server refuses an encrypted operation that is
+// not @manualRouteRegistration (TestFixtureAPIIsRefusedForItsEncryptedMutations),
+// so the router tests serve fixture-api with its TenantMutations set and
+// operations unencrypted: createTenant and updateSecret stay JSON routes
+// that exercise the strict input parser, the body arguments and the
+// permission gate.
 func loadFixtureAPI(t *testing.T) (*ir.Schema, *ir.Schema) {
 	t.Helper()
 	apiSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-api"))
 	if err != nil {
 		t.Fatalf("load fixture-api: %v", err)
+	}
+	for _, set := range apiSchema.OperationSets {
+		set.Encrypted = false
+		for _, op := range set.Operations {
+			op.Encrypted = false
+		}
 	}
 	dbSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))
 	if err != nil {

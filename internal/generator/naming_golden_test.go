@@ -96,7 +96,9 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 	}
 
 	// The TypeScript API server shares api/<service> with the Go server, so
-	// it is built into its own root under the scanned tree.
+	// it is built into its own root under the scanned tree. It refuses an
+	// encrypted operation that is not @manualRouteRegistration.
+	manualEncryptedOperations(apiSchema)
 	tsAPICfg := *apiCfg
 	tsAPICfg.Outputs = map[string]any{}
 	for key, value := range apiCfg.Outputs {

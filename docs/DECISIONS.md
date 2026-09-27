@@ -537,6 +537,18 @@ already runs a TypeScript-aware toolchain. Its npm name is the naming key
 `http_runtime_npm_package`, so a distribution that republishes the runtime
 under its own name renders the same generated router.
 
+The runtime has no step that decrypts a request body, and none that reads
+a multipart one. The generator refuses an operation that needs one unless
+it is `@manualRouteRegistration`, naming the operation: a file upload, and
+an encrypted operation (an `Encrypted` operation set, `@encrypted`, or an
+`EncryptedField<T>` result). The service's handler decrypts the payload,
+as the Go server's `PayloadDecryptor` does. Before, the generator mounted
+an encrypted operation as an ordinary JSON route, which handed the
+ciphertext to the body parser. A decryption step in the runtime, the
+counterpart of the Go runtime's `PayloadDecryptor` seam, would let the
+router mount such an operation; until it exists, refusing is the only
+behavior that cannot parse ciphertext.
+
 This entry was first recorded as a second D12, next to the arrays-of-arrays
 entry. It was renumbered D15 so that each number names one decision.
 ## D14. A failing scalar value is one error, named by the rule it breaks

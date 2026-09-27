@@ -227,6 +227,17 @@ the same way and then handed to `options.manualRoutes.<operation>` with the
 Hono context, for a streaming response or anything else the JSON router
 cannot express.
 
+Two kinds of operation must be `@manualRouteRegistration`, and the build
+fails with the operation named when one is not:
+
+- An encrypted operation: one in an `Encrypted` operation set, one declared
+  `@encrypted`, or one whose result is an `EncryptedField<T>`. The Go
+  server decrypts such a body with its `PayloadDecryptor` before it parses
+  it. The TypeScript router has no decryption step and would hand the
+  ciphertext to the body parser, so the service's handler decrypts the
+  payload and decodes it.
+- An operation that uploads files. The router has no multipart adapter.
+
 The generated package and the runtime ship TypeScript sources, so run them
 with Bun, a bundler or a TypeScript loader. `examples/acme-schematic`
 (`shop-storefront` and its `storefront/` app) is a complete example.

@@ -650,6 +650,18 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- TypeScript API server: an encrypted operation (in an `Encrypted`
+  operation set, declared `@encrypted`, or with an `EncryptedField<T>`
+  result) fails the build unless it is `@manualRouteRegistration`, with the
+  operation named: `tsrestgen: operation tenant.createTenant is encrypted
+  ...; the TypeScript router has no decryption step, declare it
+  @manualRouteRegistration and decrypt the payload in the service's
+  handler`. The runtime has no decryption step, so the router mounted such
+  an operation as an ordinary JSON route and handed the ciphertext to the
+  body parser. A schema that selects the TypeScript server and declares an
+  encrypted operation marks it `@manualRouteRegistration` and decrypts in
+  its `manualRoutes` handler, as it already does for a file upload. The Go
+  server is unchanged. Minor.
 - Go API: a list argument of a `GET` operation is decoded by
   `bodyargs.QueryList`. Each item is read as its type's JSON value and
   checked as a list element at `name[i]`, with the scalar's and the
