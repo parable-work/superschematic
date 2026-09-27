@@ -45,7 +45,10 @@ Two entry points:
   parser, the implementation, and the envelope. It maps every failure to the
   problem envelope. `mountManualOperation` gates a `@manualRouteRegistration`
   operation and hands the Hono context to the service's own handler (a
-  streaming response, say). `notFoundHandler` and `errorHandler` cover the
+  streaming response, say). The runtime has no step that decrypts a request
+  body or reads a multipart one, so the generator refuses an encrypted
+  operation or a file upload that is not `@manualRouteRegistration`; the
+  service's handler decrypts or reads the body itself. `notFoundHandler` and `errorHandler` cover the
   application root, and `disconnectSignal` aborts when the client leaves on
   `@hono/node-server`. `@timeout` answers 504, as the Go runtime does.
 

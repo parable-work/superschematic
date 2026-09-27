@@ -1,9 +1,11 @@
 /*
 Runtime check of a generated router (run by TestGeneratedRouterRuntime with
-API_DIR set to the materialized fixture-api package). Stub implementations echo
-their decoded arguments; the assertions cover what the router owns: the two
-envelopes, the strict body parser, the auth gate, parameter decoding, and the
-manual-route hook.
+API_DIR set to the materialized fixture-api package). The TypeScript server
+refuses an encrypted operation that is not @manualRouteRegistration, so the
+test serves fixture-api with its TenantMutations unencrypted
+(loadFixtureAPI). Stub implementations echo their decoded arguments; the
+assertions cover what the router owns: the two envelopes, the strict body
+parser, the auth gate, parameter decoding, and the manual-route hook.
 */
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';

@@ -124,22 +124,30 @@ func TestRunAPISchemaSelectsAPIOutputs(t *testing.T) {
 
 // TestRunAPISchemaSelectsTypeScriptAPI flips fixture-api to the TypeScript
 // server language and checks the Hono package lands in the api output dir,
-// the SDK still follows, and no Go server files are written.
+// the SDK still follows, and no Go server files are written. The TypeScript
+// server refuses fixture-api's encrypted TenantMutations until they are
+// @manualRouteRegistration, the fix its error names.
 func TestRunAPISchemaSelectsTypeScriptAPI(t *testing.T) {
 	schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, "fixture-api"))
 	if err != nil {
 		t.Fatalf("LoadServiceWithConfig: %v", err)
 	}
 	cfg.Outputs["api"] = map[string]any{"enabled": true, "language": APILanguageTypeScript}
-
-	outputRoot := t.TempDir()
-	result, err := Run(schema, cfg, Options{
-		OutputRoot: outputRoot,
+	opts := Options{
+		OutputRoot: t.TempDir(),
 		Naming:     naming.Default(),
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(tsFixtures, name))
 		},
-	})
+	}
+	if _, err := Run(schema, cfg, opts); err == nil || !strings.Contains(err.Error(), "operation tenant.createTenant is encrypted") {
+		t.Fatalf("Run = %v, want the TypeScript server to refuse the encrypted createTenant", err)
+	}
+	manualEncryptedOperations(schema)
+
+	outputRoot := t.TempDir()
+	opts.OutputRoot = outputRoot
+	result, err := Run(schema, cfg, opts)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -162,6 +170,19 @@ func TestRunAPISchemaSelectsTypeScriptAPI(t *testing.T) {
 	}
 	if result.Outputs["sdk-typescript"] != SDKDir(outputRoot, "typescript", "fixture-api") {
 		t.Errorf("expected the TypeScript SDK beside the TypeScript API, got %v", result.Outputs)
+	}
+}
+
+// manualEncryptedOperations declares every encrypted operation of schema
+// @manualRouteRegistration, as the TypeScript server requires: it has no
+// decryption step, so the service mounts and decrypts such a route itself.
+func manualEncryptedOperations(schema *ir.Schema) {
+	for _, set := range schema.OperationSets {
+		for _, op := range set.Operations {
+			if set.Encrypted || op.Encrypted {
+				op.ManualRouteRegistration = true
+			}
+		}
 	}
 }
 
