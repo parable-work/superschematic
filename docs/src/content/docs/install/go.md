@@ -162,8 +162,7 @@ chi router and calls your implementations.
 An operation with an input type reads it from the JSON body. An operation
 without one reads its other arguments from the JSON body object, each from
 its own JSON value, through `runtime/http/go/bodyargs`. On `GET` they come
-from the query string, where a list is read from repeated keys and
-comma-separated values (`?labels=a,b&labels=c`). In the body:
+from the query string (below). In the body:
 
 - A string, enum, UUID or timestamp argument takes a JSON string, a number
   a JSON number, an integer a JSON integer, and a boolean `true`
@@ -210,6 +209,25 @@ once, keyed by path, as it does for an input type's fields:
 }
 ```
 
+On `GET`, a list argument is read from repeated keys and comma-separated
+values (`?labels=a,b&labels=c` is `["a", "b", "c"]`) through
+`bodyargs.QueryList`. Each item is trimmed and an empty one is dropped; no
+item is an absent list, which is `required` when the argument is required.
+`listMin` and `listMax` bound the items. Each item is read as its type's
+JSON value (a number, an integer, a boolean as `strconv.ParseBool` reads
+it, or a string) and then follows the element rules above at `name[i]`:
+`?scores=1,x` is `type` at `scores[1]`, and `?ranks=0` breaks
+`Ordering.Rank`'s `min` at `ranks[0]`. An optional single value that is
+absent reaches the implementation as its type's zero value. Query
+validation names its rules as the body does: `minLength`, `maxLength`,
+`pattern`, `min`, `max`, `listMin` and `listMax`.
+
+`openapi.json` describes a body argument as it describes a field of an
+input type: the scalar's own constraints and the argument's
+(`minLength`, `maxLength`, `pattern`, `minimum`, `maximum`) sit on each
+value, the items of a list or the values of a map, and `listMin` and
+`listMax` are `minItems` and `maxItems` on the list.
+
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk.go` enabled writes
@@ -225,6 +243,14 @@ sdk, err := catalogsdk.New(catalogsdk.SDKConfig{
 Namespace fields on the client match the operation sets in the schema
 (`ProductQueries` becomes a `ProductQueries` field). See
 `examples/acme-schematic` for a full API plus auth provider.
+
+An operation without an input type takes its body arguments as one input
+struct. A map argument is a `map[string]T` field (`map[string][]T` for a
+map of lists), as the route takes it, and is sent as a JSON object; an
+optional one is left out when it is nil. Before the request, a nil
+required map is `required`, a nil list value is `required` at
+`name[key]`, and each value or list element runs its own validation at
+`name[key]` or `name[key][i]`.
 
 A response outside 2xx returns an `*APIError`, or a type that embeds one:
 `*AuthenticationError` for 401, `*AuthorizationError` for 403 and

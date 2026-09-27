@@ -142,6 +142,10 @@ type EndpointInfo struct {
 	// BodyArgs are the ScalarArgs of an operation that is not GET, with how
 	// the Go route decodes each from the JSON body; nil on GET.
 	BodyArgs []BodyArg
+	// QueryListArgs are the list ScalarArgs of a GET operation, with how the
+	// Go route decodes each from the query string (bodyargs.QueryList); nil
+	// on any other method.
+	QueryListArgs []BodyArg
 
 	Description string
 	// Operation is the schema operation the endpoint is generated from.
@@ -242,7 +246,6 @@ type APIOutput struct {
 	HasFilterableEndpoints   bool
 	HasFileUpload            bool
 	HasArrayQueryParams      bool
-	HasArrayScalarArgsOnGET  bool
 	HasWebhookHMACEndpoints  bool
 	RequiredWebhookProviders []string
 
@@ -307,11 +310,12 @@ func (o *APIOutput) HasConstants() bool {
 	return o.IsPublic && o.UUIDTypeExpr != ""
 }
 
-// HasBodyArgs reports whether a route decodes body arguments, so routes.go
-// imports the HTTP runtime's bodyargs package.
+// HasBodyArgs reports whether a route decodes body arguments or a list
+// argument of a GET operation, so routes.go imports the HTTP runtime's
+// bodyargs package.
 func (o *APIOutput) HasBodyArgs() bool {
 	for _, endpoint := range o.Endpoints {
-		if len(endpoint.BodyArgs) > 0 {
+		if len(endpoint.BodyArgs) > 0 || len(endpoint.QueryListArgs) > 0 {
 			return true
 		}
 	}
@@ -499,14 +503,6 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 			if param.IsArray {
 				output.HasArrayQueryParams = true
 				break
-			}
-		}
-		if endpoint.Method == "GET" {
-			for _, arg := range endpoint.ScalarArgs {
-				if arg.IsArray {
-					output.HasArrayScalarArgsOnGET = true
-					break
-				}
 			}
 		}
 		if endpoint.Encrypted {
@@ -761,6 +757,14 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	}
 	if method != "GET" {
 		endpoint.BodyArgs = types.bodyArgs(scalarArgs)
+	} else {
+		var listArgs []Param
+		for _, arg := range scalarArgs {
+			if arg.IsArray {
+				listArgs = append(listArgs, arg)
+			}
+		}
+		endpoint.QueryListArgs = types.bodyArgs(listArgs)
 	}
 	endpoint.NeedsTypesImport = endpointNeedsTypesImport(endpoint)
 	if err := provider.Endpoint(op, set, endpoint); err != nil {

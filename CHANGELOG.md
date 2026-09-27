@@ -108,6 +108,12 @@ of a generated artifact is always listed here with the bump it requires.
   `MaxLength`, `Pattern`, `Min` and `Max` describes one argument; the
   generic `Value`, `List`, `ListOfLists`, `Map` and `MapOfLists` decode
   it. Generated Go API routes call it. Minor.
+- `runtime/http/go/bodyargs`: `QueryList` decodes a list argument of a
+  `GET` operation from the query string with the same `Arg` and rules:
+  repeated keys and comma-separated items, each read as its kind's JSON
+  value and checked as a list element at `name[i]`. Minor.
+- `@superschematic/http-runtime`: `ParamSpec.isMap` and `decodeMap`, which
+  `decodeJsonParam` calls for a map body parameter. Minor.
 - Python SDK: the generated client retries a `GET`, `HEAD` or `OPTIONS`
   request that fails with a `NetworkError`, up to
   `ClientConfig.max_network_retries` times (default 3), sleeping 1, 2, 4
@@ -546,6 +552,49 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- Go API: a list argument of a `GET` operation is decoded by
+  `bodyargs.QueryList`. Each item is read as its type's JSON value and
+  checked as a list element at `name[i]`, with the scalar's and the
+  argument's rules: `?scores=1,x` is `type` at `scores[1]` ("expected a
+  number"), `?ranks=0` is `min` at `ranks[0]` for `Ordering.Rank`, and a
+  malformed UUID or timestamp is `pattern`. Before, the route cast each
+  item's string to the element's Go type, so a `GET` operation with a
+  list of numbers, integers, booleans, UUIDs or timestamps generated a
+  `routes.go` that did not compile; an element's failure was reported at
+  `name`; and the argument's `minLength`, `maxLength`, `min` and `max` did
+  not apply to an element. A required list with no item (absent,
+  `?labels=` or `?labels=,`) is a `required` field error at `name`, where
+  it was a plain 400 message. Minor.
+- Go API: a query parameter or `GET` argument that breaks a length or a
+  list bound is named `minLength`, `maxLength`, `listMin` or `listMax`, as
+  in every other validator (D14); it was `min_length`, `max_length`,
+  `list_min` or `list_max`. A client that matched the old names matches
+  the new ones. Minor.
+- Go SDK: a map body argument (`Record<string, T>`, `Record<string, T[]>`)
+  is a `map[string]T` (`map[string][]T`) field of the input struct, as the
+  Go route takes it; it was typed as its value type, so the SDK sent one
+  value where the route expects a JSON object. An optional map is left
+  out when nil. Before the request, a nil required map is `required`, a
+  nil list value is `required` at `name[key]`, and each value or list
+  element runs its own validation at `name[key]` or `name[key][i]`. Code
+  that fills the input struct changes with the field type. Minor.
+- TypeScript API server: a map body argument (`Record<string, T>`,
+  `Record<string, T[]>`) is typed `Record<string, T>` (`Record<string,
+  T[]>`) in the implementation's arguments and decoded with the Go
+  routes' map rules: a JSON object (`type` otherwise, "expected an
+  object"), `{}` satisfies a required map, a value is never null
+  (`required` at `name[key]`) and passes the checks of a list element at
+  `name[key]`, a list value's elements are checked at `name[key][i]`, and
+  list bounds do not bound a map. Before, the argument was typed and
+  decoded as its value type, so a JSON object was refused and one bare
+  value accepted. An implementation of such an operation changes its
+  argument type. Minor.
+- OpenAPI: a body argument carries its constraints as a field of an input
+  type does. The scalar's own `format`, `pattern`, lengths and range and
+  the argument's `minLength`, `maxLength`, `pattern`, `minimum` and
+  `maximum` sit on each value (the items of a list, the values of a map),
+  and `listMin` and `listMax` are `minItems` and `maxItems` on a list.
+  They were left out. Patch.
 - `@superschematic/schema-ir` carries the repository's one version, which
   `scripts/bump_version.py` writes, in place of a fixed `0.1.0`, and the
   release packs and publishes it with the other npm packages. Its
@@ -888,6 +937,13 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Go API: a `GET` operation with an optional number, integer, boolean or
+  UUID argument, or a timestamp argument, generated a `routes.go` that did
+  not compile: the route parsed an optional one into a pointer while the
+  implementation takes the value, and cast a timestamp's string to its Go
+  type. An optional one that is absent reaches the implementation as its
+  zero value, and a timestamp is parsed as a `QueryParam` one is; a
+  malformed one answers 400. Patch.
 - Go ORM: `CreateOne` and `CreateMany` insert a required enum field's
   declared default when the Go value is `""`, for an enum declared in the
   schema or imported from a dependency. They inserted `''`, which is not a

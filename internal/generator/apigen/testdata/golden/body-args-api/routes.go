@@ -121,6 +121,12 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/documents",
 			Handler: createTagStoreDocumentHandler(cfg.Implementations.Tag),
 		},
+		// Search posts by score, rank, flag, related post, date and code.
+		{
+			Method:  "GET",
+			Path:    "/posts/search",
+			Handler: createTagSearchPostsHandler(cfg.Implementations.Tag),
+		},
 		// Find posts by label; the labels travel in the query string.
 		{
 			Method:  "GET",
@@ -222,56 +228,262 @@ func createTagStoreDocumentHandler(impl TagImplementation) gohttp.HandlerFunc {
 	}
 }
 
+// createTagSearchPostsHandler creates a handler for GET /api/posts/search
+//
+// Search posts by score, rank, flag, related post, date and code.
+func createTagSearchPostsHandler(impl TagImplementation) gohttp.HandlerFunc {
+	// List arguments in the query string: the JSON type of each item, then
+	// its rules in the order they are checked (the scalar type's own, then
+	// the argument's).
+	queryListScoresArg := bodyargs.NewArg("scores", bodyargs.Number, bodyargs.Min(0), bodyargs.Max(10))
+	queryListRanksArg := bodyargs.NewArg("ranks", bodyargs.Integer, bodyargs.ListMax(3), bodyargs.Min(1), bodyargs.Max(9007199254740991))
+	queryListFlagsArg := bodyargs.NewArg("flags", bodyargs.Boolean)
+	queryListRelatedArg := bodyargs.NewArg("related", bodyargs.String, bodyargs.Pattern(`^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`))
+	queryListDaysArg := bodyargs.NewArg("days", bodyargs.String)
+	queryListCodesArg := bodyargs.NewArg("codes", bodyargs.String, bodyargs.ListMin(2), bodyargs.ListMax(4), bodyargs.MinLength(2), bodyargs.MaxLength(4), bodyargs.Pattern(`^[a-z]+$`))
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract query parameters
+		// An array uses the form/explode=false wire format: ?tags=a,b.
+		// A nil slice means the optional parameter was absent; a present empty value is invalid.
+		var Tags []string
+		TagsValues, TagsPresent, err := parseArrayQueryParam(r, "tags")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, err.Error())
+			return
+		}
+		if TagsPresent {
+			Tags = make([]string, 0, len(TagsValues))
+			for _, rawValue := range TagsValues {
+				elem := rawValue
+				if len(rawValue) < 2 {
+					validationErrors := types.NewValidationErrors()
+					validationErrors.SetFieldErrors("tags", []types.ValidationError{{Validator: "minLength", Message: "each item must be at least 2 characters"}})
+					RespondValidationErrors(w, r, validationErrors)
+					return
+				}
+				if validator, ok := interface{}(elem).(interface {
+					ValidateRequired() (bool, []types.ValidationError)
+				}); ok {
+					if valid, fieldErrs := validator.ValidateRequired(); !valid {
+						validationErrors := types.NewValidationErrors()
+						validationErrors.SetFieldErrors("tags", fieldErrs)
+						RespondValidationErrors(w, r, validationErrors)
+						return
+					}
+				} else if validator, ok := interface{}(elem).(interface {
+					Validate() (bool, []types.ValidationError)
+				}); ok {
+					if valid, fieldErrs := validator.Validate(); !valid {
+						validationErrors := types.NewValidationErrors()
+						validationErrors.SetFieldErrors("tags", fieldErrs)
+						RespondValidationErrors(w, r, validationErrors)
+						return
+					}
+				}
+				Tags = append(Tags, elem)
+			}
+		}
+		if TagsPresent && len(Tags) > 2 {
+			validationErrors := types.NewValidationErrors()
+			validationErrors.SetFieldErrors("tags", []types.ValidationError{{Validator: "listMax", Message: "must contain at most 2 items"}})
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+		// Parse scalar arguments from query string (GET endpoint)
+
+		// scores travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at scores[i]; no item is an
+		// absent list.
+		var Scores []float64
+		{
+			listErrors := types.NewValidationErrors()
+			Scores = bodyargs.QueryList[float64](listErrors, r.URL.Query(), queryListScoresArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
+			}
+		}
+
+		// ranks travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at ranks[i]; no item is an
+		// absent list.
+		var Ranks []int64
+		{
+			listErrors := types.NewValidationErrors()
+			Ranks = bodyargs.QueryList[int64](listErrors, r.URL.Query(), queryListRanksArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
+			}
+		}
+
+		// flags travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at flags[i]; no item is an
+		// absent list.
+		var Flags []bool
+		{
+			listErrors := types.NewValidationErrors()
+			Flags = bodyargs.QueryList[bool](listErrors, r.URL.Query(), queryListFlagsArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
+			}
+		}
+
+		// related travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at related[i]; no item is an
+		// absent list.
+		var Related []types.IdentityUUID
+		{
+			listErrors := types.NewValidationErrors()
+			Related = bodyargs.QueryList[types.IdentityUUID](listErrors, r.URL.Query(), queryListRelatedArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
+			}
+		}
+
+		// days travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at days[i]; no item is an
+		// absent list.
+		var Days []types.TemporalDateTime
+		{
+			listErrors := types.NewValidationErrors()
+			Days = bodyargs.QueryList[types.TemporalDateTime](listErrors, r.URL.Query(), queryListDaysArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
+			}
+		}
+
+		// codes travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at codes[i]; no item is an
+		// absent list.
+		var Codes []string
+		{
+			listErrors := types.NewValidationErrors()
+			Codes = bodyargs.QueryList[string](listErrors, r.URL.Query(), queryListCodesArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
+			}
+		}
+		// caption is a string-backed scalar or enum; parse from query string and validate
+		var Caption string
+		if CaptionStr := parseStringQueryParamPtr(r, "caption"); CaptionStr != nil {
+			Caption = string(*CaptionStr)
+			if len(string(Caption)) < 2 {
+				validationErrors := types.NewValidationErrors()
+				validationErrors.SetFieldErrors("caption", []types.ValidationError{{Validator: "minLength", Message: "must be at least 2 characters"}})
+				RespondValidationErrors(w, r, validationErrors)
+				return
+			}
+			if len(string(Caption)) > 5 {
+				validationErrors := types.NewValidationErrors()
+				validationErrors.SetFieldErrors("caption", []types.ValidationError{{Validator: "maxLength", Message: "must be at most 5 characters"}})
+				RespondValidationErrors(w, r, validationErrors)
+				return
+			}
+			if validator, ok := interface{}(Caption).(interface {
+				Validate() (bool, []types.ValidationError)
+			}); ok {
+				if valid, fieldErrs := validator.Validate(); !valid {
+					validationErrors := types.NewValidationErrors()
+					validationErrors.SetFieldErrors("caption", fieldErrs)
+					RespondValidationErrors(w, r, validationErrors)
+					return
+				}
+			}
+		}
+		// Absent, the implementation receives the zero value.
+		var Limit float64
+		LimitPtr := parseFloat64QueryParamPtr(r, "limit")
+		if LimitPtr != nil {
+			Limit = *LimitPtr
+		}
+		// Absent, the implementation receives the zero value.
+		var Page int64
+		PagePtr := parseIntQueryParamPtr(r, "page")
+		if PagePtr != nil {
+			Page = *PagePtr
+		}
+		// Absent, the implementation receives the zero value.
+		var Pinned bool
+		PinnedPtr := parseBoolQueryParamPtr(r, "pinned")
+		if PinnedPtr != nil {
+			Pinned = *PinnedPtr
+		}
+		// Absent, the implementation receives the zero value.
+		var Author types.IdentityUUID
+		if AuthorStr := parseStringQueryParamPtr(r, "author"); AuthorStr != nil {
+			parsed, err := types.ParseIdentityUUID(*AuthorStr)
+			if err != nil {
+				RespondError(w, r, gohttp.StatusBadRequest, "author must be a valid UUID")
+				return
+			}
+			Author = parsed
+		}
+		// Absent, the implementation receives the zero value.
+		var Since types.TemporalDateTime
+		if SinceStr := parseStringQueryParamPtr(r, "since"); SinceStr != nil {
+			parsed, err := types.ParseTemporalDateTime(*SinceStr)
+			if err != nil {
+				RespondError(w, r, gohttp.StatusBadRequest, "since must be a valid datetime")
+				return
+			}
+			Since = parsed
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.SearchPosts(r.Context(), Tags, Scores, Ranks, Flags, Related, Days, Codes, Caption, Limit, Page, Pinned, Author, Since)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondCollectionEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
 // createTagFindTagsHandler creates a handler for GET /api/posts/tags
 //
 // Find posts by label; the labels travel in the query string.
 func createTagFindTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
+	// List arguments in the query string: the JSON type of each item, then
+	// its rules in the order they are checked (the scalar type's own, then
+	// the argument's).
+	queryListLabelsArg := bodyargs.NewArg("labels", bodyargs.String, bodyargs.Required())
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Parse scalar arguments from query string (GET endpoint)
 
-		// Parse labels from the query string: comma-separated values
-		// (?labels=a,b), repeated keys (?labels=a&labels=b) or both.
-		// Each provided element is validated individually — if present, it must be a valid
-		// value regardless of whether the array argument itself is required or optional.
+		// labels travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at labels[i]; no item is an
+		// absent list.
 		var Labels []string
 		{
-			for _, rawVal := range r.URL.Query()[`labels`] {
-				for _, v := range strings.Split(rawVal, ",") {
-					v = strings.TrimSpace(v)
-					if v == "" {
-						continue
-					}
-					elem := string(v)
-					if validator, ok := interface{}(elem).(interface {
-						ValidateRequired() (bool, []types.ValidationError)
-					}); ok {
-						if valid, fieldErrs := validator.ValidateRequired(); !valid {
-							validationErrors := types.NewValidationErrors()
-							validationErrors.SetFieldErrors("labels", fieldErrs)
-							RespondValidationErrors(w, r, validationErrors)
-							return
-						}
-					} else if validator, ok := interface{}(elem).(interface {
-						Validate() (bool, []types.ValidationError)
-					}); ok {
-						if valid, fieldErrs := validator.Validate(); !valid {
-							validationErrors := types.NewValidationErrors()
-							validationErrors.SetFieldErrors("labels", fieldErrs)
-							RespondValidationErrors(w, r, validationErrors)
-							return
-						}
-					}
-					Labels = append(Labels, elem)
-				}
+			listErrors := types.NewValidationErrors()
+			Labels = bodyargs.QueryList[string](listErrors, r.URL.Query(), queryListLabelsArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
 			}
-		}
-		if len(Labels) == 0 {
-			if r.URL.Query().Has("labels") {
-				RespondError(w, r, gohttp.StatusBadRequest, "labels cannot be empty")
-			} else {
-				RespondError(w, r, gohttp.StatusBadRequest, "labels is required")
-			}
-			return
 		}
 
 		// Ensure request context is still valid before entering implementation logic.
@@ -557,6 +769,32 @@ func createTagSaveTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 // =============================================================================
 // These functions parse query parameters from the URL and convert them to Go types.
 // They handle missing values gracefully by returning defaults or nil for pointer types.
+
+// parseArrayQueryParam parses an array query parameter in the OpenAPI
+// form/explode=false representation (?name=a,b). It also accepts repeated
+// keys (?name=a&name=b); each value is still split on commas. present
+// distinguishes an omitted optional parameter (nil slice) from input.
+func parseArrayQueryParam(r *gohttp.Request, name string) (values []string, present bool, err error) {
+	rawValues, present := r.URL.Query()[name]
+	if !present {
+		return nil, false, nil
+	}
+
+	values = make([]string, 0)
+	for _, rawValue := range rawValues {
+		for _, candidate := range strings.Split(rawValue, ",") {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				return nil, true, fmt.Errorf("%s cannot contain empty values", name)
+			}
+			values = append(values, candidate)
+		}
+	}
+	if len(values) == 0 {
+		return nil, true, fmt.Errorf("%s cannot be empty", name)
+	}
+	return values, true, nil
+}
 
 // parseIntQueryParam parses an integer query parameter with a default value.
 // Returns the default if the parameter is missing or cannot be parsed.
