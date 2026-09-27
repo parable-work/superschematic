@@ -60,6 +60,10 @@ func TestWriteORMGolden(t *testing.T) {
 	}{
 		{"fixture-db", []string{"repository_tenant.go", "repository_tenant_user.go"}},
 		{"fixture-nested-arrays-db", []string{"repository_board.go"}},
+		{"fixture-version-graph-db", []string{
+			"repository_cover.go", "repository_ingredient.go", "repository_note.go", "repository_recipe.go",
+			"repository_recipe_commit.go", "repository_recipe_patch.go", "repository_recipe_ref.go", "repository_step.go",
+		}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

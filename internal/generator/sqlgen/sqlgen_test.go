@@ -23,7 +23,7 @@ const fixturesDir = "../../loader/tsreader/testdata/services"
 // against their golden copies. Regenerate with:
 // go test ./internal/generator/sqlgen -run TestWriteDDLGolden -update
 func TestWriteDDLGolden(t *testing.T) {
-	for _, svc := range []string{"fixture-db", "fixture-nested-arrays-db"} {
+	for _, svc := range []string{"fixture-db", "fixture-nested-arrays-db", "fixture-version-graph-db"} {
 		t.Run(svc, func(t *testing.T) {
 			schema, err := loader.LoadService(filepath.Join(fixturesDir, svc))
 			if err != nil {
