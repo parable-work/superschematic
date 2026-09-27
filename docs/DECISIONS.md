@@ -760,3 +760,146 @@ them; behavior declarations in the compiler follow. Each change that
 lands a piece updates this paragraph, the README layout table and the
 pages that describe it. The names and rules are reversible until the
 first release.
+
+## D17. A version graph over versioned tables, with one merge core
+
+A distribution built a version graph on the source tree for one domain.
+Its content lived in typed `@versioned` rows. Refs held a main line and
+change sets as sparse rows keyed by the ref. Commits recorded the exact row
+versions they sealed. One pure core composed, merged and diffed trees for
+the server and the browser. The mechanism is generic, so it comes into the
+core under D10. What the distribution built on it (publication, delivery,
+review rules) is policy and stays there. In the source implementation
+every entity kind was wired by hand at about forty sites; here the
+compiler generates that wiring from three decorators.
+
+This entry records the design before any of it is built. Names and rules
+are reversible until the first release.
+
+### `@versioned` first
+
+The graph pins exact row versions, deletes rows it no longer overrides,
+and needs a fence on every write. The decorator gains these first:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Two triggers. `BEFORE UPDATE` sets `NEW._version = OLD._version + 1`. `AFTER INSERT OR UPDATE` writes the history row from the stored row. An `INSERT ... ON CONFLICT DO UPDATE` records one `UPDATE` with the row that was stored. | One `BEFORE INSERT OR UPDATE` trigger, as today, which records the proposed insert image even when the conflict clause turns it into an update |
+| A delete tombstone's image is the pre-delete row with `_version` set to the tombstone's version. The image's actor column is `deleted_by` when the table has one, else `updated_by`, else none. It is read from the transaction-local Postgres setting named by the naming key `history_actor_setting` (default `superschematic.history_actor_id`), falling back to the row's value. Generated hard deletes set the setting from the context user for the statement and clear it after. | An `actor` column on every history table, which changes the DDL of every versioned table; relying on `updated_by`, which a bare `DELETE` never writes |
+| `DeleteOneIfVersion(ctx, id, expectedVersion)` deletes the row only when its stored `_version` equals `expectedVersion`. It soft-deletes a table with `deletedAt` and hard-deletes one without. | Leaving deletes unfenced, so a stale reader can delete a row another writer changed |
+| `UpdateOneIfVersion` and `DeleteOneIfVersion` return `ErrVersionConflict` when the row exists at another version, and `ErrNotFound` when it does not exist. `ErrVersionConflict` wraps `ErrNotFound`, so `errors.Is(err, ErrNotFound)` still holds for existing callers. | One error for both, as today; a new error that breaks callers matching `ErrNotFound` |
+| `GetVersion` never returns a tombstone's image. `GetAsOf` and the relation as-of readers return not-found when the latest history row at that time is a `DELETE` or a soft-deleted image. | Returning the pre-delete image as if the row were live |
+| `@versioned({ exclude: [...] })` leaves the named fields out of every history image. They read back as their zero value from the history readers. The key cannot be excluded. | Splitting a table so a sensitive column lives elsewhere, which every author would do by hand |
+| `@optimistic` gives a table `_version`, the `BEFORE UPDATE` bump, `UpdateOneIfVersion` and `DeleteOneIfVersion`, with no history. `@versioned` implies it, and a type cannot carry both. | A hand-kept `version` column with filtered updates on each table that needs a fence |
+| When a `pruneKeepReferencedBy` table is a DB type in the same schema, verification checks that its key column has the versioned key's type and that its version column is `Int64`. A table outside the schema stays syntactic. | Syntactic checks only, as today |
+| Rust and Python types gain `_version` and a history record type, as Go and TypeScript have. | Go and TypeScript only |
+| CI runs a Postgres service, and every test that reads `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` runs there. | Skipping them in CI, as today |
+
+### Declaring a graph
+
+```ts
+@versionGraph()
+export abstract class Recipe { id: Key<Identity.UUID>; name: string; }
+
+@versioned({ retentionDays: 365 })
+@graphMember({ graph: Recipe, order: 'position' })
+export abstract class Step {
+  id: Key<Identity.UUID>;
+  recipe: Relation<Recipe>;
+  position: Generic.Int64;
+  @conflictUnit('keyed') timings: Generic.JSON;
+}
+
+@versioned({ retentionDays: 365 })
+@graphMember({ graph: Recipe, parent: { key: 'stepKey', of: Step } })
+export abstract class Ingredient {
+  id: Key<Identity.UUID>;
+  recipe: Relation<Recipe>;
+  stepKey: Identity.UUID;
+  quantity: string;
+}
+```
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The decorators are DB markers from `@superschematic/db`, read by the frontend, like `versioned`. They add tables and generated methods at build time. D16's behaviors add operations, checks and storage at run time in the engine. The engine may later back its revisions behavior with this entry's core, which takes and returns JSON; nothing here depends on the engine. | Declaring the graph as D16 behaviors, which the compiler cannot render until behaviors exist in it, and which would describe build-time storage with a run-time concept |
+| `@versionGraph({ name? })` marks the graph root: the stable identity other tables reference. The root is never overlaid and is in no commit. It has exactly one `@key`, a UUID. `name` prefixes the generated tables (snake_case) and types (PascalCase); it defaults to the root's name. | Overlaying the root itself, which gives it several rows per identity and breaks every relation that points at it |
+| `@graphMember({ graph, parent?, order?, singleton? })` marks an entity kind of the graph. The member must be `@versioned`, because history is where a commit's rows live. It has one UUID `@key`, exactly one relation to the root, and no `deletedAt`. A member's delete on a ref is a row that says so, and it must hold its slot. A type belongs to at most one graph. | Soft-deleting members, which frees the `(entityKey, ref)` slot, hides the tombstone from every generated read, and lets a generated `SoftDelete(id)` delete the shared base row |
+| `parent: { key, of }` declares containment: the field `key` holds the parent row's `entityKey`, and `of` is a member type of the same graph, the member itself included. Deleting a parent removes its descendants. `order` names an `Int64` field that orders siblings. `singleton: true` allows at most one live row per ref. A parent of several types is left for later. | Cascading deletes by writing a tombstone per descendant, which makes the overlay dense and misses children added later under a deleted parent |
+| `@conflictUnit(strategy)` on a member field sets its merge unit. `atomic` (the default) is the whole field. `keyed` is each top-level key of a JSON object. `jsonSchema` treats a JSON Schema object as units: each entry of `properties`, recursively; each name's membership in `required`; and every other keyword. Removing or retyping a property conflicts with a concurrent edit under it. `excluded` is not content: it never conflicts and is not hashed. Audit fields (`createdAt`, `createdBy`, `updatedAt`, `updatedBy`) are excluded without a decorator, as are the graph's own columns. | Whole-row conflicts only, which the source implementation had and which turns every two-sided edit of a large JSON field into a conflict |
+
+### What the loader adds
+
+The loader verifies the declarations and then expands them into ordinary
+types, as it copies a trait's fields onto a type. The `sql`, `orm` and
+`types` generators emit the result with no graph-specific code, and
+`--emit-ir` shows it. Expanded types and fields carry `origin:
+"versionGraph"` in the IR. `format` skips them and writes the decorators.
+
+For a graph named `Recipe`:
+
+| Generated | Shape |
+|-----------|-------|
+| `RecipeRef` (`recipe_ref`), `@versioned`, soft-deletable | `id`; `root` (relation to `Recipe`, `RESTRICT`); `parentRef?` (`RESTRICT`); `baseCommit?`; `headCommit?`; `name`, unique per root among live refs; `sealedAt?`; audit fields. A ref with no `parentRef` is a primary line; one with a parent is a change set. Its `_version` fences every write through it. Discarding a draft soft-deletes it. |
+| `RecipeCommit` (`recipe_commit`), written once | `id`; `root`; `ref`; `parentCommit?`; `message?`; `schemaEpoch`; `contentHash`; `sequence?`, unique per root; `createdAt`; `createdBy`. A commit with a `sequence` is a published version. |
+| `RecipePatch` (`recipe_patch`), written once | `id`; `commit` (`RESTRICT`); `entityKind`; `entityKey`; `entityId`; `entityVersion`; `operation` (`ADD`, `UPDATE`, `DELETE`). Unique on `(commit, entityKind, entityKey)`, indexed on `(entityId, entityVersion)`. |
+| Enums `RecipeEntityKind`, `RecipePatchOperation` | One member per member type (snake_case), and the three operations |
+| Each member | `entityKey` (the logical identity, generated on insert); `ref` (`RESTRICT`); `deletedOnRef` (default false); a unique index on `(entityKey, ref)`; and, when it declares `retentionDays`, a `pruneKeepReferencedBy` entry for `recipe_patch(entity_id, entity_version)` |
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The tables are generated per graph, with relations to the root, so a graph's rows are scoped the way its root is and a foreign key checks every edge. | One shared set of graph tables with a domain column, whose relations would be polymorphic and unchecked |
+| A published version is a commit with a `sequence`, and a line's head is its primary ref's `headCommit` fenced by the ref's `_version`. | Separate version and head tables, which restate facts the commit and the ref already hold |
+| There is no kind column on a ref. A null `parentRef` means a primary line. | A stored kind that can disagree with `parentRef` |
+
+### The core
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One Rust crate, `runtime/versiongraph/rust`. It is pure: no IO, clock or randomness. Its functions take and return JSON: `compose`, `merge`, `diff`, `content_hash` and `validate`. A C ABI exposes them to a Go binding, and the same exports compile to `wasm32-unknown-unknown` for the browser. | A Go and a TypeScript implementation kept equal by shared vectors, which is two implementations of the merge rules; typed Rust generated per schema, which compiles a crate and a static archive for every schema |
+| The core is driven by a graph descriptor, not by generated Rust. The descriptor is JSON the ORM generator writes from the IR. For each kind it gives the key, id, ref, tombstone, version and author columns, the parent edge, the order field, whether it is a singleton, and each field's conflict unit. The generator writes it as a constant in the ORM package and as `versiongraph/<name>.json` beside the types. | Per-kind code in the core, which the source implementation wrote by hand at every site |
+| Rows cross the boundary in the JSON that Postgres `to_jsonb` gives a row, keyed by column name: the same form as a history image. The generated shell reads live rows with `to_jsonb` rather than serializing typed values, so a live row and its history image hash the same. | Each language's own JSON form of a typed row, which renders timestamps and numbers differently |
+| `compose(base, overlay)` lays one ref's rows over a base tree by `entityKey`. A row with `deleted_on_ref` removes the entity. A removed parent removes its descendants. A row whose parent key is absent is kept and reported as a finding. Output order is deterministic. | Composing along the whole parent chain of refs, which reads a change set through its parent's live, moving rows |
+| `merge(base, ours, theirs, resolutions?)` is a three-way merge per entity and then per unit. An entity changed on one side only takes that side. Equal changes agree. A unit changed differently on both sides, or an edit against a delete, is a conflict. A conflict names the kind, the `entityKey`, the unit path, and the base, ours and theirs values. `resolutions` settles conflicts by unit path. | Whole-row merges only |
+| `content_hash` is SHA-256 over canonical JSON (sorted keys, no insignificant whitespace) of each kind's content columns, with rows sorted by `entityKey`. | Hashing whole rows, so an audit timestamp changes the hash |
+| `validate` checks per kind: unique `entityKey`, the singleton rule, parent existence and cycles, and an `order` inside the range JavaScript integers can hold exactly. | Validation only on the server |
+| Vectors in `runtime/versiongraph/testdata/vectors` are the executable contract. The Rust tests run them, and so do the Go binding and a bun test that drives the WASM build. The Rust test rewrites expected outputs only with `UPDATE_VECTORS=1`, and the diff is reviewed. | Rust-only tests, with nothing to prove the bindings agree |
+| The Go binding is a fifth Go module, `runtime/versiongraph/go`, amending D1. Generated ORM code imports it, and it carries a cgo link the schema runtime must not force on every importer. `make versiongraph` builds the static archive, and the Makefile adds it to `CGO_LDFLAGS` as it does superscalar's (D3). | A package inside `runtime/schema/go`, whose every test run would then need the archive |
+
+### The generated shell
+
+When a schema declares a graph, the ORM generator writes
+`versiongraph_<name>.go` into the ORM package. It holds the descriptor
+and a typed `<Name>Graph` from `db.<Name>Graph()`. Every method runs in
+one transaction, needs a user in the context, and every write through a
+ref takes the ref's expected `_version`.
+
+| Method | Does |
+|--------|------|
+| `CreatePrimary(root, name)` | Creates a primary ref |
+| `Branch(fromRef, name)` | Creates a change set whose `baseCommit` is the source's `headCommit` |
+| `Save(ref, version, edits)` | Upserts override rows on the ref, writes tombstones, or removes an override (a hard delete that records its actor), which restores read-through. It rejects a sealed ref. |
+| `Commit(ref, version, opts)` | Composes the ref, diffs it against its last commit (or its base), writes a commit and its patches with the winning rows' `(id, _version)`, and moves `headCommit`. `opts.Tag` assigns the next `sequence`. |
+| `Seal(ref, version)` | Commits and sets `sealedAt`. The ref then refuses writes. |
+| `Merge(source, target, targetVersion, resolutions)` | Merges the source's head into the target against the source's base, writes the result onto the target and commits, or returns conflicts and writes nothing |
+| `Revert(ref, version, toCommit)` | Writes the rows that make the ref compose to an earlier commit's tree, and commits. History is never rewritten. |
+| `Materialize(commit)`, `Compose(ref)`, `Diff(from, to)`, `History(ref)`, `Discard(ref)` | Read a commit's tree by walking its parents, compose a ref, diff two commits, list a ref's commits, soft-delete a ref |
+
+`Materialize` stops after a walk ceiling (default 4096, an option) with
+an error rather than reading without bound. A commit records the graph's
+`schemaEpoch` (`@versionGraph({ schemaEpoch })`, default 0), and
+`Materialize` rejects a commit from a newer epoch than the binary's.
+Transforms between epochs are a later entry.
+
+### Limits
+
+History is linear per row; a branch exists because each ref writes its
+own rows. The core reads whole trees. The compiler emits DDL, not
+migrations. Who may commit, seal, merge or tag is the distribution's
+policy, as is draft garbage collection; the generated prune functions
+still have no scheduler.
+
+Status: nothing is built. The `@versioned` changes and the core come
+first and in parallel. The declarations and their expansion follow, then
+the shell, then the acme example (`scripts/smoke.sh`: a graph declared
+with no core edit) and the docs pages. Each change that lands a piece
+updates this paragraph and the README layout table.
