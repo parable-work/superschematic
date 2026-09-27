@@ -13,6 +13,18 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- Generated Rust and Python types give a `@versioned` table the `_version`
+  field and declare a generic `HistoryRecord`, as the Go and TypeScript
+  types do (D17). In Rust the field is `version: i64`, renamed to
+  `_version` and defaulted to 0 when absent, and
+  `HistoryRecord<T> { version, operation, recorded_at, value }` takes
+  `recordedAt` as the scalar crate's `DateTime`, so the crate of a
+  versioned schema always depends on the scalar crate. In Python the field
+  is `version_: int = 0` with alias `_version`, and the pydantic model
+  `HistoryRecord[T]` (exported from the package) reads `recordedAt` as a
+  `datetime` and writes wire names from `to_json` and `to_json_dict`. Both
+  read and write the JSON Go's `HistoryRecord[T]` writes. Schemas without
+  `@versioned` generate the same output as before. Minor.
 - Naming file: `history_actor_setting` (default
   `superschematic.history_actor_id`) names the transaction-local Postgres
   setting a `@versioned` table's history trigger reads a delete's actor

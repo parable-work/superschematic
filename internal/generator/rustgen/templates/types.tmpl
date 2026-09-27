@@ -24,6 +24,18 @@ use {{.CrateModule}} as {{.Alias}};
 {{- end}}
 pub type {{.Name}} = {{.ImportAlias}}::{{.Name}};
 {{end}}
+{{- if .HasVersionedTypes}}
+/// HistoryRecord wraps one captured historical value and its version metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryRecord<T> {
+    pub version: i64,
+    pub operation: String,
+    #[serde(rename = "recordedAt")]
+    pub recorded_at: {{.Naming.ScalarRustCrateIdent}}::DateTime,
+    pub value: T,
+}
+
+{{end}}
 {{range .Types}}
 {{- $typeName := .Name}}
 {{- range .Fields}}
@@ -52,6 +64,8 @@ pub struct {{.Name}} {
 {{- else}}
     #[serde(default = "{{.DefaultFnName}}"{{if .SkipSerializing}}, skip_serializing{{else if not .Required}}, skip_serializing_if = "Option::is_none"{{end}})]
 {{- end}}
+{{- else if .IsVersion}}
+    #[serde(default{{if .SerdeRename}}, rename = "{{escapeString .SerdeRename}}"{{end}})]
 {{- else if and .SerdeRename (not .Required)}}
     #[serde(default, rename = "{{escapeString .SerdeRename}}", skip_serializing_if = "Option::is_none")]
 {{- else if .SerdeRename}}
