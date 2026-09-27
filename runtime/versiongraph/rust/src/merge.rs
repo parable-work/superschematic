@@ -339,6 +339,11 @@ impl EntityMerge<'_> {
                 content.insert(column.clone(), value);
             }
         }
+        // A conflicted unit holds its base value, which an add does not
+        // have, so the row is incomplete; the caller leaves the entity out.
+        if !self.conflicts.is_empty() {
+            return Ok(Merged::State(o));
+        }
         if content == oc {
             return Ok(Merged::State(o));
         }

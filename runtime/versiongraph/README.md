@@ -148,7 +148,11 @@ column, tombstones included.
 `{"kind", "entityKey", "path", "value"}` gives the value (JSON `null` is a
 value). A whole-entity conflict takes a side. A resolution must match a
 conflict of this merge exactly; one that does not is refused, as are two for
-one unit.
+one unit. A resolved row is checked like an input row, so a resolution that
+leaves the order column missing or not an integer is refused as
+`invalid_row`, and one outside the range as `order_out_of_range`. Taking
+`"base"` for the order of an entity both sides added is such a resolution:
+an add has no base value.
 
 `merged` is a tree of every entity's result: the winning row, a winning
 delete's tombstone when that side has one, or, for a unit-level merge, ours'

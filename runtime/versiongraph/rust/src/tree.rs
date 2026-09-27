@@ -123,6 +123,11 @@ pub(crate) fn parse_row(kind: &Kind, at: &str, value: Value) -> Result<Row, Erro
         Some(column) => {
             let number = match value.get(column) {
                 Some(Value::Number(number)) => number,
+                None => {
+                    return Err(Error::row(format!(
+                        "{at}: order column {column:?} is missing; it must be an integer"
+                    )))
+                }
                 _ => {
                     return Err(Error::row(format!(
                         "{at}: order column {column:?} must be an integer"
