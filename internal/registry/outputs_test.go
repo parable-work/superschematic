@@ -136,3 +136,40 @@ func TestParseOutputsReadsTheSQLSectionStrictly(t *testing.T) {
 		t.Fatalf("a misspelt outputs.sql key: %v", err)
 	}
 }
+
+// Every SDK imports the types package of its language, so an SDK whose
+// language has no types output would name a package the build never writes.
+// The error names each such language and what the SDK uses the types for.
+func TestParseOutputsRefusesAnSDKWithoutItsTypes(t *testing.T) {
+	enabled := map[string]any{"enabled": true}
+	_, err := ParseOutputs(map[string]any{
+		"types": map[string]any{"go": enabled},
+		"sdk":   map[string]any{"go": enabled, "typescript": enabled, "python": enabled, "rust": enabled},
+	}, coreOutputRegistry(t))
+	want := "outputs.sdk.python needs outputs.types.python: the Python SDK validates with the Python types and skips validation without them\n" +
+		"outputs.sdk.rust needs outputs.types.rust: the Rust SDK depends on the Rust types crate and its methods take and return its types\n" +
+		"outputs.sdk.typescript needs outputs.types.typescript: the TypeScript SDK decodes responses and validates inputs with the TypeScript types"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+
+	_, err = ParseOutputs(map[string]any{
+		"types": map[string]any{"typescript": map[string]any{"enabled": false}},
+		"sdk":   map[string]any{"go": enabled, "typescript": enabled},
+	}, coreOutputRegistry(t))
+	if err == nil || !strings.Contains(err.Error(), "outputs.sdk.go needs outputs.types.go: the Go SDK's methods take and return the Go types") ||
+		!strings.Contains(err.Error(), "outputs.sdk.typescript needs outputs.types.typescript") {
+		t.Fatalf("an SDK whose types are listed but disabled: %v", err)
+	}
+
+	outputs, err := ParseOutputs(map[string]any{
+		"types": map[string]any{"go": enabled, "typescript": enabled, "python": enabled, "rust": enabled},
+		"sdk":   map[string]any{"go": enabled, "typescript": enabled, "python": enabled, "rust": map[string]any{"enabled": false}},
+	}, coreOutputRegistry(t))
+	if err != nil {
+		t.Fatalf("every SDK with its types: %v", err)
+	}
+	if got := outputs.EnabledSDKLanguages(); !reflect.DeepEqual(got, []string{"go", "python", "typescript"}) {
+		t.Errorf("EnabledSDKLanguages = %v", got)
+	}
+}

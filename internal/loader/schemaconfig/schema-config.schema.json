@@ -107,6 +107,7 @@
     },
     "SdkOutputConfig": {
       "additionalProperties": false,
+      "description": "The client SDK in each language. An SDK imports the service's types in its language, so each enabled SDK language needs the same language enabled in types.",
       "properties": {
         "go": {
           "$ref": "#/definitions/TargetOutputConfig"
@@ -169,6 +170,7 @@
     },
     "TypesOutputConfig": {
       "additionalProperties": false,
+      "description": "The type library in each language. A library imports the types of every dependency it takes types from, so each such dependency must enable the same languages; build-all and build --with-deps refuse a build where one does not.",
       "properties": {
         "go": {
           "$ref": "#/definitions/TargetOutputConfig"

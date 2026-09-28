@@ -238,7 +238,9 @@ value, the items of a list or the values of a map, and `listMin` and
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk.go` enabled writes
-`example.com/schemas/sdk/go/<name>`. Construct the client with `New`:
+`example.com/schemas/sdk/go/<name>`. It needs `outputs.types.go` too: the
+SDK's methods take and return the schema's Go types, and the build refuses
+the config without them. Construct the client with `New`:
 
 ```go
 sdk, err := catalogsdk.New(catalogsdk.SDKConfig{
