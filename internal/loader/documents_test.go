@@ -132,3 +132,20 @@ func TestLoadServiceRejectsSidecarDuplicatingDataFormDocument(t *testing.T) {
 		t.Errorf("error = %v", err)
 	}
 }
+
+// TestDecodeDataDocumentRefusesTrailingText pins that only whitespace may
+// follow a JSON sidecar's value, a closing bracket or brace included.
+func TestDecodeDataDocumentRefusesTrailingText(t *testing.T) {
+	for _, text := range []string{`{"replicas": 2}]`, `{"replicas": 2}}`, `{"replicas": 2} {}`} {
+		dir := writeService(t, map[string]string{"manifest.json": text})
+		_, err := decodeDataDocument(dir, "manifest.json", nil)
+		if err == nil || !strings.Contains(err.Error(), "manifest.json: trailing data after JSON value") {
+			t.Errorf("decodeDataDocument(%s) error = %v, want trailing data", text, err)
+		}
+	}
+	dir := writeService(t, map[string]string{"manifest.json": "{\"replicas\": 2}\n\t\r "})
+	got, err := decodeDataDocument(dir, "manifest.json", nil)
+	if err != nil || string(got) != `{"replicas":2}` {
+		t.Errorf("decodeDataDocument with trailing whitespace = %s, %v", got, err)
+	}
+}
