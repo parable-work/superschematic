@@ -3,7 +3,7 @@
 package orm
 
 import (
-{{- if or .HasGenericJSON .HasJSONListFields }}
+{{- if or .HasGenericJSON .HasJSONListFields .HasGenericJSONLists }}
 	"bytes"
 {{- end }}
 	"context"
@@ -335,6 +335,41 @@ func rejectNullJSONListElement(raw []byte, field string, depth int) error {
 // isJSONNullToken reports whether a JSON value is the null token.
 func isJSONNullToken(value json.RawMessage) bool {
 	return bytes.Equal(bytes.TrimSpace(value), []byte("null"))
+}
+{{- end }}
+{{- if .HasGenericJSONLists }}
+
+// refuseNullGenericJSONElements returns an error that names the first null
+// element of a Generic.JSON list at field[i]: a nil value, which pgx writes
+// and reads as SQL NULL, or the JSON null token. A list element is never
+// null, a Generic.JSON element included.
+func refuseNullGenericJSONElements[T ~[]byte](field string, values []T) error {
+	for i, value := range values {
+		if isNullGenericJSONValue(value) {
+			return fmt.Errorf("%s[%d]: null element", field, i)
+		}
+	}
+	return nil
+}
+
+// refuseNullGenericJSONGridElements is refuseNullGenericJSONElements for a
+// list of lists, at field[i][j]. A nil inner list is not an element.
+func refuseNullGenericJSONGridElements[T ~[]byte](field string, rows [][]T) error {
+	for i, row := range rows {
+		for j, value := range row {
+			if isNullGenericJSONValue(value) {
+				return fmt.Errorf("%s[%d][%d]: null element", field, i, j)
+			}
+		}
+	}
+	return nil
+}
+
+// isNullGenericJSONValue reports whether a Generic.JSON value is null: nil,
+// or the JSON null token.
+func isNullGenericJSONValue[T ~[]byte](value T) bool {
+	trimmed := bytes.TrimSpace([]byte(value))
+	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null"))
 }
 {{- end }}
 

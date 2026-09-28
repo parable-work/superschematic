@@ -44,9 +44,15 @@ type ORMOutput struct {
 	HasArraysOfArrays bool
 
 	// HasJSONListFields is true when a JSONB column holds a list or a list
-	// of lists of a non-union type; it emits the decoder that refuses a null
-	// element in one (Field.JSONListDepth).
+	// of lists of a non-union type, or a history row holds a native
+	// Generic.JSON list; it emits the decoder that refuses a null element in
+	// one (Field.JSONListDepth).
 	HasJSONListFields bool
+
+	// HasGenericJSONLists is true when a column holds a Generic.JSON list
+	// (Field.IsGenericJSONList); it emits the check that refuses a null
+	// element in one before a write and after a native array is scanned.
+	HasGenericJSONLists bool
 
 	// UUIDGoType is the Go type used for primary-key / foreign-key plumbing
 	// (e.g. "types.IdentityUUID"). Resolved from the schema's UUID-like
@@ -176,10 +182,13 @@ type Field struct {
 	// Its four-byte JSON `null` token is a value, distinct from SQL NULL.
 	PreservesExplicitJSONNull bool
 
-	// HoldsAnyJSON is true for a scalar whose value is any JSON value
-	// (Generic.JSON). Its Go type keeps a JSON null as the null token, so a
-	// null element of a list of it reads as that token, not a zero value.
-	HoldsAnyJSON bool
+	// IsGenericJSONList is true for a list (T[]) or a list of lists (T[][])
+	// of a scalar that holds any JSON value (Generic.JSON). Its elements are
+	// never null (D12, amended), but its Go element type can hold one: a nil
+	// value, which is SQL NULL, or the JSON null token. The repository
+	// refuses a null element before a write, and after it scans a native
+	// JSONB[] column, where pgx reads one without an error.
+	IsGenericJSONList bool
 
 	// OptionalNilCheck is true when the optional/auto-generated insert path
 	// detects a set value with `input.X != nil` (pointer, slice, or map Go
@@ -203,22 +212,52 @@ func (f Field) ArrayDepth() int {
 }
 
 // JSONListDepth is 1 for a JSONB column that holds a list (T[]) and 2 for
-// one that holds a list of lists (T[][]), and 0 for any other column. Two
-// lists are left out. A union list's decoder reads each element through the
-// union's wrapper, which refuses a null element itself. A Generic.JSON
-// list keeps a stored null element as the null token, which a reader can
-// tell from every value, and the ORM's tests pin that.
+// one that holds a list of lists (T[][]), and 0 for any other column. A
+// list of every element type counts, Generic.JSON included: a list element
+// is never null (D12, amended). A union list is left out; its decoder reads
+// each element through the union's wrapper, which refuses a null element
+// itself.
 func (f Field) JSONListDepth() int {
-	if !f.IsJSONField || f.IsMap || f.IsUnion || f.HoldsAnyJSON {
+	if !f.IsJSONField || f.IsMap || f.IsUnion {
 		return 0
 	}
 	return f.ArrayDepth()
 }
 
+// NativeGenericJSONList reports whether the field is a Generic.JSON list
+// stored in a native JSONB[] column: a T[] without @jsonField. A T[][] is
+// always a JSONB column.
+func (f Field) NativeGenericJSONList() bool {
+	return f.IsGenericJSONList && !f.IsJSONField
+}
+
+// GenericJSONNullCheck is the call that returns an error naming the first
+// null element of the Generic.JSON list value, a Go expression of the
+// field's list type.
+func (f Field) GenericJSONNullCheck(value string) string {
+	if f.IsArrayOfArrays {
+		return fmt.Sprintf("refuseNullGenericJSONGridElements(%q, %s)", f.Name, value)
+	}
+	return fmt.Sprintf("refuseNullGenericJSONElements(%q, %s)", f.Name, value)
+}
+
+// GenericJSONListFields returns the repository's Generic.JSON list fields,
+// which CreateOne, CreateMany, UpdateOne and UpdateMany check for a null
+// element before they write.
+func (r Repository) GenericJSONListFields() []Field {
+	var fields []Field
+	for _, field := range r.Fields {
+		if field.IsGenericJSONList {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
 // JSONDecodeCall is the call that decodes the field's JSONB column payload,
 // src, into dst. A list column's decoder refuses a null element, as the
 // generated types' UnmarshalJSON does for a list field (D12, amended); a
-// Generic.JSON column's keeps the JSON null token as a value.
+// single Generic.JSON column's keeps the JSON null token as a value.
 func (f Field) JSONDecodeCall(src, dst string) string {
 	switch {
 	case f.PreservesExplicitJSONNull:
@@ -366,6 +405,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	hasGenericJSON := false
 	hasArraysOfArrays := false
 	hasJSONListFields := false
+	hasGenericJSONLists := false
 	for _, repo := range repositories {
 		if repo.HasSoftDelete {
 			hasSoftDeletes = true
@@ -383,8 +423,11 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			if field.IsArrayOfArrays {
 				hasArraysOfArrays = true
 			}
-			if field.JSONListDepth() > 0 {
+			if field.JSONListDepth() > 0 || (field.NativeGenericJSONList() && repo.Versioned) {
 				hasJSONListFields = true
+			}
+			if field.IsGenericJSONList {
+				hasGenericJSONLists = true
 			}
 		}
 	}
@@ -402,6 +445,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		HasGenericJSON:           hasGenericJSON,
 		HasArraysOfArrays:        hasArraysOfArrays,
 		HasJSONListFields:        hasJSONListFields,
+		HasGenericJSONLists:      hasGenericJSONLists,
 		Timestamp:                opts.Clock.RFC3339(),
 		UUIDGoType:               uuidGoType,
 		UserIDGoType:             resolveUserIDGoType(tableTypes, scalarMap, uuidGoType),
@@ -856,7 +900,7 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsDateLike:                traits.IsDateLike,
 		IsJSONLike:                traits.IsJSONLike || traits.IsObjectLike || fieldDef.TypeRef.IsMap,
 		PreservesExplicitJSONNull: preservesExplicitJSONNull,
-		HoldsAnyJSON:              isScalar && traits.IsAnyJSON,
+		IsGenericJSONList:         isScalar && traits.IsAnyJSON && isArray && !isMap,
 	}
 
 	nilCheckedJSONScalar := field.IsScalarType && field.IsJSONLike && !field.IsArray
