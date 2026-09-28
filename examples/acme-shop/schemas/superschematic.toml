@@ -1,0 +1,28 @@
+# Naming file for the acme-shop example. Every command reads it from the
+# schemas root (this directory). A key left out keeps the core default; the
+# docs site's naming reference lists every key.
+
+# Coordinates of the generated packages: example.com/acme/types/go/shop-db,
+# @acme/shop-db-types, acme_types_shop_db, acme-shop-db-types.
+go_module_root = "example.com/acme"
+npm_scope = "@acme"
+python_types_module_prefix = "acme_types_"
+python_sdk_module_prefix = "acme_"
+python_sdk_module_suffix = "_sdk"
+rust_crate_prefix = "acme-"
+package_author = "acme"
+
+# Where the runtime modules live, relative to the parent of the schemas root
+# (examples/acme-shop). Generated manifests point their path dependencies
+# (go.mod replace, npm file:) here so the example compiles against this
+# checkout before anything is published. A project that consumes published
+# modules leaves this table out.
+[paths]
+scalar_go = "../../third_party/superscalar/go"
+scalar_typescript = "../../third_party/superscalar/bindings/typescript"
+scalar_rust = "../../third_party/superscalar/crates/core"
+schema_ir = "../../ir"
+schema_runtime_go = "../../runtime/schema/go"
+http_runtime_go = "../../runtime/http/go"
+http_runtime_rust = "../../runtime/http/rust"
+versiongraph_go = "../../runtime/versiongraph/go"

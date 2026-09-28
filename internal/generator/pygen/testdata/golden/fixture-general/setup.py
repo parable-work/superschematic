@@ -14,6 +14,7 @@ setup(
     install_requires=[
         "pydantic>=2.12.0,<3.0.0",
         "PyYAML>=6.0.0",
+        "superscalar>=1.0.0",
     ],
     python_requires=">=3.12",
     classifiers=[

@@ -195,10 +195,6 @@ type DDLOutput struct {
 	OptimisticTables []OptimisticTable
 	Projections      []ProjectionView
 	Timestamp        string
-	HasUserTable     bool
-	SystemUserUUID   string
-	SystemUserName   string
-	SystemUserEmail  string
 
 	// MetadataKeyPrefix prefixes the keys of the projection Arrow schemas'
 	// metadata (Options.MetadataKeyPrefix).
@@ -427,14 +423,6 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		metadataKeyPrefix = DefaultMetadataKeyPrefix
 	}
 
-	hasUserTable := false
-	for _, table := range tables {
-		if table.OriginalName == "User" {
-			hasUserTable = true
-			break
-		}
-	}
-
 	output := &DDLOutput{
 		SchemaName:       opts.SchemaName,
 		Extensions:       collectExtensions(tables, historyTables, usedScalars),
@@ -444,10 +432,6 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		OptimisticTables: optimisticTables,
 		Projections:      projections,
 		Timestamp:        opts.Clock.RFC3339(),
-		HasUserTable:     hasUserTable,
-		SystemUserUUID:   "00000000-0000-4000-8000-000000000000",
-		SystemUserName:   "System",
-		SystemUserEmail:  "system@localhost",
 
 		MetadataKeyPrefix: metadataKeyPrefix,
 	}

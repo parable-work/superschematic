@@ -249,9 +249,13 @@ sdk, err := catalogsdk.New(catalogsdk.SDKConfig{
 })
 ```
 
-Namespace fields on the client match the operation sets in the schema
-(`ProductQueries` becomes a `ProductQueries` field). See
-`examples/acme-schematic` for a full API plus auth provider.
+The client has one field per namespace. Operation sets that share a
+namespace share a field: `ProductQueries` and `ProductMutations` are both
+the `product` namespace, so their methods are on `ProductNamespace`
+(`sdk.ProductNamespace.GetProduct(ctx, id)`). `examples/acme-shop/go` has a
+tested client, walked through in
+[Serve and call it from Go](/superschematic/first-project/go-api/), and
+`examples/acme-schematic` a full API plus auth provider.
 
 An operation without an input type takes its body arguments as one input
 struct. A map argument is a `map[string]T` field (`map[string][]T` for a

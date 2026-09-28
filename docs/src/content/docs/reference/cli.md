@@ -136,7 +136,7 @@ it with `-trimpath -buildvcs=false`, as `make build` does, so a commit
 that changes no Go source keeps the same binary. A binary that links
 extensions can set `cli.Config.ToolDigest` instead, so builds from
 different checkouts share entries; the
-[extension guide](/superschematic/guides/write-an-extension/#share-the-build-cache-across-checkouts)
+[extension guide](/superschematic/extending/write-an-extension/#share-the-build-cache-across-checkouts)
 explains what the digest must cover.
 
 A service with sidecar documents also gets
@@ -229,4 +229,4 @@ extension slot instead of dropping it. It writes a type's behaviors as
 
 An extension that implements `cli.CommandProvider` adds its commands to
 the root. acme adds `describe [<schemas-root>]`. See
-[write an extension](/superschematic/guides/write-an-extension/).
+[write an extension](/superschematic/extending/write-an-extension/).
