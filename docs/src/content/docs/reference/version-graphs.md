@@ -178,7 +178,9 @@ cgo; a `cdylib`; and `wasm32-unknown-unknown` for the browser
 The ORM generator builds each graph's descriptor from the IR and writes it
 twice: as the constant `<Name>GraphDescriptor` in the ORM package, and as
 `versiongraph/<name>.json` in the Go types module, where a browser or
-another runtime reads the same one.
+another runtime reads the same one. Writing the types module removes each
+`versiongraph/*.json` that no graph of the schema writes and leaves any
+other file there.
 
 ```json
 {

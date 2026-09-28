@@ -18,6 +18,10 @@ of a generated artifact is always listed here with the bump it requires.
   configured scalar Python module as not installed, and the availability
   flag is `_SCALAR_MODULE_AVAILABLE`. The scrub gate fails on that name.
   Patch (generated comment and private identifier change).
+- Writing a Go types module no longer removes the whole `versiongraph/`
+  directory when the schema declares no graph. It removes each
+  `versiongraph/*.json` no graph of the schema writes, keeps every other
+  file, and removes the directory only when that leaves it empty. Patch.
 
 ### Added
 
