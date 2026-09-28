@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/parable-work/superscalar/go v0.0.0-20260924221754-1be340a36ae1
-	github.com/parable-work/superschematic/ir v0.0.0
+	github.com/parable-work/superschematic/ir v0.0.1
 	github.com/stretchr/testify v1.12.1
 	gopkg.in/yaml.v3 v3.0.1
 )

@@ -11,6 +11,8 @@ of a generated artifact is always listed here with the bump it requires.
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-09-27
+
 ### Added
 
 - The version-graph core (D17), `runtime/versiongraph`: a Rust crate,
@@ -1547,4 +1549,5 @@ of a generated artifact is always listed here with the bump it requires.
   now fails the build ("tsrestgen cannot decode body argument"). The
   runtime exports `decodeJsonParam`. Minor.
 
-[Unreleased]: https://github.com/parable-work/superschematic/commits/main
+[Unreleased]: https://github.com/parable-work/superschematic/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/parable-work/superschematic/releases/tag/v0.0.1
