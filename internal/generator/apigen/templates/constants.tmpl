@@ -8,10 +8,8 @@ import (
 	types "{{ .TypesModule }}"
 )
 
-// SystemUserID is the UUID for the system user.
-// This user is used for system-generated records and audit fields (createdBy, updatedBy)
-// when no specific user context is available.
-//
-// The system user is automatically created during database initialization
-// and has the UUID: {{ .SystemUserUUID }}
+// SystemUserID is a fixed UUID an implementation may use as the actor of
+// system-generated records. No generated code creates a user row with this
+// id or assigns it to an audit field; a database that needs the row seeds it
+// itself.
 var SystemUserID = {{ .UUIDTypeExpr }}(uuid.MustParse("{{ .SystemUserUUID }}"))

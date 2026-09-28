@@ -30,6 +30,20 @@ of a generated artifact is always listed here with the bump it requires.
   The SQL generator fails on the same indexes, as a backstop. A schema
   with such an index now fails to load; output for every other schema is
   unchanged. Patch.
+- `create.sql` no longer inserts a system user when the schema has a
+  `User` table. The insert named a fixed column list left over from the
+  source tree (`id`, `created_at`, `created_by`, `updated_at`,
+  `updated_by`, `deleted_at`, `deleted_by`, `name`, `email`, `timezone`,
+  `locale`), so `create.sql` failed on any `User` table without all of
+  them (`column "created_by" of relation "user" does not exist`), the
+  acme example's `shop-db` among them. No generated code reads the row:
+  the ORM fills `createdBy` and `updatedBy` from the context's user, and
+  the session auth provider finds users through their sessions. A
+  deployment that wants a system user seeds it in its own migration. The
+  comment on the Go API's `SystemUserID` no longer says the database
+  creates that user. Patch, except that a database created from the
+  `create.sql` of a `User` table with all eleven columns no longer gets
+  the row: Major for that case only.
 - Verification refuses version graph schemas the generators could not run
   correctly. A `@graphMember` may exclude from history only nullable
   fields (besides its audit fields), since Revert and Merge rebuild rows

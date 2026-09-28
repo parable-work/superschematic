@@ -3,9 +3,7 @@ package sqlgen
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -42,15 +40,8 @@ func TestProjectionMigrationsOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	module := t.TempDir()
-	if err := os.CopyFS(module, os.DirFS(filepath.Join("testdata", "pgcheck"))); err != nil {
-		t.Fatal(err)
-	}
 	view := output.Projections[0]
-	cmd := exec.Command("go", "test", "-count=1", "-v", "./...")
-	cmd.Dir = module
-	cmd.Env = append(os.Environ(),
-		"GOFLAGS=-mod=readonly",
+	runPGCheck(t, "TestProjectionOnPostgres",
 		"PGCHECK_DATABASE_URL="+dsn,
 		"PGCHECK_SQL_DIR="+sqlDir,
 		"PGCHECK_UP="+view.UpFileName,
@@ -58,12 +49,4 @@ func TestProjectionMigrationsOnPostgres(t *testing.T) {
 		"PGCHECK_ARROW="+filepath.Join(sqlDir, ProjectionsSubdir, view.Relation+".arrow.json"),
 		"PGCHECK_VIEW_OWNER="+owner,
 	)
-	out, err := cmd.CombinedOutput()
-	t.Logf("pgcheck:\n%s", out)
-	if err != nil {
-		t.Fatalf("pgcheck failed: %v", err)
-	}
-	if !strings.Contains(string(out), "--- PASS: TestProjectionOnPostgres") {
-		t.Fatal("pgcheck did not run its test")
-	}
 }
