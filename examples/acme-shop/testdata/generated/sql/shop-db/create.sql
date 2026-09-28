@@ -103,25 +103,6 @@ CREATE TABLE "user" (
 
 COMMENT ON TABLE "user" IS 'A person who can sign in to the shop.';
 
--- Insert System User
--- This is a special system user with a memorable UUID that can be used for
--- system-generated records and bootstrapping the database
-INSERT INTO "user" (id, created_at, created_by, updated_at, updated_by, deleted_at, deleted_by, "name", email, timezone, locale)
-VALUES (
-  '00000000-0000-4000-8000-000000000000',
-  CURRENT_TIMESTAMP,
-  '00000000-0000-4000-8000-000000000000',
-  CURRENT_TIMESTAMP,
-  '00000000-0000-4000-8000-000000000000',
-  NULL,
-  NULL,
-  'System',
-  'system@localhost',
-  NULL,
-  NULL
-)
-ON CONFLICT (id) DO NOTHING;
-
 -- Add foreign key constraints
 
 ALTER TABLE "order"
