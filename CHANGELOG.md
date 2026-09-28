@@ -28,6 +28,22 @@ of a generated artifact is always listed here with the bump it requires.
   not public still has no auth middleware; only middleware the service
   adds itself reads the token. Output for a public API, or for one with no
   such operation, is unchanged. Minor.
+- The generated TypeScript validator checks a scalar field's own rules.
+  For a field typed with a scalar it ran the scalar's validator and the
+  list bounds only, and dropped the field's `minLength`, `maxLength`,
+  `pattern`, `min` and `max`: `Validate<Generic.Int64, { min: 0 }>`
+  accepted `-1`, which the Go and Python validators and the three schema
+  runtimes report as `min`. The rules now follow the scalar's validation
+  on a single value, every `T[]` element, every innermost `T[][]` element
+  and every map value, with the rule names and messages the Go types use.
+  A rule checks only a value of its own JSON type, so a mistyped value is
+  still the scalar's one `type` error. A package whose only range rules
+  are on scalar fields now writes `validators/primitives.ts` for
+  `isFiniteNumber`. The parity matrix gains `ScalarRuleMatrix` (D14). The
+  Go and Python types already checked these rules, and the Rust types
+  have no validator; their generators are unchanged. Behavior change: a
+  generated TypeScript validator refuses a value its field's rules reject,
+  which it accepted. Minor.
 - Verification refuses an `@index` of a DB table that the SQL generator
   cannot build: one with a key that resolves to no column of the table, or
   one with no keys. The SQL generator left such an index out of the DDL
@@ -89,6 +105,17 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- Docs site: a "Guides" group, one page per area over `examples/acme-shop`
+  (modeling types, database tables, API routes, auth and permissions, and
+  client SDKs in Go, TypeScript, Python and Rust), and a decorators and
+  wrappers reference. The extension guides move from `/guides/` to
+  `/extending/`. Command output on the pages is quoted from logs
+  `examples/acme-shop/scripts/check.sh` captures, as generated code already
+  was. `examples/acme-shop` gains `shop-orders`, an API over new order and
+  review tables with SDKs in all four languages; Go, TypeScript, Python and
+  Rust clients that the Go tests run against its Go server and compare; and
+  type tests in each language. The `acme` CI job sets up Python and uv for
+  it.
 - `examples/acme-shop`: the docs tutorial's project. Four services built
   with the core binary (`shop-common`, General; `shop-db`, DB; `shop-api`,
   an API served in Go with Go and TypeScript SDKs; `shop-storefront`, an API

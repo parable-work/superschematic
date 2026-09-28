@@ -212,7 +212,7 @@ gets the same answers:
 
 The core does not require any particular rule on a view. A deployment that
 does, such as a row scope every view must bind, registers a
-[check](/superschematic/guides/write-an-extension/#policy-on-what-the-core-writes)
+[check](/superschematic/extending/write-an-extension/#policy-on-what-the-core-writes)
 (`RegisterCheck`) on the DB kind and reads its settings from its own
 `[extension.<name>]` table. `examples/acme-schematic` requires every
 projection's first rule to bind `acme.shop_id`.

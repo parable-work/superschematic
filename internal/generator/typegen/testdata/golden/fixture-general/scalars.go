@@ -2,13 +2,48 @@
 
 package types
 
-import scalars "github.com/parable-work/superscalar/go"
+import (
+	"strconv"
+
+	scalars "github.com/parable-work/superscalar/go"
+)
 
 // =============================================================================
 // Scalar Type Aliases
 // =============================================================================
 // All scalar types are aliases to the scalar library.
 // This enables zero-cast interoperability between different type libraries.
+
+// Generic.Int64 - Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
+type GenericInt64 = scalars.GenericInt64
+
+// ParseGenericInt64 parses a string and returns a Generic.Int64 scalar.
+func ParseGenericInt64(s string) (GenericInt64, error) {
+	canonical, err := scalars.ParseGenericInt64(s)
+	if err != nil {
+		var zero GenericInt64
+		return zero, err
+	}
+	parsed, err := strconv.ParseInt(canonical, 10, 64)
+	if err != nil {
+		var zero GenericInt64
+		return zero, err
+	}
+	return GenericInt64(parsed), nil
+}
+
+// Identity.Name - An objects name
+type IdentityName = scalars.IdentityName
+
+// ParseIdentityName parses a string and returns a Identity.Name scalar.
+func ParseIdentityName(s string) (IdentityName, error) {
+	parsed, err := scalars.ParseIdentityName(s)
+	if err != nil {
+		var zero IdentityName
+		return zero, err
+	}
+	return IdentityName(parsed), nil
+}
 
 // Network.Url - Valid HTTP/HTTPS URL
 type NetworkUrl = scalars.NetworkUrl

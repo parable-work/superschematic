@@ -1089,8 +1089,9 @@ Two rules settled as they were built: `diff` takes
 `{descriptor, from, to}`, and a graph member may exclude from history only
 fields with `@conflictUnit('excluded')` and its audit fields, since a
 commit reads a member's content back from history. Not built: transforms
-between schema epochs (`Materialize` refuses a newer epoch) and a parent of
-several types.
+between schema epochs (`Materialize` refuses a newer epoch). D19 rules out a
+parent of several types and moves the engine into a runtime in every
+language.
 
 ## D18. A distribution's field directives live in its extension slot
 
@@ -1153,3 +1154,82 @@ moves each value into its slot: a flag a field set to `true` becomes
 `CHANGELOG.md`, so none comes back into the core.
 
 The removal is reversible until the first release.
+
+## D19. The version graph's engine is a runtime in every language, over storage adapters
+
+D17 built the version graph with its engine in generated Go: a
+`graphEngine` in each ORM package, holding one schema's SQL, calls the core
+over cgo. Five gaps followed from that shape:
+
+- **No catch-up.** A draft cannot move onto its parent's newer work.
+- **Drafts on the primary line.** A primary line's live rows can hold unreleased edits, and nothing names the released version.
+- **Unbounded reads.** `Materialize` walks commit history back to the first commit.
+- **No cleanup.** Nothing prunes history or discarded drafts.
+- **Go only, Postgres only.** Only Go has the engine, and content identity is whatever Postgres `to_jsonb` renders.
+
+This entry closes them. It records the design before any of it is built.
+Names and rules are reversible until the first release.
+
+### Engine, adapters, facades
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The engine is a runtime library in each language: Go (`runtime/versiongraph/go`, beside the binding), TypeScript (`runtime/versiongraph/typescript`), Python (`runtime/versiongraph/python`) and Rust (an engine crate beside the core). Each engine implements every operation once: create, branch, save, commit, seal, merge, rebase, revert, release, materialize, compose, diff, history, discard, sweep. Each drives the core through its language's binding. | Keeping the engine as generated code, written again for every schema and in every language |
+| The engine reaches storage only through a storage adapter. The adapter reads and locks refs, reads a ref's rows, upserts and removes a member row, reads history images by `(id, _version)`, reads and writes commits, patches, snapshots and the release pointer, takes the next sequence under a root lock, walks commits, prunes, and takes a sweep lock. Every read returns canonical rows (below). Transactions are the adapter's; the engine asks for one per operation. | An engine that issues SQL itself, which ties every language to one database |
+| Each language ships a Postgres adapter. It builds its statements at run time from the descriptor, which now names each kind's table and each column's value class; the descriptor's version rises to 2. The adapter targets a small client interface, with a default binding to one widely used driver: pgx in Go, `pg` in TypeScript, psycopg 3 in Python, tokio-postgres in Rust. A SQLite adapter for D16's engine is a later entry. | Statements generated per schema, which each new adapter would have to generate again; a fixed driver with no seam |
+| The generated code per graph becomes a typed facade. It holds the descriptor and a `<Name>Graph` that turns typed edits into canonical rows and canonical rows into typed trees. The ORM generator writes the Go facade; the types generators write the TypeScript, Python and Rust facades beside their types. | A facade in Go only |
+| Parity is tested with scenario files in `runtime/versiongraph/testdata/scenarios`. Each scenario is a sequence of engine operations over canonical rows, with the expected trees, content hashes, conflicts and errors. Every language's engine runs every scenario against Postgres in CI, as the core's vectors already run in every binding. | Parity by review |
+| Python gains a core binding (PyO3 over the crate, built with maturin, as superscalar's Python binding is). Rust calls the core natively. | An engine without a Python binding, reimplementing the core |
+
+### Canonical rows
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A canonical row is a JSON object keyed by column name. Each value is the JSON the schema runtime writes for the field's type (`runtime/schema`, D14). The adapter normalizes what its database returns, live rows and history images alike, into this form. The core compares and hashes canonical rows only, so a content hash does not depend on the database that stored the row. | Postgres `to_jsonb` output as the contract (D17's rule), which no other engine renders the same way |
+| A content hash computed before this change is not comparable with one computed after it. No release has shipped, so there is nothing to migrate. | Keeping two hash forms |
+
+### The primary line and the released version
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A primary line takes writes only from `Merge`. `Save`, `Revert` and `Seal` on a primary line fail with `ErrPrimaryMergeOnly`; work happens on a draft and merges in, and `Merge` commits in the same transaction. A primary line's live rows therefore always equal its head commit's tree. | Direct saves on the primary line, which leave live rows that no commit, tag or release describes |
+| Each root has a released pointer: a generated, `@versioned` `<Name>Release` row (`root` unique, `commit`, audit fields), fenced by its `_version`. `Release(root, commit, version)` moves it to a tagged commit of that root. A rollback is a `Release` to an earlier tagged commit: it writes no member rows, and the pointer's history is the release log. `Released(root)` returns the typed tree of the released commit. `Merge` gains `Message` and `Tag` options, since a primary line is only written through it. | Rollback as a forward `Revert` plus a new tag, which rewrites rows to reach a state the graph already records |
+| Readers of released content read `Released(root)` or `Materialize` of a tagged commit. They do not read member tables directly. | A released view over member tables, which would show only the one version the rows hold |
+
+### Rebase
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Rebase(draft, version, resolutions)` merges the parent's head into the draft, with the draft's base as the merge base and the draft's composed tree, uncommitted work included, as ours. On conflicts it returns them and writes nothing, as `Merge` does. Otherwise it writes the draft's rows so the draft composes to the merged tree over the new base, sets `baseCommit` to the parent's head, and commits on the draft with the draft's previous head as parent, so the draft's `History` keeps its commits. | Merging a primary line into a draft, which has no merge base; a new draft per catch-up |
+
+### Snapshots
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A snapshot is a commit's full pin set, stored in a generated `<Name>SnapshotEntry` table: `commit`, `entityKind`, `entityKey`, `entityId`, `entityVersion`, unique on `(commit, entityKind, entityKey)` and indexed on `(entityId, entityVersion)`. Each member's history is pinned by it as by the patch table. | Snapshots of row images, which duplicate what history already holds |
+| A commit is snapshotted when it is `snapshotEvery` commits past the nearest snapshot on its chain (`@versionGraph({ snapshotEvery })`, default 64), when it is tagged, and when it is released. `Materialize` stops at the nearest snapshot, so a read touches at most `snapshotEvery` commits' patches plus one pin set. The walk ceiling stays as a guard. | A cache outside the database; snapshots only on request |
+
+### Sweep
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Sweep(options)` is one maintenance pass, and nothing calls it unless a service turns it on. It prunes each member's history past its retention, which keeps every pinned row. It hard-deletes the member rows of refs discarded longer ago than a grace period; their commits and ref rows stay as the audit trail. It fills missing snapshots. With `abandonAfter` set (off by default), it discards drafts with no write for that long. It returns a report of what it did. | A scheduler in the core, which a library cannot own; no sweep, leaving every adopter to write it |
+| `RunSweeper(interval, options)` repeats the pass. Each pass takes the adapter's sweep lock (a Postgres advisory lock per graph), so one replica sweeps at a time and a busy lock skips the pass. The sweeper writes as a configured actor. | Leader election outside the database |
+
+### One parent, and epochs
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A member has at most one parent type. This is a rule, not deferred work: containment in a version graph is a tree of kinds, and a child whose parent can be one of several kinds is modeled as one child kind per parent. D17's status paragraph stops listing it. | A kind column naming the parent's type, which makes every cascade and every check dispatch on data |
+| Schema-epoch transforms stay open. `Materialize` keeps refusing a commit from a newer epoch than the graph's. | Designing transforms before any graph has had an incompatible schema change |
+
+The Go engine keeps the operations and names the generated shell has
+today, and adds `Rebase`, `Release`, `Released`, `Sweep` and
+`RunSweeper`. The generated shell's code moves into the runtime.
+
+Status: nothing is built. The canonical row form, the adapter interface
+and the Go engine come first, with the scenario suite. The release
+pointer, merge-only primary lines, `Rebase`, snapshots and the sweep
+follow in the Go engine. The TypeScript, Rust and Python engines and
+facades follow and must pass the same scenarios. Each change that lands a
+piece updates this paragraph.

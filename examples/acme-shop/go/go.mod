@@ -4,12 +4,17 @@ go 1.26.4
 
 require (
 	example.com/acme/api/shop-api v0.0.0-00010101000000-000000000000
+	example.com/acme/api/shop-orders v0.0.0-00010101000000-000000000000
 	example.com/acme/orm/shop-db v0.0.0-00010101000000-000000000000
 	example.com/acme/sdk/go/shop-api v0.0.0-00010101000000-000000000000
+	example.com/acme/sdk/go/shop-orders v0.0.0-00010101000000-000000000000
 	example.com/acme/types/go/shop-api v0.0.0
 	example.com/acme/types/go/shop-common v0.0.0-00010101000000-000000000000
 	example.com/acme/types/go/shop-db v0.0.0-00010101000000-000000000000
+	example.com/acme/types/go/shop-orders v0.0.0
 	github.com/go-chi/chi/v5 v5.3.2
+	github.com/jackc/pgx/v5 v5.11.0
+	github.com/parable-work/superscalar/go v1.0.0
 	github.com/parable-work/superschematic/runtime/http/go v0.0.0-00010101000000-000000000000
 	go.uber.org/zap v1.28.0
 )
@@ -20,10 +25,8 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.11.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/parable-work/superscalar/go v1.0.0 // indirect
 	github.com/parable-work/superschematic/ir v0.0.0 // indirect
 	github.com/parable-work/superschematic/runtime/schema/go v0.0.0 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
@@ -42,11 +45,14 @@ require (
 // generated modules, or none once those are published too.
 replace (
 	example.com/acme/api/shop-api => ../schemas/dist/api/shop-api
+	example.com/acme/api/shop-orders => ../schemas/dist/api/shop-orders
 	example.com/acme/orm/shop-db => ../schemas/dist/orm/shop-db
 	example.com/acme/sdk/go/shop-api => ../schemas/dist/sdk/go/shop-api
+	example.com/acme/sdk/go/shop-orders => ../schemas/dist/sdk/go/shop-orders
 	example.com/acme/types/go/shop-api => ../schemas/dist/types/go/shop-api
 	example.com/acme/types/go/shop-common => ../schemas/dist/types/go/shop-common
 	example.com/acme/types/go/shop-db => ../schemas/dist/types/go/shop-db
+	example.com/acme/types/go/shop-orders => ../schemas/dist/types/go/shop-orders
 	github.com/parable-work/superscalar/go => ../../../third_party/superscalar/go
 	github.com/parable-work/superschematic/ir => ../../../ir
 	github.com/parable-work/superschematic/runtime/http/go => ../../../runtime/http/go

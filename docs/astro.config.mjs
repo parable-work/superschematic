@@ -32,8 +32,9 @@ export default defineConfig({
         { label: 'Overview', link: '/' },
         { label: 'Start here', items: [{ autogenerate: { directory: 'start' } }] },
         { label: 'Your first project', items: [{ autogenerate: { directory: 'first-project' } }] },
+        { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
         { label: 'Languages', items: [{ autogenerate: { directory: 'install' } }] },
-        { label: 'Extending', items: [{ autogenerate: { directory: 'guides' } }] },
+        { label: 'Extending', items: [{ autogenerate: { directory: 'extending' } }] },
         { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
       ],
       // Fails the build on a broken internal link or anchor.

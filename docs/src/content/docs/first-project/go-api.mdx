@@ -57,15 +57,7 @@ SDK to call it. You write the business logic and say who the caller is.
 superschematic build schemas/services/shop-api
 ```
 
-```
-Loaded schema shop-api (kind API): 2 types, 0 enums, 5 scalars, 2 operation sets
-  + types-go written to .../schemas/dist/types/go/shop-api
-  + types-typescript written to .../schemas/dist/types/typescript/shop-api
-  + api written to .../schemas/dist/api/shop-api
-  + sdk-go written to .../schemas/dist/sdk/go/shop-api
-  + sdk-typescript written to .../schemas/dist/sdk/typescript/shop-api
-Build complete: 5 outputs generated, 0 skipped
-```
+<Snippet file="testdata/generated/logs/build-shop-api.txt" />
 
 The generated server imports `shop-db`'s ORM module, so build `shop-db`
 too, or run `superschematic build --with-deps schemas/services/shop-api`,
