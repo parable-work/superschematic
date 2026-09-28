@@ -1034,7 +1034,7 @@ of a generated artifact is always listed here with the bump it requires.
   one comma-separated value. Before, the handler parsed the parameter as a
   single scalar. The Rust SDK also drops a zero `listMin` check, which
   compared an unsigned length with zero. Minor.
-- The superscalar pin moves to `1be340a` (`superscalar.pin` and every
+- The superscalar pin moves to `f1440d9` (`superscalar.pin` and every
   `go.mod`), and the TypeScript and Python scalar catalogs are regenerated
   from it. Generated output changes where a scalar changed:
   - Four new scalars are available to schemas: `AgentSkill.Name`,
@@ -1057,6 +1057,18 @@ of a generated artifact is always listed here with the bump it requires.
     `Temporal.DateTime`; stringifying the map gave `[object Object]`.
 
   Minor.
+- superscalar at `f1440d9` identifies a scalar by its canonical name only:
+  numeric scalar ids are gone from its C ABI and every binding. The schema
+  runtimes call it by name. The Go runtime lists the linked scalars from
+  `VALID_SCALARS` (was the keys of `ScalarIDByCanonical`). The TypeScript
+  runtime's default parse registry passes the canonical name to the
+  superscalar backend (was the id from `scalarIdByCanonical`). The Python
+  default validate registry (`_generated_default_registry.py`, regenerated)
+  checks each name against `VALID_SCALARS` and passes it to
+  `_native.validate` (was the id from `SCALAR_ID_BY_CANONICAL`). Parsing,
+  validation and generated code are unchanged. The runtimes no longer work
+  with a superscalar that takes ids; the pin and every `go.mod` require one
+  that takes names. Patch.
 - TypeScript and Python types: a custom-parse scalar whose `json_schema`
   type is `object` (`Generic.StringMap`) takes its TypeScript and Python
   types from the scalar catalog, `Record<string, string>` and
