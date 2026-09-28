@@ -13,6 +13,37 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- `outputs.sdk` needs the same language in `outputs.types`: every SDK
+  imports the service's types package in its language, and the build
+  never generated that package unless `outputs.types` asked for it. The
+  TypeScript SDK imported runtime decoders from a types package its
+  `package.json` listed only as an optional peer dependency, the Go SDK
+  required and the Rust SDK path-depended on a types module or crate that
+  was not there, and the Python SDK skipped validation when its types
+  package was missing. `ParseOutputs` now refuses the config and names
+  each such language and what its SDK uses the types for, such as
+  `outputs.sdk.typescript needs outputs.types.typescript: the TypeScript
+  SDK decodes responses and validates inputs with the TypeScript types`,
+  so `build-all` fails at discovery, before any service is built. The
+  `@superschematic/schema-config` doc comment on `SdkOutputConfig` states
+  the rule. Output for every config that builds is unchanged. Patch.
+- `build-all` and `build --with-deps` refuse a service whose types in a
+  language import the types of a dependency that does not generate that
+  language: the dependencies it takes an enum, a union or an object type
+  from (an imported scalar is regenerated locally and needs nothing). The
+  Rust crate path-depended on a crate that was not there, the Go module
+  and the TypeScript package named a missing one, and the Python package
+  bound the imported types to `Any` and dropped their validation. The
+  service fails before its generators run, one line per dependency, such
+  as `shop-orders generates Rust types, which use shop-common's Rust
+  types; enable outputs.types.rust in shop-common`. A single `build` does
+  not read its dependencies' configs: it builds, and logs a
+  `- not checked:` line naming the dependencies and the switches they
+  need. The public `registry.Options` gains `DependencyConfig`, which
+  hands `generator.Run` the dependency configs; nil runs no check and logs
+  the line. The `@superschematic/schema-config` doc comment on
+  `TypesOutputConfig` states the rule. Output for every build that
+  succeeds is unchanged. Minor (new `registry.Options` field).
 - Verification refuses an `@index` of a DB table that the SQL generator
   cannot build: one with a key that resolves to no column of the table, or
   one with no keys. The SQL generator left such an index out of the DDL

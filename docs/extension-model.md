@@ -980,9 +980,16 @@ program.
 3. Take `reg.Pipeline(kind)`: the kind's `Pipeline` in order, then every
    other generator whose `Kinds` lists the kind, in registration order.
 4. Call each generator's `Enabled`. Collect the `Dirs` of the enabled ones
-   and fail, before any runs, if two claim the same directory, or if a
+   and fail, before any runs, if two claim the same directory, if a
    type composes a behavior and an enabled generator does not set
-   `RendersBehaviors` (section 3.16).
+   `RendersBehaviors` (section 3.16), or if `types` is enabled and a
+   library it writes imports the types of a dependency whose config does
+   not enable that language. The dependencies are the ones
+   `codegen.TypeDependencies` finds in `Schema.Imports`: those that
+   contribute an enum, a union or an object type rather than only
+   scalars. `Options.DependencyConfig` supplies their configs;
+   `build-all` and `build --with-deps` set it, and without it (a single
+   `build`) the run logs the dependencies it did not check.
 5. Run the enabled generators in order.
 6. Run the document generators: for every registered `DocumentSpec` with a
    `Generate` whose name is present in `Schema.Documents`, in name order.
@@ -999,8 +1006,10 @@ its `OutputKey`. The error lists the core keys in registration order
 (`types`, `sql`, `api`, `sdk`), then the extension keys sorted. It
 validates each section against the `OutputSchema` of the generator that
 claims its key, decodes the core sections into typed fields, checks their
-target languages, rejects an unknown key in `outputs.sql`, fills the API
-defaults, and keeps every section raw in `Outputs.Raw`. An extension
+target languages, rejects an `outputs.sdk` language whose `outputs.types`
+language is off (the SDK imports that types package), rejects an unknown
+key in `outputs.sql`, fills the API defaults, and keeps every section raw
+in `Outputs.Raw`. An extension
 generator reads its own section with `registry.DecodeOutput(outputs, key,
 &v)`, usually in `Enabled`; the section has already passed its
 `OutputSchema`.

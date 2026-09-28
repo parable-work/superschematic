@@ -98,7 +98,9 @@ as the schema spelled them.
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk` for Python writes
-`schemas_<stem>_sdk` (default prefix `schemas_`, suffix `_sdk`).
+`schemas_<stem>_sdk` (default prefix `schemas_`, suffix `_sdk`). It needs
+`outputs.types` for Python too: the SDK validates inputs with the types
+package, and the build refuses the config without it.
 
 ```python
 from schemas_catalog_sdk import CatalogSDK, ClientConfig

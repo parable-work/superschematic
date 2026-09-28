@@ -3,6 +3,7 @@ package registry
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -24,6 +25,33 @@ var knownTargetLanguages = map[string]bool{
 	LangTypeScript: true,
 	LangPython:     true,
 	LangRust:       true,
+}
+
+// languageNames spells each target language for messages.
+var languageNames = map[string]string{
+	LangGo:         "Go",
+	LangTypeScript: "TypeScript",
+	LangPython:     "Python",
+	LangRust:       "Rust",
+}
+
+// LanguageName returns the display name of a target language ("Rust" for
+// "rust"), or lang itself when it is not one.
+func LanguageName(lang string) string {
+	if name, ok := languageNames[lang]; ok {
+		return name
+	}
+	return lang
+}
+
+// sdkTypesUse says what the SDK of each language does with the types
+// package of the same language, for the error that refuses an SDK whose
+// types are not enabled.
+var sdkTypesUse = map[string]string{
+	LangGo:         "the Go SDK's methods take and return the Go types",
+	LangTypeScript: "the TypeScript SDK decodes responses and validates inputs with the TypeScript types",
+	LangPython:     "the Python SDK validates with the Python types and skips validation without them",
+	LangRust:       "the Rust SDK depends on the Rust types crate and its methods take and return its types",
 }
 
 // TargetOutputConfig is a per-language enable switch.
@@ -92,7 +120,8 @@ type Outputs struct {
 
 // ParseOutputs decodes the raw outputs block from schema.config into its
 // typed form, rejecting keys no registered generator claims, sections that
-// fail their generator's OutputSchema, and unknown target languages.
+// fail their generator's OutputSchema, unknown target languages, and an SDK
+// whose language has no types output (the SDK imports that package).
 func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 	if raw == nil {
 		return &Outputs{}, nil
@@ -130,6 +159,17 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 		if !knownTargetLanguages[lang] {
 			return nil, fmt.Errorf("outputs.sdk has unknown target language %q", lang)
 		}
+	}
+	// Each SDK imports the types package of its language, which only
+	// outputs.types generates.
+	var missingTypes []error
+	for _, lang := range outputs.EnabledSDKLanguages() {
+		if !outputs.TypesEnabled(lang) {
+			missingTypes = append(missingTypes, fmt.Errorf("outputs.sdk.%s needs outputs.types.%s: %s", lang, lang, sdkTypesUse[lang]))
+		}
+	}
+	if err := errors.Join(missingTypes...); err != nil {
+		return nil, err
 	}
 
 	// outputs.sql is read strictly: a misspelt key would otherwise leave

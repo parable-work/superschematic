@@ -5,6 +5,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/profile"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -40,6 +41,13 @@ type Options struct {
 	// name. Generators that alias imported definitions require it whenever
 	// the schema config declares dependencies.
 	LoadDependency func(name string) (*ir.Schema, error)
+
+	// DependencyConfig returns the config of a service dependency by name,
+	// false when the build does not know it. Run uses it to check that each
+	// dependency whose types this schema's type libraries import generates
+	// its own types in the same languages. build-all and build --with-deps
+	// set it; nil (a single build) makes Run log the check it skipped.
+	DependencyConfig func(name string) (*schemaconfig.SchemaConfig, bool)
 
 	// Clock stamps generated file headers. Defaults to the wall clock.
 	Clock codegen.Clock

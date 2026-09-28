@@ -38,6 +38,9 @@ export type TargetOutputConfig = {
   readonly enabled: boolean;
 };
 
+/**
+ * The type library in each language. A library imports the types of every dependency it takes types from, so each such dependency must enable the same languages; build-all and build --with-deps refuse a build where one does not.
+ */
 export type TypesOutputConfig = Partial<Record<TargetLanguage, TargetOutputConfig>>;
 
 /**
@@ -51,6 +54,9 @@ export type ApiOutputConfig = {
   readonly scaffoldsOutputDir?: string;
 };
 
+/**
+ * The client SDK in each language. An SDK imports the service's types in its language, so each enabled SDK language needs the same language enabled in types.
+ */
 export type SdkOutputConfig = Partial<Record<TargetLanguage, TargetOutputConfig>>;
 
 /**

@@ -1,0 +1,6 @@
+name: shop-common
+kind: General
+outputs:
+  types:
+    go: { enabled: true }
+    typescript: { enabled: true }

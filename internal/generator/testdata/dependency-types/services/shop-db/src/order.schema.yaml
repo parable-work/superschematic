@@ -1,0 +1,26 @@
+name: shop-db
+kind: DB
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+types:
+  Order:
+    name: Order
+    role: DBTable
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+        key: true
+      - name: status
+        typeRef: { name: OrderStatus }
+        required: true
+enums:
+  OrderStatus:
+    name: OrderStatus
+    values:
+      - name: Open
+        serializedAs: open
+      - name: Closed
+        serializedAs: closed

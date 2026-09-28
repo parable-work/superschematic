@@ -117,7 +117,10 @@ text; any other JSON type is `type`
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk` for TypeScript writes
-`@schemas/<name>-sdk`. The class is `<Name>SDK`:
+`@schemas/<name>-sdk`. It needs `outputs.types` for TypeScript too: the SDK
+decodes responses and validates inputs with the types package, a peer
+dependency, and the build refuses the config without it. The class is
+`<Name>SDK`:
 
 ```ts
 import { CatalogSDK } from "@schemas/catalog-sdk";
