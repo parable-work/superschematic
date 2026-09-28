@@ -2,6 +2,20 @@
   "name": "fixture-general",
   "kind": "General",
   "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "languagePrimitive": "number",
+      "typeMappings": {
+        "sql": "BIGINT"
+      }
+    },
+    "Identity.Name": {
+      "name": "Identity.Name",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "VARCHAR(80)"
+      }
+    },
     "Network.Url": {
       "name": "Network.Url",
       "languagePrimitive": "string",
@@ -76,6 +90,23 @@
           "validateMaxLength": 64,
           "validateListMin": 1,
           "validateListMax": 10
+        },
+        {
+          "name": "minCents",
+          "comment": "Scalars with rules of their own, checked after the scalar's.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 0
+        },
+        {
+          "name": "labels",
+          "typeRef": {
+            "name": "Identity.Name",
+            "isArray": true
+          },
+          "validateMaxLength": 16
         }
       ],
       "jsonField": true

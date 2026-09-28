@@ -13,6 +13,22 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- The generated TypeScript validator checks a scalar field's own rules.
+  For a field typed with a scalar it ran the scalar's validator and the
+  list bounds only, and dropped the field's `minLength`, `maxLength`,
+  `pattern`, `min` and `max`: `Validate<Generic.Int64, { min: 0 }>`
+  accepted `-1`, which the Go and Python validators and the three schema
+  runtimes report as `min`. The rules now follow the scalar's validation
+  on a single value, every `T[]` element, every innermost `T[][]` element
+  and every map value, with the rule names and messages the Go types use.
+  A rule checks only a value of its own JSON type, so a mistyped value is
+  still the scalar's one `type` error. A package whose only range rules
+  are on scalar fields now writes `validators/primitives.ts` for
+  `isFiniteNumber`. The parity matrix gains `ScalarRuleMatrix` (D14). The
+  Go and Python types already checked these rules, and the Rust types
+  have no validator; their generators are unchanged. Behavior change: a
+  generated TypeScript validator refuses a value its field's rules reject,
+  which it accepted. Minor.
 - Verification refuses version graph schemas the generators could not run
   correctly. A `@graphMember` may exclude from history only nullable
   fields (besides its audit fields), since Revert and Merge rebuild rows

@@ -2,6 +2,8 @@
 
 import type {
   JSDate,
+  GenericInt64,
+  IdentityName,
   NetworkUrl,
 } from './scalars';
 import type {
@@ -41,6 +43,9 @@ not normalize an absent optional list into an empty non-nil slice).
 export interface FixtureFilter {
   kind: string;
   values?: string[] | null;
+  /** Scalars with rules of their own, checked after the scalar's. */
+  minCents: number;
+  labels?: string[] | null;
 }
 
 export interface RetryPolicy {
