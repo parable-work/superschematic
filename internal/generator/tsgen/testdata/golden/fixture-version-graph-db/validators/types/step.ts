@@ -9,13 +9,17 @@ import {
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
 import { expectBoolean, expectNumber, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
-import type { Step, Recipe, RecipeRef } from '../../types';
+import type { Step, JSDate, Recipe, RecipeRef } from '../../types';
 
 import { validateIdentityUUIDRequired, validateIdentityUUID } from '../scalars/identity_uuid';
 
 import { validateGenericInt64Required, validateGenericInt64 } from '../scalars/generic_int64';
 
 import { validateGenericJSONRequired, validateGenericJSON } from '../scalars/generic_json';
+
+import { validateTemporalDateTimeRequired, validateTemporalDateTime } from '../scalars/temporal_date_time';
+
+import { parseTemporalDateTime as parseTemporalDateTimeFromLib } from 'superscalar/scalars';
 
 import { parseRecipeFromJSON, validateRecipe } from './recipe';
 
@@ -86,6 +90,34 @@ export function validateStep(value: Step | null | undefined): ValidationResult {
 
   expectString(errors, "scratch", value.scratch);
 
+  {
+    const [valid, fieldErrors] = validateTemporalDateTimeRequired(value.createdAt);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "createdAt", fieldErrors);
+    }
+  }
+
+  {
+    const [valid, fieldErrors] = validateIdentityUUIDRequired(value.createdBy);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "createdBy", fieldErrors);
+    }
+  }
+
+  {
+    const [valid, fieldErrors] = validateTemporalDateTimeRequired(value.updatedAt);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "updatedAt", fieldErrors);
+    }
+  }
+
+  {
+    const [valid, fieldErrors] = validateIdentityUUIDRequired(value.updatedBy);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "updatedBy", fieldErrors);
+    }
+  }
+
   if (value.entityKey !== null && value.entityKey !== undefined) {
     const [valid, fieldErrors] = validateIdentityUUID(value.entityKey);
     if (!valid && fieldErrors) {
@@ -150,6 +182,10 @@ const StepKnownFields = new Set<string>([
   'instruction',
   'timings',
   'scratch',
+  'createdAt',
+  'createdBy',
+  'updatedAt',
+  'updatedBy',
   'entityKey',
   'ref',
   'deletedOnRef',
@@ -240,6 +276,14 @@ export function parseStepFromJSON(input: unknown): Step {
     recipe: obj.recipe != null
       ? parseRecipeFromJSON(obj.recipe)
       : (obj.recipe as unknown as Recipe),
+
+    createdAt: obj.createdAt != null
+      ? (parseTemporalDateTimeFromLib(obj.createdAt as string) as JSDate)
+      : (obj.createdAt as unknown as JSDate),
+
+    updatedAt: obj.updatedAt != null
+      ? (parseTemporalDateTimeFromLib(obj.updatedAt as string) as JSDate)
+      : (obj.updatedAt as unknown as JSDate),
 
     ref: obj.ref != null
       ? parseRecipeRefFromJSON(obj.ref)

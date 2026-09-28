@@ -181,7 +181,7 @@ export interface RecipeRef {
 }
 
 /**
- * Step - One step of a recipe, ordered by position.
+ * Step - One step of a recipe, ordered by position; updatedBy names its row's writer.
  */
 export interface Step {
   id?: string | null;
@@ -190,6 +190,10 @@ export interface Step {
   instruction: string;
   timings: GenericJSON;
   scratch?: string | null;
+  createdAt: JSDate;
+  createdBy: string;
+  updatedAt: JSDate;
+  updatedBy: string;
   /** The entity's logical identity, shared by its rows on every ref. */
   entityKey?: string | null;
   /** The ref this row overrides the entity on. */

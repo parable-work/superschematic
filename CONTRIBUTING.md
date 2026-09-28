@@ -128,8 +128,8 @@ install they need, is missing. CI sets `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`,
 which turns each of those skips into a failure. Set it locally after
 `make setup` to run the same gates.
 
-The database tests (the generated ORM and history triggers, the projection
-migrations) skip unless `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` and
+The database tests (the generated ORM and history triggers, the
+version-graph shell, the projection migrations) skip unless `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` and
 `SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL` name a Postgres whose role may
 create schemas, databases and roles; each test creates and drops its own.
 CI runs them against a `postgres:16-alpine` container. Locally a throwaway
@@ -182,8 +182,9 @@ and concrete.
 
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
 `api`, `schema-config`, `schema-ir`, `schema-runtime`, `http-runtime`), the
-PyPI distribution (`superschematic-schema-runtime`), the crate
-(`superschematic-http-runtime`) and the four Go modules all carry the SemVer
+PyPI distribution (`superschematic-schema-runtime`), the crates
+(`superschematic-http-runtime`, and `superschematic-versiongraph`, which is
+not published) and the five Go modules all carry the SemVer
 version in `versions.env`, and `scripts/bump_version.py` is the only thing
 that writes it. `bump_version.py check` fails when any site disagrees; CI
 runs it on every pull request and the release workflow runs it before

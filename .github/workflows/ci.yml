@@ -125,6 +125,12 @@ jobs:
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
 
+      - name: Build the version-graph archive
+        # A generated ORM whose schema declares a version graph links the
+        # core's Go binding, and the ormgen tests build and run such modules
+        # against the archive this stages under runtime/versiongraph/go/lib.
+        run: scripts/versiongraph-archive.sh
+
       - name: Install the authoring packages
         # TestEmbeddedDefinitionIsCurrent regenerates the schema-config JSON
         # Schema with packages/schema-config's own tooling. Without this
@@ -182,7 +188,7 @@ jobs:
           SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
-          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
           for m in . ir runtime/schema/go runtime/http/go; do
             echo "==> $m"
             (cd "$m" && go build ./... && go vet ./... && go test -count=1 ./...)
@@ -295,6 +301,11 @@ jobs:
 
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
+
+      - name: Build the version-graph archive
+        # shop-db declares a version graph, so its generated ORM, and the API
+        # that imports it, link the core's Go binding against this archive.
+        run: scripts/versiongraph-archive.sh
 
       - name: Smoke (module tests, build-all, every surface, generated API compiles, core rejects Catalog)
         env:

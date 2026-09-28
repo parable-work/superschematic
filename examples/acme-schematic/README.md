@@ -36,6 +36,16 @@ field of `shop-api`'s `ProductView` and `CreateProductInput`, and the body
 argument of `replaceVariants`, which makes it a tool argument. The smoke
 follows it into every output that renders it.
 
+A shop's shelf plan is a version graph, declared in acme's own terms with
+the core's `@versionGraph`, `@graphMember` and `@conflictUnit` and no core
+edit (`schemas/services/shop-db/src/planogram.schema.ts`): a `Planogram`
+root, its `Bay` members ordered by position with a `keyed` conflict unit
+on `shelfHeights`, and `Facing` members under each bay. The loader adds
+`PlanogramRef`, `PlanogramCommit` and `PlanogramPatch`; the Go types write
+the graph's descriptor and the ORM `db.PlanogramGraph()`. The ORM, and
+`shop-api` through it, link the version-graph core's static archive,
+which `make setup` builds (`scripts/versiongraph-archive.sh`).
+
 ## Run it
 
 From the repository root, after `make setup`:
@@ -54,7 +64,7 @@ smoke, and fails if any path outside this directory changed. Both are the
 To poke at it by hand:
 
 ```sh
-export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
 cd examples/acme-schematic
 go build -o /tmp/acme-schematic ./cmd/acme-schematic
 /tmp/acme-schematic describe schemas
@@ -93,7 +103,8 @@ examples/acme-schematic/
     deps.json                 the committed copy of the dependency graph ([deps] copy)
     tsconfig.base.json        path aliases for @superschematic/*, @acme/* (@acme/schema-config included), superscalar
     services/shop-db          DB: User, Session, ApiKey, Product, StockLevel
-                              tables and the storefront.stock projection
+                              tables, the storefront.stock projection and
+                              the Planogram version graph (Bay, Facing)
     services/shop-api         API: ProductQueries, ProductMutations over shop-db, with @docs, @mcp, @icon
     services/shop-config      General: ShopConfig with @envVars and field @docs/@purpose/@icon
     services/shop-catalog     Catalog: Product, Bundle with @shelf and @feedKey; Product.photo, an Acme.Photo upload; catalog.config.yaml

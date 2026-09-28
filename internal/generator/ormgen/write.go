@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/profile"
 )
 
@@ -19,6 +20,15 @@ type RepositoryOutput struct {
 	Timestamp    string
 	UUIDGoType   string
 	UserIDGoType string
+}
+
+// VersionGraphOutput wraps one version graph with module-level metadata for
+// the version graph shell template.
+type VersionGraphOutput struct {
+	VersionGraph
+	TypesModule string
+	UUIDGoType  string
+	Naming      naming.Naming
 }
 
 // WriteORM writes the generated ORM module into outputDir.
@@ -67,6 +77,9 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	if err := cleanStaleRepositoryFiles(outputDir, output.Repositories); err != nil {
 		return fmt.Errorf("failed to clean stale repository files: %w", err)
 	}
+	if err := cleanStaleVersionGraphFiles(outputDir, output.VersionGraphs); err != nil {
+		return fmt.Errorf("failed to clean stale version graph files: %w", err)
+	}
 
 	repositoryTasks := make([]func() error, 0, len(output.Repositories))
 	for _, repo := range output.Repositories {
@@ -87,7 +100,61 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 		})
 	}
 
+	if len(output.VersionGraphs) > 0 {
+		repositoryTasks = append(repositoryTasks, func() error {
+			if err := generateFile(generator, "versiongraph.tmpl", filepath.Join(outputDir, "versiongraph.go"), output); err != nil {
+				return fmt.Errorf("failed to write versiongraph.go: %w", err)
+			}
+			return nil
+		})
+	}
+	for _, graph := range output.VersionGraphs {
+		graph := graph
+		repositoryTasks = append(repositoryTasks, func() error {
+			filename := versionGraphFileName(graph)
+			graphOutput := VersionGraphOutput{
+				VersionGraph: graph,
+				TypesModule:  output.TypesModule,
+				UUIDGoType:   output.UUIDGoType,
+				Naming:       output.Naming,
+			}
+			if err := generateFile(generator, "versiongraph_graph.tmpl", filepath.Join(outputDir, filename), graphOutput); err != nil {
+				return fmt.Errorf("failed to write %s: %w", filename, err)
+			}
+			return nil
+		})
+	}
+
 	return codegen.RunParallel(repositoryTasks)
+}
+
+func versionGraphFileName(graph VersionGraph) string {
+	return "versiongraph_" + graph.FileName + ".go"
+}
+
+// cleanStaleVersionGraphFiles removes versiongraph.go and the
+// versiongraph_*.go shells of graphs the schema no longer declares.
+func cleanStaleVersionGraphFiles(outputDir string, graphs []VersionGraph) error {
+	expected := make(map[string]struct{}, len(graphs)+1)
+	if len(graphs) > 0 {
+		expected["versiongraph.go"] = struct{}{}
+	}
+	for _, graph := range graphs {
+		expected[versionGraphFileName(graph)] = struct{}{}
+	}
+	matches, err := filepath.Glob(filepath.Join(outputDir, "versiongraph*.go"))
+	if err != nil {
+		return err
+	}
+	for _, match := range matches {
+		if _, ok := expected[filepath.Base(match)]; ok {
+			continue
+		}
+		if err := os.Remove(match); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // cleanStaleRepositoryFiles removes repository_*.go files whose table no

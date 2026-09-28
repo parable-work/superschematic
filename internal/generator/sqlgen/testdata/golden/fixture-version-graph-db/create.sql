@@ -110,13 +110,17 @@ CREATE TABLE step (
   instruction TEXT NOT NULL,
   timings JSONB NOT NULL,
   scratch TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  created_by UUID NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_by UUID NOT NULL,
   entity_key UUID DEFAULT gen_random_uuid() NOT NULL,
   ref_id UUID NOT NULL,
   deleted_on_ref BOOLEAN NOT NULL,
   _version BIGINT DEFAULT 1 NOT NULL
 );
 
-COMMENT ON TABLE step IS 'One step of a recipe, ordered by position.';
+COMMENT ON TABLE step IS 'One step of a recipe, ordered by position; updatedBy names its row''s writer.';
 
 -- Create history tables for versioned entities
 
@@ -541,7 +545,8 @@ BEGIN
     -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
     -- the unique history index holds and the latest history row for a deleted key
     -- is the DELETE. The data payload is the pre-delete image at the tombstone's
-    -- version.
+    -- version. Its updated_by is the actor a hard delete set in
+    -- superschematic.history_actor_id for the statement, else the row's own value.
     -- Every image leaves out scratch.
     INSERT INTO step_history (id, _version, operation, data)
     VALUES (
@@ -549,7 +554,11 @@ BEGIN
       OLD._version + 1,
       'DELETE',
       (to_jsonb(OLD) - ARRAY['scratch']) || jsonb_build_object(
-        '_version', OLD._version + 1
+        '_version', OLD._version + 1,
+        'updated_by', COALESCE(
+          NULLIF(current_setting('superschematic.history_actor_id', true), '')::UUID,
+          OLD.updated_by
+        )
       )
     );
     RETURN OLD;

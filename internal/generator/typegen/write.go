@@ -199,6 +199,41 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		return fmt.Errorf("failed to generate README.md: %w", err)
 	}
 
+	return writeVersionGraphDescriptors(output.VersionGraphs, filepath.Join(outputDir, "versiongraph"))
+}
+
+// writeVersionGraphDescriptors writes each version graph's descriptor as
+// <dir>/<name>.json and removes the directory's other descriptors, so a
+// graph the schema dropped leaves none behind.
+func writeVersionGraphDescriptors(graphs []VersionGraphDescriptor, dir string) error {
+	if len(graphs) == 0 {
+		if err := os.RemoveAll(dir); err != nil {
+			return fmt.Errorf("failed to remove stale version graph descriptors: %w", err)
+		}
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("failed to create %s: %w", dir, err)
+	}
+	keep := map[string]bool{}
+	for _, graph := range graphs {
+		name := graph.FileName + ".json"
+		keep[name] = true
+		if err := os.WriteFile(filepath.Join(dir, name), graph.JSON, 0o644); err != nil {
+			return fmt.Errorf("failed to write versiongraph/%s: %w", name, err)
+		}
+	}
+	stale, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	if err != nil {
+		return err
+	}
+	for _, path := range stale {
+		if !keep[filepath.Base(path)] {
+			if err := os.Remove(path); err != nil {
+				return fmt.Errorf("failed to remove stale %s: %w", path, err)
+			}
+		}
+	}
 	return nil
 }
 

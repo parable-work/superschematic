@@ -77,6 +77,11 @@ type Naming struct {
 	HTTPRuntimeRustCrate  string `toml:"http_runtime_rust_crate"`
 	PtrGoModule           string `toml:"ptr_go_module"`
 
+	// VersionGraphGoModule is the Go binding of the version-graph core
+	// (D17), which a generated ORM imports when its schema declares a
+	// graph. It links the core's static archive through cgo.
+	VersionGraphGoModule string `toml:"versiongraph_go_module"`
+
 	// HTTPRuntimeNpmPackage is the npm package the generated TypeScript
 	// API router imports its request pipeline from.
 	HTTPRuntimeNpmPackage string `toml:"http_runtime_npm_package"`
@@ -194,6 +199,8 @@ type PathsConfig struct {
 	SchemaIR string `toml:"schema_ir"`
 	// SchemaRuntimeGo holds the schema runtime Go module.
 	SchemaRuntimeGo string `toml:"schema_runtime_go"`
+	// VersionGraphGo holds the version-graph core's Go binding module.
+	VersionGraphGo string `toml:"versiongraph_go"`
 	// HTTPRuntimeGo holds the http runtime Go module.
 	HTTPRuntimeGo string `toml:"http_runtime_go"`
 	// HTTPRuntimeRust holds the http runtime Rust crate.
@@ -211,6 +218,7 @@ type LocalPaths struct {
 	ScalarRust       string
 	SchemaIR         string
 	SchemaRuntimeGo  string
+	VersionGraphGo   string
 	HTTPRuntimeGo    string
 	HTTPRuntimeRust  string
 	Ptr              string
@@ -230,6 +238,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		ScalarRust:       resolve(n.Paths.ScalarRust),
 		SchemaIR:         resolve(n.Paths.SchemaIR),
 		SchemaRuntimeGo:  resolve(n.Paths.SchemaRuntimeGo),
+		VersionGraphGo:   resolve(n.Paths.VersionGraphGo),
 		HTTPRuntimeGo:    resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:  resolve(n.Paths.HTTPRuntimeRust),
 		Ptr:              resolve(n.Paths.Ptr),
@@ -300,6 +309,7 @@ func Default() Naming {
 		ScalarRustCrate:         "superscalar",
 		SchemaIRGoModule:        "github.com/parable-work/superschematic/ir",
 		SchemaRuntimeGoModule:   "github.com/parable-work/superschematic/runtime/schema/go",
+		VersionGraphGoModule:    "github.com/parable-work/superschematic/runtime/versiongraph/go",
 		HTTPRuntimeGoModule:     "github.com/parable-work/superschematic/runtime/http/go",
 		HTTPRuntimeRustCrate:    "superschematic-http-runtime",
 		PtrGoModule:             "github.com/parable-work/superschematic/runtime/schema/go/ptr",
@@ -343,6 +353,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.ScalarRustCrate, d.ScalarRustCrate)
 	fill(&n.SchemaIRGoModule, d.SchemaIRGoModule)
 	fill(&n.SchemaRuntimeGoModule, d.SchemaRuntimeGoModule)
+	fill(&n.VersionGraphGoModule, d.VersionGraphGoModule)
 	fill(&n.HTTPRuntimeGoModule, d.HTTPRuntimeGoModule)
 	fill(&n.HTTPRuntimeRustCrate, d.HTTPRuntimeRustCrate)
 	fill(&n.PtrGoModule, d.PtrGoModule)

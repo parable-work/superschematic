@@ -68,6 +68,7 @@ schema_ir = "../../ir"
 schema_runtime_go = "../../runtime/schema/go"
 http_runtime_go = "../../runtime/http/go"
 http_runtime_rust = "../../runtime/http/rust"
+versiongraph_go = "../../runtime/versiongraph/go"
 
 # build-all writes the dependency graph of the generated packages to
 # dist/.deps.json and, with this key, a copy at this path, relative to the

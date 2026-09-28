@@ -48,6 +48,26 @@ func decodeStepHistoryData(raw []byte) (*types.Step, error) {
 			return nil, fmt.Errorf("failed to decode history field scratch: %w", err)
 		}
 	}
+	if rawValue, ok := values["created_at"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
+		if err := json.Unmarshal(rawValue, &result.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to decode history field created_at: %w", err)
+		}
+	}
+	if rawValue, ok := values["created_by"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
+		if err := json.Unmarshal(rawValue, &result.CreatedBy); err != nil {
+			return nil, fmt.Errorf("failed to decode history field created_by: %w", err)
+		}
+	}
+	if rawValue, ok := values["updated_at"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
+		if err := json.Unmarshal(rawValue, &result.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to decode history field updated_at: %w", err)
+		}
+	}
+	if rawValue, ok := values["updated_by"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
+		if err := json.Unmarshal(rawValue, &result.UpdatedBy); err != nil {
+			return nil, fmt.Errorf("failed to decode history field updated_by: %w", err)
+		}
+	}
 	if rawValue, ok := values["entity_key"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
 		if err := json.Unmarshal(rawValue, &result.EntityKey); err != nil {
 			return nil, fmt.Errorf("failed to decode history field entity_key: %w", err)
@@ -95,6 +115,10 @@ var StepAllowedFields = map[string]bool{
 	"instruction":    true,
 	"timings":        true,
 	"scratch":        true,
+	"created_at":     true,
+	"created_by":     true,
+	"updated_at":     true,
+	"updated_by":     true,
 	"entity_key":     true,
 	"deleted_on_ref": true,
 	"_version":       true,
@@ -109,6 +133,10 @@ var StepQuotedFields = map[string]string{
 	"instruction":    `instruction`,
 	"timings":        `timings`,
 	"scratch":        `scratch`,
+	"created_at":     `created_at`,
+	"created_by":     `created_by`,
+	"updated_at":     `updated_at`,
+	"updated_by":     `updated_by`,
 	"entity_key":     `entity_key`,
 	"deleted_on_ref": `deleted_on_ref`,
 	"_version":       `_version`,
@@ -605,6 +633,18 @@ func (r *StepRepository) GetOne(ctx context.Context, id types.IdentityUUID, opts
 		if opts.Fields.Scratch {
 			fieldStrings = append(fieldStrings, "scratch")
 		}
+		if opts.Fields.CreatedAt {
+			fieldStrings = append(fieldStrings, "created_at")
+		}
+		if opts.Fields.CreatedBy {
+			fieldStrings = append(fieldStrings, "created_by")
+		}
+		if opts.Fields.UpdatedAt {
+			fieldStrings = append(fieldStrings, "updated_at")
+		}
+		if opts.Fields.UpdatedBy {
+			fieldStrings = append(fieldStrings, "updated_by")
+		}
 		if opts.Fields.EntityKey {
 			fieldStrings = append(fieldStrings, "entity_key")
 		}
@@ -625,7 +665,7 @@ func (r *StepRepository) GetOne(ctx context.Context, id types.IdentityUUID, opts
 		query = fmt.Sprintf(`SELECT %s FROM step WHERE id = $1`, selectFields)
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		query = `SELECT "id", "recipe_id", "position", "instruction", "timings", "scratch", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM step WHERE id = $1`
+		query = `SELECT "id", "recipe_id", "position", "instruction", "timings", "scratch", "created_at", "created_by", "updated_at", "updated_by", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM step WHERE id = $1`
 	}
 
 	// Execute query
@@ -670,6 +710,14 @@ func (r *StepRepository) GetOne(ctx context.Context, id types.IdentityUUID, opts
 			case "scratch":
 				scanDest[i] = &tempScratch
 				selectedScratch = true
+			case "created_at":
+				scanDest[i] = &result.CreatedAt
+			case "created_by":
+				scanDest[i] = &result.CreatedBy
+			case "updated_at":
+				scanDest[i] = &result.UpdatedAt
+			case "updated_by":
+				scanDest[i] = &result.UpdatedBy
 			case "entity_key":
 				scanDest[i] = &result.EntityKey
 			case "deleted_on_ref":
@@ -722,6 +770,14 @@ func (r *StepRepository) GetOne(ctx context.Context, id types.IdentityUUID, opts
 			&tempTimings,
 
 			&tempScratch,
+
+			&result.CreatedAt,
+
+			&result.CreatedBy,
+
+			&result.UpdatedAt,
+
+			&result.UpdatedBy,
 
 			&result.EntityKey,
 
@@ -839,7 +895,7 @@ func (r *StepRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityU
 	}
 
 	// Build query with explicit column order
-	query := fmt.Sprintf(`SELECT "id", "recipe_id", "position", "instruction", "timings", "scratch", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM step WHERE id IN (%s)`, strings.Join(placeholders, ", "))
+	query := fmt.Sprintf(`SELECT "id", "recipe_id", "position", "instruction", "timings", "scratch", "created_at", "created_by", "updated_at", "updated_by", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM step WHERE id IN (%s)`, strings.Join(placeholders, ", "))
 
 	// Execute query
 	var rows pgx.Rows
@@ -882,6 +938,14 @@ func (r *StepRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityU
 			&tempTimings,
 
 			&tempScratch,
+
+			&entity.CreatedAt,
+
+			&entity.CreatedBy,
+
+			&entity.UpdatedAt,
+
+			&entity.UpdatedBy,
 
 			&entity.EntityKey,
 
@@ -955,6 +1019,18 @@ func (r *StepRepository) FindOne(ctx context.Context, filter *StepFilter, opts *
 		if opts.Fields.Scratch {
 			fieldStrings = append(fieldStrings, "scratch")
 		}
+		if opts.Fields.CreatedAt {
+			fieldStrings = append(fieldStrings, "created_at")
+		}
+		if opts.Fields.CreatedBy {
+			fieldStrings = append(fieldStrings, "created_by")
+		}
+		if opts.Fields.UpdatedAt {
+			fieldStrings = append(fieldStrings, "updated_at")
+		}
+		if opts.Fields.UpdatedBy {
+			fieldStrings = append(fieldStrings, "updated_by")
+		}
 		if opts.Fields.EntityKey {
 			fieldStrings = append(fieldStrings, "entity_key")
 		}
@@ -974,7 +1050,7 @@ func (r *StepRepository) FindOne(ctx context.Context, filter *StepFilter, opts *
 		selectFields = buildSelectFieldsTyped(fieldStrings, "step")
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		selectFields = `"id", "recipe_id", "position", "instruction", "timings", "scratch", "entity_key", "ref_id", "deleted_on_ref", "_version"`
+		selectFields = `"id", "recipe_id", "position", "instruction", "timings", "scratch", "created_at", "created_by", "updated_at", "updated_by", "entity_key", "ref_id", "deleted_on_ref", "_version"`
 		if opts == nil {
 			opts = &StepFindOptions{}
 		}
@@ -1032,6 +1108,14 @@ func (r *StepRepository) FindOne(ctx context.Context, filter *StepFilter, opts *
 			case "scratch":
 				scanDest[i] = &tempScratch
 				selectedScratch = true
+			case "created_at":
+				scanDest[i] = &result.CreatedAt
+			case "created_by":
+				scanDest[i] = &result.CreatedBy
+			case "updated_at":
+				scanDest[i] = &result.UpdatedAt
+			case "updated_by":
+				scanDest[i] = &result.UpdatedBy
 			case "entity_key":
 				scanDest[i] = &result.EntityKey
 			case "deleted_on_ref":
@@ -1089,6 +1173,14 @@ func (r *StepRepository) FindOne(ctx context.Context, filter *StepFilter, opts *
 			&tempTimings,
 
 			&tempScratch,
+
+			&result.CreatedAt,
+
+			&result.CreatedBy,
+
+			&result.UpdatedAt,
+
+			&result.UpdatedBy,
 
 			&result.EntityKey,
 
@@ -1207,6 +1299,18 @@ func (r *StepRepository) FindMany(ctx context.Context, filter *StepFilter, opts 
 	if opts.Fields.Scratch {
 		fieldStrings = append(fieldStrings, "scratch")
 	}
+	if opts.Fields.CreatedAt {
+		fieldStrings = append(fieldStrings, "created_at")
+	}
+	if opts.Fields.CreatedBy {
+		fieldStrings = append(fieldStrings, "created_by")
+	}
+	if opts.Fields.UpdatedAt {
+		fieldStrings = append(fieldStrings, "updated_at")
+	}
+	if opts.Fields.UpdatedBy {
+		fieldStrings = append(fieldStrings, "updated_by")
+	}
 	if opts.Fields.EntityKey {
 		fieldStrings = append(fieldStrings, "entity_key")
 	}
@@ -1305,6 +1409,14 @@ func (r *StepRepository) FindMany(ctx context.Context, filter *StepFilter, opts 
 			case "scratch":
 				scanDest[i] = &tempScratch
 				selectedScratch = true
+			case "created_at":
+				scanDest[i] = &result.CreatedAt
+			case "created_by":
+				scanDest[i] = &result.CreatedBy
+			case "updated_at":
+				scanDest[i] = &result.UpdatedAt
+			case "updated_by":
+				scanDest[i] = &result.UpdatedBy
 			case "entity_key":
 				scanDest[i] = &result.EntityKey
 			case "deleted_on_ref":
@@ -1442,6 +1554,11 @@ func (r *StepRepository) FindMany(ctx context.Context, filter *StepFilter, opts 
 // CreateOne inserts a new Step record
 func (r *StepRepository) CreateOne(ctx context.Context, input *types.Step) (*types.Step, error) {
 	// Set audit fields
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	input.CreatedBy = GetUserID(ctx)
+	input.UpdatedBy = GetUserID(ctx)
 
 	// Build INSERT query
 	var fields []string
@@ -1487,6 +1604,16 @@ func (r *StepRepository) CreateOne(ctx context.Context, input *types.Step) (*typ
 			values = append(values, input.Scratch)
 		}
 	}
+	// Required field: createdBy
+	fields = append(fields, `created_by`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.CreatedBy.ToUUID())
+	// Required field: updatedBy
+	fields = append(fields, `updated_by`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.UpdatedBy.ToUUID())
 	// Auto-generated field: entityKey - only add if set
 	{
 		if !reflect.ValueOf(input.EntityKey).IsZero() {
@@ -1525,7 +1652,7 @@ func (r *StepRepository) CreateOne(ctx context.Context, input *types.Step) (*typ
 	}
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClause := `"id", "recipe_id", "position", "instruction", "timings", "scratch", "entity_key", "ref_id", "deleted_on_ref", "_version"`
+	returningClause := `"id", "recipe_id", "position", "instruction", "timings", "scratch", "created_at", "created_by", "updated_at", "updated_by", "entity_key", "ref_id", "deleted_on_ref", "_version"`
 	query := fmt.Sprintf(
 		`INSERT INTO step (%s) VALUES (%s) RETURNING %s`,
 		strings.Join(fields, ", "),
@@ -1567,6 +1694,14 @@ func (r *StepRepository) CreateOne(ctx context.Context, input *types.Step) (*typ
 
 		&tempScratch,
 
+		&result.CreatedAt,
+
+		&result.CreatedBy,
+
+		&result.UpdatedAt,
+
+		&result.UpdatedBy,
+
 		&result.EntityKey,
 
 		&tempRelRef,
@@ -1607,6 +1742,15 @@ func (r *StepRepository) CreateMany(ctx context.Context, inputs []*types.Step) (
 	}
 
 	// Set audit fields
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	for _, input := range inputs {
+		input.CreatedBy = GetUserID(ctx)
+	}
+	for _, input := range inputs {
+		input.UpdatedBy = GetUserID(ctx)
+	}
 
 	// Build batch INSERT query - collect field names from first input
 	var fieldNames []string
@@ -1632,6 +1776,8 @@ func (r *StepRepository) CreateMany(ctx context.Context, inputs []*types.Step) (
 	fieldNames = append(fieldNames, `position`)
 	fieldNames = append(fieldNames, `instruction`)
 	fieldNames = append(fieldNames, `timings`)
+	fieldNames = append(fieldNames, `created_by`)
+	fieldNames = append(fieldNames, `updated_by`)
 	fieldNames = append(fieldNames, `deleted_on_ref`)
 
 	// Add optional/auto-generated fields that are set in first input
@@ -1694,6 +1840,12 @@ func (r *StepRepository) CreateMany(ctx context.Context, inputs []*types.Step) (
 				values = append(values, input.Scratch)
 			}
 		}
+		paramNum++
+		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+		values = append(values, input.CreatedBy.ToUUID())
+		paramNum++
+		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+		values = append(values, input.UpdatedBy.ToUUID())
 		{
 			if !reflect.ValueOf(input.EntityKey).IsZero() {
 				paramNum++
@@ -1728,7 +1880,7 @@ func (r *StepRepository) CreateMany(ctx context.Context, inputs []*types.Step) (
 	}
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "recipe_id", "position", "instruction", "timings", "scratch", "entity_key", "ref_id", "deleted_on_ref", "_version"`
+	returningClauseMany := `"id", "recipe_id", "position", "instruction", "timings", "scratch", "created_at", "created_by", "updated_at", "updated_by", "entity_key", "ref_id", "deleted_on_ref", "_version"`
 	query := fmt.Sprintf(
 		`INSERT INTO step (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
@@ -1776,6 +1928,14 @@ func (r *StepRepository) CreateMany(ctx context.Context, inputs []*types.Step) (
 			&tempTimings,
 
 			&tempScratch,
+
+			&result.CreatedAt,
+
+			&result.CreatedBy,
+
+			&result.UpdatedAt,
+
+			&result.UpdatedBy,
 
 			&result.EntityKey,
 
@@ -1909,8 +2069,20 @@ func (r *StepRepository) updateOne(ctx context.Context, id types.IdentityUUID, u
 	}
 
 	// Set updated_at
+	paramNum++
+	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
+	values = append(values, time.Now())
 
 	// Set updated_by
+	if update.UpdatedBy != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+		values = append(values, *update.UpdatedBy)
+	} else if HasUserID(ctx) {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+		values = append(values, GetUserID(ctx))
+	}
 
 	if len(setClauses) == 0 {
 		return nil, fmt.Errorf("no fields to update")
@@ -1931,7 +2103,7 @@ func (r *StepRepository) updateOne(ctx context.Context, id types.IdentityUUID, u
 	}
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	query += ` RETURNING "id", "recipe_id", "position", "instruction", "timings", "scratch", "entity_key", "ref_id", "deleted_on_ref", "_version"`
+	query += ` RETURNING "id", "recipe_id", "position", "instruction", "timings", "scratch", "created_at", "created_by", "updated_at", "updated_by", "entity_key", "ref_id", "deleted_on_ref", "_version"`
 
 	// Execute query
 	var row pgx.Row
@@ -1966,6 +2138,14 @@ func (r *StepRepository) updateOne(ctx context.Context, id types.IdentityUUID, u
 		&tempTimings,
 
 		&tempScratch,
+
+		&result.CreatedAt,
+
+		&result.CreatedBy,
+
+		&result.UpdatedAt,
+
+		&result.UpdatedBy,
 
 		&result.EntityKey,
 
@@ -2065,8 +2245,20 @@ func (r *StepRepository) UpdateMany(ctx context.Context, filter *StepFilter, upd
 	}
 
 	// Set updated_at
+	paramNum++
+	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
+	values = append(values, time.Now())
 
 	// Set updated_by
+	if update.UpdatedBy != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+		values = append(values, *update.UpdatedBy)
+	} else if HasUserID(ctx) {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+		values = append(values, GetUserID(ctx))
+	}
 
 	if len(setClauses) == 0 {
 		return 0, fmt.Errorf("no fields to update")
@@ -2096,16 +2288,21 @@ func (r *StepRepository) UpdateMany(ctx context.Context, filter *StepFilter, upd
 	return int(result.RowsAffected()), nil
 }
 
-// DeleteOne permanently deletes a single Step record by ID
+// DeleteOne permanently deletes a single Step record by ID.
+// The history tombstone records the context user as its updated_by.
 func (r *StepRepository) DeleteOne(ctx context.Context, id types.IdentityUUID) error {
-	query := `DELETE FROM step WHERE id = $1`
+	query := historyActorCTE + `DELETE FROM step USING history_actor WHERE id = $2`
+	queryArgs := []interface{}{historyActor(ctx), id.ToUUID()}
 
 	var result pgconn.CommandTag
 	var err error
 	if r.tx != nil {
-		result, err = r.tx.Exec(ctx, query, id.ToUUID())
+		result, err = r.tx.Exec(ctx, query, queryArgs...)
+		if err == nil {
+			err = clearHistoryActor(ctx, r.tx)
+		}
 	} else {
-		result, err = r.db.pool.Exec(ctx, query, id.ToUUID())
+		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to delete record: %w", err)
@@ -2121,14 +2318,18 @@ func (r *StepRepository) DeleteOne(ctx context.Context, id types.IdentityUUID) e
 // DeleteOneIfVersion permanently deletes a single Step only if its
 // current _version matches expectedVersion. It returns ErrVersionConflict when
 // the row exists at another version and ErrNotFound when it does not exist.
+// The history tombstone records the context user as its updated_by.
 func (r *StepRepository) DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error {
-	query := `DELETE FROM step WHERE id = $1 AND _version = $2`
-	queryArgs := []interface{}{id.ToUUID(), expectedVersion}
+	query := historyActorCTE + `DELETE FROM step USING history_actor WHERE id = $2 AND _version = $3`
+	queryArgs := []interface{}{historyActor(ctx), id.ToUUID(), expectedVersion}
 
 	var result pgconn.CommandTag
 	var err error
 	if r.tx != nil {
 		result, err = r.tx.Exec(ctx, query, queryArgs...)
+		if err == nil {
+			err = clearHistoryActor(ctx, r.tx)
+		}
 	} else {
 		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
 	}
@@ -2143,18 +2344,22 @@ func (r *StepRepository) DeleteOneIfVersion(ctx context.Context, id types.Identi
 	return nil
 }
 
-// DeleteMany permanently deletes multiple Step records matching the filter
+// DeleteMany permanently deletes multiple Step records matching the filter.
+// Each history tombstone records the context user as its updated_by.
 func (r *StepRepository) DeleteMany(ctx context.Context, filter *StepFilter) (int, error) {
-	// Build WHERE clause
-	var values []interface{}
-	whereClause := filter.buildWhereClause(&values, 0)
+	// Build WHERE clause after the actor, historyActorCTE's $1
+	values := []interface{}{historyActor(ctx)}
+	whereClause := filter.buildWhereClause(&values, 1)
 
-	query := fmt.Sprintf(`DELETE FROM step%s`, whereClause)
+	query := historyActorCTE + fmt.Sprintf(`DELETE FROM step USING history_actor%s`, whereClause)
 
 	var result pgconn.CommandTag
 	var err error
 	if r.tx != nil {
 		result, err = r.tx.Exec(ctx, query, values...)
+		if err == nil {
+			err = clearHistoryActor(ctx, r.tx)
+		}
 	} else {
 		result, err = r.db.pool.Exec(ctx, query, values...)
 	}

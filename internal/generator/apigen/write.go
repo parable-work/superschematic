@@ -201,6 +201,11 @@ func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir strin
 	if output.PtrReplacePath, err = naming.RelPath(outputDir, paths.Ptr); err != nil {
 		return fmt.Errorf("ptr replace path: %w", err)
 	}
+	if output.IsPublic && output.UpstreamVersionGraph {
+		if output.VersionGraphReplacePath, err = naming.RelPath(outputDir, paths.VersionGraphGo); err != nil {
+			return fmt.Errorf("version-graph binding replace path: %w", err)
+		}
+	}
 	return nil
 }
 

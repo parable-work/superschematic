@@ -1121,6 +1121,10 @@ type StepFields struct {
 	Instruction  bool
 	Timings      bool
 	Scratch      bool
+	CreatedAt    bool
+	CreatedBy    bool
+	UpdatedAt    bool
+	UpdatedBy    bool
 	EntityKey    bool
 	DeletedOnRef bool
 	Version      bool
@@ -1155,6 +1159,18 @@ func (f StepFields) ToStringSlice() []string {
 	}
 	if f.Scratch {
 		fields = append(fields, "scratch")
+	}
+	if f.CreatedAt {
+		fields = append(fields, "created_at")
+	}
+	if f.CreatedBy {
+		fields = append(fields, "created_by")
+	}
+	if f.UpdatedAt {
+		fields = append(fields, "updated_at")
+	}
+	if f.UpdatedBy {
+		fields = append(fields, "updated_by")
 	}
 	if f.EntityKey {
 		fields = append(fields, "entity_key")
@@ -1193,6 +1209,10 @@ func (StepFields) All() StepFields {
 		Instruction:  true,
 		Timings:      true,
 		Scratch:      true,
+		CreatedAt:    true,
+		CreatedBy:    true,
+		UpdatedAt:    true,
+		UpdatedBy:    true,
 		EntityKey:    true,
 		DeletedOnRef: true,
 		Version:      true,
@@ -1231,6 +1251,10 @@ const (
 	StepOrderByInstruction  StepOrderByField = "instruction"
 	StepOrderByTimings      StepOrderByField = "timings"
 	StepOrderByScratch      StepOrderByField = "scratch"
+	StepOrderByCreatedAt    StepOrderByField = "created_at"
+	StepOrderByCreatedBy    StepOrderByField = "created_by"
+	StepOrderByUpdatedAt    StepOrderByField = "updated_at"
+	StepOrderByUpdatedBy    StepOrderByField = "updated_by"
 	StepOrderByEntityKey    StepOrderByField = "entity_key"
 	StepOrderByDeletedOnRef StepOrderByField = "deleted_on_ref"
 	StepOrderByVersion      StepOrderByField = "_version"
@@ -2333,11 +2357,10 @@ func NewRecipeCommitSnapshotUpdate(input *types.RecipeCommit) *RecipeCommitUpdat
 	}
 	update.SchemaEpoch = &input.SchemaEpoch
 	update.ContentHash = &input.ContentHash
-	var zeroSequence types.GenericInt64
-	if input.Sequence == zeroSequence {
+	if input.Sequence == nil {
 		update.SequenceSetNull = true
 	} else {
-		update.Sequence = &input.Sequence
+		update.Sequence = input.Sequence
 	}
 	return update
 }
@@ -2361,10 +2384,9 @@ func (u *RecipeCommitUpdate) ApplyTo(row *types.RecipeCommit) {
 		row.ContentHash = *u.ContentHash
 	}
 	if u.SequenceSetNull {
-		var zeroSequence types.GenericInt64
-		row.Sequence = zeroSequence
+		row.Sequence = nil
 	} else if u.Sequence != nil {
-		row.Sequence = *u.Sequence
+		row.Sequence = u.Sequence
 	}
 	if u.RootID != nil {
 		row.Root.Id = u.RootID
@@ -3424,6 +3446,8 @@ type StepFilter struct {
 	Instruction  *StringFilter
 	Timings      *StringFilter
 	Scratch      *StringFilter
+	CreatedAt    *DateTimeFilter
+	UpdatedAt    *DateTimeFilter
 	EntityKey    *UUIDFilter
 	DeletedOnRef *BoolFilter
 	Version      *Int64Filter
@@ -3504,6 +3528,9 @@ func (u *StepUpdate) ApplyTo(row *types.Step) {
 	}
 	if u.RefID != nil {
 		row.Ref.Id = u.RefID
+	}
+	if u.UpdatedBy != nil {
+		row.UpdatedBy = *u.UpdatedBy
 	}
 }
 
@@ -3634,6 +3661,90 @@ func (f *StepFilter) buildWhereClause(args *[]interface{}, paramOffset int) stri
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`step.scratch ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Scratch.ILike+"%")
+		}
+	}
+	if f.CreatedAt != nil {
+		if f.CreatedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.created_at = $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Eq)
+		}
+		if f.CreatedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.created_at > $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gt)
+		}
+		if f.CreatedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.created_at >= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gte)
+		}
+		if f.CreatedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.created_at < $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lt)
+		}
+		if f.CreatedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.created_at <= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lte)
+		}
+		if f.CreatedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.created_at >= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.created_at <= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.End)
+		}
+		if f.CreatedAt.IsNull != nil {
+			if *f.CreatedAt.IsNull {
+				conditions = append(conditions, `step.created_at IS NULL`)
+			} else {
+				conditions = append(conditions, `step.created_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UpdatedAt != nil {
+		if f.UpdatedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.updated_at = $%d`, paramNum))
+			*args = append(*args, *f.UpdatedAt.Eq)
+		}
+		if f.UpdatedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.updated_at > $%d`, paramNum))
+			*args = append(*args, *f.UpdatedAt.Gt)
+		}
+		if f.UpdatedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.updated_at >= $%d`, paramNum))
+			*args = append(*args, *f.UpdatedAt.Gte)
+		}
+		if f.UpdatedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.updated_at < $%d`, paramNum))
+			*args = append(*args, *f.UpdatedAt.Lt)
+		}
+		if f.UpdatedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.updated_at <= $%d`, paramNum))
+			*args = append(*args, *f.UpdatedAt.Lte)
+		}
+		if f.UpdatedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.updated_at >= $%d`, paramNum))
+			*args = append(*args, f.UpdatedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`step.updated_at <= $%d`, paramNum))
+			*args = append(*args, f.UpdatedAt.Between.End)
+		}
+		if f.UpdatedAt.IsNull != nil {
+			if *f.UpdatedAt.IsNull {
+				conditions = append(conditions, `step.updated_at IS NULL`)
+			} else {
+				conditions = append(conditions, `step.updated_at IS NOT NULL`)
+			}
 		}
 	}
 	if f.EntityKey != nil {

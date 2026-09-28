@@ -52,6 +52,11 @@ tests, the Go binding and the wasm test run every one of them.
 }
 ```
 
+The Go ORM generator builds each graph's descriptor from the IR and writes
+it twice: as the constant `<Name>GraphDescriptor` beside the generated
+shell (`versiongraph_<name>.go`) in the ORM package, and as
+`versiongraph/<name>.json` in the Go types module.
+
 | Member | Meaning |
 |---|---|
 | `graph` | Optional. The graph's name; the core does not read it. |

@@ -5,10 +5,12 @@
 #   examples/acme-schematic/scripts/smoke.sh
 #
 # Needs: the pinned Go toolchain, the superscalar dependency built by
-# scripts/superscalar-dep.sh (the Makefile's `setup`), jq. Nothing is
-# installed from the network beyond Go modules. Generated output goes to the
-# example's own schemas/dist (gitignored); the core-only builds go to a temp
-# dir that is removed on exit.
+# scripts/superscalar-dep.sh, the version-graph core's archive built by
+# scripts/versiongraph-archive.sh, which shop-db's generated ORM links (the
+# Makefile's `setup` runs both), and jq. Nothing is installed from the
+# network beyond Go modules. Generated output goes to the example's own
+# schemas/dist (gitignored); the core-only builds go to a temp dir that is
+# removed on exit.
 #
 # Asserts, in order:
 #   1. the acme module builds, vets and passes its tests;
@@ -81,7 +83,15 @@
 #      names to it and format converts the file to YAML and to TypeScript;
 #      build refuses the service, naming the types generator, which does
 #      not render behaviors; the core-only binary refuses the behavior by
-#      name.
+#      name;
+#  19. shop-db's Planogram version graph, declared with the core's
+#      @versionGraph, @graphMember and @conflictUnit and no core edit,
+#      expands in the IR into PlanogramRef, PlanogramCommit, PlanogramPatch,
+#      their enums and each member's graph fields; the types module writes
+#      its descriptor and the ORM its shell (db.PlanogramGraph()), which
+#      compiled with the ORM module in step 17; format writes the
+#      declarations, not the expansion, and the YAML twin expands to the
+#      same types.
 #
 # Step 16 also needs bun and installs hono and the generated types package's
 # dependencies from the npm registry.
@@ -98,7 +108,7 @@ trap 'rm -rf "$OUT"' EXIT
 
 export CGO_ENABLED=1
 if [[ -z "${CGO_LDFLAGS:-}" ]]; then
-  CGO_LDFLAGS="$("$REPO_ROOT/scripts/superscalar-dep.sh" --print)"
+  CGO_LDFLAGS="$("$REPO_ROOT/scripts/superscalar-dep.sh" --print) $("$REPO_ROOT/scripts/versiongraph-archive.sh" --print)"
   export CGO_LDFLAGS
 fi
 
@@ -436,5 +446,53 @@ if "$OUT/superschematic" build "$RATINGS" --emit-ir --naming "$OUT/session.toml"
   exit 1
 fi
 grep -q 'behavior "acme.Rating" on type "Product" is not a registered behavior (none are registered)' "$OUT/core-ratings.log"
+
+echo "==> version graph: shop-db's Planogram, declared with no core edit"
+# The loader expands the declarations into ordinary types, marked with their
+# origin; the members keep their own fields and gain the graph's.
+jq -e '[.types[] | select(.origin == "versionGraph") | .name] | sort == ["PlanogramCommit", "PlanogramPatch", "PlanogramRef"]' \
+  "$OUT/db-ir.json" >/dev/null
+jq -e '[.enums[] | select(.origin == "versionGraph") | .name] | sort == ["PlanogramEntityKind", "PlanogramPatchOperation"]' \
+  "$OUT/db-ir.json" >/dev/null
+jq -e '[.enums.PlanogramEntityKind.values[].serializedAs] == ["bay", "facing"]' "$OUT/db-ir.json" >/dev/null
+jq -e '.types.Facing.graphMember == {"graph": "Planogram", "parent": {"key": "bayKey", "of": "Bay"}, "order": "position"}' \
+  "$OUT/db-ir.json" >/dev/null
+for member in Bay Facing; do
+  jq -e --arg m "$member" '[.types[$m].fields[] | select(.origin == "versionGraph") | .name] == ["entityKey", "ref", "deletedOnRef"]' \
+    "$OUT/db-ir.json" >/dev/null
+  jq -e --arg m "$member" '.types[$m].versionedConfig.pruneKeepReferencedBy == [{"table": "planogram_patch", "keyColumn": "entity_id", "versionColumn": "entity_version", "origin": "versionGraph"}]' \
+    "$OUT/db-ir.json" >/dev/null
+done
+# The descriptor the core reads: a keyed conflict unit on Bay.shelf_heights,
+# the parent edge and order on Facing, and the audit and root columns left
+# out of the content.
+DESCRIPTOR="$DIST/types/go/shop-db/versiongraph/planogram.json"
+jq -e '.graph == "planogram" and ([.kinds[].kind] == ["bay", "facing"])' "$DESCRIPTOR" >/dev/null
+jq -e '.kinds[0].units == {"shelf_heights": "keyed"} and .kinds[0].excluded == ["planogram_id", "created_at", "updated_at"]' \
+  "$DESCRIPTOR" >/dev/null
+jq -e '.kinds[1].parent == {"key": "bay_key", "kind": "bay"} and .kinds[1].order == "position"' "$DESCRIPTOR" >/dev/null
+# The shell and the tables it writes through; go_module_compiles built and
+# vetted the ORM module with it in the arrays-of-arrays step.
+grep -q '^func (db \*Database) PlanogramGraph() \*PlanogramGraph {$' "$DIST/orm/shop-db/versiongraph_planogram.go"
+grep -q $'^\tversiongraph "github.com/parable-work/superschematic/runtime/versiongraph/go"$' \
+  "$DIST/orm/shop-db/versiongraph_planogram.go"
+grep -q '^CREATE TABLE planogram_ref ($' "$DIST/sql/shop-db/create.sql"
+grep -q '^CREATE TABLE planogram_patch ($' "$DIST/sql/shop-db/create.sql"
+# format writes the declarations and skips what the loader added; the YAML
+# twin loads back to the same expanded types and enums.
+PLANOGRAM="$OUT/planogram-yaml"
+mkdir -p "$PLANOGRAM/src"
+"$OUT/acme-schematic" format --to=yaml --stdout "$SCHEMAS/services/shop-db/src/planogram.schema.ts" \
+  >"$PLANOGRAM/src/planogram.schema.yaml"
+grep -qx '    versionGraph: {}' "$PLANOGRAM/src/planogram.schema.yaml"
+if grep -q 'PlanogramRef:\|entityKey' "$PLANOGRAM/src/planogram.schema.yaml"; then
+  echo "ERROR: format wrote the version graph's expansion" >&2
+  exit 1
+fi
+printf '{"name": "shop-db", "kind": "DB", "outputs": {}}\n' >"$PLANOGRAM/schema.config.json"
+"$OUT/acme-schematic" build "$PLANOGRAM" --emit-ir --naming "$SCHEMAS/superschematic.toml" --out "$OUT/ir-dist" >"$OUT/planogram-ir.json"
+GRAPH_DEFS='[.types, .enums | to_entries[] | select(.key | test("^(Planogram|Bay$|Facing$)")) | .value | del(.owner)]'
+jq -e "$GRAPH_DEFS | length == 8" "$OUT/planogram-ir.json" >/dev/null
+cmp <(jq -S "$GRAPH_DEFS" "$OUT/db-ir.json") <(jq -S "$GRAPH_DEFS" "$OUT/planogram-ir.json")
 
 echo "acme smoke: ok"

@@ -1038,37 +1038,35 @@ migrations. Who may commit, seal, merge or tag is the distribution's
 policy, as is draft garbage collection; the generated prune functions
 still have no scheduler.
 
-Status: nothing is built. The `@versioned` changes and the core come
-first and in parallel. The declarations and their expansion follow, then
-the shell, then the acme example (`scripts/smoke.sh`: a graph declared
-with no core edit) and the docs pages. Each change that lands a piece
-updates this paragraph and the README layout table.
-Status: the TypeScript types are built. `internal/tools/schemafiletypes`
-writes `schema-file.d.ts` and `schema-file.json` into
-`@superschematic/schema-ir` (subpaths `./schema-file` and
-`./schema-file.json`), `make schema-file-types-check` and CI run its
-`-check`, the package takes the repository's version, and the meta-schema
-declares the invocation policy's default. The types also leave the schema
-kinds open, since a registry adds kinds as it adds extension slots. The
-strict loader comes next, because the engine and its publish checks read
-schemas through it; behavior declarations in the compiler follow. Each
-Status: three pieces are built. `internal/tools/schemafiletypes` writes
-the data form's TypeScript types and meta-schema into
-`@superschematic/schema-ir` (`./schema-file`, `./schema-file.json`). The
-strict loader is in `@superschematic/schema-runtime`, held to the Go
-reader by `runtime/schema/testdata/schema_file_parity.json`
-(`runtime/schema/README.md`). Behavior declarations and the `@behavior`
-decorator are in the compiler (section 3.16 of `docs/extension-model.md`);
-the core declares no behavior yet, acme declares `acme.Rating`, and every
-generator refuses a type that declares one. To match the Go reader's
-canonical bytes, which drop a value its decoder cannot tell from an
-absent key, the meta-schema gives each such property that value as its
-default (section 5), and the loader needs `JSON.parse` source text access
-(Node.js 21 or later, or Bun). Not built: the tool that copies a
-declaration into its npm package, and the engine with its packages. Each
-change that lands a piece updates this paragraph, the README layout table
-and the pages that describe it. The names and rules are reversible until
-the first release.
+Status: built. Each piece:
+
+- The `@versioned` changes: the split triggers, the
+  `history_actor_setting` naming key and tombstone actors,
+  `DeleteOneIfVersion`, `ErrVersionConflict`, the tombstone-aware readers,
+  `@versioned({ exclude })`, `@optimistic`, the typed
+  `pruneKeepReferencedBy` checks, `_version` and `HistoryRecord` in Rust and
+  Python, and a Postgres service in CI.
+- The declarations `@versionGraph`, `@graphMember` and `@conflictUnit`, their
+  verification, and the loader's expansion (`internal/loader/versiongraph`).
+- The core in `runtime/versiongraph`: the Rust crate, the Go binding as the
+  fifth Go module, the wasm build, and the vectors the Rust tests, the Go
+  binding and a bun test of the wasm build run.
+- The descriptor (`internal/generator/graphdesc`), written as a constant in
+  the ORM and as `versiongraph/<name>.json` in the Go types module, and the
+  generated shell. A public API whose `authDb` declares a graph carries the
+  binding's `replace` too.
+- The acceptance: `examples/acme-schematic` declares a `Planogram` graph
+  with no core edit, and `scripts/smoke.sh` asserts its expansion,
+  descriptor, shell and `format` round trip, and compiles the ORM and the
+  API over it.
+- The docs pages "Versioned tables" and "Version graphs".
+
+Two rules settled as they were built: `diff` takes
+`{descriptor, from, to}`, and a graph member may exclude from history only
+fields with `@conflictUnit('excluded')` and its audit fields, since a
+commit reads a member's content back from history. Not built: transforms
+between schema epochs (`Materialize` refuses a newer epoch), a TypeScript
+package over the wasm build, and a parent of several types.
 
 ## D18. A distribution's field directives live in its extension slot
 

@@ -110,6 +110,16 @@ Default: `github.com/parable-work/superschematic/runtime/schema/go`
 
 Go module path of the schema runtime.
 
+### `versiongraph_go_module`
+
+Default: `github.com/parable-work/superschematic/runtime/versiongraph/go`
+
+Go module path of the version-graph core's Go binding. A generated ORM
+imports it when its schema declares a version graph. The binding links
+the core's static archive through cgo; the
+[Go install page](/superschematic/install/go/#requirements) says how to
+build it.
+
 ### `http_runtime_go_module`
 
 Default: `github.com/parable-work/superschematic/runtime/http/go`
@@ -330,6 +340,12 @@ Directory of the schema IR Go module.
 Default: unset. This repository's own file sets `runtime/schema/go`.
 
 Directory of the schema runtime Go module.
+
+### `paths.versiongraph_go`
+
+Default: unset. This repository's own file sets `runtime/versiongraph/go`.
+
+Directory of the version-graph core's Go binding module.
 
 ### `paths.http_runtime_go`
 

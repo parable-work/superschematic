@@ -185,7 +185,7 @@ func (g *graph) addCommit() {
 			scalarField("message", "string", false),
 			scalarField("schemaEpoch", int64Scalar, true),
 			scalarField("contentHash", "string", true),
-			scalarField("sequence", int64Scalar, false),
+			g.sequenceField(),
 			scalarField("createdAt", dateTimeScalar, true),
 			g.actorField("createdBy", true),
 		},
@@ -273,6 +273,15 @@ func (g *graph) relation(name, target string, required bool) *ir.FieldDef {
 		Required: required,
 		Relation: &ir.RelationDef{Type: target, OnDelete: restrict},
 	}
+}
+
+// sequenceField is a commit's published version number. Its null (not a
+// published version) is distinct from any number, so the Go types give it a
+// pointer rather than reading null back as zero.
+func (g *graph) sequenceField() *ir.FieldDef {
+	fd := scalarField("sequence", int64Scalar, false)
+	fd.DistinctNull = true
+	return fd
 }
 
 func (g *graph) actorField(name string, required bool) *ir.FieldDef {
