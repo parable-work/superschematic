@@ -1,0 +1,18 @@
+Resolved 2 schema services for shop-storefront: shop-common, shop-storefront
+Loaded schema shop-common (kind General): 2 types, 1 enums, 2 scalars, 0 operation sets
+  - sentinel up to date
+  + types-go written to .../schemas/dist/types/go/shop-common
+  + types-python written to .../schemas/dist/types/python/shop-common
+  + types-rust written to .../schemas/dist/types/rust/shop-common
+  + types-typescript written to .../schemas/dist/types/typescript/shop-common
+Build complete: 4 outputs generated, 0 skipped
+  OK: shop-common (built)
+Loaded schema shop-storefront (kind API): 4 types, 1 enums, 3 scalars, 3 operation sets
+  - sentinel up to date
+  + types-typescript written to .../schemas/dist/types/typescript/shop-storefront
+  + api-typescript written to .../schemas/dist/api/shop-storefront
+  + sdk-typescript written to .../schemas/dist/sdk/typescript/shop-storefront
+Build complete: 3 outputs generated, 0 skipped
+  OK: shop-storefront (built)
+
+Built 2 schema services for shop-storefront

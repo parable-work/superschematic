@@ -1,0 +1,273 @@
+{
+  "version": 1,
+  "packages": [
+    {
+      "id": "shop-api-api",
+      "language": "go",
+      "kind": "api",
+      "name": "example.com/acme/api/shop-api",
+      "path": "api/shop-api",
+      "service": "shop-api",
+      "deps": [
+        "shop-api-types",
+        "shop-db-orm"
+      ]
+    },
+    {
+      "id": "shop-api-sdk",
+      "language": "go",
+      "kind": "sdk",
+      "name": "example.com/acme/sdk/go/shop-api",
+      "path": "sdk/go/shop-api",
+      "service": "shop-api",
+      "deps": [
+        "shop-api-types"
+      ]
+    },
+    {
+      "id": "shop-api-types",
+      "language": "go",
+      "kind": "types",
+      "name": "example.com/acme/types/go/shop-api",
+      "path": "types/go/shop-api",
+      "service": "shop-api",
+      "deps": null
+    },
+    {
+      "id": "shop-common-types",
+      "language": "go",
+      "kind": "types",
+      "name": "example.com/acme/types/go/shop-common",
+      "path": "types/go/shop-common",
+      "service": "shop-common",
+      "deps": null
+    },
+    {
+      "id": "shop-db-orm",
+      "language": "go",
+      "kind": "orm",
+      "name": "example.com/acme/orm/shop-db",
+      "path": "orm/shop-db",
+      "service": "shop-db",
+      "deps": [
+        "shop-db-types"
+      ]
+    },
+    {
+      "id": "shop-db-types",
+      "language": "go",
+      "kind": "types",
+      "name": "example.com/acme/types/go/shop-db",
+      "path": "types/go/shop-db",
+      "service": "shop-db",
+      "deps": null
+    },
+    {
+      "id": "shop-orders-api",
+      "language": "go",
+      "kind": "api",
+      "name": "example.com/acme/api/shop-orders",
+      "path": "api/shop-orders",
+      "service": "shop-orders",
+      "deps": [
+        "shop-db-orm",
+        "shop-orders-types"
+      ]
+    },
+    {
+      "id": "shop-orders-sdk",
+      "language": "go",
+      "kind": "sdk",
+      "name": "example.com/acme/sdk/go/shop-orders",
+      "path": "sdk/go/shop-orders",
+      "service": "shop-orders",
+      "deps": [
+        "shop-orders-types"
+      ]
+    },
+    {
+      "id": "shop-orders-types",
+      "language": "go",
+      "kind": "types",
+      "name": "example.com/acme/types/go/shop-orders",
+      "path": "types/go/shop-orders",
+      "service": "shop-orders",
+      "deps": [
+        "shop-db-types"
+      ]
+    },
+    {
+      "id": "shop-common-types",
+      "language": "python",
+      "kind": "types",
+      "name": "acme_types_shop_common",
+      "path": "types/python/shop-common",
+      "service": "shop-common",
+      "deps": null
+    },
+    {
+      "id": "shop-db-types",
+      "language": "python",
+      "kind": "types",
+      "name": "acme_types_shop_db",
+      "path": "types/python/shop-db",
+      "service": "shop-db",
+      "deps": null
+    },
+    {
+      "id": "shop-orders-sdk",
+      "language": "python",
+      "kind": "sdk",
+      "name": "acme_shop_orders_sdk",
+      "path": "sdk/python/shop-orders",
+      "service": "shop-orders",
+      "deps": [
+        "shop-orders-types"
+      ]
+    },
+    {
+      "id": "shop-orders-types",
+      "language": "python",
+      "kind": "types",
+      "name": "acme_types_shop_orders",
+      "path": "types/python/shop-orders",
+      "service": "shop-orders",
+      "deps": [
+        "shop-db-types"
+      ]
+    },
+    {
+      "id": "shop-common-types",
+      "language": "rust",
+      "kind": "types",
+      "name": "acme-shop-common-types",
+      "path": "types/rust/shop-common",
+      "service": "shop-common",
+      "deps": null
+    },
+    {
+      "id": "shop-db-types",
+      "language": "rust",
+      "kind": "types",
+      "name": "acme-shop-db-types",
+      "path": "types/rust/shop-db",
+      "service": "shop-db",
+      "deps": null
+    },
+    {
+      "id": "shop-orders-sdk",
+      "language": "rust",
+      "kind": "sdk",
+      "name": "acme-shop-orders-sdk",
+      "path": "sdk/rust/shop-orders",
+      "service": "shop-orders",
+      "deps": [
+        "shop-orders-types"
+      ]
+    },
+    {
+      "id": "shop-orders-types",
+      "language": "rust",
+      "kind": "types",
+      "name": "acme-shop-orders-types",
+      "path": "types/rust/shop-orders",
+      "service": "shop-orders",
+      "deps": [
+        "shop-db-types"
+      ]
+    },
+    {
+      "id": "shop-api-sdk",
+      "language": "typescript",
+      "kind": "sdk",
+      "name": "@acme/shop-api-sdk",
+      "path": "sdk/typescript/shop-api",
+      "service": "shop-api",
+      "deps": [
+        "shop-api-types"
+      ]
+    },
+    {
+      "id": "shop-api-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-api-types",
+      "path": "types/typescript/shop-api",
+      "service": "shop-api",
+      "deps": null
+    },
+    {
+      "id": "shop-common-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-common-types",
+      "path": "types/typescript/shop-common",
+      "service": "shop-common",
+      "deps": null
+    },
+    {
+      "id": "shop-db-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-db-types",
+      "path": "types/typescript/shop-db",
+      "service": "shop-db",
+      "deps": null
+    },
+    {
+      "id": "shop-orders-sdk",
+      "language": "typescript",
+      "kind": "sdk",
+      "name": "@acme/shop-orders-sdk",
+      "path": "sdk/typescript/shop-orders",
+      "service": "shop-orders",
+      "deps": [
+        "shop-orders-types"
+      ]
+    },
+    {
+      "id": "shop-orders-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-orders-types",
+      "path": "types/typescript/shop-orders",
+      "service": "shop-orders",
+      "deps": [
+        "shop-db-types"
+      ]
+    },
+    {
+      "id": "shop-storefront-api",
+      "language": "typescript",
+      "kind": "api",
+      "name": "@acme/shop-storefront-api",
+      "path": "api/shop-storefront",
+      "service": "shop-storefront",
+      "deps": [
+        "shop-storefront-types"
+      ]
+    },
+    {
+      "id": "shop-storefront-sdk",
+      "language": "typescript",
+      "kind": "sdk",
+      "name": "@acme/shop-storefront-sdk",
+      "path": "sdk/typescript/shop-storefront",
+      "service": "shop-storefront",
+      "deps": [
+        "shop-storefront-types"
+      ]
+    },
+    {
+      "id": "shop-storefront-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-storefront-types",
+      "path": "types/typescript/shop-storefront",
+      "service": "shop-storefront",
+      "deps": [
+        "shop-common-types"
+      ]
+    }
+  ]
+}

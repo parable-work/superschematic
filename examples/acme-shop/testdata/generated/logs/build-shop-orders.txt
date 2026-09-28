@@ -1,0 +1,12 @@
+Loaded schema shop-orders (kind API): 6 types, 0 enums, 3 scalars, 3 operation sets
+  - sentinel up to date
+  + types-go written to .../schemas/dist/types/go/shop-orders
+  + types-python written to .../schemas/dist/types/python/shop-orders
+  + types-rust written to .../schemas/dist/types/rust/shop-orders
+  + types-typescript written to .../schemas/dist/types/typescript/shop-orders
+  + api written to .../schemas/dist/api/shop-orders
+  + sdk-go written to .../schemas/dist/sdk/go/shop-orders
+  + sdk-python written to .../schemas/dist/sdk/python/shop-orders
+  + sdk-rust written to .../schemas/dist/sdk/rust/shop-orders
+  + sdk-typescript written to .../schemas/dist/sdk/typescript/shop-orders
+Build complete: 9 outputs generated, 0 skipped

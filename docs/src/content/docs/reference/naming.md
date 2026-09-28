@@ -389,4 +389,4 @@ Undecoded tables handed to the extension whose `Name()` matches
 an extension the binary does not link is ignored at load and unused.
 
 acme reads `[extension.acme]` for a region string. See
-[write an extension](/superschematic/guides/write-an-extension/).
+[write an extension](/superschematic/extending/write-an-extension/).

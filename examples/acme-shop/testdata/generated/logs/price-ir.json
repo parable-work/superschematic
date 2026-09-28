@@ -1,0 +1,22 @@
+{
+  "name": "Price",
+  "owner": "src/price.schema.ts",
+  "comment": "A price in the currency's smallest unit: 1999 EUR is 19.99 euros.",
+  "role": "EmbeddedStruct",
+  "fields": [
+    {
+      "name": "amountCents",
+      "typeRef": {
+        "name": "Generic.Int64"
+      },
+      "required": true
+    },
+    {
+      "name": "currency",
+      "typeRef": {
+        "name": "Currency"
+      },
+      "required": true
+    }
+  ]
+}
