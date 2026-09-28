@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from superscalar import SCALAR_ID_BY_CANONICAL, ValidationError, _native
+from superscalar import VALID_SCALARS, ValidationError, _native
 from superscalar import (
     normalize_contact_email,
     normalize_contact_phone_number,
@@ -29,11 +29,12 @@ from superscalar import (
 
 
 def _validator(canonical_name: str) -> Callable[[str], list]:
-    scalar_id = SCALAR_ID_BY_CANONICAL[canonical_name]
+    if canonical_name not in VALID_SCALARS:
+        raise KeyError(canonical_name)
 
     def validate(value: str) -> list:
         try:
-            _native.validate(scalar_id, value)
+            _native.validate(canonical_name, value)
         except ValueError as exc:
             return [ValidationError(validator="custom", message=str(exc))]
         return []

@@ -181,7 +181,7 @@ func renderPython(names []string) []byte {
 	b.WriteString("# Regenerate with: go run ./internal/tools/scalarcatalog\n\n")
 	b.WriteString("from __future__ import annotations\n\n")
 	b.WriteString("from typing import Callable\n\n")
-	b.WriteString("from superscalar import SCALAR_ID_BY_CANONICAL, ValidationError, _native\n")
+	b.WriteString("from superscalar import VALID_SCALARS, ValidationError, _native\n")
 	imports := map[string]bool{}
 	for _, name := range parse {
 		imports["parse_"+snake(scalars.ScalarMetadataByCanonical[name].Symbol)] = true
@@ -200,10 +200,11 @@ func renderPython(names []string) []byte {
 	}
 	b.WriteString(")\n\n\n")
 	b.WriteString("def _validator(canonical_name: str) -> Callable[[str], list]:\n")
-	b.WriteString("    scalar_id = SCALAR_ID_BY_CANONICAL[canonical_name]\n\n")
+	b.WriteString("    if canonical_name not in VALID_SCALARS:\n")
+	b.WriteString("        raise KeyError(canonical_name)\n\n")
 	b.WriteString("    def validate(value: str) -> list:\n")
 	b.WriteString("        try:\n")
-	b.WriteString("            _native.validate(scalar_id, value)\n")
+	b.WriteString("            _native.validate(canonical_name, value)\n")
 	b.WriteString("        except ValueError as exc:\n")
 	b.WriteString("            return [ValidationError(validator=\"custom\", message=str(exc))]\n")
 	b.WriteString("        return []\n\n")
