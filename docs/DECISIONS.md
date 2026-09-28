@@ -579,9 +579,11 @@ server ignored.
 | The SDK follows the operations: `APIOutput.HasAuth`, which the OpenAPI document's per-operation `bearerAuth` already followed. The Python SDK already sent a configured token for every API. The TypeScript client now attaches `Authorization: Bearer`, refreshes once on 401 and has `setToken` and `clearToken`. The Go and Rust clients already sent a configured token; they gain `SetToken` / `ClearToken` and `set_token` / `clear_token`. | Letting `public` go without an `authDb` when the server is TypeScript, which still leaves the SDK without credentials by default and makes it depend on the server's language |
 | `public` stays the Go server's switch: its auth middleware and the auth provider's stores over the `authDb` schema. A public API still needs an auth store; the TypeScript server needs neither. | Dropping the `authDb` requirement, which the Go server's middleware needs |
 
-A Go API that is not public mounts `@auth` routes without middleware, so
-it does not check a token the SDK sends. An SDK given no token sends none,
-as before.
+A Go API that is not public has no auth middleware. Its `@auth` routes
+check nothing, and with the `session` provider its `@requirePermission`
+routes answer 401 unless the service's own middleware puts a caller on
+the context, which it can now do from the token the SDK sends. An SDK
+given no token sends none, as before.
 
 ## D14. A failing scalar value is one error, named by the rule it breaks
 

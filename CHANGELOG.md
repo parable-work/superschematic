@@ -24,9 +24,10 @@ of a generated artifact is always listed here with the bump it requires.
   `auth.refreshToken`, and the SDK class has `setToken` and `clearToken`.
   The Go and Rust SDKs, whose clients already sent a configured token,
   gain `SetToken` / `ClearToken` and `set_token` / `clear_token`. The
-  TypeScript server needs neither `public` nor `authDb`; a Go API that is
-  not public still does not check the token. Output for a public API, or
-  for one with no such operation, is unchanged. Minor.
+  TypeScript server needs neither `public` nor `authDb`. A Go API that is
+  not public still has no auth middleware; only middleware the service
+  adds itself reads the token. Output for a public API, or for one with no
+  such operation, is unchanged. Minor.
 - Verification refuses an `@index` of a DB table that the SQL generator
   cannot build: one with a key that resolves to no column of the table, or
   one with no keys. The SQL generator left such an index out of the DDL
