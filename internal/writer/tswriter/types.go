@@ -169,6 +169,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if def.Versioned {
 		fmt.Fprintf(&e.body, "@%s%s\n", e.use("versioned"), versionedConfigArgs(def.VersionedConfig))
 	}
+	if def.Optimistic {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("optimistic"))
+	}
 	if def.VersionGraph != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), versionGraphArgs(def.VersionGraph))
 	}
@@ -221,7 +224,7 @@ func (e *emitter) emitBehavior(typeName string, ref ir.BehaviorRef) {
 }
 
 func versionedConfigArgs(cfg *ir.VersionedConfig) string {
-	if cfg == nil || (cfg.RetentionDays == nil && cfg.PartitionBy == "" && len(cfg.PruneKeepReferencedBy) == 0) {
+	if cfg == nil || (cfg.RetentionDays == nil && cfg.PartitionBy == "" && len(cfg.PruneKeepReferencedBy) == 0 && len(cfg.Exclude) == 0) {
 		return ""
 	}
 	parts := []string{}
@@ -244,6 +247,13 @@ func versionedConfigArgs(cfg *ir.VersionedConfig) string {
 		} else {
 			parts = append(parts, "pruneKeepReferencedBy: ["+strings.Join(refs, ", ")+"]")
 		}
+	}
+	if len(cfg.Exclude) > 0 {
+		names := make([]string, 0, len(cfg.Exclude))
+		for _, name := range cfg.Exclude {
+			names = append(names, quote(name))
+		}
+		parts = append(parts, "exclude: ["+strings.Join(names, ", ")+"]")
 	}
 	return fmt.Sprintf("({ %s })", strings.Join(parts, ", "))
 }

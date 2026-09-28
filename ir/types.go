@@ -125,6 +125,12 @@ type TypeDef struct {
 	// Nil means @versioned was used with the default append-only behavior.
 	VersionedConfig *VersionedConfig `json:"versionedConfig,omitempty" yaml:"versionedConfig,omitempty"`
 
+	// Optimistic (@optimistic) gives a DB table the _version column, the
+	// BEFORE UPDATE trigger that bumps it and the fenced writes
+	// UpdateOneIfVersion and DeleteOneIfVersion, with no history. Versioned
+	// implies it, so a type never carries both.
+	Optimistic bool `json:"optimistic,omitempty" yaml:"optimistic,omitempty"`
+
 	// EnvVars indicates this type provides environment variable configuration.
 	EnvVars bool `json:"envVars,omitempty" yaml:"envVars,omitempty"`
 
@@ -178,6 +184,12 @@ type VersionedConfig struct {
 	// a second pin never displaces the first. The TypeScript DSL accepts one
 	// reference or an array of them; both land here as a list.
 	PruneKeepReferencedBy []*PruneReference `json:"pruneKeepReferencedBy,omitempty" yaml:"pruneKeepReferencedBy,omitempty"`
+
+	// Exclude names fields (schema field names) left out of every history
+	// image: the row an INSERT or UPDATE records and a delete's tombstone.
+	// The history readers return their zero value. The key cannot be
+	// excluded.
+	Exclude []string `json:"exclude,omitempty" yaml:"exclude,omitempty"`
 }
 
 // PruneReference names the table and columns that pin history rows against

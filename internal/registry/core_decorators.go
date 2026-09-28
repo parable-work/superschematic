@@ -60,6 +60,7 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// reads them itself beside @versioned.
 	marker(TargetType, "versionGraph", []string{pkgDB})
 	marker(TargetType, "graphMember", []string{pkgDB})
+	flag(TargetType, "optimistic", []string{pkgDB}, func(n Node) { n.Type.Optimistic = true })
 	flag(TargetType, "jsonField", []string{pkgDB, pkgSchema}, func(n Node) { n.Type.JsonField = true })
 	flag(TargetType, "denyUnknownFields", []string{pkgSchema}, func(n Node) { n.Type.DenyUnknownFields = true })
 	flag(TargetType, "strictJSON", []string{pkgSchema}, func(n Node) { n.Type.StrictJSON = true })

@@ -292,6 +292,18 @@ func (w *walker) versionedConfigFromDecorator(d decoratorRef) (*ir.VersionedConf
 				}
 				out.PruneKeepReferencedBy = append(out.PruneKeepReferencedBy, pin)
 			}
+		case "exclude":
+			names, ok := value.([]any)
+			if !ok {
+				return nil, errorAtNode(d.node, "@versioned exclude must be an array of field names")
+			}
+			for _, entry := range names {
+				name, ok := entry.(string)
+				if !ok {
+					return nil, errorAtNode(d.node, "@versioned exclude must be an array of string literals")
+				}
+				out.Exclude = append(out.Exclude, name)
+			}
 		default:
 			return nil, errorAtNode(d.node, "@versioned config has unknown key %q", key)
 		}
