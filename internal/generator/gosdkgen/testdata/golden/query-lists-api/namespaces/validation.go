@@ -2,11 +2,9 @@ package namespaces
 
 import (
 	"fmt"
-{{- if .ChecksQueryListItems}}
 	"strings"
-{{- end}}
 
-	types "{{.TypesModule}}"
+	types "example.com/schemas/types/go/query-lists-api"
 )
 
 // ValidationError reports client-side input validation failures.
@@ -83,7 +81,6 @@ func appendScalarValidationErrors(validationErrors types.ValidationErrors, field
 		validationErrors.SetFieldErrors(fieldName, fieldErrors)
 	}
 }
-{{- if .ValidatesListElements}}
 
 // validateListElement runs the validation of one element of a list argument
 // when its type has one, and records the errors under path
@@ -105,8 +102,6 @@ func validateListElement(validationErrors types.ValidationErrors, path string, i
 		}
 	}
 }
-{{- end}}
-{{- if .ChecksQueryListItems}}
 
 // checkQueryListItem reports whether text, one item of a list query
 // parameter, reaches the Go route unchanged in the comma-separated value
@@ -123,4 +118,3 @@ func checkQueryListItem(validationErrors types.ValidationErrors, path, text stri
 	}
 	return false
 }
-{{- end}}

@@ -780,6 +780,23 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- Go SDK: a list query parameter (`QueryParam<T[]>`) is a `[]T` field of
+  the query struct, as the Go route takes it: `[]types.OrderStatus` for an
+  enum list, the scalar's type for a UUID, timestamp or other string
+  scalar (`[]types.IdentityUUID`), and `[]int64`, `[]float64`, `[]bool` or
+  `[]string` otherwise. It was one value (`*string` for an enum or UUID
+  list), so the caller joined the items and nothing checked them. The list
+  is sent as one comma-separated value (`?statuses=open,paid`) by the new
+  `runtime.AddQueryList`, and an empty list is left out, since the route
+  refuses a present empty value. Before the request, a required list with
+  no item is `required` at `name`, `listMin` and `listMax` bound a
+  non-empty list, and each item is checked at `name[i]` with the
+  argument's `min`, `max`, `minLength`, `maxLength` and `pattern`, then
+  its own validation (an enum member, a non-zero UUID). The route splits
+  the value on commas and trims each item, so an empty item is `required`
+  and one with a comma or surrounding space is `pattern`. Code that fills
+  the query struct changes with the field type. A scalar query parameter,
+  and an SDK without a list query parameter, are unchanged. Minor.
 - Go ORM: a `Generic.JSON[]` or `Generic.JSON[][]` column refuses a null
   element, as every other list column and every other implementation do
   (D12, amended): `GetOne`, `FindOne`, `FindMany`, `GetManyByIDs`, the

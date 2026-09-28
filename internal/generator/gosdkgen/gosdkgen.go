@@ -55,10 +55,18 @@ type SDKOutput struct {
 	Naming                 naming.Naming
 
 	// ValidatesListElements reports whether a namespace validates the
-	// elements of an array-of-arrays argument whose type may carry its own
-	// validation (not a Go primitive); namespaces/validation.go then
-	// carries the validateListElement helper those checks call.
+	// elements of an array-of-arrays argument, a map argument or a list
+	// query parameter whose type may carry its own validation (not a Go
+	// primitive); namespaces/validation.go then carries the
+	// validateListElement helper those checks call.
 	ValidatesListElements bool
+	// HasQueryLists reports whether an endpoint takes a list query
+	// parameter; runtime/runtime.go then carries AddQueryList.
+	HasQueryLists bool
+	// ChecksQueryListItems reports whether a list query parameter's items
+	// are sent as text; namespaces/validation.go then carries the
+	// checkQueryListItem helper.
+	ChecksQueryListItems bool
 }
 
 // ModuleReplace describes a go.mod replace directive needed by generated SDK modules.
@@ -144,6 +152,62 @@ type QueryParam struct {
 	ValidateListMin   *int
 	ValidateListMax   *int
 	ValidatePattern   string
+
+	// IsArray marks a list parameter (QueryParam<T[]>), typed []T as the
+	// Go route takes it and sent as one comma-separated value. An empty
+	// list is left out, the route refusing a present empty value, and an
+	// item is checked at name[i]: against the argument's rules, and,
+	// unless IsGoPrimitive, by its own validation.
+	IsArray       bool
+	IsGoPrimitive bool
+	// ItemIsText marks a list whose items are not numbers or booleans, so
+	// one may be empty or hold a comma or surrounding space, which the
+	// comma-separated value cannot carry.
+	ItemIsText bool
+}
+
+// HasItemRules reports whether an item of a list parameter has a check
+// beyond checkQueryListItem: a length or pattern rule on its text, a range
+// rule on its number, or its own validation.
+func (p QueryParam) HasItemRules() bool {
+	if !p.IsArray {
+		return false
+	}
+	if p.ItemIsText {
+		return p.ValidateMinLength != nil || p.ValidateMaxLength != nil || p.ValidatePattern != "" || !p.IsGoPrimitive
+	}
+	return p.ValidateMin != nil || p.ValidateMax != nil
+}
+
+// ChecksItems reports whether the SDK checks each item of a list
+// parameter before the request.
+func (p QueryParam) ChecksItems() bool {
+	return p.IsArray && (p.ItemIsText || p.HasItemRules())
+}
+
+// ChecksListMin reports whether a list parameter's listMin bounds a list
+// the SDK sends: one of at least one item, as an empty list is left out.
+func (p QueryParam) ChecksListMin() bool {
+	return p.IsArray && p.ValidateListMin != nil && *p.ValidateListMin > 1
+}
+
+// ValidatesWhenSet reports whether the SDK checks the parameter's value
+// when the query struct is not nil.
+func (p QueryParam) ValidatesWhenSet() bool {
+	if p.IsArray {
+		return p.ChecksListMin() || p.ValidateListMax != nil || p.ChecksItems()
+	}
+	return p.ValidateMin != nil ||
+		p.ValidateMax != nil ||
+		p.ValidateMinLength != nil ||
+		p.ValidateMaxLength != nil ||
+		p.ValidatePattern != ""
+}
+
+// Validates reports whether the SDK checks the parameter before the
+// request: its value, or, for a required list, that it has an item.
+func (p QueryParam) Validates() bool {
+	return p.ValidatesWhenSet() || (p.IsArray && p.Required)
 }
 
 // ScalarArg represents a scalar input argument for an endpoint.
@@ -259,6 +323,18 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 				output.ValidatesListElements = true
 			}
 		}
+		for _, param := range converted.QueryParams {
+			if !param.IsArray {
+				continue
+			}
+			output.HasQueryLists = true
+			if !param.IsGoPrimitive {
+				output.ValidatesListElements = true
+			}
+			if param.ItemIsText {
+				output.ChecksQueryListItems = true
+			}
+		}
 		ns.Endpoints = append(ns.Endpoints, converted)
 	}
 
@@ -335,7 +411,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 
 	queryParams := make([]QueryParam, 0, len(ep.QueryParams))
 	for _, param := range ep.QueryParams {
-		queryParams = append(queryParams, QueryParam{
+		queryParam := QueryParam{
 			Name:              param.Name,
 			GoName:            goutil.GoPublicIdentifier(param.Name),
 			GoType:            mapScalarToGo(param),
@@ -348,7 +424,16 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			ValidateListMin:   param.ValidateListMin,
 			ValidateListMax:   param.ValidateListMax,
 			ValidatePattern:   param.ValidatePattern,
-		})
+		}
+		if param.IsArray {
+			elemType := queryListElemGoType(param, scalarSymbols)
+			queryParam.GoType = "[]" + elemType
+			queryParam.Pointer = false // slices are nil-able, no pointer needed
+			queryParam.IsArray = true
+			queryParam.IsGoPrimitive = !strings.HasPrefix(elemType, "types.")
+			queryParam.ItemIsText = elemType != "int64" && elemType != "float64" && elemType != "bool"
+		}
+		queryParams = append(queryParams, queryParam)
 	}
 	pathArgs = qualifyGoPathArgs(pathArgs, pathParams, queryParams)
 
@@ -797,7 +882,15 @@ func customTemplateFuncs() template.FuncMap {
 		},
 		"hasQueryParamValidation": func(params []QueryParam) bool {
 			for _, param := range params {
-				if queryParamHasValidationConstraints(param) {
+				if param.Validates() {
+					return true
+				}
+			}
+			return false
+		},
+		"hasQueryParamValidationWhenSet": func(params []QueryParam) bool {
+			for _, param := range params {
+				if param.ValidatesWhenSet() {
 					return true
 				}
 			}
@@ -907,6 +1000,18 @@ func mapScalarToGo(param apigen.Param) string {
 	}
 }
 
+// queryListElemGoType maps the element of a list query parameter to the Go
+// type the Go route decodes it to: int64, float64 or bool as
+// mapScalarToGo, string for the string primitive, and otherwise the enum's
+// or the scalar's type in the types package, whose own validation the SDK
+// runs on each item.
+func queryListElemGoType(param apigen.Param, scalarSymbols map[string]string) string {
+	if goType := mapScalarToGo(param); goType != "string" || param.IsString {
+		return goType
+	}
+	return qualifyType(param.Type, scalarSymbols)
+}
+
 func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, needsTypes, needsStrings, needsRegexp, needsFilterparse bool) {
 	needsTypes = ns.RequiresTypes
 	for _, ep := range ns.Endpoints {
@@ -937,6 +1042,13 @@ func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, n
 			}
 			if ep.HasQueryParams {
 				needsRuntime = true
+			}
+			for _, param := range ep.QueryParams {
+				if param.ChecksItems() {
+					// Each item is checked at name[i] (fmt.Sprintf), a
+					// text item as fmt.Sprint formats it.
+					needsFmt = true
+				}
 			}
 		}
 		if ep.HasEncryptedBody {
@@ -978,12 +1090,17 @@ func endpointUsesTypes(endpoint EndpointInfo) bool {
 			return true
 		}
 	}
+	for _, param := range endpoint.QueryParams {
+		if strings.Contains(param.GoType, "types.") {
+			return true
+		}
+	}
 	return false
 }
 
 func endpointHasValidationConstraints(endpoint EndpointInfo) bool {
 	for _, queryParam := range endpoint.QueryParams {
-		if queryParamHasValidationConstraints(queryParam) {
+		if queryParam.Validates() {
 			return true
 		}
 	}
@@ -1007,16 +1124,6 @@ func endpointNeedsRegexp(endpoint EndpointInfo) bool {
 		}
 	}
 	return false
-}
-
-func queryParamHasValidationConstraints(param QueryParam) bool {
-	return param.ValidateMin != nil ||
-		param.ValidateMax != nil ||
-		param.ValidateMinLength != nil ||
-		param.ValidateMaxLength != nil ||
-		param.ValidateListMin != nil ||
-		param.ValidateListMax != nil ||
-		param.ValidatePattern != ""
 }
 
 func scalarArgHasValidationConstraints(arg ScalarArg) bool {
