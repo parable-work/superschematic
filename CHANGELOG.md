@@ -43,6 +43,24 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- `@superschematic/versiongraph`, a new npm package in
+  `runtime/versiongraph/typescript`: the version-graph core built for
+  `wasm32-unknown-unknown`, with an async `init` and typed `compose`,
+  `merge`, `diff`, `contentHash` and `validate` over the core's JSON
+  contract, in the browser, bun and Node. `init` takes the module as bytes,
+  a URL, a `Response` (or a promise of one) or a compiled module, and by
+  default loads the `superschematic_versiongraph.wasm` the package ships.
+  A refused input throws `VersionGraphError` with the contract's error
+  code. The contract's types live in one module and the package's tests
+  run every vector through them. The package ships compiled ES modules and
+  the wasm file, carries the repository version (`bump_version.py` writes
+  it), and is packed and published with the other npm packages. The bun
+  test of the raw wasm build (`runtime/versiongraph/wasm`) and the
+  `versiongraph-wasm` make target are gone: `make ts` and CI's
+  versiongraph job run the vectors through the package instead, once each,
+  and `make rust` no longer builds the wasm module. A new vector,
+  `merge_atomic_unit_is_one_unit`, covers a unit named `atomic`
+  explicitly. Minor (new package).
 - The rest of D17's `@versioned` changes. `@versioned({ exclude: [...] })`
   names fields left out of every history image: the capture function
   subtracts their columns from the `INSERT` and `UPDATE` image and from a
@@ -130,12 +148,13 @@ of a generated artifact is always listed here with the bump it requires.
   (`Compose`, `Merge`, `Diff`, `ContentHash`, `Validate` over
   `json.RawMessage`, cgo over the static archive), and the same exports
   build for `wasm32-unknown-unknown`. `runtime/versiongraph/testdata/vectors`
-  holds the vectors the Rust tests, the Go binding and a bun test over the
-  wasm module all run (`UPDATE_VECTORS=1 cargo test` rewrites them).
+  holds the vectors the Rust tests, the Go binding and the
+  `@superschematic/versiongraph` package's tests all run
+  (`UPDATE_VECTORS=1 cargo test` rewrites them).
   `make versiongraph` (`scripts/versiongraph-archive.sh`) builds the archive,
   the Makefile adds its directory to `CGO_LDFLAGS` and the module to its Go
-  module list, `make rust` runs the crate's gates, the wasm build and the
-  bun test, and CI runs them in a new `versiongraph` job. The crate and the
+  module list, `make rust` runs the crate's gates, including clippy for
+  wasm32, and CI runs them in a new `versiongraph` job. The crate and the
   module are version sites of `scripts/bump_version.py`, and
   `go-module-tag.yml` cuts `runtime/versiongraph/go/vX.Y.Z`. The crate is
   not published to crates.io. Minor.

@@ -30,6 +30,8 @@ Version sites (relative to the repository root):
                                       version
   runtime/http/typescript/package.json
                                       version
+  runtime/versiongraph/typescript/package.json
+                                      version
   runtime/schema/python/pyproject.toml
                                       [project] version, in PEP 440 form
   runtime/http/rust/Cargo.toml        [package] version
@@ -165,6 +167,13 @@ def sites():
     out.append(
         (
             ROOT / "runtime" / "http" / "typescript" / "package.json",
+            [(r'(\n  "version": ")' + V + r'(",)', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "versiongraph" / "typescript" / "package.json",
             [(r'(\n  "version": ")' + V + r'(",)', 1)],
             "semver",
         )

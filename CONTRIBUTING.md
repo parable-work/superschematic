@@ -73,7 +73,7 @@ By making a contribution to this project, I certify that:
 | Bun           | 1.4.0   | `tools.env` (`BUN_VERSION`)                        |
 | Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`) |
 | uv            | 0.12.9  | `tools.env` (`UV_VERSION`)                         |
-| Rust          | 1.95.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust` and `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target) |
+| Rust          | 1.95.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust` and `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript`) |
 | Postgres      | 16      | `tools.env` (`POSTGRES_VERSION`); CI's database tests run against it |
 | superscalar   | commit  | `superscalar.pin`; `go.mod` carries the same commit as a pseudo-version |
 
@@ -113,9 +113,9 @@ of them; run them locally before pushing.
 | `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
 | `make cli-smoke`      | `bin/superschematic build` with no extension builds the DB, API and General fixtures |
-| `make ts`             | `packages/`, `runtime/schema/typescript` and `runtime/http/typescript` typecheck, build and test |
+| `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript` and `runtime/versiongraph/typescript` typecheck, build and test; the last builds the version-graph core for wasm32 and runs every vector through the package |
 | `make python`         | `runtime/schema/python` pytest                                       |
-| `make rust`           | `runtime/http/rust` and `runtime/versiongraph/rust` fmt, clippy `-D warnings`, test; the version-graph wasm build and its bun vector test |
+| `make rust`           | `runtime/http/rust` and `runtime/versiongraph/rust` fmt, clippy `-D warnings` (the core for native and wasm32), test |
 | `make versiongraph`   | Builds the version-graph core's static archive the Go binding links (`scripts/versiongraph-archive.sh`) |
 | `make docs`           | Starlight site in `docs/` (`npm ci && npm run build`)                |
 | `make scrub`          | No leftover mentions, identifiers or planning ids from the source tree this repository was extracted from, dot-paths such as `.github/` included |
@@ -181,7 +181,8 @@ and concrete.
 ## Releases
 
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
-`api`, `schema-config`, `schema-ir`, `schema-runtime`, `http-runtime`), the
+`api`, `schema-config`, `schema-ir`, `schema-runtime`, `http-runtime`,
+`versiongraph`), the
 PyPI distribution (`superschematic-schema-runtime`), the crates
 (`superschematic-http-runtime`, and `superschematic-versiongraph`, which is
 not published) and the five Go modules all carry the SemVer
