@@ -4,13 +4,14 @@ name: ci
 # (build, vet, test with the database tests against a Postgres container,
 # gofmt, golangci-lint, scalar catalog and schema-file types drift, CLI smoke
 # over the fixture corpus), the acme example extension (smoke plus the
-# no-core-edits check), the TypeScript authoring packages, schema runtime
-# and http runtime, the Python schema runtime, the Rust http runtime, the
+# no-core-edits check), the TypeScript authoring packages, schema runtime and
+# http runtime, the Python schema runtime, the Rust http runtime, the
 # version-graph core (crate, Go binding, and the TypeScript package over its
-# wasm build), the Starlight docs build, and the extraction scrub. `ci-pass` is the single aggregating
-# job the branch ruleset requires; every other job must be listed in its
-# `needs`. The docs job on pull requests is a recorded deviation from
-# superscalar (D9); superscalar only builds docs in release.yml.
+# wasm build), the Starlight docs build, and the extraction scrub. `ci-pass`
+# is the single aggregating job the branch ruleset requires; every other job
+# must be listed in its `needs`. The docs job on pull requests is a recorded
+# deviation from superscalar (D9); superscalar only builds docs in
+# release.yml.
 #
 # superscalar has no release yet, so every job that links it checks the
 # pinned commit out under third_party/superscalar and builds the static

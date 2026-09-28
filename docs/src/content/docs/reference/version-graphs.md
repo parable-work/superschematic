@@ -304,8 +304,8 @@ operation on the graph it returns is synchronous. `source` is the module's
 bytes, a URL, a `Response` or a promise of one, or a compiled
 `WebAssembly.Module`. Without it, `init` loads the
 `superschematic_versiongraph.wasm` shipped next to the package's `index.js`,
-found with `new URL(..., import.meta.url)`: fetched in a browser, where
-bundlers such as Vite and webpack copy the file into the build, and read
+found with `new URL(..., import.meta.url)`: fetched in a browser (a bundler
+that understands that pattern copies the file into the build), and read
 from disk under bun and Node. A server that sends the module as
 `application/wasm` lets the browser compile it while it downloads. The file
 is also exported as
@@ -334,9 +334,11 @@ exactly.
 
 The package's test suite runs every vector through the package. It decodes
 each vector's input and output through the package's types, with one
-decoder per member that the compiler requires to cover each type exactly,
-and compares the bytes with the vector, so a type that drifts from the
-contract fails it.
+decoder per member that the compiler requires to cover each type exactly
+and a check of each literal union's values, and compares the decoded JSON,
+member order included, with the vector. It also fails when a member or
+literal of the types appears in no vector. A member or literal that is
+missing, extra or misnamed in the types therefore fails it.
 
 ## Limits
 

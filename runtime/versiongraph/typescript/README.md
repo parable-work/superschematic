@@ -19,7 +19,8 @@ const { tree, findings } = graph.compose({ descriptor, base, overlay });
   any other is fetched), a `Response` or a promise of one, or a compiled
   `WebAssembly.Module`. Without it, `init` loads
   `superschematic_versiongraph.wasm` from next to `index.js`
-  (`new URL(..., import.meta.url)`), which bundlers copy into the build.
+  (`new URL(..., import.meta.url)`), which a bundler that understands that
+  pattern copies into the build.
   The file is also exported as
   `@superschematic/versiongraph/superschematic_versiongraph.wasm`.
 - The operations are synchronous. A refused input throws a

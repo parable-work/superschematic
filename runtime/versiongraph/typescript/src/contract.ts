@@ -4,8 +4,11 @@
 // Nothing checks these types at run time. The vector suite
 // (test/vectors.test.ts) keeps them honest: it decodes every vector's input
 // and output through them, with one decoder field per member that the
-// compiler requires to cover the type exactly, and compares the bytes with
-// the vector. A member missing, extra or misnamed here fails it.
+// compiler requires to cover the type exactly, checks each literal union
+// against a record the compiler requires to list it exactly, and compares
+// the decoded JSON, member order included, with the vector. It also fails
+// when a member or literal here appears in no vector. So a member or a
+// literal missing, extra or misnamed here fails it.
 
 /** How a content column merges. */
 export type Unit = "atomic" | "keyed" | "jsonSchema";

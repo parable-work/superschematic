@@ -1,7 +1,7 @@
 // init accepts the wasm module as bytes, a URL, a Response or a promise of
 // one, or a compiled module, and loads the bundled file by default. Each
 // source is proved by running an operation on the core it produced.
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { init, VersionGraphError, type TreeInput, type VersionGraph } from "../dist/index.js";
 
@@ -80,8 +80,17 @@ test("a compiled module", async () => {
   expectWorks(await init(await WebAssembly.compile(wasmBytes)));
 });
 
-test("a failed response is refused", async () => {
-  await expect(init(new URL("/missing", server.url))).rejects.toThrow("failed: 404");
+test("a failed response is refused before it is compiled", async () => {
+  // Caught by hand: bun's rejects.toThrow(message) also passes for the
+  // CompileError the 404 body would raise.
+  let thrown: unknown;
+  try {
+    await init(new URL("/missing", server.url));
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).not.toBeInstanceOf(WebAssembly.CompileError);
+  expect((thrown as Error).message).toContain("failed: 404");
 });
 
 test("a module without the core's exports is refused", async () => {
@@ -108,14 +117,35 @@ test("run returns the output document as text", async () => {
   expect(JSON.parse(graph.run("validate", JSON.stringify(input)))).toEqual(graph.validate(input));
 });
 
-test("every call releases its input", async () => {
-  // 600 calls of 8 MiB each are more than the 4 GiB a wasm32 memory can
-  // grow to, so a buffer left unreleased traps before the loop ends.
-  const graph = await init(wasmBytes);
-  const input = "{not json" + " ".repeat(8 * 1024 * 1024);
-  for (let i = 0; i < 600; i++) {
-    expect(() => graph.run("validate", input)).toThrow(VersionGraphError);
+test("every call releases what it allocates", async () => {
+  // The core's memory is private to the package, so the test takes it from
+  // the instance init creates. A call that keeps its input, its output
+  // document or its two out slots grows the memory by at least 8 bytes a
+  // call; 100,000 calls then grow it by more than a 64 KiB page.
+  const instantiate = spyOn(WebAssembly, "instantiate");
+  let graph: VersionGraph;
+  let memory: WebAssembly.Memory;
+  try {
+    graph = await init(wasmBytes);
+    const instance = (await instantiate.mock.results[0]!.value) as WebAssembly.Instance;
+    memory = instance.exports.memory as WebAssembly.Memory;
+  } finally {
+    instantiate.mockRestore();
   }
+  const text = JSON.stringify(input);
+  const calls = () => {
+    // A success and a refusal, each with an output document.
+    expect(JSON.parse(graph.run("validate", text)).findings).toHaveLength(1);
+    expect(() => graph.run("validate", "{not json")).toThrow(VersionGraphError);
+  };
+  for (let i = 0; i < 1_000; i++) {
+    calls();
+  }
+  const before = memory.buffer.byteLength;
+  for (let i = 0; i < 100_000; i++) {
+    calls();
+  }
+  expect(memory.buffer.byteLength).toBe(before);
 });
 
 test("parse and stringify replace the JSON codec", async () => {
