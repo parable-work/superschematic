@@ -81,28 +81,6 @@ CREATE INDEX {{ $history.RetentionIndexName }} ON {{ $history.QuotedName }} (rec
 COMMENT ON TABLE {{ $history.QuotedName }} IS 'Version history for {{ $history.SourceTableName }}';
 {{- end }}
 {{- end }}
-{{- if .HasUserTable }}
-
--- Insert System User
--- This is a special system user with a memorable UUID that can be used for
--- system-generated records and bootstrapping the database
-INSERT INTO "user" (id, created_at, created_by, updated_at, updated_by, deleted_at, deleted_by, "name", email, timezone, locale)
-VALUES (
-  '{{ .SystemUserUUID }}',
-  CURRENT_TIMESTAMP,
-  '{{ .SystemUserUUID }}',
-  CURRENT_TIMESTAMP,
-  '{{ .SystemUserUUID }}',
-  NULL,
-  NULL,
-  '{{ .SystemUserName }}',
-  '{{ .SystemUserEmail }}',
-  NULL,
-  NULL
-)
-ON CONFLICT (id) DO NOTHING;
-
-{{- end }}
 
 -- Add foreign key constraints
 {{- range $table := .Tables }}

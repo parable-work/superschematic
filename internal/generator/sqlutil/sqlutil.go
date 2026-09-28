@@ -118,3 +118,13 @@ func IndexName(tableName string, keys []string, purpose string, unique bool) (st
 	}
 	return name, nil
 }
+
+// IndexKeyMatches reports whether an @index key (a field name) resolves to
+// column: the key in snake_case is the column's name, or names the foreign
+// key column (<key>_id) a to-one relation field becomes. The SQL generator
+// resolves each key with it, and verification checks keys with it, so the
+// two accept the same keys.
+func IndexKeyMatches(key, column string) bool {
+	name := codegen.ToSnakeCase(key)
+	return column == name || column == name+"_id"
+}

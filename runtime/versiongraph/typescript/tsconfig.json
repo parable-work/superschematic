@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": [],
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "comment": "No Node or bun types: the package runs in the browser too, so src/ uses only what the DOM and ES2022 libraries declare. tsconfig.test.json checks the tests against the built dist/.",
+  "include": ["src/**/*.ts"]
+}

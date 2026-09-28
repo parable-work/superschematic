@@ -45,7 +45,7 @@ Pages on a release tag once the repository is public.
 | `ir/typescript/` | `@superschematic/schema-ir`: the runtime document's types, and the schema-file data form's types and JSON Schema |
 | `runtime/schema/{go,typescript,python}/` | Schema runtime the generated code links |
 | `runtime/http/{go,rust,typescript}/` | HTTP runtime the generated servers link |
-| `runtime/versiongraph/{rust,go,wasm}/` | Version-graph core: compose, merge, diff, hash and validate trees of versioned rows; a Rust crate with a Go binding (its own Go module) and a wasm build. `runtime/versiongraph/README.md` is its JSON contract and `testdata/vectors` its executable form. A generated ORM whose schema declares a graph imports the Go binding |
+| `runtime/versiongraph/{rust,go,typescript}/` | Version-graph core: compose, merge, diff, hash and validate trees of versioned rows; a Rust crate with a Go binding (its own Go module) and `@superschematic/versiongraph`, the TypeScript package over its wasm build for the browser, bun and Node. `runtime/versiongraph/README.md` is its JSON contract and `testdata/vectors` its executable form. A generated ORM whose schema declares a graph imports the Go binding |
 | `packages/` | `@superschematic/{api,db,schema,schema-config}`: the TypeScript authoring packages |
 | `extensions/` | Example extensions |
 | `superschematic.toml` | The default naming file, written out |
@@ -79,7 +79,10 @@ bin/superschematic build path/to/schemas/services/my-service
 ```
 
 `superschematic build <service-dir>` reads `<schemas-root>/superschematic.toml`
-for names and writes to `<schemas-root>/dist`. `examples/acme-schematic` is a
+for names and writes to `<schemas-root>/dist`. `examples/acme-shop` is the
+docs site's tutorial project: four services built with the core binary,
+and a Go and a TypeScript app that serve and call what they generate;
+`examples/acme-shop/scripts/check.sh` builds and tests it. `examples/acme-schematic` is a
 complete downstream example: a schemas root with one service per kind and an
 extension that adds a kind, a decorator, a document, a generator, an auth
 provider and a command without editing the core. Its README walks through
