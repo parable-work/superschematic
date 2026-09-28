@@ -13,6 +13,23 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Verification refuses an `@index` of a DB table that the SQL generator
+  cannot build: one with a key that resolves to no column of the table, or
+  one with no keys. The SQL generator left such an index out of the DDL
+  without an error. A key resolves as the generator always resolved it: to
+  the column named by the key in snake_case, or by that name plus `_id`,
+  so a to-one relation `author` is indexed as `author` or `authorId`. A
+  list relation, the generated `id` of a table without a `@key`, `_version`
+  and a `@hasMany` back reference's column are not keys: the generator adds
+  none of them before it resolves the keys. The TypeScript compiler did
+  not catch these, since `@index<T>` checks the keys against `T` rather
+  than the decorated class and `keyof T` includes list relations; the JSON
+  and YAML forms accept any string. The error names the type, the index
+  and the key, such as
+  `Post: @index(["author", "titel"]) key "titel" names no field of Post`.
+  The SQL generator fails on the same indexes, as a backstop. A schema
+  with such an index now fails to load; output for every other schema is
+  unchanged. Patch.
 - Verification refuses version graph schemas the generators could not run
   correctly. A `@graphMember` may exclude from history only nullable
   fields (besides its audit fields), since Revert and Merge rebuild rows

@@ -661,30 +661,27 @@ func convertTypeToTable(
 		table.Columns = append(table.Columns, column)
 	}
 
-	// Indexes from @index declarations.
+	// Indexes from @index declarations. Verification refuses an index
+	// without keys and a key that names no column (checkIndexKeys); both
+	// fail here too, as a backstop, rather than drop the index.
 	var pending []pendingIndex
 	for _, idx := range typeDef.Indexes {
 		if len(idx.Keys) == 0 {
-			continue
+			return table, fmt.Errorf("type %s declares an @index with no keys", typeDef.Name)
 		}
 
 		indexColumns := make([]string, 0, len(idx.Keys))
 		indexTypes := make([]string, 0, len(idx.Keys))
 		indexKeys := make([]string, 0, len(idx.Keys))
-		validIndex := true
 
 		for _, key := range idx.Keys {
 			indexCol := findIndexColumn(table.Columns, key)
 			if indexCol == nil {
-				validIndex = false
-				break
+				return table, fmt.Errorf("@index key %q of type %s names no column of table %s", key, typeDef.Name, table.Name)
 			}
 			indexColumns = append(indexColumns, indexCol.QuotedName)
 			indexTypes = append(indexTypes, indexCol.Type)
 			indexKeys = append(indexKeys, key)
-		}
-		if !validIndex {
-			continue
 		}
 
 		pending = append(pending, pendingIndex{
@@ -1094,11 +1091,12 @@ func determineIndexType(columnTypes []string) string {
 	return "BTREE"
 }
 
+// findIndexColumn returns the first of columns an @index key resolves to
+// (sqlutil.IndexKeyMatches), or nil.
 func findIndexColumn(columns []Column, key string) *Column {
-	keyFieldName := codegen.ToSnakeCase(key)
 	for i := range columns {
 		col := &columns[i]
-		if col.Name == keyFieldName || col.Name == keyFieldName+"_id" {
+		if sqlutil.IndexKeyMatches(key, col.Name) {
 			return col
 		}
 	}
