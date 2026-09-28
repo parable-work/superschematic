@@ -302,6 +302,11 @@ jobs:
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
 
+      - name: Build the version-graph archive
+        # shop-db declares a version graph, so its generated ORM, and the API
+        # that imports it, link the core's Go binding against this archive.
+        run: scripts/versiongraph-archive.sh
+
       - name: Smoke (module tests, build-all, every surface, generated API compiles, core rejects Catalog)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
