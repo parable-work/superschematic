@@ -62,4 +62,7 @@ replace {{ . }} => ../../types/go/{{ base . }}
 replace {{ .ORMModule }} => ../../orm/{{ .UpstreamSchema }}
 replace {{ .UpstreamTypesModule }} => ../../types/go/{{ .UpstreamSchema }}
 {{- end }}
+{{- if .VersionGraphReplacePath }}
+replace {{ $.Naming.VersionGraphGoModule }} => {{ .VersionGraphReplacePath }}
+{{- end }}
 {{- authSnippet "moduleReplaces" . }}

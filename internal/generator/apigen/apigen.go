@@ -228,6 +228,12 @@ type APIOutput struct {
 	UpstreamSchema      string // upstream DB schema name (public APIs only)
 	UpstreamTypesModule string // upstream types module path (public APIs only)
 
+	// UpstreamVersionGraph reports whether the upstream schema declares a
+	// version graph. Its ORM then imports the version-graph core's Go
+	// binding, and this module's go.mod carries the binding's replace
+	// directive, since a replace in the ORM's go.mod does not reach it.
+	UpstreamVersionGraph bool
+
 	// Auth is the provider's analysis of the upstream schema: it gates the
 	// ORM-backed auth store adapters in middleware.go on what the upstream
 	// schema actually declares.
@@ -302,6 +308,7 @@ type APIOutput struct {
 	HTTPRuntimeReplacePath   string
 	SchemaRuntimeReplacePath string
 	PtrReplacePath           string
+	VersionGraphReplacePath  string
 }
 
 // HasConstants reports whether constants.go is generated: public schemas
@@ -461,6 +468,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	if opts.UpstreamSchema != "" && opts.UpstreamIR == nil {
 		return nil, fmt.Errorf("apigen: upstream schema %s declared but no upstream IR provided", opts.UpstreamSchema)
 	}
+	output.UpstreamVersionGraph = declaresVersionGraph(opts.UpstreamIR)
 	auth, err := opts.Provider.Analyze(schema, opts.UpstreamIR)
 	if err != nil {
 		return nil, fmt.Errorf("apigen: auth provider %s: %w", opts.Provider.Name(), err)
@@ -861,6 +869,20 @@ func endpointNeedsTypesImport(endpoint *EndpointInfo) bool {
 	}
 	for _, arg := range endpoint.ScalarArgs {
 		if strings.HasPrefix(arg.GoType, "types.") {
+			return true
+		}
+	}
+	return false
+}
+
+// declaresVersionGraph reports whether schema (nil for none) declares a
+// @versionGraph root.
+func declaresVersionGraph(schema *ir.Schema) bool {
+	if schema == nil {
+		return false
+	}
+	for _, td := range schema.Types {
+		if td.VersionGraph != nil {
 			return true
 		}
 	}
