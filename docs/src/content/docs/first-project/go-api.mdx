@@ -1,0 +1,172 @@
+---
+title: Serve and call it from Go
+description: Declare the product API, implement the generated Go server over the ORM, and call it with the generated Go SDK.
+sidebar:
+  order: 3
+---
+
+import { FileTree, LinkCard } from '@astrojs/starlight/components';
+import Snippet from '../../../components/Snippet.astro';
+
+Shop staff add products and shoppers browse them. `shop-api` declares
+those routes over the `Product` table. superschematic generates the Go
+server, which routes, decodes, validates and checks permissions, and a Go
+SDK to call it. You write the business logic and say who the caller is.
+
+## Declare the API
+
+<Snippet file="schemas/services/shop-api/src/products.schema.ts" />
+
+- `ProductView` is what a caller sees of a product. `@source(Product)`
+  makes it a view of the table, and the loader checks that each field
+  matches a field of the table with a compatible type. It lists only the
+  columns a caller may see.
+- `CreateProductInput` is a plain type. `Validate<Generic.Int64, { min: 0 }>`
+  adds a constraint that the generated Go types enforce, so the Go SDK
+  refuses to send a negative price and the Go server refuses to accept one.
+- A class of methods is an operation set. `@rest` gives each method its
+  HTTP method and path, and the server mounts the paths under `/api`. The
+  method bodies never run.
+- `extends Authenticated` puts every route of the set behind the auth
+  middleware. `@requirePermission` lists the permissions that let a caller
+  in; a granted permission covers the ones nested under it, so `products`
+  covers `products.read` and `products.write`.
+- `QueryParam<boolean>` reads `inStock` from the query string.
+
+## Configure it
+
+<Snippet file="schemas/services/shop-api/schema.config.ts" />
+
+- `api: { enabled: true }` generates the Go server, the default language.
+- `public: true` marks an API whose callers authenticate. It turns on the
+  auth provider's code in the Go server, the security scheme in OpenAPI and
+  the token handling in the SDKs.
+- `authDb` names the DB schema the auth provider reads its stores from.
+  The core provider, `session`, finds `shop-db`'s `Session` and `User`
+  tables and generates stores over the ORM for them.
+- `sdk` lists the SDK languages. Any API can have an SDK in Go, TypeScript,
+  Python or Rust, whatever language serves it. An SDK decodes and validates
+  with the types package of its own language, so `types` lists every SDK
+  language too.
+
+## Build
+
+```sh
+superschematic build schemas/services/shop-api
+```
+
+```
+Loaded schema shop-api (kind API): 2 types, 0 enums, 5 scalars, 2 operation sets
+  + types-go written to .../schemas/dist/types/go/shop-api
+  + types-typescript written to .../schemas/dist/types/typescript/shop-api
+  + api written to .../schemas/dist/api/shop-api
+  + sdk-go written to .../schemas/dist/sdk/go/shop-api
+  + sdk-typescript written to .../schemas/dist/sdk/typescript/shop-api
+Build complete: 5 outputs generated, 0 skipped
+```
+
+The generated server imports `shop-db`'s ORM module, so build `shop-db`
+too, or run `superschematic build --with-deps schemas/services/shop-api`,
+which builds `shop-db` first and then `shop-api`.
+
+<FileTree>
+- schemas/dist/api/shop-api/ the Go module example.com/acme/api/shop-api
+  - interfaces.go what you implement
+  - routes.go Config and RegisterRoutes
+  - middleware.go the session and principal stores, request middleware
+  - errors.go NotFoundError and the other problem responses
+  - openapi.json
+  - ...
+</FileTree>
+
+## Implement the routes
+
+`ProductQueries` and `ProductMutations` share the `product` namespace, so
+the server asks for one implementation with all three methods:
+
+<Snippet file="testdata/generated/api/shop-api/interfaces.go" symbol="ProductImplementation" />
+
+`examples/acme-shop/go` implements it over the ORM:
+
+<Snippet file="go/products.go" symbol={['Products', 'Products.GetProduct', 'Products.ListProducts']} />
+
+The server has already decoded and validated the arguments, so a method
+only does the work. An error from `shopapi.NotFoundError` answers 404, and
+the other constructors in `errors.go` (`BadRequestError`,
+`ConflictError`, `ForbiddenError` and more) answer their own statuses. Any
+other error is logged and answers 500 with a generic message, so no
+internal detail reaches the caller.
+
+## Say who the caller is
+
+The server needs an `AuthMiddleware` that puts the caller on the request
+context. With the `session` provider, the generated
+`shopapi.NewSessionStore(db)` and `shopapi.NewPrincipalStore(db)` look the
+session and the user up in `shop-db`. Your code verifies the bearer token
+and says which roles the user holds, since the shop has no role table:
+
+<Snippet file="go/auth.go" symbol={['TokenValidator', 'Auth', 'Auth.Middleware']} />
+
+`session.RequireAuth` answers 401 when no caller was found. Each route then
+checks its `@requirePermission` list against the roles and answers 403
+when none covers it.
+
+## Mount the server
+
+`RegisterRoutes` mounts every route on a chi router. `Config.Validate`
+refuses a missing database, logger, auth middleware or implementation:
+
+<Snippet file="go/server.go" symbol="NewHandler" />
+
+In a real service, `main` connects to Postgres and wires in the generated
+stores. The example compiles this as a Go example function but does not
+run it:
+
+<Snippet file="go/example_test.go" symbol="Example" />
+
+The server also answers `GET /api/openapi.json` with the OpenAPI document
+and `GET /api/docs` with a page that renders it, without a caller.
+
+## Call it from Go
+
+The generated SDK is the module `example.com/acme/sdk/go/shop-api`. Its
+client has one field per namespace, and each method takes the same
+arguments as the route. The example's test drives the SDK against the
+server in-process, with the ORM's no-op database in place of Postgres:
+
+<Snippet file="go/server_test.go" symbol="TestTheSDKCallsTheGeneratedServer" />
+
+- `AuthConfig.Token` sends `Authorization: Bearer <token>`. `GetToken`
+  resolves a token per request instead, and `RefreshToken` is called after
+  a 401.
+- The SDK validates an input before it sends it and returns a
+  `*sdk.ValidationError` without a request.
+- A response outside 2xx returns an `*sdk.APIError`, or a type that embeds
+  one: `*sdk.AuthenticationError` for 401, `*sdk.AuthorizationError` for
+  403.
+
+Run it from `examples/acme-shop/go` after building the schemas, with the
+flags from
+[Prerequisites](/superschematic/start/prerequisites/#compile-generated-go-code)
+exported:
+
+```sh
+go test ./...
+```
+
+`examples/acme-shop/go/go.mod` requires each generated module and points a
+`replace` line at `schemas/dist`, until the modules are published.
+
+## Call it from TypeScript
+
+The same build wrote a TypeScript SDK for this API, `@acme/shop-api-sdk`.
+Its client is `ShopApiSDK`, with a `product` namespace:
+`new ShopApiSDK({ baseUrl, auth: { token } })`, then
+`await sdk.product.getProduct(id)`. The
+[TypeScript path](/superschematic/first-project/typescript-api/) shows a
+TypeScript SDK at work.
+
+<LinkCard
+  title="Next: build the whole tree"
+  href="/superschematic/first-project/build-the-tree/"
+/>

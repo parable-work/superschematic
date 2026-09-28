@@ -60,6 +60,23 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- `examples/acme-shop`: the docs tutorial's project. Four services built
+  with the core binary (`shop-common`, General; `shop-db`, DB; `shop-api`,
+  an API served in Go with Go and TypeScript SDKs; `shop-storefront`, an API
+  served in TypeScript), a Go app that implements `shop-api` over the
+  generated ORM and calls it through the Go SDK, and a TypeScript app that
+  implements `shop-storefront` and calls it through the TypeScript SDK, both
+  tested in-process without Postgres. `scripts/check.sh` builds and tests it
+  and compares the generated files the docs quote with their committed
+  copies under `testdata/generated/`; the `acme` CI job runs it.
+- Docs site: a "Start here" group (prerequisites, getting started, how it
+  works) and "Your first project", a tutorial over `examples/acme-shop` with
+  a Go path and a TypeScript path. Pages quote the example's files through
+  a `Snippet` component that reads them when the site builds, by
+  declaration name or line anchors, and fails the build when a name no
+  longer matches. The sidebar's "Quickstart" group is now "Languages" and
+  "Guides" is "Extending". The Go and TypeScript pages name the SDK
+  namespace fields correctly (`ProductNamespace`, `sdk.product`).
 - `@superschematic/versiongraph`, a new npm package in
   `runtime/versiongraph/typescript`: the version-graph core built for
   `wasm32-unknown-unknown`, with an async `init` and typed `compose`,

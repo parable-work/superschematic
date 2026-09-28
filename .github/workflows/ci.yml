@@ -274,6 +274,7 @@ jobs:
           cache-dependency-path: |
             go.sum
             examples/acme-schematic/go.sum
+            examples/acme-shop/go/go.sum
 
       - name: Setup Bun
         # The superscalar TypeScript binding is built alongside the Go
@@ -320,6 +321,15 @@ jobs:
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: examples/acme-schematic/scripts/check_second_decorator.sh
+
+      # The docs site's getting-started and first-project pages quote
+      # examples/acme-shop. This builds it with the core binary, compiles and
+      # tests the Go and TypeScript code the pages show, and fails when a
+      # generated file a page quotes (examples/acme-shop/testdata/generated/) is stale.
+      - name: acme-shop (the docs tutorial project builds and passes its tests)
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: examples/acme-shop/scripts/check.sh
 
   typescript:
     name: typescript (authoring packages + schema and http runtimes)

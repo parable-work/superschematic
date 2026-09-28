@@ -1,0 +1,142 @@
+---
+title: Serve and call it from TypeScript
+description: Declare the storefront API, implement the generated TypeScript router, and call it with the generated TypeScript SDK.
+sidebar:
+  order: 4
+---
+
+import { Aside, FileTree, LinkCard } from '@astrojs/starlight/components';
+import Snippet from '../../../components/Snippet.astro';
+
+Shoppers fill carts on the storefront, which the shop runs on TypeScript.
+`shop-storefront` declares the cart routes. superschematic generates a
+router, built on [Hono](https://hono.dev), that decodes, validates and
+gates each request, and a TypeScript SDK to call it. You write the
+handlers and say who the caller is.
+
+## Declare the API
+
+<Snippet file="schemas/services/shop-storefront/src/carts.schema.ts" />
+
+- `CartLine` and `CartView` use `Price` from `shop-common`. A schema that
+  imports another service's types lists that service in its config's
+  `dependencies`.
+- `@requirePermission` puts a route behind the auth gate: the caller must
+  hold one of the listed permissions. `@publicRoute` opens `getHealth` to
+  anyone.
+- `Validate<number, { min: 1; max: 99 }>` bounds the quantity. The router
+  checks it on every request, and the SDK checks it before sending.
+
+## Configure it
+
+<Snippet file="schemas/services/shop-storefront/schema.config.ts" />
+
+`language: "TYPESCRIPT"` generates the router package instead of a Go
+module. `service({ name: "shop-common", kind: SchemaKind.General })` is
+the handle `shop-common`'s build wrote to its `src/service.generated.ts`.
+
+## Build
+
+```sh
+superschematic build --with-deps schemas/services/shop-storefront
+```
+
+`--with-deps` builds `shop-common` first, then:
+
+```
+Loaded schema shop-storefront (kind API): 4 types, 1 enums, 3 scalars, 3 operation sets
+  + sentinel written (src/service.generated.ts)
+  + types-typescript written to .../schemas/dist/types/typescript/shop-storefront
+  + api-typescript written to .../schemas/dist/api/shop-storefront
+  + sdk-typescript written to .../schemas/dist/sdk/typescript/shop-storefront
+Build complete: 3 outputs generated, 0 skipped
+```
+
+<FileTree>
+- schemas/dist/
+  - api/shop-storefront/ @acme/shop-storefront-api
+    - interfaces.ts what you implement
+    - router.ts buildRouter and the operation table
+    - openapi.json
+  - sdk/typescript/shop-storefront/ @acme/shop-storefront-sdk
+  - types/typescript/
+    - shop-common/ @acme/shop-common-types
+    - shop-storefront/ @acme/shop-storefront-types
+</FileTree>
+
+## Implement the routes
+
+The router asks for one implementation per operation set, keyed by the
+set's namespace:
+
+<Snippet file="testdata/generated/api/shop-storefront/interfaces.ts" symbol={['CartImplementation', 'Implementations']} />
+
+Each method receives its decoded arguments and a request context, and
+returns the view, or an `OperationResult` to choose the status.
+`examples/acme-shop/typescript/app.ts` keeps carts in memory:
+
+<Snippet file="typescript/app.ts" symbol={['authenticate', 'storefrontApp']} />
+
+- `authenticate` returns the caller as a `Principal` (`subject` and
+  `permissions`) or `null`. The router reads the bearer token into
+  `ctx.bearerToken` for it. A route that needs a caller answers 401
+  without one and 403 when no permission covers the route's; `carts`
+  covers `carts.read` and `carts.write`.
+- Before a method runs, the router has decoded `cartId` as a UUID and
+  parsed the body with the generated parser, so a bad UUID or a quantity
+  of 100 answers 400 without reaching your code.
+- A thrown `notFound(...)` or `HttpProblem` answers with an RFC 9457
+  problem body. `errorHandler()` and `notFoundHandler()` answer the same
+  way for errors outside the router.
+- A success answers `{ "data": <view>, "meta": { "requestId": ... } }`.
+
+## Call it from TypeScript
+
+The SDK's `fetch` option replaces the network, so the example's test hands
+each request straight to the Hono app:
+
+<Snippet file="typescript/app.test.ts" symbol="sdkFor" />
+
+<Aside>
+  An SDK attaches `auth.token` only for an API marked `public: true`, and
+  `public` requires an `authDb`, a database the TypeScript router has no
+  use for. So this example leaves `public` off and sets the `Authorization`
+  header with the SDK's `requestInterceptor`. For an API served in Go, set
+  `public` and `authDb` and pass `auth: { token }`, as the
+  [Go path](/superschematic/first-project/go-api/) does.
+</Aside>
+
+Then each namespace is a property of the SDK, and each method takes the
+route's arguments:
+
+<Snippet file="typescript/app.test.ts" from="test('a shopper adds lines" to="  });" />
+
+The SDK parses each response with the generated parser, so `updatedAt`
+arrives as a `Date`. A response outside 2xx throws an `ApiError` with its
+`statusCode`, or `AuthenticationError` for 401, and an input the
+generated validator refuses throws `ValidationError` before any request.
+
+## Install the packages
+
+Until the packages are published, a service resolves the generated
+packages and the runtime from the checkout.
+`schemas/dist/types/typescript` is a Bun workspace, so `bun install` there
+links `@acme/shop-storefront-types` to `@acme/shop-common-types`. The
+router, the SDK and the app then need those packages, the HTTP runtime and
+Hono in their `node_modules`. `scripts/check.sh` links them:
+
+<Snippet file="scripts/check.sh" from="link_module() {" to='link_module "$SDK_PKG"' />
+
+With the links in place, run the tests from `examples/acme-shop/typescript`:
+
+```sh
+bun test
+```
+
+The generated packages and the runtime ship TypeScript sources, so run
+them with Bun, a bundler or a TypeScript loader.
+
+<LinkCard
+  title="Next: build the whole tree"
+  href="/superschematic/first-project/build-the-tree/"
+/>
