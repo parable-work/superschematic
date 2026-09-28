@@ -1154,8 +1154,8 @@ its provider, which supplies those two functions. D15 in
 | Surface | Core registration |
 | --- | --- |
 | Kinds | `DB`, `API`, `General` (section 3.3) |
-| Decorators | 42 specs over the four targets in `internal/registry/core_decorators.go`, `core_projection.go`, `docs_decorators.go` and `behaviors.go`, declared in `@superschematic/{schema,db,api,schema-config}` |
-| Generators | `types`, `sql`, `orm`, `api`, `sdks`, `envConfig` (section 3.6) |
+| Decorators | 46 specs over the four targets in `internal/registry/core_decorators.go`, `core_projection.go`, `docs_decorators.go` and `behaviors.go`, declared in `@superschematic/{schema,db,api,schema-config}`. Types (14): `trait`, `source`, `envVars`, `jsonField`, `denyUnknownFields`, `strictJSON`, `versioned`, `optimistic`, `versionGraph`, `graphMember`, `index`, `projection`, `join`, `behavior`. Fields (14): `key`, `unique`, `searchField`, `jsonField`, `uiHidden`, `internalMetadata`, `temporalFormat`, `conflictUnit`, `virtual`, `sourceMustProject`, `docs`, `purpose`, `icon`, `column`. Operation sets (3): `rateLimit`, `bodyLimit`, `timeout`. Operations (15): `rest`, `requirePermission`, `requireOwnership`, `auth`, `encrypted`, `publicRoute`, `webhook`, `hmacVerified`, `manualRouteRegistration`, `rateLimit`, `bodyLimit`, `timeout`, `docs`, `mcp`, `icon` |
+| Generators | `types`, `sql`, `orm`, `api`, `sdks`, `envConfig` (section 3.6). For a schema that declares a version graph, `orm` also writes the graph's shell and `types` its descriptor (D17) |
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
@@ -1196,6 +1196,7 @@ each surface:
 | Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Behavior | `acme.Rating`, which a General data-form service in `ext/testdata/services/shop-ratings` composes, and its TypeScript twin `shop-ratings-ts` with `@behavior`; its `BehaviorConfigs` augmentation | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts` |
 | Binary | `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
+| A core mechanism in acme's terms | the `Planogram` version graph (D17): `Bay` and `Facing` members declared with the core's `@versionGraph`, `@graphMember` and `@conflictUnit` | `schemas/services/shop-db/src/planogram.schema.ts` |
 
 The acceptance criterion: an extension adds every surface above without
 editing a file outside its own module, and adding one more decorator stays
@@ -1219,7 +1220,10 @@ that way. Two scripts check it, and the `acme` job in
   documents carry acme's keys; `acme.Rating` reaches the IR of
   `shop-ratings` and of its TypeScript twin, `json-schema` and `format`
   accept it (to YAML and to TypeScript), and `build` refuses the service,
-  naming the `types` generator. It also asserts that the
+  naming the `types` generator; shop-db's `Planogram` graph expands in
+  the IR, its descriptor and shell are written and the ORM and the API
+  over it compile, and `format` writes the declarations back rather than
+  the expansion. It also asserts that the
   core-only binary rejects the Catalog service, the `acme.Rating` behavior
   and the naming file that selects `apikey`,
   that it builds the DB and API services with `session` and the result

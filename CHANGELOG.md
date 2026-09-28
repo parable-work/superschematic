@@ -1121,6 +1121,13 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Go API: a public API whose `authDb` declares a version graph did not
+  resolve its dependencies. The upstream ORM imports the version-graph
+  core's Go binding, and the replace directive in the ORM's `go.mod` does
+  not apply to a module that imports the ORM, so `go mod tidy` looked the
+  binding up at its placeholder version. The API's `go.mod` now carries
+  the binding's replace (`[paths] versiongraph_go`) when its upstream
+  schema declares a graph. Output for any other API is unchanged. Patch.
 - Go API: a `GET` operation with an optional number, integer, boolean or
   UUID argument, or a timestamp argument, generated a `routes.go` that did
   not compile: the route parsed an optional one into a pointer while the
