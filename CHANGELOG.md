@@ -11,6 +11,14 @@ of a generated artifact is always listed here with the bump it requires.
 
 ## [Unreleased]
 
+### Fixed
+
+- The Python scalars module (`scalars.py`) no longer carries the source
+  tree's name for the scalar library: the fallback comment now names the
+  configured scalar Python module as not installed, and the availability
+  flag is `_SCALAR_MODULE_AVAILABLE`. The scrub gate fails on that name.
+  Patch (generated comment and private identifier change).
+
 ### Added
 
 - The version-graph core (D17), `runtime/versiongraph`: a Rust crate,

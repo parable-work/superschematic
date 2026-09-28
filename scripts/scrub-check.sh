@@ -155,6 +155,18 @@ if [ -n "$shapes$generator" ]; then
   exit 1
 fi
 
+# The source tree's name for the scalar library, in any case and with a
+# hyphen or an underscore; here it is superscalar. docs/DECISIONS.md records
+# the renames that removed it and is the one file skipped.
+scalarlib="$(scan -i 'scalar[-_]lib' . -- "${hashes[@]}" \
+  | drop '^\./docs/DECISIONS\.md:[0-9]+:')"
+
+if [ -n "$scalarlib" ]; then
+  echo "scrub: source-tree scalar library name:" >&2
+  echo "$scalarlib" >&2
+  exit 1
+fi
+
 # Schema kinds the source tree defines and the core does not: plots,
 # combinators and ontology definitions, in any case and inside identifiers.
 # Its fourth kind, primitives, is not searched: the core uses "primitive" for

@@ -36,10 +36,10 @@ try:
         {{- end}}
         {{end}}{{end}}
     )
-    _SCALAR_LIB_AVAILABLE = True
+    _SCALAR_MODULE_AVAILABLE = True
 except ImportError:
-    # Scalar-lib not available, validation will be limited to patterns only
-    _SCALAR_LIB_AVAILABLE = False
+    # {{.Naming.ScalarPythonModule}} is not installed: validation is limited to patterns
+    _SCALAR_MODULE_AVAILABLE = False
 {{end}}
 
 {{range .Scalars}}{{if and (or .HasCustomParse (pythonParsesJSON .)) (ne .Name "Generic.JSON")}}
@@ -56,7 +56,7 @@ def _custom_parse_{{pythonScalarModule .}}(v: Any) -> Any:
             v = json.loads(v)
         except ValueError as e:
             raise ValueError(f"expected JSON text: {e}")
-    if not _SCALAR_LIB_AVAILABLE:
+    if not _SCALAR_MODULE_AVAILABLE:
         return v
     try:
         parsed = parse_{{pythonScalarModule .}}(json.dumps(v))
@@ -66,7 +66,7 @@ def _custom_parse_{{pythonScalarModule .}}(v: Any) -> Any:
     inputs are stringified before the call and numeric targets are
     converted back afterwards.
     """
-    if not _SCALAR_LIB_AVAILABLE or v is None:
+    if not _SCALAR_MODULE_AVAILABLE or v is None:
         return v
     try:
         parsed = parse_{{pythonScalarModule .}}(v if isinstance(v, str) else str(v))
@@ -91,7 +91,7 @@ def _custom_normalize_{{pythonScalarModule .}}(v: Any) -> Any:
     inputs are stringified before the call and numeric targets are
     converted back afterwards.
     """
-    if not _SCALAR_LIB_AVAILABLE or v is None:
+    if not _SCALAR_MODULE_AVAILABLE or v is None:
         return v
     try:
         normalized = normalize_{{pythonScalarModule .}}(v if isinstance(v, str) else str(v))
@@ -113,7 +113,7 @@ def _custom_validate_{{pythonScalarModule .}}(v: Any) -> Any:
     Wraps the scalar library validator that returns list[ValidationError]
     to the Pydantic-compatible pattern that raises ValueError.
     """
-    if not _SCALAR_LIB_AVAILABLE:
+    if not _SCALAR_MODULE_AVAILABLE:
         return v
     errors = validate_{{pythonScalarModule .}}(str(v))
     if errors:
@@ -239,7 +239,7 @@ def _validate_generic_json(v: Any) -> Any:
 
     visit(v)
     {{- if .HasCustomValidate}}
-    if _SCALAR_LIB_AVAILABLE:
+    if _SCALAR_MODULE_AVAILABLE:
         errors = validate_{{pythonScalarModule .}}(json.dumps(v, allow_nan=False, separators=(",", ":")))
         if errors:
             raise ValueError("; ".join([e.message for e in errors]))
