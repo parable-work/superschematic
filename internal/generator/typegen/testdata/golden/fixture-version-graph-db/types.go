@@ -1447,7 +1447,7 @@ type RecipeCommit struct {
 
 	ContentHash string `json:"contentHash"`
 
-	Sequence GenericInt64 `json:"sequence,omitempty"`
+	Sequence *GenericInt64 `json:"sequence,omitempty"`
 
 	CreatedAt TemporalDateTime `json:"createdAt"`
 
@@ -1532,9 +1532,9 @@ func (t *RecipeCommit) Validate() ValidationErrors {
 
 	// Validate sequence (optional)
 
-	// Validate optional value field only when it is set
-	if !reflect.ValueOf(t.Sequence).IsZero() {
-		if valid, fieldErrs := validateGenericInt64Value(t.Sequence, false); !valid {
+	// Validate optional pointer field
+	if t.Sequence != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Sequence, false); !valid {
 			errors.SetFieldErrors("sequence", fieldErrs)
 		}
 	}
@@ -2394,7 +2394,7 @@ func RecipeRefFromYAMLNonStrict(data []byte) (*RecipeRef, error) {
 	return decoded, nil
 }
 
-// Step - One step of a recipe, ordered by position.
+// Step - One step of a recipe, ordered by position; updatedBy names its row's writer.
 type Step struct {
 	Id *IdentityUUID `json:"id,omitempty"`
 
@@ -2407,6 +2407,14 @@ type Step struct {
 	Timings GenericJSON `json:"timings"`
 
 	Scratch string `json:"scratch,omitempty"`
+
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	CreatedBy IdentityUUID `json:"createdBy"`
+
+	UpdatedAt TemporalDateTime `json:"updatedAt"`
+
+	UpdatedBy IdentityUUID `json:"updatedBy"`
 
 	EntityKey *IdentityUUID `json:"entityKey,omitempty"`
 
@@ -2463,6 +2471,14 @@ func (t *Step) MaskSecrets() *Step {
 
 	masked.Scratch = t.Scratch
 
+	masked.CreatedAt = t.CreatedAt
+
+	masked.CreatedBy = t.CreatedBy
+
+	masked.UpdatedAt = t.UpdatedAt
+
+	masked.UpdatedBy = t.UpdatedBy
+
 	masked.EntityKey = t.EntityKey
 
 	maskedValueRef := t.Ref.MaskSecrets()
@@ -2505,6 +2521,24 @@ func (t *Step) Validate() ValidationErrors {
 	// Validate timings (required): any JSON value but null.
 	if jsonValueMissing(t.Timings) {
 		errors.AddFieldError("timings", "required", "required field")
+	}
+
+	{
+		value := t.CreatedBy
+
+		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
+			errors.AddFieldError("createdBy", "pattern", "invalid format")
+		}
+
+	}
+
+	{
+		value := t.UpdatedBy
+
+		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
+			errors.AddFieldError("updatedBy", "pattern", "invalid format")
+		}
+
 	}
 
 	// Validate entityKey (optional)

@@ -45,9 +45,9 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	return output
 }
 
-// TestWriteORMGolden generates the ORM module for the fixture-db and
-// fixture-nested-arrays-db services and compares every emitted file against
-// its golden copy. Regenerate with:
+// TestWriteORMGolden generates the ORM module for the fixture-db,
+// fixture-nested-arrays-db and fixture-version-graph-db services and
+// compares every emitted file against its golden copy. Regenerate with:
 // go test ./internal/generator/ormgen -run TestWriteORMGolden -update
 func TestWriteORMGolden(t *testing.T) {
 	common := []string{
@@ -63,6 +63,7 @@ func TestWriteORMGolden(t *testing.T) {
 		{"fixture-version-graph-db", []string{
 			"repository_cover.go", "repository_ingredient.go", "repository_note.go", "repository_recipe.go",
 			"repository_recipe_commit.go", "repository_recipe_patch.go", "repository_recipe_ref.go", "repository_step.go",
+			"versiongraph.go", "versiongraph_recipe.go",
 		}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {

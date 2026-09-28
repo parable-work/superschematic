@@ -224,7 +224,7 @@
     "Step": {
       "name": "Step",
       "owner": "src/recipe.schema.ts",
-      "comment": "One step of a recipe, ordered by position.",
+      "comment": "One step of a recipe, ordered by position; updatedBy names its row's writer.",
       "role": "DBTable",
       "fields": [
         {
@@ -274,6 +274,34 @@
             "name": "string"
           },
           "conflictUnit": "excluded"
+        },
+        {
+          "name": "createdAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "updatedAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true
+        },
+        {
+          "name": "updatedBy",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
         }
       ],
       "versioned": true,

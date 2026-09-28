@@ -30,6 +30,18 @@ func TestGeneratedVersionGraphORM(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
+	ormDir := generateVersionGraphModule(t)
+	if err := os.WriteFile(filepath.Join(ormDir, "version_graph_test.go"), []byte(versionGraphORMTest), 0o644); err != nil {
+		t.Fatalf("write version graph test: %v", err)
+	}
+	runVersionGraphModule(t, ormDir)
+}
+
+// generateVersionGraphModule writes the Go types module, the ORM module and
+// the DDL (under the ORM's testdata) of fixture-version-graph-db into a
+// temporary tree, and returns the ORM module's directory.
+func generateVersionGraphModule(t *testing.T) string {
+	t.Helper()
 	paths := testpaths.Local(t)
 
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, versionGraphFixture))
@@ -80,15 +92,20 @@ func TestGeneratedVersionGraphORM(t *testing.T) {
 	if err := sqlgen.WriteDDL(ddl, filepath.Join(ormDir, "testdata")); err != nil {
 		t.Fatalf("write ddl: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(ormDir, "version_graph_test.go"), []byte(versionGraphORMTest), 0o644); err != nil {
-		t.Fatalf("write version graph test: %v", err)
-	}
+	return ormDir
+}
 
+// runVersionGraphModule tidies, builds, vets and tests the generated ORM
+// module, and returns the test output. It links the version-graph binding,
+// so it needs the core's archive (make versiongraph).
+func runVersionGraphModule(t *testing.T, ormDir string) string {
+	t.Helper()
 	tidy := exec.Command("go", "mod", "tidy")
 	tidy.Dir = ormDir
 	if out, err := tidy.CombinedOutput(); err != nil {
 		t.Skipf("go mod tidy failed (likely offline): %v\n%s", err, out)
 	}
+	var testOutput string
 	for _, args := range [][]string{{"build", "./..."}, {"vet", "./..."}, {"test", "-count=1", "-v", "./..."}} {
 		// No cmd.Env: exec then sets PWD to cmd.Dir, which keeps the
 		// module's relative replace paths valid under a symlinked temp dir.
@@ -100,8 +117,10 @@ func TestGeneratedVersionGraphORM(t *testing.T) {
 		}
 		if args[0] == "test" {
 			t.Logf("generated ORM tests:\n%s", out)
+			testOutput = string(out)
 		}
 	}
+	return testOutput
 }
 
 const versionGraphORMTest = `package orm

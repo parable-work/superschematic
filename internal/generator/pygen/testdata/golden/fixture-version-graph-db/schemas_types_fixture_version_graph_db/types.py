@@ -1728,7 +1728,7 @@ class RecipeRef(BaseModel):
 
 class Step(BaseModel):
     """
-    One step of a recipe, ordered by position.
+    One step of a recipe, ordered by position; updatedBy names its row's writer.
     """
 
     model_config = ConfigDict(
@@ -1750,6 +1750,14 @@ class Step(BaseModel):
     timings: GenericJSON = Field(..., alias="timings", serialization_alias="timings")
 
     scratch: Optional[str] = Field(default=None, alias="scratch", serialization_alias="scratch")
+
+    created_at: TemporalDateTime = Field(..., alias="createdAt", serialization_alias="createdAt")
+
+    created_by: IdentityUUID = Field(..., alias="createdBy", serialization_alias="createdBy")
+
+    updated_at: TemporalDateTime = Field(..., alias="updatedAt", serialization_alias="updatedAt")
+
+    updated_by: IdentityUUID = Field(..., alias="updatedBy", serialization_alias="updatedBy")
 
     # The entity's logical identity, shared by its rows on every ref.
     entity_key: Optional[IdentityUUID] = Field(default=None, alias="entityKey", serialization_alias="entityKey")
@@ -1823,6 +1831,30 @@ class Step(BaseModel):
                 TypeAdapter(str).validate_python(self.scratch)
             except PydanticValidationError as e:
                 errors.add_field_error("scratch", "invalid", str(e))
+
+        # Validate createdAt
+        if self.created_at is None:
+            errors.add_field_error("created_at", "required", "required field")
+
+        # Validate createdBy
+        if self.created_by is None:
+            errors.add_field_error("created_by", "required", "required field")
+        else:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.created_by)) is None:
+                errors.add_field_error("created_by", "pattern", "invalid format")
+
+        # Validate updatedAt
+        if self.updated_at is None:
+            errors.add_field_error("updated_at", "required", "required field")
+
+        # Validate updatedBy
+        if self.updated_by is None:
+            errors.add_field_error("updated_by", "required", "required field")
+        else:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.updated_by)) is None:
+                errors.add_field_error("updated_by", "pattern", "invalid format")
 
         # Validate entityKey
         if self.entity_key is not None:

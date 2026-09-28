@@ -21,6 +21,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/graphdesc"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -260,6 +261,18 @@ type ModuleOutput struct {
 	Timestamp            string
 	ScalarLibReplacePath string
 	SchemaIRReplacePath  string
+
+	// VersionGraphs are the descriptors of the schema's version graphs
+	// (D17), written as versiongraph/<name>.json beside the types.
+	VersionGraphs []VersionGraphDescriptor
+}
+
+// VersionGraphDescriptor is one version graph's descriptor file.
+type VersionGraphDescriptor struct {
+	// FileName is the graph's snake_case name, the file's stem.
+	FileName string
+	// JSON is the descriptor document.
+	JSON []byte
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -392,6 +405,14 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	output.HasShapeDispatchedUnions, err = annotateShapeDispatch(output.Unions, append(append([]codegen.TypeInfo{}, objectTypes...), inputTypes...), enumLookup)
 	if err != nil {
 		return nil, err
+	}
+
+	for _, graph := range graphdesc.Graphs(schema) {
+		descriptor, err := graph.Descriptor.JSON()
+		if err != nil {
+			return nil, err
+		}
+		output.VersionGraphs = append(output.VersionGraphs, VersionGraphDescriptor{FileName: graph.FileName, JSON: descriptor})
 	}
 
 	for _, typeInfo := range output.Types {
@@ -739,7 +760,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 		// The pointer edits below never apply to a list: the elements of
 		// T[] and T[][] are value types, so [][]*T cannot arise.
 		goType := normalizeImportedGoType(cf.TargetType, importAliases)
-		if !isInput && cf.IsScalar && !cf.Required && cf.ScalarInfo != nil && cf.ScalarInfo.Traits.IsIntegerLike {
+		if !isInput && cf.IsScalar && !cf.Required && !cf.DistinctNull && cf.ScalarInfo != nil && cf.ScalarInfo.Traits.IsIntegerLike {
 			goType = strings.TrimPrefix(goType, "*")
 		}
 		// A Go union is an interface and already nilable. A pointer to it is

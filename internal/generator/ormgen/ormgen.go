@@ -75,6 +75,16 @@ type ORMOutput struct {
 	// transitive dependency via superscalar), relative to the output
 	// directory. Empty omits the directive.
 	SchemaIRReplacePath string
+
+	// VersionGraphs are the schema's version graphs (D17). Each gets a
+	// versiongraph_<name>.go shell, and any gets versiongraph.go and a
+	// requirement on the version-graph core's Go binding.
+	VersionGraphs []VersionGraph
+
+	// VersionGraphReplacePath is the go.mod replace target for the
+	// version-graph binding, relative to the output directory. Empty omits
+	// the directive; it is only written when the schema has a graph.
+	VersionGraphReplacePath string
 }
 
 // ModuleDependencyReplace keeps local generated type dependencies resolvable
@@ -160,7 +170,7 @@ type Field struct {
 	IsScalarType       bool   // scalar or enum (value type in typegen output)
 	JSONUnionDecoder   string // generated per-repository decoder for a closed-union JSON field
 	IsNullableEnum     bool   // optional enum: typegen emits *Enum
-	IsNullableScalar   bool   // optional non-integer scalar: typegen emits *Scalar
+	IsNullableScalar   bool   // optional non-integer (or DistinctNull) scalar: typegen emits *Scalar
 	IsUUIDScalar       bool   // non-array UUID-like scalar: values coerce via .ToUUID()
 	IsDateTimeScalar   bool   // non-array datetime-like scalar: values coerce via time.Time()
 	IsUUIDLike         bool
@@ -360,6 +370,11 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	attachInboundReferences(repositories)
 	markNestedCycles(repositories)
 
+	graphs, err := versionGraphs(schema, repositories)
+	if err != nil {
+		return nil, err
+	}
+
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
 	hasHistoryActor := false
@@ -405,6 +420,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Timestamp:                opts.Clock.RFC3339(),
 		UUIDGoType:               uuidGoType,
 		UserIDGoType:             resolveUserIDGoType(tableTypes, scalarMap, uuidGoType),
+		VersionGraphs:            graphs,
 	}
 
 	return output, nil
@@ -445,6 +461,11 @@ func SetReplacePaths(output *ORMOutput, paths naming.LocalPaths, outputDir strin
 	}
 	if output.SchemaIRReplacePath, err = naming.RelPath(outputDir, paths.SchemaIR); err != nil {
 		return fmt.Errorf("schema-ir replace path: %w", err)
+	}
+	if len(output.VersionGraphs) > 0 {
+		if output.VersionGraphReplacePath, err = naming.RelPath(outputDir, paths.VersionGraphGo); err != nil {
+			return fmt.Errorf("version-graph binding replace path: %w", err)
+		}
 	}
 	return nil
 }
@@ -816,11 +837,12 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 	// Arrays and maps are nilable in typegen output ([]T, map[string]T; an
 	// optional non-union map holds *T values), so neither is a *T even when
 	// the field itself is nullable. Optional integer-like scalars keep
-	// value-type parity with the legacy generator; other optional scalars and
-	// enums still use pointers.
+	// value-type parity with the legacy generator unless their null is
+	// distinct (ir.FieldDef.DistinctNull); other optional scalars and enums
+	// still use pointers.
 	isMap := fieldDef.TypeRef.IsMap
 	isNullableEnum := !isRequired && !isArray && !isMap && isEnum
-	isNullableScalar := !isRequired && !isArray && !isMap && isScalar && !traits.IsIntegerLike
+	isNullableScalar := !isRequired && !isArray && !isMap && isScalar && (!traits.IsIntegerLike || fieldDef.DistinctNull)
 	preservesExplicitJSONNull := isScalar && irType == "Generic.JSON" && !isArray && !isMap
 
 	field := Field{

@@ -19,6 +19,8 @@ Generated at: 2026-01-02T03:04:05Z
 - `repository_recipe_patch.go` -- RecipePatch repository
 - `repository_recipe_ref.go` -- RecipeRef repository
 - `repository_step.go` -- Step repository
+- `versiongraph.go` -- the machinery the version graph shells share
+- `versiongraph_recipe.go` -- the Recipe version graph: `db.RecipeGraph()`
 
 ## Usage
 
@@ -44,3 +46,14 @@ Repositories expose `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,
 Each `*Update` type has `ApplyTo(*types.T)` to project set and `SetNull`
 fields onto a stored row, and `New*SnapshotUpdate` to build a full
 replacement from a complete value.
+
+## Version graphs
+
+A version graph's shell (`db.<Name>Graph()`) creates refs, saves edits on
+them, commits, seals, merges, reverts, and reads a commit's or a ref's tree.
+It hands rows to the version-graph core through its Go binding,
+`github.com/parable-work/superschematic/runtime/versiongraph/go`, which links the core's static archive
+through cgo. Build the archive from a superschematic checkout with
+`scripts/versiongraph-archive.sh` and put the directory it prints in
+`CGO_LDFLAGS` as `-L<dir>`; a `replace` directive to that checkout finds it
+without the flag.

@@ -269,6 +269,7 @@ func ExtractFieldInfo(field *ir.FieldDef, scalarMap ScalarMap, schema *ir.Schema
 		Type:             field.TypeRef.Name,
 		TargetType:       targetType,
 		Required:         required,
+		DistinctNull:     field.DistinctNull,
 		InternalMetadata: field.InternalMetadata,
 		Secret:           field.Secret,
 		IsArray:          field.TypeRef.IsArray,

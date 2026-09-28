@@ -17,6 +17,12 @@ Go modules whose paths come from `go_module_root` in
   against a static archive.
 - Until superscalar publishes `go/vX.Y.Z` tags, you need that archive from
   source. `scripts/superscalar-dep.sh` in this repository builds it.
+- A generated ORM whose schema declares a version graph also imports the
+  version-graph core's Go binding (`versiongraph_go_module`), which links
+  the core's own static archive through cgo. Build it from a checkout with
+  `scripts/versiongraph-archive.sh` and add the `-L` directory it prints to
+  `CGO_LDFLAGS`, beside superscalar's. A `go.mod` replace line to the
+  checkout (`paths.versiongraph_go`) finds the archive without the flag.
 
 ## Install the CLI
 

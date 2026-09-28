@@ -13,6 +13,41 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- The generated version-graph shell (D17). When a schema declares a
+  version graph, the Go ORM generator writes `versiongraph_<name>.go` with
+  `db.<Name>Graph()`, a typed `<Name>Graph` whose methods each run in one
+  transaction and need a user in the context: `CreatePrimary`, `Branch`,
+  `Save` (per kind `GraphEdits[T]`: upsert a row by entity key, generating
+  the key of a new entity; delete, which writes a tombstone copying the
+  entity's effective row; unset, which removes the ref's own row through
+  the actor-recording hard delete), `Commit` (`Message`, `Tag`, which takes
+  the root's next `sequence` under a root lock), `Seal`, `Merge` (source,
+  target, target version, resolutions; conflicts write nothing), `Revert`,
+  `Materialize` (walks parent commits up to `DefaultWalkCeiling`, 4096, or
+  `WithWalkCeiling(n)`, and refuses a commit from a newer schema epoch),
+  `Compose`, `Diff`, `History` and `Discard`. Every write through a ref
+  takes its expected `_version` and fails with `ErrVersionConflict` when
+  it moved. Rows reach the core as `to_jsonb` of live rows and history
+  images of committed ones; a commit's patches pin the winning rows'
+  `(id, _version)`. It returns `<Name>Tree` (a slice per kind, the content
+  hash, compose findings), `<Name>Conflict`, `<Name>Resolution` and
+  `<Name>Change` over `json.RawMessage` values, and the named errors
+  `ErrRefSealed`, `ErrNothingToCommit`, `ErrWalkCeiling`, `ErrSchemaEpoch`,
+  `ErrEntityNotFound`, `ErrHistoryMissing`, `ErrInvalidTree`
+  (`*InvalidTreeError`) and `ErrRootMismatch`. The shared machinery is in
+  a generated `versiongraph.go`. The graph descriptor is built from the IR
+  (`internal/generator/graphdesc`) and written both as the constant
+  `<Name>GraphDescriptor` in the ORM and as `versiongraph/<name>.json` in
+  the Go types module. Such an ORM requires the version-graph core's Go
+  binding: the naming file gains `versiongraph_go_module` (default
+  `github.com/parable-work/superschematic/runtime/versiongraph/go`) and
+  `[paths] versiongraph_go`, which writes a `replace` directive, and a
+  consumer builds the core's archive and adds it to `CGO_LDFLAGS`. The IR
+  gains `FieldDef.distinctNull`, which the expansion sets on
+  `<Name>Commit.sequence`, so the Go types give it a pointer and store
+  `nil` as `NULL` rather than reading `NULL` back as sequence 0. CI's go
+  job builds the core's archive before the Go tests. Schemas without a
+  graph generate byte-identical output. Minor.
 - The version-graph core (D17), `runtime/versiongraph`: a Rust crate,
   `superschematic-versiongraph` (rlib, staticlib, cdylib; depends on serde,
   serde_json and sha2 only), with no IO, clock or randomness. Its five

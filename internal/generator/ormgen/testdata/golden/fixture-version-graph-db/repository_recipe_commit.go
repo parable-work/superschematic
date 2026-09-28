@@ -455,8 +455,8 @@ func (r *RecipeCommitRepository) GetOne(ctx context.Context, id types.IdentityUU
 				result.Message = tempMessage.String
 			}
 			if selectedSequence && tempSequence != nil {
-				// Value type (primitive): dereference pointer temp to value
-				result.Sequence = *tempSequence
+				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+				result.Sequence = tempSequence
 			}
 			if jsonFieldDecodeErr != nil {
 				return nil, jsonFieldDecodeErr
@@ -498,8 +498,8 @@ func (r *RecipeCommitRepository) GetOne(ctx context.Context, id types.IdentityUU
 				result.Message = tempMessage.String
 			}
 			if tempSequence != nil {
-				// Value type (primitive): dereference pointer temp to value
-				result.Sequence = *tempSequence
+				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+				result.Sequence = tempSequence
 			}
 		}
 	}
@@ -689,7 +689,7 @@ func (r *RecipeCommitRepository) GetManyByIDs(ctx context.Context, ids []types.I
 			entity.Message = tempMessage.String
 		}
 		if tempSequence != nil {
-			entity.Sequence = *tempSequence
+			entity.Sequence = tempSequence
 		}
 
 		// Set relationship IDs from scanned FK values
@@ -853,8 +853,8 @@ func (r *RecipeCommitRepository) FindOne(ctx context.Context, filter *RecipeComm
 				result.Message = tempMessage.String
 			}
 			if selectedSequence && tempSequence != nil {
-				// Value type (primitive): dereference pointer temp to value
-				result.Sequence = *tempSequence
+				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+				result.Sequence = tempSequence
 			}
 			if jsonFieldDecodeErr != nil {
 				return nil, jsonFieldDecodeErr
@@ -907,8 +907,8 @@ func (r *RecipeCommitRepository) FindOne(ctx context.Context, filter *RecipeComm
 				result.Message = tempMessage.String
 			}
 			if tempSequence != nil {
-				// Value type (primitive): dereference pointer temp to value
-				result.Sequence = *tempSequence
+				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+				result.Sequence = tempSequence
 			}
 		}
 	}
@@ -1167,8 +1167,8 @@ func (r *RecipeCommitRepository) FindMany(ctx context.Context, filter *RecipeCom
 			result.Message = tempMessage.String
 		}
 		if selectedSequence && tempSequence != nil {
-			// Value type (primitive): dereference pointer temp to value
-			result.Sequence = *tempSequence
+			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+			result.Sequence = tempSequence
 		}
 		if jsonFieldDecodeErr != nil {
 			return nil, 0, jsonFieldDecodeErr
@@ -1366,11 +1366,12 @@ func (r *RecipeCommitRepository) CreateOne(ctx context.Context, input *types.Rec
 	values = append(values, input.ContentHash)
 	// Optional field: sequence - only add if set
 	{
-		if !reflect.ValueOf(input.Sequence).IsZero() {
+		if input.Sequence != nil {
 			fields = append(fields, `"sequence"`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-			values = append(values, input.Sequence)
+			// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+			values = append(values, *input.Sequence)
 		}
 	}
 	// Required field: createdBy
@@ -1474,8 +1475,8 @@ func (r *RecipeCommitRepository) CreateOne(ctx context.Context, input *types.Rec
 		result.Message = tempMessage.String
 	}
 	if tempSequence != nil {
-		// Value type (primitive): dereference pointer temp to value
-		result.Sequence = *tempSequence
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.Sequence = tempSequence
 	}
 
 	// Set relationship IDs from scanned FK values
@@ -1539,7 +1540,7 @@ func (r *RecipeCommitRepository) CreateMany(ctx context.Context, inputs []*types
 		}
 	}
 	{
-		if !reflect.ValueOf(inputs[0].Sequence).IsZero() {
+		if inputs[0].Sequence != nil {
 			fieldNames = append(fieldNames, `"sequence"`)
 		}
 	}
@@ -1595,10 +1596,11 @@ func (r *RecipeCommitRepository) CreateMany(ctx context.Context, inputs []*types
 		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 		values = append(values, input.ContentHash)
 		{
-			if !reflect.ValueOf(input.Sequence).IsZero() {
+			if input.Sequence != nil {
 				paramNum++
 				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, input.Sequence)
+				// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+				values = append(values, *input.Sequence)
 			}
 		}
 		paramNum++
@@ -1707,8 +1709,8 @@ func (r *RecipeCommitRepository) CreateMany(ctx context.Context, inputs []*types
 			result.Message = tempMessage.String
 		}
 		if tempSequence != nil {
-			// Value type (primitive): dereference pointer temp to value
-			result.Sequence = *tempSequence
+			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+			result.Sequence = tempSequence
 		}
 
 		// Set relationship IDs from scanned FK values
@@ -1867,8 +1869,8 @@ func (r *RecipeCommitRepository) UpdateOne(ctx context.Context, id types.Identit
 		result.Message = tempMessage.String
 	}
 	if tempSequence != nil {
-		// Value type (primitive): dereference pointer temp to value
-		result.Sequence = *tempSequence
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.Sequence = tempSequence
 	}
 
 	// Set relationship IDs from scanned FK values

@@ -216,7 +216,7 @@ fn default_step_deleted_on_ref() -> bool {
     false
 }
 
-/// One step of a recipe, ordered by position.
+/// One step of a recipe, ordered by position; updatedBy names its row's writer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Step {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -229,6 +229,14 @@ pub struct Step {
     pub timings: GenericJSON,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scratch: Option<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: TemporalDateTime,
+    #[serde(rename = "createdBy")]
+    pub created_by: IdentityUUID,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: TemporalDateTime,
+    #[serde(rename = "updatedBy")]
+    pub updated_by: IdentityUUID,
     /// The entity's logical identity, shared by its rows on every ref.
     #[serde(default, rename = "entityKey", skip_serializing_if = "Option::is_none")]
     pub entity_key: Option<IdentityUUID>,

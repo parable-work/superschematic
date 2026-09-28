@@ -1,0 +1,70 @@
+{
+  "graph": "recipe",
+  "kinds": [
+    {
+      "kind": "cover",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "singleton": true,
+      "excluded": [
+        "recipe_id"
+      ]
+    },
+    {
+      "kind": "ingredient",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "parent": {
+        "key": "step_key",
+        "kind": "step"
+      },
+      "units": {
+        "substitutes": "jsonSchema"
+      },
+      "excluded": [
+        "recipe_id"
+      ]
+    },
+    {
+      "kind": "note",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "parent": {
+        "key": "reply_to",
+        "kind": "note"
+      },
+      "excluded": [
+        "recipe_id"
+      ]
+    },
+    {
+      "kind": "step",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "author": "updated_by",
+      "order": "position",
+      "units": {
+        "timings": "keyed"
+      },
+      "excluded": [
+        "recipe_id",
+        "scratch",
+        "created_at",
+        "created_by",
+        "updated_at"
+      ]
+    }
+  ]
+}

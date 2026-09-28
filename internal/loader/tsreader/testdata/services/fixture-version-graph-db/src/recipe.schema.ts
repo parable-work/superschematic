@@ -22,7 +22,7 @@ export abstract class Recipe {
   createdBy: Identity.UUID;
 }
 
-// One step of a recipe, ordered by position.
+// One step of a recipe, ordered by position; updatedBy names its row's writer.
 @versioned({ retentionDays: 365 })
 @graphMember({ graph: Recipe, order: "position" })
 export abstract class Step {
@@ -37,6 +37,11 @@ export abstract class Step {
 
   @conflictUnit("excluded")
   scratch: Nullable<string>;
+
+  createdAt: Temporal.DateTime;
+  createdBy: Identity.UUID;
+  updatedAt: Temporal.DateTime;
+  updatedBy: Identity.UUID;
 }
 
 // An ingredient one step uses.

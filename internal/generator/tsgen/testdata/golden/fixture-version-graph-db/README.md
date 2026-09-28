@@ -131,7 +131,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 - **RecipeRef** - A line of the Recipe version graph: a primary line when parentRef is null, else a change set.
 
-- **Step** - One step of a recipe, ordered by position.
+- **Step** - One step of a recipe, ordered by position; updatedBy names its row's writer.
 
 
 

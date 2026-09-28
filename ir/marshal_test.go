@@ -211,7 +211,7 @@ func TestTypeDefFlagKeyOrder(t *testing.T) {
 }
 
 // TestVersionGraphIRRoundTrip: the version graph declarations and the
-// Origin markers survive a JSON and a YAML round trip, and a type, field,
+// Origin and DistinctNull markers survive a JSON and a YAML round trip, and a type, field,
 // index or enum without them marshals exactly as before they existed.
 func TestVersionGraphIRRoundTrip(t *testing.T) {
 	root := &TypeDef{Name: "Recipe", Role: RoleDBTable, VersionGraph: &VersionGraphConfig{Name: "Cookbook", SchemaEpoch: 2}}
@@ -221,6 +221,7 @@ func TestVersionGraphIRRoundTrip(t *testing.T) {
 		Fields: []*FieldDef{
 			{Name: "timings", TypeRef: TypeRef{Name: "Generic.JSON"}, ConflictUnit: ConflictUnitKeyed},
 			{Name: "entityKey", TypeRef: TypeRef{Name: "Identity.UUID"}, Origin: OriginVersionGraph},
+			{Name: "sequence", TypeRef: TypeRef{Name: "Generic.Int64"}, DistinctNull: true, Origin: OriginVersionGraph},
 		},
 		Indexes: []IndexDef{{Keys: []string{"entityKey", "ref"}, Unique: true, Origin: OriginVersionGraph}},
 	}
