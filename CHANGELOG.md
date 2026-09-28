@@ -21,6 +21,22 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- `@superschematic/versiongraph`, a new npm package in
+  `runtime/versiongraph/typescript`: the version-graph core built for
+  `wasm32-unknown-unknown`, with an async `init` and typed `compose`,
+  `merge`, `diff`, `contentHash` and `validate` over the core's JSON
+  contract, in the browser, bun and Node. `init` takes the module as bytes,
+  a URL, a `Response` (or a promise of one) or a compiled module, and by
+  default loads the `superschematic_versiongraph.wasm` the package ships.
+  A refused input throws `VersionGraphError` with the contract's error
+  code. The contract's types live in one module and the package's tests
+  run every vector through them. The package ships compiled ES modules and
+  the wasm file, carries the repository version (`bump_version.py` writes
+  it), and is packed and published with the other npm packages. The bun
+  test of the raw wasm build (`runtime/versiongraph/wasm`) and the
+  `versiongraph-wasm` make target are gone: `make ts` and CI's
+  versiongraph job run the vectors through the package instead, once each,
+  and `make rust` no longer builds the wasm module. Minor (new package).
 - The rest of D17's `@versioned` changes. `@versioned({ exclude: [...] })`
   names fields left out of every history image: the capture function
   subtracts their columns from the `INSERT` and `UPDATE` image and from a

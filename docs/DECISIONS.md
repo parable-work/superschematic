@@ -1049,8 +1049,9 @@ Status: built. Each piece:
 - The declarations `@versionGraph`, `@graphMember` and `@conflictUnit`, their
   verification, and the loader's expansion (`internal/loader/versiongraph`).
 - The core in `runtime/versiongraph`: the Rust crate, the Go binding as the
-  fifth Go module, the wasm build, and the vectors the Rust tests, the Go
-  binding and a bun test of the wasm build run.
+  fifth Go module, the wasm build with the TypeScript package
+  `@superschematic/versiongraph` over it, and the vectors the Rust tests,
+  the Go binding and the package's tests run.
 - The descriptor (`internal/generator/graphdesc`), written as a constant in
   the ORM and as `versiongraph/<name>.json` in the Go types module, and the
   generated shell. A public API whose `authDb` declares a graph carries the
@@ -1065,8 +1066,8 @@ Two rules settled as they were built: `diff` takes
 `{descriptor, from, to}`, and a graph member may exclude from history only
 fields with `@conflictUnit('excluded')` and its audit fields, since a
 commit reads a member's content back from history. Not built: transforms
-between schema epochs (`Materialize` refuses a newer epoch), a TypeScript
-package over the wasm build, and a parent of several types.
+between schema epochs (`Materialize` refuses a newer epoch) and a parent of
+several types.
 
 ## D18. A distribution's field directives live in its extension slot
 

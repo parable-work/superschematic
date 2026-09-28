@@ -1,6 +1,6 @@
 ---
 title: Version graphs
-description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the generated Go shell, and how a consumer links the core.
+description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the generated Go shell, how a consumer links the core, and the core from TypeScript.
 sidebar:
   order: 8
 ---
@@ -165,13 +165,14 @@ a live row and its history image hash the same. A refused input returns
 the descriptor's members, every rule, the error codes and the C ABI, is
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md).
 Its vectors in `runtime/versiongraph/testdata/vectors` are the executable
-form: the Rust tests, the Go binding and a bun test of the wasm build run
+form: the Rust tests, the Go binding and the TypeScript package's tests run
 every one.
 
 The same exports are built three ways: a static archive, which the Go
 binding `runtime/versiongraph/go` (package `versiongraph`) links through
-cgo; a `cdylib`; and `wasm32-unknown-unknown` for the browser
-(`make versiongraph-wasm`).
+cgo; a `cdylib`; and `wasm32-unknown-unknown`, which the TypeScript package
+`@superschematic/versiongraph` ships
+([Use the core from TypeScript](#use-the-core-from-typescript)).
 
 ### The descriptor
 
@@ -272,6 +273,71 @@ in `CGO_LDFLAGS`.
 
 The binding ships link flags for linux and darwin on amd64 and arm64.
 
+## Use the core from TypeScript
+
+`@superschematic/versiongraph` runs the same core in the browser, bun and
+Node. It ships the `wasm32-unknown-unknown` build and compiled ES modules,
+has no dependencies and no generated glue, and types every input and output
+of the contract.
+
+```ts
+import { init, VersionGraphError, type Descriptor } from "@superschematic/versiongraph";
+import recipe from "./versiongraph/recipe.json" with { type: "json" };
+
+const descriptor = recipe as Descriptor;
+const graph = await init();
+
+const { tree, findings } = graph.compose({ descriptor, base, overlay });
+const { merged, conflicts, entities } = graph.merge({ descriptor, base, ours, theirs });
+const { changes } = graph.diff({ descriptor, from: base, to: tree });
+const { contentHash } = graph.contentHash({ descriptor, tree });
+
+try {
+  graph.validate({ descriptor, tree: { recipe_step: [] } });
+} catch (error) {
+  if (error instanceof VersionGraphError) console.log(error.code); // "unknown_kind"
+}
+```
+
+`init(source?, options?)` compiles and instantiates the module; every
+operation on the graph it returns is synchronous. `source` is the module's
+bytes, a URL, a `Response` or a promise of one, or a compiled
+`WebAssembly.Module`. Without it, `init` loads the
+`superschematic_versiongraph.wasm` shipped next to the package's `index.js`,
+found with `new URL(..., import.meta.url)`: fetched in a browser, where
+bundlers such as Vite and webpack copy the file into the build, and read
+from disk under bun and Node. A server that sends the module as
+`application/wasm` lets the browser compile it while it downloads. The file
+is also exported as
+`@superschematic/versiongraph/superschematic_versiongraph.wasm`.
+
+| Method | Operation | Input and output types |
+| --- | --- | --- |
+| `compose` | `compose` | `ComposeInput`, `ComposeOutput` |
+| `merge` | `merge` | `MergeInput`, `MergeOutput` |
+| `diff` | `diff` | `DiffInput`, `DiffOutput` |
+| `contentHash` | `content_hash` | `TreeInput`, `ContentHashOutput` |
+| `validate` | `validate` | `TreeInput`, `ValidateOutput` |
+| `run(operation, json)` | any, by its contract name | JSON text in, JSON text out |
+
+A refused input throws a `VersionGraphError`, whose `code` is the
+contract's error code (`ErrorCode`) and whose `message` is the core's.
+Every type names its members as the contract does, and rows are plain
+objects keyed by column name, the form the Go shell sends the core.
+
+`JSON.parse` reads a number as a double, so a numeric column wider than 53
+bits would lose digits on the way back. `options.parse` and
+`options.stringify` replace the JSON codec, for example with a reviver that
+returns `JSON.rawJSON(context.source)` for each number. An order column
+needs neither: the core refuses one outside the integers a double holds
+exactly.
+
+The package's test suite runs every vector through the package. It decodes
+each vector's input and output through the package's types, with one
+decoder per member that the compiler requires to cover each type exactly,
+and compares the bytes with the vector, so a type that drifts from the
+contract fails it.
+
 ## Limits
 
 - History is linear per row; a branch exists because each ref writes its
@@ -282,8 +348,6 @@ The binding ships link flags for linux and darwin on amd64 and arm64.
   supported.
 - `schemaEpoch` is recorded and checked, but nothing transforms a commit
   from an older epoch.
-- The wasm build has no TypeScript package over it yet; a browser loads
-  the module and calls its exports itself.
 - The compiler emits DDL, not migrations.
 - Who may commit, seal, merge or tag, and when a discarded draft is
   collected, is the application's policy. The generated prune functions
