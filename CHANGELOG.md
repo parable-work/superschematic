@@ -13,6 +13,20 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- TypeScript, Go and Rust SDKs: an SDK carries its auth surface when any
+  operation needs a caller (`@auth`, `@requirePermission`,
+  `@requireOwnership`), whether or not the config sets `public` (D15,
+  amended). The TypeScript SDK of an API that was not public took
+  `auth.token` and never sent it, so it could not call the protected
+  routes of the TypeScript server, which checks them on every API; setting
+  `public` required an `authDb` that server never reads. Its client now
+  sends `Authorization: Bearer`, retries once on 401 through
+  `auth.refreshToken`, and the SDK class has `setToken` and `clearToken`.
+  The Go and Rust SDKs, whose clients already sent a configured token,
+  gain `SetToken` / `ClearToken` and `set_token` / `clear_token`. The
+  TypeScript server needs neither `public` nor `authDb`; a Go API that is
+  not public still does not check the token. Output for a public API, or
+  for one with no such operation, is unchanged. Minor.
 - Verification refuses version graph schemas the generators could not run
   correctly. A `@graphMember` may exclude from history only nullable
   fields (besides its audit fields), since Revert and Merge rebuild rows

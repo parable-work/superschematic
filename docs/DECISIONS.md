@@ -562,6 +562,27 @@ behavior that cannot parse ciphertext.
 
 This entry was first recorded as a second D12, next to the arrays-of-arrays
 entry. It was renumbered D15 so that each number names one decision.
+
+### D15, amended: an SDK sends credentials when an operation needs a caller
+
+The TypeScript, Go and Rust SDKs carry their auth surface when any
+operation needs a caller (`@auth`, `@requirePermission` or
+`@requireOwnership`), whether or not the config sets `public`. Before, they
+carried it only for a public API. The TypeScript router enforces those
+decorators on every API, and a public API needs an `authDb` or a DB-kind
+dependency, which the router never reads. So the TypeScript SDK of an API
+it served dropped `auth.token`, unless the config named an auth store the
+server ignored.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The SDK follows the operations: `APIOutput.HasAuth`, which the OpenAPI document's per-operation `bearerAuth` already followed. The Python SDK already sent a configured token for every API. The TypeScript client now attaches `Authorization: Bearer`, refreshes once on 401 and has `setToken` and `clearToken`. The Go and Rust clients already sent a configured token; they gain `SetToken` / `ClearToken` and `set_token` / `clear_token`. | Letting `public` go without an `authDb` when the server is TypeScript, which still leaves the SDK without credentials by default and makes it depend on the server's language |
+| `public` stays the Go server's switch: its auth middleware and the auth provider's stores over the `authDb` schema. A public API still needs an auth store; the TypeScript server needs neither. | Dropping the `authDb` requirement, which the Go server's middleware needs |
+
+A Go API that is not public mounts `@auth` routes without middleware, so
+it does not check a token the SDK sends. An SDK given no token sends none,
+as before.
+
 ## D14. A failing scalar value is one error, named by the rule it breaks
 
 A scalar value its scalar rejects is one validation error in every

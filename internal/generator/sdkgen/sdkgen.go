@@ -132,8 +132,10 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		return nil, nil
 	}
 
-	// Check if this is public api (has authentication)
-	hasAuth := apiOutput.IsPublic && apiOutput.HasAuth
+	// The client sends credentials when any operation needs a caller, public
+	// API or not: the TypeScript router enforces @auth on every API, and the
+	// OpenAPI document marks such operations bearerAuth either way.
+	hasAuth := apiOutput.HasAuth
 
 	output := &SDKOutput{
 		SchemaName:   apiOutput.SchemaName,
