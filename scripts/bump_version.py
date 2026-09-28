@@ -42,6 +42,8 @@ Version sites (relative to the repository root):
   runtime/schema/go/go.mod            require .../superschematic/ir vX.Y.Z
   runtime/http/go/go.mod              require .../runtime/schema/go vX.Y.Z and
                                       .../superschematic/ir vX.Y.Z
+  examples/acme-schematic/go.mod      require .../superschematic vX.Y.Z and
+                                      .../superschematic/ir vX.Y.Z
   CHANGELOG.md                        the released sections and their links
 
 The Go requires carry the release version so a consumer at a tag resolves
@@ -215,6 +217,19 @@ def sites():
             ROOT / "runtime" / "http" / "go" / "go.mod",
             [
                 (go_require_pattern(GO_MODULE + "/runtime/schema/go"), 1),
+                (go_require_pattern(GO_MODULE + "/ir"), 1),
+            ],
+            "gomod",
+        )
+    )
+    # The example requires the core at the release version too: the root
+    # module requires ir at that version, so an example left behind is a
+    # go.mod that `go build -mod=readonly` refuses to update.
+    out.append(
+        (
+            ROOT / "examples" / "acme-schematic" / "go.mod",
+            [
+                (go_require_pattern(GO_MODULE), 1),
                 (go_require_pattern(GO_MODULE + "/ir"), 1),
             ],
             "gomod",
