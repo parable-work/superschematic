@@ -102,6 +102,42 @@ func {{ .JSONUnionDecoder }}(raw []byte) ({{ .ValueGoType }}, error) {
 {{- end }}
 {{- end }}
 
+{{- if .GenericJSONListFields }}
+
+// refuseNull{{ .TypeName }}GenericJSONElements returns an error that names the
+// first null element of a Generic.JSON list of input. A list element is never
+// null, so the repository writes none.
+func refuseNull{{ .TypeName }}GenericJSONElements(input *types.{{ .TypeName }}) error {
+	if input == nil {
+		return nil
+	}
+	{{- range .GenericJSONListFields }}
+	if err := {{ .GenericJSONNullCheck (printf "input.%s" (toGoName .Name)) }}; err != nil {
+		return err
+	}
+	{{- end }}
+	return nil
+}
+
+// refuseNull{{ .TypeName }}UpdateGenericJSONElements is
+// refuseNull{{ .TypeName }}GenericJSONElements for the lists an update sets.
+func refuseNull{{ .TypeName }}UpdateGenericJSONElements(update *{{ .TypeName }}Update) error {
+	if update == nil {
+		return nil
+	}
+	{{- range .GenericJSONListFields }}
+	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) }}
+	if update.{{ toGoName .Name }} != nil {
+		if err := {{ .GenericJSONNullCheck (printf "*update.%s" (toGoName .Name)) }}; err != nil {
+			return err
+		}
+	}
+	{{- end }}
+	{{- end }}
+	return nil
+}
+{{- end }}
+
 {{- if .Versioned }}
 
 func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error) {
@@ -121,6 +157,10 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 		result.{{ toGoName .Name }} = decoded
 		{{- else if .IsJSONField }}
 		if err := {{ .JSONDecodeCall "rawValue" (printf "&result.%s" (toGoName .Name)) }}; err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		{{- else if .NativeGenericJSONList }}
+		if err := unmarshalJSONListFieldValue(rawValue, &result.{{ toGoName .Name }}, {{ printf "%q" .Name }}, 1); err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
 		}
 		{{- else }}
@@ -182,6 +222,10 @@ if len(temp{{ toGoName $member.Field.Name }}) > 0 {
 		return nil, fmt.Errorf("failed to decode JSON field {{ $member.Field.Name }}: %w", err)
 	}
 }
+{{- else if $member.Field.NativeGenericJSONList }}
+if err := {{ $member.Field.GenericJSONNullCheck (printf "result.%s" (toGoName $member.Field.Name)) }}; err != nil {
+	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
+}
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	{{- if $member.Field.IsNullableScalar }}
@@ -229,6 +273,10 @@ if len(temp{{ toGoName $member.Field.Name }}) > 0 {
 	if err := {{ $member.Field.JSONDecodeCall (printf "temp%s" (toGoName $member.Field.Name)) (printf "&entity.%s" (toGoName $member.Field.Name)) }}; err != nil {
 		return nil, fmt.Errorf("failed to decode JSON field {{ $member.Field.Name }}: %w", err)
 	}
+}
+{{- else if $member.Field.NativeGenericJSONList }}
+if err := {{ $member.Field.GenericJSONNullCheck (printf "entity.%s" (toGoName $member.Field.Name)) }}; err != nil {
+	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
@@ -344,6 +392,10 @@ if len(temp{{ toGoName $field.Name }}) > 0 {
 	if err := {{ $field.JSONDecodeCall (printf "temp%s" (toGoName $field.Name)) (printf "&result.%s" (toGoName $field.Name)) }}; err != nil {
 		jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field {{ $field.Name }}: %w", err)
 	}
+}
+{{- else if $field.NativeGenericJSONList }}
+if err := {{ $field.GenericJSONNullCheck (printf "result.%s" (toGoName $field.Name)) }}; err != nil {
+	jsonFieldDecodeErr = fmt.Errorf("failed to decode field {{ $field.Name }}: %w", err)
 }
 {{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
 if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }}.Valid {
@@ -1858,6 +1910,11 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 
 // CreateOne inserts a new {{ .TypeName }} record
 func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }}) (*types.{{ .TypeName }}, error) {
+	{{- if .GenericJSONListFields }}
+	if err := refuseNull{{ .TypeName }}GenericJSONElements(input); err != nil {
+		return nil, fmt.Errorf("create {{ .TypeName }}: %w", err)
+	}
+	{{- end }}
 	// Set audit fields
 	{{- range .Fields }}
 	{{- if eq .Name "createdBy" }}
@@ -2051,6 +2108,13 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 	if len(inputs) == 0 {
 		return []*types.{{ .TypeName }}{}, nil
 	}
+	{{- if .GenericJSONListFields }}
+	for i, input := range inputs {
+		if err := refuseNull{{ .TypeName }}GenericJSONElements(input); err != nil {
+			return nil, fmt.Errorf("create {{ .TypeName }} %d: %w", i, err)
+		}
+	}
+	{{- end }}
 
 	// Set audit fields
 	{{- range .Fields }}
@@ -2322,7 +2386,7 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 
 // UpdateOne updates a single {{ .TypeName }} record by ID
 func (r *{{ .Name }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
-	{{- if .Versioned }}
+	{{- if .HasVersion }}
 	return r.updateOne(ctx, id, update, nil)
 }
 
@@ -2356,6 +2420,11 @@ func (r *{{ .Name }}) versionMiss(ctx context.Context, id {{ .PrimaryKeyType }})
 }
 
 func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update, expectedVersion *int64) (*types.{{ .TypeName }}, error) {
+	{{- end }}
+	{{- if .GenericJSONListFields }}
+	if err := refuseNull{{ .TypeName }}UpdateGenericJSONElements(update); err != nil {
+		return nil, fmt.Errorf("update {{ .TypeName }}: %w", err)
+	}
 	{{- end }}
 	// Build UPDATE query
 	var setClauses []string
@@ -2450,7 +2519,7 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		paramNum,
 	)
 
-	{{- if .Versioned }}
+	{{- if .HasVersion }}
 	if expectedVersion != nil {
 		paramNum++
 		values = append(values, *expectedVersion)
@@ -2495,7 +2564,7 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		{{- end }}
 	); err != nil {
 		if err == pgx.ErrNoRows {
-			{{- if .Versioned }}
+			{{- if .HasVersion }}
 			if expectedVersion != nil {
 				return nil, r.versionMiss(ctx, id)
 			}
@@ -2528,6 +2597,11 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 
 // UpdateMany updates multiple {{ .TypeName }} records matching the filter
 func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Filter, update *{{ .TypeName }}Update) (int, error) {
+	{{- if .GenericJSONListFields }}
+	if err := refuseNull{{ .TypeName }}UpdateGenericJSONElements(update); err != nil {
+		return 0, fmt.Errorf("update {{ .TypeName }}: %w", err)
+	}
+	{{- end }}
 	// Build UPDATE query
 	var setClauses []string
 	var values []interface{}
@@ -2678,7 +2752,7 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 	return nil
 }
 
-{{- if .Versioned }}
+{{- if .HasVersion }}
 
 // DeleteOneIfVersion soft deletes a single {{ .TypeName }} only if its current
 // _version matches expectedVersion. It returns ErrVersionConflict when the row
@@ -2830,7 +2904,7 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 
 	return nil
 }
-{{- if .Versioned }}
+{{- if .HasVersion }}
 
 // DeleteOneIfVersion permanently deletes a single {{ .TypeName }} only if its
 // current _version matches expectedVersion. It returns ErrVersionConflict when

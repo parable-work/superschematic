@@ -159,6 +159,25 @@ func TestAnyTakesEveryJSONValueButNull(t *testing.T) {
 	if want := map[string]string{"doc": "required: required field"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("errors = %v, want %v", got, want)
 	}
+
+	// A list element is never null, a JSON value included, in a required
+	// and an optional list alike; a null inside an element is part of it.
+	docs := NewArg("docs", Any, Required())
+	notes := NewArg("notes", Any)
+	grid := NewArg("grid", Any)
+	got = errorsOf(t, `{"docs": [{"a": null}, null], "notes": [null], "grid": [[1], [2, null]]}`, func(errs validate.ValidationErrors, b Body) {
+		List[json.RawMessage](errs, b, docs)
+		List[json.RawMessage](errs, b, notes)
+		ListOfLists[json.RawMessage](errs, b, grid)
+	})
+	want := map[string]string{
+		"docs[1]":    "required: required field",
+		"notes[0]":   "required: required field",
+		"grid[1][1]": "required: required field",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("null list elements: errors = %v, want %v", got, want)
+	}
 }
 
 func TestListRules(t *testing.T) {

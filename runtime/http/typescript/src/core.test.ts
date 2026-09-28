@@ -332,6 +332,9 @@ describe('JSON body parameters of a scalar, enum or JSON type', () => {
     const list = p({ kind: 'json', isArray: true });
     expect(decodeJsonParam('body', list, [1, 'a', { b: 2 }, [3, null], true])).toEqual([1, 'a', { b: 2 }, [3, null], true]);
     refusedAt(list, [1, null], 'x[1]', 'required', 'required field');
+    // In an optional list too: a list element is never null.
+    refusedAt(p({ kind: 'json', isArray: true, required: false }), [null], 'x[0]', 'required', 'required field');
+    refusedAt(p({ kind: 'json', isArray: true, isArrayOfArrays: true, required: false }), [[1, null]], 'x[0][1]', 'required', 'required field');
     refusedAt(p({ kind: 'json', isArray: true, isArrayOfArrays: true }), [[{}], null], 'x[1]', 'required', 'required field');
     refusedAt(p({ kind: 'json', isArray: true, isArrayOfArrays: true }), [[{}, null]], 'x[0][1]', 'required', 'required field');
   });

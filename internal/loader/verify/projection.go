@@ -90,7 +90,7 @@ func checkProjectionClass(td *ir.TypeDef, r *Result) {
 	if td.Extends != "" || len(td.Implements) > 0 || td.IsTrait {
 		r.errorf(td.Owner, "%s: a @projection class cannot extend or implement anything; list its columns directly", td.Name)
 	}
-	if len(td.Indexes) > 0 || td.JsonField || td.Versioned || td.EnvVars || td.Source != nil ||
+	if len(td.Indexes) > 0 || td.JsonField || td.Versioned || td.Optimistic || td.EnvVars || td.Source != nil ||
 		td.StrictJSON || td.DenyUnknownFields {
 		r.errorf(td.Owner, "%s: a @projection class carries only @projection and @join", td.Name)
 	}

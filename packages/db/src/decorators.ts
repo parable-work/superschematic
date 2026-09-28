@@ -22,15 +22,26 @@ export interface VersionedOptions {
    * independent readers of its historical rows, and each needs its own
    * exclusion. Declaring a second reference never displaces the first.
    *
-   * Verification is syntactic only. It checks that this implies retentionDays,
-   * that every identifier is snake_case (they are interpolated into DDL), and
-   * that no reference is repeated. It cannot check the dangerous direction: a
+   * Verification checks that this implies retentionDays, that every
+   * identifier is snake_case (they are interpolated into DDL), and that no
+   * reference is repeated. When the table is a DB type of the same schema, it
+   * also checks that keyColumn has the versioned key's type and that
+   * versionColumn is a Generic.Int64 column; a table outside the schema is
+   * checked syntactically only. It cannot check the dangerous direction: a
    * table that declares retentionDays and has as-of readers but does NOT
    * declare the exclusion that protects them prunes their pinned images with
    * no diagnostic. Nothing in superschematic knows who reads a table's history, so that
    * one stays on the schema author and on repo-local tests.
    */
   readonly pruneKeepReferencedBy?: VersionedPruneReference | readonly VersionedPruneReference[];
+  /**
+   * Fields (schema field names) left out of every history image: the row an
+   * insert or update records and a delete's tombstone. The history readers
+   * return their zero value. The key, deletedAt and relations cannot be
+   * excluded, and a @graphMember may exclude only fields whose conflict unit
+   * is "excluded" and the audit fields.
+   */
+  readonly exclude?: readonly string[];
 }
 
 /**
@@ -183,6 +194,13 @@ export function versioned<TFunction extends Function>(_arg?: VersionedOptions | 
   }
   return noopClassDecorator;
 }
+
+/**
+ * Gives a DB table the _version column, the trigger that bumps it on every
+ * update and the fenced writes UpdateOneIfVersion and DeleteOneIfVersion,
+ * with no history. @versioned implies it, so a type carries one or the other.
+ */
+export const optimistic: ClassDecorator = noopClassDecorator;
 
 /** A schema class, referenced as a value in a decorator argument. */
 export type SchemaClass = abstract new (...args: never[]) => unknown;

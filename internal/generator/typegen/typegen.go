@@ -415,15 +415,8 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		output.VersionGraphs = append(output.VersionGraphs, VersionGraphDescriptor{FileName: graph.FileName, JSON: descriptor})
 	}
 
+	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
 	for _, typeInfo := range output.Types {
-		if typeInfo.Role == ir.RoleDBTable {
-			for _, field := range typeInfo.Fields {
-				if field.Name == "_version" && field.InternalMetadata {
-					output.HasVersionedTypes = true
-					break
-				}
-			}
-		}
 		for _, field := range typeInfo.Fields {
 			if field.UsesWrapper {
 				output.HasInputFieldWrappers = true

@@ -451,6 +451,7 @@ export interface TypeDef {
   jsonField?: boolean;
   kind?: string;
   name: string;
+  optimistic?: boolean;
   owner?: string;
   projection?: ProjectionDef;
   rawHeritage?: RawHeritage;
@@ -492,6 +493,7 @@ export interface VersionGraphConfig {
 }
 
 export interface VersionedConfig {
+  exclude?: string[];
   partitionBy?: string;
   pruneKeepReferencedBy?: PruneReference[];
   retentionDays?: number;

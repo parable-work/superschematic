@@ -11,8 +11,45 @@ of a generated artifact is always listed here with the bump it requires.
 
 ## [Unreleased]
 
+### Fixed
+
+- The Python scalars module (`scalars.py`) no longer carries the source
+  tree's name for the scalar library: the fallback comment now names the
+  configured scalar Python module as not installed, and the availability
+  flag is `_SCALAR_MODULE_AVAILABLE`. The scrub gate fails on that name.
+  Patch (generated comment and private identifier change).
+
 ### Added
 
+- The rest of D17's `@versioned` changes. `@versioned({ exclude: [...] })`
+  names fields left out of every history image: the capture function
+  subtracts their columns from the `INSERT` and `UPDATE` image and from a
+  delete's tombstone, and the history readers return their zero value. An
+  excluded actor column is left out of the tombstone too, so it records no
+  actor and generated hard deletes do not set the history actor setting.
+  Verification requires each name to be a field of the type and refuses
+  the key, `deletedAt` and relations (the history readers find and filter
+  rows by them); a `@graphMember` may exclude only fields with
+  `@conflictUnit("excluded")` and the audit fields. `@superschematic/db`
+  exports `@optimistic`, a core decorator the registry declares: the
+  table gets `_version`, a `BEFORE UPDATE` trigger that bumps it
+  (`<table>_bump_version`, `trg_<table>_bump_version`),
+  `UpdateOneIfVersion`, `DeleteOneIfVersion` and `ErrVersionConflict`, and
+  no history table, capture function, prune function or history readers.
+  `@versioned` implies it, so a type carrying both fails verification. The
+  Go, TypeScript, Rust and Python types give an `@optimistic` table
+  `_version`; `HistoryRecord` is declared only when a table is
+  `@versioned`. When a `pruneKeepReferencedBy` table is a DB type
+  of the same schema, verification checks that its key column holds the
+  versioned key's type and that its version column is a `Generic.Int64`;
+  a table outside the schema is still checked syntactically only. A
+  `@versioned` or `@optimistic` type that declares a field named `version`
+  or `_version` fails verification, since the generated `_version` field
+  collides with it in Go and Rust. The IR gains `TypeDef.optimistic` and
+  `VersionedConfig.exclude`; the JSON and YAML forms, the schema-file JSON
+  Schema and TypeScript types, `format` and `@superschematic/db`'s
+  `VersionedOptions` carry them. Output for a schema that uses neither is
+  unchanged. Minor.
 - The generated version-graph shell (D17). When a schema declares a
   version graph, the Go ORM generator writes `versiongraph_<name>.go` with
   `db.<Name>Graph()`, a typed `<Name>Graph` whose methods each run in one
@@ -685,6 +722,17 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- Go ORM: a `Generic.JSON[]` or `Generic.JSON[][]` column refuses a null
+  element, as every other list column and every other implementation do
+  (D12, amended): `GetOne`, `FindOne`, `FindMany`, `GetManyByIDs`, the
+  `RETURNING` reads and the history decoder fail with
+  `metadataList[0]: null element` for a stored `[null, true]`, which read
+  as the `null` and `true` tokens. That holds for a JSONB column and for a
+  native `JSONB[]` one (a `Generic.JSON[]` without `@jsonField`), whose SQL
+  NULL element read as a nil value. `CreateOne`, `CreateMany`, `UpdateOne`
+  and `UpdateMany` refuse a nil element or the JSON null token before they
+  write; they stored it. A row that holds such an element must be
+  rewritten before it reads. Minor.
 - TypeScript API server: an encrypted operation (in an `Encrypted`
   operation set, declared `@encrypted`, or with an `EncryptedField<T>`
   result) fails the build unless it is `@manualRouteRegistration`, with the
@@ -1182,9 +1230,8 @@ of a generated artifact is always listed here with the bump it requires.
   `failed to decode JSON field labels: labels[0][1]: null element`. The
   column was decoded into the Go list directly, so a null element another
   writer stored read as the element's zero value (`[["a", null]]` as
-  `[["a", ""]]`). A null inner list still reads as a nil list, and a
-  `Generic.JSON[]` column still reads a null element as the JSON null
-  token (D12, amended). Patch.
+  `[["a", ""]]`). A null inner list still reads as a nil list (D12,
+  amended). Patch.
 - Go SDK: an error response's message is read from the RFC 9457 `detail`
   member first, then `error`, then `message`. A generated Go server writes
   its message only in `detail`, which the Go SDK did not read, so an error

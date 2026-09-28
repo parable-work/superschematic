@@ -1562,6 +1562,10 @@
         "name": {
           "type": "string"
         },
+        "optimistic": {
+          "default": false,
+          "type": "boolean"
+        },
         "owner": {
           "default": "",
           "type": "string"
@@ -1714,6 +1718,13 @@
     "VersionedConfig": {
       "additionalProperties": false,
       "properties": {
+        "exclude": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "partitionBy": {
           "default": "",
           "type": "string"

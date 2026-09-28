@@ -383,13 +383,24 @@ a list column through `unmarshalJSONListFieldValue`, which fails the read
 with `<field>[i]: null element` (`<field>[i][j]` for a list of lists)
 before `json.Unmarshal` runs; a payload without a `null` token is decoded
 once, and a null inner list still reads as a nil list. A union list
-refuses a null element in the union's wrapper, as before. A
-`Generic.JSON[]` column is left as it was: its Go type keeps a stored null
-element as the null token, which a reader can tell from every value, and
-the ORM's tests pin that reading. Whether it should refuse the element, as
-the generated types do, is open. A list argument of an API operation
-without an input type, which the Go route decodes itself, is refused with
-a null element (below).
+refuses a null element in the union's wrapper, as before. A list argument
+of an API operation without an input type, which the Go route decodes
+itself, is refused with a null element (below).
+
+That change first left `Generic.JSON[]` columns reading a stored null
+element as the JSON null token, which its Go type can hold, and recorded
+whether they should refuse it as open. They refuse it:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A `Generic.JSON[]` element, and an innermost element of `Generic.JSON[][]`, is never null, in every implementation, the ORM included, and in a required and an optional list alike. Requiredness decides only whether the list itself may be missing or null. The runtimes, the generated validators and decoders, the TypeScript API server and `bodyargs` already refused one; the parity matrix has an optional and a required `Generic.JSON[]`. | Nullable elements for `Generic.JSON`, whose Go type can hold a null as the JSON null token; the list's requiredness deciding it |
+| The ORM refuses one in both storage forms, with `<field>[i]: null element` (`<field>[i][j]` for a list of lists): a JSONB list column through `unmarshalJSONListFieldValue`, and a native `JSONB[]` column (a `Generic.JSON[]` without `@jsonField`), where pgx reads a SQL NULL element as nil and a JSON null element as the token without an error, by checking the scanned list. The history decoder refuses one too. | Leaving the native column to pgx |
+| The ORM writes none: `CreateOne`, `CreateMany`, `UpdateOne` and `UpdateMany` refuse a nil element or the JSON null token before the statement runs. A Go caller can put one in the list, and without the check a write would store it and the `RETURNING` read of the same call would refuse it after the row was written. | Writing it and refusing it on the next read |
+
+Still open: a native array column of a scalar whose Go type scans SQL NULL
+as its zero value (a UUID, a timestamp, or a string scalar such as
+`Identity.Name`) reads a NULL element another writer stored as that zero
+value. pgx refuses one for a string, an enum and a number.
 
 The generated TypeScript validator rejects a null element, validates a
 nested object element of every type, and reports a non-string element of a

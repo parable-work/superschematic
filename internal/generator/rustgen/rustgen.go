@@ -216,7 +216,7 @@ type ModuleOutput struct {
 	// unused-import warning.
 	UsesUnions bool
 
-	// HasVersionedTypes is true when a DB table carries the _version field;
+	// HasVersionedTypes is true when a DB table is @versioned;
 	// types.rs then declares HistoryRecord, whose recorded_at is the scalar
 	// crate's DateTime.
 	HasVersionedTypes bool
@@ -342,7 +342,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		output.Unions[i].PreserveJSON = containsGenericJSON(schema, output.Unions[i].Name, opts.Dependencies, map[string]bool{})
 	}
 
-	output.HasVersionedTypes = hasVersionFields(output.Types)
+	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
 	output.UsesHashMap = hasMapFields(output.Types)
 	output.UsesUnions = hasUnionFields(output.Types)
 	output.ExternalCrateDeps = collectExternalCrateDeps(output)
@@ -839,20 +839,6 @@ func toRustFieldName(name string) string {
 		return "r#" + fieldName
 	}
 	return fieldName
-}
-
-func hasVersionFields(types []TypeInfo) bool {
-	for _, typ := range types {
-		if typ.Role != ir.RoleDBTable {
-			continue
-		}
-		for _, field := range typ.Fields {
-			if field.IsVersion {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func hasMapFields(types []TypeInfo) bool {

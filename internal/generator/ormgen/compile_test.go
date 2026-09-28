@@ -92,6 +92,7 @@ func TestGeneratedORMCompiles(t *testing.T) {
 	historyDecoderTest := `package orm
 
 import (
+	"strings"
 	"testing"
 
 	types "example.com/schemas/types/go/fixture-db"
@@ -110,7 +111,7 @@ func TestDecodeTenantHistoryDataSnakeCaseRoundTrip(t *testing.T) {
 		"seat_count": 12,
 		"metadata": {"tier": "pro"},
 		"optional_metadata": null,
-		"metadata_list": [null, true],
+		"metadata_list": [false, true],
 		"metadata_by_name": {"empty": null, "set": 42},
 		"_version": 2
 	}` + "`" + `)
@@ -139,11 +140,19 @@ func TestDecodeTenantHistoryDataSnakeCaseRoundTrip(t *testing.T) {
 	if got.OptionalMetadata != nil {
 		t.Fatalf("OptionalMetadata = %#v, want nil for an ambiguous nullable history value", got.OptionalMetadata)
 	}
-	if len(got.MetadataList) != 2 || string(got.MetadataList[0]) != "null" || string(got.MetadataList[1]) != "true" {
-		t.Fatalf("MetadataList = %#v, want the [null,true] tokens", got.MetadataList)
+	if len(got.MetadataList) != 2 || string(got.MetadataList[0]) != "false" || string(got.MetadataList[1]) != "true" {
+		t.Fatalf("MetadataList = %#v, want the [false,true] tokens", got.MetadataList)
 	}
 	if string(got.MetadataByName["empty"]) != "null" || string(got.MetadataByName["set"]) != "42" {
 		t.Fatalf("MetadataByName = %#v, want the null and 42 tokens", got.MetadataByName)
+	}
+
+	// A list element is never null, a Generic.JSON element included (D12,
+	// amended): a stored [null, true] fails the decode at its index. A null
+	// map value is a value.
+	_, err = decodeTenantHistoryData([]byte(` + "`" + `{"metadata": {}, "metadata_list": [null, true]}` + "`" + `))
+	if err == nil || !strings.Contains(err.Error(), "metadataList[0]: null element") {
+		t.Fatalf("decode a null list element = %v, want an error naming metadataList[0]", err)
 	}
 
 	// A required Generic.JSON column cannot be SQL NULL, so null is the
@@ -357,6 +366,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -452,9 +462,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)` + "`" + `
 		t.Fatalf("t4 users len = %d, want child moved to another tenant excluded", len(snapshot4.Users))
 	}
 
-	// Generic.JSON keeps the JSON null token as a value, apart from SQL NULL,
-	// through the full scan, a selected-field scan, the map result and the
-	// history decoder.
+	// A single Generic.JSON column and a map value keep the JSON null token
+	// as a value, apart from SQL NULL, through the full scan, a
+	// selected-field scan, the map result and the history decoder.
 	sqlNullTenant, err := db.Tenant.GetOne(context.Background(), tenantID, nil)
 	if err != nil {
 		t.Fatalf("get SQL-NULL tenant: %v", err)
@@ -465,7 +475,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)` + "`" + `
 	execStrategyASQL(t, pool, ` + "`" + `INSERT INTO tenant (id, name, slug, email, status, is_active, seat_count, metadata, optional_metadata, metadata_list, metadata_by_name)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb)` + "`" + `,
 		jsonTenantID.ToUUID(), "JSON Corp", "json", "json@example.com", "active", true, 5,
-		"null", "null", ` + "`" + `[null,true]` + "`" + `, ` + "`" + `{"empty":null,"set":42}` + "`" + `)
+		"null", "null", ` + "`" + `[false,true]` + "`" + `, ` + "`" + `{"empty":null,"set":42}` + "`" + `)
 
 	assertJSONNulls := func(label string, got *types.Tenant, wantOptionalNull bool) {
 		t.Helper()
@@ -479,8 +489,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb
 		} else if got.OptionalMetadata != nil {
 			t.Fatalf("%s OptionalMetadata = %#v, want nil for an ambiguous nullable history value", label, got.OptionalMetadata)
 		}
-		if len(got.MetadataList) != 2 || string(got.MetadataList[0]) != "null" || string(got.MetadataList[1]) != "true" {
-			t.Fatalf("%s MetadataList = %#v, want [null,true]", label, got.MetadataList)
+		if len(got.MetadataList) != 2 || string(got.MetadataList[0]) != "false" || string(got.MetadataList[1]) != "true" {
+			t.Fatalf("%s MetadataList = %#v, want [false,true]", label, got.MetadataList)
 		}
 		if string(got.MetadataByName["empty"]) != "null" || string(got.MetadataByName["set"]) != "42" {
 			t.Fatalf("%s MetadataByName = %#v, want null/42", label, got.MetadataByName)
@@ -515,6 +525,92 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb
 		t.Fatalf("JSON tenant history = %#v, want one value", jsonHistory)
 	}
 	assertJSONNulls("history", jsonHistory[0].Value, false)
+
+	// A Generic.JSON list element is never null (D12, amended). The ORM
+	// writes none, but a row another writer stored with one fails the read
+	// at its index through the full scan, a selected-field scan, the map
+	// result and the history decoder, as every other list column does.
+	execStrategyASQL(t, pool, ` + "`" + `UPDATE tenant SET metadata_list = $1::jsonb WHERE id = $2` + "`" + `, ` + "`" + `[null,true]` + "`" + `, jsonTenantID.ToUUID())
+	assertReadsRefused := func(id types.IdentityUUID, stored, want string) {
+		t.Helper()
+		refused := func(label string, err error) {
+			t.Helper()
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("%s with a stored %s: err = %v, want one naming %q", label, stored, err, want)
+			}
+		}
+		_, err := db.Tenant.GetOne(context.Background(), id, nil)
+		refused("GetOne", err)
+		_, err = db.Tenant.GetOne(context.Background(), id, &TenantGetOptions{
+			Fields: TenantFields{Metadata: true, MetadataList: true, PayloadList: true, PayloadGrid: true},
+		})
+		refused("selected GetOne", err)
+		_, err = db.Tenant.GetManyByIDs(context.Background(), []types.IdentityUUID{id})
+		refused("GetManyByIDs", err)
+		_, err = db.Tenant.ListVersions(context.Background(), id, nil)
+		refused("history", err)
+	}
+	assertReadsRefused(jsonTenantID, "[null,true] metadata_list", "metadataList[0]: null element")
+	execStrategyASQL(t, pool, ` + "`" + `UPDATE tenant SET metadata_list = $1::jsonb WHERE id = $2` + "`" + `, ` + "`" + `[]` + "`" + `, jsonTenantID.ToUUID())
+
+	// So does a native JSONB[] column, where pgx reads a SQL NULL element as
+	// nil and a JSON null element as the null token without an error, and a
+	// list of lists. Each row is new, so its history holds only the insert.
+	for i, tc := range []struct{ column, value, want string }{
+		{"payload_list", "ARRAY['1'::jsonb, NULL]", "payloadList[1]: null element"},
+		{"payload_list", "ARRAY['null'::jsonb]", "payloadList[0]: null element"},
+		{"payload_grid", "'[[1], [2, null]]'::jsonb", "payloadGrid[1][1]: null element"},
+	} {
+		id := mustUUID(t, fmt.Sprintf("00000000-0000-0000-0000-0000000004%02d", i))
+		execStrategyASQL(t, pool, ` + "`" + `INSERT INTO tenant (id, name, slug, email, status, is_active, seat_count, metadata, metadata_list, metadata_by_name, ` + "`" + `+tc.column+` + "`" + `)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, ` + "`" + `+tc.value+` + "`" + `)` + "`" + `,
+			id.ToUUID(), "Null Corp", fmt.Sprintf("null-%d", i), "null@example.com", "active", true, 5,
+			` + "`" + `{}` + "`" + `, ` + "`" + `[]` + "`" + `, ` + "`" + `{}` + "`" + `)
+		assertReadsRefused(id, tc.column+" = "+tc.value, tc.want)
+	}
+
+	// The repository writes no null element: CreateOne, CreateMany, UpdateOne
+	// and UpdateMany refuse a nil element or the JSON null token before the
+	// statement runs.
+	var tenantsBefore, tenantsAfter int
+	if err := pool.QueryRow(context.Background(), "SELECT count(*) FROM tenant").Scan(&tenantsBefore); err != nil {
+		t.Fatalf("count tenants: %v", err)
+	}
+	nilElement := []types.GenericJSON{types.GenericJSON("1"), nil}
+	nullToken := []types.GenericJSON{types.GenericJSON("null")}
+	nullGrid := [][]types.GenericJSON{{types.GenericJSON("1")}, {nil}}
+	for label, write := range map[string]func() (string, error){
+		"CreateOne": func() (string, error) {
+			_, err := db.Tenant.CreateOne(context.Background(), &types.Tenant{MetadataList: nilElement})
+			return "metadataList[1]: null element", err
+		},
+		"CreateMany": func() (string, error) {
+			_, err := db.Tenant.CreateMany(context.Background(), []*types.Tenant{{MetadataList: []types.GenericJSON{}}, {PayloadList: nullToken}})
+			return "create Tenant 1: payloadList[0]: null element", err
+		},
+		"UpdateOne": func() (string, error) {
+			_, err := db.Tenant.UpdateOne(context.Background(), jsonTenantID, &TenantUpdate{PayloadGrid: &nullGrid})
+			return "payloadGrid[1][0]: null element", err
+		},
+		"UpdateMany": func() (string, error) {
+			_, err := db.Tenant.UpdateMany(context.Background(), nil, &TenantUpdate{MetadataList: &nilElement})
+			return "metadataList[1]: null element", err
+		},
+	} {
+		want, err := write()
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s with a null Generic.JSON element: err = %v, want one naming %q", label, err, want)
+		}
+	}
+	if err := pool.QueryRow(context.Background(), "SELECT count(*) FROM tenant").Scan(&tenantsAfter); err != nil {
+		t.Fatalf("count tenants: %v", err)
+	}
+	if tenantsAfter != tenantsBefore {
+		t.Fatalf("tenants = %d after the refused writes, want %d", tenantsAfter, tenantsBefore)
+	}
+	if got, err := db.Tenant.GetOne(context.Background(), jsonTenantID, nil); err != nil || got.PayloadGrid != nil {
+		t.Fatalf("JSON tenant after a refused update = %+v, %v; want no payloadGrid", got, err)
+	}
 
 	// Regression: hard delete of a versioned row must succeed and
 	// record a tombstone at OLD._version + 1. The buggy trigger wrote the
@@ -827,7 +923,8 @@ func TestCreateBindsTheEnumDefaultWhenUnset(t *testing.T) {
 
 // extendFixtureForCompileCoverage mutates the loaded fixture-db IR to
 // exercise template branches the fixture schema does not reach: nullable,
-// list and map Generic.JSON columns, a table of closed-union JSON columns
+// list (JSONB and native JSONB[]), list-of-lists and map Generic.JSON
+// columns, a table of closed-union JSON columns
 // (single, nullable, list, map and nullable map), createdBy/updatedBy user
 // audit fields, scalar arrays, optional enums, optional non-audit datetime
 // scalars, and optional maps.
@@ -839,6 +936,10 @@ func extendFixtureForCompileCoverage(schema *ir.Schema) {
 	tenant.Fields = append(tenant.Fields,
 		&ir.FieldDef{Name: "optionalMetadata", TypeRef: ir.TypeRef{Name: "Generic.JSON"}},
 		&ir.FieldDef{Name: "metadataList", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsArray: true}, Required: true, JsonField: true},
+		// A Generic.JSON list without @jsonField is a native JSONB[] column,
+		// and a list of lists is a JSONB column.
+		&ir.FieldDef{Name: "payloadList", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsArray: true}},
+		&ir.FieldDef{Name: "payloadGrid", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsArray: true, IsArrayOfArrays: true}},
 		&ir.FieldDef{Name: "metadataByName", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsMap: true}, Required: true, JsonField: true},
 	)
 

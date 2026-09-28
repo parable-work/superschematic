@@ -23,7 +23,7 @@ export abstract class Recipe {
 }
 
 // One step of a recipe, ordered by position; updatedBy names its row's writer.
-@versioned({ retentionDays: 365 })
+@versioned({ retentionDays: 365, exclude: ["scratch"] })
 @graphMember({ graph: Recipe, order: "position" })
 export abstract class Step {
   @key

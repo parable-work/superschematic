@@ -39,12 +39,12 @@ type {{ .TypeName }}RepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.{{ .TypeName }}) (*types.{{ .TypeName }}, error)
 	CreateMany(ctx context.Context, inputs []*types.{{ .TypeName }}) ([]*types.{{ .TypeName }}, error)
 	UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
-	{{- if .Versioned }}
+	{{- if .HasVersion }}
 	UpdateOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
 	{{- end }}
 	UpdateMany(ctx context.Context, filter *{{ .TypeName }}Filter, update *{{ .TypeName }}Update) (int, error)
 	DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error
-	{{- if .Versioned }}
+	{{- if .HasVersion }}
 	DeleteOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64) error
 	{{- end }}
 	DeleteMany(ctx context.Context, filter *{{ .TypeName }}Filter) (int, error)
@@ -195,7 +195,7 @@ func (r *NoOp{{ .Name }}) UpdateOne(_ context.Context, _ {{ .PrimaryKeyType }}, 
 	return nil, ErrNotFound
 }
 
-{{- if .Versioned }}
+{{- if .HasVersion }}
 
 func (r *NoOp{{ .Name }}) UpdateOneIfVersion(_ context.Context, _ {{ .PrimaryKeyType }}, _ int64, _ *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
 	return nil, ErrNotFound
@@ -210,7 +210,7 @@ func (r *NoOp{{ .Name }}) DeleteOne(_ context.Context, _ {{ .PrimaryKeyType }}) 
 	return nil
 }
 
-{{- if .Versioned }}
+{{- if .HasVersion }}
 
 func (r *NoOp{{ .Name }}) DeleteOneIfVersion(_ context.Context, _ {{ .PrimaryKeyType }}, _ int64) error {
 	return nil
