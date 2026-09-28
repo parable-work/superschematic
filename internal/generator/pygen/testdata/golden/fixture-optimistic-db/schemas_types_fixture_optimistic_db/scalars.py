@@ -24,10 +24,10 @@ try:
         parse_temporal_date_time,
 
     )
-    _SCALAR_LIB_AVAILABLE = True
+    _SCALAR_MODULE_AVAILABLE = True
 except ImportError:
-    # Scalar-lib not available, validation will be limited to patterns only
-    _SCALAR_LIB_AVAILABLE = False
+    # superscalar is not installed: validation is limited to patterns
+    _SCALAR_MODULE_AVAILABLE = False
 
 def _custom_parse_generic_int64(v: Any) -> Any:
     """Custom parse wrapper for Generic.Int64.
@@ -36,7 +36,7 @@ def _custom_parse_generic_int64(v: Any) -> Any:
     inputs are stringified before the call and numeric targets are
     converted back afterwards.
     """
-    if not _SCALAR_LIB_AVAILABLE or v is None:
+    if not _SCALAR_MODULE_AVAILABLE or v is None:
         return v
     try:
         parsed = parse_generic_int64(v if isinstance(v, str) else str(v))
@@ -51,7 +51,7 @@ def _custom_parse_identity_uuid(v: Any) -> Any:
     inputs are stringified before the call and numeric targets are
     converted back afterwards.
     """
-    if not _SCALAR_LIB_AVAILABLE or v is None:
+    if not _SCALAR_MODULE_AVAILABLE or v is None:
         return v
     try:
         parsed = parse_identity_uuid(v if isinstance(v, str) else str(v))
@@ -66,7 +66,7 @@ def _custom_parse_temporal_date_time(v: Any) -> Any:
     inputs are stringified before the call and numeric targets are
     converted back afterwards.
     """
-    if not _SCALAR_LIB_AVAILABLE or v is None:
+    if not _SCALAR_MODULE_AVAILABLE or v is None:
         return v
     try:
         parsed = parse_temporal_date_time(v if isinstance(v, str) else str(v))
