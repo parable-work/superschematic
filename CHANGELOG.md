@@ -13,6 +13,17 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Verification refuses version graph schemas the generators could not run
+  correctly. A `@graphMember` may exclude from history only nullable
+  fields (besides its audit fields), since Revert and Merge rebuild rows
+  from history images and a required column missing from the image would
+  be written as NULL. A member field whose column is `entity_key`,
+  `ref_id` or `deleted_on_ref` (such as `refId`, or a `@hasMany` back
+  reference from a type named `Ref`) fails, as does an authored index
+  whose name equals one the graph generates (`uq_<member>_entity_ref`,
+  `uq_<graph>_ref_root_name`, `uq_<graph>_commit_root_sequence`,
+  `uq_<graph>_patch_entity`, `idx_<graph>_patch_entity_version`). Output
+  for schemas that verified before is unchanged. Patch.
 - The Python scalars module (`scalars.py`) no longer carries the source
   tree's name for the scalar library: the fallback comment now names the
   configured scalar Python module as not installed, and the availability

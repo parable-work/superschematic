@@ -33,6 +33,52 @@ const (
 
 const restrict = "RESTRICT"
 
+// The indexes the expansion adds: a ref's name is unique per root, a
+// commit's sequence is unique per root, a patch names one entity of its
+// commit and is found by the row version it pins, and a member holds one
+// row per (entityKey, ref). Each call returns fresh key slices, so no
+// schema shares them.
+func refIndex() ir.IndexDef {
+	return ir.IndexDef{Keys: []string{"root", "name"}, Unique: true, Name: "root_name"}
+}
+
+func commitIndex() ir.IndexDef {
+	return ir.IndexDef{Keys: []string{"root", "sequence"}, Unique: true, Name: "root_sequence"}
+}
+
+func patchIndexes() []ir.IndexDef {
+	return []ir.IndexDef{
+		{Keys: []string{"commit", "entityKind", "entityKey"}, Unique: true, Name: "entity"},
+		{Keys: []string{"entityId", "entityVersion"}, Name: "entity_version"},
+	}
+}
+
+func memberIndex() ir.IndexDef {
+	return ir.IndexDef{Keys: []string{"entityKey", "ref"}, Unique: true, Name: "entity_ref", Origin: ir.OriginVersionGraph}
+}
+
+// GeneratedIndex is an index the expansion adds: the type whose table
+// holds it, and the index.
+type GeneratedIndex struct {
+	Type  string
+	Index ir.IndexDef
+}
+
+// Indexes returns the indexes the expansion of the graph rooted at root
+// adds, to its generated types and to each of its members, so
+// verification can refuse an authored index of the same name.
+func Indexes(schema *ir.Schema, root *ir.TypeDef) []GeneratedIndex {
+	g := newGraph(schema, root, ir.TypeRef{})
+	out := []GeneratedIndex{{g.refType(), refIndex()}, {g.commitType(), commitIndex()}}
+	for _, idx := range patchIndexes() {
+		out = append(out, GeneratedIndex{g.patchType(), idx})
+	}
+	for _, member := range g.members {
+		out = append(out, GeneratedIndex{member.Name, memberIndex()})
+	}
+	return out
+}
+
 // Expand adds the generated definitions of every version graph in schema.
 // It assumes the declarations passed verification. It returns the scalar
 // names the generated fields use, so the caller can hydrate any the schema
@@ -167,7 +213,7 @@ func (g *graph) addRef() {
 			g.actorField("deletedBy", false),
 		},
 		// A soft-deletable table's unique index covers live rows only.
-		Indexes: []ir.IndexDef{{Keys: []string{"root", "name"}, Unique: true, Name: "root_name"}},
+		Indexes: []ir.IndexDef{refIndex()},
 	})
 }
 
@@ -189,7 +235,7 @@ func (g *graph) addCommit() {
 			scalarField("createdAt", dateTimeScalar, true),
 			g.actorField("createdBy", true),
 		},
-		Indexes: []ir.IndexDef{{Keys: []string{"root", "sequence"}, Unique: true, Name: "root_sequence"}},
+		Indexes: []ir.IndexDef{commitIndex()},
 	})
 }
 
@@ -208,10 +254,7 @@ func (g *graph) addPatch() {
 			scalarField("entityVersion", int64Scalar, true),
 			scalarField("operation", g.operationEnum(), true),
 		},
-		Indexes: []ir.IndexDef{
-			{Keys: []string{"commit", "entityKind", "entityKey"}, Unique: true, Name: "entity"},
-			{Keys: []string{"entityId", "entityVersion"}, Name: "entity_version"},
-		},
+		Indexes: patchIndexes(),
 	})
 }
 
@@ -240,9 +283,7 @@ func (g *graph) extendMember(member *ir.TypeDef) {
 		Origin:   ir.OriginVersionGraph,
 	}
 	member.Fields = append(member.Fields, entityKey, ref, deleted)
-	member.Indexes = append(member.Indexes, ir.IndexDef{
-		Keys: []string{"entityKey", "ref"}, Unique: true, Name: "entity_ref", Origin: ir.OriginVersionGraph,
-	})
+	member.Indexes = append(member.Indexes, memberIndex())
 	if cfg := member.VersionedConfig; cfg != nil && cfg.RetentionDays != nil {
 		cfg.PruneKeepReferencedBy = append(cfg.PruneKeepReferencedBy, &ir.PruneReference{
 			Table:         g.table + "_patch",

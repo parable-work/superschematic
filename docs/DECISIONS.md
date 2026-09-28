@@ -1063,8 +1063,9 @@ Status: built. Each piece:
 
 Two rules settled as they were built: `diff` takes
 `{descriptor, from, to}`, and a graph member may exclude from history only
-fields with `@conflictUnit('excluded')` and its audit fields, since a
-commit reads a member's content back from history. Not built: transforms
+nullable fields with `@conflictUnit('excluded')` and its audit fields, since a
+commit reads a member's content back from history and Revert and Merge
+rebuild its rows from history images. Not built: transforms
 between schema epochs (`Materialize` refuses a newer epoch), a TypeScript
 package over the wasm build, and a parent of several types.
 
