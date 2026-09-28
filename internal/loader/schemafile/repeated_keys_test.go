@@ -67,6 +67,13 @@ func TestDecodeRefusesARepeatedObjectKey(t *testing.T) {
 			`{"name": "Item", "role": "EmbeddedStruct", "description": "x", "descr\u0069ption": "y"}`,
 			`repeated object key "description" at '/description'`,
 		},
+		{
+			// The decoder reads each half of a surrogate pair alone as
+			// U+FFFD, so these two keys are the same key.
+			"keys that decode to the same replacement character",
+			`{"name": "Item", "role": "EmbeddedStruct", "implements": [{"name": "Named", "configArgs": {"\ud800": 1, "\udc00": 2}}]}`,
+			"repeated object key \"\ufffd\" at '/implements/0/configArgs/\ufffd'",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

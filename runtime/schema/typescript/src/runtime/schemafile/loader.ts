@@ -21,6 +21,7 @@ import {
   isJSONObject,
   parseJSON,
   toPlain,
+  wellFormed,
   writeCanonical,
   type JSONNode,
   type JSONObject,
@@ -131,6 +132,12 @@ export class SchemaFileLoader {
     }
     if (!isJSONObject(tree)) {
       throw new SchemaFileError(source, [{ path: '', message: 'a schema file is a JSON object' }]);
+    }
+    // Go's decode reads every copy of a repeated key into the same value,
+    // so its reader refuses one.
+    const repeated = findRepeatedKey(text);
+    if (repeated !== undefined) {
+      throw new SchemaFileError(source, [{ path: repeated.path, message: `repeated object key ${JSON.stringify(repeated.key)}` }]);
     }
 
     const form = this.dispatch(tree, source);
@@ -379,6 +386,63 @@ function findNonFinite(node: JSONNode, path: string): string | undefined {
     const found = findNonFinite(child, `${path}/${escapePointer(key)}`);
     if (found !== undefined) {
       return found;
+    }
+  }
+  return undefined;
+}
+
+/** An open object or array while findRepeatedKey reads the text. */
+interface OpenValue {
+  path: string;
+  /** The keys read so far, for an object. */
+  keys?: Set<string>;
+  /** The pointer of the member being read, for an object. */
+  member: string;
+  /** The index of the element being read, for an array. */
+  index: number;
+}
+
+/**
+ * findRepeatedKey returns the first object member whose key an earlier
+ * member of the same object has, and its JSON pointer. Keys compare as
+ * decoded: `"\u0061"` is `"a"`, and a lone surrogate is U+FFFD, as Go reads
+ * it. JSON.parse keeps the last copy of a repeated key and drops the others
+ * unseen, so this reads the text, which must be valid JSON.
+ */
+function findRepeatedKey(text: string): { key: string; path: string } | undefined {
+  const open: OpenValue[] = [];
+  let atKey = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const top = open[open.length - 1];
+    if (c === '{' || c === '[') {
+      const path = top === undefined ? '' : top.keys ? top.member : `${top.path}/${top.index}`;
+      open.push({ path, keys: c === '{' ? new Set() : undefined, member: '', index: 0 });
+      atKey = c === '{';
+    } else if (c === '}' || c === ']') {
+      open.pop();
+      atKey = false;
+    } else if (c === ',' && top !== undefined) {
+      if (top.keys) {
+        atKey = true;
+      } else {
+        top.index += 1;
+      }
+    } else if (c === '"') {
+      let end = i + 1;
+      while (end < text.length && text[end] !== '"') {
+        end += text[end] === '\\' ? 2 : 1;
+      }
+      if (atKey && top?.keys) {
+        const key = wellFormed(JSON.parse(text.slice(i, end + 1)) as string);
+        top.member = `${top.path}/${escapePointer(key)}`;
+        if (top.keys.has(key)) {
+          return { key, path: top.member };
+        }
+        top.keys.add(key);
+        atKey = false;
+      }
+      i = end;
     }
   }
   return undefined;

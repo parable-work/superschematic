@@ -1225,7 +1225,10 @@ of a generated artifact is always listed here with the bump it requires.
   copy, or an extension the registry does not link in a first
   `extensions` copy. Keys compare after their escapes are read. A file
   that repeats a key now fails to load. The YAML reader already refused a
-  repeated mapping key. Patch.
+  repeated mapping key. The TypeScript `SchemaFileLoader` refuses the same
+  files, with the pointer as the issue's path; `JSON.parse` keeps only the
+  last copy, so it reads the text for a repeated key.
+  `schema_file_parity.json` holds reject vectors for them. Patch.
 - IR: `ir.CanonicalJSON` refuses any text but whitespace after the value.
   It checked `Decoder.More`, which reports false before a closing bracket
   or brace, so it accepted `{}]` and `{}}` and wrote `{}`. A JSON sidecar

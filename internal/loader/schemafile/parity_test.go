@@ -93,6 +93,8 @@ var canonicalInputs = []struct{ name, input string }{
 	{"duplicate keys keep the last", `{"a": 1, "a": {"b": 2}}`},
 	{"invalid JSON", `{"a": }`},
 	{"trailing data", `{} {}`},
+	{"a closing bracket after the value", `{}]`},
+	{"a closing brace after the value", `[1]}`},
 	{"empty input", ``},
 }
 
@@ -225,6 +227,19 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"top-level string", "core", `"x"`},
 	{"invalid JSON", "core", `{"name": }`},
 	{"trailing data", "core", `{"types": {}} x`},
+
+	// Repeated keys: the validator reads the last copy, the decode every
+	// copy, so the reader refuses them.
+	{"a repeated collection key", "core", `{"types": {"Bad": {"name": "Bad", "role": "Table"}}, "types": {"Good": {"name": "Good", "role": "EmbeddedStruct"}}}`},
+	{"a repeated field list", "core", `{"name": "Item", "role": "EmbeddedStruct",
+		"fields": [{"name": "a", "typeRef": {"name": "String"}, "httpMethod": "FETCH"}], "fields": [{"name": "a", "typeRef": {"name": "String"}}]}`},
+	{"a repeated extensions slot", "extended", `{"name": "Item", "role": "EmbeddedStruct", "fields": [
+		{"name": "a", "typeRef": {"name": "String"}, "extensions": {"vendor": {}}, "extensions": {}}]}`},
+	{"a repeated key in extension data", "extended", `{"extensions": {"acme": {"catalog": true, "catalog": true}}}`},
+	{"a repeated key in configArgs", "core", `{"name": "Item", "role": "EmbeddedStruct", "implements": [{"name": "Named", "configArgs": {"a": 1, "a": 1}}]}`},
+	{"a repeated scalar key with the same value", "core", `{"kind": "Enum", "name": "Colour", "values": [], "name": "Colour"}`},
+	{"a repeated key written with an escape", "core", `{"name": "Item", "role": "EmbeddedStruct", "description": "x", "descr\u0069ption": "x"}`},
+	{"the same key in sibling objects", "core", `{"types": {"A": {"name": "A", "role": "EmbeddedStruct"}, "B": {"name": "B", "role": "EmbeddedStruct"}}}`},
 
 	// A registry's own kinds, extension data, documents and policy.
 	{"a registry's kind", "extended", `{"kind": "Catalog", "name": "catalog"}`},
