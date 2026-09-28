@@ -74,6 +74,15 @@
       ]
     },
     {
+      "id": "shop-api-types",
+      "language": "typescript",
+      "kind": "types",
+      "name": "@acme/shop-api-types",
+      "path": "types/typescript/shop-api",
+      "service": "shop-api",
+      "deps": null
+    },
+    {
       "id": "shop-common-types",
       "language": "typescript",
       "kind": "types",

@@ -7,7 +7,8 @@ export default defineConfig({
   authDb: service({ name: "shop-db", kind: SchemaKind.DB }),
   outputs: {
     types: {
-      [TargetLanguage.Go]: { enabled: true }
+      [TargetLanguage.Go]: { enabled: true },
+      [TargetLanguage.TypeScript]: { enabled: true }
     },
     api: { enabled: true },
     sdk: {

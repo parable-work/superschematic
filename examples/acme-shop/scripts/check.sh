@@ -96,6 +96,15 @@ link_module "$API_PKG" "$APP/node_modules/@acme/shop-storefront-api"
 link_module "$SDK_PKG" "$APP/node_modules/@acme/shop-storefront-sdk"
 (cd "$API_PKG" && "$RUNTIME/node_modules/.bin/tsc" --noEmit -p tsconfig.json)
 (cd "$APP" && "$RUNTIME/node_modules/.bin/tsc" --noEmit -p tsconfig.json && bun test)
+# shop-api is served in Go; its TypeScript SDK imports its parsers and
+# validators from shop-api's TypeScript types, so it type-checks against them.
+API_SDK="$DIST/sdk/typescript/shop-api"
+link_module "$TYPES/shop-api" "$API_SDK/node_modules/@acme/shop-api-types"
+link_module "$REPO_ROOT/third_party/superscalar/bindings/typescript" "$API_SDK/node_modules/superscalar"
+for dep in typescript @types/node; do
+  link_module "$RUNTIME/node_modules/$dep" "$API_SDK/node_modules/$dep"
+done
+(cd "$API_SDK" && "$RUNTIME/node_modules/.bin/tsc" --noEmit -p tsconfig.json)
 
 echo "==> testdata/generated/ matches this build"
 # The generated files the docs site quotes. The site builds without Go or

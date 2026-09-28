@@ -45,7 +45,9 @@ SDK to call it. You write the business logic and say who the caller is.
   The core provider, `session`, finds `shop-db`'s `Session` and `User`
   tables and generates stores over the ORM for them.
 - `sdk` lists the SDK languages. Any API can have an SDK in Go, TypeScript,
-  Python or Rust, whatever language serves it.
+  Python or Rust, whatever language serves it. An SDK decodes and validates
+  with the types package of its own language, so `types` lists every SDK
+  language too.
 
 ## Build
 
@@ -56,10 +58,11 @@ superschematic build schemas/services/shop-api
 ```
 Loaded schema shop-api (kind API): 2 types, 0 enums, 5 scalars, 2 operation sets
   + types-go written to .../schemas/dist/types/go/shop-api
+  + types-typescript written to .../schemas/dist/types/typescript/shop-api
   + api written to .../schemas/dist/api/shop-api
   + sdk-go written to .../schemas/dist/sdk/go/shop-api
   + sdk-typescript written to .../schemas/dist/sdk/typescript/shop-api
-Build complete: 4 outputs generated, 0 skipped
+Build complete: 5 outputs generated, 0 skipped
 ```
 
 The generated server imports `shop-db`'s ORM module, so build `shop-db`
