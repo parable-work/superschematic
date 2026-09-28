@@ -283,11 +283,17 @@ func (ih *InputHasher) Recompute(service buildplan.Service, depHashes map[string
 	_, _ = h.Write([]byte(ih.base))
 	_, _ = h.Write([]byte("|service:" + ih.serviceDigests[service.Name]))
 	if service.Config.AuthDB != "" {
-		authDir := ih.serviceDirs[service.Config.AuthDB]
-		if authDir == "" {
-			authDir = filepath.Join(ih.repoRoot, SchemasDir, "services", service.Config.AuthDB)
+		// The authDb's own hash covers its dependencies: the API go.mod
+		// requires the Go types modules its ORM reaches through them.
+		authHash := depHashes[service.Config.AuthDB]
+		if authHash == "" {
+			authDir := ih.serviceDirs[service.Config.AuthDB]
+			if authDir == "" {
+				authDir = filepath.Join(ih.repoRoot, SchemasDir, "services", service.Config.AuthDB)
+			}
+			authHash = TreeDigest(authDir)
 		}
-		_, _ = fmt.Fprintf(h, "|authdb:%s:%s", service.Config.AuthDB, TreeDigest(authDir))
+		_, _ = fmt.Fprintf(h, "|authdb:%s:%s", service.Config.AuthDB, authHash)
 	}
 	for _, rel := range ReadAuthoringImports(ih.repoRoot, service.Name) {
 		_, _ = fmt.Fprintf(h, "|authoring:%s:%s", rel, fileHashOrMissing(filepath.Join(ih.repoRoot, filepath.FromSlash(rel))))

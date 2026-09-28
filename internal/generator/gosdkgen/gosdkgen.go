@@ -54,6 +54,13 @@ type SDKOutput struct {
 	Version                string
 	Naming                 naming.Naming
 
+	// IndirectModules are the Go types modules TypesModule imports,
+	// directly or through one another, sorted; the dispatch layer sets them
+	// before WriteSDK. go.mod requires them as indirect, and
+	// TypeModuleReplaces, copied from the types module's go.mod, replaces
+	// them.
+	IndirectModules []string
+
 	// ValidatesListElements reports whether a namespace validates the
 	// elements of an array-of-arrays argument whose type may carry its own
 	// validation (not a Go primitive); namespaces/validation.go then
