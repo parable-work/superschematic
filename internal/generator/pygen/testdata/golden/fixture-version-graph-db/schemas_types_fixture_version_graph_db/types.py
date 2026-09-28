@@ -2008,3 +2008,216 @@ class Step(BaseModel):
             "recipe": self.recipe.mask_secrets() if self.recipe is not None else None,
             "ref": self.ref.mask_secrets() if self.ref is not None else None,
         })
+
+class Utensil(BaseModel):
+    """
+    A utensil the recipe needs, keyed by a plain UUID rather than an
+# AutoGenerate one.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        validate_assignment=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    id: IdentityUUID = Field(..., alias="id", serialization_alias="id")
+
+    recipe: Optional[Recipe] = Field(default=None, alias="recipe", serialization_alias="recipe")
+
+    name: str = Field(..., alias="name", serialization_alias="name")
+
+    # The entity's logical identity, shared by its rows on every ref.
+    entity_key: Optional[IdentityUUID] = Field(default=None, alias="entityKey", serialization_alias="entityKey")
+
+    # The ref this row overrides the entity on.
+    ref: Optional[RecipeRef] = Field(default=None, alias="ref", serialization_alias="ref")
+
+    # True when the row deletes the entity on its ref.
+    deleted_on_ref: bool = Field(default=False, alias="deletedOnRef", serialization_alias="deletedOnRef")
+
+    version_: int = Field(default=0, alias="_version", serialization_alias="_version")
+
+    def validate_all(self) -> ValidationErrors:
+        """
+        Perform comprehensive validation and return all errors.
+
+        Returns:
+            ValidationErrors object containing any validation errors.
+            If no errors, the errors dict will be empty.
+        """
+        errors = ValidationErrors()
+
+        # Validate id
+        if self.id is None:
+            errors.add_field_error("id", "required", "required field")
+        else:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
+                errors.add_field_error("id", "pattern", "invalid format")
+
+        # Validate recipe
+        if self.recipe is not None:
+            try:
+                TypeAdapter(Recipe).validate_python(self.recipe)
+            except PydanticValidationError as e:
+                errors.add_field_error("recipe", "invalid", str(e))
+
+        # Validate name
+        if self.name is None:
+            errors.add_field_error("name", "required", "required field")
+
+        # Validate entityKey
+        if self.entity_key is not None:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key)) is None:
+                errors.add_field_error("entity_key", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "entity_key" or key.startswith("entity_key[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.entity_key)
+                except PydanticValidationError as e:
+                    errors.add_field_error("entity_key", "invalid", str(e))
+
+        # Validate ref
+        if self.ref is not None:
+            try:
+                TypeAdapter(RecipeRef).validate_python(self.ref)
+            except PydanticValidationError as e:
+                errors.add_field_error("ref", "invalid", str(e))
+
+        # Validate deletedOnRef
+        if self.deleted_on_ref is None:
+            errors.add_field_error("deleted_on_ref", "required", "required field")
+
+        # Validate _version
+        if self.version_ is None:
+            errors.add_field_error("_version", "required", "required field")
+
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a dictionary.
+
+        Returns:
+            Dictionary representation of the model.
+        """
+        return self.model_dump(mode='python', exclude_none=False)
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a JSON-serializable dictionary.
+
+        Returns:
+            JSON-serializable dictionary representation.
+        """
+        return self.model_dump(mode='json', exclude_none=False)
+
+    def to_json(self) -> str:
+        """
+        Convert the model to a stable JSON string.
+
+        Returns:
+            JSON string representation.
+        """
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "Utensil":
+        """
+        Parse a model from a dictionary using strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_dict_non_strict(cls, input_data: Dict[str, Any]) -> "Utensil":
+        """
+        Parse a model from a dictionary using non-strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=False)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "Utensil":
+        """
+        Parse a model from JSON text/bytes using strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_json_non_strict(cls, input_data: str | bytes) -> "Utensil":
+        """
+        Parse a model from JSON text/bytes using non-strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict_non_strict(parsed_data)
+
+    @classmethod
+    def from_yaml(cls, input_data: str | bytes) -> "Utensil":
+        """
+        Parse a model from YAML text/bytes using strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_yaml_non_strict(cls, input_data: str | bytes) -> "Utensil":
+        """
+        Parse a model from YAML text/bytes using non-strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict_non_strict(parsed_data)
+
+    def mask_secrets(self) -> "Utensil":
+        """
+        Return a copy of this object with secret fields masked.
+        """
+        return self.model_copy(update={
+            "recipe": self.recipe.mask_secrets() if self.recipe is not None else None,
+            "ref": self.ref.mask_secrets() if self.ref is not None else None,
+        })

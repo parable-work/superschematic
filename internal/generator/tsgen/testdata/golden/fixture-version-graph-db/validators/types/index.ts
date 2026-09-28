@@ -7,3 +7,4 @@ export * from './recipecommit';
 export * from './recipepatch';
 export * from './reciperef';
 export * from './step';
+export * from './utensil';

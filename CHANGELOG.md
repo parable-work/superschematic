@@ -18,6 +18,13 @@ of a generated artifact is always listed here with the bump it requires.
   configured scalar Python module as not installed, and the availability
   flag is `_SCALAR_MODULE_AVAILABLE`. The scrub gate fails on that name.
   Patch (generated comment and private identifier change).
+- The generated version-graph shell's `Save` leaves the row id of a member
+  whose `@key` is a plain `Identity.UUID` to the table's default, as it
+  does for an `AutoGenerate<Identity.UUID>` key, instead of minting a
+  client-side UUID. Behavior is unchanged: each ref holds its own row of an
+  entity, so the caller's id was already never the row's. Such members are
+  now exercised end to end. Output for a graph whose members all have
+  `AutoGenerate` keys is unchanged. Patch.
 - Writing a Go types module no longer removes the whole `versiongraph/`
   directory when the schema declares no graph. It removes each
   `versiongraph/*.json` no graph of the schema writes, keeps every other

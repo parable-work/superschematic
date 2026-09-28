@@ -219,3 +219,37 @@ export const StepDefaults: Partial<Step> = {
 export function makeStep(overrides?: Partial<Step>): Step {
   return { ...StepDefaults, ...(overrides || {}) } as Step;
 }
+
+/**
+ * Utensil - A utensil the recipe needs, keyed by a plain UUID rather than an
+AutoGenerate one.
+ */
+export interface Utensil {
+  id: string;
+  recipe: Recipe;
+  name: string;
+  /** The entity's logical identity, shared by its rows on every ref. */
+  entityKey?: string | null;
+  /** The ref this row overrides the entity on. */
+  ref: RecipeRef;
+  /** True when the row deletes the entity on its ref. */
+  deletedOnRef: boolean;
+  _version: number;
+}
+
+/**
+ * UtensilDefaults holds @default values declared in the schema. Defaults
+ * are typed as Partial<Utensil> so they can be merged into incoming
+ * payloads or used to bootstrap a new instance.
+ */
+export const UtensilDefaults: Partial<Utensil> = {
+  deletedOnRef: false,
+};
+
+/**
+ * makeUtensil returns a Utensil initialised with @default values from
+ * the schema. Caller-provided overrides win over the declared defaults.
+ */
+export function makeUtensil(overrides?: Partial<Utensil>): Utensil {
+  return { ...UtensilDefaults, ...(overrides || {}) } as Utensil;
+}
