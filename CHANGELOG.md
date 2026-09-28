@@ -30,6 +30,20 @@ of a generated artifact is always listed here with the bump it requires.
   The SQL generator fails on the same indexes, as a backstop. A schema
   with such an index now fails to load; output for every other schema is
   unchanged. Patch.
+- `create.sql` no longer inserts a system user when the schema has a
+  `User` table. The insert named a fixed column list left over from the
+  source tree (`id`, `created_at`, `created_by`, `updated_at`,
+  `updated_by`, `deleted_at`, `deleted_by`, `name`, `email`, `timezone`,
+  `locale`), so `create.sql` failed on any `User` table without all of
+  them (`column "created_by" of relation "user" does not exist`), the
+  acme example's `shop-db` among them. No generated code reads the row:
+  the ORM fills `createdBy` and `updatedBy` from the context's user, and
+  the session auth provider finds users through their sessions. A
+  deployment that wants a system user seeds it in its own migration. The
+  comment on the Go API's `SystemUserID` no longer says the database
+  creates that user. Patch, except that a database created from the
+  `create.sql` of a `User` table with all eleven columns no longer gets
+  the row: Major for that case only.
 - Verification refuses version graph schemas the generators could not run
   correctly. A `@graphMember` may exclude from history only nullable
   fields (besides its audit fields), since Revert and Merge rebuild rows
@@ -60,6 +74,34 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- Docs site: a "Guides" group, one page per area over `examples/acme-shop`
+  (modeling types, database tables, API routes, auth and permissions, and
+  client SDKs in Go, TypeScript, Python and Rust), and a decorators and
+  wrappers reference. The extension guides move from `/guides/` to
+  `/extending/`. Command output on the pages is quoted from logs
+  `examples/acme-shop/scripts/check.sh` captures, as generated code already
+  was. `examples/acme-shop` gains `shop-orders`, an API over new order and
+  review tables with SDKs in all four languages; Go, TypeScript, Python and
+  Rust clients that the Go tests run against its Go server and compare; and
+  type tests in each language. The `acme` CI job sets up Python and uv for
+  it.
+- `examples/acme-shop`: the docs tutorial's project. Four services built
+  with the core binary (`shop-common`, General; `shop-db`, DB; `shop-api`,
+  an API served in Go with Go and TypeScript SDKs; `shop-storefront`, an API
+  served in TypeScript), a Go app that implements `shop-api` over the
+  generated ORM and calls it through the Go SDK, and a TypeScript app that
+  implements `shop-storefront` and calls it through the TypeScript SDK, both
+  tested in-process without Postgres. `scripts/check.sh` builds and tests it
+  and compares the generated files the docs quote with their committed
+  copies under `testdata/generated/`; the `acme` CI job runs it.
+- Docs site: a "Start here" group (prerequisites, getting started, how it
+  works) and "Your first project", a tutorial over `examples/acme-shop` with
+  a Go path and a TypeScript path. Pages quote the example's files through
+  a `Snippet` component that reads them when the site builds, by
+  declaration name or line anchors, and fails the build when a name no
+  longer matches. The sidebar's "Quickstart" group is now "Languages" and
+  "Guides" is "Extending". The Go and TypeScript pages name the SDK
+  namespace fields correctly (`ProductNamespace`, `sdk.product`).
 - `@superschematic/versiongraph`, a new npm package in
   `runtime/versiongraph/typescript`: the version-graph core built for
   `wasm32-unknown-unknown`, with an async `init` and typed `compose`,

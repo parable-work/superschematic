@@ -1,0 +1,123 @@
+---
+title: Build the whole tree
+description: Build every service in dependency order with build-all, read the package graph, and reuse outputs with the build cache.
+sidebar:
+  order: 5
+---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+import Snippet from '../../../components/Snippet.astro';
+
+So far each part built one service. `build-all` builds every service under
+a directory in one process, in dependency order, and is what a project runs
+in CI and before a release.
+
+## Build every service
+
+```sh
+superschematic build-all schemas/services
+```
+
+<Snippet file="testdata/generated/logs/build-all.txt" />
+
+Each service's own build lines, as `build` prints them, come between these
+summary lines.
+
+The order comes from the configs: `shop-api` and `shop-orders` name
+`shop-db` as their `authDb`, and `shop-storefront` lists `shop-common` in
+its `dependencies`, so each builds after the service it needs. Every
+service loads through one TypeScript program, which is faster than a build
+per service.
+`--parallel` builds services that do not depend on each other at the same
+time.
+
+`build --with-deps <service>` builds one service and everything it depends
+on, and nothing else:
+
+```sh
+superschematic build --with-deps schemas/services/shop-storefront
+```
+
+<Snippet file="testdata/generated/logs/build-with-deps-shop-storefront.txt" />
+
+## The package graph
+
+`build-all` also writes `dist/.deps.json`, the graph of the generated
+packages: each package's language, kind, name, the service that produced
+it, and the packages it depends on. `shop-api`'s Go server depends on its
+own types and on `shop-db`'s ORM:
+
+<Snippet file="testdata/generated/deps.json" title="schemas/dist/.deps.json" from='"id": "shop-api-api"' to="]" />
+
+A release script can publish the packages in this order, and a CI job can
+build only what a change touched. `dist/` is usually ignored by version
+control; `[deps] copy = "<path>"` in `superschematic.toml` writes a copy
+you can commit.
+
+## Reuse outputs with the cache
+
+With `--cache`, `build-all` keeps each service's output in a
+content-addressed cache, keyed by a hash of the service's inputs and of
+the binary. A service whose inputs have not changed is skipped, and one
+whose outputs are missing is restored:
+
+```sh
+superschematic build-all --cache schemas/services
+```
+
+<Snippet file="testdata/generated/logs/build-all-cache.txt" />
+
+After `rm -rf schemas/dist`, the same command restores each service:
+
+<Snippet file="testdata/generated/logs/build-all-restore.txt" />
+
+The cache lives in your XDG cache directory; `--cache-root`, `SUPERSCHEMATIC_BUILD_CACHE_DIR` or
+`[cache] root` in the naming file move it. Because the key covers the
+binary, build the CLI with `make build`, which strips the checkout's paths
+and revision, so the key survives a commit that changes no Go code.
+
+## Check it in CI
+
+`examples/acme-shop/scripts/check.sh` is a complete CI script for a
+project like this one:
+
+1. `build-all` with the core binary;
+2. `go build` and `go vet` on every generated Go module;
+3. `tsc` on the generated TypeScript router and SDKs, an import of the
+   generated Python packages, and a Rust build against the generated Rust
+   SDK;
+4. the Go services' tests, which call the generated server through the
+   generated Go SDK, then run the TypeScript, Python and Rust clients
+   against the same server and compare what they print;
+5. the TypeScript service's tests, which call the router through the
+   generated TypeScript SDK;
+6. a byte comparison of the generated files and command output these pages
+   quote against their committed copies under `testdata/generated/`.
+
+It runs on every pull request to this repository, so the pages of this
+tutorial stay true.
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard
+    title="Guides"
+    description="Types, tables, routes, auth and SDKs in depth, over the same shop."
+    href="/superschematic/guides/modeling-types/"
+  />
+  <LinkCard
+    title="Languages"
+    description="What the generated code offers in Go, TypeScript, Python and Rust."
+    href="/superschematic/install/go/"
+  />
+  <LinkCard
+    title="Reference"
+    description="The CLI, the naming file, and the reference for each feature."
+    href="/superschematic/reference/cli/"
+  />
+  <LinkCard
+    title="Extend superschematic"
+    description="Add kinds, decorators, generators and auth providers. examples/acme-schematic extends this same shop."
+    href="/superschematic/extending/write-an-extension/"
+  />
+</CardGrid>

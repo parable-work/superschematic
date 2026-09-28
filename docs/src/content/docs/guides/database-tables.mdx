@@ -1,0 +1,145 @@
+---
+title: Database tables
+description: Keys, columns, relations, one-to-many, indexes, text search, JSON columns and soft delete in a DB schema, and what the SQL and the Go ORM make of them.
+sidebar:
+  order: 2
+---
+
+import Snippet from '../../../components/Snippet.astro';
+
+A DB schema declares tables. Its build writes Postgres DDL
+(`sql/<service>/create.sql` and `drop.sql`), a Go ORM over pgx, and the row
+types in the languages `outputs.types` lists. This guide walks the acme
+shop's order and review tables in `shop-db`. [Your first project](/superschematic/first-project/database/)
+covers the basics of the users and products tables.
+
+## Tables and keys
+
+Every class in a DB schema is a table, named after the class in snake case
+(`OrderLine` is `order_line`). Postgres keywords are quoted: the `Order`
+class is the `"order"` table.
+
+<Snippet file="schemas/services/shop-db/src/orders.schema.ts" symbol="Order" />
+
+- `@key` marks the primary key. `AutoGenerate<Identity.UUID>` makes it a
+  `UUID DEFAULT gen_random_uuid()`, so the ORM leaves a zero id out of an
+  insert and the row type holds the id as a pointer until then.
+- A class that other tables extend, like `Auditable`, is not a table: its
+  fields become columns of each table that extends it. A required
+  `Temporal.DateTime` column defaults to `CURRENT_TIMESTAMP`, and the ORM's
+  `UpdateOne` sets `updatedAt`.
+- `@unique` on a field adds a unique constraint on its column.
+- The class comment becomes `COMMENT ON TABLE`.
+
+<Snippet file="testdata/generated/sql/shop-db/create.sql" from={'CREATE TABLE "order" ('} to=");" />
+
+## Columns
+
+The field's type decides its column:
+
+| Field type | Column |
+| --- | --- |
+| `Identity.UUID` | `UUID` |
+| `Identity.Slug`, `Contact.Email` | `CITEXT` (compares case-insensitively) |
+| `Identity.Name` | `VARCHAR(80)` |
+| `Generic.Int64` | `BIGINT` |
+| `Temporal.DateTime` | `TIMESTAMPTZ` |
+| `string`, an enum | `TEXT` |
+| `number` | `DOUBLE PRECISION` |
+| `boolean` | `BOOLEAN` |
+| a `@jsonField` type, a map, a list of lists | `JSONB` |
+
+A field is `NOT NULL` unless it is `Nullable<T>`. `Validate` constraints
+and enum membership are checked by the generated code, not by the
+database, and `Default<T, V>` fills in decoded payloads, not columns.
+
+## Relations
+
+`Relation<T>` stores a foreign key to another table of the same schema, in
+a column named after the field with `_id`. `onDelete` says what deleting
+the referenced row does: `CASCADE`, the default, deletes this row too;
+`RESTRICT` and `NO ACTION` refuse the delete. A relation is never null, so
+`SET NULL` is not offered. The DDL adds the foreign keys once every table
+exists:
+
+<Snippet file="testdata/generated/sql/shop-db/create.sql" from={'ALTER TABLE "order"'} to="ON DELETE RESTRICT;" />
+
+In the row types a relation holds the related row (`Order.Customer` is a
+`User` in Go). To write one, give it the related row's id:
+`Customer: db.User{Id: &customer}`. The filter for it is `CustomerID`.
+
+## One-to-many
+
+`HasMany<T>` on the parent is the other side of a `Relation` on the child.
+It adds no column: `Order.lines` lists the `OrderLine` rows whose `order`
+points at the order.
+
+<Snippet file="schemas/services/shop-db/src/orders.schema.ts" symbol="OrderLine" />
+
+The ORM loads the lines when the read asks for them, through the nested
+field selection of the order's options:
+
+<Snippet file="go/orders.go" symbol="withLines" />
+
+## Indexes
+
+`@index<T>(keys, options?)` on the class adds an index over the listed
+fields, in order. A relation field indexes its foreign key column.
+`{ unique: true }` makes it unique, and `name` names it. A key that names
+no field fails the build.
+
+<Snippet file="schemas/services/shop-db/src/orders.schema.ts" symbol="Review" />
+
+<Snippet file="testdata/generated/sql/shop-db/create.sql" from="CREATE INDEX idx_order_customer_placed_at" to="idx_review_search_trgm" />
+
+`one_per_author` is unique only among rows that are not deleted: on a
+table with `deletedAt`, a unique index leaves deleted rows out.
+
+## Text search
+
+`@searchField` on one or more fields adds a generated `search_text` column
+that joins them, and a trigram index on it. The DDL enables the `pg_trgm`
+extension.
+
+<Snippet file="testdata/generated/sql/shop-db/create.sql" from="ALTER TABLE review ADD COLUMN search_text" to="STORED;" />
+
+## JSON columns
+
+A class marked `@jsonField` (from `@superschematic/schema`) is not a table.
+A field of its type is a `JSONB` column, read and written with its row, and
+the ORM marshals it for you. `shop-db`'s `ShippingAddress` is one; see
+[Modeling types](/superschematic/guides/modeling-types/#constraints). Maps
+and lists of lists are `JSONB` too.
+
+## Soft delete
+
+A table with nullable `deletedAt` and `deletedBy` fields, like `Review`, is
+soft-deletable:
+
+- `DeleteOne` sets `deleted_at` and `deleted_by` instead of removing the
+  row, and `HardDeleteOne` removes it.
+- `FindMany` and `FindOne` leave deleted rows out unless the options set
+  `IncludeDeleted`.
+- Unique indexes cover live rows only, as above.
+
+<Snippet file="testdata/generated/orm/shop-db/interfaces.go" symbol="ReviewRepositoryInterface" />
+
+`DeleteOne` records who deleted the row, so it needs the acting user on the
+context, set with `orm.WithUserID`; without one it returns
+`ErrNoUserInContext`. The generated API server authenticates callers but
+does not tell the ORM who they are, so the orders service adds that step
+to its auth middleware:
+
+<Snippet file="go/orders.go" symbol="actingUser" />
+
+## Transactions
+
+`Transaction` runs a function with repositories bound to one transaction,
+and rolls it back when the function returns an error. Placing an order
+writes the order and its lines together:
+
+<Snippet file="go/orders.go" symbol="Orders.PlaceOrder" />
+
+`ErrNotFound` from a lookup, and the unique index's `23505` error from
+Postgres, are the errors an implementation usually turns into a 404 or a
+409; [API routes](/superschematic/guides/api-routes/) shows how.
