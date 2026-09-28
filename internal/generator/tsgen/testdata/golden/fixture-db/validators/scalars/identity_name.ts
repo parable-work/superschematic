@@ -16,16 +16,21 @@ export function validateIdentityName(
 
   // A value of another JSON type is "type", and its length and format are
   // not checked.
-  if (typeof value !== "string") {
+  const candidate: unknown = value;
+
+  if (typeof candidate !== "string") {
     return [false, [{ validator: "type", message: "expected string value" }]];
   }
-  const s = value;
+  const s = candidate;
 
-  if (s.length < 2) {
+  // Lengths count code points, not UTF-16 units.
+  const length = [...s].length;
+
+  if (length < 2) {
     errors.push({ validator: "minLength", message: "must be at least 2 characters" });
   }
 
-  if (s.length > 80) {
+  if (length > 80) {
     errors.push({ validator: "maxLength", message: "must be at most 80 characters" });
   }
 

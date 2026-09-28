@@ -169,12 +169,22 @@ def _parse_structured_json(
 
 
 def _apply_builtin(name: str, value: Any, strict: bool) -> tuple[Any, bool]:
+    """The GraphQL builtins and the IR's ``number`` and ``boolean``.
+
+    Lenient mode coerces a numeric or boolean string for the IR names as it
+    does for ``Float`` and ``Boolean``; strict mode passes their values
+    through, and validation checks them.
+    """
     if name == "Int":
         return coerce_int(value, strict)
     if name == "Float":
         return coerce_float(value, strict)
     if name == "Boolean":
         return coerce_bool(value, strict)
+    if name == "number":
+        return (value, True) if strict else coerce_float(value, False)
+    if name == "boolean":
+        return (value, True) if strict else coerce_bool(value, False)
     if name in ("String", "ID"):
         return (value, True) if isinstance(value, str) else (value, False)
     return value, True

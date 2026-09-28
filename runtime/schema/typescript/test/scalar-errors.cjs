@@ -250,6 +250,40 @@ test('loading a JSON object or array scalar reads its JSON text into the value',
   }
 });
 
+// The IR's number and boolean builtins, in a single field and a list.
+const builtinSchema = parseSchemaIR({
+  name: 'builtin-coercion',
+  kind: 'General',
+  types: {
+    Settings: {
+      name: 'Settings',
+      role: 'EmbeddedStruct',
+      fields: [
+        { name: 'ratio', typeRef: { name: 'number', isArray: false } },
+        { name: 'enabled', typeRef: { name: 'boolean', isArray: false } },
+        { name: 'weights', typeRef: { name: 'number', isArray: true } },
+      ],
+    },
+  },
+});
+
+test('a lenient load coerces a numeric or boolean string for the IR number and boolean', () => {
+  const lenient = loadType(builtinSchema, 'Settings', { ratio: ' 5 ', enabled: 'TRUE', weights: ['1.5', 2] });
+  assert.deepStrictEqual(lenient.errors, {});
+  assert.deepStrictEqual(lenient.data, { ratio: 5, enabled: true, weights: [1.5, 2] });
+
+  const unreadable = loadType(builtinSchema, 'Settings', { ratio: 'far', enabled: 'yes' });
+  assert.strictEqual(unreadable.errors.ratio[0].validator, 'type');
+  assert.strictEqual(unreadable.errors.enabled[0].validator, 'type');
+
+  // Strict parse passes the value through; validation refuses it.
+  const strict = loadType(builtinSchema, 'Settings', { ratio: '5', enabled: 'true' }, { strict: true });
+  assert.deepStrictEqual(strict.errors, {
+    ratio: [{ validator: 'type', message: 'expected a number' }],
+    enabled: [{ validator: 'type', message: 'expected a boolean' }],
+  });
+});
+
 if (failures > 0) {
   console.error(`scalar-errors: ${failures} failing test(s)`);
 } else {

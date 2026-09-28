@@ -20,10 +20,12 @@ export function validateIdentityUUID(
 
   // A value of another JSON type is "type", and its length and format are
   // not checked.
-  if (typeof value !== "string") {
+  const candidate: unknown = value;
+
+  if (typeof candidate !== "string") {
     return [false, [{ validator: "type", message: "expected string value" }]];
   }
-  const s = value;
+  const s = candidate;
 
   if (!IdentityUUIDPattern.test(s)) {
     errors.push({ validator: "pattern", message: "invalid format" });

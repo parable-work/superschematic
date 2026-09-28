@@ -521,21 +521,8 @@ function validateSingleField(
     return;
   }
 
-  if (kind === 'type') {
-    const nested = schema.types ? schema.types[field.typeRef.name] : undefined;
-    if (nested && isObject(value)) {
-      const nestedErrors = validateTypeDef(schema, nested, value, options);
-      addNestedErrors(errors, key, nestedErrors);
-    }
-    return;
-  }
-
-  if (kind === 'input') {
-    const nested = schema.inputs ? schema.inputs[field.typeRef.name] : undefined;
-    if (nested && isObject(value)) {
-      const nestedErrors = validateTypeDef(schema, nested, value, options);
-      addNestedErrors(errors, key, nestedErrors);
-    }
+  if (kind === 'type' || kind === 'input') {
+    validateObjectValue(schema, field, kind, key, value, errors, options);
     return;
   }
 
@@ -650,22 +637,34 @@ function validateArrayElements(
       continue;
     }
 
-    if (kind === 'type') {
-      const nested = schema.types ? schema.types[field.typeRef.name] : undefined;
-      if (nested && isObject(element)) {
-        const nestedErrors = validateTypeDef(schema, nested, element, options);
-        addNestedErrors(errors, elementKey, nestedErrors);
-      }
-      continue;
+    if (kind === 'type' || kind === 'input') {
+      validateObjectValue(schema, field, kind, elementKey, element, errors, options);
     }
+  }
+}
 
-    if (kind === 'input') {
-      const nested = schema.inputs ? schema.inputs[field.typeRef.name] : undefined;
-      if (nested && isObject(element)) {
-        const nestedErrors = validateTypeDef(schema, nested, element, options);
-        addNestedErrors(errors, elementKey, nestedErrors);
-      }
-    }
+/**
+ * Validates a value of an object-typed field, or one element of a list of
+ * them, at key: an object's field errors nest under key, and any other JSON
+ * value is "type".
+ */
+function validateObjectValue(
+  schema: Schema,
+  field: FieldDef,
+  kind: 'type' | 'input',
+  key: string,
+  value: unknown,
+  errors: ValidationErrors,
+  options?: ValidationOptions
+): void {
+  if (!isObject(value)) {
+    addFieldError(errors, key, 'type', 'expected an object');
+    return;
+  }
+  const defs = kind === 'type' ? schema.types : schema.inputs;
+  const nested = defs ? defs[field.typeRef.name] : undefined;
+  if (nested) {
+    addNestedErrors(errors, key, validateTypeDef(schema, nested, value, options));
   }
 }
 
@@ -680,41 +679,37 @@ function validateField(
   const hasKey = Object.prototype.hasOwnProperty.call(data, key);
   const value = data[key];
 
-  if (field.required) {
-    if (!hasKey || value === null || value === undefined) {
-      addFieldError(errors, key, 'required', `${field.name} is required.`);
-      return;
-    }
-
-    if (field.typeRef.isArray && !Array.isArray(value)) {
-      addFieldError(errors, key, 'required', `${field.name} is required.`);
-      return;
-    }
-  }
-
   if (!hasKey || value === null || value === undefined) {
+    if (field.required) {
+      addFieldError(errors, key, 'required', `${field.name} is required.`);
+    }
     return;
   }
 
   if (field.typeRef.isArray) {
+    // A required list means present, not non-empty: [] is a value, and
+    // non-emptiness is declared with listMin. A present value that is not a
+    // list is of the wrong JSON type, required or optional.
+    if (!Array.isArray(value)) {
+      addFieldError(errors, key, 'type', 'expected an array');
+      return;
+    }
     // List bounds apply to the outer list, including for T[][].
-    if (Array.isArray(value)) {
-      if (field.validateListMin !== null && value.length < field.validateListMin) {
-        addFieldError(
-          errors,
-          key,
-          'listMin',
-          `${field.name} must have at least ${field.validateListMin} items.`
-        );
-      }
-      if (field.validateListMax !== null && value.length > field.validateListMax) {
-        addFieldError(
-          errors,
-          key,
-          'listMax',
-          `${field.name} must have at most ${field.validateListMax} items.`
-        );
-      }
+    if (field.validateListMin !== null && value.length < field.validateListMin) {
+      addFieldError(
+        errors,
+        key,
+        'listMin',
+        `${field.name} must have at least ${field.validateListMin} items.`
+      );
+    }
+    if (field.validateListMax !== null && value.length > field.validateListMax) {
+      addFieldError(
+        errors,
+        key,
+        'listMax',
+        `${field.name} must have at most ${field.validateListMax} items.`
+      );
     }
     validateArrayField(schema, field, key, value, errors, options);
     return;

@@ -54,6 +54,21 @@ func (o *ModuleOutput) NeedsRegexp() bool {
 	return false
 }
 
+// NeedsRuneCount reports whether types.go emits a length check, which counts
+// code points with unicode/utf8 as every other validator does.
+func (o *ModuleOutput) NeedsRuneCount() bool {
+	for _, typeInfo := range o.Types {
+		for _, field := range typeInfo.Fields {
+			for _, rule := range append(append([]codegen.ValidationRule(nil), field.Validations...), field.ScalarRules...) {
+				if rule.Validator == "minLength" || rule.Validator == "maxLength" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // ListFields returns the fields of t whose value is a list, T[] or T[][], in
 // field order. UnmarshalJSON refuses a null element in them (D12): a list
 // element is never null, and encoding/json would decode one to the

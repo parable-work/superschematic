@@ -420,7 +420,7 @@ value: a value of the wrong JSON type is `type`, a null element is
 and `listMin` and `listMax` bound the outer list. The scalar's own
 lengths, pattern and range, then the argument's constraints, apply to
 each value, and the first rule a value breaks is its one error (D14);
-lengths count bytes, as every Go validator does. A value those rules
+lengths count code points (D14, amended). A value those rules
 accept then passes its type's own `Validate`: a scalar's core check, an
 enum's membership, an object's fields nested under its path. A
 `Generic.JSON` argument is any JSON value but null, and an optional one
@@ -618,7 +618,7 @@ for a number `x`.
 | An optional string scalar given a non-string is `type`, as a required one is. | Nothing in the runtimes and the scalar's pattern or length in the generated TypeScript validator, as before |
 | A number scalar given a non-number, and an integer scalar given a non-integer such as `1.5`, is `type` in the generated TypeScript validator as in the runtimes. | `Number(value)`, which let `"3"` through an integer scalar |
 | Presence, then type, then the rules: a missing required string is `required` alone, and a rule checks only a value of its own type (a string for `minLength`, `maxLength` and `pattern`, a finite number for `min` and `max`). | Measuring `String(undefined)`, 9 characters, which added `maxLength` next to `required` |
-| A required list given a value that is not a list is `required` in the generated TypeScript validator, as in the runtimes. | Checking it for null only |
+| A list given a value that is not a list is `type`, required or optional (amended below; it was `required` for a required list and nothing for an optional one). | Checking it for null only |
 
 The typed decoders refuse these payloads before the generated Go and
 Python validators run (D12, amended). The runtimes do not walk maps, so
@@ -630,10 +630,10 @@ missing required string field into `""`, which the generated Go validator
 cannot tell from a present empty string, and a present `""` satisfies a
 required `string` field in every validator.
 
-The runtimes' lenient parse coerces a numeric or boolean string only for
+The runtimes' lenient parse coerced a numeric or boolean string only for
 the GraphQL names (`Int`, `Float`, `Boolean`), not for the IR's `number`
-and `boolean`, so a `"5"` in a `number` field is `type` after a lenient
-parse too.
+and `boolean`, so a `"5"` in a `number` field was `type` after a lenient
+parse too. It now coerces the IR names as well (amended below).
 
 ### D14, amended: `Generic.JSON` is any JSON value but null
 
@@ -728,6 +728,76 @@ type from its mapping: `object` or `array` for these scalars, where it
 wrote `string`. The readers turn `object` into the `JSON` primitive and
 `array` into `String`; the rule keys off `x-typeMapping`, so both read
 back to the same checks.
+
+### D14, amended: a list, an enum and an object hold their JSON type
+
+The rule above covered builtin primitives and scalars. Four more values of
+the wrong JSON type were reported differently, or not at all, and none had
+a parity vector:
+
+- A list field given a value that is not a list was `required` for a
+  required list in the runtimes and the generated TypeScript validator,
+  and passed for an optional one.
+- An enum given a number was `type` in the runtimes and `enum` in the
+  generated TypeScript validator.
+- An object-typed field or list element given a value that is not an
+  object passed in the runtimes and the generated TypeScript validator.
+- A string scalar whose generated TypeScript type is not `string` (a
+  date-time scalar, whose type is a `Date`, and object-shaped ones such as
+  `Geo.Location`) was checked in the generated TypeScript validator as
+  `String(value)`: `42` passed `Temporal.DateTime`.
+
+The Go and Python decoders refuse all four before their validators run.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A present value that is not a list is `type` ("expected an array") at the list field, required or optional, `T[]` and `T[][]` alike, in the three runtimes and the generated TypeScript validator, which calls `expectList` from `validators/primitives.ts`. A missing or null required list is `required`. | `required` for a required list, which counted a wrong value as a missing one |
+| An enum value that is not a string is `type`; a string outside the enum is `enum`. | `enum` for both |
+| A value of an object-typed field, list element or innermost element that is not a JSON object is `type` ("expected an object") at its path. The generated TypeScript validator reports it for a nested type it validates (a local type, or the type itself), and for a map value of one. | Leaving it to the decoders |
+| A string scalar holds a string in the generated TypeScript validator, whatever its TypeScript type: any other value is `type`, and the scalar's rules check the string. A date-time scalar (`JSDate`) also takes a valid `Date`, the value its generated type holds, and its rules check the `Date`'s ISO string, the text `JSON.stringify` writes. | `String(value)`, which let any value through a scalar without rules and measured `"[object Object]"` for an object |
+| The runtimes' lenient parse coerces a numeric or boolean string for the IR's `number` and `boolean` as it does for `Float` and `Boolean`, in a single field and a list element, so a lenient load of `"5"` into a `number` field is `5`. Strict parse passes such a value to validation, as before. | `type` after a lenient parse; coercing in strict parse too |
+| The Python runtime's `Float` coercion refuses a boolean, as the Go and TypeScript runtimes do. It read `true` as `1.0` in both modes. | Keeping the difference, which the lenient `number` coercion would have spread |
+
+`Geo.Location`'s object now fails the generated TypeScript validator as
+`type` where it failed as `pattern`; the string form passes as before. A
+`@strictJSON` type reports a nested object's failures, a value that is not
+an object included, as one `object` error, as before; a list field of one
+given a value that is not a list is `type`, where it was `array`.
+
+The runtimes do not model map fields: the Go runtime ignores `isMap` and
+the TypeScript runtime's IR reader drops it, so a map field is checked as
+a value of its value type. A map of strings given its object was already
+`type`; a map of lists given its object is now `type` too, and a map of
+objects is still checked as one object. No parity vector has a map field.
+
+### D14, amended: string lengths count code points
+
+`minLength` and `maxLength` counted three different units:
+
+| Validator | Unit |
+|-----------|------|
+| TypeScript and Python runtimes, generated Python validator, Python SDK, TypeScript API server (a scalar's lengths), superscalar's core | code points |
+| Go runtime (a field's lengths) | code points |
+| Go runtime (a scalar's lengths), generated Go validator, `runtime/http/go/bodyargs`, Go routes (query parameters and `GET` arguments), Go and Rust SDKs | UTF-8 bytes |
+| Generated TypeScript validator, TypeScript SDK, TypeScript API server (an argument's own lengths) | UTF-16 code units |
+
+A string of astral characters, such as five emoji for a `maxLength` of 5,
+passed in the first group and failed in the other two, and an accented
+`e` (U+00E9) counted two in the third.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every validator counts Unicode code points: `utf8.RuneCountInString` (or `len([]rune(s))`) in Go, `[...s].length` in TypeScript, `.chars().count()` in Rust, `len` in Python. JSON Schema defines a string's length in code points, superscalar's core and the runtimes already counted them, and a Postgres `VARCHAR(n)` counts characters. | UTF-16 units, JavaScript's native length, which counts an astral character twice; UTF-8 bytes, a storage size no schema author writes a limit in |
+
+The parity matrix has vectors with astral and multi-byte BMP characters
+for a field's lengths, a scalar's lengths, and list and list-of-lists
+elements.
+
+Still different, and not in the parity matrix: a `pattern` on astral
+characters. Go's `regexp` and Python's `re` match code points, and the
+generated TypeScript validator and the TypeScript runtime build a
+`RegExp` without the `u` flag, which matches UTF-16 units, so `.` matches
+half an emoji there.
 
 ## D16. An engine takes schemas as data, and behaviors compose on its types
 

@@ -91,7 +91,14 @@ const schemaConfigJSON = `{
 // optNums, optBool, optBools) and the scalar fields also cover a value of
 // the wrong JSON type (D14, amended): it is one "type" error at its path,
 // required or optional, and the field's length, pattern and range rules do
-// not check it.
+// not check it. So do shade (an enum), point (an object), when and whens
+// (Temporal.DateTime, a string scalar whose generated TypeScript type is a
+// Date), and every list field given a value that is not a list.
+//
+// String lengths count Unicode code points in every validator (D14,
+// amended): the length vectors hold astral characters (two UTF-16 units,
+// four UTF-8 bytes) and multi-byte BMP characters (one UTF-16 unit, two
+// UTF-8 bytes).
 //
 // ListMatrix holds the list rules for T[] and T[][] (D12): a required list
 // means present, not non-empty; listMin and listMax bound the outer list; a
@@ -146,6 +153,10 @@ const parityMatrixSchemaJSON = `{
     },
     "Embedding.Vector": {
       "name": "Embedding.Vector",
+      "languagePrimitive": "string"
+    },
+    "Temporal.DateTime": {
+      "name": "Temporal.DateTime",
       "languagePrimitive": "string"
     }
   },
@@ -242,6 +253,22 @@ const parityMatrixSchemaJSON = `{
         {
           "name": "optBools",
           "typeRef": { "name": "boolean", "isArray": true }
+        },
+        {
+          "name": "shade",
+          "typeRef": { "name": "ParityShade" }
+        },
+        {
+          "name": "point",
+          "typeRef": { "name": "ParityPoint" }
+        },
+        {
+          "name": "when",
+          "typeRef": { "name": "Temporal.DateTime" }
+        },
+        {
+          "name": "whens",
+          "typeRef": { "name": "Temporal.DateTime", "isArray": true }
         }
       ]
     },
@@ -657,12 +684,95 @@ var vectors = []parityVector{
 		decodeRejects: []string{"go", "python"},
 	},
 	{
-		// A required list given a value that is not a list is "required",
-		// as a missing one is.
+		// A list given a value that is not a list is "type", required or
+		// optional: the value is present, of the wrong JSON type.
 		name:          "req_list_not_a_list",
 		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": "a"}`,
-		want:          map[string][]string{"reqList": {"required"}},
+		want:          map[string][]string{"reqList": {"type"}},
 		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "req_scalar_list_not_a_list",
+		payload:       `{"reqScalarList": "https://a.test", "reqStr": "ok", "reqList": ["a"]}`,
+		want:          map[string][]string{"reqScalarList": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name: "opt_list_not_a_list",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "optList": "a", "optNums": 5,
+			"optBools": true, "names": "Ada", "ranks": 3, "whens": "2026-01-02T03:04:05Z"}`,
+		want: map[string][]string{
+			"optList":  {"type"},
+			"optNums":  {"type"},
+			"optBools": {"type"},
+			"names":    {"type"},
+			"ranks":    {"type"},
+			"whens":    {"type"},
+		},
+		decodeRejects: []string{"go", "python"},
+	},
+
+	// An enum holds a string (D14, amended): a value of another JSON type is
+	// "type", and a string outside the enum is "enum".
+	{
+		name:          "enum_wrong_type",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "shade": 1}`,
+		want:          map[string][]string{"shade": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "enum_bad_value",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "shade": "purple"}`,
+		want:          map[string][]string{"shade": {"enum"}},
+		decodeRejects: []string{"python"},
+	},
+
+	// An object field holds a JSON object: any other value is "type".
+	{
+		name:          "object_wrong_type",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "point": "dark"}`,
+		want:          map[string][]string{"point": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+
+	// Temporal.DateTime is a string scalar: its wire value is a string, and
+	// any other JSON type is "type". The generated TypeScript validator also
+	// takes a Date, the value its generated type holds.
+	{
+		name:    "date_time_valid",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "when": "2026-01-02T03:04:05Z", "whens": ["2026-01-02T03:04:05Z"]}`,
+		want:    map[string][]string{},
+	},
+	{
+		name:          "date_time_wrong_type",
+		payload:       `{"reqScalarList": ["https://a.test"], "reqStr": "ok", "reqList": ["a"], "when": 42, "whens": ["2026-01-02T03:04:05Z", {}]}`,
+		want:          map[string][]string{"when": {"type"}, "whens[1]": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+
+	// String lengths count Unicode code points: an astral character such as
+	// U+1F600 is one, not two UTF-16 units or four UTF-8 bytes, and a
+	// multi-byte BMP character such as U+00E9 is one, not two UTF-8 bytes.
+	// reqStr, optStr and optList allow 5, Identity.Name 2 to 80.
+	{
+		name: "lengths_count_code_points",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+			"optStr": "\u00e9\u00e9\u00e9\u00e9\u00e9", "reqList": ["\u00e9t\u00e9"], "optList": ["\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"],
+			"name": "\ud83d\ude00\ud83d\ude00", "names": ["` + strings.Repeat(`\ud83d\ude00`, 80) + `"]}`,
+		want: map[string][]string{},
+	},
+	{
+		name: "lengths_over_by_code_points",
+		payload: `{"reqScalarList": ["https://a.test"], "reqStr": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+			"optStr": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9", "reqList": ["a"], "optList": ["\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"],
+			"name": "\ud83d\ude00", "names": ["Ada", "` + strings.Repeat(`\u00e9`, 81) + `"]}`,
+		want: map[string][]string{
+			"reqStr":     {"maxLength"},
+			"optStr":     {"maxLength"},
+			"optList[0]": {"maxLength"},
+			"name":       {"minLength"},
+			"names[1]":   {"maxLength"},
+		},
 	},
 	{
 		name:          "req_list_wrong_type_element",
@@ -738,6 +848,37 @@ var vectors = []parityVector{
 		want:          map[string][]string{"pointList[1].shade": {"enum"}},
 		decodeRejects: []string{"python"},
 	},
+	{
+		// A list of every element kind given a value that is not a list is
+		// "type" at the field, required or optional.
+		name:     "list_not_a_list",
+		typeName: "ListMatrix",
+		payload:  listMatrix(`"reqShadeList": "dark", "pointList": {"shade": "dark"}, "flags": true, "payloads": {"a": 1}`),
+		want: map[string][]string{
+			"reqShadeList": {"type"},
+			"pointList":    {"type"},
+			"flags":        {"type"},
+			"payloads":     {"type"},
+		},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		// An enum element of another JSON type is "type", in a list, a list
+		// of lists and a nested object alike.
+		name:          "enum_element_wrong_type",
+		typeName:      "ListMatrix",
+		payload:       listMatrix(`"reqShadeList": ["dark", 1], "reqShadeGrid": [["light", false]], "pointList": [{"shade": 2}]`),
+		want:          map[string][]string{"reqShadeList[1]": {"type"}, "reqShadeGrid[0][1]": {"type"}, "pointList[0].shade": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		// An object element that is not an object is "type".
+		name:          "object_element_wrong_type",
+		typeName:      "ListMatrix",
+		payload:       listMatrix(`"pointList": [{"shade": "dark"}, "dark"], "pointGrid": [[5]]`),
+		want:          map[string][]string{"pointList[1]": {"type"}, "pointGrid[0][0]": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
 
 	// T[][] (D12).
 	{
@@ -765,8 +906,21 @@ var vectors = []parityVector{
 	{
 		name:          "grid_required_outer_not_a_list",
 		typeName:      "ListMatrix",
-		payload:       listMatrix(`"reqGrid": "a"`),
-		want:          map[string][]string{"reqGrid": {"required"}},
+		payload:       listMatrix(`"reqGrid": "a", "reqUrlGrid": "https://a.test", "reqShadeGrid": "dark"`),
+		want:          map[string][]string{"reqGrid": {"type"}, "reqUrlGrid": {"type"}, "reqShadeGrid": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:     "grid_optional_outer_not_a_list",
+		typeName: "ListMatrix",
+		payload:  listMatrix(`"optGrid": "a", "numGrid": 5, "pointGrid": {"shade": "dark"}, "boolGrid": false, "rankGrid": 1`),
+		want: map[string][]string{
+			"optGrid":   {"type"},
+			"numGrid":   {"type"},
+			"pointGrid": {"type"},
+			"boolGrid":  {"type"},
+			"rankGrid":  {"type"},
+		},
 		decodeRejects: []string{"go", "python"},
 	},
 	{
@@ -904,6 +1058,14 @@ var vectors = []parityVector{
 		want:          map[string][]string{"pointGrid[0][1].shade": {"enum"}},
 		decodeRejects: []string{"python"},
 	},
+	{
+		// Innermost string lengths count code points (D14, amended).
+		name:     "grid_lengths_count_code_points",
+		typeName: "ListMatrix",
+		payload: listMatrix(`"reqGrid": [["\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00", "\u00e9\u00e9\u00e9\u00e9\u00e9"],
+			["\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"]]`),
+		want: map[string][]string{"reqGrid[1][0]": {"maxLength"}},
+	},
 
 	// Generic.JSON: any JSON value but null. A value of every JSON type is
 	// valid in a required field, an optional one and a list element, and a
@@ -972,6 +1134,15 @@ var vectors = []parityVector{
 		payload:       `{"reqJson": 1, "jsonList": [1, null], "jsonGrid": [[null, 1]]}`,
 		want:          map[string][]string{"jsonList[1]": {"required"}, "jsonGrid[0][0]": {"required"}},
 		decodeRejects: []string{"go"},
+	},
+	{
+		// A list of Generic.JSON is still a list: an object or a string where
+		// the list belongs is "type".
+		name:          "json_list_not_a_list",
+		typeName:      "JsonMatrix",
+		payload:       `{"reqJson": 1, "jsonList": {"a": 1}, "jsonGrid": "x"}`,
+		want:          map[string][]string{"jsonList": {"type"}, "jsonGrid": {"type"}},
+		decodeRejects: []string{"go", "python"},
 	},
 
 	// Generic.StringMap and Embedding.Vector hold a JSON object and a JSON
@@ -1050,6 +1221,15 @@ var vectors = []parityVector{
 		payload:       `{"reqMap": {}, "reqVec": [], "mapList": [{}, null], "vecList": [null, [1]]}`,
 		want:          map[string][]string{"mapList[1]": {"required"}, "vecList[0]": {"required"}},
 		decodeRejects: []string{"go"},
+	},
+	{
+		// A list of JSON object or array scalars given one object, or one
+		// JSON text, is "type" at the field.
+		name:          "structured_list_not_a_list",
+		typeName:      "StructuredMatrix",
+		payload:       `{"reqMap": {}, "reqVec": [], "mapList": {"k": "v"}, "vecList": "[1]"}`,
+		want:          map[string][]string{"mapList": {"type"}, "vecList": {"type"}},
+		decodeRejects: []string{"go", "python"},
 	},
 }
 

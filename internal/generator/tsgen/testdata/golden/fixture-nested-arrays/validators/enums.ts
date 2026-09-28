@@ -24,6 +24,12 @@ export function validateShade(
     return [true, null];
   }
 
+  // A value of another JSON type is "type"; a string outside the enum is
+  // "enum".
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected a string" }]];
+  }
+
   if (!isValidShade(value)) {
     errors.push({ validator: "enum", message: `must be a valid Shade value` });
   }
@@ -44,9 +50,5 @@ export function validateShadeRequired(
     return [false, errors];
   }
 
-  if (!isValidShade(value)) {
-    errors.push({ validator: "enum", message: `must be a valid Shade value` });
-  }
-
-  return errors.length > 0 ? [false, errors] : [true, null];
+  return validateShade(value);
 }

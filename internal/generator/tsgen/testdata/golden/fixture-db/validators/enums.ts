@@ -24,6 +24,12 @@ export function validateTenantStatus(
     return [true, null];
   }
 
+  // A value of another JSON type is "type"; a string outside the enum is
+  // "enum".
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected a string" }]];
+  }
+
   if (!isValidTenantStatus(value)) {
     errors.push({ validator: "enum", message: `must be a valid TenantStatus value` });
   }
@@ -44,9 +50,5 @@ export function validateTenantStatusRequired(
     return [false, errors];
   }
 
-  if (!isValidTenantStatus(value)) {
-    errors.push({ validator: "enum", message: `must be a valid TenantStatus value` });
-  }
-
-  return errors.length > 0 ? [false, errors] : [true, null];
+  return validateTenantStatus(value);
 }

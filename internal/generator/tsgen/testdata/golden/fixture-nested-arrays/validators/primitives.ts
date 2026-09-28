@@ -27,6 +27,15 @@ export function expectBoolean(errors: ValidationErrors, path: string, value: unk
   }
 }
 
+// A list field (T[] or T[][]) must hold a list. expectList reports "type" at
+// path for a present value that is not one, required or optional, and leaves
+// null and undefined to the presence checks.
+export function expectList(errors: ValidationErrors, path: string, value: unknown): void {
+  if (value !== null && value !== undefined && !Array.isArray(value)) {
+    addFieldError(errors, path, "type", "expected an array");
+  }
+}
+
 // isFiniteNumber is true for a number that is neither NaN nor infinite: the
 // values a range rule (min, max) checks.
 export function isFiniteNumber(value: unknown): value is number {

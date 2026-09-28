@@ -4,6 +4,16 @@ use serde::{Deserialize, Serialize};
 use crate::scalars::*;
 use crate::enums::*;
 
+/// HistoryRecord wraps one captured historical value and its version metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryRecord<T> {
+    pub version: i64,
+    pub operation: String,
+    #[serde(rename = "recordedAt")]
+    pub recorded_at: superscalar::DateTime,
+    pub value: T,
+}
+
 fn default_cover_deleted_on_ref() -> bool {
     false
 }
@@ -26,6 +36,8 @@ pub struct Cover {
     /// True when the row deletes the entity on its ref.
     #[serde(default = "default_cover_deleted_on_ref", rename = "deletedOnRef")]
     pub deleted_on_ref: bool,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
 }
 
 impl Default for Cover {
@@ -37,6 +49,7 @@ impl Default for Cover {
             entity_key: None,
             r#ref: None,
             deleted_on_ref: default_cover_deleted_on_ref(),
+            version: Default::default(),
         }
     }
 }
@@ -66,6 +79,8 @@ pub struct Ingredient {
     /// True when the row deletes the entity on its ref.
     #[serde(default = "default_ingredient_deleted_on_ref", rename = "deletedOnRef")]
     pub deleted_on_ref: bool,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
 }
 
 fn default_note_deleted_on_ref() -> bool {
@@ -91,6 +106,8 @@ pub struct Note {
     /// True when the row deletes the entity on its ref.
     #[serde(default = "default_note_deleted_on_ref", rename = "deletedOnRef")]
     pub deleted_on_ref: bool,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
 }
 
 impl Default for Note {
@@ -103,6 +120,7 @@ impl Default for Note {
             entity_key: None,
             r#ref: None,
             deleted_on_ref: default_note_deleted_on_ref(),
+            version: Default::default(),
         }
     }
 }
@@ -190,6 +208,8 @@ pub struct RecipeRef {
     pub deleted_at: Option<TemporalDateTime>,
     #[serde(default, rename = "deletedBy", skip_serializing_if = "Option::is_none")]
     pub deleted_by: Option<IdentityUUID>,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
 }
 
 fn default_step_deleted_on_ref() -> bool {
@@ -218,4 +238,6 @@ pub struct Step {
     /// True when the row deletes the entity on its ref.
     #[serde(default = "default_step_deleted_on_ref", rename = "deletedOnRef")]
     pub deleted_on_ref: bool,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
 }

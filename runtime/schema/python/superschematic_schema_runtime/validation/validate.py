@@ -470,18 +470,8 @@ def _validate_single_field(
         _set_field_errors(errors, key, field_errors)
         return
 
-    if kind == "type":
-        nested = schema.types.get(field.type_ref.name)
-        if nested is not None and _is_object(value):
-            nested_errors = _validate_type_def(schema, nested, value, registry)
-            _add_nested_errors(errors, key, nested_errors)
-        return
-
-    if kind == "input":
-        nested = schema.inputs.get(field.type_ref.name)
-        if nested is not None and _is_object(value):
-            nested_errors = _validate_type_def(schema, nested, value, registry)
-            _add_nested_errors(errors, key, nested_errors)
+    if kind in ("type", "input"):
+        _validate_object_value(schema, field, kind, key, value, errors, registry)
         return
 
     # builtin
@@ -549,11 +539,32 @@ def _validate_array_element(
         _set_field_errors(errors, element_key, element_errors)
         return
     if kind in ("type", "input"):
-        defs = schema.types if kind == "type" else schema.inputs
-        nested = defs.get(field.type_ref.name)
-        if nested is not None and _is_object(element):
-            nested_errors = _validate_type_def(schema, nested, element, registry)
-            _add_nested_errors(errors, element_key, nested_errors)
+        _validate_object_value(schema, field, kind, element_key, element, errors, registry)
+
+
+def _validate_object_value(
+    schema: Schema,
+    field: FieldDef,
+    kind: str,
+    key: str,
+    value: Any,
+    errors: ValidationErrors,
+    registry: ScalarValidatorRegistry,
+) -> None:
+    """Validate a value of an object-typed field, or one list element, at ``key``.
+
+    An object's field errors nest under ``key``; any other JSON value is
+    "type".
+    """
+    if not _is_object(value):
+        append_field_error(
+            errors, key, ValidationError(validator="type", message="expected an object")
+        )
+        return
+    defs = schema.types if kind == "type" else schema.inputs
+    nested = defs.get(field.type_ref.name)
+    if nested is not None:
+        _add_nested_errors(errors, key, _validate_type_def(schema, nested, value, registry))
 
 
 def _validate_array_field(
@@ -609,47 +620,42 @@ def _validate_field(
     has_key = key in data
     value = data.get(key)
 
-    if field.required:
-        if not has_key or value is None:
-            append_field_error(
-                errors,
-                key,
-                ValidationError(validator="required", message=f"{field.name} is required."),
-            )
-            return
-        # A required list means present, not non-empty: [] is a value.
-        # Non-emptiness is declared with listMin.
-        if field.type_ref.is_array and not isinstance(value, list):
-            append_field_error(
-                errors,
-                key,
-                ValidationError(validator="required", message=f"{field.name} is required."),
-            )
-            return
-
     if not has_key or value is None:
+        if field.required:
+            append_field_error(
+                errors,
+                key,
+                ValidationError(validator="required", message=f"{field.name} is required."),
+            )
         return
 
     if field.type_ref.is_array:
-        if isinstance(value, list):
-            if field.validate_list_min is not None and len(value) < field.validate_list_min:
-                append_field_error(
-                    errors,
-                    key,
-                    ValidationError(
-                        validator="listMin",
-                        message=f"{field.name} must have at least {field.validate_list_min} items.",
-                    ),
-                )
-            if field.validate_list_max is not None and len(value) > field.validate_list_max:
-                append_field_error(
-                    errors,
-                    key,
-                    ValidationError(
-                        validator="listMax",
-                        message=f"{field.name} must have at most {field.validate_list_max} items.",
-                    ),
-                )
+        # A required list means present, not non-empty: [] is a value, and
+        # non-emptiness is declared with listMin. A present value that is not
+        # a list is of the wrong JSON type, required or optional.
+        if not isinstance(value, list):
+            append_field_error(
+                errors, key, ValidationError(validator="type", message="expected an array")
+            )
+            return
+        if field.validate_list_min is not None and len(value) < field.validate_list_min:
+            append_field_error(
+                errors,
+                key,
+                ValidationError(
+                    validator="listMin",
+                    message=f"{field.name} must have at least {field.validate_list_min} items.",
+                ),
+            )
+        if field.validate_list_max is not None and len(value) > field.validate_list_max:
+            append_field_error(
+                errors,
+                key,
+                ValidationError(
+                    validator="listMax",
+                    message=f"{field.name} must have at most {field.validate_list_max} items.",
+                ),
+            )
         _validate_array_field(schema, field, key, value, errors, registry)
         return
 

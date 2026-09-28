@@ -3,7 +3,7 @@
 A required list means present, not non-empty; listMin and listMax bound the
 outer list; a field's own constraints apply to every element and every
 innermost element; an element and an inner list are never null; a non-list
-inner value is a type error.
+value, as the list or an inner list, is a type error.
 """
 
 from __future__ import annotations
@@ -74,7 +74,14 @@ def test_required_list_is_present_not_non_empty(schema):
     assert _verdicts(validate_type(schema, "Rules", {"tags": [], "rows": []})) == {"tags": ["listMin"]}
     assert _verdicts(validate_type(schema, "Rules", _base())) == {}
     assert _verdicts(validate_type(schema, "Rules", {})) == {"tags": ["required"], "rows": ["required"]}
-    assert _verdicts(validate_type(schema, "Rules", {"tags": "a", "rows": []})) == {"tags": ["required"]}
+
+
+def test_a_value_that_is_not_a_list_is_a_type_error(schema):
+    # A present value of the wrong JSON type is "type", required or optional.
+    errors = validate_type(schema, "Rules", {"tags": "a", "rows": {}, "cells": "ab", "codes": 5})
+    assert {key: [(e.validator, e.message) for e in value] for key, value in errors.items()} == {
+        key: [("type", "expected an array")] for key in ("tags", "rows", "cells", "codes")
+    }
 
 
 def test_list_bounds_apply_to_the_outer_list(schema):

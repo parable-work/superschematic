@@ -59,25 +59,40 @@ export function validate{{.Scalar.Symbol}}(
   {{end}}
 
   {{if and (eq .Scalar.Primitive "string") (not .Scalar.HasJSONParse) (not .Scalar.IsAnyJSON) (not .Scalar.StructuredJSON)}}
-  {{if eq .Scalar.TSType "string"}}
   // A value of another JSON type is "type", and its length and format are
   // not checked.
-  if (typeof value !== "string") {
+  const candidate: unknown = value;
+  {{if eq .Scalar.TSType "JSDate"}}
+  // The wire value is a string. The generated type holds a Date, whose wire
+  // value is its ISO string; a Date that holds no time has none.
+  let s: string;
+  if (typeof candidate === "string") {
+    s = candidate;
+  } else if (candidate instanceof Date && !Number.isNaN(candidate.getTime())) {
+    s = candidate.toISOString();
+  } else {
+    return [false, [{ validator: "type", message: "expected a date-time string" }]];
+  }
+  {{else}}
+  if (typeof candidate !== "string") {
     return [false, [{ validator: "type", message: "expected string value" }]];
   }
-  const s = value;
-  {{else}}
-  const s = String(value);
+  const s = candidate;
+  {{end}}
+
+  {{if or .Scalar.MinLength .Scalar.MaxLength}}
+  // Lengths count code points, not UTF-16 units.
+  const length = [...s].length;
   {{end}}
 
   {{if .Scalar.MinLength}}
-  if (s.length < {{.Scalar.MinLength}}) {
+  if (length < {{.Scalar.MinLength}}) {
     errors.push({ validator: "minLength", message: "must be at least {{.Scalar.MinLength}} characters" });
   }
   {{end}}
 
   {{if .Scalar.MaxLength}}
-  if (s.length > {{.Scalar.MaxLength}}) {
+  if (length > {{.Scalar.MaxLength}}) {
     errors.push({ validator: "maxLength", message: "must be at most {{.Scalar.MaxLength}} characters" });
   }
   {{end}}

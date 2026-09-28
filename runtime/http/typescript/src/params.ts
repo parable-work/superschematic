@@ -208,9 +208,9 @@ function matchesScalarPattern(pattern: string, value: string): boolean {
 /** A scalar's lengths and pattern, then the argument's own constraints. */
 function checkString(location: ParamLocation, spec: ParamSpec, value: string, path?: string): string {
   const scalar = spec.scalar;
+  // Code points, not UTF-16 units, as every validator counts.
+  const length = [...value].length;
   if (scalar) {
-    // Code points, not UTF-16 units, as the schema runtimes count.
-    const length = [...value].length;
     if (scalar.minLength !== undefined && length < scalar.minLength) {
       refuseAt(location, spec, path, 'minLength', `must be at least ${scalar.minLength} characters`);
     }
@@ -221,10 +221,10 @@ function checkString(location: ParamLocation, spec: ParamSpec, value: string, pa
       refuseAt(location, spec, path, 'pattern', `is not a valid ${scalar.name}`);
     }
   }
-  if (spec.minLength !== undefined && value.length < spec.minLength) {
+  if (spec.minLength !== undefined && length < spec.minLength) {
     refuseAt(location, spec, path, 'minLength', `must be at least ${spec.minLength} characters`);
   }
-  if (spec.maxLength !== undefined && value.length > spec.maxLength) {
+  if (spec.maxLength !== undefined && length > spec.maxLength) {
     refuseAt(location, spec, path, 'maxLength', `must be at most ${spec.maxLength} characters`);
   }
   if (spec.pattern && !new RegExp(spec.pattern, 'u').test(value)) {

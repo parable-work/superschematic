@@ -18,7 +18,20 @@ export function validateTemporalDateTime(
     return [true, null];
   }
 
-  const s = String(value);
+  // A value of another JSON type is "type", and its length and format are
+  // not checked.
+  const candidate: unknown = value;
+
+  // The wire value is a string. The generated type holds a Date, whose wire
+  // value is its ISO string; a Date that holds no time has none.
+  let s: string;
+  if (typeof candidate === "string") {
+    s = candidate;
+  } else if (candidate instanceof Date && !Number.isNaN(candidate.getTime())) {
+    s = candidate.toISOString();
+  } else {
+    return [false, [{ validator: "type", message: "expected a date-time string" }]];
+  }
 
   return errors.length > 0 ? [false, errors] : [true, null];
 }

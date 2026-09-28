@@ -356,7 +356,10 @@ func (p *Parser) applyScalar(scalar *ir.ScalarDef, value any, strict bool) (any,
 	}
 }
 
-// applyBuiltin handles built-in GraphQL scalars (Int, Float, Boolean, String, ID).
+// applyBuiltin handles built-in GraphQL scalars (Int, Float, Boolean, String,
+// ID) and the IR's number and boolean. Lenient mode coerces a numeric or
+// boolean string for the IR names as it does for Float and Boolean; strict
+// mode passes their values through, and validation checks them.
 func (p *Parser) applyBuiltin(name string, value any, strict bool) (any, bool) {
 	switch name {
 	case "Int":
@@ -365,6 +368,16 @@ func (p *Parser) applyBuiltin(name string, value any, strict bool) (any, bool) {
 		return coerceFloat(value, strict)
 	case "Boolean":
 		return coerceBool(value, strict)
+	case "number":
+		if strict {
+			return value, true
+		}
+		return coerceFloat(value, false)
+	case "boolean":
+		if strict {
+			return value, true
+		}
+		return coerceBool(value, false)
 	case "String", "ID":
 		s, ok := value.(string)
 		if !ok {

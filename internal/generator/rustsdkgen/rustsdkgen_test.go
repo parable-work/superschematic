@@ -286,8 +286,8 @@ func TestArrayQueryParamsValidateEachItem(t *testing.T) {
 		"for query_param_item in query_param_value.iter() {":           4,
 		"let query_param_item_text = query_param_item.to_string();":    4,
 		"if !query_param_pattern.is_match(&query_param_item_text) {":   2,
-		"if query_param_item_text.len() < 2 {":                         2,
-		"if query_param_item_text.len() > 3 {":                         2,
+		"if query_param_item_text.chars().count() < 2 {":               2,
+		"if query_param_item_text.chars().count() > 3 {":               2,
 		"if query_param_value.len() < 1 {":                             2,
 		"if query_param_value.len() > 2 {":                             2,
 		"let query_param_item_number = query_param_item_text":          2,
@@ -302,7 +302,7 @@ func TestArrayQueryParamsValidateEachItem(t *testing.T) {
 	}
 	for _, unwanted := range []string{
 		"query_param_pattern.is_match(&query_param_text)",
-		"query_param_text.len()",
+		"query_param_text.chars().count()",
 		"query_param_text.split(',')",
 		"let query_param_number = query_param_text",
 	} {

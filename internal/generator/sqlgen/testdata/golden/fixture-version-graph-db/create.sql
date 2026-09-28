@@ -318,25 +318,41 @@ CREATE UNIQUE INDEX uq_step_entity_ref ON step USING BTREE (entity_key, ref_id);
 
 CREATE OR REPLACE FUNCTION cover_capture_history() RETURNS trigger AS $$
 BEGIN
+  IF (TG_WHEN = 'BEFORE') THEN
+    -- BEFORE UPDATE: the stored row takes the next version.
+    NEW._version := OLD._version + 1;
+    RETURN NEW;
+  END IF;
   IF (TG_OP = 'DELETE') THEN
     -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
     -- the unique history index holds and the latest history row for a deleted key
-    -- is the DELETE. The data payload is the pre-delete image.
+    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
+    -- version.
     INSERT INTO cover_history (id, _version, operation, data)
-    VALUES (OLD.id, OLD._version + 1, 'DELETE', to_jsonb(OLD));
+    VALUES (
+      OLD.id,
+      OLD._version + 1,
+      'DELETE',
+      to_jsonb(OLD) || jsonb_build_object(
+        '_version', OLD._version + 1
+      )
+    );
     RETURN OLD;
   END IF;
-  IF (TG_OP = 'UPDATE') THEN
-    NEW._version := OLD._version + 1;
-  END IF;
+  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
+  -- CONFLICT DO UPDATE records the one UPDATE it made.
   INSERT INTO cover_history (id, _version, operation, data)
   VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE TRIGGER trg_cover_bump_version
+  BEFORE UPDATE ON cover
+  FOR EACH ROW EXECUTE FUNCTION cover_capture_history();
+
 CREATE TRIGGER trg_cover_capture_history_write
-  BEFORE INSERT OR UPDATE ON cover
+  AFTER INSERT OR UPDATE ON cover
   FOR EACH ROW EXECUTE FUNCTION cover_capture_history();
 
 CREATE TRIGGER trg_cover_capture_history_delete
@@ -345,25 +361,41 @@ CREATE TRIGGER trg_cover_capture_history_delete
 
 CREATE OR REPLACE FUNCTION ingredient_capture_history() RETURNS trigger AS $$
 BEGIN
+  IF (TG_WHEN = 'BEFORE') THEN
+    -- BEFORE UPDATE: the stored row takes the next version.
+    NEW._version := OLD._version + 1;
+    RETURN NEW;
+  END IF;
   IF (TG_OP = 'DELETE') THEN
     -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
     -- the unique history index holds and the latest history row for a deleted key
-    -- is the DELETE. The data payload is the pre-delete image.
+    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
+    -- version.
     INSERT INTO ingredient_history (id, _version, operation, data)
-    VALUES (OLD.id, OLD._version + 1, 'DELETE', to_jsonb(OLD));
+    VALUES (
+      OLD.id,
+      OLD._version + 1,
+      'DELETE',
+      to_jsonb(OLD) || jsonb_build_object(
+        '_version', OLD._version + 1
+      )
+    );
     RETURN OLD;
   END IF;
-  IF (TG_OP = 'UPDATE') THEN
-    NEW._version := OLD._version + 1;
-  END IF;
+  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
+  -- CONFLICT DO UPDATE records the one UPDATE it made.
   INSERT INTO ingredient_history (id, _version, operation, data)
   VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE TRIGGER trg_ingredient_bump_version
+  BEFORE UPDATE ON ingredient
+  FOR EACH ROW EXECUTE FUNCTION ingredient_capture_history();
+
 CREATE TRIGGER trg_ingredient_capture_history_write
-  BEFORE INSERT OR UPDATE ON ingredient
+  AFTER INSERT OR UPDATE ON ingredient
   FOR EACH ROW EXECUTE FUNCTION ingredient_capture_history();
 
 CREATE TRIGGER trg_ingredient_capture_history_delete
@@ -409,25 +441,41 @@ $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION note_capture_history() RETURNS trigger AS $$
 BEGIN
+  IF (TG_WHEN = 'BEFORE') THEN
+    -- BEFORE UPDATE: the stored row takes the next version.
+    NEW._version := OLD._version + 1;
+    RETURN NEW;
+  END IF;
   IF (TG_OP = 'DELETE') THEN
     -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
     -- the unique history index holds and the latest history row for a deleted key
-    -- is the DELETE. The data payload is the pre-delete image.
+    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
+    -- version.
     INSERT INTO note_history (id, _version, operation, data)
-    VALUES (OLD.id, OLD._version + 1, 'DELETE', to_jsonb(OLD));
+    VALUES (
+      OLD.id,
+      OLD._version + 1,
+      'DELETE',
+      to_jsonb(OLD) || jsonb_build_object(
+        '_version', OLD._version + 1
+      )
+    );
     RETURN OLD;
   END IF;
-  IF (TG_OP = 'UPDATE') THEN
-    NEW._version := OLD._version + 1;
-  END IF;
+  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
+  -- CONFLICT DO UPDATE records the one UPDATE it made.
   INSERT INTO note_history (id, _version, operation, data)
   VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE TRIGGER trg_note_bump_version
+  BEFORE UPDATE ON note
+  FOR EACH ROW EXECUTE FUNCTION note_capture_history();
+
 CREATE TRIGGER trg_note_capture_history_write
-  BEFORE INSERT OR UPDATE ON note
+  AFTER INSERT OR UPDATE ON note
   FOR EACH ROW EXECUTE FUNCTION note_capture_history();
 
 CREATE TRIGGER trg_note_capture_history_delete
@@ -436,25 +484,46 @@ CREATE TRIGGER trg_note_capture_history_delete
 
 CREATE OR REPLACE FUNCTION recipe_ref_capture_history() RETURNS trigger AS $$
 BEGIN
+  IF (TG_WHEN = 'BEFORE') THEN
+    -- BEFORE UPDATE: the stored row takes the next version.
+    NEW._version := OLD._version + 1;
+    RETURN NEW;
+  END IF;
   IF (TG_OP = 'DELETE') THEN
     -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
     -- the unique history index holds and the latest history row for a deleted key
-    -- is the DELETE. The data payload is the pre-delete image.
+    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
+    -- version. Its deleted_by is the actor a hard delete set in
+    -- superschematic.history_actor_id for the statement, else the row's own value.
     INSERT INTO recipe_ref_history (id, _version, operation, data)
-    VALUES (OLD.id, OLD._version + 1, 'DELETE', to_jsonb(OLD));
+    VALUES (
+      OLD.id,
+      OLD._version + 1,
+      'DELETE',
+      to_jsonb(OLD) || jsonb_build_object(
+        '_version', OLD._version + 1,
+        'deleted_by', COALESCE(
+          NULLIF(current_setting('superschematic.history_actor_id', true), '')::UUID,
+          OLD.deleted_by
+        )
+      )
+    );
     RETURN OLD;
   END IF;
-  IF (TG_OP = 'UPDATE') THEN
-    NEW._version := OLD._version + 1;
-  END IF;
+  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
+  -- CONFLICT DO UPDATE records the one UPDATE it made.
   INSERT INTO recipe_ref_history (id, _version, operation, data)
   VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE TRIGGER trg_recipe_ref_bump_version
+  BEFORE UPDATE ON recipe_ref
+  FOR EACH ROW EXECUTE FUNCTION recipe_ref_capture_history();
+
 CREATE TRIGGER trg_recipe_ref_capture_history_write
-  BEFORE INSERT OR UPDATE ON recipe_ref
+  AFTER INSERT OR UPDATE ON recipe_ref
   FOR EACH ROW EXECUTE FUNCTION recipe_ref_capture_history();
 
 CREATE TRIGGER trg_recipe_ref_capture_history_delete
@@ -463,25 +532,41 @@ CREATE TRIGGER trg_recipe_ref_capture_history_delete
 
 CREATE OR REPLACE FUNCTION step_capture_history() RETURNS trigger AS $$
 BEGIN
+  IF (TG_WHEN = 'BEFORE') THEN
+    -- BEFORE UPDATE: the stored row takes the next version.
+    NEW._version := OLD._version + 1;
+    RETURN NEW;
+  END IF;
   IF (TG_OP = 'DELETE') THEN
     -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
     -- the unique history index holds and the latest history row for a deleted key
-    -- is the DELETE. The data payload is the pre-delete image.
+    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
+    -- version.
     INSERT INTO step_history (id, _version, operation, data)
-    VALUES (OLD.id, OLD._version + 1, 'DELETE', to_jsonb(OLD));
+    VALUES (
+      OLD.id,
+      OLD._version + 1,
+      'DELETE',
+      to_jsonb(OLD) || jsonb_build_object(
+        '_version', OLD._version + 1
+      )
+    );
     RETURN OLD;
   END IF;
-  IF (TG_OP = 'UPDATE') THEN
-    NEW._version := OLD._version + 1;
-  END IF;
+  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
+  -- CONFLICT DO UPDATE records the one UPDATE it made.
   INSERT INTO step_history (id, _version, operation, data)
   VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE TRIGGER trg_step_bump_version
+  BEFORE UPDATE ON step
+  FOR EACH ROW EXECUTE FUNCTION step_capture_history();
+
 CREATE TRIGGER trg_step_capture_history_write
-  BEFORE INSERT OR UPDATE ON step
+  AFTER INSERT OR UPDATE ON step
   FOR EACH ROW EXECUTE FUNCTION step_capture_history();
 
 CREATE TRIGGER trg_step_capture_history_delete

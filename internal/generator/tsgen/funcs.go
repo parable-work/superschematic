@@ -121,6 +121,7 @@ const (
 	expectStringHelper  = "expectString"
 	expectNumberHelper  = "expectNumber"
 	expectBooleanHelper = "expectBoolean"
+	expectListHelper    = "expectList"
 	finiteNumberHelper  = "isFiniteNumber"
 )
 
@@ -163,13 +164,16 @@ func ruleApplies(field FieldInfo, validator string) bool {
 }
 
 // typePrimitiveHelpers returns the validators/primitives.ts helpers a
-// type's validator calls, sorted: a type check per builtin primitive field
-// and isFiniteNumber for a range rule.
+// type's validator calls, sorted: a type check per builtin primitive field,
+// expectList for a list field and isFiniteNumber for a range rule.
 func typePrimitiveHelpers(t *TypeInfo) []string {
 	used := map[string]bool{}
 	for _, f := range t.Fields {
 		if check := primitiveCheck(f); check != "" {
 			used[check] = true
+		}
+		if f.IsArray && !f.IsMap {
+			used[expectListHelper] = true
 		}
 		if f.IsScalar {
 			continue

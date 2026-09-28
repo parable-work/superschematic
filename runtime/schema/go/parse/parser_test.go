@@ -276,6 +276,40 @@ func TestParseType_LenientCoercesStringInt(t *testing.T) {
 	assert.Equal(t, int64(42), out["amount"])
 }
 
+// The IR's number and boolean builtins coerce in lenient mode as Float and
+// Boolean do, in a single field and a list element; strict mode passes the
+// value through for validation to check (D14, amended).
+func TestParseType_LenientCoercesIRBuiltins(t *testing.T) {
+	s := ir.NewSchema("parse-test", ir.SchemaKindGeneral)
+	s.Types["Settings"] = &ir.TypeDef{
+		Name: "Settings",
+		Kind: ir.TypeKindObject,
+		Fields: []*ir.FieldDef{
+			{Name: "ratio", TypeRef: ir.TypeRef{Name: "number"}},
+			{Name: "enabled", TypeRef: ir.TypeRef{Name: "boolean"}},
+			{Name: "weights", TypeRef: ir.TypeRef{Name: "number", IsArray: true}},
+			{Name: "flags", TypeRef: ir.TypeRef{Name: "boolean", IsArray: true, IsArrayOfArrays: true}},
+		},
+	}
+	raw := map[string]any{"ratio": " 5 ", "enabled": "TRUE", "weights": []any{"1.5", 2.0}, "flags": []any{[]any{"false"}}}
+
+	out, errs := New(s).ParseType("Settings", raw)
+	require.False(t, errs.HasErrors(), "errs=%v", errs)
+	assert.Equal(t, 5.0, out["ratio"])
+	assert.Equal(t, true, out["enabled"])
+	assert.Equal(t, []any{1.5, 2.0}, out["weights"])
+	assert.Equal(t, []any{[]any{false}}, out["flags"])
+
+	_, errs = New(s).ParseType("Settings", map[string]any{"ratio": "far", "enabled": "yes"})
+	assert.Equal(t, "type", errs.GetFieldErrors("ratio")[0].Validator)
+	assert.Equal(t, "type", errs.GetFieldErrors("enabled")[0].Validator)
+
+	out, errs = New(s).ParseTypeStrict("Settings", raw)
+	require.False(t, errs.HasErrors(), "errs=%v", errs)
+	assert.Equal(t, " 5 ", out["ratio"])
+	assert.Equal(t, "TRUE", out["enabled"])
+}
+
 func TestParseInput(t *testing.T) {
 	p := newTestParser(t)
 	raw := map[string]any{

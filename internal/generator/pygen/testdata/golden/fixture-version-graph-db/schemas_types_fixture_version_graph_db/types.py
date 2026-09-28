@@ -9,10 +9,11 @@ validation, serialization, and type safety.
 
 from __future__ import annotations
 
-from typing import Optional, List, Any, Dict, TYPE_CHECKING
+from typing import Optional, List, Any, Dict, TYPE_CHECKING, Annotated, Generic, TypeVar
+from datetime import datetime
 import json
 import re
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError as PydanticValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError as PydanticValidationError, BeforeValidator
 
 from .scalars import (
     GenericInt64,
@@ -46,6 +47,64 @@ def _safe_load_yaml(input_data: str | bytes) -> Dict[str, Any]:
         raise ValueError("YAML content must decode to an object")
     return parsed_data
 
+_HistoryValue = TypeVar("_HistoryValue")
+
+def _parse_recorded_at(v: Any) -> Any:
+    """Parse the RFC 3339 text Go writes for a time.Time."""
+    if isinstance(v, str):
+        try:
+            return datetime.fromisoformat(v)
+        except ValueError:
+            raise ValueError(f"invalid datetime format: {v}")
+    return v
+
+class HistoryRecord(BaseModel, Generic[_HistoryValue]):
+    """
+    HistoryRecord wraps one captured historical value and its version metadata.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        populate_by_name=True,
+    )
+
+    version: int = Field(..., alias="version", serialization_alias="version")
+    operation: str = Field(..., alias="operation", serialization_alias="operation")
+    recorded_at: Annotated[datetime, BeforeValidator(_parse_recorded_at)] = Field(..., alias="recordedAt", serialization_alias="recordedAt")
+    value: _HistoryValue = Field(..., alias="value", serialization_alias="value")
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the record to a JSON-serializable dictionary keyed by wire
+        names, the value's fields included.
+        """
+        return self.model_dump(mode='json', by_alias=True, exclude_none=False)
+
+    def to_json(self) -> str:
+        """
+        Convert the record to JSON keyed by wire names, the shape Go writes.
+        """
+        return self.model_dump_json(by_alias=True, exclude_none=False)
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "HistoryRecord[_HistoryValue]":
+        """
+        Parse a record from a dictionary using strict validation. Parametrize
+        the class with the table type first: HistoryRecord[Table].from_dict.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "HistoryRecord[_HistoryValue]":
+        """
+        Parse a record from JSON text/bytes using strict validation.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict(parsed_data)
+
 class Cover(BaseModel):
     """
     The recipe's cover photo: at most one per ref.
@@ -73,6 +132,8 @@ class Cover(BaseModel):
 
     # True when the row deletes the entity on its ref.
     deleted_on_ref: bool = Field(default=False, alias="deletedOnRef", serialization_alias="deletedOnRef")
+
+    version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
     def validate_all(self) -> ValidationErrors:
         """
@@ -133,6 +194,10 @@ class Cover(BaseModel):
         # Validate deletedOnRef
         if self.deleted_on_ref is None:
             errors.add_field_error("deleted_on_ref", "required", "required field")
+
+        # Validate _version
+        if self.version_ is None:
+            errors.add_field_error("_version", "required", "required field")
 
         return errors
 
@@ -290,6 +355,8 @@ class Ingredient(BaseModel):
     # True when the row deletes the entity on its ref.
     deleted_on_ref: bool = Field(default=False, alias="deletedOnRef", serialization_alias="deletedOnRef")
 
+    version_: int = Field(default=0, alias="_version", serialization_alias="_version")
+
     def validate_all(self) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
@@ -367,6 +434,10 @@ class Ingredient(BaseModel):
         # Validate deletedOnRef
         if self.deleted_on_ref is None:
             errors.add_field_error("deleted_on_ref", "required", "required field")
+
+        # Validate _version
+        if self.version_ is None:
+            errors.add_field_error("_version", "required", "required field")
 
         return errors
 
@@ -522,6 +593,8 @@ class Note(BaseModel):
     # True when the row deletes the entity on its ref.
     deleted_on_ref: bool = Field(default=False, alias="deletedOnRef", serialization_alias="deletedOnRef")
 
+    version_: int = Field(default=0, alias="_version", serialization_alias="_version")
+
     def validate_all(self) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
@@ -595,6 +668,10 @@ class Note(BaseModel):
         # Validate deletedOnRef
         if self.deleted_on_ref is None:
             errors.add_field_error("deleted_on_ref", "required", "required field")
+
+        # Validate _version
+        if self.version_ is None:
+            errors.add_field_error("_version", "required", "required field")
 
         return errors
 
@@ -1409,6 +1486,8 @@ class RecipeRef(BaseModel):
 
     deleted_by: Optional[IdentityUUID] = Field(default=None, alias="deletedBy", serialization_alias="deletedBy")
 
+    version_: int = Field(default=0, alias="_version", serialization_alias="_version")
+
     def validate_all(self) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
@@ -1516,6 +1595,10 @@ class RecipeRef(BaseModel):
                     TypeAdapter(IdentityUUID).validate_python(self.deleted_by)
                 except PydanticValidationError as e:
                     errors.add_field_error("deleted_by", "invalid", str(e))
+
+        # Validate _version
+        if self.version_ is None:
+            errors.add_field_error("_version", "required", "required field")
 
         return errors
 
@@ -1677,6 +1760,8 @@ class Step(BaseModel):
     # True when the row deletes the entity on its ref.
     deleted_on_ref: bool = Field(default=False, alias="deletedOnRef", serialization_alias="deletedOnRef")
 
+    version_: int = Field(default=0, alias="_version", serialization_alias="_version")
+
     def validate_all(self) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
@@ -1763,6 +1848,10 @@ class Step(BaseModel):
         # Validate deletedOnRef
         if self.deleted_on_ref is None:
             errors.add_field_error("deleted_on_ref", "required", "required field")
+
+        # Validate _version
+        if self.version_ is None:
+            errors.add_field_error("_version", "required", "required field")
 
         return errors
 

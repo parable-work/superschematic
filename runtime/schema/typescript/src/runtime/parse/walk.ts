@@ -378,6 +378,12 @@ function parseStructuredJSON(
   }
 }
 
+/**
+ * The GraphQL builtins (Int, Float, Boolean, String, ID) and the IR's number
+ * and boolean. Lenient mode coerces a numeric or boolean string for the IR
+ * names as it does for Float and Boolean; strict mode passes their values
+ * through, and validation checks them.
+ */
 function applyBuiltin(name: string, value: unknown, strict: boolean): [unknown, boolean] {
   switch (name) {
     case 'Int':
@@ -386,6 +392,10 @@ function applyBuiltin(name: string, value: unknown, strict: boolean): [unknown, 
       return coerceFloat(value, strict);
     case 'Boolean':
       return coerceBool(value, strict);
+    case 'number':
+      return strict ? [value, true] : coerceFloat(value, false);
+    case 'boolean':
+      return strict ? [value, true] : coerceBool(value, false);
     case 'String':
     case 'ID':
       return typeof value === 'string' ? [value, true] : [value, false];

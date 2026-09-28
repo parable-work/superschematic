@@ -237,12 +237,12 @@ impl {{.Namespace.StructName}} {
         }
 {{- end}}
 {{- if .ValidateMinLength}}
-        if scalar_arg_text.len() < {{.ValidateMinLength}} {
+        if scalar_arg_text.chars().count() < {{.ValidateMinLength}} {
             return Err(SDKError::config("{{.Name}} must be at least {{.ValidateMinLength}} characters"));
         }
 {{- end}}
 {{- if .ValidateMaxLength}}
-        if scalar_arg_text.len() > {{.ValidateMaxLength}} {
+        if scalar_arg_text.chars().count() > {{.ValidateMaxLength}} {
             return Err(SDKError::config("{{.Name}} must be at most {{.ValidateMaxLength}} characters"));
         }
 {{- end}}
@@ -507,12 +507,12 @@ so an array is checked item by item and counted as a list. */}}
                 }
 {{- end}}
 {{- if .ValidateMinLength}}
-                if query_param_item_text.len() < {{.ValidateMinLength}} {
+                if query_param_item_text.chars().count() < {{.ValidateMinLength}} {
                     return Err(SDKError::config("each {{.Name}} item must be at least {{.ValidateMinLength}} characters"));
                 }
 {{- end}}
 {{- if .ValidateMaxLength}}
-                if query_param_item_text.len() > {{.ValidateMaxLength}} {
+                if query_param_item_text.chars().count() > {{.ValidateMaxLength}} {
                     return Err(SDKError::config("each {{.Name}} item must be at most {{.ValidateMaxLength}} characters"));
                 }
 {{- end}}
@@ -556,12 +556,12 @@ so an array is checked item by item and counted as a list. */}}
             }
 {{- end}}
 {{- if .ValidateMinLength}}
-            if query_param_text.len() < {{.ValidateMinLength}} {
+            if query_param_text.chars().count() < {{.ValidateMinLength}} {
                 return Err(SDKError::config("{{.Name}} must be at least {{.ValidateMinLength}} characters"));
             }
 {{- end}}
 {{- if .ValidateMaxLength}}
-            if query_param_text.len() > {{.ValidateMaxLength}} {
+            if query_param_text.chars().count() > {{.ValidateMaxLength}} {
                 return Err(SDKError::config("{{.Name}} must be at most {{.ValidateMaxLength}} characters"));
             }
 {{- end}}

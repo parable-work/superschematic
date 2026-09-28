@@ -396,6 +396,26 @@ func TestValueRulesInOrderOneErrorEach(t *testing.T) {
 	}
 }
 
+// TestLengthsCountCodePoints: an astral character (four UTF-8 bytes) and a
+// multi-byte BMP character (two) are one each, as every validator counts.
+func TestLengthsCountCodePoints(t *testing.T) {
+	name := NewArg("name", String, MinLength(2), MaxLength(5))
+	for _, tc := range []struct {
+		body string
+		want map[string]string
+	}{
+		{`{"name": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"}`, map[string]string{}},
+		{`{"name": "\u00e9\u00e9\u00e9\u00e9\u00e9"}`, map[string]string{}},
+		{`{"name": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"}`, map[string]string{"name": "maxLength: must be at most 5 characters"}},
+		{`{"name": "\ud83d\ude00"}`, map[string]string{"name": "minLength: must be at least 2 characters"}},
+	} {
+		got := errorsOf(t, tc.body, func(errs validate.ValidationErrors, b Body) { Value[string](errs, b, name) })
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: errors = %v, want %v", tc.body, got, tc.want)
+		}
+	}
+}
+
 func TestAPatternGoCannotCompileAcceptsNoValue(t *testing.T) {
 	arg := NewArg("v", String, Pattern(`(?=a)`))
 	got := errorsOf(t, `{"v": "a"}`, func(errs validate.ValidationErrors, b Body) { Value[string](errs, b, arg) })

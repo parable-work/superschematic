@@ -588,6 +588,9 @@
           "$ref": "#/definitions/string",
           "x-validateMaxLength": 5
         },
+        "point": {
+          "$ref": "#/definitions/ParityPoint"
+        },
         "rank": {
           "$ref": "#/definitions/scalars/Ordering_Rank"
         },
@@ -616,11 +619,23 @@
           "$ref": "#/definitions/string",
           "x-validateMaxLength": 5
         },
+        "shade": {
+          "$ref": "#/definitions/ParityShade"
+        },
         "share": {
           "$ref": "#/definitions/scalars/Generic_Probability"
         },
         "url": {
           "$ref": "#/definitions/scalars/Network_Url"
+        },
+        "when": {
+          "$ref": "#/definitions/scalars/Temporal_DateTime"
+        },
+        "whens": {
+          "items": {
+            "$ref": "#/definitions/scalars/Temporal_DateTime"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -722,13 +737,15 @@
     "Temporal_DateTime": {
       "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
       "type": "string",
-      "x-example": "2025-01-01T12:00:00Z",
       "x-hasCustomParse": true,
       "x-scalar": "Temporal_DateTime",
       "x-typeMapping": {
         "go": "TemporalDateTime",
         "json_schema": "string",
-        "sql": "TIMESTAMPTZ"
+        "python": "datetime.datetime",
+        "rust": "chrono::DateTime<chrono::Utc>",
+        "sql": "TIMESTAMPTZ",
+        "typescript": "JSDate"
       }
     },
     "Temporal_Days": {

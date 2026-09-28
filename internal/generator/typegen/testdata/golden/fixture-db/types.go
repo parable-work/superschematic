@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // HistoryRecord wraps one captured historical value and its version metadata.
@@ -380,10 +381,10 @@ func validateIdentityNameValue(value IdentityName, required bool) (bool, []Valid
 		return false, coreErrs
 	}
 	var ruleErrs []ValidationError
-	if len(string(value)) > 80 {
+	if utf8.RuneCountInString(string(value)) > 80 {
 		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 80 characters"})
 	}
-	if len(string(value)) < 2 {
+	if utf8.RuneCountInString(string(value)) < 2 {
 		ruleErrs = append(ruleErrs, ValidationError{Validator: "minLength", Message: "must be at least 2 characters"})
 	}
 	if len(ruleErrs) > 0 {
@@ -407,10 +408,10 @@ func validateIdentitySlugValue(value IdentitySlug, required bool) (bool, []Valid
 		return false, coreErrs
 	}
 	var ruleErrs []ValidationError
-	if len(string(value)) > 255 {
+	if utf8.RuneCountInString(string(value)) > 255 {
 		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 255 characters"})
 	}
-	if len(string(value)) < 1 {
+	if utf8.RuneCountInString(string(value)) < 1 {
 		ruleErrs = append(ruleErrs, ValidationError{Validator: "minLength", Message: "must be at least 1 characters"})
 	}
 	if matched, err := regexp.MatchString("^[a-z0-9]+(?:[-_][a-z0-9]+)*$", string(value)); err != nil || !matched {

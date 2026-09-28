@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/runtime/schema/go/internal/jsonshape"
@@ -215,14 +216,16 @@ func (v *Validator) validateStringConstraints(scalar *ir.ScalarDef, value any) [
 
 	var errs []ValidationError
 
-	if scalar.MinLength > 0 && len(s) < scalar.MinLength {
+	// Lengths count code points, as every validator does.
+	length := utf8.RuneCountInString(s)
+	if scalar.MinLength > 0 && length < scalar.MinLength {
 		errs = append(errs, ValidationError{
 			Validator: "minLength",
 			Message:   fmt.Sprintf("must be at least %d characters", scalar.MinLength),
 		})
 	}
 
-	if scalar.MaxLength > 0 && len(s) > scalar.MaxLength {
+	if scalar.MaxLength > 0 && length > scalar.MaxLength {
 		errs = append(errs, ValidationError{
 			Validator: "maxLength",
 			Message:   fmt.Sprintf("must be at most %d characters", scalar.MaxLength),
