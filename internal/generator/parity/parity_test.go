@@ -106,8 +106,9 @@ const schemaConfigJSON = `{
 // element; an inner list is never null ("required" at field[i]) and any
 // other non-list inner value is "type" at field[i]; a list element is never
 // null ("required" at field[i] or field[i][j]). Its enum, scalar, object
-// and builtin element types cover the element checks at both depths; flags
-// and payloads add boolean and Generic.JSON elements to T[].
+// and builtin element types cover the element checks at both depths; flags,
+// payloads and reqPayloads add boolean and Generic.JSON elements to T[], in
+// an optional and a required list.
 //
 // JsonMatrix holds Generic.JSON, whose value is any JSON value but null: an
 // object, an array, a string (JSON text or not), a number or a boolean, with
@@ -346,6 +347,11 @@ const parityMatrixSchemaJSON = `{
         {
           "name": "payloads",
           "typeRef": { "name": "Generic.JSON", "isArray": true }
+        },
+        {
+          "name": "reqPayloads",
+          "typeRef": { "name": "Generic.JSON", "isArray": true },
+          "required": true
         }
       ]
     },
@@ -446,7 +452,7 @@ func listMatrix(fields string) string {
 	if err := json.Unmarshal([]byte("{"+fields+"}"), &payload); err != nil {
 		panic(fmt.Sprintf("listMatrix(%q): %v", fields, err))
 	}
-	for _, required := range []string{"reqGrid", "reqUrlGrid", "reqShadeGrid", "reqShadeList"} {
+	for _, required := range []string{"reqGrid", "reqUrlGrid", "reqShadeGrid", "reqShadeList", "reqPayloads"} {
 		if _, ok := payload[required]; !ok {
 			payload[required] = json.RawMessage(`[]`)
 		}
@@ -826,6 +832,16 @@ var vectors = []parityVector{
 		decodeRejects: []string{"go"},
 	},
 	{
+		// A Generic.JSON element is never null in a required list either:
+		// requiredness decides only whether the list may be missing (D12,
+		// amended). A null inside an element is part of its value.
+		name:          "required_json_list_null_element",
+		typeName:      "ListMatrix",
+		payload:       listMatrix(`"reqPayloads": [{"a": null}, null]`),
+		want:          map[string][]string{"reqPayloads[1]": {"required"}},
+		decodeRejects: []string{"go"},
+	},
+	{
 		// A null object element is "required", not an object whose own
 		// required fields are missing.
 		name:          "list_null_object_element",
@@ -900,7 +916,7 @@ var vectors = []parityVector{
 	{
 		name:     "grid_required_outer_absent",
 		typeName: "ListMatrix",
-		payload:  `{"reqUrlGrid": [], "reqShadeGrid": [], "reqShadeList": []}`,
+		payload:  `{"reqUrlGrid": [], "reqShadeGrid": [], "reqShadeList": [], "reqPayloads": []}`,
 		want:     map[string][]string{"reqGrid": {"required"}},
 	},
 	{
