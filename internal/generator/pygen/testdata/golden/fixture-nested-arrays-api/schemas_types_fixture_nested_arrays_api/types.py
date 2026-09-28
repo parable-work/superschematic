@@ -65,9 +65,14 @@ class GridView(BaseModel):
 
     weights: Optional[List[List[float]]] = Field(default=None, alias="weights", serialization_alias="weights")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -292,9 +297,14 @@ class Point(BaseModel):
 
     y: float = Field(..., alias="y", serialization_alias="y")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -457,9 +467,14 @@ class SaveGridInput(BaseModel):
     # Weight vectors in batches; absent when the grid is unweighted.
     weights: Optional[List[List[float]]] = Field(default=None, alias="weights", serialization_alias="weights")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.

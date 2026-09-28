@@ -63,9 +63,14 @@ class FixtureConfig(BaseModel):
 
     environment: FixtureEnvironment = Field(default="development", alias="ENVIRONMENT", serialization_alias="ENVIRONMENT")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -94,6 +99,14 @@ class FixtureConfig(BaseModel):
         # Validate ENVIRONMENT
         if self.environment is None:
             errors.add_field_error("environment", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "database_url": "DATABASE_URL",
+                "jwt_secret": "JWT_SECRET",
+                "port": "PORT",
+                "environment": "ENVIRONMENT",
+            })
 
         return errors
 
@@ -237,9 +250,14 @@ class FixtureFilter(BaseModel):
 
     values: Optional[List[str]] = Field(default=None, alias="values", serialization_alias="values")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -417,9 +435,14 @@ class RetryPolicy(BaseModel):
 
     backoff_seconds: Optional[float] = Field(default=None, alias="backoffSeconds", serialization_alias="backoffSeconds")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -437,6 +460,12 @@ class RetryPolicy(BaseModel):
                 TypeAdapter(float).validate_python(self.backoff_seconds)
             except PydanticValidationError as e:
                 errors.add_field_error("backoff_seconds", "invalid", str(e))
+
+        if by_alias:
+            return errors._with_field_names({
+                "max_attempts": "maxAttempts",
+                "backoff_seconds": "backoffSeconds",
+            })
 
         return errors
 

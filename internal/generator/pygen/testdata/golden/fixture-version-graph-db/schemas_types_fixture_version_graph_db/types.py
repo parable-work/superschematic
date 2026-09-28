@@ -135,9 +135,14 @@ class Cover(BaseModel):
 
     version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -198,6 +203,13 @@ class Cover(BaseModel):
         # Validate _version
         if self.version_ is None:
             errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "photo_url": "photoUrl",
+                "entity_key": "entityKey",
+                "deleted_on_ref": "deletedOnRef",
+            })
 
         return errors
 
@@ -357,9 +369,14 @@ class Ingredient(BaseModel):
 
     version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -438,6 +455,13 @@ class Ingredient(BaseModel):
         # Validate _version
         if self.version_ is None:
             errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "step_key": "stepKey",
+                "entity_key": "entityKey",
+                "deleted_on_ref": "deletedOnRef",
+            })
 
         return errors
 
@@ -595,9 +619,14 @@ class Note(BaseModel):
 
     version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -672,6 +701,13 @@ class Note(BaseModel):
         # Validate _version
         if self.version_ is None:
             errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "reply_to": "replyTo",
+                "entity_key": "entityKey",
+                "deleted_on_ref": "deletedOnRef",
+            })
 
         return errors
 
@@ -818,9 +854,14 @@ class Recipe(BaseModel):
 
     created_by: IdentityUUID = Field(..., alias="createdBy", serialization_alias="createdBy")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -857,6 +898,12 @@ class Recipe(BaseModel):
 
             if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.created_by)) is None:
                 errors.add_field_error("created_by", "pattern", "invalid format")
+
+        if by_alias:
+            return errors._with_field_names({
+                "created_at": "createdAt",
+                "created_by": "createdBy",
+            })
 
         return errors
 
@@ -1013,9 +1060,14 @@ class RecipeCommit(BaseModel):
 
     created_by: IdentityUUID = Field(..., alias="createdBy", serialization_alias="createdBy")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -1106,6 +1158,15 @@ class RecipeCommit(BaseModel):
 
             if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.created_by)) is None:
                 errors.add_field_error("created_by", "pattern", "invalid format")
+
+        if by_alias:
+            return errors._with_field_names({
+                "parent_commit": "parentCommit",
+                "schema_epoch": "schemaEpoch",
+                "content_hash": "contentHash",
+                "created_at": "createdAt",
+                "created_by": "createdBy",
+            })
 
         return errors
 
@@ -1259,9 +1320,14 @@ class RecipePatch(BaseModel):
 
     operation: RecipePatchOperation = Field(..., alias="operation", serialization_alias="operation")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -1323,6 +1389,14 @@ class RecipePatch(BaseModel):
         # Validate operation
         if self.operation is None:
             errors.add_field_error("operation", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "entity_kind": "entityKind",
+                "entity_key": "entityKey",
+                "entity_id": "entityId",
+                "entity_version": "entityVersion",
+            })
 
         return errors
 
@@ -1488,9 +1562,14 @@ class RecipeRef(BaseModel):
 
     version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -1599,6 +1678,20 @@ class RecipeRef(BaseModel):
         # Validate _version
         if self.version_ is None:
             errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "parent_ref": "parentRef",
+                "base_commit": "baseCommit",
+                "head_commit": "headCommit",
+                "sealed_at": "sealedAt",
+                "created_at": "createdAt",
+                "created_by": "createdBy",
+                "updated_at": "updatedAt",
+                "updated_by": "updatedBy",
+                "deleted_at": "deletedAt",
+                "deleted_by": "deletedBy",
+            })
 
         return errors
 
@@ -1770,9 +1863,14 @@ class Step(BaseModel):
 
     version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -1884,6 +1982,16 @@ class Step(BaseModel):
         # Validate _version
         if self.version_ is None:
             errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "created_at": "createdAt",
+                "created_by": "createdBy",
+                "updated_at": "updatedAt",
+                "updated_by": "updatedBy",
+                "entity_key": "entityKey",
+                "deleted_on_ref": "deletedOnRef",
+            })
 
         return errors
 
@@ -2040,9 +2148,14 @@ class Utensil(BaseModel):
 
     version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -2097,6 +2210,12 @@ class Utensil(BaseModel):
         # Validate _version
         if self.version_ is None:
             errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "entity_key": "entityKey",
+                "deleted_on_ref": "deletedOnRef",
+            })
 
         return errors
 

@@ -156,18 +156,79 @@ class GridNamespace:
             return input_data
 
         if isinstance(input_data, input_type):
-            return input_data
+            validated = input_data
+        else:
+            model_validate = getattr(input_type, "model_validate", None)
+            if not callable(model_validate):
+                return input_data
 
-        model_validate = getattr(input_type, "model_validate", None)
-        if not callable(model_validate):
-            return input_data
+            try:
+                validated = model_validate(input_data, strict=False)
+            except Exception as err:
+                raise ValidationError(
+                    self._build_validation_errors(err, default_field="input_data"),
+                ) from err
 
-        try:
-            return model_validate(input_data, strict=False)
-        except Exception as err:
-            raise ValidationError(
-                self._build_validation_errors(err, default_field="input_data"),
-            ) from err
+        # pydantic checks types and presence; the schema's rules (listMin,
+        # minLength, min, pattern, ...) are validate_all's, run here before
+        # the request as the Go and TypeScript SDKs run theirs.
+        rule_errors: dict[str, list[dict[str, str]]] = {}
+        self._collect_rule_errors(validated, (), rule_errors)
+        if rule_errors:
+            raise ValidationError(rule_errors)
+        return validated
+
+    def _collect_rule_errors(
+        self,
+        value: Any,
+        location: tuple[str | int, ...],
+        rule_errors: dict[str, list[dict[str, str]]],
+    ) -> None:
+        """Collect the rule errors of value and of every model it holds.
+
+        Each model reports its own fields through validate_all, keyed by wire
+        name under the path that reached it (lines[0].quantity), the paths
+        the Go and TypeScript validators nest their errors under.
+        """
+        if isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                self._collect_rule_errors(item, (*location, index), rule_errors)
+            return
+        if isinstance(value, dict):
+            for key, item in value.items():
+                self._collect_rule_errors(item, (*location, str(key)), rule_errors)
+            return
+
+        model_fields = getattr(type(value), "model_fields", None)
+        if not isinstance(model_fields, dict):
+            return
+
+        validate_all = getattr(value, "validate_all", None)
+        if callable(validate_all):
+            try:
+                found = validate_all(by_alias=True)
+            except TypeError:
+                # A types package generated before by_alias keys its errors
+                # by snake_case name.
+                found = validate_all()
+            found_errors = getattr(found, "errors", None)
+            if isinstance(found_errors, dict):
+                for key, field_errors in found_errors.items():
+                    path = self._format_error_location((*location, str(key)), str(key))
+                    for field_error in field_errors:
+                        rule_errors.setdefault(path, []).append(
+                            {
+                                "validator": str(field_error.get("validator", "invalid")),
+                                "message": str(field_error.get("message", "invalid value")),
+                            },
+                        )
+
+        for attr, field in model_fields.items():
+            self._collect_rule_errors(
+                getattr(value, attr, None),
+                (*location, field.alias or attr),
+                rule_errors,
+            )
 
     def _coerce_response(self, raw: Any, output_type_name: str, is_array: bool) -> Any:
         """Coerce raw JSON-decoded responses into typed Pydantic models.

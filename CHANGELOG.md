@@ -13,6 +13,36 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- The Python SDK checks an input's schema rules before the request, as the
+  Go and TypeScript SDKs do. It ran only pydantic's `model_validate`,
+  which checks types and required fields but none of the rules (`listMin`,
+  `listMax`, `minLength`, `maxLength`, `min`, `max`, `pattern`), so an
+  order with no lines under `listMin: 1` was sent and the server answered
+  400. The SDK now runs the types package's `validate_all` on the input and
+  on every object it holds, a model the caller built included, and raises
+  `ValidationError` with the errors keyed as the Go and TypeScript SDKs
+  key them: `lines` (`listMin`), `lines[1].quantity` (`min`),
+  `shipTo.postalCode` (`pattern`), `giftCodes[1]` (`maxLength`). A map
+  value's errors are keyed `extras.gift.quantity`, as the TypeScript SDK
+  and pydantic's errors key them; the Go SDK keys them
+  `extras[gift].quantity`. For the wire names, the Python types'
+  `validate_all` takes a keyword-only `by_alias`: `False`, the default,
+  keys errors by snake_case name as before, and `True` keys them by wire
+  name. With a types package generated before `by_alias`, the SDK keys
+  errors by snake_case name. Minor (new keyword; the SDK refuses inputs
+  it sent before).
+- Python types: `str()` of a `ValidationErrors` lists its errors. It
+  returned the message `Exception` was built with, and `validate_all`
+  builds the container empty and adds errors afterwards, so a container
+  whose `has_errors()` was true read "No validation errors". That text
+  now means there are none. Patch.
+- The Rust SDK's input validation checks a list's `listMin` and `listMax`
+  (`minItems` and `maxItems` in its embedded schemas) before the request.
+  It checked lengths, bounds, patterns and required fields at every depth,
+  but not a list's size, so an order with no lines under `listMin: 1` was
+  sent. Its errors stay one `SDKError::Config` message naming each path
+  (`input.lines: must contain at least 1 items`), without the Go and
+  TypeScript SDKs' rule names. Patch.
 - Verification refuses an `@index` of a DB table that the SQL generator
   cannot build: one with a key that resolves to no column of the table, or
   one with no keys. The SQL generator left such an index out of the DDL

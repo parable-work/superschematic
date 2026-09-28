@@ -304,6 +304,17 @@ fn validate_array_value(
         return;
     };
 
+    if let Some(min_items) = schema.get("minItems").and_then(Value::as_u64) {
+        if (items.len() as u64) < min_items {
+            errors.push(format!("{path}: must contain at least {min_items} items"));
+        }
+    }
+    if let Some(max_items) = schema.get("maxItems").and_then(Value::as_u64) {
+        if (items.len() as u64) > max_items {
+            errors.push(format!("{path}: must contain at most {max_items} items"));
+        }
+    }
+
     let Some(item_schema) = schema.get("items") else {
         return;
     };
