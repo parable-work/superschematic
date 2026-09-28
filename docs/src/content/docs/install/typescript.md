@@ -127,15 +127,16 @@ const sdk = new CatalogSDK({
   auth: { token: process.env.API_TOKEN },
 });
 
-const product = await sdk.productQueries.getProduct(id);
+const product = await sdk.product.getProduct(id);
 ```
 
 `auth.token` is a static token. `auth.getToken` is called per request.
 `setToken` / `clearToken` change the token after construction. The SDK of
 an API with an operation that needs a caller (`@auth`,
 `@requirePermission`, `@requireOwnership`) sends the token on every request
-as `Authorization: Bearer <token>`. Operation sets become camelCase
-namespace fields.
+as `Authorization: Bearer <token>`. Each namespace is a camelCase field,
+and operation sets that share a namespace share it: `ProductQueries` and
+`ProductMutations` are both `sdk.product`.
 
 ## Serve a generated API
 

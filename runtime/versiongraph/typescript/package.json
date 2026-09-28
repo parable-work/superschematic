@@ -1,0 +1,37 @@
+{
+  "name": "@superschematic/versiongraph",
+  "version": "0.0.0",
+  "description": "The version-graph core built for WebAssembly: compose, merge, diff, contentHash and validate trees of versioned rows over the core's JSON contract, in the browser, bun and Node. Ships the compiled ESM and the wasm module.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./superschematic_versiongraph.wasm": "./dist/superschematic_versiongraph.wasm"
+  },
+  "files": [
+    "dist/*.js",
+    "dist/*.d.ts",
+    "dist/superschematic_versiongraph.wasm"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-wasm.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun run build && tsc --noEmit -p tsconfig.test.json && bun test test && node test/node.mjs"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/parable-work/superschematic",
+    "directory": "runtime/versiongraph/typescript"
+  }
+}

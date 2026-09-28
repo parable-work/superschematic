@@ -1,6 +1,7 @@
 # superschematic (the schema compiler). Convenience targets for the Go
-# modules, the TypeScript authoring packages, the schema runtimes and the
-# TypeScript and Rust http runtimes. Mirrors the CI workflow gates (.github/workflows/ci.yml).
+# modules, the TypeScript authoring packages, the schema runtimes, the
+# TypeScript and Rust http runtimes and the version-graph core. Mirrors the
+# CI workflow gates (.github/workflows/ci.yml).
 #
 #   make setup && make all
 
@@ -29,7 +30,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check ts python rust \
-        versiongraph versiongraph-wasm docs cli-smoke scrub clean
+        versiongraph docs cli-smoke scrub clean
 
 all: build test lint
 
@@ -41,6 +42,7 @@ setup:
 	cd packages && bun install
 	cd runtime/schema/typescript && bun install
 	cd runtime/http/typescript && bun install
+	cd runtime/versiongraph/typescript && bun install
 	cd runtime/schema/python && uv sync
 
 build: go-build $(BIN)
@@ -89,11 +91,12 @@ ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
 	cd runtime/schema/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
 	cd runtime/http/typescript && bun install --frozen-lockfile && bun run test
+	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 
 python:
 	cd runtime/schema/python && uv run pytest -q
 
-rust: versiongraph-wasm
+rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test
@@ -102,12 +105,6 @@ rust: versiongraph-wasm
 # it (runtime/versiongraph/go/lib/<goos>_<goarch>).
 versiongraph:
 	scripts/versiongraph-archive.sh >/dev/null
-
-# The core built for wasm32-unknown-unknown, and the bun test that runs every
-# vector through it.
-versiongraph-wasm:
-	cd runtime/versiongraph/rust && cargo build --release --target wasm32-unknown-unknown
-	cd runtime/versiongraph/wasm && bun test
 
 # Starlight site. CI runs this as the docs job (D9); release.yml deploys it.
 docs:

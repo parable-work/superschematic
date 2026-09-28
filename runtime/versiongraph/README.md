@@ -9,12 +9,13 @@ role, so it holds no per-kind code.
 ```
 rust/             superschematic-versiongraph: the core and its C ABI (rlib, staticlib, cdylib)
 go/               the Go binding, a module of its own (package versiongraph): cgo over the static archive
-wasm/             bun test that drives the wasm32-unknown-unknown build
+typescript/       @superschematic/versiongraph: the wasm32-unknown-unknown build with typed operations
 testdata/vectors/ the contract as vectors: {name, op, input, expect}
 ```
 
 This page is the contract. The vectors are its executable form: the Rust
-tests, the Go binding and the wasm test run every one of them.
+tests, the Go binding and the TypeScript package's tests run every one of
+them. The package's types for this contract are `typescript/src/contract.ts`.
 
 ## Descriptor
 
@@ -100,8 +101,9 @@ integer.
 
 ## Operations
 
-Every output is deterministic: kinds follow descriptor order, rows sort by
-order and then entity key, and lists sort by kind, entity key and path.
+Every output is deterministic: object members are sorted by name, so a
+tree lists its kinds by name rather than in descriptor order; rows sort by
+order and then entity key; and lists sort by kind, entity key and path.
 
 ### compose
 
@@ -250,7 +252,8 @@ them with `vg_dealloc`. `go/include/versiongraph.h` is the header.
 
 ```
 make versiongraph            # static archive for the Go binding (scripts/versiongraph-archive.sh)
-make rust                    # fmt, clippy (native and wasm32) and cargo test, then the wasm build and bun test
+make rust                    # fmt, clippy (native and wasm32) and cargo test
+make ts                      # among the TypeScript packages: the wasm build, the package, every vector through it
 cd runtime/versiongraph/go && go test ./...
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
 ```
