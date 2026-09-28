@@ -650,6 +650,17 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
+- Go ORM: a `Generic.JSON[]` or `Generic.JSON[][]` column refuses a null
+  element, as every other list column and every other implementation do
+  (D12, amended): `GetOne`, `FindOne`, `FindMany`, `GetManyByIDs`, the
+  `RETURNING` reads and the history decoder fail with
+  `metadataList[0]: null element` for a stored `[null, true]`, which read
+  as the `null` and `true` tokens. That holds for a JSONB column and for a
+  native `JSONB[]` one (a `Generic.JSON[]` without `@jsonField`), whose SQL
+  NULL element read as a nil value. `CreateOne`, `CreateMany`, `UpdateOne`
+  and `UpdateMany` refuse a nil element or the JSON null token before they
+  write; they stored it. A row that holds such an element must be
+  rewritten before it reads. Minor.
 - TypeScript API server: an encrypted operation (in an `Encrypted`
   operation set, declared `@encrypted`, or with an `EncryptedField<T>`
   result) fails the build unless it is `@manualRouteRegistration`, with the
@@ -1140,9 +1151,8 @@ of a generated artifact is always listed here with the bump it requires.
   `failed to decode JSON field labels: labels[0][1]: null element`. The
   column was decoded into the Go list directly, so a null element another
   writer stored read as the element's zero value (`[["a", null]]` as
-  `[["a", ""]]`). A null inner list still reads as a nil list, and a
-  `Generic.JSON[]` column still reads a null element as the JSON null
-  token (D12, amended). Patch.
+  `[["a", ""]]`). A null inner list still reads as a nil list (D12,
+  amended). Patch.
 - Go SDK: an error response's message is read from the RFC 9457 `detail`
   member first, then `error`, then `message`. A generated Go server writes
   its message only in `detail`, which the Go SDK did not read, so an error

@@ -288,6 +288,14 @@
               "name": "Generic.JSON",
               "isArray": true
             }
+          },
+          {
+            "name": "reqPayloads",
+            "typeRef": {
+              "name": "Generic.JSON",
+              "isArray": true
+            },
+            "required": true
           }
         ],
         "jsonField": true
@@ -1536,6 +1544,7 @@
       "type": "ListMatrix",
       "payload": {
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [
           "dark",
@@ -1564,6 +1573,7 @@
           null
         ],
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -1573,6 +1583,27 @@
           "required"
         ],
         "payloads[1]": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "required_json_list_null_element",
+      "type": "ListMatrix",
+      "payload": {
+        "reqGrid": [],
+        "reqPayloads": [
+          {
+            "a": null
+          },
+          null
+        ],
+        "reqShadeGrid": [],
+        "reqShadeList": [],
+        "reqUrlGrid": []
+      },
+      "want": {
+        "reqPayloads[1]": [
           "required"
         ]
       }
@@ -1588,6 +1619,7 @@
           null
         ],
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -1603,6 +1635,7 @@
       "type": "ListMatrix",
       "payload": {
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [
           "light",
@@ -1629,6 +1662,7 @@
           }
         ],
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -1651,6 +1685,7 @@
           "shade": "dark"
         },
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": "dark",
         "reqUrlGrid": []
@@ -1680,6 +1715,7 @@
           }
         ],
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [
           [
             "light",
@@ -1720,6 +1756,7 @@
           "dark"
         ],
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -1790,6 +1827,7 @@
             "d"
           ]
         ],
+        "reqPayloads": [],
         "reqShadeGrid": [
           [
             "light"
@@ -1816,6 +1854,7 @@
       "type": "ListMatrix",
       "payload": {
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -1828,7 +1867,8 @@
       "payload": {
         "reqUrlGrid": [],
         "reqShadeGrid": [],
-        "reqShadeList": []
+        "reqShadeList": [],
+        "reqPayloads": []
       },
       "want": {
         "reqGrid": [
@@ -1841,6 +1881,7 @@
       "type": "ListMatrix",
       "payload": {
         "reqGrid": "a",
+        "reqPayloads": [],
         "reqShadeGrid": "dark",
         "reqShadeList": [],
         "reqUrlGrid": "https://a.test"
@@ -1869,6 +1910,7 @@
         },
         "rankGrid": 1,
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -1896,6 +1938,7 @@
       "type": "ListMatrix",
       "payload": {
         "reqGrid": null,
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -1915,6 +1958,7 @@
         "pointGrid": null,
         "pointList": null,
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -1935,6 +1979,7 @@
         "reqGrid": [
           []
         ],
+        "reqPayloads": [],
         "reqShadeGrid": [
           []
         ],
@@ -1962,6 +2007,7 @@
           ],
           null
         ],
+        "reqPayloads": [],
         "reqShadeGrid": [
           [],
           null
@@ -2002,6 +2048,7 @@
           ],
           "b"
         ],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -2020,6 +2067,7 @@
       "type": "ListMatrix",
       "payload": {
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [
           [
             "light",
@@ -2072,6 +2120,7 @@
             null
           ]
         ],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": [
@@ -2109,6 +2158,7 @@
       "type": "ListMatrix",
       "payload": {
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": [
@@ -2140,6 +2190,7 @@
           ]
         ],
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -2156,6 +2207,7 @@
       "payload": {
         "optGrid": [],
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -2180,6 +2232,7 @@
           ]
         ],
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -2213,6 +2266,7 @@
             "toolong"
           ]
         ],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -2237,6 +2291,7 @@
       "type": "ListMatrix",
       "payload": {
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [
           [
             "light"
@@ -2260,6 +2315,7 @@
       "type": "ListMatrix",
       "payload": {
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": [
@@ -2304,6 +2360,7 @@
             1234567
           ]
         ],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -2338,6 +2395,7 @@
           ]
         ],
         "reqGrid": [],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []
@@ -2361,6 +2419,7 @@
             "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
           ]
         ],
+        "reqPayloads": [],
         "reqShadeGrid": [],
         "reqShadeList": [],
         "reqUrlGrid": []

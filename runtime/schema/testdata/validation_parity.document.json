@@ -410,6 +410,12 @@
           "type": "array",
           "x-validateMaxLength": 5
         },
+        "reqPayloads": {
+          "items": {
+            "$ref": "#/definitions/scalars/Generic_JSON"
+          },
+          "type": "array"
+        },
         "reqShadeGrid": {
           "items": {
             "items": {
@@ -439,7 +445,8 @@
         "reqGrid",
         "reqUrlGrid",
         "reqShadeGrid",
-        "reqShadeList"
+        "reqShadeList",
+        "reqPayloads"
       ],
       "type": "object",
       "x-kind": "type"
