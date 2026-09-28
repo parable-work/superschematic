@@ -192,9 +192,11 @@ The same paths appear where each target checks a payload:
 - The Go ORM reads a JSON column that holds an object type through that
   type's decoder, so a null element stored in one of its lists fails the
   read. A list or list-of-lists column fails the read too, with
-  `labels[0][1]: null element`; a null inner list reads as a nil list. A
-  `Generic.JSON[]` column reads a stored null element as the JSON null
-  token.
+  `labels[0][1]: null element`; a null inner list reads as a nil list. So
+  does a `Generic.JSON[]` column, stored as JSONB or as a native `JSONB[]`,
+  whether its null element is SQL NULL or the JSON null token, and
+  `CreateOne`, `CreateMany`, `UpdateOne` and `UpdateMany` refuse a
+  `Generic.JSON` list with a null element before they write.
 - The Rust types carry no validators: serde refuses a null inner list, and
   list bounds are not checked.
 
