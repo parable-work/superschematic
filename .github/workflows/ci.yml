@@ -79,6 +79,8 @@ jobs:
         # release-pr.yml refuses to bump a tree whose sites disagree; catch
         # drift (a hand-edited package.json) on the pull request instead.
         run: python3 scripts/bump_version.py check
+      - name: bump_version.py tests
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
   go:
     name: go (build / vet / test / gofmt / lint / catalog / cli smoke)
