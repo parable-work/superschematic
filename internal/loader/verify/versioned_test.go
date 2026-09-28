@@ -96,11 +96,21 @@ func TestVersionedExcludeOptimisticAndPins(t *testing.T) {
 			want:   "Pantry: @versioned exclude cannot name the relation recipe",
 		},
 		{
-			name: "a graph member excluding an excluded conflict unit and an audit field",
+			name: "a graph member excluding a nullable excluded conflict unit and a required audit field",
 			mutate: func(s *ir.Schema) {
+				s.Types["Ingredient"].Fields[3].Required = false
 				s.Types["Ingredient"].Fields = append(s.Types["Ingredient"].Fields, &ir.FieldDef{Name: "createdAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}, Required: true})
 				excludeFrom(s, "Ingredient", "quantity", "createdAt")
 			},
+		},
+		{
+			name:   "a graph member excluding a required field",
+			mutate: func(s *ir.Schema) { excludeFrom(s, "Ingredient", "quantity") },
+			want:   "Ingredient: a @graphMember may exclude only nullable fields besides its audit fields, and quantity is required",
+		},
+		{
+			name:   "a table outside a graph excluding a required field",
+			mutate: func(s *ir.Schema) { excludeFrom(s, "Pantry", "label") },
 		},
 		{
 			name:   "a graph member excluding content",

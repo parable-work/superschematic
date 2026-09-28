@@ -88,20 +88,28 @@ Verification refuses:
   member, or whose `name` is not PascalCase; a negative `schemaEpoch`;
 - a member that is not `@versioned`, has other than one UUID `@key`, has
   other than exactly one relation to its root, has `deletedAt`, or declares
-  `entityKey`, `ref` or `deletedOnRef`;
+  `entityKey`, `ref` or `deletedOnRef` or a field whose column is
+  `entity_key`, `ref_id` or `deleted_on_ref` (such as `refId`);
 - a type that is a root and a member, or a member of a graph the schema
   does not declare;
 - a `parent.of` that is not a member of the same graph, a `parent.key`
   that is not a UUID field, and an `order` that is not a `Generic.Int64`
   field;
 - a graph whose generated names collide with a definition of the schema or
-  of another graph;
+  of another graph, and an index whose name collides with one the graph
+  generates (`uq_<member>_entity_ref`, `uq_<graph>_ref_root_name`,
+  `uq_<graph>_commit_root_sequence`, `uq_<graph>_patch_entity` and
+  `idx_<graph>_patch_entity_version`): Postgres keeps index names in one
+  namespace per schema, so an index on any table counts;
 - `@conflictUnit` outside a member, an unknown strategy, and `keyed` or
   `jsonSchema` on a field that is not one JSON object (`Generic.JSON` or a
   `@jsonField` type);
 - a member that excludes content from history with
   `@versioned({ exclude })`: it may exclude only its audit fields and
-  fields with `@conflictUnit("excluded")`.
+  nullable fields with `@conflictUnit("excluded")`. Revert and Merge
+  rebuild rows from history images, so a required column missing from the
+  image would be written as NULL and the statement would fail. The shell
+  writes the audit fields itself.
 
 A member has no `deletedAt` because a delete on a ref is a row that holds
 the entity's `(entityKey, ref)` slot. A soft delete would free the slot and

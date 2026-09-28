@@ -4,7 +4,10 @@ package sqlutil
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
+
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 )
 
 // PostgresReservedKeywords lists PostgreSQL reserved keywords that need to be
@@ -68,4 +71,50 @@ func QuoteIdentifier(name string) string {
 	}
 
 	return name
+}
+
+// PostgresIdentifierLimit is the byte length past which PostgreSQL
+// truncates an identifier.
+const PostgresIdentifierLimit = 63
+
+var indexPurposeName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// IndexName builds the identifier of an index over keys (field names) on
+// tableName. Without a purpose name the identifier is idx_{table}_{columns};
+// with one it is {idx|uq}_{table}_{purpose}.
+//
+// PostgreSQL truncates identifiers past 63 bytes, which silently collapses two
+// distinct indexes into one name. Rather than pack or hash a name to fit, an
+// overlong result is a schema error: the author picks a purpose name, which
+// reads better than any suffix the generator could derive.
+func IndexName(tableName string, keys []string, purpose string, unique bool) (string, error) {
+	if purpose == "" {
+		parts := make([]string, 0, 2+len(keys))
+		parts = append(parts, "idx", tableName)
+		for _, key := range keys {
+			parts = append(parts, codegen.ToSnakeCase(key))
+		}
+		name := strings.Join(parts, "_")
+		if len(name) > PostgresIdentifierLimit {
+			return "", fmt.Errorf(
+				"index on %s over %s generates %q (%d bytes), over PostgreSQL's %d-byte limit; give it a purpose name: @index([...], { name: 'purpose' })",
+				tableName, strings.Join(keys, ", "), name, len(name), PostgresIdentifierLimit)
+		}
+		return name, nil
+	}
+
+	if !indexPurposeName.MatchString(purpose) {
+		return "", fmt.Errorf("index name %q on %s must be lowercase alphanumeric with underscores", purpose, tableName)
+	}
+	kind := "idx"
+	if unique {
+		kind = "uq"
+	}
+	name := kind + "_" + tableName + "_" + purpose
+	if len(name) > PostgresIdentifierLimit {
+		return "", fmt.Errorf(
+			"index name %q on %s is %d bytes, over PostgreSQL's %d-byte limit; shorten the purpose name",
+			name, tableName, len(name), PostgresIdentifierLimit)
+	}
+	return name, nil
 }

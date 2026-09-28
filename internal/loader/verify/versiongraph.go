@@ -4,6 +4,9 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/graphdesc"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/loader/versiongraph"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -26,10 +29,17 @@ func checkVersionGraphs(schema *ir.Schema, r *Result) {
 	}
 
 	generated := make(map[string]string)
+	var indexes map[string]string
 	for _, name := range sortedTypeNames(schema.Types) {
 		td := schema.Types[name]
 		if td.VersionGraph != nil {
 			checkGraphRoot(schema, td, len(members[td.Name]), generated, r)
+			if td.Role == ir.RoleDBTable {
+				if indexes == nil {
+					indexes = authoredIndexNames(schema)
+				}
+				checkGeneratedIndexes(schema, td, indexes, r)
+			}
 		}
 	}
 	for _, name := range sortedTypeNames(schema.Types) {
@@ -119,6 +129,12 @@ func checkGraphMember(schema *ir.Schema, td *ir.TypeDef, r *Result) {
 			r.errorf(td.Owner, "%s: field %s collides with the field @graphMember adds", td.Name, name)
 		}
 	}
+	columns := tableColumns(schema, td)
+	for i, column := range memberColumns {
+		if _, ok := columns[column]; ok && fieldNamed(td, versiongraph.MemberFields[i]) == nil {
+			r.errorf(td.Owner, "%s: column %s collides with the column @graphMember adds for %s", td.Name, column, versiongraph.MemberFields[i])
+		}
+	}
 
 	if parent := cfg.Parent; parent != nil {
 		of := schema.Types[parent.Of]
@@ -137,6 +153,48 @@ func checkGraphMember(schema *ir.Schema, td *ir.TypeDef, r *Result) {
 		order := fieldNamed(td, cfg.Order)
 		if order == nil || order.TypeRef.Name != "Generic.Int64" || order.TypeRef.IsArray || order.TypeRef.IsMap {
 			r.errorf(td.Owner, "%s: @graphMember order %q must name a Generic.Int64 field", td.Name, cfg.Order)
+		}
+	}
+}
+
+// memberColumns are the columns of versiongraph.MemberFields, in order.
+var memberColumns = []string{graphdesc.EntityKeyColumn, graphdesc.RefColumn, graphdesc.TombstoneColumn}
+
+// authoredIndexNames maps the identifier of every index the schema's DB
+// tables declare to the type that declares it. Postgres keeps index names
+// in one namespace per schema, so an index on any table can collide with
+// one the expansion adds. An index whose name the SQL generator refuses is
+// left to it.
+func authoredIndexNames(schema *ir.Schema) map[string]string {
+	names := map[string]string{}
+	for _, name := range sortedTypeNames(schema.Types) {
+		td := schema.Types[name]
+		if !isDBTable(td) {
+			continue
+		}
+		for _, idx := range td.Indexes {
+			if len(idx.Keys) == 0 {
+				continue
+			}
+			if id, err := sqlutil.IndexName(codegen.ToSnakeCase(td.Name), idx.Keys, idx.Name, idx.Unique); err == nil {
+				names[id] = td.Name
+			}
+		}
+	}
+	return names
+}
+
+// checkGeneratedIndexes refuses an authored index whose identifier equals
+// one the expansion of the graph rooted at root adds.
+func checkGeneratedIndexes(schema *ir.Schema, root *ir.TypeDef, authored map[string]string, r *Result) {
+	for _, gen := range versiongraph.Indexes(schema, root) {
+		id, err := sqlutil.IndexName(codegen.ToSnakeCase(gen.Type), gen.Index.Keys, gen.Index.Name, gen.Index.Unique)
+		if err != nil {
+			continue
+		}
+		if owner, ok := authored[id]; ok {
+			td := schema.Types[owner]
+			r.errorf(td.Owner, "%s: index %s collides with the index version graph %q adds to %s; give it another name", td.Name, id, root.VersionGraphName(), gen.Type)
 		}
 	}
 }
