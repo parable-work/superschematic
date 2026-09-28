@@ -10,8 +10,8 @@ import Snippet from '../../../components/Snippet.astro';
 
 This page takes one small schema from source to working code. The acme
 shop shows prices to shoppers in more than one currency, so it declares a
-`Price` type once, and superschematic generates a Go package and a
-TypeScript package that decode and validate it the same way.
+`Price` type once, and superschematic generates packages in Go,
+TypeScript, Python and Rust that decode and validate it the same way.
 
 The schema is the `shop-common` service of `examples/acme-shop`, the
 project the [first project](/superschematic/first-project/) tutorial
@@ -105,17 +105,12 @@ From the directory that holds `schemas/`:
 superschematic build schemas/services/shop-common
 ```
 
-```
-Loaded schema shop-common (kind General): 1 types, 1 enums, 1 scalars, 0 operation sets
-  + sentinel written (src/service.generated.ts)
-  + types-go written to .../schemas/dist/types/go/shop-common
-  + types-typescript written to .../schemas/dist/types/typescript/shop-common
-Build complete: 2 outputs generated, 0 skipped
-```
+<Snippet file="testdata/generated/logs/build-shop-common.txt" />
 
-Output goes to `schemas/dist`. The build also writes
+Output goes to `schemas/dist`. The first build also writes
 `src/service.generated.ts` and exports it from `src/index.ts`: a handle
-other services import when they depend on this one. Commit both.
+other services import when they depend on this one. Commit both; later
+builds report the sentinel up to date.
 
 <FileTree>
 - schemas/dist/types/
@@ -130,9 +125,11 @@ other services import when they depend on this one. Commit both.
       - types/
       - validators/
       - index.ts
+  - python/shop-common/ the Python package acme_types_shop_common
+  - rust/shop-common/ the crate acme-shop-common-types
 </FileTree>
 
-Both packages declare the same type:
+Each package declares the same type:
 
 <Tabs syncKey="lang">
   <TabItem label="Go">
@@ -145,6 +142,15 @@ Both packages declare the same type:
     <Snippet file="testdata/generated/types/typescript/shop-common/types/types.ts" symbol="Price" />
     The package also exports `validatePrice`, `parsePriceJson`,
     `parsePriceYaml` and the `NonStrict` variants that accept unknown keys.
+  </TabItem>
+  <TabItem label="Python">
+    <Snippet file="testdata/generated/types/python/shop-common/acme_types_shop_common/types.py" from="class Price(BaseModel):" to="currency: Currency = Field" />
+    A pydantic model, with `validate_all`, `from_json`, `from_yaml`, the
+    `_non_strict` variants and `to_json`.
+  </TabItem>
+  <TabItem label="Rust">
+    <Snippet file="testdata/generated/types/rust/shop-common/src/types.rs" symbol="Price" />
+    A serde struct, with the JSON names as renames.
   </TabItem>
 </Tabs>
 
@@ -173,6 +179,17 @@ does a currency outside the enum.
     directory to its own workspace. The
     [TypeScript page](/superschematic/install/typescript/) covers the
     install in more detail.
+  </TabItem>
+  <TabItem label="Python">
+    <Snippet file="python/types_test.py" symbol="test_a_price_decodes" />
+    Put `schemas/dist/types/python/shop-common` on `PYTHONPATH`, or install
+    it with pip from that directory. It needs pydantic 2 and the
+    `superscalar` package.
+  </TabItem>
+  <TabItem label="Rust">
+    <Snippet file="rust/src/types_test.rs" symbol="a_price_decodes" />
+    Depend on the crate by path, as `examples/acme-shop/rust/Cargo.toml`
+    does.
   </TabItem>
 </Tabs>
 

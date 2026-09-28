@@ -38,8 +38,9 @@ docs/
     index.md              overview
     start/                prerequisites, getting started, how it works
     first-project/        the tutorial over examples/acme-shop
+    guides/               one guide per area: types, tables, routes, auth, SDKs
     install/              per-language pages (the "Languages" group)
-    guides/               write an extension, deploy, platform (the "Extending" group)
+    extending/            write an extension, deploy, platform
     reference/            naming file, CLI, one page per feature
     404.md                not-found page, emitted as dist/404.html for GitHub Pages
   src/components/Snippet.astro  quotes a file of examples/acme-shop
@@ -73,8 +74,9 @@ import Snippet from '../../../components/Snippet.astro';
 ```
 
 `file` is a path under `examples/acme-shop`. `symbol` names top-level
-declarations (a class, interface, enum, function or const, a Go type or
-func, or a Go method as `Type.Method`), with the comments and decorators
+declarations (a TypeScript class, interface, enum, function or const; a Go
+type or func, or a Go method as `Type.Method`; a Rust struct, enum or fn;
+a Python class or def), with the comments, decorators and attributes
 directly above each. `from` and `to` quote the lines from the first one
 containing `from` to the next one containing `to`. With neither, the whole
 file is quoted. A name or anchor that matches nothing fails the build.

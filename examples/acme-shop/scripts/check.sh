@@ -6,20 +6,29 @@
 #   UPDATE=1 examples/acme-shop/scripts/check.sh   also rewrite testdata/generated/
 #
 # Needs what `make setup` stands up (the superscalar checkout and archive,
-# the version-graph archive, the runtime installs), the pinned Go toolchain
-# and bun. Generated output goes to the example's schemas/dist (gitignored).
+# the version-graph archive, the runtime installs and the Python schema
+# runtime's uv environment), the pinned Go and Rust toolchains, bun and jq. Generated output goes to the example's schemas/dist
+# (gitignored).
 #
 # Asserts, in order:
 #   1. build-all builds every service with the binary that links no
 #      extension, dependencies first;
 #   2. every generated Go module builds and vets;
-#   3. the Go app in go/ builds, vets and passes its tests, which call the
-#      generated server through the generated Go SDK;
-#   4. the generated TypeScript router and the app in typescript/
-#      type-check, and its tests call the router through the generated
-#      TypeScript SDK;
-#   5. the copies under testdata/generated/, the generated files the docs site
-#      quotes, match this build byte for byte.
+#   3. the generated TypeScript router and SDKs, and the app in typescript/,
+#      type-check; the generated Python packages import and python/'s type
+#      tests pass; the Rust client in rust/ builds against the generated Rust
+#      SDK and its type tests pass;
+#   4. the Go app in go/ builds, vets and passes its tests, which call the
+#      generated Go server through the generated Go SDK, then run the
+#      TypeScript, Python and Rust clients against the same server and
+#      compare what they print;
+#   5. the TypeScript app's tests call the generated TypeScript router
+#      through the generated TypeScript SDK;
+#   6. build-all with --cache skips every service on a second run and
+#      restores every service once dist is gone;
+#   7. the copies under testdata/generated/ match this run byte for byte:
+#      the generated files the docs site quotes, and under logs/ the output
+#      of the commands it shows.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +39,7 @@ DIST="$SCHEMAS/dist"
 
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
+mkdir -p "$OUT/logs"
 
 export CGO_ENABLED=1
 if [[ -z "${CGO_LDFLAGS:-}" ]]; then
@@ -43,74 +53,119 @@ go_module_compiles() {
   (cd "$1" && GOFLAGS=-mod=mod go mod tidy >/dev/null 2>&1 && go build ./... && go vet ./...)
 }
 
+# Runs a command from the example directory, as the docs pages do, and keeps
+# its output under logs/<name> with the checkout's absolute paths shortened
+# to "...", as the pages print them.
+superschematic() { "$OUT/superschematic" "$@"; }
+capture() {
+  local name="$1"
+  shift
+  (cd "$EXAMPLE_DIR" && "$@") | sed "s|$EXAMPLE_DIR/|.../|g" >"$OUT/logs/$name"
+}
+
 echo "==> core binary (no extension)"
 (cd "$REPO_ROOT" && go build -o "$OUT/superschematic" ./cmd/superschematic)
 
 echo "==> build-all"
 rm -rf "$DIST"
-"$OUT/superschematic" build-all "$SCHEMAS/services" | tee "$OUT/build-all.log"
-grep -q '^All 4 schema services built successfully$' "$OUT/build-all.log"
-# shop-storefront imports Price from shop-common, so shop-common builds first.
-common_line="$(grep -n 'OK: shop-common' "$OUT/build-all.log" | cut -d: -f1)"
-storefront_line="$(grep -n 'OK: shop-storefront' "$OUT/build-all.log" | cut -d: -f1)"
-test "$common_line" -lt "$storefront_line"
+capture build-all.full.txt superschematic build-all schemas/services
+cat "$OUT/logs/build-all.full.txt"
+grep -q '^All 5 schema services built successfully$' "$OUT/logs/build-all.full.txt"
+# A service builds after every service it depends on.
+built_before() {
+  local first second
+  first="$(grep -n "OK: $1 " "$OUT/logs/build-all.full.txt" | cut -d: -f1)"
+  second="$(grep -n "OK: $2 " "$OUT/logs/build-all.full.txt" | cut -d: -f1)"
+  test "$first" -lt "$second"
+}
+built_before shop-common shop-storefront
+built_before shop-db shop-api
+built_before shop-db shop-orders
+# The pages show the summary lines of build-all, not each service's build.
+grep -E '^(Discovered|  Shared|  OK:|  Wrote|All |$)' "$OUT/logs/build-all.full.txt" >"$OUT/logs/build-all.txt"
+
+echo "==> the commands the pages show"
+capture build-shop-common.txt superschematic build schemas/services/shop-common
+capture build-shop-db.txt superschematic build schemas/services/shop-db
+capture build-shop-api.txt superschematic build schemas/services/shop-api
+capture build-shop-orders.txt superschematic build schemas/services/shop-orders
+capture build-with-deps-shop-storefront.txt superschematic build --with-deps schemas/services/shop-storefront
+capture price-ir.json sh -c "\"$OUT/superschematic\" build schemas/services/shop-common --emit-ir | jq .types.Price"
 
 echo "==> generated Go modules compile"
-for module in types/go/shop-common types/go/shop-db types/go/shop-api orm/shop-db api/shop-api sdk/go/shop-api; do
+for module in \
+  types/go/shop-common types/go/shop-db types/go/shop-api types/go/shop-orders \
+  orm/shop-db api/shop-api api/shop-orders sdk/go/shop-api sdk/go/shop-orders; do
   echo "    $module"
   go_module_compiles "$DIST/$module"
 done
 
-echo "==> the Go app: build, vet, test"
-(cd "$EXAMPLE_DIR/go" && GOFLAGS=-mod=mod go mod tidy >/dev/null && go build ./... && go vet ./... && go test -count=1 ./...)
-
-echo "==> the TypeScript app: type-check, test"
+echo "==> TypeScript: the generated router and SDKs type-check"
 RUNTIME="$REPO_ROOT/runtime/http/typescript"
 TYPES="$DIST/types/typescript"
-API_PKG="$DIST/api/shop-storefront"
-SDK_PKG="$DIST/sdk/typescript/shop-storefront"
 APP="$EXAMPLE_DIR/typescript"
 (cd "$RUNTIME" && bun install --frozen-lockfile >/dev/null && bun run link-deps >/dev/null)
-# The types packages form one Bun workspace; installing it links
-# shop-storefront-types to shop-common-types.
+# The types packages form one Bun workspace; installing it links each to the
+# types packages of the services it depends on.
 (cd "$TYPES" && bun install >/dev/null)
-# Until the packages are published, resolve every package the router, the SDK
-# and the app import by name, as a service's own install would. hono comes
-# from the runtime's install so the router, the runtime and the app share one
-# copy.
+# Until the packages are published, every package the router, the SDKs and
+# the app import by name is linked into their node_modules, as a service's
+# own install would resolve it. hono comes from the runtime's install so the
+# router, the runtime and the app share one copy.
 link_module() {
   mkdir -p "$(dirname "$2")"
   rm -rf "$2"
   ln -s "$1" "$2"
 }
-for dir in "$API_PKG" "$SDK_PKG" "$APP"; do
-  link_module "$TYPES/shop-storefront" "$dir/node_modules/@acme/shop-storefront-types"
-  link_module "$TYPES/shop-common" "$dir/node_modules/@acme/shop-common-types"
-  link_module "$RUNTIME" "$dir/node_modules/@superschematic/http-runtime"
-  link_module "$REPO_ROOT/third_party/superscalar/bindings/typescript" "$dir/node_modules/superscalar"
-  for dep in hono typescript @types/node; do
-    link_module "$RUNTIME/node_modules/$dep" "$dir/node_modules/$dep"
+link_packages() {
+  local service
+  for service in shop-common shop-db shop-api shop-orders shop-storefront; do
+    link_module "$TYPES/$service" "$1/node_modules/@acme/$service-types"
   done
+  for service in shop-api shop-orders shop-storefront; do
+    link_module "$DIST/sdk/typescript/$service" "$1/node_modules/@acme/$service-sdk"
+  done
+  link_module "$DIST/api/shop-storefront" "$1/node_modules/@acme/shop-storefront-api"
+  link_module "$RUNTIME" "$1/node_modules/@superschematic/http-runtime"
+  link_module "$REPO_ROOT/third_party/superscalar/bindings/typescript" "$1/node_modules/superscalar"
+  for dep in hono typescript @types/node; do
+    link_module "$RUNTIME/node_modules/$dep" "$1/node_modules/$dep"
+  done
+}
+for pkg in api/shop-storefront sdk/typescript/shop-api sdk/typescript/shop-orders sdk/typescript/shop-storefront; do
+  echo "    $pkg"
+  link_packages "$DIST/$pkg"
+  (cd "$DIST/$pkg" && "$RUNTIME/node_modules/.bin/tsc" --noEmit -p tsconfig.json)
 done
-link_module "$API_PKG" "$APP/node_modules/@acme/shop-storefront-api"
-link_module "$SDK_PKG" "$APP/node_modules/@acme/shop-storefront-sdk"
-(cd "$API_PKG" && "$RUNTIME/node_modules/.bin/tsc" --noEmit -p tsconfig.json)
-(cd "$APP" && "$RUNTIME/node_modules/.bin/tsc" --noEmit -p tsconfig.json && bun test)
-# shop-api is served in Go; its TypeScript SDK imports its parsers and
-# validators from shop-api's TypeScript types, so it type-checks against them.
-API_SDK="$DIST/sdk/typescript/shop-api"
-link_module "$TYPES/shop-api" "$API_SDK/node_modules/@acme/shop-api-types"
-link_module "$REPO_ROOT/third_party/superscalar/bindings/typescript" "$API_SDK/node_modules/superscalar"
-for dep in typescript @types/node; do
-  link_module "$RUNTIME/node_modules/$dep" "$API_SDK/node_modules/$dep"
-done
-(cd "$API_SDK" && "$RUNTIME/node_modules/.bin/tsc" --noEmit -p tsconfig.json)
+link_packages "$APP"
+(cd "$APP" && "$RUNTIME/node_modules/.bin/tsc" --noEmit -p tsconfig.json)
 
-echo "==> testdata/generated/ matches this build"
-# The generated files the docs site quotes. The site builds without Go or
-# the superscalar checkout, so it reads these committed copies; a change to
-# a generator that alters one fails here until the copy is refreshed with
-# UPDATE=1.
+echo "==> Python: the generated types and SDK import"
+# The schema runtime's uv environment (make setup) has pydantic and the
+# superscalar binding the generated packages import.
+PYTHON="$REPO_ROOT/runtime/schema/python/.venv/bin/python"
+ACME_PYTHONPATH="$DIST/types/python/shop-common:$DIST/types/python/shop-db:$DIST/types/python/shop-orders:$DIST/sdk/python/shop-orders"
+PYTHONPATH="$ACME_PYTHONPATH" "$PYTHON" -B -c 'import acme_shop_orders_sdk, acme_types_shop_orders'
+PYTHONPATH="$ACME_PYTHONPATH" "$PYTHON" -B "$EXAMPLE_DIR/python/types_test.py"
+
+echo "==> Rust: the client builds against the generated SDK; the types tests pass"
+(cd "$EXAMPLE_DIR/rust" && cargo build --locked -q && cargo test --locked -q)
+
+echo "==> the Go app: build, vet, test; every SDK calls the Go server"
+(cd "$EXAMPLE_DIR/go" && GOFLAGS=-mod=mod go mod tidy >/dev/null && go build ./... && go vet ./...)
+(cd "$EXAMPLE_DIR/go" &&
+  ACME_SHOP_CLIENTS=1 ACME_SHOP_PYTHON="$PYTHON" ACME_SHOP_PYTHONPATH="$ACME_PYTHONPATH" \
+    go test -count=1 -v ./... >"$OUT/go-test.log" 2>&1) || { cat "$OUT/go-test.log"; exit 1; }
+grep -E '^(--- |ok)' "$OUT/go-test.log"
+for language in typescript python rust; do
+  grep -q "^    --- PASS: TestEverySDKCallsTheGoServer/$language " "$OUT/go-test.log"
+done
+
+echo "==> the TypeScript app's tests"
+(cd "$APP" && bun test)
+
+echo "==> the generated files the pages quote"
+# Copied now, before the cache step below removes and restores dist.
 QUOTED=(
   .deps.json
   types/go/shop-common/types.go
@@ -120,22 +175,43 @@ QUOTED=(
   types/go/shop-db/types.go
   api/shop-api/interfaces.go
   api/shop-api/routes.go
+  api/shop-orders/interfaces.go
+  api/shop-orders/routes.go
   api/shop-storefront/interfaces.ts
+  types/python/shop-common/acme_types_shop_common/types.py
+  types/rust/shop-common/src/types.rs
 )
-stale=0
+mkdir -p "$OUT/quoted"
 for path in "${QUOTED[@]}"; do
   # The site's file glob skips dotfiles, so .deps.json is kept as deps.json.
-  copy="$EXAMPLE_DIR/testdata/generated/${path#.}"
-  if [[ "${UPDATE:-}" == 1 ]]; then
-    mkdir -p "$(dirname "$copy")"
-    cp "$DIST/$path" "$copy"
-  elif ! cmp -s "$DIST/$path" "$copy"; then
-    echo "stale: testdata/generated/${path#.} differs from schemas/dist/$path" >&2
-    stale=1
-  fi
+  mkdir -p "$(dirname "$OUT/quoted/${path#.}")"
+  cp "$DIST/$path" "$OUT/quoted/${path#.}"
 done
-if [[ "$stale" == 1 ]]; then
-  echo "rerun with UPDATE=1 to refresh testdata/generated/, then check the docs pages that quote it" >&2
+
+echo "==> build-all --cache: skip, then restore"
+CACHE_FLAGS=(--cache --cache-root "$OUT/cache")
+superschematic build-all "${CACHE_FLAGS[@]}" "$SCHEMAS/services" >/dev/null
+capture build-all-cache.full.txt superschematic build-all "${CACHE_FLAGS[@]}" schemas/services
+rm -rf "$DIST"
+capture build-all-restore.full.txt superschematic build-all "${CACHE_FLAGS[@]}" schemas/services
+for run in cache restore; do
+  grep -E '^  OK:' "$OUT/logs/build-all-$run.full.txt" >"$OUT/logs/build-all-$run.txt"
+done
+test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 5
+test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 5
+rm -f "$OUT"/logs/*.full.txt
+cp -R "$OUT/logs" "$OUT/quoted/logs"
+
+echo "==> testdata/generated/ matches this run"
+# The site builds without Go or the superscalar checkout, so it reads these
+# committed copies. A change that alters one fails here until the copy is
+# refreshed with UPDATE=1.
+COPIES="$EXAMPLE_DIR/testdata/generated"
+if [[ "${UPDATE:-}" == 1 ]]; then
+  rm -rf "$COPIES"
+  cp -R "$OUT/quoted" "$COPIES"
+elif ! diff -r "$OUT/quoted" "$COPIES"; then
+  echo "testdata/generated/ is stale: rerun with UPDATE=1, then check the docs pages that quote it" >&2
   exit 1
 fi
 

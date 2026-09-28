@@ -90,6 +90,17 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- Docs site: a "Guides" group, one page per area over `examples/acme-shop`
+  (modeling types, database tables, API routes, auth and permissions, and
+  client SDKs in Go, TypeScript, Python and Rust), and a decorators and
+  wrappers reference. The extension guides move from `/guides/` to
+  `/extending/`. Command output on the pages is quoted from logs
+  `examples/acme-shop/scripts/check.sh` captures, as generated code already
+  was. `examples/acme-shop` gains `shop-orders`, an API over new order and
+  review tables with SDKs in all four languages; Go, TypeScript, Python and
+  Rust clients that the Go tests run against its Go server and compare; and
+  type tests in each language. The `acme` CI job sets up Python and uv for
+  it.
 - `examples/acme-shop`: the docs tutorial's project. Four services built
   with the core binary (`shop-common`, General; `shop-db`, DB; `shop-api`,
   an API served in Go with Go and TypeScript SDKs; `shop-storefront`, an API

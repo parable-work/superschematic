@@ -164,7 +164,7 @@ the file with `unknown kind "Catalog"`.
 
 `KindSpec.Verify` runs after load. `KindSpec.NoSentinel` skips the
 `service.generated.ts` file when the kind is not something other services
-import. See [platform](/superschematic/guides/platform/) for both.
+import. See [platform](/superschematic/extending/platform/) for both.
 
 ## A generator
 
@@ -301,7 +301,7 @@ r.RegisterDocument(registry.DocumentSpec{
   the document depends on, for `build-all`'s change detection.
 - `Generate` receives the raw document alongside the `GenerateContext`.
 
-The [deploy](/superschematic/guides/deploy/) extension is a document with
+The [deploy](/superschematic/extending/deploy/) extension is a document with
 no new kind.
 
 ## A build-all hook

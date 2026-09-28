@@ -27,15 +27,21 @@ function headerPattern(name: string): RegExp {
     return new RegExp(`^func \\(\\s*\\w+\\s+\\*?${receiver}\\s*\\)\\s+${method}\\b`);
   }
   return new RegExp(
-    `^(export\\s+)?(default\\s+)?(declare\\s+)?(abstract\\s+)?(async\\s+)?` +
-      `(class|interface|enum|type|function|const|let|var|func)\\s+${escape(name)}\\b`
+    // TypeScript and Go; Rust's pub items; Python's def and class.
+    `^((export\\s+)?(default\\s+)?(declare\\s+)?(abstract\\s+)?(async\\s+)?` +
+      `(class|interface|enum|type|function|const|let|var|func)` +
+      `|(pub(\\([^)]*\\))?\\s+)?(async\\s+)?(struct|enum|fn|trait|mod)` +
+      `|(async\\s+)?def)\\s+${escape(name)}\\b`
   );
 }
 
 // A declaration whose first line ends by opening a block, a parameter list or
-// a literal runs to the first later line that closes it at column 0.
+// a literal runs to the first later line that closes it at column 0. A
+// Python one, whose first line ends with a colon, runs to the last line
+// before the next line at column 0.
 const opensBlock = /[{([]\s*$/;
 const closesAtColumnZero = /^[})\]]/;
+const opensPythonBlock = /:\s*$/;
 
 function declaration(lines: string[], name: string, file: string): string[] {
   const pattern = headerPattern(name);
@@ -43,12 +49,19 @@ function declaration(lines: string[], name: string, file: string): string[] {
   if (header < 0) {
     throw new Error(`Snippet: no top-level declaration named ${name} in examples/acme-shop/${file}`);
   }
+  // Comments, decorators and Rust attributes directly above belong to it.
   let start = header;
-  while (start > 0 && /^\s*(\/\/|\/\*|\*|@)/.test(lines[start - 1])) {
+  while (start > 0 && /^\s*(\/\/|\/\*|\*|@|#)/.test(lines[start - 1])) {
     start--;
   }
   let end = header;
-  if (opensBlock.test(lines[header])) {
+  if (file.endsWith('.py') && opensPythonBlock.test(lines[header])) {
+    const next = lines.findIndex((line, i) => i > header && /^\S/.test(line));
+    end = next < 0 ? lines.length - 1 : next - 1;
+    while (end > header && lines[end].trim() === '') {
+      end--;
+    }
+  } else if (opensBlock.test(lines[header])) {
     end = lines.findIndex((line, i) => i > header && closesAtColumnZero.test(line));
     if (end < 0) {
       throw new Error(`Snippet: ${name} in examples/acme-shop/${file} never closes at column 0`);

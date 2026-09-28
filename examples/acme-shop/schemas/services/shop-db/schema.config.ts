@@ -6,7 +6,9 @@ export default defineConfig({
   outputs: {
     types: {
       [TargetLanguage.Go]: { enabled: true },
-      [TargetLanguage.TypeScript]: { enabled: true }
+      [TargetLanguage.TypeScript]: { enabled: true },
+      [TargetLanguage.Python]: { enabled: true },
+      [TargetLanguage.Rust]: { enabled: true }
     }
   }
 });
