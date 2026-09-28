@@ -1294,6 +1294,142 @@ type StepHistoryOptions struct {
 	Offset int
 }
 
+// UtensilFields specifies which Utensil fields to select
+type UtensilFields struct {
+	Id           bool
+	Name         bool
+	EntityKey    bool
+	DeletedOnRef bool
+	Version      bool
+	// Recipe selects the recipe_id foreign key field
+	Recipe bool
+	// RecipeNested selects fields for the related Recipe
+	RecipeNested RecipeFields
+	// Ref selects the ref_id foreign key field
+	Ref bool
+	// RefNested selects fields for the related RecipeRef
+	RefNested RecipeRefFields
+}
+
+// ToStringSlice converts UtensilFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f UtensilFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Recipe {
+		fields = append(fields, "recipe_id")
+	}
+	if f.Name {
+		fields = append(fields, "name")
+	}
+	if f.EntityKey {
+		fields = append(fields, "entity_key")
+	}
+	if f.Ref {
+		fields = append(fields, "ref_id")
+	}
+	if f.DeletedOnRef {
+		fields = append(fields, "deleted_on_ref")
+	}
+	if f.Version {
+		fields = append(fields, "_version")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f UtensilFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.RecipeNested.IsZero() {
+		return false
+	}
+	if !f.RefNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a UtensilFields with all fields selected
+func (UtensilFields) All() UtensilFields {
+	return UtensilFields{
+		Id:           true,
+		Name:         true,
+		EntityKey:    true,
+		DeletedOnRef: true,
+		Version:      true,
+		Recipe:       true,
+		Ref:          true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (UtensilFields) Minimal() UtensilFields {
+	return UtensilFields{
+		Id:   true,
+		Name: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (UtensilFields) WithoutAudit() UtensilFields {
+	return UtensilFields{
+		Id:           true,
+		Name:         true,
+		EntityKey:    true,
+		DeletedOnRef: true,
+		Version:      true,
+	}
+}
+
+// UtensilOrderByField represents a field that can be used for ordering
+type UtensilOrderByField string
+
+const (
+	UtensilOrderById           UtensilOrderByField = "id"
+	UtensilOrderByName         UtensilOrderByField = "name"
+	UtensilOrderByEntityKey    UtensilOrderByField = "entity_key"
+	UtensilOrderByDeletedOnRef UtensilOrderByField = "deleted_on_ref"
+	UtensilOrderByVersion      UtensilOrderByField = "_version"
+)
+
+// UtensilOrderBy specifies ordering for Utensil queries
+type UtensilOrderBy struct {
+	Field UtensilOrderByField
+	Desc  bool
+}
+
+// UtensilGetOptions contains options for Utensil GetOne operations
+type UtensilGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields UtensilFields
+}
+
+// UtensilFindOptions contains options for Utensil Find operations
+type UtensilFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields UtensilFields
+	// OrderBy specifies sorting order
+	OrderBy []UtensilOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// UtensilHistoryOptions contains options for Utensil version history reads.
+type UtensilHistoryOptions struct {
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+}
+
 // ========================================
 // Filters and Update Structs
 // ========================================
@@ -2109,6 +2245,9 @@ type RecipeFilter struct {
 	// ReferencedByStepRecipe filters on the presence or absence of a
 	// Step whose recipe points at this row.
 	ReferencedByStepRecipe *ReferencedByFilter
+	// ReferencedByUtensilRecipe filters on the presence or absence of a
+	// Utensil whose recipe points at this row.
+	ReferencedByUtensilRecipe *ReferencedByFilter
 }
 
 // RecipeUpdate provides fields that can be updated
@@ -2281,6 +2420,14 @@ func (f *RecipeFilter) buildWhereClause(args *[]interface{}, paramOffset int) st
 	if f.ReferencedByStepRecipe != nil {
 		probe := `SELECT 1 FROM step WHERE step.recipe_id = recipe.id`
 		if f.ReferencedByStepRecipe.Exists {
+			conditions = append(conditions, `EXISTS (`+probe+`)`)
+		} else {
+			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+		}
+	}
+	if f.ReferencedByUtensilRecipe != nil {
+		probe := `SELECT 1 FROM utensil WHERE utensil.recipe_id = recipe.id`
+		if f.ReferencedByUtensilRecipe.Exists {
 			conditions = append(conditions, `EXISTS (`+probe+`)`)
 		} else {
 			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
@@ -2990,6 +3137,9 @@ type RecipeRefFilter struct {
 	// ReferencedByStepRef filters on the presence or absence of a
 	// Step whose ref points at this row.
 	ReferencedByStepRef *ReferencedByFilter
+	// ReferencedByUtensilRef filters on the presence or absence of a
+	// Utensil whose ref points at this row.
+	ReferencedByUtensilRef *ReferencedByFilter
 }
 
 // RecipeRefUpdate provides fields that can be updated
@@ -3431,6 +3581,14 @@ func (f *RecipeRefFilter) buildWhereClause(args *[]interface{}, paramOffset int)
 			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
 		}
 	}
+	if f.ReferencedByUtensilRef != nil {
+		probe := `SELECT 1 FROM utensil WHERE utensil.ref_id = recipe_ref.id`
+		if f.ReferencedByUtensilRef.Exists {
+			conditions = append(conditions, `EXISTS (`+probe+`)`)
+		} else {
+			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+		}
+	}
 
 	if len(conditions) == 0 {
 		return ""
@@ -3853,6 +4011,238 @@ func (f *StepFilter) buildWhereClause(args *[]interface{}, paramOffset int) stri
 				conditions = append(conditions, `step.ref_id IS NULL`)
 			} else {
 				conditions = append(conditions, `step.ref_id IS NOT NULL`)
+			}
+		}
+	}
+
+	if len(conditions) == 0 {
+		return ""
+	}
+
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// UtensilFilter provides filtering for Utensil queries
+type UtensilFilter struct {
+	Id           *UUIDFilter
+	Name         *StringFilter
+	EntityKey    *UUIDFilter
+	DeletedOnRef *BoolFilter
+	Version      *Int64Filter
+	// RecipeID allows filtering by foreign key
+	RecipeID *UUIDFilter
+	// RefID allows filtering by foreign key
+	RefID *UUIDFilter
+}
+
+// UtensilUpdate provides fields that can be updated
+type UtensilUpdate struct {
+	Name         *string
+	EntityKey    *types.IdentityUUID
+	DeletedOnRef *bool
+	// RecipeID allows updating the foreign key for recipe
+	RecipeID *types.IdentityUUID
+	// RefID allows updating the foreign key for ref
+	RefID *types.IdentityUUID
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewUtensilSnapshotUpdate maps every mutable field from a complete
+// Utensil value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewUtensilSnapshotUpdate(input *types.Utensil) *UtensilUpdate {
+	update := &UtensilUpdate{}
+	if input == nil {
+		return update
+	}
+	update.Name = &input.Name
+	update.EntityKey = input.EntityKey
+	update.DeletedOnRef = &input.DeletedOnRef
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *UtensilUpdate) ApplyTo(row *types.Utensil) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.Name != nil {
+		row.Name = *u.Name
+	}
+	if u.EntityKey != nil {
+		row.EntityKey = u.EntityKey
+	}
+	if u.DeletedOnRef != nil {
+		row.DeletedOnRef = *u.DeletedOnRef
+	}
+	if u.RecipeID != nil {
+		row.Recipe.Id = u.RecipeID
+	}
+	if u.RefID != nil {
+		row.Ref.Id = u.RefID
+	}
+}
+
+// buildWhereClause builds a WHERE clause from a UtensilFilter
+func (f *UtensilFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	if f == nil {
+		return ""
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`utensil.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `utensil.id IS NULL`)
+			} else {
+				conditions = append(conditions, `utensil.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Name != nil {
+		if f.Name.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil."name" = $%d`, paramNum))
+			*args = append(*args, *f.Name.Eq)
+		}
+		if len(f.Name.In) > 0 {
+			placeholders := make([]string, len(f.Name.In))
+			for i, value := range f.Name.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`utensil."name" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Name.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil."name" ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Name.ILike+"%")
+		}
+	}
+	if f.EntityKey != nil {
+		if f.EntityKey.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil.entity_key = $%d`, paramNum))
+			*args = append(*args, f.EntityKey.Eq.ToUUID())
+		}
+		if len(f.EntityKey.In) > 0 {
+			placeholders := make([]string, len(f.EntityKey.In))
+			for i, id := range f.EntityKey.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`utensil.entity_key IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.EntityKey.IsNull != nil {
+			if *f.EntityKey.IsNull {
+				conditions = append(conditions, `utensil.entity_key IS NULL`)
+			} else {
+				conditions = append(conditions, `utensil.entity_key IS NOT NULL`)
+			}
+		}
+	}
+	if f.DeletedOnRef != nil && f.DeletedOnRef.Eq != nil {
+		paramNum++
+		conditions = append(conditions, fmt.Sprintf(`utensil.deleted_on_ref = $%d`, paramNum))
+		*args = append(*args, *f.DeletedOnRef.Eq)
+	}
+	if f.Version != nil {
+		if f.Version.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil._version = $%d`, paramNum))
+			*args = append(*args, *f.Version.Eq)
+		}
+		if f.Version.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil._version > $%d`, paramNum))
+			*args = append(*args, *f.Version.Gt)
+		}
+		if f.Version.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil._version >= $%d`, paramNum))
+			*args = append(*args, *f.Version.Gte)
+		}
+		if f.Version.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil._version < $%d`, paramNum))
+			*args = append(*args, *f.Version.Lt)
+		}
+		if f.Version.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil._version <= $%d`, paramNum))
+			*args = append(*args, *f.Version.Lte)
+		}
+		if f.Version.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil._version >= $%d`, paramNum))
+			*args = append(*args, f.Version.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil._version <= $%d`, paramNum))
+			*args = append(*args, f.Version.Between.Max)
+		}
+	}
+	if f.RecipeID != nil {
+		if f.RecipeID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil.recipe_id = $%d`, paramNum))
+			*args = append(*args, f.RecipeID.Eq.ToUUID())
+		}
+		if len(f.RecipeID.In) > 0 {
+			placeholders := make([]string, len(f.RecipeID.In))
+			for i, id := range f.RecipeID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`utensil.recipe_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.RecipeID.IsNull != nil {
+			if *f.RecipeID.IsNull {
+				conditions = append(conditions, `utensil.recipe_id IS NULL`)
+			} else {
+				conditions = append(conditions, `utensil.recipe_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.RefID != nil {
+		if f.RefID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`utensil.ref_id = $%d`, paramNum))
+			*args = append(*args, f.RefID.Eq.ToUUID())
+		}
+		if len(f.RefID.In) > 0 {
+			placeholders := make([]string, len(f.RefID.In))
+			for i, id := range f.RefID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`utensil.ref_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.RefID.IsNull != nil {
+			if *f.RefID.IsNull {
+				conditions = append(conditions, `utensil.ref_id IS NULL`)
+			} else {
+				conditions = append(conditions, `utensil.ref_id IS NOT NULL`)
 			}
 		}
 	}

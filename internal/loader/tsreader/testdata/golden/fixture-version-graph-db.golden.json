@@ -315,6 +315,43 @@
         "graph": "Recipe",
         "order": "position"
       }
+    },
+    "Utensil": {
+      "name": "Utensil",
+      "owner": "src/recipe.schema.ts",
+      "comment": "A utensil the recipe needs, keyed by a plain UUID rather than an\nAutoGenerate one.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "key": true
+        },
+        {
+          "name": "recipe",
+          "typeRef": {
+            "name": "Recipe"
+          },
+          "required": true,
+          "relation": {
+            "type": "Recipe"
+          }
+        },
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        }
+      ],
+      "versioned": true,
+      "graphMember": {
+        "graph": "Recipe"
+      }
     }
   }
 }

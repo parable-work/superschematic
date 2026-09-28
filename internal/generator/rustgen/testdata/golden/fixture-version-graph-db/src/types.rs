@@ -249,3 +249,28 @@ pub struct Step {
     #[serde(default, rename = "_version")]
     pub version: i64,
 }
+
+fn default_utensil_deleted_on_ref() -> bool {
+    false
+}
+
+/// A utensil the recipe needs, keyed by a plain UUID rather than an
+/// AutoGenerate one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Utensil {
+    pub id: IdentityUUID,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<Recipe>,
+    pub name: String,
+    /// The entity's logical identity, shared by its rows on every ref.
+    #[serde(default, rename = "entityKey", skip_serializing_if = "Option::is_none")]
+    pub entity_key: Option<IdentityUUID>,
+    /// The ref this row overrides the entity on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<RecipeRef>,
+    /// True when the row deletes the entity on its ref.
+    #[serde(default = "default_utensil_deleted_on_ref", rename = "deletedOnRef")]
+    pub deleted_on_ref: bool,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
+}

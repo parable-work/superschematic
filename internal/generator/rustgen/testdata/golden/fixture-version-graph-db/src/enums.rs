@@ -13,10 +13,12 @@ pub enum RecipeEntityKind {
     Note,
     #[serde(rename = "step")]
     Step,
+    #[serde(rename = "utensil")]
+    Utensil,
 }
 
 impl RecipeEntityKind {
-    pub const ALL: &'static [Self] = &[Self::Cover, Self::Ingredient, Self::Note, Self::Step, ];
+    pub const ALL: &'static [Self] = &[Self::Cover, Self::Ingredient, Self::Note, Self::Step, Self::Utensil, ];
 
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -24,6 +26,7 @@ impl RecipeEntityKind {
             Self::Ingredient => "ingredient",
             Self::Note => "note",
             Self::Step => "step",
+            Self::Utensil => "utensil",
         }
     }
 }

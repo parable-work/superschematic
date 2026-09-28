@@ -18,6 +18,9 @@ const (
 
 	// RecipeEntityKindStep
 	RecipeEntityKind_Step RecipeEntityKind = "step"
+
+	// RecipeEntityKindUtensil
+	RecipeEntityKind_Utensil RecipeEntityKind = "utensil"
 )
 
 // String returns the string representation of RecipeEntityKind
@@ -41,6 +44,9 @@ func (e RecipeEntityKind) IsValid() bool {
 	case RecipeEntityKind_Step:
 		return true
 
+	case RecipeEntityKind_Utensil:
+		return true
+
 	}
 	return false
 }
@@ -53,6 +59,7 @@ func (RecipeEntityKind) Values() []RecipeEntityKind {
 		RecipeEntityKind_Ingredient,
 		RecipeEntityKind_Note,
 		RecipeEntityKind_Step,
+		RecipeEntityKind_Utensil,
 	}
 }
 

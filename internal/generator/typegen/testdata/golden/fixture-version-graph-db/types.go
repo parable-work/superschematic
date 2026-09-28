@@ -2756,3 +2756,310 @@ func StepFromYAMLNonStrict(data []byte) (*Step, error) {
 
 	return decoded, nil
 }
+
+// Utensil - A utensil the recipe needs, keyed by a plain UUID rather than an
+// AutoGenerate one.
+type Utensil struct {
+	Id IdentityUUID `json:"id"`
+
+	Recipe Recipe `json:"recipe"`
+
+	Name string `json:"name"`
+
+	EntityKey *IdentityUUID `json:"entityKey,omitempty"`
+
+	Ref RecipeRef `json:"ref"`
+
+	DeletedOnRef bool `json:"deletedOnRef"`
+
+	Version int64 `json:"_version"`
+}
+
+// NewUtensil returns a Utensil with @default values from the schema applied.
+// Fields without a declared default are left at their Go zero value.
+func NewUtensil() *Utensil {
+	return &Utensil{
+		DeletedOnRef: false,
+	}
+}
+
+// applyDefaults seeds the declared @default values on the receiver. Existing
+// non-zero / wrapper-set fields are preserved so this is safe to call before
+// json.Unmarshal: keys present in the payload overwrite the defaults, while
+// keys absent from the payload retain them.
+func (t *Utensil) applyDefaults() {
+	if t == nil {
+		return
+	}
+	var zeroDeletedOnRef bool
+	if t.DeletedOnRef == zeroDeletedOnRef {
+		t.DeletedOnRef = false
+	}
+
+}
+
+// MaskSecrets returns a copy of Utensil with secret fields cleared.
+func (t *Utensil) MaskSecrets() *Utensil {
+	if t == nil {
+		return nil
+	}
+
+	masked := &Utensil{}
+
+	masked.Id = t.Id
+
+	maskedValueRecipe := t.Recipe.MaskSecrets()
+	if maskedValueRecipe != nil {
+		masked.Recipe = *maskedValueRecipe
+	}
+
+	masked.Name = t.Name
+
+	masked.EntityKey = t.EntityKey
+
+	maskedValueRef := t.Ref.MaskSecrets()
+	if maskedValueRef != nil {
+		masked.Ref = *maskedValueRef
+	}
+
+	masked.DeletedOnRef = t.DeletedOnRef
+
+	masked.Version = t.Version
+
+	return masked
+}
+
+// Validate validates all fields in Utensil
+func (t *Utensil) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	{
+		value := t.Id
+
+		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
+			errors.AddFieldError("id", "pattern", "invalid format")
+		}
+
+	}
+
+	// Validate recipe (required nested type)
+
+	if fieldErrs := t.Recipe.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("recipe", fieldErrs)
+	}
+
+	// Validate entityKey (optional)
+
+	// Validate optional pointer field
+	if t.EntityKey != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.EntityKey, false); !valid {
+			errors.SetFieldErrors("entityKey", fieldErrs)
+		}
+	}
+
+	// Validate ref (required nested type)
+
+	if fieldErrs := t.Ref.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("ref", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals Utensil to JSON
+func (t *Utensil) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias Utensil
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals Utensil from JSON with validation
+func (t *Utensil) UnmarshalJSON(data []byte) error {
+	// Apply @default values first; standard json decoding preserves these
+	// for any keys absent from the payload while overwriting them when
+	// a value is provided explicitly.
+	t.applyDefaults()
+	type Alias Utensil
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts Utensil into a map representation.
+func (t *Utensil) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert Utensil to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert Utensil to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes Utensil from a map using lenient decoding.
+func (t *Utensil) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode Utensil from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode Utensil from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes Utensil from a map and rejects unknown fields.
+func (t *Utensil) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Utensil from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode Utensil from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes Utensil from JSON and rejects unknown fields.
+func (t *Utensil) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Utensil from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Utensil from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Utensil from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes Utensil from JSON using lenient decoding.
+func (t *Utensil) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Utensil from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Utensil from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Utensil from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes Utensil from YAML and rejects unknown fields.
+func (t *Utensil) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Utensil from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Utensil from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Utensil from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes Utensil from YAML using lenient decoding.
+func (t *Utensil) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Utensil from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Utensil from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Utensil from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// UtensilFromMap builds Utensil from a map using lenient decoding.
+func UtensilFromMap(value map[string]any) (*Utensil, error) {
+	decoded := &Utensil{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UtensilFromMapStrict builds Utensil from a map and rejects unknown fields.
+func UtensilFromMapStrict(value map[string]any) (*Utensil, error) {
+	decoded := &Utensil{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UtensilFromJSON builds Utensil from JSON and rejects unknown fields.
+func UtensilFromJSON(data []byte) (*Utensil, error) {
+	decoded := &Utensil{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UtensilFromJSONNonStrict builds Utensil from JSON using lenient decoding.
+func UtensilFromJSONNonStrict(data []byte) (*Utensil, error) {
+	decoded := &Utensil{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UtensilFromYAML builds Utensil from YAML and rejects unknown fields.
+func UtensilFromYAML(data []byte) (*Utensil, error) {
+	decoded := &Utensil{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// UtensilFromYAMLNonStrict builds Utensil from YAML using lenient decoding.
+func UtensilFromYAMLNonStrict(data []byte) (*Utensil, error) {
+	decoded := &Utensil{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
