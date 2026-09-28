@@ -49,6 +49,11 @@ root. The [naming-file reference](/superschematic/reference/naming/) lists
 every key and its default. The [CLI reference](/superschematic/reference/cli/)
 lists every command and flag.
 
+A DB table can keep every version of its rows
+([versioned tables](/superschematic/reference/versioned-tables/)), and a
+tree of such tables can be branched, committed and merged as a whole
+([version graphs](/superschematic/reference/version-graphs/)).
+
 ## Where to start
 
 Pick the language you will consume generated code in:
