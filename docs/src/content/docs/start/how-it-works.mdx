@@ -5,6 +5,8 @@ sidebar:
   order: 3
 ---
 
+import Snippet from '../../../components/Snippet.astro';
+
 A build reads schema files into one in-memory model, the Schema IR, and
 hands it to generators. What the files may declare, and which generators
 run, depends on the service's kind. What the generated packages are called
@@ -25,14 +27,15 @@ directory. Each service is one schema: a directory with a
 `schema.config.ts` (or `.json` or `.yaml`) and its schema files under
 `src/`. Output goes to `dist/` next to `services/`.
 
-`examples/acme-shop/schemas` has four services, one or more of each core
+`examples/acme-shop/schemas` has five services, one or more of each core
 kind:
 
 | Service | Kind | What it declares |
 | --- | --- | --- |
 | `shop-common` | General | `Price` and `Currency`, shared by the other services |
-| `shop-db` | DB | the `User`, `Session`, `Product` and `StockLevel` tables |
+| `shop-db` | DB | the shop's tables: users, sessions, products, stock, orders and reviews |
 | `shop-api` | API | product routes over `shop-db`, served in Go |
+| `shop-orders` | API | order and review routes, served in Go, with SDKs in all four languages |
 | `shop-storefront` | API | cart routes, served in TypeScript |
 
 ## A kind decides what a schema means
@@ -55,7 +58,7 @@ load error, unless an extension registers the package; the
 key lists them.
 
 An extension can register more kinds, each with its own rules and
-generators. The [extension guide](/superschematic/guides/write-an-extension/)
+generators. The [extension guide](/superschematic/extending/write-an-extension/)
 covers that.
 
 ## Outputs choose what to generate
@@ -113,18 +116,7 @@ schema files are interchangeable, and `format` converts between them.
 superschematic build schemas/services/shop-common --emit-ir | jq .types.Price
 ```
 
-```json
-{
-  "name": "Price",
-  "owner": "src/price.schema.ts",
-  "comment": "A price in the currency's smallest unit: 1999 EUR is 19.99 euros.",
-  "role": "EmbeddedStruct",
-  "fields": [
-    { "name": "amountCents", "typeRef": { "name": "Generic.Int64" }, "required": true },
-    { "name": "currency", "typeRef": { "name": "Currency" }, "required": true }
-  ]
-}
-```
+<Snippet file="testdata/generated/logs/price-ir.json" />
 
 When a generator's output surprises you, the IR shows what it was given.
 `superschematic json-schema` prints the JSON Schema the JSON and YAML forms

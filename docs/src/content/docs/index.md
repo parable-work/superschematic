@@ -39,10 +39,10 @@ an extension: a Go package you pass to `cli.New`. The `cmd/superschematic`
 binary links no extension.
 
 `examples/acme-schematic` is a complete downstream example. The
-[write an extension](/superschematic/guides/write-an-extension/) guide walks
+[write an extension](/superschematic/extending/write-an-extension/) guide walks
 the same surfaces. `extensions/deploy` and `extensions/platform` are smaller
-worked examples; see [deploy](/superschematic/guides/deploy/) and
-[platform](/superschematic/guides/platform/).
+worked examples; see [deploy](/superschematic/extending/deploy/) and
+[platform](/superschematic/extending/platform/).
 
 Names of generated packages come from `superschematic.toml` at the schemas
 root. The [naming-file reference](/superschematic/reference/naming/) lists
@@ -64,6 +64,12 @@ tree of such tables can be branched, committed and merged as a whole
    outputs, the naming file and the IR.
 4. [Your first project](/superschematic/first-project/): grow the acme shop
    into a database, a Go API and a TypeScript API, with SDKs for both.
+5. The guides, one per area: [modeling types](/superschematic/guides/modeling-types/),
+   [database tables](/superschematic/guides/database-tables/),
+   [API routes](/superschematic/guides/api-routes/),
+   [auth and permissions](/superschematic/guides/auth-and-permissions/) and
+   [client SDKs](/superschematic/guides/client-sdks/) in Go, TypeScript,
+   Python and Rust.
 
 The tutorial's code is `examples/acme-shop`, which CI builds and tests on
 every pull request.

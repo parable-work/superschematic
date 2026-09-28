@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"reflect"
+	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 func toMapValue(value any) (map[string]any, error) {
@@ -154,6 +156,190 @@ func mapFromYAMLValue(data []byte) (map[string]any, error) {
 	return result, nil
 }
 
+// jsonListField is a list field as rejectNullListElements reads it: its JSON
+// key, and its depth, 1 for a list and 2 for a list of lists.
+type jsonListField struct {
+	name  string
+	depth int
+}
+
+// jsonNull is the JSON null token.
+var jsonNull = []byte("null")
+
+// rejectNullListElements refuses a null element in a list field of data, a
+// typeName object json.Unmarshal has already decoded. A list element is
+// never null, but encoding/json decodes one to the element type's zero
+// value, which Validate cannot tell from a real one. A null inner list of a
+// list of lists is not an element: it decodes to a nil list, which Validate
+// reports. A key names a field as encoding/json matches it, exactly or else
+// without regard to case, and a repeated key is checked at every occurrence.
+// A payload without a null token is not scanned.
+func rejectNullListElements(typeName string, data []byte, fields []jsonListField) error {
+	if !bytes.Contains(data, jsonNull) {
+		return nil
+	}
+	i := skipJSONSpace(data, 0)
+	if i >= len(data) || data[i] != '{' {
+		return nil
+	}
+	i++
+	for {
+		i = skipJSONSpace(data, i)
+		if i >= len(data) || data[i] != '"' {
+			return nil
+		}
+		keyEnd := skipJSONString(data, i)
+		field, isList := matchJSONListField(data[i:keyEnd], fields)
+		i = skipJSONSpace(data, keyEnd)
+		if i >= len(data) || data[i] != ':' {
+			return nil
+		}
+		i = skipJSONSpace(data, i+1)
+		if !isList {
+			i = skipJSONValue(data, i)
+		} else {
+			var at [2]int
+			var found bool
+			if i, at, found = findJSONNullElement(data, i, field.depth); found {
+				if field.depth > 1 {
+					return fmt.Errorf("decode %s: %s[%d][%d]: null element", typeName, field.name, at[0], at[1])
+				}
+				return fmt.Errorf("decode %s: %s[%d]: null element", typeName, field.name, at[0])
+			}
+		}
+		i = skipJSONSpace(data, i)
+		if i >= len(data) || data[i] != ',' {
+			return nil
+		}
+		i++
+	}
+}
+
+// matchJSONListField returns the list field an object key, quoted as in the
+// payload, names.
+func matchJSONListField(quoted []byte, fields []jsonListField) (jsonListField, bool) {
+	if len(quoted) < 2 {
+		return jsonListField{}, false
+	}
+	key := quoted[1 : len(quoted)-1]
+	if bytes.IndexByte(key, '\\') >= 0 {
+		var unquoted string
+		if err := json.Unmarshal(quoted, &unquoted); err != nil {
+			return jsonListField{}, false
+		}
+		key = []byte(unquoted)
+	}
+	for _, field := range fields {
+		if string(key) == field.name {
+			return field, true
+		}
+	}
+	for _, field := range fields {
+		if strings.EqualFold(string(key), field.name) {
+			return field, true
+		}
+	}
+	return jsonListField{}, false
+}
+
+// findJSONNullElement reads the value at data[i] as a list of depth levels
+// and returns the index just past it and the position of its first null
+// element, if it has one. A value that is not a list, such as a null list or
+// a null inner list, has no elements.
+func findJSONNullElement(data []byte, i, depth int) (end int, at [2]int, found bool) {
+	if i >= len(data) || data[i] != '[' {
+		return skipJSONValue(data, i), at, false
+	}
+	i++
+	for n := 0; ; n++ {
+		i = skipJSONSpace(data, i)
+		if i >= len(data) {
+			return i, at, false
+		}
+		if data[i] == ']' {
+			return i + 1, at, false
+		}
+		switch {
+		case depth > 1:
+			var inner [2]int
+			if i, inner, found = findJSONNullElement(data, i, depth-1); found {
+				return i, [2]int{n, inner[0]}, true
+			}
+		case data[i] == 'n':
+			return i, [2]int{n}, true
+		default:
+			i = skipJSONValue(data, i)
+		}
+		i = skipJSONSpace(data, i)
+		if i < len(data) && data[i] == ',' {
+			i++
+		}
+	}
+}
+
+// skipJSONSpace returns the index of the first non-space byte at or after i.
+func skipJSONSpace(data []byte, i int) int {
+	for i < len(data) {
+		switch data[i] {
+		case ' ', '\t', '\n', '\r':
+			i++
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+// skipJSONString returns the index just past the string that opens at
+// data[i].
+func skipJSONString(data []byte, i int) int {
+	for i++; i < len(data); i++ {
+		switch data[i] {
+		case '\\':
+			i++
+		case '"':
+			return i + 1
+		}
+	}
+	return len(data)
+}
+
+// skipJSONValue returns the index just past the JSON value at data[i].
+func skipJSONValue(data []byte, i int) int {
+	if i >= len(data) {
+		return len(data)
+	}
+	switch data[i] {
+	case '"':
+		return skipJSONString(data, i)
+	case '{', '[':
+		depth := 0
+		for i < len(data) {
+			switch data[i] {
+			case '"':
+				i = skipJSONString(data, i)
+				continue
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+				if depth == 0 {
+					return i + 1
+				}
+			}
+			i++
+		}
+		return len(data)
+	}
+	for i++; i < len(data); i++ {
+		switch data[i] {
+		case ',', ']', '}', ' ', '\t', '\n', '\r':
+			return i
+		}
+	}
+	return len(data)
+}
+
 // validateGenericInt64Value validates one Generic.Int64 value and reports a
 // failure once. A missing required value is "required". A value that breaks
 // the scalar's own length, pattern or range is reported by that rule's name,
@@ -179,6 +365,376 @@ func validateGenericInt64Value(value GenericInt64, required bool) (bool, []Valid
 		return false, ruleErrs
 	}
 	return valid, coreErrs
+}
+
+// validateIdentitySlugValue validates one Identity.Slug value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateIdentitySlugValue(value IdentitySlug, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if utf8.RuneCountInString(string(value)) > 255 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 255 characters"})
+	}
+	if utf8.RuneCountInString(string(value)) < 1 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "minLength", Message: "must be at least 1 characters"})
+	}
+	if matched, err := regexp.MatchString("^[a-z0-9]+(?:[-_][a-z0-9]+)*$", string(value)); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// FeedItem - One row of a supplier's product feed. A key this type does not declare is
+// a supplier's mistake, so every decoder refuses it.
+type FeedItem struct {
+	Sku IdentitySlug `json:"sku"`
+
+	Name string `json:"name"`
+
+	Price Price `json:"price"`
+
+	Tags []string `json:"tags"`
+
+	Attributes map[string]string `json:"attributes"`
+}
+
+// FeedItemOpenAPISchema returns a fresh copy of the standalone OpenAPI
+// schema of FeedItem; referenced types are under "definitions".
+func FeedItemOpenAPISchema() map[string]any {
+	var schema map[string]any
+	if err := json.Unmarshal([]byte("{\"additionalProperties\":false,\"definitions\":{\"Currency\":{\"enum\":[\"EUR\",\"GBP\",\"USD\"],\"type\":\"string\"},\"Price\":{\"description\":\"A price in the currency's smallest unit: 1999 EUR is 19.99 euros.\",\"properties\":{\"amountCents\":{\"description\":\"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.\",\"format\":\"int64\",\"maximum\":9007199254740991,\"minimum\":-9007199254740991,\"type\":\"integer\"},\"currency\":{\"$ref\":\"#/definitions/Currency\"}},\"required\":[\"amountCents\",\"currency\"],\"type\":\"object\"}},\"description\":\"One row of a supplier's product feed. A key this type does not declare is\\na supplier's mistake, so every decoder refuses it.\",\"properties\":{\"attributes\":{\"additionalProperties\":{\"type\":\"string\"},\"description\":\"Free-form details by name, such as origin or harvest.\",\"type\":\"object\"},\"name\":{\"maxLength\":200,\"minLength\":1,\"type\":\"string\"},\"price\":{\"$ref\":\"#/definitions/Price\"},\"sku\":{\"description\":\"A URL friendly version of a string\",\"maxLength\":255,\"minLength\":1,\"pattern\":\"^[a-z0-9]+(?:[-_][a-z0-9]+)*$\",\"type\":\"string\"},\"tags\":{\"items\":{\"type\":\"string\"},\"maxItems\":20,\"type\":\"array\"}},\"required\":[\"sku\",\"name\",\"price\",\"tags\",\"attributes\"],\"title\":\"FeedItem\",\"type\":\"object\"}"), &schema); err != nil {
+		panic("invalid generated FeedItem OpenAPI schema: " + err.Error())
+	}
+	return schema
+}
+
+// MaskSecrets returns a copy of FeedItem with secret fields cleared.
+func (t *FeedItem) MaskSecrets() *FeedItem {
+	if t == nil {
+		return nil
+	}
+
+	masked := &FeedItem{}
+
+	masked.Sku = t.Sku
+
+	masked.Name = t.Name
+
+	maskedValuePrice := t.Price.MaskSecrets()
+	if maskedValuePrice != nil {
+		masked.Price = *maskedValuePrice
+	}
+
+	if t.Tags != nil {
+		masked.Tags = make([]string, len(t.Tags))
+
+		copy(masked.Tags, t.Tags)
+
+	}
+
+	if t.Attributes != nil {
+		masked.Attributes = make(map[string]string, len(t.Attributes))
+
+		for key, item := range t.Attributes {
+			masked.Attributes[key] = item
+		}
+
+	}
+
+	return masked
+}
+
+// Validate validates all fields in FeedItem
+func (t *FeedItem) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate sku (required)
+
+	if valid, fieldErrs := validateIdentitySlugValue(t.Sku, true); !valid {
+		errors.SetFieldErrors("sku", fieldErrs)
+	}
+
+	{
+		value := t.Name
+
+		if utf8.RuneCountInString(string(value)) > 200 {
+			errors.AddFieldError("name", "maxLength", "must be at most 200 characters")
+		}
+
+		if utf8.RuneCountInString(string(value)) < 1 {
+			errors.AddFieldError("name", "minLength", "must be at least 1 characters")
+		}
+
+	}
+
+	// Validate price (required nested type)
+
+	if fieldErrs := t.Price.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("price", fieldErrs)
+	}
+
+	{
+		value := t.Tags
+
+		if len(value) > 20 {
+			errors.AddFieldError("tags", "listMax", "must contain at most 20 items")
+		}
+
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals FeedItem to JSON
+func (t *FeedItem) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias FeedItem
+	return json.Marshal((*Alias)(t))
+}
+
+// listFieldsOfFeedItem are the list fields of FeedItem; UnmarshalJSON
+// refuses a null element in them.
+var listFieldsOfFeedItem = []jsonListField{
+	{name: "tags", depth: 1},
+}
+
+// UnmarshalJSON unmarshals FeedItem from JSON with validation
+func (t *FeedItem) UnmarshalJSON(data []byte) error {
+	// @strictJSON: reject an undeclared key before any field decoder can
+	// drop it, and a required field that is absent or null.
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("decode FeedItem: %w", err)
+	}
+	if fields == nil {
+		return fmt.Errorf("decode FeedItem: expected an object")
+	}
+	for key := range fields {
+		switch key {
+		case "sku":
+		case "name":
+		case "price":
+		case "tags":
+		case "attributes":
+		default:
+			return fmt.Errorf("decode FeedItem: unknown field %q", key)
+		}
+	}
+	if raw, ok := fields["sku"]; !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("sku is required")
+	}
+	if raw, ok := fields["name"]; !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("name is required")
+	}
+	if raw, ok := fields["price"]; !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("price is required")
+	}
+	if raw, ok := fields["tags"]; !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("tags is required")
+	}
+	if raw, ok := fields["attributes"]; !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("attributes is required")
+	}
+	type Alias FeedItem
+	aux := (*Alias)(t)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(aux); err != nil {
+		return err
+	}
+	if err := rejectNullListElements("FeedItem", data, listFieldsOfFeedItem); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts FeedItem into a map representation.
+func (t *FeedItem) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert FeedItem to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert FeedItem to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes FeedItem from a map using lenient decoding.
+func (t *FeedItem) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode FeedItem from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode FeedItem from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes FeedItem from a map and rejects unknown fields.
+func (t *FeedItem) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode FeedItem from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode FeedItem from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes FeedItem from JSON and rejects unknown fields.
+func (t *FeedItem) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode FeedItem from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode FeedItem from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode FeedItem from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes FeedItem from JSON using lenient decoding.
+func (t *FeedItem) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode FeedItem from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode FeedItem from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode FeedItem from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes FeedItem from YAML and rejects unknown fields.
+func (t *FeedItem) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode FeedItem from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode FeedItem from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode FeedItem from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes FeedItem from YAML using lenient decoding.
+func (t *FeedItem) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode FeedItem from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode FeedItem from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode FeedItem from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FeedItemFromMap builds FeedItem from a map using lenient decoding.
+func FeedItemFromMap(value map[string]any) (*FeedItem, error) {
+	decoded := &FeedItem{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// FeedItemFromMapStrict builds FeedItem from a map and rejects unknown fields.
+func FeedItemFromMapStrict(value map[string]any) (*FeedItem, error) {
+	decoded := &FeedItem{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// FeedItemFromJSON builds FeedItem from JSON and rejects unknown fields.
+func FeedItemFromJSON(data []byte) (*FeedItem, error) {
+	decoded := &FeedItem{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// FeedItemFromJSONNonStrict builds FeedItem from JSON using lenient decoding.
+func FeedItemFromJSONNonStrict(data []byte) (*FeedItem, error) {
+	decoded := &FeedItem{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// FeedItemFromYAML builds FeedItem from YAML and rejects unknown fields.
+func FeedItemFromYAML(data []byte) (*FeedItem, error) {
+	decoded := &FeedItem{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// FeedItemFromYAMLNonStrict builds FeedItem from YAML using lenient decoding.
+func FeedItemFromYAMLNonStrict(data []byte) (*FeedItem, error) {
+	decoded := &FeedItem{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
 }
 
 // Price - A price in the currency's smallest unit: 1999 EUR is 19.99 euros.
