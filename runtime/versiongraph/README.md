@@ -101,8 +101,9 @@ integer.
 
 ## Operations
 
-Every output is deterministic: kinds follow descriptor order, rows sort by
-order and then entity key, and lists sort by kind, entity key and path.
+Every output is deterministic: object members are sorted by name, so a
+tree lists its kinds by name rather than in descriptor order; rows sort by
+order and then entity key; and lists sort by kind, entity key and path.
 
 ### compose
 
