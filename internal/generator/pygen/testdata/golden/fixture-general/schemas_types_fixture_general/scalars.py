@@ -12,6 +12,82 @@ from typing import Annotated, Any, Dict
 from pydantic import Field, BeforeValidator, AfterValidator, PlainSerializer, PlainValidator
 import re
 
+# Import custom scalar implementations from the scalar library
+try:
+    from superscalar import (
+
+        parse_generic_int64,
+
+    )
+    _SCALAR_MODULE_AVAILABLE = True
+except ImportError:
+    # superscalar is not installed: validation is limited to patterns
+    _SCALAR_MODULE_AVAILABLE = False
+
+def _custom_parse_generic_int64(v: Any) -> Any:
+    """Custom parse wrapper for Generic.Int64.
+
+    The scalar library native hooks are string-in/string-out, so non-string
+    inputs are stringified before the call and numeric targets are
+    converted back afterwards.
+    """
+    if not _SCALAR_MODULE_AVAILABLE or v is None:
+        return v
+    try:
+        parsed = parse_generic_int64(v if isinstance(v, str) else str(v))
+    except Exception as e:
+        raise ValueError(str(e))
+    return int(parsed)
+
+# Generic.Int64 - Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
+
+def _validate_generic_int64_range(v: Any) -> Any:
+    """Validate Generic.Int64 numeric range."""
+    if v is None:
+        return v
+    val = int(v)
+    if val < -9007199254740991:
+        raise ValueError("must be at least -9007199254740991")
+    if val > 9007199254740991:
+        raise ValueError("must be at most 9007199254740991")
+    return v
+
+# Standard scalar type
+GenericInt64 = Annotated[
+    int,
+    Field(
+        description="Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+        ge=-9007199254740991,
+        le=9007199254740991,
+    ),
+    BeforeValidator(_custom_parse_generic_int64),
+    AfterValidator(_validate_generic_int64_range),
+]
+
+# Identity.Name - An objects name
+
+def _validate_identity_name_length(v: Any) -> Any:
+    """Validate Identity.Name length constraints."""
+    if v is None:
+        return v
+    s = str(v)
+    if len(s) < 2:
+        raise ValueError("must be at least 2 characters")
+    if len(s) > 80:
+        raise ValueError("must be at most 80 characters")
+    return v
+
+# Standard scalar type
+IdentityName = Annotated[
+    str,
+    Field(
+        description="An objects name",
+        max_length=80,
+        min_length=2,
+    ),
+    AfterValidator(_validate_identity_name_length),
+]
+
 # Network.Url - Valid HTTP/HTTPS URL
 _NetworkUrl_pattern = re.compile(r"^https?://[\w\-\{\}]+(\.[\w\-\{\}]+)+([:/?#][\w\-\._~:/?#\[\]@!\$&'\(\)\*\+,;=\{\}%]*)?$")
 

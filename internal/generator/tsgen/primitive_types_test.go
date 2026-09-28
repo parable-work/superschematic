@@ -36,10 +36,12 @@ const primitiveTypesSchemaJSON = `{
   }
 }`
 
-const primitiveTypesDriver = `import { readFileSync, writeFileSync } from 'node:fs';
+// sampleDriver runs every payload in SAMPLE_VECTORS through validateSample
+// and writes path -> sorted validator names to SAMPLE_RESULTS.
+const sampleDriver = `import { readFileSync, writeFileSync } from 'node:fs';
 import { validateSample } from './validators/types/sample';
 
-const vectors = JSON.parse(readFileSync(process.env.PRIMITIVE_VECTORS as string, 'utf8')) as Record<string, unknown>;
+const vectors = JSON.parse(readFileSync(process.env.SAMPLE_VECTORS as string, 'utf8')) as Record<string, unknown>;
 const results: Record<string, Record<string, string[]>> = {};
 for (const [name, payload] of Object.entries(vectors)) {
   const result = validateSample(payload as never);
@@ -51,7 +53,7 @@ for (const [name, payload] of Object.entries(vectors)) {
   }
   results[name] = fields;
 }
-writeFileSync(process.env.PRIMITIVE_RESULTS as string, JSON.stringify(results, null, 2));
+writeFileSync(process.env.SAMPLE_RESULTS as string, JSON.stringify(results, null, 2));
 `
 
 // TestPrimitiveFieldTypes type-checks and runs validateSample: a value of
@@ -62,32 +64,7 @@ func TestPrimitiveFieldTypes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping generated-validator check in -short mode")
 	}
-	dir := t.TempDir()
-	for rel, contents := range map[string]string{
-		"schema.config.json":     `{"name": "` + primitiveTypesService + `", "kind": "General", "outputs": {"types": {"typescript": {"enabled": true}}}}`,
-		"src/sample.schema.json": primitiveTypesSchemaJSON,
-	} {
-		path := filepath.Join(dir, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	schema, err := loader.LoadService(dir)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	typesRoot, bunPath := buildTSPackages(t, []tsPackageCase{{name: primitiveTypesService, schema: schema}})
-	if t.Failed() {
-		return
-	}
-
-	vectors := map[string]struct {
-		payload string
-		want    map[string][]string
-	}{
+	runSampleVectors(t, primitiveTypesService, primitiveTypesSchemaJSON, map[string]sampleVector{
 		"valid": {
 			payload: `{"name": "abc", "count": 5, "flag": false, "tags": ["a"], "scores": [[0, 0.5], []],
 				"labels": {"k": "abc"}, "limits": {"k": [1, 10]}, "switches": {"k": true}}`,
@@ -130,7 +107,43 @@ func TestPrimitiveFieldTypes(t *testing.T) {
 			payload: `{"name": "abc", "tags": [null], "scores": [[null]]}`,
 			want:    map[string][]string{"tags[0]": {"required"}, "scores[0][0]": {"required"}},
 		},
+	})
+}
+
+// sampleVector is one payload for a generated validateSample and the
+// verdicts it must return: path -> sorted validator names.
+type sampleVector struct {
+	payload string
+	want    map[string][]string
+}
+
+// runSampleVectors generates the TypeScript types package of service from
+// schemaJSON, whose schema has a Sample type, type-checks it and runs every
+// vector through validateSample.
+func runSampleVectors(t *testing.T, service, schemaJSON string, vectors map[string]sampleVector) {
+	t.Helper()
+	dir := t.TempDir()
+	for rel, contents := range map[string]string{
+		"schema.config.json":     `{"name": "` + service + `", "kind": "General", "outputs": {"types": {"typescript": {"enabled": true}}}}`,
+		"src/sample.schema.json": schemaJSON,
+	} {
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
+	schema, err := loader.LoadService(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	typesRoot, bunPath := buildTSPackages(t, []tsPackageCase{{name: service, schema: schema}})
+	if t.Failed() {
+		return
+	}
+
 	payloads := map[string]json.RawMessage{}
 	for name, v := range vectors {
 		payloads[name] = json.RawMessage(v.payload)
@@ -139,18 +152,18 @@ func TestPrimitiveFieldTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkgDir := filepath.Join(typesRoot, primitiveTypesService)
+	pkgDir := filepath.Join(typesRoot, service)
 	vectorsPath := filepath.Join(pkgDir, "vectors.json")
 	resultsPath := filepath.Join(pkgDir, "results.json")
 	if err := os.WriteFile(vectorsPath, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(pkgDir, "primitive_driver.ts"), []byte(primitiveTypesDriver), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(pkgDir, "sample_driver.ts"), []byte(sampleDriver), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(bunPath, "run", "primitive_driver.ts")
+	cmd := exec.Command(bunPath, "run", "sample_driver.ts")
 	cmd.Dir = pkgDir
-	cmd.Env = append(os.Environ(), "PRIMITIVE_VECTORS="+vectorsPath, "PRIMITIVE_RESULTS="+resultsPath)
+	cmd.Env = append(os.Environ(), "SAMPLE_VECTORS="+vectorsPath, "SAMPLE_RESULTS="+resultsPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("driver failed: %v\n%s", err, out)
 	}

@@ -37,24 +37,9 @@ func customTemplateFuncs() template.FuncMap {
 			}
 		},
 		"hasFieldLevelValidations": func(field FieldInfo) bool {
-			// Required checks are emitted separately; scalar constraints are
-			// covered by the scalar validators. Field-level blocks are only
-			// needed for explicit @validate rules (any rule on non-scalars
-			// that can fail for the field's type, list-size rules on
-			// scalars).
-			for _, v := range field.Validations {
-				if v.Validator == "required" || !ruleApplies(field, v.Validator) {
-					continue
-				}
-				if !field.IsScalar {
-					return true
-				}
-				if v.Validator == "listMin" || v.Validator == "listMax" {
-					return true
-				}
-			}
-			return false
+			return len(fieldRules(field)) > 0
 		},
+		"fieldRules":         fieldRules,
 		"listValidations":    listValidations,
 		"elementValidations": elementValidations,
 		"primitiveCheck":     primitiveCheck,
@@ -95,23 +80,32 @@ func listValidations(field FieldInfo) []codegen.ValidationRule {
 	return rules
 }
 
-// elementValidations returns the explicit @validate rules a field's
-// validator checks on each value, which for a T[][] field is each innermost
-// element: every rule except required and the list-size rules. A scalar
-// field returns none, because its scalar validator covers these constraints.
-func elementValidations(field FieldInfo) []codegen.ValidationRule {
-	if field.IsScalar {
-		return nil
-	}
+// fieldRules returns the rules the field's own block checks: its explicit
+// @validate rules that can fail for its type (ruleApplies). Required is
+// checked separately. The rules copied from a scalar type (FromScalar) are
+// the scalar validator's, which runs first, so a failing value is reported
+// once for them; a scalar field's own rules follow it, as in the Go types.
+func fieldRules(field FieldInfo) []codegen.ValidationRule {
 	var rules []codegen.ValidationRule
 	for _, v := range field.Validations {
-		switch v.Validator {
-		case "required", "listMin", "listMax":
+		if v.Validator == "required" || v.FromScalar || !ruleApplies(field, v.Validator) {
 			continue
 		}
-		if ruleApplies(field, v.Validator) {
-			rules = append(rules, v)
+		rules = append(rules, v)
+	}
+	return rules
+}
+
+// elementValidations returns the explicit @validate rules a field's
+// validator checks on each value, which for a T[][] field is each innermost
+// element: every field rule except the list-size rules.
+func elementValidations(field FieldInfo) []codegen.ValidationRule {
+	var rules []codegen.ValidationRule
+	for _, v := range fieldRules(field) {
+		if v.Validator == "listMin" || v.Validator == "listMax" {
+			continue
 		}
+		rules = append(rules, v)
 	}
 	return rules
 }
@@ -175,11 +169,8 @@ func typePrimitiveHelpers(t *TypeInfo) []string {
 		if f.IsArray && !f.IsMap {
 			used[expectListHelper] = true
 		}
-		if f.IsScalar {
-			continue
-		}
-		for _, v := range f.Validations {
-			if (v.Validator == "min" || v.Validator == "max") && ruleApplies(f, v.Validator) {
+		for _, v := range fieldRules(f) {
+			if v.Validator == "min" || v.Validator == "max" {
 				used[finiteNumberHelper] = true
 			}
 		}
