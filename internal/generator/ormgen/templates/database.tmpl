@@ -220,7 +220,7 @@ var (
 	ErrNotFound        = fmt.Errorf("record not found")
 	ErrAlreadyDeleted  = fmt.Errorf("record already deleted")
 	ErrNoUserInContext = fmt.Errorf("no user ID in context")
-{{- if .HasVersionedRepositories }}
+{{- if .HasVersionFences }}
 
 	// ErrVersionConflict is returned by UpdateOneIfVersion and
 	// DeleteOneIfVersion when the row exists at a version other than the

@@ -60,6 +60,8 @@ var corpus = []roundtripFixture{
 	// and fields the loader expands them into, and reading them back
 	// expands them to the same IR.
 	{name: "fixture-version-graph-db", dir: tsFixtures + "/fixture-version-graph-db", native: FormatTS},
+	// @optimistic tables and, in the graph above, @versioned({ exclude }).
+	{name: "fixture-optimistic-db", dir: tsFixtures + "/fixture-optimistic-db", native: FormatTS},
 	{name: "fixture-db-json", dir: dataFixtures + "/fixture-db-json", native: FormatJSON},
 	{name: "fixture-db-yaml", dir: dataFixtures + "/fixture-db-yaml", native: FormatYAML},
 	{name: "fixture-general-json", dir: dataFixtures + "/fixture-general-json", native: FormatJSON},

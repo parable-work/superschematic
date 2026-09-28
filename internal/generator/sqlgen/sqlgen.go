@@ -156,6 +156,22 @@ type HistoryTable struct {
 	// PruneKeep adds one NOT EXISTS exclusion per entry to the generated prune
 	// function, so externally referenced (key, _version) pairs survive.
 	PruneKeep []PruneKeepRef
+
+	// ExcludedColumns are the columns @versioned({ exclude }) leaves out of
+	// every history image; ExcludeArray is them as a SQL text[] literal the
+	// capture function subtracts from each image. Both are empty when
+	// nothing is excluded.
+	ExcludedColumns []string
+	ExcludeArray    string
+}
+
+// OptimisticTable is the version bump an @optimistic table gets: the
+// _version column and a BEFORE UPDATE trigger, with no history.
+type OptimisticTable struct {
+	TableName       string
+	QuotedTableName string
+	FunctionName    string
+	TriggerName     string
 }
 
 // PruneKeepRef is the quoted referencing-table metadata for one of the prune
@@ -170,17 +186,19 @@ type PruneKeepRef struct {
 
 // DDLOutput contains all the generated DDL.
 type DDLOutput struct {
-	SchemaName      string
-	Extensions      []string
-	Tables          []Table
-	JoinTables      []JoinTable
-	HistoryTables   []HistoryTable
-	Projections     []ProjectionView
-	Timestamp       string
-	HasUserTable    bool
-	SystemUserUUID  string
-	SystemUserName  string
-	SystemUserEmail string
+	SchemaName    string
+	Extensions    []string
+	Tables        []Table
+	JoinTables    []JoinTable
+	HistoryTables []HistoryTable
+	// OptimisticTables are the @optimistic tables, in table order.
+	OptimisticTables []OptimisticTable
+	Projections      []ProjectionView
+	Timestamp        string
+	HasUserTable     bool
+	SystemUserUUID   string
+	SystemUserName   string
+	SystemUserEmail  string
 
 	// MetadataKeyPrefix prefixes the keys of the projection Arrow schemas'
 	// metadata (Options.MetadataKeyPrefix).
@@ -364,8 +382,9 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		historyActorSetting = DefaultHistoryActorSetting
 	}
 	var historyTables []HistoryTable
+	var optimisticTables []OptimisticTable
 	for _, typeDef := range tableTypes {
-		if !typeDef.Versioned {
+		if !typeDef.Versioned && !typeDef.Optimistic {
 			continue
 		}
 
@@ -374,6 +393,15 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 			continue
 		}
 		injectVersionColumn(table)
+		if !typeDef.Versioned {
+			optimisticTables = append(optimisticTables, OptimisticTable{
+				TableName:       table.Name,
+				QuotedTableName: table.QuotedName,
+				FunctionName:    table.Name + "_bump_version",
+				TriggerName:     "trg_" + table.Name + "_bump_version",
+			})
+			continue
+		}
 		historyTable, err := buildHistoryTable(*table, typeDef.VersionedConfig, historyActorSetting)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build history table for %s: %w", typeDef.Name, err)
@@ -408,17 +436,18 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	}
 
 	output := &DDLOutput{
-		SchemaName:      opts.SchemaName,
-		Extensions:      collectExtensions(tables, historyTables, usedScalars),
-		Tables:          tables,
-		JoinTables:      joinTables,
-		HistoryTables:   historyTables,
-		Projections:     projections,
-		Timestamp:       opts.Clock.RFC3339(),
-		HasUserTable:    hasUserTable,
-		SystemUserUUID:  "00000000-0000-4000-8000-000000000000",
-		SystemUserName:  "System",
-		SystemUserEmail: "system@localhost",
+		SchemaName:       opts.SchemaName,
+		Extensions:       collectExtensions(tables, historyTables, usedScalars),
+		Tables:           tables,
+		JoinTables:       joinTables,
+		HistoryTables:    historyTables,
+		OptimisticTables: optimisticTables,
+		Projections:      projections,
+		Timestamp:        opts.Clock.RFC3339(),
+		HasUserTable:     hasUserTable,
+		SystemUserUUID:   "00000000-0000-4000-8000-000000000000",
+		SystemUserName:   "System",
+		SystemUserEmail:  "system@localhost",
 
 		MetadataKeyPrefix: metadataKeyPrefix,
 	}
@@ -780,7 +809,21 @@ func buildHistoryTable(table Table, cfg *ir.VersionedConfig, actorSetting string
 		DefaultPartitionName:   historyName + "_default",
 		QuotedDefaultPartition: sqlutil.QuoteIdentifier(historyName + "_default"),
 	}
-	if actor := historyActorColumn(table); actor != nil {
+	var excluded map[string]bool
+	if cfg != nil && len(cfg.Exclude) > 0 {
+		excluded = make(map[string]bool, len(cfg.Exclude))
+		literals := make([]string, 0, len(cfg.Exclude))
+		for _, field := range cfg.Exclude {
+			column := codegen.ToSnakeCase(field)
+			excluded[column] = true
+			history.ExcludedColumns = append(history.ExcludedColumns, column)
+			literals = append(literals, "'"+strings.ReplaceAll(column, "'", "''")+"'")
+		}
+		history.ExcludeArray = "ARRAY[" + strings.Join(literals, ", ") + "]"
+	}
+	// An excluded actor column is left out of the tombstone too, so the
+	// tombstone records no actor.
+	if actor := historyActorColumn(table); actor != nil && !excluded[actor.Name] {
 		history.ActorColumn = actor.Name
 		history.QuotedActorColumn = actor.QuotedName
 		history.ActorColumnType = actor.Type

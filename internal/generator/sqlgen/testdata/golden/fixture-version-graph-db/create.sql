@@ -542,12 +542,13 @@ BEGIN
     -- the unique history index holds and the latest history row for a deleted key
     -- is the DELETE. The data payload is the pre-delete image at the tombstone's
     -- version.
+    -- Every image leaves out scratch.
     INSERT INTO step_history (id, _version, operation, data)
     VALUES (
       OLD.id,
       OLD._version + 1,
       'DELETE',
-      to_jsonb(OLD) || jsonb_build_object(
+      (to_jsonb(OLD) - ARRAY['scratch']) || jsonb_build_object(
         '_version', OLD._version + 1
       )
     );
@@ -556,7 +557,7 @@ BEGIN
   -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
   -- CONFLICT DO UPDATE records the one UPDATE it made.
   INSERT INTO step_history (id, _version, operation, data)
-  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));
+  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW) - ARRAY['scratch']);
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

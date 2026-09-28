@@ -167,5 +167,12 @@ func customTemplateFuncs() template.FuncMap {
 			}
 			return reversed
 		},
+		"reverseOptimisticTables": func(tables []OptimisticTable) []OptimisticTable {
+			reversed := make([]OptimisticTable, len(tables))
+			for i, t := range tables {
+				reversed[len(tables)-1-i] = t
+			}
+			return reversed
+		},
 	}
 }

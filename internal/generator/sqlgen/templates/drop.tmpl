@@ -48,6 +48,14 @@ DROP TABLE IF EXISTS {{ $history.QuotedDefaultPartition }} CASCADE;
 DROP TABLE IF EXISTS {{ $history.QuotedName }} CASCADE;
 {{- end }}
 {{- end }}
+{{- if .OptimisticTables }}
+
+-- Drop version bump triggers and functions
+{{- range $optimistic := .OptimisticTables | reverseOptimisticTables }}
+DROP TRIGGER IF EXISTS {{ $optimistic.TriggerName }} ON {{ $optimistic.QuotedTableName }};
+DROP FUNCTION IF EXISTS {{ $optimistic.FunctionName }}();
+{{- end }}
+{{- end }}
 
 -- Drop join tables first
 {{- if .JoinTables }}

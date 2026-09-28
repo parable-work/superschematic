@@ -169,12 +169,15 @@ BEGIN
 {{- if $history.ActorColumn }} Its {{ $history.ActorColumn }} is the actor a hard delete set in
     -- {{ $history.ActorSetting }} for the statement, else the row's own value.
 {{- end }}
+{{- if $history.ExcludeArray }}
+    -- Every image leaves out {{ join $history.ExcludedColumns ", " }}.
+{{- end }}
     INSERT INTO {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version, operation, data)
     VALUES (
       OLD.{{ $history.QuotedKeyColumn }},
       OLD._version + 1,
       'DELETE',
-      to_jsonb(OLD) || jsonb_build_object(
+      {{ if $history.ExcludeArray }}(to_jsonb(OLD) - {{ $history.ExcludeArray }}){{ else }}to_jsonb(OLD){{ end }} || jsonb_build_object(
         '_version', OLD._version + 1
 {{- if $history.ActorColumn }},
         '{{ $history.ActorColumn }}', COALESCE(
@@ -189,7 +192,7 @@ BEGIN
   -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
   -- CONFLICT DO UPDATE records the one UPDATE it made.
   INSERT INTO {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version, operation, data)
-  VALUES (NEW.{{ $history.QuotedKeyColumn }}, NEW._version, TG_OP, to_jsonb(NEW));
+  VALUES (NEW.{{ $history.QuotedKeyColumn }}, NEW._version, TG_OP, to_jsonb(NEW){{ if $history.ExcludeArray }} - {{ $history.ExcludeArray }}{{ end }});
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -246,6 +249,24 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 {{- end }}
+{{- end }}
+{{- end }}
+{{- if .OptimisticTables }}
+
+-- Create version bump functions and triggers for optimistic entities
+{{- range $optimistic := .OptimisticTables }}
+
+CREATE OR REPLACE FUNCTION {{ $optimistic.FunctionName }}() RETURNS trigger AS $$
+BEGIN
+  -- BEFORE UPDATE: the stored row takes the next version.
+  NEW._version := OLD._version + 1;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER {{ $optimistic.TriggerName }}
+  BEFORE UPDATE ON {{ $optimistic.QuotedTableName }}
+  FOR EACH ROW EXECUTE FUNCTION {{ $optimistic.FunctionName }}();
 {{- end }}
 {{- end }}
 {{- if .Projections }}

@@ -344,6 +344,25 @@ ON CONFLICT (id) DO UPDATE SET title = recipe.title || ' and ' || EXCLUDED.title
 	}
 }
 
+func listRecipeVersions(t *testing.T, db *Database, id types.IdentityUUID) []types.HistoryRecord[*types.Recipe] {
+	t.Helper()
+	history, err := db.Recipe.ListVersions(context.Background(), id, nil)
+	if err != nil {
+		t.Fatalf("ListVersions: %v", err)
+	}
+	if len(history) == 0 {
+		t.Fatalf("ListVersions(%s) is empty", id.ToUUID())
+	}
+	return history
+}
+` + versionedORMTestHelpers
+
+// versionedORMTestHelpers are the helpers a generated ORM module's
+// versioned test shares: the version fence assertions, the database clock,
+// UUID parsing and a database in a fresh schema. The test source that
+// appends them imports context, errors, fmt, os, testing, time, pgxpool and
+// the types module as types.
+const versionedORMTestHelpers = `
 func assertVersionConflict(t *testing.T, label string, err error) {
 	t.Helper()
 	if !errors.Is(err, ErrVersionConflict) || !errors.Is(err, ErrNotFound) {
@@ -356,18 +375,6 @@ func assertNotFoundOnly(t *testing.T, label string, err error) {
 	if !errors.Is(err, ErrNotFound) || errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("%s = %v, want ErrNotFound and not ErrVersionConflict", label, err)
 	}
-}
-
-func listRecipeVersions(t *testing.T, db *Database, id types.IdentityUUID) []types.HistoryRecord[*types.Recipe] {
-	t.Helper()
-	history, err := db.Recipe.ListVersions(context.Background(), id, nil)
-	if err != nil {
-		t.Fatalf("ListVersions: %v", err)
-	}
-	if len(history) == 0 {
-		t.Fatalf("ListVersions(%s) is empty", id.ToUUID())
-	}
-	return history
 }
 
 func dbTime(t *testing.T, pool *pgxpool.Pool) time.Time {
