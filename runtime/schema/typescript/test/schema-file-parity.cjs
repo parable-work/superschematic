@@ -84,6 +84,42 @@ test('loadSchemaFile uses the core meta-schema by default', () => {
   );
 });
 
+test('a repeated key names its JSON pointer', () => {
+  const cases = [
+    ['{"name": "Item", "role": "EmbeddedStruct", "fields": [], "fields": []}', '/fields', 'fields'],
+    [
+      '{"types": {"a/b~c": {"name": "a/b~c", "role": "EmbeddedStruct", "fields": [{"name": "x", "typeRef": {"name": "String"}, "extensions": {}, "extensions": {}}]}}}',
+      '/types/a~1b~0c/fields/0/extensions',
+      'extensions',
+    ],
+    ['{"documents": {"d": [{"k": [1, {"a": 1, "b": 2, "a": 3}]}]}}', '/documents/d/0/k/1/a', 'a'],
+    ['{"name": "Item", "role": "EmbeddedStruct", "description": "x", "descr\\u0069ption": "x"}', '/description', 'description'],
+    // Go reads each half of a surrogate pair alone as U+FFFD.
+    [
+      '{"name": "Item", "role": "EmbeddedStruct", "implements": [{"name": "Named", "configArgs": {"\\ud800": 1, "\\udc00": 2}}]}',
+      '/implements/0/configArgs/\ufffd',
+      '\ufffd',
+    ],
+  ];
+  for (const [input, path, key] of cases) {
+    assert.throws(
+      () => loaders.core.load(input, 'payload'),
+      (error) =>
+        error instanceof SchemaFileError &&
+        error.issues.length === 1 &&
+        error.issues[0].path === path &&
+        error.issues[0].message === `repeated object key ${JSON.stringify(key)}`,
+      input
+    );
+  }
+  // A string that holds a repeated key, and the same key in sibling objects
+  // and array elements.
+  const loaded = loaders.core.load(
+    '{"types": {"A": {"name": "A", "role": "EmbeddedStruct", "description": "{\\"name\\": 1, \\"name\\": 2}", "implements": [{"name": "N", "configArgs": {"k": ["k", "k"]}}, {"name": "M", "configArgs": {"k": 1}}]}, "B": {"name": "B", "role": "EmbeddedStruct"}}}'
+  );
+  assert.deepStrictEqual(Object.keys(loaded.document.types), ['A', 'B']);
+});
+
 test('a meta-schema without the invocation policy default is refused', () => {
   const metaSchema = JSON.parse(extendedMetaSchemaText);
   delete metaSchema.$defs.OperationMCP.properties.review.default;

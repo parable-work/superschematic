@@ -65,6 +65,17 @@
         "created_by",
         "updated_at"
       ]
+    },
+    {
+      "kind": "utensil",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "excluded": [
+        "recipe_id"
+      ]
     }
   ]
 }

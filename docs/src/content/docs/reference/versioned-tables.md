@@ -87,8 +87,10 @@ Verification refuses a name that is not a field of the type, the key,
 `deletedAt` and relations: the history readers find and filter rows by
 them. A member of a [version graph](/superschematic/reference/version-graphs/)
 may exclude only its audit fields (`createdAt`, `createdBy`, `updatedAt`,
-`updatedBy`) and fields with `@conflictUnit("excluded")`, because a
-commit reads the member's content back from history.
+`updatedBy`) and nullable fields with `@conflictUnit("excluded")`, because
+a commit reads the member's content back from history, and Revert and
+Merge rebuild rows from history images: a required column missing from the
+image would be written as NULL. The graph writes the audit fields itself.
 
 ## What the ORM generates
 

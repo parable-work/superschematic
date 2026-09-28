@@ -1,6 +1,6 @@
 ---
 title: Version graphs
-description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the generated Go shell, and how a consumer links the core.
+description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the generated Go shell, how a consumer links the core, and the core from TypeScript.
 sidebar:
   order: 8
 ---
@@ -88,20 +88,28 @@ Verification refuses:
   member, or whose `name` is not PascalCase; a negative `schemaEpoch`;
 - a member that is not `@versioned`, has other than one UUID `@key`, has
   other than exactly one relation to its root, has `deletedAt`, or declares
-  `entityKey`, `ref` or `deletedOnRef`;
+  `entityKey`, `ref` or `deletedOnRef` or a field whose column is
+  `entity_key`, `ref_id` or `deleted_on_ref` (such as `refId`);
 - a type that is a root and a member, or a member of a graph the schema
   does not declare;
 - a `parent.of` that is not a member of the same graph, a `parent.key`
   that is not a UUID field, and an `order` that is not a `Generic.Int64`
   field;
 - a graph whose generated names collide with a definition of the schema or
-  of another graph;
+  of another graph, and an index whose name collides with one the graph
+  generates (`uq_<member>_entity_ref`, `uq_<graph>_ref_root_name`,
+  `uq_<graph>_commit_root_sequence`, `uq_<graph>_patch_entity` and
+  `idx_<graph>_patch_entity_version`): Postgres keeps index names in one
+  namespace per schema, so an index on any table counts;
 - `@conflictUnit` outside a member, an unknown strategy, and `keyed` or
   `jsonSchema` on a field that is not one JSON object (`Generic.JSON` or a
   `@jsonField` type);
 - a member that excludes content from history with
   `@versioned({ exclude })`: it may exclude only its audit fields and
-  fields with `@conflictUnit("excluded")`.
+  nullable fields with `@conflictUnit("excluded")`. Revert and Merge
+  rebuild rows from history images, so a required column missing from the
+  image would be written as NULL and the statement would fail. The shell
+  writes the audit fields itself.
 
 A member has no `deletedAt` because a delete on a ref is a row that holds
 the entity's `(entityKey, ref)` slot. A soft delete would free the slot and
@@ -165,20 +173,23 @@ a live row and its history image hash the same. A refused input returns
 the descriptor's members, every rule, the error codes and the C ABI, is
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md).
 Its vectors in `runtime/versiongraph/testdata/vectors` are the executable
-form: the Rust tests, the Go binding and a bun test of the wasm build run
+form: the Rust tests, the Go binding and the TypeScript package's tests run
 every one.
 
 The same exports are built three ways: a static archive, which the Go
 binding `runtime/versiongraph/go` (package `versiongraph`) links through
-cgo; a `cdylib`; and `wasm32-unknown-unknown` for the browser
-(`make versiongraph-wasm`).
+cgo; a `cdylib`; and `wasm32-unknown-unknown`, which the TypeScript package
+`@superschematic/versiongraph` ships
+([Use the core from TypeScript](#use-the-core-from-typescript)).
 
 ### The descriptor
 
 The ORM generator builds each graph's descriptor from the IR and writes it
 twice: as the constant `<Name>GraphDescriptor` in the ORM package, and as
 `versiongraph/<name>.json` in the Go types module, where a browser or
-another runtime reads the same one.
+another runtime reads the same one. Writing the types module removes each
+`versiongraph/*.json` that no graph of the schema writes and leaves any
+other file there.
 
 ```json
 {
@@ -218,7 +229,7 @@ A ref or commit that does not exist, or a discarded ref, is `ErrNotFound`.
 | --- | --- |
 | `CreatePrimary(ctx, root, name)` | Creates a primary line of `root`. |
 | `Branch(ctx, fromRef, name)` | Creates a change set of `fromRef` whose base is `fromRef`'s head commit. |
-| `Save(ctx, ref, version, RecipeEdits)` | Applies each kind's `GraphEdits[T]`: `Upsert` writes each row as the ref's override of its entity, found by `EntityKey` (a row without one is a new entity, whose key the database generates); `Delete` writes a row that deletes the entity on the ref; `Unset` removes the ref's own row, so the ref reads the entity through its base again. A sealed ref refuses it with `ErrRefSealed`. |
+| `Save(ctx, ref, version, RecipeEdits)` | Applies each kind's `GraphEdits[T]`: `Upsert` writes each row as the ref's override of its entity, found by `EntityKey` (a row without one is a new entity, whose key the database generates). Every ref holds its own row of an entity, so the row's id is never the caller's: Save ignores it and the table's default generates it, whether the `@key` is `AutoGenerate<Identity.UUID>` or a plain `Identity.UUID`. `Delete` writes a row that deletes the entity on the ref; `Unset` removes the ref's own row, so the ref reads the entity through its base again. A sealed ref refuses it with `ErrRefSealed`. |
 | `Commit(ctx, ref, version, RecipeCommitOptions)` | Composes the ref, checks the tree with `validate`, diffs it against the ref's last commit (or its base), and writes a commit with one patch per changed entity pinning the winning row's `(id, _version)`. Moves the ref's head. `Message` is stored; `Tag` takes the root's next `sequence`, which makes the commit a published version. `ErrNothingToCommit` when nothing changed; an `*InvalidTreeError` (`ErrInvalidTree`) lists what `validate` found. |
 | `Seal(ctx, ref, version)` | Commits when there are changes and sets `sealedAt`. The ref then refuses writes. |
 | `Merge(ctx, source, target, targetVersion, resolutions)` | Merges the source's head commit into the target against the source's base. Without conflicts it writes the result onto the target and commits. With conflicts left after `resolutions` it returns them as `[]RecipeConflict` (kind, entity key, unit path, the base, ours and theirs values, and each side's author) and writes nothing. A `RecipeResolution` takes a side (`versiongraph.Take`) or gives a value for one conflict's path. |
@@ -272,6 +283,73 @@ in `CGO_LDFLAGS`.
 
 The binding ships link flags for linux and darwin on amd64 and arm64.
 
+## Use the core from TypeScript
+
+`@superschematic/versiongraph` runs the same core in the browser, bun and
+Node. It ships the `wasm32-unknown-unknown` build and compiled ES modules,
+has no dependencies and no generated glue, and types every input and output
+of the contract.
+
+```ts
+import { init, VersionGraphError, type Descriptor } from "@superschematic/versiongraph";
+import recipe from "./versiongraph/recipe.json" with { type: "json" };
+
+const descriptor = recipe as Descriptor;
+const graph = await init();
+
+const { tree, findings } = graph.compose({ descriptor, base, overlay });
+const { merged, conflicts, entities } = graph.merge({ descriptor, base, ours, theirs });
+const { changes } = graph.diff({ descriptor, from: base, to: tree });
+const { contentHash } = graph.contentHash({ descriptor, tree });
+
+try {
+  graph.validate({ descriptor, tree: { recipe_step: [] } });
+} catch (error) {
+  if (error instanceof VersionGraphError) console.log(error.code); // "unknown_kind"
+}
+```
+
+`init(source?, options?)` compiles and instantiates the module; every
+operation on the graph it returns is synchronous. `source` is the module's
+bytes, a URL, a `Response` or a promise of one, or a compiled
+`WebAssembly.Module`. Without it, `init` loads the
+`superschematic_versiongraph.wasm` shipped next to the package's `index.js`,
+found with `new URL(..., import.meta.url)`: fetched in a browser (a bundler
+that understands that pattern copies the file into the build), and read
+from disk under bun and Node. A server that sends the module as
+`application/wasm` lets the browser compile it while it downloads. The file
+is also exported as
+`@superschematic/versiongraph/superschematic_versiongraph.wasm`.
+
+| Method | Operation | Input and output types |
+| --- | --- | --- |
+| `compose` | `compose` | `ComposeInput`, `ComposeOutput` |
+| `merge` | `merge` | `MergeInput`, `MergeOutput` |
+| `diff` | `diff` | `DiffInput`, `DiffOutput` |
+| `contentHash` | `content_hash` | `TreeInput`, `ContentHashOutput` |
+| `validate` | `validate` | `TreeInput`, `ValidateOutput` |
+| `run(operation, json)` | any, by its contract name | JSON text in, JSON text out |
+
+A refused input throws a `VersionGraphError`, whose `code` is the
+contract's error code (`ErrorCode`) and whose `message` is the core's.
+Every type names its members as the contract does, and rows are plain
+objects keyed by column name, the form the Go shell sends the core.
+
+`JSON.parse` reads a number as a double, so a numeric column wider than 53
+bits would lose digits on the way back. `options.parse` and
+`options.stringify` replace the JSON codec, for example with a reviver that
+returns `JSON.rawJSON(context.source)` for each number. An order column
+needs neither: the core refuses one outside the integers a double holds
+exactly.
+
+The package's test suite runs every vector through the package. It decodes
+each vector's input and output through the package's types, with one
+decoder per member that the compiler requires to cover each type exactly
+and a check of each literal union's values, and compares the decoded JSON,
+member order included, with the vector. It also fails when a member or
+literal of the types appears in no vector. A member or literal that is
+missing, extra or misnamed in the types therefore fails it.
+
 ## Limits
 
 - History is linear per row; a branch exists because each ref writes its
@@ -282,8 +360,6 @@ The binding ships link flags for linux and darwin on amd64 and arm64.
   supported.
 - `schemaEpoch` is recorded and checked, but nothing transforms a commit
   from an older epoch.
-- The wasm build has no TypeScript package over it yet; a browser loads
-  the module and calls its exports itself.
 - The compiler emits DDL, not migrations.
 - Who may commit, seal, merge or tag, and when a discarded draft is
   collected, is the application's policy. The generated prune functions

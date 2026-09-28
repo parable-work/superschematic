@@ -14,7 +14,8 @@ import (
 var sqlIdentifierPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
 // auditFields are the fields a graph member may exclude from its history
-// without a conflict unit: they are never content (D17).
+// without a conflict unit, even when required: they are never content
+// (D17), and the shell writes them on every row it rebuilds.
 var auditFields = map[string]bool{"createdAt": true, "createdBy": true, "updatedAt": true, "updatedBy": true}
 
 // checkVersioned validates the @versioned and @optimistic contracts. The
@@ -240,6 +241,8 @@ func relationTarget(fd *ir.FieldDef) string {
 // by its column, so none of those can be excluded. A graph member's
 // commits are read back from its history, so it may exclude only what is
 // not content: a field whose conflict unit is excluded, or an audit field.
+// Revert and Merge rebuild its rows from history images, so a field it
+// excludes must also be nullable; the shell writes the audit fields itself.
 func checkExclude(schema *ir.Schema, td *ir.TypeDef, r *Result) {
 	seen := map[string]bool{}
 	for _, name := range td.VersionedConfig.Exclude {
@@ -260,6 +263,8 @@ func checkExclude(schema *ir.Schema, td *ir.TypeDef, r *Result) {
 			r.errorf(td.Owner, "%s: @versioned exclude cannot name the relation %s: its as-of reader finds history rows by it", td.Name, name)
 		case td.GraphMember != nil && fd.ConflictUnit != ir.ConflictUnitExcluded && !auditFields[name]:
 			r.errorf(td.Owner, "%s: a @graphMember may exclude only audit fields and fields with @conflictUnit(\"excluded\"), and %s is content its commits read back from history", td.Name, name)
+		case td.GraphMember != nil && fd.Required && !auditFields[name]:
+			r.errorf(td.Owner, "%s: a @graphMember may exclude only nullable fields besides its audit fields, and %s is required: Revert and Merge rebuild rows from history images, which would write it as NULL", td.Name, name)
 		}
 	}
 }

@@ -185,11 +185,15 @@ func Decode(data []byte, source string) (*Document, error) {
 // dispatch the document form, its extensions and documents close the
 // corresponding slots, and an "extensions" or "documents" key naming
 // something the registry does not know is rejected by name before JSON
-// Schema validation runs.
+// Schema validation runs. A payload in which any object repeats a key is
+// rejected first.
 func DecodeWith(data []byte, source string, reg *registry.Registry) (*Document, error) {
 	reg = orCore(reg)
 	var payload map[string]any
 	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, fmt.Errorf("%s: %w", source, err)
+	}
+	if err := refuseRepeatedKeys(data); err != nil {
 		return nil, fmt.Errorf("%s: %w", source, err)
 	}
 

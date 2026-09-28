@@ -193,6 +193,101 @@ func TestVersionGraphDeclarations(t *testing.T) {
 			want: "Step: field ref collides with the field @graphMember adds",
 		},
 		{
+			name: "member with a column that only resembles one the graph adds",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].Fields = append(s.Types["Step"].Fields, &ir.FieldDef{Name: "refCode", TypeRef: ir.TypeRef{Name: "string"}})
+			},
+		},
+		{
+			name: "member with a field whose column is ref_id",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].Fields = append(s.Types["Step"].Fields, &ir.FieldDef{Name: "refId", TypeRef: ir.TypeRef{Name: "string"}})
+			},
+			want: "Step: column ref_id collides with the column @graphMember adds for ref",
+		},
+		{
+			name: "member with a field whose column is entity_key",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].Fields = append(s.Types["Step"].Fields, &ir.FieldDef{Name: "entity_key", TypeRef: ir.TypeRef{Name: "Identity.UUID"}})
+			},
+			want: "Step: column entity_key collides with the column @graphMember adds for entityKey",
+		},
+		{
+			name: "member with a field whose column is deleted_on_ref",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].Fields = append(s.Types["Step"].Fields, &ir.FieldDef{Name: "deleted_on_ref", TypeRef: ir.TypeRef{Name: "boolean"}})
+			},
+			want: "Step: column deleted_on_ref collides with the column @graphMember adds for deletedOnRef",
+		},
+		{
+			name: "member given ref_id by a @hasMany back reference",
+			mutate: func(s *ir.Schema) {
+				s.Types["Ref"] = &ir.TypeDef{
+					Name: "Ref", Role: ir.RoleDBTable,
+					Fields: []*ir.FieldDef{
+						{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Key: true},
+						{Name: "steps", TypeRef: ir.TypeRef{Name: "Step", IsArray: true}, HasMany: true},
+					},
+				}
+			},
+			want: "Step: column ref_id collides with the column @graphMember adds for ref",
+		},
+		{
+			name: "member with a unique index named as the graph's",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].Indexes = []ir.IndexDef{{Keys: []string{"position"}, Unique: true, Name: "entity_ref"}}
+			},
+			want: `Step: index uq_step_entity_ref collides with the index version graph "Recipe" adds to Step`,
+		},
+		{
+			name: "member with a plain index of the graph's purpose name",
+			mutate: func(s *ir.Schema) {
+				s.Types["Step"].Indexes = []ir.IndexDef{{Keys: []string{"position"}, Name: "entity_ref"}}
+			},
+		},
+		{
+			name: "an index named as the ref table's",
+			mutate: func(s *ir.Schema) {
+				s.Types["Recipe"].Indexes = []ir.IndexDef{{Keys: []string{"title"}, Unique: true, Name: "ref_root_name"}}
+			},
+			want: `Recipe: index uq_recipe_ref_root_name collides with the index version graph "Recipe" adds to RecipeRef`,
+		},
+		{
+			name: "an index named as another graph's ref table's",
+			mutate: func(s *ir.Schema) {
+				s.Types["Recipe"].VersionGraph.Name = "Cookbook"
+				s.Types["Recipe"].Indexes = []ir.IndexDef{{Keys: []string{"title"}, Unique: true, Name: "ref_root_name"}}
+			},
+		},
+		{
+			name: "an index named as the commit table's",
+			mutate: func(s *ir.Schema) {
+				s.Types["Recipe"].Indexes = []ir.IndexDef{{Keys: []string{"title"}, Unique: true, Name: "commit_root_sequence"}}
+			},
+			want: `Recipe: index uq_recipe_commit_root_sequence collides with the index version graph "Recipe" adds to RecipeCommit`,
+		},
+		{
+			name: "an index named as the patch table's entity index",
+			mutate: func(s *ir.Schema) {
+				s.Types["Recipe"].Indexes = []ir.IndexDef{{Keys: []string{"title"}, Unique: true, Name: "patch_entity"}}
+			},
+			want: `Recipe: index uq_recipe_patch_entity collides with the index version graph "Recipe" adds to RecipePatch`,
+		},
+		{
+			name: "an unnamed index whose generated name is the patch table's version index",
+			mutate: func(s *ir.Schema) {
+				s.Types["Recipe"].Fields = append(s.Types["Recipe"].Fields, &ir.FieldDef{Name: "patchEntity", TypeRef: ir.TypeRef{Name: "string"}}, &ir.FieldDef{Name: "version", TypeRef: ir.TypeRef{Name: "string"}})
+				s.Types["Recipe"].Indexes = []ir.IndexDef{{Keys: []string{"patchEntity", "version"}}}
+			},
+			want: `Recipe: index idx_recipe_patch_entity_version collides with the index version graph "Recipe" adds to RecipePatch`,
+		},
+		{
+			name: "a unique index whose name only shares the patch version index's purpose",
+			mutate: func(s *ir.Schema) {
+				s.Types["Recipe"].Indexes = []ir.IndexDef{{Keys: []string{"title"}, Unique: true, Name: "patch_entity_version"}}
+			},
+		},
+		{
 			name: "a parent of the member's own type",
 			mutate: func(s *ir.Schema) {
 				s.Types["Ingredient"].GraphMember.Parent.Of = "Ingredient"

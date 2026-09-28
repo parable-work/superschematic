@@ -4,13 +4,14 @@ name: ci
 # (build, vet, test with the database tests against a Postgres container,
 # gofmt, golangci-lint, scalar catalog and schema-file types drift, CLI smoke
 # over the fixture corpus), the acme example extension (smoke plus the
-# no-core-edits check), the TypeScript authoring packages, schema runtime
-# and http runtime, the Python schema runtime, the Rust http runtime, the
-# version-graph core (crate, Go binding and wasm build), the Starlight docs
-# build, and the extraction scrub. `ci-pass` is the single aggregating
-# job the branch ruleset requires; every other job must be listed in its
-# `needs`. The docs job on pull requests is a recorded deviation from
-# superscalar (D9); superscalar only builds docs in release.yml.
+# no-core-edits check), the TypeScript authoring packages, schema runtime and
+# http runtime, the Python schema runtime, the Rust http runtime, the
+# version-graph core (crate, Go binding, and the TypeScript package over its
+# wasm build), the Starlight docs build, and the extraction scrub. `ci-pass`
+# is the single aggregating job the branch ruleset requires; every other job
+# must be listed in its `needs`. The docs job on pull requests is a recorded
+# deviation from superscalar (D9); superscalar only builds docs in
+# release.yml.
 #
 # superscalar has no release yet, so every job that links it checks the
 # pinned commit out under third_party/superscalar and builds the static
@@ -478,7 +479,7 @@ jobs:
           cargo test
 
   versiongraph:
-    name: versiongraph (core crate / Go binding / wasm)
+    name: versiongraph (core crate / Go binding / TypeScript package)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -528,10 +529,20 @@ jobs:
           version: v${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: runtime/versiongraph/go
 
-      - name: wasm32 build + bun vector test
+      - name: Setup Node.js
+        # The package's test imports the built package under Node too.
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: TypeScript package (wasm32 build, typecheck, every vector through the package, Node load)
+        # The only place CI runs the vectors through the wasm build; the
+        # typescript job leaves this package to this job.
+        working-directory: runtime/versiongraph/typescript
         run: |
-          (cd runtime/versiongraph/rust && cargo build --release --target wasm32-unknown-unknown)
-          (cd runtime/versiongraph/wasm && bun test)
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run test
 
   docs:
     # Cheap PR gate: npm ci + astro build. superscalar only builds docs in

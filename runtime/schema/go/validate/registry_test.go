@@ -172,8 +172,8 @@ func TestDefaultRegistry_Contents(t *testing.T) {
 	// Every name the linked scalar core knows is dispatched, not just the
 	// ones whose metadata marks a custom validator: the core's Validate is
 	// the single source of truth for all of them.
-	assert.Equal(t, len(scalarlib.ScalarIDByCanonical), r.Len())
-	for name := range scalarlib.ScalarIDByCanonical {
+	assert.Equal(t, len(scalarlib.VALID_SCALARS), r.Len())
+	for _, name := range scalarlib.VALID_SCALARS {
 		assert.True(t, r.Has(name), "expected default registry to contain %q", name)
 	}
 	assert.False(t, r.Has("Custom.Missing"))

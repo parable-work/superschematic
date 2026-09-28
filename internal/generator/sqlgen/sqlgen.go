@@ -661,30 +661,27 @@ func convertTypeToTable(
 		table.Columns = append(table.Columns, column)
 	}
 
-	// Indexes from @index declarations.
+	// Indexes from @index declarations. Verification refuses an index
+	// without keys and a key that names no column (checkIndexKeys); both
+	// fail here too, as a backstop, rather than drop the index.
 	var pending []pendingIndex
 	for _, idx := range typeDef.Indexes {
 		if len(idx.Keys) == 0 {
-			continue
+			return table, fmt.Errorf("type %s declares an @index with no keys", typeDef.Name)
 		}
 
 		indexColumns := make([]string, 0, len(idx.Keys))
 		indexTypes := make([]string, 0, len(idx.Keys))
 		indexKeys := make([]string, 0, len(idx.Keys))
-		validIndex := true
 
 		for _, key := range idx.Keys {
 			indexCol := findIndexColumn(table.Columns, key)
 			if indexCol == nil {
-				validIndex = false
-				break
+				return table, fmt.Errorf("@index key %q of type %s names no column of table %s", key, typeDef.Name, table.Name)
 			}
 			indexColumns = append(indexColumns, indexCol.QuotedName)
 			indexTypes = append(indexTypes, indexCol.Type)
 			indexKeys = append(indexKeys, key)
-		}
-		if !validIndex {
-			continue
 		}
 
 		pending = append(pending, pendingIndex{
@@ -1094,18 +1091,19 @@ func determineIndexType(columnTypes []string) string {
 	return "BTREE"
 }
 
+// findIndexColumn returns the first of columns an @index key resolves to
+// (sqlutil.IndexKeyMatches), or nil.
 func findIndexColumn(columns []Column, key string) *Column {
-	keyFieldName := codegen.ToSnakeCase(key)
 	for i := range columns {
 		col := &columns[i]
-		if col.Name == keyFieldName || col.Name == keyFieldName+"_id" {
+		if sqlutil.IndexKeyMatches(key, col.Name) {
 			return col
 		}
 	}
 	return nil
 }
 
-const postgresIdentifierLimit = 63
+const postgresIdentifierLimit = sqlutil.PostgresIdentifierLimit
 
 type pendingIndex struct {
 	index Index
@@ -1113,46 +1111,10 @@ type pendingIndex struct {
 	name  string
 }
 
-var indexPurposeName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-
-// indexName builds the identifier for one declared index. Without an explicit
-// purpose the name stays idx_{table}_{columns}; with one it becomes
-// {idx|uq}_{table}_{purpose}.
-//
-// PostgreSQL truncates identifiers past 63 bytes, which silently collapses two
-// distinct indexes into one name. Rather than pack or hash a name to fit, an
-// overlong result is a schema error: the author picks a purpose name, which
-// reads better than any suffix the generator could derive.
+// indexName builds the identifier for one declared index
+// (sqlutil.IndexName).
 func indexName(tableName string, p pendingIndex) (string, error) {
-	if p.name == "" {
-		parts := make([]string, 0, 2+len(p.keys))
-		parts = append(parts, "idx", tableName)
-		for _, key := range p.keys {
-			parts = append(parts, codegen.ToSnakeCase(key))
-		}
-		name := strings.Join(parts, "_")
-		if len(name) > postgresIdentifierLimit {
-			return "", fmt.Errorf(
-				"index on %s over %s generates %q (%d bytes), over PostgreSQL's %d-byte limit; give it a purpose name: @index([...], { name: 'purpose' })",
-				tableName, strings.Join(p.keys, ", "), name, len(name), postgresIdentifierLimit)
-		}
-		return name, nil
-	}
-
-	if !indexPurposeName.MatchString(p.name) {
-		return "", fmt.Errorf("index name %q on %s must be lowercase alphanumeric with underscores", p.name, tableName)
-	}
-	kind := "idx"
-	if p.index.Unique {
-		kind = "uq"
-	}
-	name := kind + "_" + tableName + "_" + p.name
-	if len(name) > postgresIdentifierLimit {
-		return "", fmt.Errorf(
-			"index name %q on %s is %d bytes, over PostgreSQL's %d-byte limit; shorten the purpose name",
-			name, tableName, len(name), postgresIdentifierLimit)
-	}
-	return name, nil
+	return sqlutil.IndexName(tableName, p.keys, p.name, p.index.Unique)
 }
 
 // serverConstraintName returns the identifier PostgreSQL will create for name.

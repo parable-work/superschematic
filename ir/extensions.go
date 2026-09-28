@@ -81,7 +81,8 @@ func SetDocument[T any](s *Schema, name string, v T) error {
 // literals kept as written. Every path that stores a value runs it
 // ([SetExtension], [SetDocument], and the data-form readers through
 // [CanonicalizeExtensions] and [CanonicalizeDocuments]), so the persisted IR
-// does not depend on the authoring format or the codec's field order.
+// does not depend on the authoring format or the codec's field order. Only
+// whitespace may follow the value.
 func CanonicalJSON(raw json.RawMessage) (json.RawMessage, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -89,7 +90,9 @@ func CanonicalJSON(raw json.RawMessage) (json.RawMessage, error) {
 	if err := dec.Decode(&value); err != nil {
 		return nil, err
 	}
-	if dec.More() {
+	// Decoder.More reports false before a closing bracket or brace, so it
+	// would pass `{}]`; read the rest of the input instead.
+	if len(bytes.TrimLeft(raw[dec.InputOffset():], " \t\r\n")) > 0 {
 		return nil, fmt.Errorf("trailing data after JSON value")
 	}
 	return json.Marshal(value)

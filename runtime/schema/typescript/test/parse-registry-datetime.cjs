@@ -6,7 +6,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { scalarIdByCanonical } = require('superscalar/scalars');
 const { napiBackend } = require('superscalar/backend');
 const { createDefaultScalarParseRegistry } = require('../dist/runtime/parse/registry.js');
 
@@ -21,14 +20,13 @@ const corpus = JSON.parse(
 
 let failures = 0;
 const dtAdapter = createDefaultScalarParseRegistry().get('Temporal.DateTime');
-const dtId = scalarIdByCanonical['Temporal.DateTime'];
 const dtBackend = napiBackend();
 let checked = 0;
 for (const c of corpus.scalars['Temporal.DateTime'].accepted || []) {
   if (c.unresolved || c.normalized === undefined) continue;
   checked++;
   const [got, errs] = dtAdapter(c.input);
-  const core = dtBackend.parse(dtId, c.input);
+  const core = dtBackend.parse('Temporal.DateTime', c.input);
   if (errs.length > 0 || got !== core) {
     failures++;
     console.error(

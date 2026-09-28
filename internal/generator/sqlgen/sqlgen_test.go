@@ -664,6 +664,35 @@ func TestHasManyWithoutDirectiveFails(t *testing.T) {
 	}
 }
 
+// TestUnbuildableIndexFails: verification refuses an @index without keys or
+// with a key that names no column; the generator fails on both too, as a
+// backstop, instead of leaving the index out of the DDL.
+func TestUnbuildableIndexFails(t *testing.T) {
+	cases := []struct {
+		keys []string
+		want string
+	}{
+		{[]string{"slug", "slugg"}, `@index key "slugg" of type Tenant names no column of table tenant`},
+		{nil, "type Tenant declares an @index with no keys"},
+	}
+	for _, tc := range cases {
+		schema := ir.NewSchema("synthetic", ir.SchemaKindDB)
+		schema.Types["Tenant"] = &ir.TypeDef{
+			Name: "Tenant",
+			Role: ir.RoleDBTable,
+			Fields: []*ir.FieldDef{
+				{Name: "id", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Key: true},
+				{Name: "slug", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			},
+			Indexes: []ir.IndexDef{{Keys: tc.keys}},
+		}
+		_, err := Generate(schema, Options{SchemaName: "synthetic"})
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("keys %q: error = %v, want %q", tc.keys, err, tc.want)
+		}
+	}
+}
+
 // TestDetermineIndexType verifies index access method selection.
 func TestDetermineIndexType(t *testing.T) {
 	cases := []struct {

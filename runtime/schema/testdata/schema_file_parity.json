@@ -52,6 +52,16 @@
       "error": "trailing data after JSON value"
     },
     {
+      "name": "a closing bracket after the value",
+      "input": "{}]",
+      "error": "trailing data after JSON value"
+    },
+    {
+      "name": "a closing brace after the value",
+      "input": "[1]}",
+      "error": "trailing data after JSON value"
+    },
+    {
       "name": "empty input",
       "input": "",
       "error": "EOF"
@@ -533,6 +543,62 @@
       "input": "{\"types\": {}} x",
       "accept": false,
       "error": "trailing data: invalid character 'x' after top-level value"
+    },
+    {
+      "name": "a repeated collection key",
+      "registry": "core",
+      "input": "{\"types\": {\"Bad\": {\"name\": \"Bad\", \"role\": \"Table\"}}, \"types\": {\"Good\": {\"name\": \"Good\", \"role\": \"EmbeddedStruct\"}}}",
+      "accept": false,
+      "error": "a repeated collection key: repeated object key \"types\" at '/types'"
+    },
+    {
+      "name": "a repeated field list",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\",\n\t\t\"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"httpMethod\": \"FETCH\"}], \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}}]}",
+      "accept": false,
+      "error": "a repeated field list: repeated object key \"fields\" at '/fields'"
+    },
+    {
+      "name": "a repeated extensions slot",
+      "registry": "extended",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [\n\t\t{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"extensions\": {\"vendor\": {}}, \"extensions\": {}}]}",
+      "accept": false,
+      "error": "a repeated extensions slot: repeated object key \"extensions\" at '/fields/0/extensions'"
+    },
+    {
+      "name": "a repeated key in extension data",
+      "registry": "extended",
+      "input": "{\"extensions\": {\"acme\": {\"catalog\": true, \"catalog\": true}}}",
+      "accept": false,
+      "error": "a repeated key in extension data: repeated object key \"catalog\" at '/extensions/acme/catalog'"
+    },
+    {
+      "name": "a repeated key in configArgs",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"implements\": [{\"name\": \"Named\", \"configArgs\": {\"a\": 1, \"a\": 1}}]}",
+      "accept": false,
+      "error": "a repeated key in configArgs: repeated object key \"a\" at '/implements/0/configArgs/a'"
+    },
+    {
+      "name": "a repeated scalar key with the same value",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"Colour\", \"values\": [], \"name\": \"Colour\"}",
+      "accept": false,
+      "error": "a repeated scalar key with the same value: repeated object key \"name\" at '/name'"
+    },
+    {
+      "name": "a repeated key written with an escape",
+      "registry": "core",
+      "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"description\": \"x\", \"descr\\u0069ption\": \"x\"}",
+      "accept": false,
+      "error": "a repeated key written with an escape: repeated object key \"description\" at '/description'"
+    },
+    {
+      "name": "the same key in sibling objects",
+      "registry": "core",
+      "input": "{\"types\": {\"A\": {\"name\": \"A\", \"role\": \"EmbeddedStruct\"}, \"B\": {\"name\": \"B\", \"role\": \"EmbeddedStruct\"}}}",
+      "accept": true,
+      "canonical": "{\"types\":{\"A\":{\"name\":\"A\",\"role\":\"EmbeddedStruct\"},\"B\":{\"name\":\"B\",\"role\":\"EmbeddedStruct\"}}}"
     },
     {
       "name": "a registry's kind",
