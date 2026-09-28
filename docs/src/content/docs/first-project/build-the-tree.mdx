@@ -18,26 +18,16 @@ in CI and before a release.
 superschematic build-all schemas/services
 ```
 
-```
-Discovered 4 schema services: shop-db, shop-api, shop-common, shop-storefront (mode: sequential)
-  Shared TypeScript program: 4 service(s)
-  ...
-  OK: shop-db (built)
-  ...
-  OK: shop-api (built)
-  ...
-  OK: shop-common (built)
-  ...
-  OK: shop-storefront (built)
-  Wrote .../schemas/dist/.deps.json
+<Snippet file="testdata/generated/logs/build-all.txt" />
 
-All 4 schema services built successfully
-```
+Each service's own build lines, as `build` prints them, come between these
+summary lines.
 
-The order comes from the configs: `shop-api` names `shop-db` as its
-`authDb`, and `shop-storefront` lists `shop-common` in its `dependencies`,
-so each builds after the service it needs. All four load through one
-TypeScript program, which is faster than four separate builds.
+The order comes from the configs: `shop-api` and `shop-orders` name
+`shop-db` as their `authDb`, and `shop-storefront` lists `shop-common` in
+its `dependencies`, so each builds after the service it needs. Every
+service loads through one TypeScript program, which is faster than a build
+per service.
 `--parallel` builds services that do not depend on each other at the same
 time.
 
@@ -48,11 +38,7 @@ on, and nothing else:
 superschematic build --with-deps schemas/services/shop-storefront
 ```
 
-```
-Resolved 2 schema services for shop-storefront: shop-common, shop-storefront
-...
-Built 2 schema services for shop-storefront
-```
+<Snippet file="testdata/generated/logs/build-with-deps-shop-storefront.txt" />
 
 ## The package graph
 
@@ -79,16 +65,13 @@ whose outputs are missing is restored:
 superschematic build-all --cache schemas/services
 ```
 
-```
-  OK: shop-db (up to date)
-  OK: shop-api (up to date)
-  OK: shop-common (up to date)
-  OK: shop-storefront (up to date)
-```
+<Snippet file="testdata/generated/logs/build-all-cache.txt" />
 
-After `rm -rf schemas/dist`, the same command answers
-`restored from cache` for each service. The cache lives in your XDG cache
-directory; `--cache-root`, `SUPERSCHEMATIC_BUILD_CACHE_DIR` or
+After `rm -rf schemas/dist`, the same command restores each service:
+
+<Snippet file="testdata/generated/logs/build-all-restore.txt" />
+
+The cache lives in your XDG cache directory; `--cache-root`, `SUPERSCHEMATIC_BUILD_CACHE_DIR` or
 `[cache] root` in the naming file move it. Because the key covers the
 binary, build the CLI with `make build`, which strips the checkout's paths
 and revision, so the key survives a commit that changes no Go code.
@@ -100,12 +83,16 @@ project like this one:
 
 1. `build-all` with the core binary;
 2. `go build` and `go vet` on every generated Go module;
-3. the Go service's tests, which call the generated server through the
-   generated Go SDK;
-4. `tsc` on the generated router and the TypeScript service, and its
-   tests, which call the router through the generated TypeScript SDK;
-5. a byte comparison of the generated files these pages quote against
-   their committed copies under `testdata/generated/`.
+3. `tsc` on the generated TypeScript router and SDKs, an import of the
+   generated Python packages, and a Rust build against the generated Rust
+   SDK;
+4. the Go services' tests, which call the generated server through the
+   generated Go SDK, then run the TypeScript, Python and Rust clients
+   against the same server and compare what they print;
+5. the TypeScript service's tests, which call the router through the
+   generated TypeScript SDK;
+6. a byte comparison of the generated files and command output these pages
+   quote against their committed copies under `testdata/generated/`.
 
 It runs on every pull request to this repository, so the pages of this
 tutorial stay true.
@@ -113,6 +100,11 @@ tutorial stay true.
 ## Where to go next
 
 <CardGrid>
+  <LinkCard
+    title="Guides"
+    description="Types, tables, routes, auth and SDKs in depth, over the same shop."
+    href="/superschematic/guides/modeling-types/"
+  />
   <LinkCard
     title="Languages"
     description="What the generated code offers in Go, TypeScript, Python and Rust."
@@ -126,6 +118,6 @@ tutorial stay true.
   <LinkCard
     title="Extend superschematic"
     description="Add kinds, decorators, generators and auth providers. examples/acme-schematic extends this same shop."
-    href="/superschematic/guides/write-an-extension/"
+    href="/superschematic/extending/write-an-extension/"
   />
 </CardGrid>

@@ -1,0 +1,128 @@
+---
+title: Auth and permissions
+description: Say which routes need a caller and which permissions they need, tell the server who the caller is, and send credentials from each SDK.
+sidebar:
+  order: 4
+---
+
+import { TabItem, Tabs } from '@astrojs/starlight/components';
+import Snippet from '../../../components/Snippet.astro';
+
+Auth has three parts. The schema says what each route requires. Your code
+says who the caller is and what they hold. The generated server enforces
+the first against the second: 401 when a route needs a caller and has
+none, 403 when the caller holds no permission the route accepts. This guide
+uses `shop-orders`, served in Go, and `shop-storefront`, served in
+TypeScript.
+
+## What a route requires
+
+| In the schema | The route needs |
+| --- | --- |
+| `extends Authenticated` on the set | a caller, on every route of the set |
+| `@auth` on a method | a caller |
+| `@requirePermission([...])` on a method | a caller holding one of the permissions |
+| none of these | nothing: anyone may call it |
+
+Mark a route that anyone may call `@publicRoute`, so an open route reads as
+a decision rather than an oversight. `shop-orders` uses each form:
+
+<Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol="ProductReviews" />
+
+`listReviews` is open, and `writeReview` needs a signed-in shopper but no
+particular permission. Every order route is in an `Authenticated` set and
+lists the permission it needs.
+
+A permission is a dotted name. A caller's permission covers itself and
+every permission nested under it, so `orders` covers `orders.read` and
+`orders.write`, while `orders.read` covers only itself. A route that lists
+several accepts any one of them.
+
+The generated Go server keeps open and protected routes apart, and puts the
+permission check on each protected route:
+
+<Snippet file="testdata/generated/api/shop-orders/routes.go" symbol="publicAPIRoutes" />
+
+The OpenAPI document declares a bearer scheme and attaches it to every
+route that needs a caller.
+
+## Turn it on: `public` and `authDb`
+
+An API whose routes need callers is marked `public: true` in its config.
+That renders the auth provider's code into the Go server, the bearer scheme
+into OpenAPI and token handling into the SDKs. `authDb` names the DB schema
+the auth provider reads:
+
+<Snippet file="schemas/services/shop-orders/schema.config.ts" from="public: true" to="authDb" />
+
+The auth provider is the naming file's `auth_provider`, `session` by
+default. `session` finds the `authDb` schema's `Session` and `User` tables
+and generates two stores over its ORM: `NewSessionStore`, which finds a
+session by its JWT id, and `NewPrincipalStore`, which loads the user. An
+extension can register another provider, as `examples/acme-schematic`
+does for API keys; see [Write an extension](/superschematic/extending/write-an-extension/#an-auth-provider).
+
+## Say who the caller is: Go
+
+The Go server's `Config.AuthMiddleware` runs before every protected route.
+It puts the caller's id and roles on the request context; the generated
+routes read them. With the `session` provider, your middleware verifies the
+bearer token, then resolves it through the generated stores:
+
+<Snippet file="go/auth.go" symbol={['Auth', 'Auth.Middleware']} />
+
+Roles are yours to supply: a `session.RoleStore` returns the caller's
+roles, each with its permissions. `session.RequireAuth` answers 401 when no
+caller was found, before any route runs.
+
+The ORM keeps its own idea of the acting user, which a soft delete records.
+The orders service sets it from the caller after authentication:
+
+<Snippet file="go/orders.go" symbol="NewOrdersHandler" />
+
+## Say who the caller is: TypeScript
+
+The TypeScript router takes an `authenticate` function instead. It gets
+the request context, with the bearer token already read into
+`ctx.bearerToken`, and returns a principal, its `subject` and
+`permissions`, or `null`:
+
+<Snippet file="typescript/app.ts" symbol="authenticate" />
+
+The router applies the same 401 and 403 rules and the same nesting.
+`buildRouter`'s `permissionMatcher` option replaces the matching rule for a
+project with its own permission vocabulary.
+
+## What the server does
+
+`shop-orders`' tests call it through the generated Go SDK, with a caller
+who holds whatever permissions a test grants:
+
+<Snippet file="go/orders_test.go" symbol={['TestPublicAndAuthRoutes', 'TestPermissions']} />
+
+## Send credentials from an SDK
+
+An SDK for a `public` API sends `Authorization: Bearer <token>` on every
+request. A static token is the simplest form; each SDK also takes a
+function that returns the token per request, and one that refreshes it
+after a 401.
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    <Snippet file="go/clients_test.go" from="shopper, err := sdk.New(" />
+  </TabItem>
+  <TabItem label="TypeScript">
+    <Snippet file="typescript/orders-client.ts" from="const shopper" />
+  </TabItem>
+  <TabItem label="Python">
+    <Snippet file="python/orders_client.py" from="shopper = ShopOrdersSDK" />
+  </TabItem>
+  <TabItem label="Rust">
+    <Snippet file="rust/src/main.rs" from="let shopper = ShopOrdersSdk::new" />
+  </TabItem>
+</Tabs>
+
+An SDK attaches the token only for an API marked `public`. The storefront
+is served by the TypeScript router, which has no use for an `authDb`, so
+its app sets the header itself; see
+[Serve and call it from TypeScript](/superschematic/first-project/typescript-api/#call-it-from-typescript).

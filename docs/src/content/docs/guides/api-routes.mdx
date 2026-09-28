@@ -1,0 +1,133 @@
+---
+title: API routes
+description: Operation sets, paths, parameters, bodies, views, errors and traffic controls in an API schema, and what the generated Go server does with them.
+sidebar:
+  order: 3
+---
+
+import Snippet from '../../../components/Snippet.astro';
+
+An API schema declares routes as methods of classes. Its build writes a
+server (Go by default, or a TypeScript router), an OpenAPI document, the
+request and response types, and an SDK per language the config lists. This
+guide walks the acme shop's `shop-orders` service, served in Go.
+[Auth and permissions](/superschematic/guides/auth-and-permissions/) covers
+who may call each route.
+
+## Operation sets
+
+A class of methods is an operation set, and each method one route. The
+method bodies never run: the compiler reads their signatures.
+
+<Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol={['OrderQueries', 'OrderMutations']} />
+
+- `@rest(method, path)` sets the route's HTTP method and path. The server
+  mounts every path under `/api`, so `orders/{id}` is `GET /api/orders/{id}`.
+- Sets group into namespaces. `OrderQueries` and `OrderMutations` share the
+  `order` namespace: a set named `<Name>Queries` or `<Name>Mutations`
+  belongs to `<name>`, and any other set, like `ProductReviews`, is its own.
+  A namespace is one interface to implement in the server and one field or
+  property of each SDK.
+
+The server asks for one implementation per namespace, with a method per
+route and typed arguments:
+
+<Snippet file="testdata/generated/api/shop-orders/interfaces.go" symbol="OrderImplementation" />
+
+## Arguments
+
+A method's arguments say where each value comes from:
+
+- **Path**: an argument named in the path, such as `id` in `orders/{id}`.
+- **Query**: `QueryParam<T>`. `Nullable<T>` makes it optional, and the Go
+  implementation receives a pointer (`limit *float64`) or a nil slice. A
+  list is read from repeated keys and comma-separated values
+  (`?statuses=placed,shipped`).
+- **Body, as an input type**: an argument of an object type, such as
+  `input: PlaceOrderInput`, is the JSON body.
+- **Body, as fields**: on a method without an input type, the other
+  arguments are the fields of a JSON body object. `cancelOrder`'s `reason`
+  is one: `POST /api/orders/{id}/cancel` with `{"reason": "..."}`. An
+  optional one reaches Go as its zero value, here `""`. On `GET`, such
+  arguments come from the query string instead.
+
+<Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol={['PlaceOrderLine', 'PlaceOrderInput']} />
+
+Before a method runs, the server decodes every argument, checks it
+against its type and constraints, and answers 400 with every failure at
+once, keyed by path, as an RFC 9457 problem body. A list of order lines
+must hold one to 50 lines, and a country must match `^[A-Z]{2}$`:
+
+<Snippet file="go/orders_test.go" symbol="TestValidation" />
+
+## Responses and views
+
+A method returns one view or a list of them. The server writes it in the
+success envelope, `{"data": <view>, "meta": {"requestId": "..."}}`, and the
+SDKs unwrap it.
+
+A view can be declared over a table of the DB schema with `@source`. It
+lists the columns a caller may see, and the loader checks each against the
+table's field of the same name. A field with no column behind it is
+`@virtual`, and the implementation fills it in:
+
+<Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol={['OrderLineView', 'OrderView']} />
+
+<Snippet file="go/orders.go" symbol="orderView" />
+
+## Errors
+
+An implementation returns an error to fail the call. The generated package
+has a constructor per common status, each answering with a problem body
+whose `detail` is the message:
+
+- `NotFoundError(resource, err)` answers 404.
+- `BadRequestError(message, err)` answers 400.
+- `ConflictError(message, err)` answers 409.
+- `UnauthorizedError(err)` and `ForbiddenError(err)` answer 401 and 403.
+- Any other error is logged and answers 500 with a generic message, so no
+  internal detail reaches the caller.
+
+<Snippet file="go/orders.go" symbol="Orders.CancelOrder" />
+
+A write that breaks a unique index fails in Postgres with code `23505`. The
+review service turns it into a 409:
+
+<Snippet file="go/orders.go" symbol="Reviews.WriteReview" />
+
+## Traffic controls
+
+Three decorators bound a route's use. On a class they apply to every route
+of the set; on a method, to that route.
+
+- `@rateLimit({ requestsPerMinute })` counts a client's requests to the
+  route, by IP address, and answers 429 past the limit for the minute.
+- `@bodyLimit({ megabytes })` answers 413 to a larger body before reading
+  it.
+- `@timeout({ seconds })` cancels the request's context when the time runs
+  out.
+
+The generated route table shows them as middleware on each route, ahead of
+the permission check:
+
+<Snippet file="testdata/generated/api/shop-orders/routes.go" from="createOrderPlaceOrderHandler(" to={'RequirePermissions("orders.write")'} />
+
+<Snippet file="go/orders_test.go" symbol="TestTrafficControls" />
+
+## OpenAPI
+
+The build writes `api/<service>/openapi.json`, and the Go server serves it
+at `GET /api/openapi.json` with a browsable page at `GET /api/docs`. Each
+schema comment becomes a description, and each constraint the matching
+JSON Schema keyword: `minLength`, `pattern`, `minimum`, and `minItems` and
+`maxItems` for `listMin` and `listMax`.
+
+## The TypeScript server
+
+The same schema served in TypeScript generates a
+[Hono](https://hono.dev) router with the same routes, argument rules,
+envelopes and traffic controls, and an `Implementations` object in place
+of the Go interfaces.
+[Serve and call it from TypeScript](/superschematic/first-project/typescript-api/)
+walks one, and the [TypeScript page](/superschematic/install/typescript/#serve-a-generated-api)
+lists what it refuses.

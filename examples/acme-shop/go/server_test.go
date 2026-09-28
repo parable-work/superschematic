@@ -33,7 +33,7 @@ func (fakeSessions) FindByJTI(_ context.Context, jti string) (session.Record, er
 	if jti != "session-1" {
 		return session.Record{}, session.ErrNotFound
 	}
-	return session.Record{ID: jti, PrincipalID: "user-1", ExpiresAt: time.Now().Add(time.Hour)}, nil
+	return session.Record{ID: jti, PrincipalID: "00000000-0000-4000-8000-0000000000a1", ExpiresAt: time.Now().Add(time.Hour)}, nil
 }
 
 type fakePrincipals struct{}

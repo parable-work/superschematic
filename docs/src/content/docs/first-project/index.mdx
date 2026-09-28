@@ -19,7 +19,7 @@ from the same schema as its server.
 | [Model the database](/superschematic/first-project/database/) | `shop-db` | Postgres DDL, a Go ORM, Go and TypeScript types |
 | [Serve and call it from Go](/superschematic/first-project/go-api/) | `shop-api` | a Go server, OpenAPI, a Go SDK and a TypeScript SDK |
 | [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/) | `shop-storefront` | a TypeScript server and a TypeScript SDK |
-| [Build the whole tree](/superschematic/first-project/build-the-tree/) | all four | one build in dependency order, and a cache |
+| [Build the whole tree](/superschematic/first-project/build-the-tree/) | every service | one build in dependency order, and a cache |
 
 The two API parts are independent. Do the one for the language you work
 in, or both to see one schema serve two stacks.
@@ -29,7 +29,9 @@ in, or both to see one schema serve two stacks.
 The finished project is `examples/acme-shop`. Every snippet in these pages
 is quoted from it, and `examples/acme-shop/scripts/check.sh` builds it
 with the core binary, compiles the generated Go, type-checks the
-generated TypeScript and runs the tests on both sides.
+generated TypeScript and runs the tests in Go, TypeScript, Python and
+Rust. `shop-orders` is not part of the tutorial; the
+[guides](/superschematic/guides/modeling-types/) use it.
 
 <FileTree>
 - examples/acme-shop/
@@ -40,9 +42,12 @@ generated TypeScript and runs the tests on both sides.
       - shop-common/ General: Price and Currency
       - shop-db/ DB: the tables
       - shop-api/ API: products, served in Go
+      - shop-orders/ API: orders and reviews, for the guides
       - shop-storefront/ API: carts, served in TypeScript
-  - go/ the Go service: implementations, auth, wiring, tests
-  - typescript/ the TypeScript service and its tests
+  - go/ the Go services: implementations, auth, wiring, tests
+  - typescript/ the TypeScript service, a client and tests
+  - python/ a client and tests
+  - rust/ a client and tests
   - testdata/generated/ copies of the generated files these pages quote
   - scripts/
     - check.sh

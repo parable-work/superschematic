@@ -10,7 +10,9 @@ import Snippet from '../../../components/Snippet.astro';
 
 The shop keeps its users, their sessions, its products and its stock in
 Postgres. `shop-db` declares those tables once; superschematic writes the
-DDL, a typed Go data-access layer, and the row types in Go and TypeScript.
+DDL, a typed Go data-access layer, and the row types in each language the
+config lists. `shop-db` also holds the order and review tables that
+[Database tables](/superschematic/guides/database-tables/) walks through.
 
 ## Configure a DB service
 
@@ -59,15 +61,7 @@ TypeScript decoders fill in `true`. The column itself has no SQL default.
 superschematic build schemas/services/shop-db
 ```
 
-```
-Loaded schema shop-db (kind DB): 5 types, 0 enums, 6 scalars, 0 operation sets
-  + sentinel written (src/service.generated.ts)
-  + sql written to .../schemas/dist/sql/shop-db
-  + orm written to .../schemas/dist/orm/shop-db
-  + types-go written to .../schemas/dist/types/go/shop-db
-  + types-typescript written to .../schemas/dist/types/typescript/shop-db
-Build complete: 4 outputs generated, 0 skipped
-```
+<Snippet file="testdata/generated/logs/build-shop-db.txt" />
 
 ## The DDL
 

@@ -9,6 +9,34 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// OrderRepositoryInterface defines the contract for Order data access.
+type OrderRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OrderGetOptions) (*types.Order, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Order, error)
+	FindOne(ctx context.Context, filter *OrderFilter, opts *OrderFindOptions) (*types.Order, error)
+	FindMany(ctx context.Context, filter *OrderFilter, opts *OrderFindOptions) ([]*types.Order, int, error)
+	CreateOne(ctx context.Context, input *types.Order) (*types.Order, error)
+	CreateMany(ctx context.Context, inputs []*types.Order) ([]*types.Order, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OrderUpdate) (*types.Order, error)
+	UpdateMany(ctx context.Context, filter *OrderFilter, update *OrderUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *OrderFilter) (int, error)
+}
+
+// OrderLineRepositoryInterface defines the contract for OrderLine data access.
+type OrderLineRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OrderLineGetOptions) (*types.OrderLine, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OrderLine, error)
+	FindOne(ctx context.Context, filter *OrderLineFilter, opts *OrderLineFindOptions) (*types.OrderLine, error)
+	FindMany(ctx context.Context, filter *OrderLineFilter, opts *OrderLineFindOptions) ([]*types.OrderLine, int, error)
+	CreateOne(ctx context.Context, input *types.OrderLine) (*types.OrderLine, error)
+	CreateMany(ctx context.Context, inputs []*types.OrderLine) ([]*types.OrderLine, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OrderLineUpdate) (*types.OrderLine, error)
+	UpdateMany(ctx context.Context, filter *OrderLineFilter, update *OrderLineUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *OrderLineFilter) (int, error)
+}
+
 // ProductRepositoryInterface defines the contract for Product data access.
 type ProductRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *ProductGetOptions) (*types.Product, error)
@@ -21,6 +49,21 @@ type ProductRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *ProductFilter, update *ProductUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *ProductFilter) (int, error)
+}
+
+// ReviewRepositoryInterface defines the contract for Review data access.
+type ReviewRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *ReviewGetOptions) (*types.Review, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Review, error)
+	FindOne(ctx context.Context, filter *ReviewFilter, opts *ReviewFindOptions) (*types.Review, error)
+	FindMany(ctx context.Context, filter *ReviewFilter, opts *ReviewFindOptions) ([]*types.Review, int, error)
+	CreateOne(ctx context.Context, input *types.Review) (*types.Review, error)
+	CreateMany(ctx context.Context, inputs []*types.Review) ([]*types.Review, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *ReviewUpdate) (*types.Review, error)
+	UpdateMany(ctx context.Context, filter *ReviewFilter, update *ReviewUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *ReviewFilter) (int, error)
+	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
 }
 
 // SessionRepositoryInterface defines the contract for Session data access.
@@ -70,7 +113,10 @@ type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
+	GetOrderRepository() OrderRepositoryInterface
+	GetOrderLineRepository() OrderLineRepositoryInterface
 	GetProductRepository() ProductRepositoryInterface
+	GetReviewRepository() ReviewRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
 	GetStockLevelRepository() StockLevelRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
@@ -79,7 +125,10 @@ type DatabaseInterface interface {
 // TxInterface defines repository access within a transaction.
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	GetOrderRepository() OrderRepositoryInterface
+	GetOrderLineRepository() OrderLineRepositoryInterface
 	GetProductRepository() ProductRepositoryInterface
+	GetReviewRepository() ReviewRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
 	GetStockLevelRepository() StockLevelRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
@@ -88,7 +137,10 @@ type TxInterface interface {
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
 type NoOpDatabase struct {
 	tx         *NoOpTx
+	Order      *NoOpOrderRepository
+	OrderLine  *NoOpOrderLineRepository
 	Product    *NoOpProductRepository
+	Review     *NoOpReviewRepository
 	Session    *NoOpSessionRepository
 	StockLevel *NoOpStockLevelRepository
 	User       *NoOpUserRepository
@@ -96,7 +148,10 @@ type NoOpDatabase struct {
 
 // NoOpTx provides deterministic no-op transaction repository access.
 type NoOpTx struct {
+	Order      *NoOpOrderRepository
+	OrderLine  *NoOpOrderLineRepository
 	Product    *NoOpProductRepository
+	Review     *NoOpReviewRepository
 	Session    *NoOpSessionRepository
 	StockLevel *NoOpStockLevelRepository
 	User       *NoOpUserRepository
@@ -106,8 +161,14 @@ type NoOpTx struct {
 func NewNoOpDatabase() *NoOpDatabase {
 	tx := &NoOpTx{}
 	db := &NoOpDatabase{tx: tx}
+	db.Order = &NoOpOrderRepository{}
+	tx.Order = db.Order
+	db.OrderLine = &NoOpOrderLineRepository{}
+	tx.OrderLine = db.OrderLine
 	db.Product = &NoOpProductRepository{}
 	tx.Product = db.Product
+	db.Review = &NoOpReviewRepository{}
+	tx.Review = db.Review
 	db.Session = &NoOpSessionRepository{}
 	tx.Session = db.Session
 	db.StockLevel = &NoOpStockLevelRepository{}
@@ -133,6 +194,114 @@ func (db *NoOpDatabase) Close() {}
 // Exec is a no-op for no-op transactions.
 func (tx *NoOpTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, nil
+}
+
+func (db *NoOpDatabase) GetOrderRepository() OrderRepositoryInterface {
+	return db.Order
+}
+
+func (tx *NoOpTx) GetOrderRepository() OrderRepositoryInterface {
+	return tx.Order
+}
+
+// NoOpOrderRepository provides deterministic no-op repository behavior.
+type NoOpOrderRepository struct{}
+
+func (r *NoOpOrderRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *OrderGetOptions) (*types.Order, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOrderRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Order, error) {
+	return map[types.IdentityUUID]*types.Order{}, nil
+}
+
+func (r *NoOpOrderRepository) FindOne(_ context.Context, _ *OrderFilter, _ *OrderFindOptions) (*types.Order, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOrderRepository) FindMany(_ context.Context, _ *OrderFilter, _ *OrderFindOptions) ([]*types.Order, int, error) {
+	return []*types.Order{}, 0, nil
+}
+
+func (r *NoOpOrderRepository) CreateOne(_ context.Context, input *types.Order) (*types.Order, error) {
+	return input, nil
+}
+
+func (r *NoOpOrderRepository) CreateMany(_ context.Context, inputs []*types.Order) ([]*types.Order, error) {
+	if inputs == nil {
+		return []*types.Order{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpOrderRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OrderUpdate) (*types.Order, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOrderRepository) UpdateMany(_ context.Context, _ *OrderFilter, _ *OrderUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpOrderRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpOrderRepository) DeleteMany(_ context.Context, _ *OrderFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetOrderLineRepository() OrderLineRepositoryInterface {
+	return db.OrderLine
+}
+
+func (tx *NoOpTx) GetOrderLineRepository() OrderLineRepositoryInterface {
+	return tx.OrderLine
+}
+
+// NoOpOrderLineRepository provides deterministic no-op repository behavior.
+type NoOpOrderLineRepository struct{}
+
+func (r *NoOpOrderLineRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *OrderLineGetOptions) (*types.OrderLine, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOrderLineRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.OrderLine, error) {
+	return map[types.IdentityUUID]*types.OrderLine{}, nil
+}
+
+func (r *NoOpOrderLineRepository) FindOne(_ context.Context, _ *OrderLineFilter, _ *OrderLineFindOptions) (*types.OrderLine, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOrderLineRepository) FindMany(_ context.Context, _ *OrderLineFilter, _ *OrderLineFindOptions) ([]*types.OrderLine, int, error) {
+	return []*types.OrderLine{}, 0, nil
+}
+
+func (r *NoOpOrderLineRepository) CreateOne(_ context.Context, input *types.OrderLine) (*types.OrderLine, error) {
+	return input, nil
+}
+
+func (r *NoOpOrderLineRepository) CreateMany(_ context.Context, inputs []*types.OrderLine) ([]*types.OrderLine, error) {
+	if inputs == nil {
+		return []*types.OrderLine{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpOrderLineRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OrderLineUpdate) (*types.OrderLine, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOrderLineRepository) UpdateMany(_ context.Context, _ *OrderLineFilter, _ *OrderLineUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpOrderLineRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpOrderLineRepository) DeleteMany(_ context.Context, _ *OrderLineFilter) (int, error) {
+	return 0, nil
 }
 
 func (db *NoOpDatabase) GetProductRepository() ProductRepositoryInterface {
@@ -187,6 +356,64 @@ func (r *NoOpProductRepository) DeleteOne(_ context.Context, _ types.IdentityUUI
 
 func (r *NoOpProductRepository) DeleteMany(_ context.Context, _ *ProductFilter) (int, error) {
 	return 0, nil
+}
+
+func (db *NoOpDatabase) GetReviewRepository() ReviewRepositoryInterface {
+	return db.Review
+}
+
+func (tx *NoOpTx) GetReviewRepository() ReviewRepositoryInterface {
+	return tx.Review
+}
+
+// NoOpReviewRepository provides deterministic no-op repository behavior.
+type NoOpReviewRepository struct{}
+
+func (r *NoOpReviewRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *ReviewGetOptions) (*types.Review, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpReviewRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Review, error) {
+	return map[types.IdentityUUID]*types.Review{}, nil
+}
+
+func (r *NoOpReviewRepository) FindOne(_ context.Context, _ *ReviewFilter, _ *ReviewFindOptions) (*types.Review, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpReviewRepository) FindMany(_ context.Context, _ *ReviewFilter, _ *ReviewFindOptions) ([]*types.Review, int, error) {
+	return []*types.Review{}, 0, nil
+}
+
+func (r *NoOpReviewRepository) CreateOne(_ context.Context, input *types.Review) (*types.Review, error) {
+	return input, nil
+}
+
+func (r *NoOpReviewRepository) CreateMany(_ context.Context, inputs []*types.Review) ([]*types.Review, error) {
+	if inputs == nil {
+		return []*types.Review{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpReviewRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *ReviewUpdate) (*types.Review, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpReviewRepository) UpdateMany(_ context.Context, _ *ReviewFilter, _ *ReviewUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpReviewRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpReviewRepository) DeleteMany(_ context.Context, _ *ReviewFilter) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpReviewRepository) HardDeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
 }
 
 func (db *NoOpDatabase) GetSessionRepository() SessionRepositoryInterface {
@@ -356,8 +583,14 @@ var (
 	_ DatabaseInterface             = (*NoOpDatabase)(nil)
 	_ TxInterface                   = (*Tx)(nil)
 	_ TxInterface                   = (*NoOpTx)(nil)
+	_ OrderRepositoryInterface      = (*OrderRepository)(nil)
+	_ OrderRepositoryInterface      = (*NoOpOrderRepository)(nil)
+	_ OrderLineRepositoryInterface  = (*OrderLineRepository)(nil)
+	_ OrderLineRepositoryInterface  = (*NoOpOrderLineRepository)(nil)
 	_ ProductRepositoryInterface    = (*ProductRepository)(nil)
 	_ ProductRepositoryInterface    = (*NoOpProductRepository)(nil)
+	_ ReviewRepositoryInterface     = (*ReviewRepository)(nil)
+	_ ReviewRepositoryInterface     = (*NoOpReviewRepository)(nil)
 	_ SessionRepositoryInterface    = (*SessionRepository)(nil)
 	_ SessionRepositoryInterface    = (*NoOpSessionRepository)(nil)
 	_ StockLevelRepositoryInterface = (*StockLevelRepository)(nil)

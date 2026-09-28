@@ -43,14 +43,7 @@ superschematic build --with-deps schemas/services/shop-storefront
 
 `--with-deps` builds `shop-common` first, then:
 
-```
-Loaded schema shop-storefront (kind API): 4 types, 1 enums, 3 scalars, 3 operation sets
-  + sentinel written (src/service.generated.ts)
-  + types-typescript written to .../schemas/dist/types/typescript/shop-storefront
-  + api-typescript written to .../schemas/dist/api/shop-storefront
-  + sdk-typescript written to .../schemas/dist/sdk/typescript/shop-storefront
-Build complete: 3 outputs generated, 0 skipped
-```
+<Snippet file="testdata/generated/logs/build-with-deps-shop-storefront.txt" from="Loaded schema shop-storefront" to="Build complete" />
 
 <FileTree>
 - schemas/dist/
@@ -125,7 +118,7 @@ links `@acme/shop-storefront-types` to `@acme/shop-common-types`. The
 router, the SDK and the app then need those packages, the HTTP runtime and
 Hono in their `node_modules`. `scripts/check.sh` links them:
 
-<Snippet file="scripts/check.sh" from="link_module() {" to='link_module "$SDK_PKG"' />
+<Snippet file="scripts/check.sh" from="link_module() {" to={'link_packages "$APP"'} />
 
 With the links in place, run the tests from `examples/acme-shop/typescript`:
 

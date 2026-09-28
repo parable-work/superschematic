@@ -171,5 +171,5 @@ registers that rule in its extension; the core has no option for it.
 `examples/acme-schematic/ext/docs.go` does all three: acme accepts the
 audiences `shoppers` and `staff`, the icons `box`, `globe`, `key`,
 `receipt` and `tag`, and writes `x-acme-docs`. The
-[extension guide](/superschematic/guides/write-an-extension/#policy-on-what-the-core-writes)
+[extension guide](/superschematic/extending/write-an-extension/#policy-on-what-the-core-writes)
 shows the two registrations.
