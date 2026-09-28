@@ -6,6 +6,7 @@ export {
   join,
   jsonField,
   key,
+  optimistic,
   projection,
   searchField,
   sourceMustProject,

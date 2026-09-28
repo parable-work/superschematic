@@ -64,6 +64,7 @@ func TestWriteORMGolden(t *testing.T) {
 			"repository_cover.go", "repository_ingredient.go", "repository_note.go", "repository_recipe.go",
 			"repository_recipe_commit.go", "repository_recipe_patch.go", "repository_recipe_ref.go", "repository_step.go",
 		}},
+		{"fixture-optimistic-db", []string{"repository_shelf.go", "repository_stock.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

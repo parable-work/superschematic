@@ -90,7 +90,7 @@ type ModuleOutput struct {
 	HasCustomValidate  bool
 	HasCustomParse     bool
 
-	// HasVersionedTypes is true when a DB table carries the _version field;
+	// HasVersionedTypes is true when a DB table is @versioned;
 	// types.py then declares the generic HistoryRecord model.
 	HasVersionedTypes bool
 
@@ -258,13 +258,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	objectTypes = codegen.AddVersionFields(objectTypes, extraction)
 	inputTypes := codegen.ExtractTypes(schema, output.Scalars, extraction, ir.RoleAPIInput)
 	output.Types = append(objectTypes, inputTypes...)
-	for _, typeInfo := range objectTypes {
-		for _, field := range typeInfo.Fields {
-			if isVersionField(field) {
-				output.HasVersionedTypes = true
-			}
-		}
-	}
+	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
 
 	applyUnionDiscriminatorLiterals(output)
 	collectModelRebuildTypes(output, imported.enumNames)

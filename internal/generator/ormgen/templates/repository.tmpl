@@ -2386,7 +2386,7 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 
 // UpdateOne updates a single {{ .TypeName }} record by ID
 func (r *{{ .Name }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
-	{{- if .Versioned }}
+	{{- if .HasVersion }}
 	return r.updateOne(ctx, id, update, nil)
 }
 
@@ -2519,7 +2519,7 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		paramNum,
 	)
 
-	{{- if .Versioned }}
+	{{- if .HasVersion }}
 	if expectedVersion != nil {
 		paramNum++
 		values = append(values, *expectedVersion)
@@ -2564,7 +2564,7 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		{{- end }}
 	); err != nil {
 		if err == pgx.ErrNoRows {
-			{{- if .Versioned }}
+			{{- if .HasVersion }}
 			if expectedVersion != nil {
 				return nil, r.versionMiss(ctx, id)
 			}
@@ -2752,7 +2752,7 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 	return nil
 }
 
-{{- if .Versioned }}
+{{- if .HasVersion }}
 
 // DeleteOneIfVersion soft deletes a single {{ .TypeName }} only if its current
 // _version matches expectedVersion. It returns ErrVersionConflict when the row
@@ -2904,7 +2904,7 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 
 	return nil
 }
-{{- if .Versioned }}
+{{- if .HasVersion }}
 
 // DeleteOneIfVersion permanently deletes a single {{ .TypeName }} only if its
 // current _version matches expectedVersion. It returns ErrVersionConflict when

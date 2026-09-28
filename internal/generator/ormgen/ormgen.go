@@ -15,6 +15,7 @@ package ormgen
 import (
 	"embed"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -38,6 +39,10 @@ type ORMOutput struct {
 	HasVersionedRepositories bool
 	HasGenericJSON           bool
 	Timestamp                string
+
+	// HasVersionFences is true when a repository has the _version column
+	// (@versioned or @optimistic); it emits ErrVersionConflict.
+	HasVersionFences bool
 
 	// HasArraysOfArrays is true when a column is an array of arrays (T[][]);
 	// it emits the encoder those columns write through.
@@ -106,6 +111,7 @@ type Repository struct {
 	HasSoftDelete          bool   // deletedAt field present
 	HasDeletedBy           bool   // deletedBy field present (soft deletes stamp it)
 	Versioned              bool   // history table/read methods should be generated
+	HasVersion             bool   // _version column and the fenced UpdateOneIfVersion/DeleteOneIfVersion (@versioned or @optimistic)
 	HasPruneHistory        bool   // @versioned retentionDays declared; PruneHistory method generated
 	PruneFunctionName      string // generated SQL prune function name (e.g. "order_prune_history")
 	HistoryTableName       string
@@ -401,6 +407,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
+	hasVersionFences := false
 	hasHistoryActor := false
 	hasGenericJSON := false
 	hasArraysOfArrays := false
@@ -412,6 +419,9 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		}
 		if repo.Versioned {
 			hasVersionedRepositories = true
+		}
+		if repo.HasVersion {
+			hasVersionFences = true
 		}
 		if repo.HistoryActorCol != "" {
 			hasHistoryActor = true
@@ -441,6 +451,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Repositories:             repositories,
 		HasSoftDeletes:           hasSoftDeletes,
 		HasVersionedRepositories: hasVersionedRepositories,
+		HasVersionFences:         hasVersionFences,
 		HasHistoryActor:          hasHistoryActor,
 		HasGenericJSON:           hasGenericJSON,
 		HasArraysOfArrays:        hasArraysOfArrays,
@@ -654,6 +665,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 		TableName:       tableName,
 		QuotedTableName: sqlutil.QuoteIdentifier(tableName),
 		Versioned:       typeDef.Versioned,
+		HasVersion:      typeDef.Versioned || typeDef.Optimistic,
 		Fields:          []Field{},
 		Relationships:   []Relationship{},
 		OrderedMembers:  []ColumnMember{},
@@ -781,9 +793,11 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 	if !repo.PrimaryKeyIsUUID {
 		repo.LookupKeyType = repo.PrimaryKeyType
 	}
-	if repo.Versioned {
+	if repo.HasVersion {
 		appendVersionField(&repo)
-		repo.HistoryActorCol = historyActorColumn(repo.Fields)
+	}
+	if repo.Versioned {
+		repo.HistoryActorCol = historyActorColumn(repo.Fields, typeDef.VersionedConfig)
 	}
 
 	reanchorOrderedMembers(&repo)
@@ -1091,13 +1105,18 @@ func mapIRToGoType(irType string, scalars map[string]scalarLookup) string {
 
 // historyActorColumn returns the column a versioned table's delete
 // tombstone records its actor in, as sqlgen's history trigger picks it:
-// deleted_by when the table has one, else updated_by, else "".
-func historyActorColumn(fields []Field) string {
+// deleted_by when the table has one, else updated_by, else "". An actor
+// column @versioned({ exclude }) leaves out of history records none.
+func historyActorColumn(fields []Field, cfg *ir.VersionedConfig) string {
 	for _, name := range []string{"deleted_by", "updated_by"} {
 		for _, field := range fields {
-			if field.DBName == name {
-				return name
+			if field.DBName != name {
+				continue
 			}
+			if cfg != nil && slices.Contains(cfg.Exclude, field.Name) {
+				return ""
+			}
+			return name
 		}
 	}
 	return ""

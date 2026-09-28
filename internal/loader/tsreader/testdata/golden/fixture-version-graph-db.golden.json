@@ -278,7 +278,10 @@
       ],
       "versioned": true,
       "versionedConfig": {
-        "retentionDays": 365
+        "retentionDays": 365,
+        "exclude": [
+          "scratch"
+        ]
       },
       "graphMember": {
         "graph": "Recipe",

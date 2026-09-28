@@ -13,6 +13,35 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Added
 
+- The rest of D17's `@versioned` changes. `@versioned({ exclude: [...] })`
+  names fields left out of every history image: the capture function
+  subtracts their columns from the `INSERT` and `UPDATE` image and from a
+  delete's tombstone, and the history readers return their zero value. An
+  excluded actor column is left out of the tombstone too, so it records no
+  actor and generated hard deletes do not set the history actor setting.
+  Verification requires each name to be a field of the type and refuses
+  the key, `deletedAt` and relations (the history readers find and filter
+  rows by them); a `@graphMember` may exclude only fields with
+  `@conflictUnit("excluded")` and the audit fields. `@superschematic/db`
+  exports `@optimistic`, a core decorator the registry declares: the
+  table gets `_version`, a `BEFORE UPDATE` trigger that bumps it
+  (`<table>_bump_version`, `trg_<table>_bump_version`),
+  `UpdateOneIfVersion`, `DeleteOneIfVersion` and `ErrVersionConflict`, and
+  no history table, capture function, prune function or history readers.
+  `@versioned` implies it, so a type carrying both fails verification. The
+  Go, TypeScript, Rust and Python types give an `@optimistic` table
+  `_version`; `HistoryRecord` is declared only when a table is
+  `@versioned`. When a `pruneKeepReferencedBy` table is a DB type
+  of the same schema, verification checks that its key column holds the
+  versioned key's type and that its version column is a `Generic.Int64`;
+  a table outside the schema is still checked syntactically only. A
+  `@versioned` or `@optimistic` type that declares a field named `version`
+  or `_version` fails verification, since the generated `_version` field
+  collides with it in Go and Rust. The IR gains `TypeDef.optimistic` and
+  `VersionedConfig.exclude`; the JSON and YAML forms, the schema-file JSON
+  Schema and TypeScript types, `format` and `@superschematic/db`'s
+  `VersionedOptions` carry them. Output for a schema that uses neither is
+  unchanged. Minor.
 - The version-graph core (D17), `runtime/versiongraph`: a Rust crate,
   `superschematic-versiongraph` (rlib, staticlib, cdylib; depends on serde,
   serde_json and sha2 only), with no IO, clock or randomness. Its five

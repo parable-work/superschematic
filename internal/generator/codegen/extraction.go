@@ -154,6 +154,7 @@ func ExtractTypes(schema *ir.Schema, scalars []ScalarInfo, config ExtractionConf
 			EnvVars:           typeDef.EnvVars,
 			Versioned:         typeDef.Versioned,
 			VersionedConfig:   typeDef.VersionedConfig,
+			Optimistic:        typeDef.Optimistic,
 		}
 
 		for _, field := range typeDef.Fields {
@@ -303,12 +304,12 @@ func ExtractFieldInfo(field *ir.FieldDef, scalarMap ScalarMap, schema *ir.Schema
 }
 
 // AddVersionFields appends superschematic's readable _version metadata field to
-// versioned DB table type models. Generators opt in explicitly, so a language
-// gets the field only once its generator supports it (Go, TypeScript, Rust
-// and Python today).
+// versioned and optimistic DB table type models. Generators opt in
+// explicitly, so a language gets the field only once its generator supports
+// it (Go, TypeScript, Rust and Python today).
 func AddVersionFields(types []TypeInfo, config ExtractionConfig) []TypeInfo {
 	for i := range types {
-		if types[i].Role != ir.RoleDBTable || !types[i].Versioned {
+		if types[i].Role != ir.RoleDBTable || (!types[i].Versioned && !types[i].Optimistic) {
 			continue
 		}
 		if hasFieldNamed(types[i].Fields, "_version") {
@@ -317,6 +318,18 @@ func AddVersionFields(types []TypeInfo, config ExtractionConfig) []TypeInfo {
 		types[i].Fields = append(types[i].Fields, versionFieldInfo(config))
 	}
 	return types
+}
+
+// HasHistoryTypes reports whether a DB table type is @versioned: its
+// history readers return HistoryRecord, which the types module then
+// declares. An @optimistic table has _version and no history.
+func HasHistoryTypes(types []TypeInfo) bool {
+	for _, t := range types {
+		if t.Role == ir.RoleDBTable && t.Versioned {
+			return true
+		}
+	}
+	return false
 }
 
 func hasFieldNamed(fields []FieldInfo, name string) bool {

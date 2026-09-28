@@ -278,6 +278,10 @@ type TypeInfo struct {
 
 	// VersionedConfig carries optional history retention/partition settings.
 	VersionedConfig *ir.VersionedConfig
+
+	// Optimistic marks DB table types that get the _version column and its
+	// fenced writes without history (@optimistic).
+	Optimistic bool
 }
 
 // Doc returns the documentation text for the type.

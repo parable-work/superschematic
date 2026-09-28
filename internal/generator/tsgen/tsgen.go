@@ -322,17 +322,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 
 	output.Types = convertTypes(objectTypes, output.Scalars, enumLookup)
 	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, enumLookup)...)
-	for _, typeInfo := range output.Types {
-		if typeInfo.Role != ir.RoleDBTable {
-			continue
-		}
-		for _, field := range typeInfo.Fields {
-			if field.Name == "_version" && field.InternalMetadata {
-				output.HasVersionedTypes = true
-				break
-			}
-		}
-	}
+	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
 
 	return output, nil
 }

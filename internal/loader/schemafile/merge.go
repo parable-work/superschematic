@@ -283,6 +283,7 @@ func isEmptyTSForwardDeclaration(def *ir.TypeDef) bool {
 		def.TraitConfig == nil &&
 		!def.JsonField &&
 		!def.Versioned &&
+		!def.Optimistic &&
 		!def.EnvVars
 }
 
