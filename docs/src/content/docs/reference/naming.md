@@ -191,7 +191,9 @@ when it is set, else left as the row had it. The actor column is
 neither records no actor. The ORM's hard deletes on such a table set the
 setting to the context user for their statement and, inside a
 transaction, clear it after. A statement of your own sets it with
-`SELECT set_config('<setting>', '<user id>', true)`.
+`SELECT set_config('<setting>', '<user id>', true)`. When
+`@versioned({ exclude })` names the actor column, the tombstone records no
+actor and the generated hard deletes do not set the setting.
 
 The value is a custom setting name: two or more identifiers (letters,
 digits and `_`, not starting with a digit) joined by dots. Any other value

@@ -9,17 +9,16 @@
 package scalarcore
 
 import (
+	"slices"
 	"sort"
 
 	scalarlib "github.com/parable-work/superscalar/go"
 )
 
-// Names returns every canonical scalar name the linked core knows, sorted.
+// Names returns every canonical scalar name the linked core knows, sorted. The
+// result is a copy, so a caller may change it without touching the core's list.
 func Names() []string {
-	names := make([]string, 0, len(scalarlib.ScalarIDByCanonical))
-	for name := range scalarlib.ScalarIDByCanonical {
-		names = append(names, name)
-	}
+	names := slices.Clone(scalarlib.VALID_SCALARS)
 	sort.Strings(names)
 	return names
 }

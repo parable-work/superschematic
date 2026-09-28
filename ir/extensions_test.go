@@ -203,7 +203,8 @@ func TestCanonicalJSON(t *testing.T) {
 		`[3, 1, {"z": 2, "y": 1}]`:                       `[3,1,{"y":1,"z":2}]`,
 		`{"n": 123456789012345678901234567890}`:          `{"n":123456789012345678901234567890}`,
 		`{"f": 1.0, "e": 1e3, "z": -0, "s": "a: \"b\""}`: `{"e":1e3,"f":1.0,"s":"a: \"b\"","z":-0}`,
-		` "text" `: `"text"`,
+		` "text" `:  `"text"`,
+		"{}\n\t\r ": `{}`,
 	}
 	for in, want := range cases {
 		got, err := CanonicalJSON(json.RawMessage(in))
@@ -214,7 +215,9 @@ func TestCanonicalJSON(t *testing.T) {
 			t.Errorf("CanonicalJSON(%s) = %s, want %s", in, got, want)
 		}
 	}
-	for _, bad := range []string{`{"a":`, `{} {}`, ``} {
+	// Text after the value is refused, a closing bracket or brace included:
+	// Decoder.More reports false before one, as at the end of the input.
+	for _, bad := range []string{`{"a":`, `{} {}`, ``, `{}]`, `{}}`, `[]]`, `1 ]`, `"a"}`, `{},`, `{} x`} {
 		if _, err := CanonicalJSON(json.RawMessage(bad)); err == nil {
 			t.Errorf("CanonicalJSON(%q) accepted malformed input", bad)
 		}

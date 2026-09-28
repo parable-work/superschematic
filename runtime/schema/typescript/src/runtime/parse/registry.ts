@@ -6,7 +6,7 @@
 
 import { backend } from 'superscalar/backend';
 import * as generatedScalars from 'superscalar/scalars';
-import { SCALAR_METADATA, scalarIdByCanonical } from 'superscalar/scalars';
+import { SCALAR_METADATA } from 'superscalar/scalars';
 import type { ValidationError } from 'superscalar/validation';
 import { BUILTIN_SCALARS } from '../builtin-scalars.generated';
 import type { Schema } from '../validation/types';
@@ -136,10 +136,9 @@ function wrapNormalize(
 // gets canonical JSON text: its generated parse function returns the decoded
 // map, which wrapParse would stringify as `[object Object]`.
 function coreTextAdapter(canonicalName: string, label: string): ScalarParseFunc {
-  const id = scalarIdByCanonical[canonicalName];
   return (input: string) => {
     try {
-      return [backend.parse(id, input), []];
+      return [backend.parse(canonicalName, input), []];
     } catch {
       return [input, [{ validator: 'parse', message: `invalid ${label}` }]];
     }

@@ -203,19 +203,17 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 }
 
 // writeVersionGraphDescriptors writes each version graph's descriptor as
-// <dir>/<name>.json and removes the directory's other descriptors, so a
-// graph the schema dropped leaves none behind.
+// <dir>/<name>.json and removes the directory's other descriptors (each
+// *.json no graph of the schema writes), so a graph the schema dropped
+// leaves none behind. Any other file stays; the directory goes only when
+// nothing is left in it.
 func writeVersionGraphDescriptors(graphs []VersionGraphDescriptor, dir string) error {
-	if len(graphs) == 0 {
-		if err := os.RemoveAll(dir); err != nil {
-			return fmt.Errorf("failed to remove stale version graph descriptors: %w", err)
-		}
-		return nil
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("failed to create %s: %w", dir, err)
-	}
 	keep := map[string]bool{}
+	if len(graphs) > 0 {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", dir, err)
+		}
+	}
 	for _, graph := range graphs {
 		name := graph.FileName + ".json"
 		keep[name] = true
@@ -231,6 +229,13 @@ func writeVersionGraphDescriptors(graphs []VersionGraphDescriptor, dir string) e
 		if !keep[filepath.Base(path)] {
 			if err := os.Remove(path); err != nil {
 				return fmt.Errorf("failed to remove stale %s: %w", path, err)
+			}
+		}
+	}
+	if len(graphs) == 0 {
+		if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
+			if err := os.Remove(dir); err != nil {
+				return fmt.Errorf("failed to remove the empty %s: %w", dir, err)
 			}
 		}
 	}

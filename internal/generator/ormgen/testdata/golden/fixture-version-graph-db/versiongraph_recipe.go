@@ -83,6 +83,17 @@ const RecipeGraphDescriptor = `{
         "created_by",
         "updated_at"
       ]
+    },
+    {
+      "kind": "utensil",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "excluded": [
+        "recipe_id"
+      ]
     }
   ]
 }`
@@ -152,6 +163,17 @@ var recipeGraphSpec = &graphSpec{
 				return (&StepRepository{tx: tx}).DeleteOne(ctx, id)
 			},
 		},
+		{
+			name:     "utensil",
+			idColumn: "id",
+			ownRows:  `SELECT to_jsonb(t) FROM utensil AS t WHERE t.ref_id = $1::uuid`,
+			slot:     `SELECT t.id::text FROM utensil AS t WHERE t.entity_key = $1::uuid AND t.ref_id = $2::uuid`,
+			images:   `SELECT h.data FROM utensil_history AS h JOIN unnest($1::text[]::uuid[], $2::bigint[]) AS p(id, version) ON h.id = p.id AND h._version = p.version`,
+			upsert:   `INSERT INTO utensil AS t (recipe_id, "name", entity_key, ref_id, deleted_on_ref) SELECT r.recipe_id, r."name", r.entity_key, r.ref_id, r.deleted_on_ref FROM jsonb_populate_record(NULL::utensil, $1::jsonb || jsonb_build_object('ref_id', $2::text, 'recipe_id', $3::text, 'deleted_on_ref', $4::boolean, 'created_at', now(), 'created_by', $5::text, 'updated_at', now(), 'updated_by', $5::text)) AS r ON CONFLICT (entity_key, ref_id) DO UPDATE SET "name" = EXCLUDED."name", deleted_on_ref = EXCLUDED.deleted_on_ref RETURNING to_jsonb(t)`,
+			unset: func(ctx context.Context, tx pgx.Tx, id types.IdentityUUID) error {
+				return (&UtensilRepository{tx: tx}).DeleteOne(ctx, id)
+			},
+		},
 	},
 }
 
@@ -186,6 +208,7 @@ type RecipeTree struct {
 	Ingredient []*types.Ingredient
 	Note       []*types.Note
 	Step       []*types.Step
+	Utensil    []*types.Utensil
 
 	// ContentHash is the core's hash of the tree's content columns.
 	ContentHash string
@@ -201,6 +224,7 @@ type RecipeEdits struct {
 	Ingredient GraphEdits[types.Ingredient]
 	Note       GraphEdits[types.Note]
 	Step       GraphEdits[types.Step]
+	Utensil    GraphEdits[types.Utensil]
 }
 
 // RecipeCommitOptions are a commit's message and whether it is published:
@@ -337,7 +361,14 @@ func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version 
 			}
 			result.Saved.Step = append(result.Saved.Step, row)
 		}
-		if len(edits.Cover.Delete) > 0 || len(edits.Ingredient.Delete) > 0 || len(edits.Note.Delete) > 0 || len(edits.Step.Delete) > 0 {
+		for _, input := range edits.Utensil.Upsert {
+			row, err := g.upsertUtensil(ctx, tx, r, input)
+			if err != nil {
+				return err
+			}
+			result.Saved.Utensil = append(result.Saved.Utensil, row)
+		}
+		if len(edits.Cover.Delete) > 0 || len(edits.Ingredient.Delete) > 0 || len(edits.Note.Delete) > 0 || len(edits.Step.Delete) > 0 || len(edits.Utensil.Delete) > 0 {
 			composed, _, _, err := g.engine.compose(ctx, tx, r)
 			if err != nil {
 				return err
@@ -366,6 +397,11 @@ func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version 
 					return err
 				}
 			}
+			for _, key := range edits.Utensil.Delete {
+				if err := g.engine.deleteEntity(ctx, tx, r, byKey, "utensil", uuidText(key)); err != nil {
+					return err
+				}
+			}
 		}
 		for _, key := range edits.Cover.Unset {
 			if err := g.engine.unsetEntity(ctx, tx, r, "cover", key); err != nil {
@@ -384,6 +420,11 @@ func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version 
 		}
 		for _, key := range edits.Step.Unset {
 			if err := g.engine.unsetEntity(ctx, tx, r, "step", key); err != nil {
+				return err
+			}
+		}
+		for _, key := range edits.Utensil.Unset {
+			if err := g.engine.unsetEntity(ctx, tx, r, "utensil", key); err != nil {
 				return err
 			}
 		}
@@ -698,6 +739,13 @@ func (g *RecipeGraph) tree(tree graphTree, findings []versiongraph.Finding) (*Re
 		}
 		result.Step = append(result.Step, row)
 	}
+	for _, raw := range tree["utensil"] {
+		row, err := decodeUtensilHistoryData(raw)
+		if err != nil {
+			return nil, err
+		}
+		result.Utensil = append(result.Utensil, row)
+	}
 	hash, err := g.engine.contentHash(tree)
 	if err != nil {
 		return nil, err
@@ -869,6 +917,50 @@ func (g *RecipeGraph) upsertStep(ctx context.Context, tx pgx.Tx, ref graphRef, i
 				return nil, err
 			}
 			return repository.UpdateOne(ctx, rowID, NewStepSnapshotUpdate(&row))
+		}
+	}
+	return repository.CreateOne(ctx, &row)
+}
+
+// upsertUtensil writes input as the ref's row of its entity: an update of
+// the ref's existing row, or a new row. A new entity gets its key from the
+// database. The row's id, root, ref and deletedOnRef are the shell's.
+func (g *RecipeGraph) upsertUtensil(ctx context.Context, tx pgx.Tx, ref graphRef, input *types.Utensil) (*types.Utensil, error) {
+	if input == nil {
+		return nil, fmt.Errorf("version graph: a nil utensil upsert")
+	}
+	rootID, err := parseUUIDText(ref.root)
+	if err != nil {
+		return nil, err
+	}
+	refID, err := parseUUIDText(ref.id)
+	if err != nil {
+		return nil, err
+	}
+	row := *input
+	// Every ref holds its own row of an entity, so the caller's id is
+	// ignored: a zero key leaves the id to the table's default.
+	row.Id = types.Utensil{}.Id
+	row.Recipe = types.Recipe{Id: &rootID}
+	row.Ref = types.RecipeRef{Id: &refID}
+	// deleted_on_ref has no SQL DEFAULT: the shell always writes it.
+	row.DeletedOnRef = false
+	repository := &UtensilRepository{tx: tx, txDB: g.db}
+	if row.EntityKey != nil {
+		kind, err := g.engine.spec.kind("utensil")
+		if err != nil {
+			return nil, err
+		}
+		id, err := g.engine.slot(ctx, tx, kind, ref.id, uuidText(*row.EntityKey))
+		if err != nil {
+			return nil, err
+		}
+		if id != "" {
+			rowID, err := parseUUIDText(id)
+			if err != nil {
+				return nil, err
+			}
+			return repository.UpdateOne(ctx, rowID, NewUtensilSnapshotUpdate(&row))
 		}
 	}
 	return repository.CreateOne(ctx, &row)

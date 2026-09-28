@@ -1105,7 +1105,7 @@ func findIndexColumn(columns []Column, key string) *Column {
 	return nil
 }
 
-const postgresIdentifierLimit = 63
+const postgresIdentifierLimit = sqlutil.PostgresIdentifierLimit
 
 type pendingIndex struct {
 	index Index
@@ -1113,46 +1113,10 @@ type pendingIndex struct {
 	name  string
 }
 
-var indexPurposeName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-
-// indexName builds the identifier for one declared index. Without an explicit
-// purpose the name stays idx_{table}_{columns}; with one it becomes
-// {idx|uq}_{table}_{purpose}.
-//
-// PostgreSQL truncates identifiers past 63 bytes, which silently collapses two
-// distinct indexes into one name. Rather than pack or hash a name to fit, an
-// overlong result is a schema error: the author picks a purpose name, which
-// reads better than any suffix the generator could derive.
+// indexName builds the identifier for one declared index
+// (sqlutil.IndexName).
 func indexName(tableName string, p pendingIndex) (string, error) {
-	if p.name == "" {
-		parts := make([]string, 0, 2+len(p.keys))
-		parts = append(parts, "idx", tableName)
-		for _, key := range p.keys {
-			parts = append(parts, codegen.ToSnakeCase(key))
-		}
-		name := strings.Join(parts, "_")
-		if len(name) > postgresIdentifierLimit {
-			return "", fmt.Errorf(
-				"index on %s over %s generates %q (%d bytes), over PostgreSQL's %d-byte limit; give it a purpose name: @index([...], { name: 'purpose' })",
-				tableName, strings.Join(p.keys, ", "), name, len(name), postgresIdentifierLimit)
-		}
-		return name, nil
-	}
-
-	if !indexPurposeName.MatchString(p.name) {
-		return "", fmt.Errorf("index name %q on %s must be lowercase alphanumeric with underscores", p.name, tableName)
-	}
-	kind := "idx"
-	if p.index.Unique {
-		kind = "uq"
-	}
-	name := kind + "_" + tableName + "_" + p.name
-	if len(name) > postgresIdentifierLimit {
-		return "", fmt.Errorf(
-			"index name %q on %s is %d bytes, over PostgreSQL's %d-byte limit; shorten the purpose name",
-			name, tableName, len(name), postgresIdentifierLimit)
-	}
-	return name, nil
+	return sqlutil.IndexName(tableName, p.keys, p.name, p.index.Unique)
 }
 
 // serverConstraintName returns the identifier PostgreSQL will create for name.

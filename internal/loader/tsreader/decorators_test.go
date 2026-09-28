@@ -242,6 +242,30 @@ export abstract class Tenant {
 			},
 		},
 		{
+			name: "versioned exclude errors",
+			kind: "DB",
+			source: `import { key, versioned } from "@superschematic/db";
+// @ts-expect-error exclude is not an array
+@versioned({ exclude: "notes" })
+export abstract class Pantry {
+  @key
+  id: string;
+  notes?: string;
+}
+// @ts-expect-error exclude holds a number
+@versioned({ exclude: ["notes", 3] })
+export abstract class Shelf {
+  @key
+  id: string;
+  notes?: string;
+}
+`,
+			want: []string{
+				"a.schema.ts:3:1: @versioned exclude must be an array of field names",
+				"a.schema.ts:10:1: @versioned exclude must be an array of string literals",
+			},
+		},
+		{
 			name: "version graph argument errors",
 			kind: "DB",
 			source: `import { Identity } from "superscalar";

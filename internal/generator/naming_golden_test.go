@@ -114,6 +114,35 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 		t.Fatalf("run fixture-api with the TypeScript server: %v", err)
 	}
 
+	// fixture-version-graph-db writes the version-graph shell into its ORM,
+	// which imports the binding named by versiongraph_go_module and replaces
+	// it with [paths] versiongraph_go, and the graph's descriptor into its Go
+	// types. The paths resolve against the output root, so the replace in
+	// the golden go.mod is the same on every machine.
+	graphSchema, graphCfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, "fixture-version-graph-db"))
+	if err != nil {
+		t.Fatalf("load fixture-version-graph-db: %v", err)
+	}
+	graphCfg.Outputs["types"] = map[string]any{
+		"go":         map[string]any{"enabled": true},
+		"typescript": map[string]any{"enabled": true},
+		"python":     map[string]any{"enabled": true},
+		"rust":       map[string]any{"enabled": true},
+	}
+	if _, err := Run(graphSchema, graphCfg, Options{
+		OutputRoot: outputRoot,
+		Naming:     names,
+		Paths:      names.LocalPaths(outputRoot),
+		Clock:      fixedClock,
+	}); err != nil {
+		t.Fatalf("run fixture-version-graph-db: %v", err)
+	}
+	for _, rel := range []string{"orm/fixture-version-graph-db/versiongraph_recipe.go", "types/go/fixture-version-graph-db/versiongraph/recipe.json"} {
+		if _, err := os.Stat(filepath.Join(outputRoot, rel)); err != nil {
+			t.Errorf("fixture-version-graph-db wrote no %s: %v", rel, err)
+		}
+	}
+
 	if err := filepath.WalkDir(outputRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -148,6 +177,8 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 		"types/python/fixture-db/pyproject.toml",
 		"types/rust/fixture-db/Cargo.toml",
 		"orm/fixture-db/go.mod",
+		"types/go/fixture-version-graph-db/go.mod",
+		"orm/fixture-version-graph-db/go.mod",
 		"api/fixture-api/go.mod",
 		"types/typescript/fixture-api/package.json",
 		"sdk/typescript/fixture-api/package.json",

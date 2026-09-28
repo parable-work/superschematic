@@ -22,6 +22,8 @@ class RecipeEntityKind(str, Enum):
 
     Step = "step"
 
+    Utensil = "utensil"
+
     @classmethod
     def __get_pydantic_core_schema__(cls, source_type, handler):
         return core_schema.no_info_before_validator_function(

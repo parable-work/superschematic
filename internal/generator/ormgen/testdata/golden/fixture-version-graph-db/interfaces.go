@@ -164,6 +164,27 @@ type StepRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *StepFilter) (int, error)
 }
 
+// UtensilRepositoryInterface defines the contract for Utensil data access.
+type UtensilRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *UtensilGetOptions) (*types.Utensil, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Utensil, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Utensil, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Utensil, error)
+	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error)
+	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error)
+	FindOne(ctx context.Context, filter *UtensilFilter, opts *UtensilFindOptions) (*types.Utensil, error)
+	FindMany(ctx context.Context, filter *UtensilFilter, opts *UtensilFindOptions) ([]*types.Utensil, int, error)
+	CreateOne(ctx context.Context, input *types.Utensil) (*types.Utensil, error)
+	CreateMany(ctx context.Context, inputs []*types.Utensil) ([]*types.Utensil, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UtensilUpdate) (*types.Utensil, error)
+	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *UtensilUpdate) (*types.Utensil, error)
+	UpdateMany(ctx context.Context, filter *UtensilFilter, update *UtensilUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
+	DeleteMany(ctx context.Context, filter *UtensilFilter) (int, error)
+}
+
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
@@ -177,6 +198,7 @@ type DatabaseInterface interface {
 	GetRecipePatchRepository() RecipePatchRepositoryInterface
 	GetRecipeRefRepository() RecipeRefRepositoryInterface
 	GetStepRepository() StepRepositoryInterface
+	GetUtensilRepository() UtensilRepositoryInterface
 }
 
 // TxInterface defines repository access within a transaction.
@@ -190,6 +212,7 @@ type TxInterface interface {
 	GetRecipePatchRepository() RecipePatchRepositoryInterface
 	GetRecipeRefRepository() RecipeRefRepositoryInterface
 	GetStepRepository() StepRepositoryInterface
+	GetUtensilRepository() UtensilRepositoryInterface
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
@@ -203,6 +226,7 @@ type NoOpDatabase struct {
 	RecipePatch  *NoOpRecipePatchRepository
 	RecipeRef    *NoOpRecipeRefRepository
 	Step         *NoOpStepRepository
+	Utensil      *NoOpUtensilRepository
 }
 
 // NoOpTx provides deterministic no-op transaction repository access.
@@ -215,6 +239,7 @@ type NoOpTx struct {
 	RecipePatch  *NoOpRecipePatchRepository
 	RecipeRef    *NoOpRecipeRefRepository
 	Step         *NoOpStepRepository
+	Utensil      *NoOpUtensilRepository
 }
 
 // NewNoOpDatabase creates a no-op database with no-op repositories.
@@ -237,6 +262,8 @@ func NewNoOpDatabase() *NoOpDatabase {
 	tx.RecipeRef = db.RecipeRef
 	db.Step = &NoOpStepRepository{}
 	tx.Step = db.Step
+	db.Utensil = &NoOpUtensilRepository{}
+	tx.Utensil = db.Utensil
 	return db
 }
 
@@ -858,6 +885,88 @@ func (r *NoOpStepRepository) DeleteMany(_ context.Context, _ *StepFilter) (int, 
 	return 0, nil
 }
 
+func (db *NoOpDatabase) GetUtensilRepository() UtensilRepositoryInterface {
+	return db.Utensil
+}
+
+func (tx *NoOpTx) GetUtensilRepository() UtensilRepositoryInterface {
+	return tx.Utensil
+}
+
+// NoOpUtensilRepository provides deterministic no-op repository behavior.
+type NoOpUtensilRepository struct{}
+
+func (r *NoOpUtensilRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *UtensilGetOptions) (*types.Utensil, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUtensilRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Utensil, error) {
+	return map[types.IdentityUUID]*types.Utensil{}, nil
+}
+
+func (r *NoOpUtensilRepository) GetVersion(_ context.Context, _ types.IdentityUUID, _ int64) (*types.Utensil, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUtensilRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error) {
+	return []types.HistoryRecord[*types.Utensil]{}, nil
+}
+
+func (r *NoOpUtensilRepository) GetAsOf(_ context.Context, _ types.IdentityUUID, _ time.Time) (*types.Utensil, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUtensilRepository) ListAsOfByRecipeID(_ context.Context, _ types.IdentityUUID, _ time.Time, _ *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error) {
+	return []types.HistoryRecord[*types.Utensil]{}, nil
+}
+
+func (r *NoOpUtensilRepository) ListAsOfByRefID(_ context.Context, _ types.IdentityUUID, _ time.Time, _ *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error) {
+	return []types.HistoryRecord[*types.Utensil]{}, nil
+}
+
+func (r *NoOpUtensilRepository) FindOne(_ context.Context, _ *UtensilFilter, _ *UtensilFindOptions) (*types.Utensil, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUtensilRepository) FindMany(_ context.Context, _ *UtensilFilter, _ *UtensilFindOptions) ([]*types.Utensil, int, error) {
+	return []*types.Utensil{}, 0, nil
+}
+
+func (r *NoOpUtensilRepository) CreateOne(_ context.Context, input *types.Utensil) (*types.Utensil, error) {
+	return input, nil
+}
+
+func (r *NoOpUtensilRepository) CreateMany(_ context.Context, inputs []*types.Utensil) ([]*types.Utensil, error) {
+	if inputs == nil {
+		return []*types.Utensil{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpUtensilRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *UtensilUpdate) (*types.Utensil, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUtensilRepository) UpdateOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64, _ *UtensilUpdate) (*types.Utensil, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpUtensilRepository) UpdateMany(_ context.Context, _ *UtensilFilter, _ *UtensilUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpUtensilRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpUtensilRepository) DeleteOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64) error {
+	return nil
+}
+
+func (r *NoOpUtensilRepository) DeleteMany(_ context.Context, _ *UtensilFilter) (int, error) {
+	return 0, nil
+}
+
 var (
 	_ DatabaseInterface               = (*Database)(nil)
 	_ DatabaseInterface               = (*NoOpDatabase)(nil)
@@ -879,4 +988,6 @@ var (
 	_ RecipeRefRepositoryInterface    = (*NoOpRecipeRefRepository)(nil)
 	_ StepRepositoryInterface         = (*StepRepository)(nil)
 	_ StepRepositoryInterface         = (*NoOpStepRepository)(nil)
+	_ UtensilRepositoryInterface      = (*UtensilRepository)(nil)
+	_ UtensilRepositoryInterface      = (*NoOpUtensilRepository)(nil)
 )

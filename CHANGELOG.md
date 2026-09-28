@@ -13,11 +13,33 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Verification refuses version graph schemas the generators could not run
+  correctly. A `@graphMember` may exclude from history only nullable
+  fields (besides its audit fields), since Revert and Merge rebuild rows
+  from history images and a required column missing from the image would
+  be written as NULL. A member field whose column is `entity_key`,
+  `ref_id` or `deleted_on_ref` (such as `refId`, or a `@hasMany` back
+  reference from a type named `Ref`) fails, as does an authored index
+  whose name equals one the graph generates (`uq_<member>_entity_ref`,
+  `uq_<graph>_ref_root_name`, `uq_<graph>_commit_root_sequence`,
+  `uq_<graph>_patch_entity`, `idx_<graph>_patch_entity_version`). Output
+  for schemas that verified before is unchanged. Patch.
 - The Python scalars module (`scalars.py`) no longer carries the source
   tree's name for the scalar library: the fallback comment now names the
   configured scalar Python module as not installed, and the availability
   flag is `_SCALAR_MODULE_AVAILABLE`. The scrub gate fails on that name.
   Patch (generated comment and private identifier change).
+- The generated version-graph shell's `Save` leaves the row id of a member
+  whose `@key` is a plain `Identity.UUID` to the table's default, as it
+  does for an `AutoGenerate<Identity.UUID>` key, instead of minting a
+  client-side UUID. Behavior is unchanged: each ref holds its own row of an
+  entity, so the caller's id was already never the row's. Such members are
+  now exercised end to end. Output for a graph whose members all have
+  `AutoGenerate` keys is unchanged. Patch.
+- Writing a Go types module no longer removes the whole `versiongraph/`
+  directory when the schema declares no graph. It removes each
+  `versiongraph/*.json` no graph of the schema writes, keeps every other
+  file, and removes the directory only when that leaves it empty. Patch.
 
 ### Added
 
@@ -1053,7 +1075,7 @@ of a generated artifact is always listed here with the bump it requires.
   one comma-separated value. Before, the handler parsed the parameter as a
   single scalar. The Rust SDK also drops a zero `listMin` check, which
   compared an unsigned length with zero. Minor.
-- The superscalar pin moves to `1be340a` (`superscalar.pin` and every
+- The superscalar pin moves to `f1440d9` (`superscalar.pin` and every
   `go.mod`), and the TypeScript and Python scalar catalogs are regenerated
   from it. Generated output changes where a scalar changed:
   - Four new scalars are available to schemas: `AgentSkill.Name`,
@@ -1076,6 +1098,18 @@ of a generated artifact is always listed here with the bump it requires.
     `Temporal.DateTime`; stringifying the map gave `[object Object]`.
 
   Minor.
+- superscalar at `f1440d9` identifies a scalar by its canonical name only:
+  numeric scalar ids are gone from its C ABI and every binding. The schema
+  runtimes call it by name. The Go runtime lists the linked scalars from
+  `VALID_SCALARS` (was the keys of `ScalarIDByCanonical`). The TypeScript
+  runtime's default parse registry passes the canonical name to the
+  superscalar backend (was the id from `scalarIdByCanonical`). The Python
+  default validate registry (`_generated_default_registry.py`, regenerated)
+  checks each name against `VALID_SCALARS` and passes it to
+  `_native.validate` (was the id from `SCALAR_ID_BY_CANONICAL`). Parsing,
+  validation and generated code are unchanged. The runtimes no longer work
+  with a superscalar that takes ids; the pin and every `go.mod` require one
+  that takes names. Patch.
 - TypeScript and Python types: a custom-parse scalar whose `json_schema`
   type is `object` (`Generic.StringMap`) takes its TypeScript and Python
   types from the scalar catalog, `Record<string, string>` and
@@ -1234,7 +1268,24 @@ of a generated artifact is always listed here with the bump it requires.
   satisfy a `maxLength` of 5 everywhere, and an accented `e` (U+00E9)
   counts one. A generated `types.go` with a length rule imports
   `unicode/utf8` (D14, amended). Minor.
-
+- JSON and YAML readers: a schema file in which an object repeats a key
+  is refused, with an error that names the key and its JSON pointer, such
+  as `repeated object key "fields" at '/types/Item/fields'`. The slot
+  check and the JSON Schema validation read the last copy of a repeated
+  key, but the decode read every copy into the same map or struct, so an
+  earlier copy reached the IR unvalidated: a type with an unknown role in
+  a first `types` copy, a field's unknown `httpMethod` in a first `fields`
+  copy, or an extension the registry does not link in a first
+  `extensions` copy. Keys compare after their escapes are read. A file
+  that repeats a key now fails to load. The YAML reader already refused a
+  repeated mapping key. The TypeScript `SchemaFileLoader` refuses the same
+  files, with the pointer as the issue's path; `JSON.parse` keeps only the
+  last copy, so it reads the text for a repeated key.
+  `schema_file_parity.json` holds reject vectors for them. Patch.
+- IR: `ir.CanonicalJSON` refuses any text but whitespace after the value.
+  It checked `Decoder.More`, which reports false before a closing bracket
+  or brace, so it accepted `{}]` and `{}}` and wrote `{}`. A JSON sidecar
+  document had the same check and now refuses such text too. Patch.
 - Go ORM: `CreateOne` and `CreateMany` insert a required enum field's
   declared default when the Go value is `""`, for an enum declared in the
   schema or imported from a dependency. They inserted `''`, which is not a

@@ -88,20 +88,28 @@ Verification refuses:
   member, or whose `name` is not PascalCase; a negative `schemaEpoch`;
 - a member that is not `@versioned`, has other than one UUID `@key`, has
   other than exactly one relation to its root, has `deletedAt`, or declares
-  `entityKey`, `ref` or `deletedOnRef`;
+  `entityKey`, `ref` or `deletedOnRef` or a field whose column is
+  `entity_key`, `ref_id` or `deleted_on_ref` (such as `refId`);
 - a type that is a root and a member, or a member of a graph the schema
   does not declare;
 - a `parent.of` that is not a member of the same graph, a `parent.key`
   that is not a UUID field, and an `order` that is not a `Generic.Int64`
   field;
 - a graph whose generated names collide with a definition of the schema or
-  of another graph;
+  of another graph, and an index whose name collides with one the graph
+  generates (`uq_<member>_entity_ref`, `uq_<graph>_ref_root_name`,
+  `uq_<graph>_commit_root_sequence`, `uq_<graph>_patch_entity` and
+  `idx_<graph>_patch_entity_version`): Postgres keeps index names in one
+  namespace per schema, so an index on any table counts;
 - `@conflictUnit` outside a member, an unknown strategy, and `keyed` or
   `jsonSchema` on a field that is not one JSON object (`Generic.JSON` or a
   `@jsonField` type);
 - a member that excludes content from history with
   `@versioned({ exclude })`: it may exclude only its audit fields and
-  fields with `@conflictUnit("excluded")`.
+  nullable fields with `@conflictUnit("excluded")`. Revert and Merge
+  rebuild rows from history images, so a required column missing from the
+  image would be written as NULL and the statement would fail. The shell
+  writes the audit fields itself.
 
 A member has no `deletedAt` because a delete on a ref is a row that holds
 the entity's `(entityKey, ref)` slot. A soft delete would free the slot and
@@ -179,7 +187,9 @@ cgo; a `cdylib`; and `wasm32-unknown-unknown`, which the TypeScript package
 The ORM generator builds each graph's descriptor from the IR and writes it
 twice: as the constant `<Name>GraphDescriptor` in the ORM package, and as
 `versiongraph/<name>.json` in the Go types module, where a browser or
-another runtime reads the same one.
+another runtime reads the same one. Writing the types module removes each
+`versiongraph/*.json` that no graph of the schema writes and leaves any
+other file there.
 
 ```json
 {
@@ -219,7 +229,7 @@ A ref or commit that does not exist, or a discarded ref, is `ErrNotFound`.
 | --- | --- |
 | `CreatePrimary(ctx, root, name)` | Creates a primary line of `root`. |
 | `Branch(ctx, fromRef, name)` | Creates a change set of `fromRef` whose base is `fromRef`'s head commit. |
-| `Save(ctx, ref, version, RecipeEdits)` | Applies each kind's `GraphEdits[T]`: `Upsert` writes each row as the ref's override of its entity, found by `EntityKey` (a row without one is a new entity, whose key the database generates); `Delete` writes a row that deletes the entity on the ref; `Unset` removes the ref's own row, so the ref reads the entity through its base again. A sealed ref refuses it with `ErrRefSealed`. |
+| `Save(ctx, ref, version, RecipeEdits)` | Applies each kind's `GraphEdits[T]`: `Upsert` writes each row as the ref's override of its entity, found by `EntityKey` (a row without one is a new entity, whose key the database generates). Every ref holds its own row of an entity, so the row's id is never the caller's: Save ignores it and the table's default generates it, whether the `@key` is `AutoGenerate<Identity.UUID>` or a plain `Identity.UUID`. `Delete` writes a row that deletes the entity on the ref; `Unset` removes the ref's own row, so the ref reads the entity through its base again. A sealed ref refuses it with `ErrRefSealed`. |
 | `Commit(ctx, ref, version, RecipeCommitOptions)` | Composes the ref, checks the tree with `validate`, diffs it against the ref's last commit (or its base), and writes a commit with one patch per changed entity pinning the winning row's `(id, _version)`. Moves the ref's head. `Message` is stored; `Tag` takes the root's next `sequence`, which makes the commit a published version. `ErrNothingToCommit` when nothing changed; an `*InvalidTreeError` (`ErrInvalidTree`) lists what `validate` found. |
 | `Seal(ctx, ref, version)` | Commits when there are changes and sets `sealedAt`. The ref then refuses writes. |
 | `Merge(ctx, source, target, targetVersion, resolutions)` | Merges the source's head commit into the target against the source's base. Without conflicts it writes the result onto the target and commits. With conflicts left after `resolutions` it returns them as `[]RecipeConflict` (kind, entity key, unit path, the base, ours and theirs values, and each side's author) and writes nothing. A `RecipeResolution` takes a side (`versiongraph.Take`) or gives a value for one conflict's path. |

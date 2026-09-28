@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityUUID, TemporalDateTime, RecipeEntityKind, RecipePatchOperation, Cover, Ingredient, Note, Recipe, RecipeCommit, RecipePatch, RecipeRef, Step,  } from '@schemas/fixture-version-graph-db-types/types';
+import type { GenericInt64, GenericJSON, IdentityUUID, TemporalDateTime, RecipeEntityKind, RecipePatchOperation, Cover, Ingredient, Note, Recipe, RecipeCommit, RecipePatch, RecipeRef, Step, Utensil,  } from '@schemas/fixture-version-graph-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-version-graph-db-types';
@@ -106,7 +106,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 - **RecipeEntityKind** - The entity kinds of the Recipe version graph.
-  - Values: `Cover`, `Ingredient`, `Note`, `Step`
+  - Values: `Cover`, `Ingredient`, `Note`, `Step`, `Utensil`
 
 - **RecipePatchOperation** - What a patch of the Recipe version graph does to one entity.
   - Values: `Add`, `Update`, `Delete`
@@ -114,7 +114,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (8)
+### Types (9)
 
 
 - **Cover** - The recipe's cover photo: at most one per ref.
@@ -132,6 +132,9 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - **RecipeRef** - A line of the Recipe version graph: a primary line when parentRef is null, else a change set.
 
 - **Step** - One step of a recipe, ordered by position; updatedBy names its row's writer.
+
+- **Utensil** - A utensil the recipe needs, keyed by a plain UUID rather than an
+AutoGenerate one.
 
 
 

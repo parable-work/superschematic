@@ -563,7 +563,9 @@ func (g *{{ $g.Name }}Graph) upsert{{ .TypeName }}(ctx context.Context, tx pgx.T
 {{- if .KeyPointer }}
 	row.{{ .KeyGoName }} = nil
 {{- else }}
-	row.{{ .KeyGoName }} = types.NewUUID()
+	// Every ref holds its own row of an entity, so the caller's id is
+	// ignored: a zero key leaves the id to the table's default.
+	row.{{ .KeyGoName }} = types.{{ .TypeName }}{}.{{ .KeyGoName }}
 {{- end }}
 	row.{{ .RootGoName }} = {{ if .RootPointer }}&{{ end }}{{ .RootGoType }}{ {{- .RootKeyGoName }}: {{ if .RootKeyPointer }}&{{ end }}rootID}
 	row.{{ .RefGoName }} = types.{{ $g.RefType }}{ {{- if .RefKeyPointer }}Id: &refID{{ else }}Id: refID{{ end }}}

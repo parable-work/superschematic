@@ -79,3 +79,14 @@ export abstract class Cover {
   recipe: Relation<Recipe>;
   photoUrl: string;
 }
+
+// A utensil the recipe needs, keyed by a plain UUID rather than an
+// AutoGenerate one.
+@versioned
+@graphMember({ graph: Recipe })
+export abstract class Utensil {
+  @key
+  id: Identity.UUID;
+  recipe: Relation<Recipe>;
+  name: string;
+}

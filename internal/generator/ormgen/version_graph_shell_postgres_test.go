@@ -14,8 +14,11 @@ import (
 // SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL through a whole lifecycle: a
 // primary line, a tagged commit, two change sets merged back (one cleanly,
 // one with a conflict settled by a resolution), a parent deleted with its
-// children, a revert, pruned history, an unset override, and the fence, the
-// seal, the walk ceiling and the schema epoch refusing what they refuse.
+// children, a revert, pruned history, an unset override, a merge that
+// carries a delete, a member with a plain UUID key, a revert that deletes,
+// two taggers made to wait on the root's lock together, and the fence, the
+// seal, a missing history row, the walk ceiling and the schema epoch
+// refusing what they refuse.
 func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -416,7 +419,120 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 		t.Fatalf("Commit on a sealed ref = %v, want ErrRefSealed", err)
 	}
 
-	// Concurrent taggers take distinct sequences.
+	// A merge carries a delete: the source's tombstone reaches the target,
+	// and the entity is gone from the target's compose and from its commits.
+	d, err := g.Branch(ctx, mainID, "no egg wash")
+	if err != nil {
+		t.Fatalf("Branch d: %v", err)
+	}
+	dSaved, err := g.Save(ctx, *d.Id, d.Version, RecipeEdits{Ingredient: GraphEdits[types.Ingredient]{Delete: []types.IdentityUUID{*wash.EntityKey}}})
+	if err != nil {
+		t.Fatalf("save d: %v", err)
+	}
+	if _, err := g.Commit(ctx, *d.Id, dSaved.Ref.Version, RecipeCommitOptions{Message: "no egg wash"}); err != nil {
+		t.Fatalf("commit d: %v", err)
+	}
+	mergedD, err := g.Merge(ctx, *d.Id, mainID, churn.Ref.Version, nil)
+	if err != nil {
+		t.Fatalf("Merge d: %v", err)
+	}
+	if len(mergedD.Conflicts) != 0 || mergedD.Commit == nil {
+		t.Fatalf("merge d = %+v, want a clean merge commit", mergedD)
+	}
+	mainTree, err = g.Compose(ctx, mainID)
+	if err != nil {
+		t.Fatalf("Compose main: %v", err)
+	}
+	assertShellTree(t, "main after d", mainTree, []string{"Mix gently", "Bake"}, []string{"200g flour"})
+	if !shellTombstone(t, pool, "ingredient", *wash.EntityKey, mainID) {
+		t.Fatal("the merge left main's egg wash row live, want the source's delete on it")
+	}
+	if got := shellPatchOperation(t, pool, *mergedD.Commit.Id, "ingredient"); got != "DELETE" {
+		t.Fatalf("merge d's ingredient patch = %q, want DELETE", got)
+	}
+	mergedDTree, err := g.Materialize(ctx, *mergedD.Commit.Id)
+	if err != nil {
+		t.Fatalf("Materialize merge d: %v", err)
+	}
+	assertShellTree(t, "merge d", mergedDTree, []string{"Mix gently", "Bake"}, []string{"200g flour"})
+	if mergedDTree.ContentHash != mergedD.Commit.ContentHash {
+		t.Fatalf("merge d materializes to hash %s, recorded %s", mergedDTree.ContentHash, mergedD.Commit.ContentHash)
+	}
+
+	// A member whose key is a plain UUID: the shell ignores the caller's id
+	// and mints a row id of its own for each ref's row of the entity.
+	callerID := mustShellUUID(t, "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d")
+	uSaved, err := g.Save(ctx, mainID, mergedD.Ref.Version, RecipeEdits{Utensil: GraphEdits[types.Utensil]{Upsert: []*types.Utensil{{Id: callerID, Name: "whisk"}}}})
+	if err != nil {
+		t.Fatalf("save a utensil: %v", err)
+	}
+	whisk := uSaved.Saved.Utensil[0]
+	if whisk.Id == callerID || whisk.Id.IsZero() || whisk.EntityKey == nil {
+		t.Fatalf("saved utensil = %+v, want a minted id and entity key", whisk)
+	}
+	withWhisk, err := g.Commit(ctx, mainID, uSaved.Ref.Version, RecipeCommitOptions{Message: "a whisk"})
+	if err != nil {
+		t.Fatalf("commit the utensil: %v", err)
+	}
+	whiskTree, err := g.Materialize(ctx, *withWhisk.Commit.Id)
+	if err != nil {
+		t.Fatalf("Materialize the utensil: %v", err)
+	}
+	// The egg wash stays gone from main's next commit.
+	assertShellTree(t, "commit with a whisk", whiskTree, []string{"Mix gently", "Bake"}, []string{"200g flour"})
+	assertShellUtensils(t, "commit with a whisk", whiskTree, "whisk")
+	e, err := g.Branch(ctx, mainID, "balloon whisk")
+	if err != nil {
+		t.Fatalf("Branch e: %v", err)
+	}
+	// The override names main's row id; the change set still gets a row of
+	// its own.
+	eSaved, err := g.Save(ctx, *e.Id, e.Version, RecipeEdits{Utensil: GraphEdits[types.Utensil]{Upsert: []*types.Utensil{{Id: whisk.Id, EntityKey: whisk.EntityKey, Name: "balloon whisk"}}}})
+	if err != nil {
+		t.Fatalf("save e: %v", err)
+	}
+	if got := eSaved.Saved.Utensil[0]; got.Id == whisk.Id || got.Id.IsZero() || *got.EntityKey != *whisk.EntityKey {
+		t.Fatalf("e's utensil override = %+v, want a row of its own for the whisk", got)
+	}
+	if _, err := g.Commit(ctx, *e.Id, eSaved.Ref.Version, RecipeCommitOptions{Message: "balloon whisk"}); err != nil {
+		t.Fatalf("commit e: %v", err)
+	}
+	mergedE, err := g.Merge(ctx, *e.Id, mainID, withWhisk.Ref.Version, nil)
+	if err != nil {
+		t.Fatalf("Merge e: %v", err)
+	}
+	if len(mergedE.Conflicts) != 0 || mergedE.Commit == nil {
+		t.Fatalf("merge e = %+v, want a clean merge commit", mergedE)
+	}
+	mainTree, err = g.Compose(ctx, mainID)
+	if err != nil {
+		t.Fatalf("Compose main: %v", err)
+	}
+	assertShellUtensils(t, "main after e", mainTree, "balloon whisk")
+
+	// Reverting to a tree without the whisk deletes it on main.
+	revertedU, err := g.Revert(ctx, mainID, mergedE.Ref.Version, *mergedD.Commit.Id)
+	if err != nil {
+		t.Fatalf("Revert past the whisk: %v", err)
+	}
+	if revertedU.Commit == nil || revertedU.Commit.ContentHash != mergedD.Commit.ContentHash {
+		t.Fatalf("revert commit = %+v, want the content hash of merge d", revertedU.Commit)
+	}
+	mainTree, err = g.Compose(ctx, mainID)
+	if err != nil {
+		t.Fatalf("Compose main: %v", err)
+	}
+	assertShellUtensils(t, "main reverted past the whisk", mainTree)
+	if !shellTombstone(t, pool, "utensil", *whisk.EntityKey, mainID) {
+		t.Fatal("the revert left main's whisk row live, want a row that deletes it")
+	}
+	if got := shellPatchOperation(t, pool, *revertedU.Commit.Id, "utensil"); got != "DELETE" {
+		t.Fatalf("the revert's utensil patch = %q, want DELETE", got)
+	}
+
+	// Concurrent taggers take consecutive sequences. The test holds the
+	// root's lock, both tagging commits wait on it, and once it is released
+	// they tag one after the other.
 	var taggers []types.IdentityUUID
 	var versions []int64
 	for i, instruction := range []string{"Fold", "Shape"} {
@@ -424,12 +540,24 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Branch tagger: %v", err)
 		}
-		s, err := g.Save(ctx, *ref.Id, ref.Version, RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{{Position: types.GenericInt64(3 + i), Instruction: instruction, Timings: types.GenericJSON(` + "`" + `{}` + "`" + `)}}}})
+		s, err := g.Save(ctx, *ref.Id, ref.Version, RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{{Position: types.GenericInt64(3 + i), Instruction: instruction, Timings: types.GenericJSON("{}")}}}})
 		if err != nil {
 			t.Fatalf("save tagger: %v", err)
 		}
 		taggers = append(taggers, *ref.Id)
 		versions = append(versions, s.Ref.Version)
+	}
+	holder, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin the root lock: %v", err)
+	}
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	var holderPID int32
+	if err := holder.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&holderPID); err != nil {
+		t.Fatalf("read the lock holder's pid: %v", err)
+	}
+	if _, err := holder.Exec(ctx, "SELECT 1 FROM recipe WHERE id = $1 FOR NO KEY UPDATE", recipe.Id.ToUUID()); err != nil {
+		t.Fatalf("lock the root: %v", err)
 	}
 	var wg sync.WaitGroup
 	sequences := make([]int64, len(taggers))
@@ -446,7 +574,17 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 			sequences[i] = int64(*result.Commit.Sequence)
 		}(i)
 	}
-	wg.Wait()
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	if waiting := waitForShellWaiters(t, pool, holderPID, len(taggers), done); waiting != len(taggers) {
+		_ = holder.Rollback(ctx)
+		<-done
+		t.Fatalf("%d of %d tagging commits waited on the root's lock (errors %v, sequences %v)", waiting, len(taggers), errs, sequences)
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatalf("release the root lock: %v", err)
+	}
+	<-done
 	for _, err := range errs {
 		if err != nil {
 			t.Fatalf("concurrent tag: %v", err)
@@ -455,6 +593,15 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	sort.Slice(sequences, func(i, j int) bool { return sequences[i] < sequences[j] })
 	if !reflect.DeepEqual(sequences, []int64{2, 3}) {
 		t.Fatalf("concurrent tags took sequences %v, want [2 3]", sequences)
+	}
+
+	// A commit that pins a row version history no longer holds cannot be
+	// read.
+	if _, err := pool.Exec(ctx, "DELETE FROM utensil_history WHERE id = $1 AND _version = $2", whisk.Id.ToUUID(), whisk.Version); err != nil {
+		t.Fatalf("remove the whisk's history row: %v", err)
+	}
+	if _, err := g.Materialize(ctx, *withWhisk.Commit.Id); !errors.Is(err, ErrHistoryMissing) {
+		t.Fatalf("Materialize over a missing history row = %v, want ErrHistoryMissing", err)
 	}
 
 	// The walk ceiling stops a long walk; a newer schema epoch is refused.
@@ -479,6 +626,67 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	}
 	if _, err := g.Compose(ctx, *b.Id); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Compose a discarded ref = %v, want ErrNotFound", err)
+	}
+}
+
+func assertShellUtensils(t *testing.T, what string, tree *RecipeTree, names ...string) {
+	t.Helper()
+	var got []string
+	for _, utensil := range tree.Utensil {
+		got = append(got, utensil.Name)
+	}
+	if !reflect.DeepEqual(got, names) {
+		t.Fatalf("%s: utensils %q, want %q", what, got, names)
+	}
+}
+
+// shellTombstone reports whether ref's own row of an entity is the row that
+// deletes it.
+func shellTombstone(t *testing.T, pool *pgxpool.Pool, table string, entityKey, ref types.IdentityUUID) bool {
+	t.Helper()
+	var tombstone bool
+	if err := pool.QueryRow(context.Background(), "SELECT deleted_on_ref FROM "+table+" WHERE entity_key = $1 AND ref_id = $2", entityKey.ToUUID(), ref.ToUUID()).Scan(&tombstone); err != nil {
+		t.Fatalf("read the %s row of %v on %v: %v", table, entityKey, ref, err)
+	}
+	return tombstone
+}
+
+// shellPatchOperation reads the operation of a commit's one patch of kind.
+func shellPatchOperation(t *testing.T, pool *pgxpool.Pool, commit types.IdentityUUID, kind string) string {
+	t.Helper()
+	var operation string
+	if err := pool.QueryRow(context.Background(), "SELECT operation FROM recipe_patch WHERE commit_id = $1 AND entity_kind = $2", commit.ToUUID(), kind).Scan(&operation); err != nil {
+		t.Fatalf("read the %s patch of %v: %v", kind, commit, err)
+	}
+	return operation
+}
+
+// waitForShellWaiters waits until want backends wait, directly or behind one
+// another, on a lock the backend holder holds, and returns how many do. It
+// stops early when done closes: the waiters finished without waiting.
+func waitForShellWaiters(t *testing.T, pool *pgxpool.Pool, holder int32, want int, done <-chan struct{}) int {
+	t.Helper()
+	const waiters = "WITH RECURSIVE waiting(pid) AS (" +
+		"SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) " +
+		"UNION SELECT a.pid FROM pg_stat_activity AS a JOIN waiting AS w ON w.pid = ANY(pg_blocking_pids(a.pid))" +
+		") SELECT count(*) FROM waiting"
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var n int
+		if err := pool.QueryRow(context.Background(), waiters, holder).Scan(&n); err != nil {
+			t.Fatalf("count lock waiters: %v", err)
+		}
+		if n >= want {
+			return n
+		}
+		select {
+		case <-done:
+			return n
+		case <-time.After(20 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			return n
+		}
 	}
 }
 
