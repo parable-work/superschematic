@@ -1,4 +1,5 @@
 // @ts-check
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightLinksValidator from 'starlight-links-validator';
@@ -29,12 +30,20 @@ export default defineConfig({
       },
       sidebar: [
         { label: 'Overview', link: '/' },
-        { label: 'Quickstart', items: [{ autogenerate: { directory: 'install' } }] },
+        { label: 'Start here', items: [{ autogenerate: { directory: 'start' } }] },
+        { label: 'Your first project', items: [{ autogenerate: { directory: 'first-project' } }] },
         { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
+        { label: 'Languages', items: [{ autogenerate: { directory: 'install' } }] },
+        { label: 'Extending', items: [{ autogenerate: { directory: 'extending' } }] },
         { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
       ],
       // Fails the build on a broken internal link or anchor.
       plugins: [starlightLinksValidator()],
     }),
   ],
+  // Pages quote examples/acme-shop through src/components/Snippet.astro. The
+  // dev server serves only files under docs/ unless told otherwise.
+  vite: {
+    server: { fs: { allow: [fileURLToPath(new URL('..', import.meta.url))] } },
+  },
 });

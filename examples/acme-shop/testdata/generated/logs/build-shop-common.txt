@@ -1,0 +1,7 @@
+Loaded schema shop-common (kind General): 2 types, 1 enums, 2 scalars, 0 operation sets
+  - sentinel up to date
+  + types-go written to .../schemas/dist/types/go/shop-common
+  + types-python written to .../schemas/dist/types/python/shop-common
+  + types-rust written to .../schemas/dist/types/rust/shop-common
+  + types-typescript written to .../schemas/dist/types/typescript/shop-common
+Build complete: 4 outputs generated, 0 skipped

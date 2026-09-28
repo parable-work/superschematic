@@ -276,6 +276,7 @@ jobs:
           cache-dependency-path: |
             go.sum
             examples/acme-schematic/go.sum
+            examples/acme-shop/go/go.sum
 
       - name: Setup Bun
         # The superscalar TypeScript binding is built alongside the Go
@@ -288,6 +289,18 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      # examples/acme-shop's Python client and type tests import the generated
+      # Python packages from the schema runtime's uv environment.
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
 
       - name: Cache the superscalar checkout
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -304,6 +317,10 @@ jobs:
 
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
+
+      - name: Python schema runtime environment
+        working-directory: runtime/schema/python
+        run: uv sync
 
       - name: Build the version-graph archive
         # shop-db declares a version graph, so its generated ORM, and the API
@@ -322,6 +339,16 @@ jobs:
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: examples/acme-schematic/scripts/check_second_decorator.sh
+
+      # The docs site's start-here, first-project and guide pages quote
+      # examples/acme-shop. This builds it with the core binary, compiles and
+      # tests the Go, TypeScript, Python and Rust code the pages show, and
+      # fails when a generated file or command output a page quotes
+      # (examples/acme-shop/testdata/generated/) is stale.
+      - name: acme-shop (the docs example builds and passes its tests in four languages)
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: examples/acme-shop/scripts/check.sh
 
   typescript:
     name: typescript (authoring packages + schema and http runtimes)

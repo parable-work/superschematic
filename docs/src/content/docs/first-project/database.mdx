@@ -1,0 +1,123 @@
+---
+title: Model the database
+description: Declare the shop's tables in a DB schema and generate Postgres DDL, a Go ORM, and Go and TypeScript types.
+sidebar:
+  order: 2
+---
+
+import { LinkCard, TabItem, Tabs } from '@astrojs/starlight/components';
+import Snippet from '../../../components/Snippet.astro';
+
+The shop keeps its users, their sessions, its products and its stock in
+Postgres. `shop-db` declares those tables once; superschematic writes the
+DDL, a typed Go data-access layer, and the row types in each language the
+config lists. `shop-db` also holds the order and review tables that
+[Database tables](/superschematic/guides/database-tables/) walks through.
+
+## Configure a DB service
+
+<Snippet file="schemas/services/shop-db/schema.config.ts" />
+
+A DB schema always gets its SQL and its Go ORM. `outputs.types` adds the
+row types in the languages it lists; the ORM uses the Go ones.
+
+## Declare the tables
+
+Every class in a DB schema is a table. Start with the columns every table
+shares, and the people who use the shop:
+
+<Snippet file="schemas/services/shop-db/src/shop.schema.ts" symbol={['Auditable', 'User']} />
+
+- `extends Auditable` copies `createdAt` and `updatedAt` into `User`. A
+  class that other tables extend is not a table itself.
+- `@key` marks the primary key. `AutoGenerate<Identity.UUID>` lets the
+  database generate it, so a new row has no id until it is inserted.
+- `@unique` adds a unique constraint.
+- `Nullable<T>` makes a column nullable. Every other column is `NOT NULL`.
+- The scalar decides the column type: `Contact.Email` is `CITEXT`, so
+  email addresses compare case-insensitively, and `Identity.Name` is
+  `VARCHAR(80)`.
+
+A session belongs to a user:
+
+<Snippet file="schemas/services/shop-db/src/shop.schema.ts" symbol="Session" />
+
+`Relation<User, { onDelete: "CASCADE" }>` stores a `user_id` column with a
+foreign key to `user`, and deletes the user's sessions with the user. The
+`session` auth provider looks sessions up by `jti` when it authenticates a
+request to the Go API.
+
+Then the catalog:
+
+<Snippet file="schemas/services/shop-db/src/shop.schema.ts" symbol={['Product', 'StockLevel']} />
+
+`Default<boolean, true>` is a default for decoders, not for the database:
+when a JSON or YAML payload leaves `inStock` out, the generated Go and
+TypeScript decoders fill in `true`. The column itself has no SQL default.
+
+## Build
+
+```sh
+superschematic build schemas/services/shop-db
+```
+
+<Snippet file="testdata/generated/logs/build-shop-db.txt" />
+
+## The DDL
+
+`sql/shop-db/create.sql` creates every table, then every foreign key, then
+every index; `drop.sql` removes them. Table names are the class names in
+snake case, and each class comment becomes the table comment:
+
+<Snippet file="testdata/generated/sql/shop-db/create.sql" from="CREATE TABLE product (" to="COMMENT ON TABLE product" />
+
+<Snippet file="testdata/generated/sql/shop-db/create.sql" from="ALTER TABLE stock_level" to="ON DELETE CASCADE;" />
+
+## The row types
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    <Snippet file="testdata/generated/types/go/shop-db/types.go" symbol="Product" />
+    `Id` is a pointer because the database generates it, and so is
+    `UpdatedAt` because it is nullable. A `Relation` field holds the
+    related row: `Session.User` is a `User` and `StockLevel.Product` a
+    `Product`.
+  </TabItem>
+  <TabItem label="TypeScript">
+    `@acme/shop-db-types` exports an interface per table, with `JSDate` for
+    date-times and optional properties for the nullable and generated
+    columns, plus the same `parse` and `validate` functions as any other
+    types package.
+  </TabItem>
+</Tabs>
+
+## The ORM
+
+`orm/shop-db` is the Go module `example.com/acme/orm/shop-db`, built on
+pgx. Each table gets a repository:
+
+<Snippet file="testdata/generated/orm/shop-db/interfaces.go" symbol="ProductRepositoryInterface" />
+
+- `orm.Connect(ctx, databaseURL)` opens a pool and returns a `*Database`.
+  `GetProductRepository()` and its siblings hand out repositories, and
+  `Transaction` runs a function with repositories bound to one transaction.
+- `FindMany` takes a `ProductFilter` with one filter per column, such as
+  `InStock: &orm.BoolFilter{Eq: &inStock}`, and `ProductFindOptions` for
+  the columns to read, the order and the page. It returns the rows and the
+  total count of matching rows. Its options must name at least one column:
+  `orm.ProductFields{}.All()` reads them all.
+- `CreateOne` leaves out a zero id and `createdAt`, so the database fills
+  them in, and returns the inserted row.
+- A lookup that finds nothing returns `orm.ErrNotFound`.
+- `orm.NewNoOpDatabase()` implements the same interfaces without a
+  database: lists are empty, a lookup is not found, and a create returns
+  its input. The tests in the next parts run against it.
+
+<LinkCard
+  title="Next: serve and call it from Go"
+  href="/superschematic/first-project/go-api/"
+/>
+<LinkCard
+  title="Or: serve and call it from TypeScript"
+  href="/superschematic/first-project/typescript-api/"
+/>

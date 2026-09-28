@@ -8,10 +8,8 @@ import (
 	types "example.com/schemas/types/go/fixture-api"
 )
 
-// SystemUserID is the UUID for the system user.
-// This user is used for system-generated records and audit fields (createdBy, updatedBy)
-// when no specific user context is available.
-//
-// The system user is automatically created during database initialization
-// and has the UUID: 00000000-0000-4000-8000-000000000000
+// SystemUserID is a fixed UUID an implementation may use as the actor of
+// system-generated records. No generated code creates a user row with this
+// id or assigns it to an audit field; a database that needs the row seeds it
+// itself.
 var SystemUserID = types.IdentityUUID(uuid.MustParse("00000000-0000-4000-8000-000000000000"))

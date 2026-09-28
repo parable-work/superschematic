@@ -1,16 +1,19 @@
-// Package pgcheck applies the SQL the sqlgen package generated for the
-// fixture-projection service to a real Postgres and checks what the view
-// does: it fails closed without its settings, serves only the rows its
-// rules admit, keeps one row per slot, belongs to the view owner, is a
-// security barrier, hides the base tables from a reader, and has the
-// columns its Arrow schema lists. TestProjectionMigrationsOnPostgres in the
-// sqlgen package runs it with:
+// Package pgcheck applies SQL the sqlgen package generated to a real
+// Postgres. TestProjectionOnPostgres checks what the fixture-projection
+// service's view does: it fails closed without its settings, serves only
+// the rows its rules admit, keeps one row per slot, belongs to the view
+// owner, is a security barrier, hides the base tables from a reader, and
+// has the columns its Arrow schema lists. TestProjectionMigrationsOnPostgres
+// in the sqlgen package runs it with:
 //
 //	PGCHECK_DATABASE_URL  a Postgres URL whose role may create databases and roles
 //	PGCHECK_SQL_DIR       the directory holding create.sql, drop.sql and the migrations
 //	PGCHECK_UP, PGCHECK_DOWN  the migration file names
 //	PGCHECK_ARROW         the Arrow schema file
 //	PGCHECK_VIEW_OWNER    the role the up migration creates the view as
+//
+// TestUserTableOnPostgres (user_table_test.go) checks a User table's
+// create.sql and drop.sql.
 package pgcheck
 
 import (

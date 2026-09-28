@@ -1,0 +1,131 @@
+---
+title: How it works
+description: Services, kinds, outputs, the naming file and the IR, the model behind every build.
+sidebar:
+  order: 3
+---
+
+import Snippet from '../../../components/Snippet.astro';
+
+A build reads schema files into one in-memory model, the Schema IR, and
+hands it to generators. What the files may declare, and which generators
+run, depends on the service's kind. What the generated packages are called
+comes from the naming file.
+
+```
+services/<name>/schema.config.ts  +  src/*.schema.ts
+  -> loader: parse, resolve imports, apply decorators, verify
+  -> Schema IR
+  -> the kind's pipeline of generators, filtered by outputs
+  -> <schemas-root>/dist
+```
+
+## A schemas root holds services
+
+A schemas root is a directory with `superschematic.toml` and a `services/`
+directory. Each service is one schema: a directory with a
+`schema.config.ts` (or `.json` or `.yaml`) and its schema files under
+`src/`. Output goes to `dist/` next to `services/`.
+
+`examples/acme-shop/schemas` has five services, one or more of each core
+kind:
+
+| Service | Kind | What it declares |
+| --- | --- | --- |
+| `shop-common` | General | `Price` and `Currency`, shared by the other services |
+| `shop-db` | DB | the shop's tables: users, sessions, products, stock, orders and reviews |
+| `shop-api` | API | product routes over `shop-db`, served in Go |
+| `shop-orders` | API | order and review routes, served in Go, with SDKs in all four languages |
+| `shop-storefront` | API | cart routes, served in TypeScript |
+
+## A kind decides what a schema means
+
+The core registers three kinds. The kind decides what a plain abstract
+class becomes, which authoring packages a schema may import, which other
+kinds it may reference, and which generators run, in order.
+
+| Kind | A class is | May import | May reference | Generators |
+| --- | --- | --- | --- | --- |
+| DB | a table | `@superschematic/db` | General | `sql`, `orm`, `types` |
+| API | a request or response type; with `@source`, a view of a table | `@superschematic/api` | DB, General | `types`, `api`, `sdks` |
+| General | a plain type | neither | General | `types`, `envConfig` |
+
+Every kind may import `@superschematic/schema` (wrappers such as
+`Nullable` and `Default`, and decorators that apply everywhere),
+`@superschematic/schema-config` and `superscalar`. Any other import is a
+load error, unless an extension registers the package; the
+[`authoring_packages`](/superschematic/reference/naming/#authoring_packages)
+key lists them.
+
+An extension can register more kinds, each with its own rules and
+generators. The [extension guide](/superschematic/extending/write-an-extension/)
+covers that.
+
+## Outputs choose what to generate
+
+A generator in the kind's pipeline runs when the config's `outputs` block
+asks for it:
+
+```ts
+outputs: {
+  types: { go: { enabled: true }, typescript: { enabled: true } },
+  api: { enabled: true, language: "GO" },     // API: GO, TYPESCRIPT or RUST
+  sdk: { typescript: { enabled: true } }       // API: an SDK per language
+}
+```
+
+A DB schema always gets its SQL and Go ORM; `types` adds types in the
+languages it lists. A General schema whose class carries `@envVars` also
+gets a loader for those environment variables. Every generated package is
+self-contained: it imports the runtimes under `runtime/` and superscalar,
+never the compiler.
+
+## The naming file names the packages
+
+`superschematic.toml` at the schemas root is the naming file. It turns a
+service name into package coordinates, so `shop-db`'s Go types are the
+module `<go_module_root>/types/go/shop-db` and its TypeScript types the
+package `<npm_scope>/shop-db-types`. It also picks the auth provider the Go
+server renders with, and where path dependencies point while nothing is
+published. Every key is optional; the
+[naming reference](/superschematic/reference/naming/) lists them with their
+defaults.
+
+## Services depend on each other
+
+A service may use another's types:
+
+- An API's `@source` class imports a table from a DB schema to declare a
+  view of it. The loader checks that each field matches the table's.
+- A config's `dependencies` names the services a schema imports types
+  from, as `shop-storefront` does for `Price`. The generated packages then
+  depend on each other's packages.
+- On an API marked `public: true`, `authDb` names the DB schema whose
+  `User` and `Session` tables the Go server's auth provider reads.
+
+`build-all` builds every service in dependency order. `build --with-deps`
+builds one service and what it depends on.
+
+## The IR is the contract
+
+Every authoring form loads into the same IR: TypeScript, JSON and YAML
+schema files are interchangeable, and `format` converts between them.
+`build --emit-ir` prints it instead of generating code:
+
+```sh
+superschematic build schemas/services/shop-common --emit-ir | jq .types.Price
+```
+
+<Snippet file="testdata/generated/logs/price-ir.json" />
+
+When a generator's output surprises you, the IR shows what it was given.
+`superschematic json-schema` prints the JSON Schema the JSON and YAML forms
+are validated against.
+
+## A binary is the core plus extensions
+
+The CLI is a library: a binary is `cli.New(cli.Config{...}, extensions...)`.
+`bin/superschematic` links no extension. A project that needs its own
+kinds, decorators, generators or auth providers builds its own binary with
+an extension, and the rest of this site applies unchanged.
+`examples/acme-schematic` is that project for the acme shop.

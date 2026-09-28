@@ -11,6 +11,7 @@ This package provides type-safe Python models generated from Superschematic defi
 - **Runtime validation** with detailed error messages
 - **Type hints** for IDE autocomplete and static type checking
 - **JSON / YAML serialization and deserialization**
+- **Custom scalar validation** from the scalar library
 - **Field-level constraints** (min/max length, patterns, ranges)
 
 ## Installation
@@ -24,6 +25,7 @@ uv pip install schemas_types_fixture_general
 - Python >= 3.12
 - Pydantic >= 2.12.0
 - PyYAML >= 6.0.0
+- superscalar >= 1.0.0
 
 ## Usage
 
@@ -46,6 +48,8 @@ if errors:
 
 This package includes custom scalar types with built-in validation:
 
+- `GenericInt64` (canonical: `Generic.Int64`): Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
+- `IdentityName` (canonical: `Identity.Name`): An objects name
 - `NetworkUrl` (canonical: `Network.Url`): Valid HTTP/HTTPS URL
 
 
