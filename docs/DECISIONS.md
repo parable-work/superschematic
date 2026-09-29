@@ -608,6 +608,27 @@ routes answer 401 unless the service's own middleware puts a caller on
 the context, which it can now do from the token the SDK sends. An SDK
 given no token sends none, as before.
 
+### D15, amended: the runtime ships compiled output
+
+The runtime shipped its TypeScript sources, and its `exports` pointed at
+`src/*.ts`. Node.js does not strip types from a file under
+`node_modules`, so only a consumer that compiles TypeScript itself (Bun, a
+bundler, a loader) could run it. The engine (D16) ships compiled ESM,
+runs on Node.js, and serves its HTTP API through this runtime. A compiled
+engine module that imported the runtime's sources would not run on
+Node.js, and its declarations would pull those sources into every
+consumer's compile.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The runtime ships compiled ESM with declarations in `dist/`, and `exports` (`.` and `./hono`) points there. It compiles with `NodeNext` resolution, which holds each relative import to the `.js` path Node.js resolves. `bun run build` writes `dist/`; the tests still run the sources under Bun. | Keeping sources, with the engine's HTTP layer reimplementing the envelopes and the auth gate, which would give every refusal two implementations |
+| Everything that resolves the runtime by name builds it first: `make ts`, the CI `typescript` job, release packing, the `tsrestgen` compile gates and the acme scripts. | Committing `dist/`, which drifts from the sources |
+
+The generated router does not change. It imports the runtime by name, and
+a generated package still ships TypeScript sources, since its consumer
+already runs a TypeScript-aware toolchain. That reason holds for the
+generated package, not for a runtime a compiled package imports.
+
 ## D14. A failing scalar value is one error, named by the rule it breaks
 
 A scalar value its scalar rejects is one validation error in every

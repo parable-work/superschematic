@@ -363,7 +363,7 @@ grep -q '"name": "@acme/shop-storefront-api"' "$API_PKG/package.json"
 grep -q '"@acme/shop-storefront-types": "\*"' "$API_PKG/package.json"
 grep -q "from '@superschematic/http-runtime/hono'" "$API_PKG/router.ts"
 test ! -e "$API_PKG/go.mod"
-(cd "$RUNTIME" && bun install --frozen-lockfile >/dev/null && bun run link-deps >/dev/null)
+(cd "$RUNTIME" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 (cd "$TYPES_PKG" && bun install >/dev/null)
 # Resolve every package the generated router and the app import by name, the
 # way a consuming service's install would: hono comes from the runtime's own

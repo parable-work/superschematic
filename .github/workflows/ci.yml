@@ -407,10 +407,11 @@ jobs:
           bun run build
           bun run test
 
-      - name: runtime/http/typescript typecheck + test
+      - name: runtime/http/typescript typecheck + build + test
         working-directory: runtime/http/typescript
         run: |
           bun install --frozen-lockfile
+          bun run build
           bun run test
 
       - name: runtime/engine/typescript typecheck + build + test (Node.js and Bun)

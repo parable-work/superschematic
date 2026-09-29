@@ -1,4 +1,4 @@
-import type { RequestContext } from './operation';
+import type { RequestContext } from './operation.js';
 
 /*
 @rateLimit, with the Go runtime's key semantics: one limiter per route, keyed
