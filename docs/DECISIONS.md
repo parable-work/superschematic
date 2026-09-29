@@ -397,10 +397,18 @@ whether they should refuse it as open. They refuse it:
 | The ORM refuses one in both storage forms, with `<field>[i]: null element` (`<field>[i][j]` for a list of lists): a JSONB list column through `unmarshalJSONListFieldValue`, and a native `JSONB[]` column (a `Generic.JSON[]` without `@jsonField`), where pgx reads a SQL NULL element as nil and a JSON null element as the token without an error, by checking the scanned list. The history decoder refuses one too. | Leaving the native column to pgx |
 | The ORM writes none: `CreateOne`, `CreateMany`, `UpdateOne` and `UpdateMany` refuse a nil element or the JSON null token before the statement runs. A Go caller can put one in the list, and without the check a write would store it and the `RETURNING` read of the same call would refuse it after the row was written. | Writing it and refusing it on the next read |
 
-Still open: a native array column of a scalar whose Go type scans SQL NULL
-as its zero value (a UUID, a timestamp, or a string scalar such as
-`Identity.Name`) reads a NULL element another writer stored as that zero
-value. pgx refuses one for a string, an enum and a number.
+That change also recorded as open a native array column of a scalar whose
+Go type's `Scan` takes a nil source and sets the zero value: a UUID, a
+timestamp, or a string scalar such as `Identity.Name`. Such a column read a
+NULL element another writer stored as that zero value (the zero UUID, the
+zero time, `""`) with no error, while pgx refused one for a string, an enum
+and a number with an error of its own. Every native array column now
+refuses one:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The ORM scans every native array column but a `Generic.JSON[]` into a list of pointers (`[]*T`), where pgx reads a SQL NULL element as nil, then copies it into the entity's `[]T` and fails the read at the first nil with `<field>[i]: null element`: GetOne, FindOne, FindMany, GetManyByIDs and the `RETURNING` reads of the writes. A string, enum or number list reports this error in place of pgx's. The history decoder reads a native list through `unmarshalJSONListFieldValue`. No Go type changes; a scan through pointers costs one allocation per element. | A scan target that implements pgx's `ArraySetter` and refuses a NULL element as it scans, which skips the copy but ties the ORM to pgx's array interface and must reproduce the element scan pgx plans for `T`; checking only the element types whose `Scan` takes a nil source, which follows superscalar's implementations; `[]*T` in the generated types |
+| The ORM writes none. A native list's Go element is a value, never a pointer, and no element type but `Generic.JSON` has a `Value` method that returns nil, so no element binds as SQL NULL; the write check above covers `Generic.JSON`. | A write check for every native list |
 
 The generated TypeScript validator rejects a null element, validates a
 nested object element of every type, and reports a non-string element of a
