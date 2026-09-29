@@ -5,7 +5,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -25,11 +24,12 @@ import (
 const encryptedBodyService = "encrypted-body-api"
 
 // TestEncryptedBodiesAreTheRequestBody generates the Rust types crate and
-// the Rust SDK crate of encrypted-body-api and runs encryptedBodySDKTest
-// with cargo test: each call sends an envelope that the test's private key
-// opens, for both algorithms, to the request body itself, as the
-// TypeScript and Python SDKs send it and the Go server's payload decryptor
-// expects. The key pair is generated here and written into the test.
+// the Rust SDK crate of encrypted-body-api, checks it with cargo clippy
+// and runs encryptedBodySDKTest with cargo test: each call sends an
+// envelope that the test's private key opens, for both algorithms, to the
+// request body itself, as the TypeScript and Python SDKs send it and the Go
+// server's payload decryptor expects. The key pair is generated here and
+// written into the test.
 // CARGO_TARGET_DIR is honored when set.
 func TestEncryptedBodiesAreTheRequestBody(t *testing.T) {
 	if testing.Short() {
@@ -86,12 +86,7 @@ superscalar = { path = "`+filepath.ToSlash(paths.ScalarRust)+`" }
 	).Replace(encryptedBodySDKTest)
 	writeFile(t, filepath.Join(sdkDir, "tests", "encrypted_body.rs"), test)
 
-	cmd := exec.Command(cargoPath, "test", "--quiet")
-	cmd.Dir = sdkDir
-	cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+cargoTargetDir(t))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("cargo test on the generated SDK crate: %v\n%s", err, out)
-	}
+	cargoClippyAndTest(t, cargoPath, sdkDir)
 }
 
 // testKeyPair returns a new RSA key pair as a PKCS #8 private key PEM and a

@@ -121,9 +121,11 @@ jobs:
       - name: Install Rust toolchain
         # Builds the superscalar ffi archive from source; the checkout carries
         # its own rust-toolchain.toml which rustup reads when it builds. The
-        # wasm32 target builds the version-graph TypeScript package.
+        # wasm32 target builds the version-graph TypeScript package, and
+        # rustsdkgen compile tests run cargo clippy on the generated SDK
+        # crates, so this toolchain carries clippy.
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown --component clippy
           rustup default "$RUST_VERSION"
 
       - name: Build the superscalar dependency

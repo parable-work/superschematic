@@ -149,7 +149,7 @@ impl PostNamespace {
             return Err(SDKError::config("query parameters are required"));
         }
         self.client
-            .request_json("GET", &path, &query_params, None, options)
+            .request_json("GET", path, &query_params, None, options)
             .await
     }
 }
