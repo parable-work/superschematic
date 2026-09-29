@@ -131,9 +131,12 @@ const product = await sdk.product.getProduct(id);
 ```
 
 `auth.token` is a static token. `auth.getToken` is called per request.
-`setToken` / `clearToken` change the token after construction. Each
-namespace is a camelCase field, and operation sets that share a namespace
-share it: `ProductQueries` and `ProductMutations` are both `sdk.product`.
+`setToken` / `clearToken` change the token after construction. The SDK of
+an API with an operation that needs a caller (`@auth`,
+`@requirePermission`, `@requireOwnership`) sends the token on every request
+as `Authorization: Bearer <token>`. Each namespace is a camelCase field,
+and operation sets that share a namespace share it: `ProductQueries` and
+`ProductMutations` are both `sdk.product`.
 
 ## Serve a generated API
 
@@ -226,7 +229,8 @@ nested under it (`carts` covers `carts.write`). Pass `permissionMatcher` to
 use another rule. An operation declared `@manualRouteRegistration` is gated
 the same way and then handed to `options.manualRoutes.<operation>` with the
 Hono context, for a streaming response or anything else the JSON router
-cannot express.
+cannot express. The config needs neither `public` nor `authDb` for this
+server: those wire the Go server's auth middleware to an auth store.
 
 Two kinds of operation must be `@manualRouteRegistration`, and the build
 fails with the operation named when one is not:

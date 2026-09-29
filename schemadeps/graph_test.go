@@ -49,6 +49,62 @@ func TestCollectFromDist_TypeScriptOmitsWebDBFromAPI(t *testing.T) {
 	}
 }
 
+// TestCollectFromDist_GoRecordsDirectRequires reads the go.mod files of a
+// common -> db -> api chain. Each module requires the generated modules it
+// reaches through another one as indirect so a local build resolves them;
+// the graph keeps the direct edges and Closure still reaches the far end.
+func TestCollectFromDist_GoRecordsDirectRequires(t *testing.T) {
+	dist := t.TempDir()
+	const pseudo = " v0.0.0-00010101000000-000000000000"
+	write := func(rel, module string, requires ...string) {
+		t.Helper()
+		content := "module " + module + "\n\ngo 1.26.4\n\nrequire (\n"
+		for _, req := range requires {
+			content += "\t" + req + "\n"
+		}
+		content += ")\n"
+		if err := os.MkdirAll(filepath.Join(dist, filepath.FromSlash(rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dist, filepath.FromSlash(rel), "go.mod"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("types/go/common", "example.com/schemas/types/go/common")
+	write("types/go/db", "example.com/schemas/types/go/db", "example.com/schemas/types/go/common"+pseudo)
+	write("orm/db", "example.com/schemas/orm/db",
+		"example.com/schemas/types/go/db"+pseudo,
+		"example.com/schemas/types/go/common"+pseudo+" // indirect")
+	write("types/go/api", "example.com/schemas/types/go/api")
+	write("api/api", "example.com/schemas/api/api",
+		"example.com/schemas/orm/db"+pseudo,
+		"example.com/schemas/types/go/api"+pseudo,
+		"example.com/schemas/types/go/common"+pseudo+" // indirect",
+		"example.com/schemas/types/go/db"+pseudo+" // indirect")
+
+	g, err := CollectFromDist(dist, nil)
+	if err != nil {
+		t.Fatalf("CollectFromDist: %v", err)
+	}
+	for id, want := range map[string]string{
+		"api-api":      "api-types,db-orm",
+		"db-orm":       "db-types",
+		"db-types":     "common-types",
+		"common-types": "",
+	} {
+		if got := strings.Join(mustPkg(t, g, "go", id).Deps, ","); got != want {
+			t.Errorf("%s deps = [%s], want [%s]", id, got, want)
+		}
+	}
+	closure, err := g.Closure("go", []string{"api-api"})
+	if err != nil {
+		t.Fatalf("Closure: %v", err)
+	}
+	if got, want := strings.Join(closure, ","), "api-types,common-types,db-types,db-orm,api-api"; got != want {
+		t.Errorf("closure = %s, want %s", got, want)
+	}
+}
+
 func TestCollectFromDist_AnnotatesProducingService(t *testing.T) {
 	dist := t.TempDir()
 	writeTSPackage(t, dist, "types/typescript/orders-api", "@schemas/orders-api-types", map[string]string{

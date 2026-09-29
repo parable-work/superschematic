@@ -3,6 +3,7 @@ package gosdkgen
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
@@ -61,6 +62,55 @@ func TestWriteSDKGolden(t *testing.T) {
 	}
 	if len(got) == 0 {
 		t.Fatal("expected non-empty sdk.go")
+	}
+}
+
+// TestSDKTokenMethodsFollowOperationsNotPublic pins when the SDK gets
+// SetToken and ClearToken: when any operation needs a caller, whether or
+// not the API is public, as in the TypeScript SDK. fixture-api declares
+// such operations; fixture-nested-arrays-api declares none.
+func TestSDKTokenMethodsFollowOperationsNotPublic(t *testing.T) {
+	fixtureAPI := func(t *testing.T) (*apigen.APIOutput, string) {
+		return loadFixtureAPI(t), "example.com/schemas/sdk/go/fixture-api"
+	}
+	nestedArraysAPI := func(t *testing.T) (*apigen.APIOutput, string) {
+		_, apiOutput := loadNestedArraysAPI(t, false)
+		return apiOutput, nestedArraysSDKModule
+	}
+	for _, test := range []struct {
+		name   string
+		load   func(t *testing.T) (*apigen.APIOutput, string)
+		public bool
+		want   bool
+	}{
+		{"public with protected operations", fixtureAPI, true, true},
+		{"not public with protected operations", fixtureAPI, false, true},
+		{"public without protected operations", nestedArraysAPI, true, false},
+		{"not public without protected operations", nestedArraysAPI, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			apiOutput, modulePath := test.load(t)
+			apiOutput.IsPublic = test.public
+			clock := codegen.DefaultClock()
+			sdkOutput, err := Generate(apiOutput, modulePath, "sdk", clock)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if sdkOutput.HasAuth != test.want || sdkOutput.Runtime.HasAuth != test.want {
+				t.Errorf("HasAuth = %v, Runtime.HasAuth = %v, want %v", sdkOutput.HasAuth, sdkOutput.Runtime.HasAuth, test.want)
+			}
+			outDir := t.TempDir()
+			if err := WriteSDKWithTools(sdkOutput, apiOutput, outDir, t.TempDir(), clock); err != nil {
+				t.Fatalf("WriteSDKWithTools: %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(outDir, "sdk.go"))
+			if err != nil {
+				t.Fatalf("read sdk.go: %v", err)
+			}
+			if marker := ") SetToken(token string) {"; strings.Contains(string(got), marker) != test.want {
+				t.Errorf("sdk.go contains %q: %v, want %v", marker, !test.want, test.want)
+			}
+		})
 	}
 }
 

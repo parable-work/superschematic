@@ -167,6 +167,63 @@ func TestGeneratedPackageJSONHasNoAxios(t *testing.T) {
 	}
 }
 
+// TestSDKAuthFollowsOperationsNotPublic pins when the SDK sends
+// credentials: when any operation needs a caller, whether or not the API is
+// public. The TypeScript router enforces @auth and @requirePermission on
+// every API, so an SDK that ignored auth.token for a non-public API could
+// not call its protected routes. fixture-api declares such operations;
+// fixture-nested-arrays-api declares none.
+func TestSDKAuthFollowsOperationsNotPublic(t *testing.T) {
+	fixtureAPI := func(t *testing.T) (*apigen.APIOutput, map[string]bool) {
+		_, apiOutput, parseable := loadFixtureAPI(t)
+		return apiOutput, parseable
+	}
+	nestedArraysAPI := func(t *testing.T) (*apigen.APIOutput, map[string]bool) {
+		_, apiOutput, parseable := loadNestedArraysAPI(t, false)
+		return apiOutput, parseable
+	}
+	for _, test := range []struct {
+		name   string
+		load   func(t *testing.T) (*apigen.APIOutput, map[string]bool)
+		public bool
+		want   bool
+	}{
+		{"public with protected operations", fixtureAPI, true, true},
+		{"not public with protected operations", fixtureAPI, false, true},
+		{"public without protected operations", nestedArraysAPI, true, false},
+		{"not public without protected operations", nestedArraysAPI, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			apiOutput, parseable := test.load(t)
+			apiOutput.IsPublic = test.public
+			clock := codegen.DefaultClock()
+			sdkOutput, err := Generate(apiOutput, parseable, clock)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if sdkOutput.HasAuth != test.want {
+				t.Errorf("HasAuth = %v, want %v", sdkOutput.HasAuth, test.want)
+			}
+			outDir := t.TempDir()
+			if err := WriteSDKWithTools(sdkOutput, apiOutput, outDir, clock); err != nil {
+				t.Fatalf("WriteSDKWithTools: %v", err)
+			}
+			for file, marker := range map[string]string{
+				"client.ts": "requestConfig.headers['Authorization'] = `Bearer ${token}`;",
+				"index.ts":  "public setToken(token: string): void {",
+			} {
+				got, err := os.ReadFile(filepath.Join(outDir, file))
+				if err != nil {
+					t.Fatalf("read %s: %v", file, err)
+				}
+				if strings.Contains(string(got), marker) != test.want {
+					t.Errorf("%s contains %q: %v, want %v", file, marker, !test.want, test.want)
+				}
+			}
+		})
+	}
+}
+
 func TestWriteSDKGolden(t *testing.T) {
 	_, apiOutput, parseable := loadFixtureAPI(t)
 	clock := codegen.DefaultClock()

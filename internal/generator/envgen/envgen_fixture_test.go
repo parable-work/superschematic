@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/envgen"
@@ -114,6 +115,41 @@ func TestWriteConfigGolden(t *testing.T) {
 		}
 		if string(got) != string(want) {
 			t.Errorf("%s differs from golden (run with -update to accept)", name)
+		}
+	}
+}
+
+// TestWriteConfigModuleRequiresIndirectModules: the standalone module
+// requires the types modules its types module reaches as indirect and
+// replaces each with its directory under types/go.
+func TestWriteConfigModuleRequiresIndirectModules(t *testing.T) {
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-general"))
+	if err != nil {
+		t.Fatalf("load fixture-general: %v", err)
+	}
+	output, err := envgen.Generate(schema, "fixture-general")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	output.IndirectModules = []string{"example.com/schemas/types/go/base", "example.com/schemas/types/go/common"}
+
+	outDir := t.TempDir()
+	if err := envgen.WriteConfigModule(output, outDir); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	gomod, err := os.ReadFile(filepath.Join(outDir, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"base", "common"} {
+		module := "example.com/schemas/types/go/" + name
+		for _, line := range []string{
+			"\t" + module + " v0.0.0-00010101000000-000000000000 // indirect\n",
+			"replace " + module + " => ../../types/go/" + name + "\n",
+		} {
+			if !strings.Contains(string(gomod), line) {
+				t.Errorf("go.mod lacks %q:\n%s", line, gomod)
+			}
 		}
 	}
 }

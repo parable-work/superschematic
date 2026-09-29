@@ -334,3 +334,49 @@ func TestWriteSDKGolden(t *testing.T) {
 		t.Fatal("expected non-empty Cargo.toml")
 	}
 }
+
+// TestSDKTokenMethodsFollowOperationsNotPublic pins when the SDK gets
+// set_token and clear_token: when any operation needs a caller, whether or
+// not the API is public, as in the TypeScript SDK. fixture-api declares
+// such operations; fixture-nested-arrays-api declares none.
+func TestSDKTokenMethodsFollowOperationsNotPublic(t *testing.T) {
+	nestedArraysAPI := func(t *testing.T) *apigen.APIOutput {
+		_, apiOutput := loadNestedArraysAPI(t)
+		return apiOutput
+	}
+	for _, test := range []struct {
+		name   string
+		load   func(t *testing.T) *apigen.APIOutput
+		public bool
+		want   bool
+	}{
+		{"public with protected operations", loadFixtureAPI, true, true},
+		{"not public with protected operations", loadFixtureAPI, false, true},
+		{"public without protected operations", nestedArraysAPI, true, false},
+		{"not public without protected operations", nestedArraysAPI, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			apiOutput := test.load(t)
+			apiOutput.IsPublic = test.public
+			clock := codegen.DefaultClock()
+			sdkOutput, err := Generate(apiOutput, naming.Default().RustSDKCrate(apiOutput.SchemaName), naming.Default().RustTypesCrate(apiOutput.SchemaName), clock)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if sdkOutput.HasAuth != test.want {
+				t.Errorf("HasAuth = %v, want %v", sdkOutput.HasAuth, test.want)
+			}
+			outDir := t.TempDir()
+			if err := WriteSDKWithTools(sdkOutput, apiOutput, outDir, t.TempDir(), clock); err != nil {
+				t.Fatalf("WriteSDKWithTools: %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(outDir, "src", "sdk.rs"))
+			if err != nil {
+				t.Fatalf("read src/sdk.rs: %v", err)
+			}
+			if marker := "pub fn set_token(&self, token: impl Into<String>) {"; strings.Contains(string(got), marker) != test.want {
+				t.Errorf("src/sdk.rs contains %q: %v, want %v", marker, !test.want, test.want)
+			}
+		})
+	}
+}

@@ -173,6 +173,62 @@ func TestRunAPISchemaSelectsTypeScriptAPI(t *testing.T) {
 	}
 }
 
+// TestRunTypeScriptAPISDKSendsTokenWithoutPublic builds fixture-api for the
+// TypeScript server with neither public nor authDb. The router enforces
+// @auth and @requirePermission itself, with the caller the service's
+// authenticate option returns (D15), so the build loads no auth store; and
+// the SDKs still send the caller's token, since their operations need one.
+// Before, an SDK sent auth.token only for a public API, and a public API
+// needed an authDb the TypeScript router never reads.
+func TestRunTypeScriptAPISDKSendsTokenWithoutPublic(t *testing.T) {
+	schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, "fixture-api"))
+	if err != nil {
+		t.Fatalf("LoadServiceWithConfig: %v", err)
+	}
+	manualEncryptedOperations(schema)
+	cfg.Public = false
+	cfg.AuthDB = ""
+	cfg.Outputs["api"] = map[string]any{"enabled": true, "language": APILanguageTypeScript}
+	cfg.Outputs["sdk"] = map[string]any{
+		LangTypeScript: map[string]any{"enabled": true},
+		LangGo:         map[string]any{"enabled": true},
+	}
+
+	var loaded []string
+	outputRoot := t.TempDir()
+	result, err := Run(schema, cfg, Options{
+		OutputRoot: outputRoot,
+		Naming:     naming.Default(),
+		LoadDependency: func(name string) (*ir.Schema, error) {
+			loaded = append(loaded, name)
+			return loader.LoadService(filepath.Join(tsFixtures, name))
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if slices.Contains(loaded, "fixture-db") {
+		t.Errorf("the TypeScript server without public loaded the auth store fixture-db (loaded %v)", loaded)
+	}
+	if result.Outputs["api-typescript"] != APIDir(outputRoot, "fixture-api") {
+		t.Errorf("expected the TypeScript API, got %v", result.Outputs)
+	}
+
+	for _, check := range []struct{ dir, file, marker string }{
+		{SDKDir(outputRoot, "typescript", "fixture-api"), "client.ts", "requestConfig.headers['Authorization'] = `Bearer ${token}`;"},
+		{SDKDir(outputRoot, "typescript", "fixture-api"), "index.ts", "public setToken(token: string): void {"},
+		{SDKDir(outputRoot, "go", "fixture-api"), "sdk.go", ") SetToken(token string) {"},
+	} {
+		got, err := os.ReadFile(filepath.Join(check.dir, check.file))
+		if err != nil {
+			t.Fatalf("read %s: %v", check.file, err)
+		}
+		if !strings.Contains(string(got), check.marker) {
+			t.Errorf("%s of an API that is not public lacks %q", check.file, check.marker)
+		}
+	}
+}
+
 // manualEncryptedOperations declares every encrypted operation of schema
 // @manualRouteRegistration, as the TypeScript server requires: it has no
 // decryption step, so the service mounts and decrypts such a route itself.

@@ -91,12 +91,10 @@ each request straight to the Hono app:
 <Snippet file="typescript/app.test.ts" symbol="sdkFor" />
 
 <Aside>
-  An SDK attaches `auth.token` only for an API marked `public: true`, and
-  `public` requires an `authDb`, a database the TypeScript router has no
-  use for. So this example leaves `public` off and sets the `Authorization`
-  header with the SDK's `requestInterceptor`. For an API served in Go, set
-  `public` and `authDb` and pass `auth: { token }`, as the
-  [Go path](/superschematic/first-project/go-api/) does.
+  The SDK sends `auth.token` as `Authorization: Bearer <token>`, which
+  `authenticate` reads as `ctx.bearerToken`. The config sets neither
+  `public` nor `authDb`: they wire the Go server's auth provider to its
+  stores, and this router reads no store.
 </Aside>
 
 Then each namespace is a property of the SDK, and each method takes the
