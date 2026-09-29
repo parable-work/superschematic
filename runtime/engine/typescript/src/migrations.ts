@@ -15,6 +15,11 @@ cursor orders it globally and seq orders one instance's events, and
 triggers refuse an update or a delete of an event. engine_events_publish
 indexes the publish events alone, which every namespace that looks names
 up in a shared namespace reads from it.
+
+engine_behaviors records the key of each behavior whose storage the file
+holds: the behavior's columns on engine_instances and its tables are named
+bhv_<key>__<name> (behaviors/storage.ts), and its migrations are in the
+ledger under its own name.
 */
 
 import type { MigrationSet } from './storage/migrations.js';
@@ -104,6 +109,57 @@ BEGIN SELECT RAISE(ABORT, 'engine_events is append-only'); END;
       up(storage) {
         storage.exec(`
 CREATE INDEX engine_events_publish ON engine_events (namespace, cursor) WHERE kind = 'publish';
+`);
+      },
+    },
+    {
+      version: 4,
+      name: 'operation events and behavior storage',
+      // SQLite cannot change a CHECK constraint, so the event log is copied
+      // into a table whose kind CHECK admits operation. The copy keeps every
+      // cursor, so the autoincrement sequence continues from the last one;
+      // dropping the old table fires none of its triggers and drops its
+      // indexes, so every index and trigger of migrations 2 and 3 is made
+      // again on the copy.
+      up(storage) {
+        storage.exec(`
+CREATE TABLE engine_events_next (
+  cursor      INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind        TEXT    NOT NULL CHECK (kind IN ('create', 'update', 'delete', 'operation', 'publish')),
+  namespace   TEXT    NOT NULL,
+  schema      TEXT    NOT NULL,
+  instance_id TEXT,
+  seq         INTEGER CHECK (seq >= 1),
+  version     INTEGER NOT NULL CHECK (version >= 1),
+  actor       TEXT    NOT NULL,
+  at          INTEGER NOT NULL,
+  change      TEXT    CHECK (change IS NULL OR json_valid(change)),
+  CHECK ((kind = 'publish') = (instance_id IS NULL)),
+  CHECK ((instance_id IS NULL) = (seq IS NULL))
+) STRICT;
+
+INSERT INTO engine_events_next (cursor, kind, namespace, schema, instance_id, seq, version, actor, at, change)
+SELECT cursor, kind, namespace, schema, instance_id, seq, version, actor, at, change FROM engine_events ORDER BY cursor;
+
+DROP TABLE engine_events;
+ALTER TABLE engine_events_next RENAME TO engine_events;
+
+CREATE UNIQUE INDEX engine_events_instance ON engine_events (namespace, schema, instance_id, seq)
+  WHERE instance_id IS NOT NULL;
+CREATE INDEX engine_events_namespace ON engine_events (namespace, cursor);
+CREATE INDEX engine_events_schema ON engine_events (namespace, schema, cursor);
+CREATE INDEX engine_events_publish ON engine_events (namespace, cursor) WHERE kind = 'publish';
+
+CREATE TRIGGER engine_events_no_update BEFORE UPDATE ON engine_events
+BEGIN SELECT RAISE(ABORT, 'engine_events is append-only'); END;
+CREATE TRIGGER engine_events_no_delete BEFORE DELETE ON engine_events
+BEGIN SELECT RAISE(ABORT, 'engine_events is append-only'); END;
+
+CREATE TABLE engine_behaviors (
+  name       TEXT    PRIMARY KEY,
+  key        TEXT    NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+) STRICT;
 `);
       },
     },

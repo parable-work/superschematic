@@ -15,8 +15,17 @@ is appended and the draft is dropped. There is no deprecate or promote: a
 live version is replaced only by publishing a newer one, so an older
 version never comes back into use.
 
-The validator of a version is built once and cached per namespace, name
-and version; a version never changes after it is published.
+A schema's instance type may compose behaviors (behaviors/). define and
+publish check them against the registered implementations, and the
+compatibility rule against each behavior's rule for its config. publish
+creates the storage of every behavior the new version composes, in its
+own transaction, so a publish that fails leaves none behind.
+
+The runtime of a version, its validator and its behaviors bound to their
+configs and storage, is built once and cached per namespace, name and
+version; a version never changes after it is published. A version whose
+behaviors this engine cannot run is unavailable, and not cached, so an
+implementation registered later makes it available.
 */
 
 import { createHash } from 'node:crypto';
@@ -24,6 +33,10 @@ import { createHash } from 'node:crypto';
 import type { SchemaFileLoader } from '@superschematic/schema-runtime';
 import type { Document } from '@superschematic/schema-ir/schema-file';
 
+import { compose, configChanges, type Composition } from '../behaviors/composition.js';
+import type { Prefixes } from '../behaviors/execution.js';
+import type { BehaviorRegistry } from '../behaviors/registry.js';
+import { prefixOf, storedKey } from '../behaviors/storage.js';
 import { EngineError, IncompatibleChangeError } from '../errors.js';
 import { appendEvent } from '../events/log.js';
 import type { Namespaces } from '../namespaces.js';
@@ -76,23 +89,32 @@ export interface PublishResult {
   published: boolean;
 }
 
+/** What running a published version needs: its validator and its behaviors. */
+export interface VersionRuntime {
+  readonly validator: SchemaValidator;
+  readonly composition: Composition;
+  /** Each composed behavior's storage prefix, by behavior name. */
+  readonly prefixes: Prefixes;
+}
+
 const DRAFT = 0;
 
 const COLUMNS = 'namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by';
 
 export class SchemaCatalog {
-  private readonly validators = new Map<string, SchemaValidator>();
+  private readonly runtimes = new Map<string, VersionRuntime>();
 
   constructor(
     private readonly storage: Storage,
     private readonly namespaces: Namespaces,
     private readonly loader: SchemaFileLoader,
+    private readonly behaviors: BehaviorRegistry,
     private readonly clock: () => number
   ) {}
 
   /** read loads a schema document from its JSON text, or from the document as a value. */
   read(input: string | Record<string, unknown>, source: string): SchemaModel {
-    return readSchema(this.loader, typeof input === 'string' ? input : JSON.stringify(input), source);
+    return this.load(typeof input === 'string' ? input : JSON.stringify(input), source);
   }
 
   /** define stores a document as its name's draft in a namespace. */
@@ -123,7 +145,7 @@ export class SchemaCatalog {
       if (!draft) {
         throw new EngineError('not_found', `schema ${name} has no draft in namespace ${namespace}`);
       }
-      const model = readSchema(this.loader, String(draft.document), `${namespace}/${name} draft`);
+      const model = this.load(String(draft.document), `${namespace}/${name} draft`);
       const hash = hashOf(model.canonical);
       const live = this.row(namespace, name, 'live');
       if (live && live.hash === hash) {
@@ -132,6 +154,9 @@ export class SchemaCatalog {
       }
       if (live) {
         this.checkCompatible(namespace, live, model);
+      }
+      for (const bound of (compose(model, this.behaviors).composition as Composition).behaviors) {
+        this.behaviors.ensureStorage(bound.behavior);
       }
       const version = live ? Number(live.version) + 1 : 1;
       this.storage.run(
@@ -194,16 +219,46 @@ export class SchemaCatalog {
 
   /** validatorOf returns the cached validator of a published version. */
   validatorOf(record: SchemaRecord): SchemaValidator {
+    return this.runtimeOf(record).validator;
+  }
+
+  /**
+   * runtimeOf returns what running a published version needs, built once.
+   * It throws unavailable when the version composes a behavior this engine
+   * cannot run.
+   */
+  runtimeOf(record: SchemaRecord): VersionRuntime {
     if (record.version === null) {
       throw new EngineError('invalid_argument', `schema ${record.name} is a draft; only a published version validates instances`);
     }
     const key = `${record.namespace}\u0000${record.name}\u0000${record.version}`;
-    let validator = this.validators.get(key);
-    if (!validator) {
-      validator = new SchemaValidator(modelOf(record.canonical));
-      this.validators.set(key, validator);
+    let runtime = this.runtimes.get(key);
+    if (!runtime) {
+      const model = modelOf(record.canonical);
+      const { composition, issues } = compose(model, this.behaviors);
+      if (!composition) {
+        throw new EngineError(
+          'unavailable',
+          `schema ${record.name} version ${record.version} in namespace ${record.namespace} composes behaviors this engine cannot run: ${issues.map((issue) => issue.message).join('; ')}`
+        );
+      }
+      const prefixes = new Map<string, string>();
+      for (const bound of composition.behaviors) {
+        const stored = storedKey(this.storage, bound.behavior.name);
+        if (stored === undefined) {
+          throw new Error(`behavior ${bound.behavior.name} has no storage in ${this.storage.path}, though version ${record.version} of ${record.name} composes it`);
+        }
+        prefixes.set(bound.behavior.name, prefixOf(stored));
+      }
+      const fields = new Map([...composition.fields].map(([field, bound]) => [field, bound.behavior.name]));
+      runtime = { validator: new SchemaValidator(model, fields), composition, prefixes };
+      this.runtimes.set(key, runtime);
     }
-    return validator;
+    return runtime;
+  }
+
+  private load(text: string, source: string): SchemaModel {
+    return readSchema(this.loader, text, source, (model) => compose(model, this.behaviors).issues);
   }
 
   private row(namespace: string, name: string, version: number | 'live'): Row | undefined {
@@ -247,10 +302,26 @@ export class SchemaCatalog {
   }
 
   private checkCompatible(namespace: string, live: Row, model: SchemaModel): void {
-    const changes = incompatibleChanges(modelOf(String(live.document)), model);
+    const before = modelOf(String(live.document));
+    const changes = incompatibleChanges(before, model);
+    if (before.instanceType === model.instanceType) {
+      changes.push(...configChanges(before, model, this.behaviors, () => this.hasInstances(namespace, model.name)));
+    }
     if (changes.length > 0) {
       throw new IncompatibleChangeError(namespace, model.name, Number(live.version), changes);
     }
+  }
+
+  // hasInstances reports whether any namespace holds an instance of the
+  // schema a namespace holds, its own or, for the shared one, another's.
+  private hasInstances(holder: string, name: string): boolean {
+    return this.namespaces.names.some((namespace) =>
+      this.storage.get('SELECT 1 AS found FROM engine_instances WHERE namespace = ? AND schema = ? AND schema_namespace = ? LIMIT 1', [
+        namespace,
+        name,
+        holder,
+      ])
+    );
   }
 }
 

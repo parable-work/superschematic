@@ -13,6 +13,7 @@ import type { Hono } from 'hono';
 
 import { type AccessPolicy, type Engine, type EngineEvent, type EngineOptions } from '../dist/index.js';
 import { engineApp, type EngineHttpOptions } from '../dist/http/index.js';
+import { openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, openTestEngine, orderDocument, schemaDocument } from './helpers.ts';
 
 // The bearer token is the caller's subject.
@@ -282,6 +283,33 @@ describe('event stream', () => {
         ['update', 'o2', 2],
       ]
     );
+  });
+
+  test('carries operation events, replayed and as they commit, and no read-only operation', async () => {
+    const { engine, base } = await serve({}, { metaSchema: openMetaSchema(), behaviors: testBehaviors });
+    publishItem(engine, [{ name: 'test.Counter', config: { limit: 3 } }, { name: 'test.Tally' }]);
+    engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
+    engine.instances.invoke(alice, 'Item', 'i1', 'increment');
+    const client = await open(`${base}/namespaces/default/events?schema=Item`);
+    await client.until(() => client.events().length === 3);
+    // A read-only operation appends nothing; bump's two calls run in
+    // savepoints under one operation event; tryBump's call is vetoed and
+    // rolled back alone, and its own write commits with its event.
+    engine.instances.invoke(alice, 'Item', 'i1', 'history');
+    engine.instances.invoke(alice, 'Item', 'i1', 'bump', { times: 2 });
+    engine.instances.invoke(alice, 'Item', 'i1', 'tryBump');
+    await client.until(() => client.events().length === 5);
+    assert.deepEqual(
+      client.events().map((event) => [event.kind, event.seq, event.kind === 'operation' ? (event.change as { operation: string }).operation : null]),
+      [
+        ['publish', null, null],
+        ['create', 1, null],
+        ['operation', 2, 'increment'],
+        ['operation', 3, 'bump'],
+        ['operation', 4, 'tryBump'],
+      ]
+    );
+    assert.deepEqual(client.events(), engine.events.read(alice, { schema: 'Item' }).events);
   });
 
   test('sends a comment every heartbeat while it waits', async () => {

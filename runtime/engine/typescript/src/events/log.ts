@@ -1,11 +1,12 @@
 /*
 The event log: one append-only table, engine_events. Each change appends
 one event in the transaction that makes it: an instance's create, update
-and delete, and a schema's publish. An event has a global cursor, which
-orders the whole log, and an instance's events also a per-instance
-sequence, 1, 2, 3, ... across its life, a re-create after a delete
-included. A delete appends an event and removes nothing before it. There
-is no retention: the log grows until a later change adds a policy for it.
+and delete, a writing behavior operation on it, and a schema's publish.
+An event has a global cursor, which orders the whole log, and an
+instance's events also a per-instance sequence, 1, 2, 3, ... across its
+life, a re-create after a delete included. A delete appends an event and
+removes nothing before it. There is no retention: the log grows until a
+later change adds a policy for it.
 
 Reading is paged from a cursor, within one namespace and optionally one
 schema and instance. A namespace that looks schema names up in a shared
@@ -29,7 +30,7 @@ import type { Row, SqlValue } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
 import { notifierOf, type EventNotifier, type EventWatcher } from './notifier.js';
 
-export type EventKind = 'create' | 'update' | 'delete' | 'publish';
+export type EventKind = 'create' | 'update' | 'delete' | 'operation' | 'publish';
 
 /** One entry of the event log. */
 export interface EngineEvent {
@@ -49,8 +50,24 @@ export interface EngineEvent {
   actor: string;
   /** When, in epoch milliseconds. */
   at: number;
-  /** create: the instance; update: the merge patch; delete: null; publish: the schema document. */
+  /**
+   * create: the instance, its behaviors' fields included; update: a merge
+   * patch of the instance, the caller's patch and any change its
+   * behaviors' fields took; operation: an OperationChange; delete: null;
+   * publish: the schema document.
+   */
   change: unknown;
+}
+
+/** The change of an operation event: what was called, and what it did to the instance. */
+export interface OperationChange {
+  /** The behavior whose operation the caller called. */
+  behavior: string;
+  operation: string;
+  /** The parameters, as its guards and handler got them. */
+  params: Record<string, unknown>;
+  /** A merge patch of the instance's behavior fields, from before the call to after it. */
+  patch: Record<string, unknown>;
 }
 
 export interface ReadEventsOptions {
