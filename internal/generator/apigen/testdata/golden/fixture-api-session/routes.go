@@ -173,8 +173,8 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/tenants",
 			Handler: createTenantCreateTenantHandler(cfg.Implementations.Tenant),
 			Middlewares: []runtimerouting.Middleware{
-				runtimemiddleware.DecryptPayloadMiddleware(cfg.PayloadDecryptor, LoggerFromContext),
 				runtimesession.RequirePermissions("tenants.write"),
+				runtimemiddleware.DecryptPayloadMiddleware(cfg.PayloadDecryptor, LoggerFromContext),
 			},
 		},
 		// Fetch one tenant by id.
@@ -185,8 +185,8 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Middlewares: []runtimerouting.Middleware{
 				runtimemiddleware.RateLimit(60, time.Minute, LoggerFromContext),
 				runtimemiddleware.BodyLimit(1, RespondError),
-				runtimemiddleware.Timeout(5*time.Second, LoggerFromContext),
 				runtimesession.RequirePermissions("tenants.read"),
+				runtimemiddleware.Timeout(5*time.Second, LoggerFromContext),
 			},
 		},
 		{
@@ -194,8 +194,8 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/tenants/{id}",
 			Handler: createTenantUpdateSecretHandler(cfg.Implementations.Tenant),
 			Middlewares: []runtimerouting.Middleware{
-				runtimemiddleware.DecryptPayloadMiddleware(cfg.PayloadDecryptor, LoggerFromContext),
 				runtimesession.RequirePermissions("tenants.write"),
+				runtimemiddleware.DecryptPayloadMiddleware(cfg.PayloadDecryptor, LoggerFromContext),
 			},
 		},
 	}

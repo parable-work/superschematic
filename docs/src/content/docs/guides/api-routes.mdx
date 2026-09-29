@@ -107,10 +107,19 @@ of the set; on a method, to that route.
 - `@timeout({ seconds })` cancels the request's context when the time runs
   out.
 
-The generated route table shows them as middleware on each route, ahead of
-the permission check:
+The generated route table lists them as middleware on each route, in the
+order they run: the rate limit, the body limit, the permission check, then
+the timeout around the handler.
 
-<Snippet file="testdata/generated/api/shop-orders/routes.go" from="createOrderPlaceOrderHandler(" to={'RequirePermissions("orders.write")'} />
+<Snippet file="testdata/generated/api/shop-orders/routes.go" from="createOrderPlaceOrderHandler(" to="Timeout(10*time.Second" />
+
+The cheap refusals come first. A `@hmacVerified` webhook's signature check
+runs before all of them. On an encrypted operation, whose request body the
+client sends as an encrypted envelope, the server's `PayloadDecryptor` runs
+after the permission check and before the timeout. A request the rate
+limit, the body limit or the permission check refuses never reaches the
+decryptor, which in a deployment calls a key service. On such a route
+`@bodyLimit` counts the envelope, not the decrypted payload.
 
 <Snippet file="go/orders_test.go" symbol="TestTrafficControls" />
 
