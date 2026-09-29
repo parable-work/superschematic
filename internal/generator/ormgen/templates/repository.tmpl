@@ -248,7 +248,7 @@ if temp{{ toGoName $member.Field.Name }}.Valid {
 }
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) }}
 if temp{{ toGoName $member.Field.Name }} != nil {
-	{{- if or $member.Field.IsNullableEnum $member.Field.IsNullableScalar }}
+	{{- if or $member.Field.IsNullableEnum $member.Field.IsNullableScalar $member.Field.IsNullableBool }}
 	// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 	result.{{ toGoName $member.Field.Name }} = temp{{ toGoName $member.Field.Name }}
 	{{- else if or (not (hasPrefix $member.Field.GoType "types.")) $member.Field.IsScalarType }}
@@ -304,7 +304,7 @@ if temp{{ toGoName $member.Field.Name }}.Valid {
 }
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) }}
 if temp{{ toGoName $member.Field.Name }} != nil {
-	{{- if or $member.Field.IsNullableEnum $member.Field.IsNullableScalar }}
+	{{- if or $member.Field.IsNullableEnum $member.Field.IsNullableScalar $member.Field.IsNullableBool }}
 	entity.{{ toGoName $member.Field.Name }} = temp{{ toGoName $member.Field.Name }}
 	{{- else if or (not (hasPrefix $member.Field.GoType "types.")) $member.Field.IsScalarType }}
 	entity.{{ toGoName $member.Field.Name }} = *temp{{ toGoName $member.Field.Name }}
@@ -435,7 +435,7 @@ if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }}.Valid {
 }
 {{- else if and (not $field.IsRequired) (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) }}
 if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }} != nil {
-	{{- if or $field.IsNullableEnum $field.IsNullableScalar }}
+	{{- if or $field.IsNullableEnum $field.IsNullableScalar $field.IsNullableBool }}
 	// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 	result.{{ toGoName $field.Name }} = temp{{ toGoName $field.Name }}
 	{{- else if or (not (hasPrefix $field.GoType "types.")) $field.IsScalarType }}

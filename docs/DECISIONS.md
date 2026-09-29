@@ -1355,6 +1355,29 @@ encrypted operation of any form; that gap predates this entry.
 
 The rule is reversible until the first release.
 
+## D21. A nullable Go boolean keeps an explicit `false`
+
+A nullable `boolean` field was a Go `bool` tagged `omitempty`, so
+`encoding/json` left out an explicit `false`. A reader that takes an absent
+key as unset, or as a `true` default, then acted on the wrong value: a
+layered configuration merge let a lower layer's `true` win over the
+`false`, and a Python or TypeScript reader saw `None` or `undefined`. The
+ORM's snapshot update treated `false` as the zero value and cleared the
+column, and the env loader could not tell an unset variable from `false`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A nullable `boolean` without a default is `*bool` in the generated Go output types, tagged `omitempty`: nil is absent, and a set `false` is written. `codegen.GoOptionalBoolIsPointer` is the one rule; typegen, ormgen and envgen call it, so a type, its repository and its env loader agree. | `omitzero` on a plain `bool`, which also leaves `false` out; a wrapper type like the input types' `InputField[T]` on output types, which changes every consumer of every optional field |
+| A nullable `Default<boolean, true>` stays `bool` without `omitempty`, so `false` is always written: an absent value decodes as `true`. The input type's `To<Type>` fills `true` for an unset or null input. | `*bool`, which puts a nil check on a field that always has a value after decoding |
+| A nullable `Default<boolean, false>` keeps `bool` with `omitempty`: leaving out `false` reads back as the default. | Writing it always, which changes the JSON of every such field for no reader |
+| The ORM scans an optional boolean column into the pointer and writes it through the same nil check as an optional enum or scalar. The env loader leaves an unset optional boolean nil. | Keeping `bool` in the ORM, which cannot store `false` apart from NULL |
+| Input types keep `InputField[bool]`; `To<Type>` takes the address of the value. TypeScript, Python and Rust output does not change: each already keeps `false` apart from absent. | |
+
+Optional numbers and strings keep value types with `omitempty`, so a `0`
+or `""` is still left out of the JSON. The same fix would apply to them,
+but it changes far more fields and has not been needed.
+
+The rule is reversible until the first release.
 ### D20, amended: the envelope carries the body itself, and a route that cannot decrypt it is refused
 
 Three gaps in how an encrypted operation travels, each older than D20:
