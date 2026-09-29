@@ -169,6 +169,37 @@ func TestParseReadsPathsTable(t *testing.T) {
 	}
 }
 
+// TestParseRejectsAbsolutePaths: LocalPaths joins every [paths] value under
+// the repository root, so an absolute value would point generated manifests
+// at <root>/<value>, a directory that does not exist. The keys come from the
+// struct tags, so a key added without the check fails here.
+func TestParseRejectsAbsolutePaths(t *testing.T) {
+	fields := reflect.TypeOf(PathsConfig{})
+	for i := range fields.NumField() {
+		key := fields.Field(i).Tag.Get("toml")
+		for _, value := range []string{"/Users/me/superschematic/third_party/superscalar/go", t.TempDir()} {
+			_, err := Parse([]byte("[paths]\n"+key+" = '"+value+"'\n"), "superschematic.toml")
+			if err == nil {
+				t.Errorf("paths.%s = %q: Parse accepted an absolute path", key, value)
+				continue
+			}
+			for _, want := range []string{"superschematic.toml", "paths." + key, "relative to the parent of the schemas root"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("paths.%s = %q: err = %v, want it to contain %q", key, value, err, want)
+				}
+			}
+		}
+		n, err := Parse([]byte("[paths]\n"+key+" = 'third_party/superscalar/go'\n"), "superschematic.toml")
+		if err != nil {
+			t.Errorf("paths.%s: a relative path must parse, got %v", key, err)
+			continue
+		}
+		if got := reflect.ValueOf(n.LocalPaths("/repo")).FieldByName(fields.Field(i).Name).String(); got != filepath.Join("/repo", "third_party", "superscalar", "go") {
+			t.Errorf("paths.%s resolved to %q, want it under /repo", key, got)
+		}
+	}
+}
+
 func TestParseReadsCacheTable(t *testing.T) {
 	n, err := Parse([]byte(`
 [cache]

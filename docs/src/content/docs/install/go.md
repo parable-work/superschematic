@@ -100,12 +100,13 @@ for this service are the module `example.com/schemas/types/go/catalog`
 under `schemas/dist/types/go/catalog`.
 
 `[paths]` in the naming file points generated `go.mod` replace lines at a
-checkout so you can compile before the modules are tagged. Leave the table
-out when you consume published modules. Go reads replace lines only from the
-module it builds, so each generated `go.mod` also requires and replaces
-every generated types module it reaches through another one: an API whose
-auth DB takes a type from a General service replaces that service's types
-module too.
+checkout so you can compile before the modules are tagged. Its values are
+relative to the parent of the schemas root; an absolute path is an error.
+Leave the table out when you consume published modules. Go reads replace
+lines only from the module it builds, so each generated `go.mod` also
+requires and replaces every generated types module it reaches through
+another one: an API whose auth DB takes a type from a General service
+replaces that service's types module too.
 
 ## Consume generated types
 

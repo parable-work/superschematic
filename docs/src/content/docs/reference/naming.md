@@ -307,8 +307,8 @@ reads that live outside the schema tree.
 In-tree locations generated modules point path dependencies at (`go.mod`
 replace, Cargo `path`, npm `file:`). Every key is optional and
 repo-relative. The repository root is the parent of the schemas root. An
-unset key emits no path dependency, so the generated manifest resolves
-the published module.
+absolute value is an error that names the key. An unset key emits no path
+dependency, so the generated manifest resolves the published module.
 
 ### `paths.scalar_go`
 
