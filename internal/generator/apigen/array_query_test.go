@@ -12,14 +12,13 @@ import (
 
 // TestGeneratedArrayQueryParamsPreserveWireAndValidation: fixture-api's
 // listTenants takes two array query parameters. The implementation receives
-// slices (nil when an optional one is absent), the handler parses each
-// comma-separated item with the element type's parser and validator, and the
-// OpenAPI parameter is an array with form/explode=false and the list bounds.
+// slices (nil when an optional one is absent), the handler decodes each with
+// bodyargs.QueryList, as a list argument of a GET operation, which reads
+// each comma-separated item as its JSON type and checks it at name[i] with
+// the list bounds, and the OpenAPI parameter is an array with
+// form/explode=false and the list bounds.
 func TestGeneratedArrayQueryParamsPreserveWireAndValidation(t *testing.T) {
 	output := generateFixtureAPI(t)
-	if !output.HasArrayQueryParams {
-		t.Fatal("fixture-api declares array query parameters")
-	}
 	outDir := t.TempDir()
 	if err := apigen.WriteAPI(output, outDir); err != nil {
 		t.Fatalf("write api: %v", err)
@@ -43,16 +42,17 @@ func TestGeneratedArrayQueryParamsPreserveWireAndValidation(t *testing.T) {
 	}
 	routeSource := string(routes)
 	for _, want := range []string{
-		`parseArrayQueryParam(r, "ids")`,
-		`types.ParseIdentityUUID(rawValue)`,
-		`elem := types.TenantListStatus(rawValue)`,
-		`validator.ValidateRequired()`,
-		`if IdsPresent && len(Ids) < 1 {`,
-		`if StatusesPresent && len(Statuses) > 10 {`,
+		`queryListIdsArg := bodyargs.NewArg("ids", bodyargs.String, bodyargs.Required(), bodyargs.ListMin(1), bodyargs.ListMax(100)`,
+		`queryListStatusesArg := bodyargs.NewArg("statuses", bodyargs.String, bodyargs.ListMin(0), bodyargs.ListMax(10))`,
+		`Ids = bodyargs.QueryList[types.IdentityUUID](listErrors, r.URL.Query(), queryListIdsArg)`,
+		`Statuses = bodyargs.QueryList[types.TenantListStatus](listErrors, r.URL.Query(), queryListStatusesArg)`,
 	} {
 		if !strings.Contains(routeSource, want) {
 			t.Errorf("generated array query parser missing %q", want)
 		}
+	}
+	if strings.Contains(routeSource, "parseArrayQueryParam") {
+		t.Error("routes.go still carries parseArrayQueryParam")
 	}
 
 	var spec map[string]any

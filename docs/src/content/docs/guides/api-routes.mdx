@@ -42,7 +42,8 @@ A method's arguments say where each value comes from:
 - **Query**: `QueryParam<T>`. `Nullable<T>` makes it optional, and the Go
   implementation receives a pointer (`limit *float64`) or a nil slice. A
   list is read from repeated keys and comma-separated values
-  (`?statuses=placed,shipped`).
+  (`?statuses=placed,shipped`), and each item is checked at
+  `statuses[i]`.
 - **Body, as an input type**: an argument of an object type, such as
   `input: PlaceOrderInput`, is the JSON body.
 - **Body, as fields**: on a method without an input type, the other

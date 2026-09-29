@@ -143,9 +143,9 @@ type EndpointInfo struct {
 	// BodyArgs are the ScalarArgs of an operation that is not GET, with how
 	// the Go route decodes each from the JSON body; nil on GET.
 	BodyArgs []BodyArg
-	// QueryListArgs are the list ScalarArgs of a GET operation, with how the
-	// Go route decodes each from the query string (bodyargs.QueryList); nil
-	// on any other method.
+	// QueryListArgs are the list QueryParams, and on GET the list
+	// ScalarArgs, with how the Go route decodes each from the query string
+	// (bodyargs.QueryList).
 	QueryListArgs []BodyArg
 
 	Description string
@@ -259,7 +259,6 @@ type APIOutput struct {
 	HasPermissionEndpoints   bool
 	HasFilterableEndpoints   bool
 	HasFileUpload            bool
-	HasArrayQueryParams      bool
 	HasWebhookHMACEndpoints  bool
 	RequiredWebhookProviders []string
 
@@ -399,8 +398,8 @@ func (e EndpointInfo) handlerUsesTypes() bool {
 }
 
 // queryParamUsesTypes reports whether routes.go references the generated
-// types module to read the @query parameter: a list checks each item
-// against types.ValidationError, a generated type is parsed or cast, and a
+// types module to read the @query parameter: a list collects
+// types.ValidationErrors, a generated type is parsed or cast, and a
 // bound on a number or a length or pattern rule on a string reports a
 // types.ValidationError.
 func (p Param) queryParamUsesTypes() bool {
@@ -611,12 +610,6 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		}
 		if endpoint.HasFileUpload {
 			output.HasFileUpload = true
-		}
-		for _, param := range endpoint.QueryParams {
-			if param.IsArray {
-				output.HasArrayQueryParams = true
-				break
-			}
 		}
 		if endpoint.Encrypted {
 			output.HasEncryptedEndpoints = true
@@ -871,17 +864,24 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		WebhookHMACProvider:          op.HMACVerifiedProvider,
 		WebhookHMACProviderTypesExpr: webhookHMACTypesExpr,
 	}
+	// A list in the query string, a @query parameter or an argument of a
+	// GET operation, is decoded by bodyargs.QueryList.
+	var queryLists []Param
+	for _, param := range queryParams {
+		if param.IsArray {
+			queryLists = append(queryLists, param)
+		}
+	}
 	if method != "GET" {
 		endpoint.BodyArgs = types.bodyArgs(scalarArgs)
 	} else {
-		var listArgs []Param
 		for _, arg := range scalarArgs {
 			if arg.IsArray {
-				listArgs = append(listArgs, arg)
+				queryLists = append(queryLists, arg)
 			}
 		}
-		endpoint.QueryListArgs = types.bodyArgs(listArgs)
 	}
+	endpoint.QueryListArgs = types.bodyArgs(queryLists)
 	endpoint.NeedsTypesImport = endpointNeedsTypesImport(endpoint)
 	if err := provider.Endpoint(op, set, endpoint); err != nil {
 		return nil, fmt.Errorf("apigen: operation %s.%s: auth provider %s: %w", namespace, op.Name, provider.Name(), err)

@@ -1,8 +1,9 @@
 # Body arguments that are lists of strings, numbers, integer scalars, an
 # enum, a string scalar and Generic.JSON values, next to single ones and a
 # Generic.JSON list of lists, a JSON object scalar and a list of a JSON
-# array scalar, and a GET whose list travels in the query string.
-# tsrestgen's scalar list tests load it.
+# array scalar, and a GET whose lists travel in the query string: its
+# arguments and two query parameters (isQuery). tsrestgen's scalar list
+# tests load it.
 name: scalar-lists-api
 kind: API
 scalars:
@@ -94,7 +95,7 @@ operationSets:
             typeRef: { name: Embedding.Vector, isArray: true }
   - name: TagQueries
     operations:
-      # Find posts by label; the labels travel in the query string.
+      # Find posts by label, rank, code and page, all in the query string.
       - name: findTags
         typeRef: { name: string, isArray: true }
         required: true
@@ -104,3 +105,16 @@ operationSets:
           - name: labels
             typeRef: { name: string, isArray: true }
             required: true
+          # Display ranks, integers from 1.
+          - name: ranks
+            typeRef: { name: Ordering.Rank, isArray: true }
+          # Codes of two or more lowercase letters, a query parameter.
+          - name: codes
+            typeRef: { name: string, isArray: true }
+            isQuery: true
+            validateMinLength: 2
+            validatePattern: "^[a-z]+$"
+          # Pages, integers from 1, a query parameter.
+          - name: pages
+            typeRef: { name: Ordering.Rank, isArray: true }
+            isQuery: true

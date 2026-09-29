@@ -200,9 +200,13 @@ A list follows the
 [list rules](/superschematic/reference/arrays-of-arrays/#list-rules):
 `[]` satisfies a required list, `listMin` and `listMax` bound the list,
 and each element is checked at `name[i]`. A null element answers 400 with
-`required`, and an element of the wrong JSON type with `type`. A
-scalar-typed argument, in the path, the query or the body, is checked
-against the scalar's own length, pattern and range, and a value that fails
+`required`, and an element of the wrong JSON type with `type`. A list in
+the query string, a `GET` argument or a `QueryParam<T[]>`, is read as the
+Go routes read it: each item is its JSON value (a number is a JSON number,
+so `0x10` is not one, and a boolean is a spelling Go's `strconv.ParseBool`
+accepts) and is checked at `name[i]`. A scalar-typed argument, in the
+path, the query or the body, is checked against the scalar's own length,
+pattern and range, and a value that fails
 answers with the rule it breaks (`pattern`, `minLength`, `maxLength`,
 `min`, `max`). The problem `details` carry the `path` and the rule in
 `errors`. A body argument whose type is a union has no generated decoder,

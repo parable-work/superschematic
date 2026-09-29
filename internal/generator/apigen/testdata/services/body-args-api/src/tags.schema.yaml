@@ -169,7 +169,7 @@ operationSets:
             required: true
   - name: TagQueries
     operations:
-      # Find posts by label; the labels travel in the query string.
+      # Find posts by label, rank, code and page, all in the query string.
       - name: findTags
         typeRef: { name: string, isArray: true }
         required: true
@@ -179,6 +179,19 @@ operationSets:
           - name: labels
             typeRef: { name: string, isArray: true }
             required: true
+          # Display ranks, integers from 1.
+          - name: ranks
+            typeRef: { name: Ordering.Rank, isArray: true }
+          # Codes of two or more lowercase letters, a query parameter.
+          - name: codes
+            typeRef: { name: string, isArray: true }
+            isQuery: true
+            validateMinLength: 2
+            validatePattern: "^[a-z]+$"
+          # Pages, integers from 1, a query parameter.
+          - name: pages
+            typeRef: { name: Ordering.Rank, isArray: true }
+            isQuery: true
       # Search posts by score, rank, flag, related post, date and code.
       - name: searchPosts
         typeRef: { name: string, isArray: true }

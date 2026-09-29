@@ -10,7 +10,6 @@ import (
 	"fmt"
 	gohttp "net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	orm "example.com/acme/orm/shop-db"
@@ -204,40 +203,24 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 
 // createOrderListOrdersHandler creates a handler for GET /api/orders
 func createOrderListOrdersHandler(impl OrderImplementation) gohttp.HandlerFunc {
+	// List arguments in the query string: the JSON type of each item, then
+	// its rules in the order they are checked (the scalar type's own, then
+	// the argument's).
+	queryListStatusesArg := bodyargs.NewArg("statuses", bodyargs.String)
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract query parameters
-		// An array uses the form/explode=false wire format: ?statuses=a,b.
-		// A nil slice means the optional parameter was absent; a present empty value is invalid.
+
+		// statuses travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at statuses[i]; no item is an
+		// absent list.
 		var Statuses []types.OrderStatus
-		StatusesValues, StatusesPresent, err := parseArrayQueryParam(r, "statuses")
-		if err != nil {
-			RespondError(w, r, gohttp.StatusBadRequest, err.Error())
-			return
-		}
-		if StatusesPresent {
-			Statuses = make([]types.OrderStatus, 0, len(StatusesValues))
-			for _, rawValue := range StatusesValues {
-				elem := types.OrderStatus(rawValue)
-				if validator, ok := interface{}(elem).(interface {
-					ValidateRequired() (bool, []types.ValidationError)
-				}); ok {
-					if valid, fieldErrs := validator.ValidateRequired(); !valid {
-						validationErrors := types.NewValidationErrors()
-						validationErrors.SetFieldErrors("statuses", fieldErrs)
-						RespondValidationErrors(w, r, validationErrors)
-						return
-					}
-				} else if validator, ok := interface{}(elem).(interface {
-					Validate() (bool, []types.ValidationError)
-				}); ok {
-					if valid, fieldErrs := validator.Validate(); !valid {
-						validationErrors := types.NewValidationErrors()
-						validationErrors.SetFieldErrors("statuses", fieldErrs)
-						RespondValidationErrors(w, r, validationErrors)
-						return
-					}
-				}
-				Statuses = append(Statuses, elem)
+		{
+			listErrors := types.NewValidationErrors()
+			Statuses = bodyargs.QueryList[types.OrderStatus](listErrors, r.URL.Query(), queryListStatusesArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
 			}
 		}
 		Limit := parseFloat64QueryParamPtr(r, "limit")
@@ -516,32 +499,6 @@ func createProductReviewsWriteReviewHandler(impl ProductReviewsImplementation) g
 // =============================================================================
 // These functions parse query parameters from the URL and convert them to Go types.
 // They handle missing values gracefully by returning defaults or nil for pointer types.
-
-// parseArrayQueryParam parses an array query parameter in the OpenAPI
-// form/explode=false representation (?name=a,b). It also accepts repeated
-// keys (?name=a&name=b); each value is still split on commas. present
-// distinguishes an omitted optional parameter (nil slice) from input.
-func parseArrayQueryParam(r *gohttp.Request, name string) (values []string, present bool, err error) {
-	rawValues, present := r.URL.Query()[name]
-	if !present {
-		return nil, false, nil
-	}
-
-	values = make([]string, 0)
-	for _, rawValue := range rawValues {
-		for _, candidate := range strings.Split(rawValue, ",") {
-			candidate = strings.TrimSpace(candidate)
-			if candidate == "" {
-				return nil, true, fmt.Errorf("%s cannot contain empty values", name)
-			}
-			values = append(values, candidate)
-		}
-	}
-	if len(values) == 0 {
-		return nil, true, fmt.Errorf("%s cannot be empty", name)
-	}
-	return values, true, nil
-}
 
 // parseIntQueryParam parses an integer query parameter with a default value.
 // Returns the default if the parameter is missing or cannot be parsed.

@@ -205,58 +205,30 @@ func buildCommonHeaderParameters(output *APIOutput) []map[string]interface{} {
 	})
 }
 
-// buildScalarQueryParams converts GET endpoint scalar args into OpenAPI query
-// parameter definitions. Array args use style=form + explode=false
-// (comma-separated: ?k=a,b) per the API format conventions.
-func buildScalarQueryParams(args []Param, scalarExamples, scalarDescriptions, scalarMap map[string]string) []map[string]interface{} {
-	var params []map[string]interface{}
-	for _, arg := range args {
-		argSchema := typeToOpenAPISchema(arg.Type, scalarExamples, scalarDescriptions, scalarMap)
-		applyOpenAPIValidationConstraints(argSchema, arg.ValidateMin, arg.ValidateMax, arg.ValidateMinLength, arg.ValidateMaxLength, arg.ValidatePattern, nil, nil)
-		param := map[string]interface{}{
-			"name":     arg.Name,
-			"in":       "query",
-			"required": arg.Required,
-			"schema":   argSchema,
-		}
-		if arg.IsArray {
-			arraySchema := map[string]interface{}{
-				"type":  "array",
-				"items": argSchema,
-			}
-			applyOpenAPIValidationConstraints(arraySchema, nil, nil, nil, nil, "", arg.ValidateListMin, arg.ValidateListMax)
-			param["schema"] = arraySchema
-			param["style"] = "form"
-			param["explode"] = false
-		}
-		params = append(params, param)
-	}
-	return params
-}
-
-// buildQueryParamDefs converts @query-decorated params into OpenAPI query
-// parameter definitions.
-func buildQueryParamDefs(params []Param, scalarExamples, scalarDescriptions, scalarMap map[string]string) []map[string]interface{} {
+// buildQueryParams converts query parameters, the arguments of a GET
+// operation and @query parameters, into OpenAPI parameter definitions. Each
+// schema is built as a body argument's is (openAPIFieldSchema): the
+// scalar's own constraints and the argument's bounds on each value, the
+// items of a list, and the list bounds on the list. A query parameter is
+// present or absent, never null, so the schema is never nullable;
+// "required" says whether it may be absent. A list uses style=form and
+// explode=false, the ?name=a,b encoding the generated servers and SDKs use.
+func buildQueryParams(params []Param, scalarExamples, scalarDescriptions, scalarMap map[string]string, schema *ir.Schema, dependencies map[string]*ir.Schema) []map[string]interface{} {
 	var result []map[string]interface{}
 	for _, param := range params {
-		paramSchema := typeToOpenAPISchema(param.Type, scalarExamples, scalarDescriptions, scalarMap)
-		applyOpenAPIValidationConstraints(paramSchema, param.ValidateMin, param.ValidateMax, param.ValidateMinLength, param.ValidateMaxLength, param.ValidatePattern, nil, nil)
+		typeRef := ir.TypeRef{Name: param.Type, IsArray: param.IsArray}
 		definition := map[string]interface{}{
 			"name":     param.Name,
 			"in":       "query",
 			"required": param.Required,
-			"schema":   paramSchema,
+			"schema": openAPIFieldSchema(typeRef, true, openAPIBounds{
+				min: param.ValidateMin, max: param.ValidateMax,
+				minLength: param.ValidateMinLength, maxLength: param.ValidateMaxLength,
+				pattern: param.ValidatePattern,
+				listMin: param.ValidateListMin, listMax: param.ValidateListMax,
+			}, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies),
 		}
 		if param.IsArray {
-			// The item constraints stay on items; the list bounds go on the
-			// array. form/explode=false is the ?name=a,b encoding the
-			// generated server and SDKs use.
-			arraySchema := map[string]interface{}{
-				"type":  "array",
-				"items": paramSchema,
-			}
-			applyOpenAPIValidationConstraints(arraySchema, nil, nil, nil, nil, "", param.ValidateListMin, param.ValidateListMax)
-			definition["schema"] = arraySchema
 			definition["style"] = "form"
 			definition["explode"] = false
 		}
@@ -342,11 +314,11 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 
 		// GET endpoints carry scalar args in the query string instead of a body.
 		if endpoint.Method == "GET" && len(endpoint.ScalarArgs) > 0 {
-			parameters = append(parameters, buildScalarQueryParams(endpoint.ScalarArgs, scalarExamples, scalarDescriptions, scalarMap)...)
+			parameters = append(parameters, buildQueryParams(endpoint.ScalarArgs, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)...)
 		}
 
 		if len(endpoint.QueryParams) > 0 {
-			parameters = append(parameters, buildQueryParamDefs(endpoint.QueryParams, scalarExamples, scalarDescriptions, scalarMap)...)
+			parameters = append(parameters, buildQueryParams(endpoint.QueryParams, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)...)
 		}
 
 		if len(parameters) > 0 {
@@ -742,12 +714,13 @@ type openAPIBounds struct {
 	listMin, listMax     *int
 }
 
-// openAPIFieldSchema is the schema of a field of a type or of a body
-// argument: its type, nullable when optional. A scalar's own constraints
-// and the field's bounds apply to each value: the field, the items of an
-// array, the values of a map. listMin and listMax bound the array itself,
-// the outer one of an array of arrays; a map has none. A required array
-// without listMin may be empty; only listMin >= 1 forbids [].
+// openAPIFieldSchema is the schema of a field of a type, of a body argument
+// or of a query parameter: its type, nullable when optional. A query
+// parameter is never null and passes required true. A scalar's own
+// constraints and the field's bounds apply to each value: the field, the
+// items of an array, the values of a map. listMin and listMax bound the
+// array itself, the outer one of an array of arrays; a map has none. A
+// required array without listMin may be empty; only listMin >= 1 forbids [].
 func openAPIFieldSchema(typeRef ir.TypeRef, required bool, bounds openAPIBounds, scalarExamples, scalarDescriptions, scalarMap map[string]string, schema *ir.Schema, dependencies map[string]*ir.Schema) map[string]interface{} {
 	fieldSchema := typeRefToOpenAPISchema(typeRef, !required, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
 	valueSchema := openAPIConstraintTarget(fieldSchema, typeRef)

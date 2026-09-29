@@ -84,12 +84,20 @@ func TestGenerateScalarListsShape(t *testing.T) {
 		}
 	}
 
+	// The query parameters (@query) come first, then the GET arguments.
 	find := byName["findTags"]
-	if len(find.QueryParams) != 1 || len(find.BodyParams) != 0 {
+	if len(find.QueryParams) != 4 || len(find.BodyParams) != 0 {
 		t.Fatalf("findTags query params %+v, body params %+v", find.QueryParams, find.BodyParams)
 	}
-	if want := "{ name: 'labels', kind: 'string', required: true, isArray: true }"; find.QueryParams[0].SpecLiteral != want {
-		t.Errorf("findTags labels = %s, want %s", find.QueryParams[0].SpecLiteral, want)
+	for i, want := range []string{
+		"{ name: 'codes', kind: 'string', required: false, isArray: true, minLength: 2, pattern: '^[a-z]+$' }",
+		"{ name: 'pages', kind: 'integer', required: false, isArray: true, scalar: { name: 'Ordering.Rank', min: 1, max: 9007199254740991 } }",
+		"{ name: 'labels', kind: 'string', required: true, isArray: true }",
+		"{ name: 'ranks', kind: 'integer', required: false, isArray: true, scalar: { name: 'Ordering.Rank', min: 1, max: 9007199254740991 } }",
+	} {
+		if got := find.QueryParams[i].SpecLiteral; got != want {
+			t.Errorf("findTags query param %d = %s, want %s", i, got, want)
+		}
 	}
 }
 
@@ -100,7 +108,8 @@ func TestGenerateScalarListsShape(t *testing.T) {
 // name[i] as required and a wrong-type one as type, "5" is not a number,
 // [] satisfies a required list, list bounds and the scalar's own pattern,
 // lengths and range apply, and a Generic.JSON argument is any JSON value
-// but null. A GET list still reads comma-separated query values.
+// but null. A GET list still reads comma-separated query values, and each
+// item is checked at name[i], a GET argument and a query parameter alike.
 func TestGeneratedScalarListsRouter(t *testing.T) {
 	tree := materializeAPI(t, scalarListsFixture(t))
 	tree.typeCheck(t)
