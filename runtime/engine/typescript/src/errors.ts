@@ -13,7 +13,13 @@ export type EngineErrorCode =
   | 'name_taken'
   | 'not_found'
   | 'unknown_namespace'
-  | 'invalid_argument';
+  | 'invalid_argument'
+  /** The access policy refuses the call. */
+  | 'forbidden'
+  /** The instance, or an update's result, does not validate against the live version. */
+  | 'invalid_instance'
+  /** An instance with the id already exists. */
+  | 'conflict';
 
 export class EngineError extends Error {
   readonly code: EngineErrorCode;
@@ -60,5 +66,27 @@ export class IncompatibleChangeError extends EngineError {
     );
     this.name = 'IncompatibleChangeError';
     this.changes = changes;
+  }
+}
+
+/** One reason an instance is refused, at a path such as `lines[2].sku`; an empty path is the instance itself. */
+export interface ValidationIssue {
+  path: string;
+  /** The rule it breaks: the schema runtime's (`required`, `type`, `pattern`, `enum`, ...) or `unknown` for an undeclared key. */
+  rule: string;
+  message: string;
+}
+
+/** An instance the live version of its schema refuses. */
+export class InstanceValidationError extends EngineError {
+  readonly issues: ValidationIssue[];
+
+  constructor(namespace: string, schema: string, version: number, issues: ValidationIssue[]) {
+    super(
+      'invalid_instance',
+      `${schema} in namespace ${namespace} (version ${version}): ${issues.map((issue) => (issue.path ? `${issue.path}: ${issue.message}` : issue.message)).join('; ')}`
+    );
+    this.name = 'InstanceValidationError';
+    this.issues = issues;
   }
 }

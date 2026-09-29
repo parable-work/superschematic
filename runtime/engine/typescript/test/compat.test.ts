@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import { IncompatibleChangeError } from '../dist/index.js';
-import { cleanup, clone, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, clone, openTestEngine, schemaDocument, thrown } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -60,13 +60,13 @@ function field(doc: Doc, typeName: string, name: string): Record<string, unknown
 
 function nextVersion(change: (doc: Doc) => void): () => unknown {
   const engine = openTestEngine();
-  engine.schemas.define(base() as unknown as Record<string, unknown>);
-  engine.schemas.publish('Order');
+  engine.schemas.define(alice, base() as unknown as Record<string, unknown>);
+  engine.schemas.publish(alice, 'Order');
   const next = clone(base());
   change(next);
   return () => {
-    engine.schemas.define(next as unknown as Record<string, unknown>);
-    return engine.schemas.publish('Order');
+    engine.schemas.define(alice, next as unknown as Record<string, unknown>);
+    return engine.schemas.publish(alice, 'Order');
   };
 }
 
@@ -192,16 +192,16 @@ describe('changes a stored instance may not satisfy', () => {
 
 test('a refused version leaves the live version and the draft as they were', () => {
   const engine = openTestEngine();
-  engine.schemas.define(base() as unknown as Record<string, unknown>);
-  engine.schemas.publish('Order');
+  engine.schemas.define(alice, base() as unknown as Record<string, unknown>);
+  engine.schemas.publish(alice, 'Order');
   const compatible = clone(base());
   compatible.description = 'kept';
-  engine.schemas.define(compatible as unknown as Record<string, unknown>);
+  engine.schemas.define(alice, compatible as unknown as Record<string, unknown>);
   const incompatible = clone(base());
   field(incompatible, 'Order', 'note').required = true;
-  thrown(() => engine.schemas.define(incompatible as unknown as Record<string, unknown>), IncompatibleChangeError);
-  assert.equal(engine.schemas.live('Order')?.version, 1);
-  assert.equal(engine.schemas.draft('Order')?.document.description, 'kept');
+  thrown(() => engine.schemas.define(alice, incompatible as unknown as Record<string, unknown>), IncompatibleChangeError);
+  assert.equal(engine.schemas.live(alice, 'Order')?.version, 1);
+  assert.equal(engine.schemas.draft(alice, 'Order')?.document.description, 'kept');
 });
 
 test('a new instance type is refused', () => {
@@ -211,8 +211,8 @@ test('a new instance type is refused', () => {
     name: 'Catalog',
     types: { [typeName]: { name: typeName, role: 'EmbeddedStruct', fields: [{ name: 'title', typeRef: { name: 'string' } }] } },
   });
-  engine.schemas.define(catalog('Item'));
-  engine.schemas.publish('Catalog');
-  const error = thrown(() => engine.schemas.define(catalog('Product')), IncompatibleChangeError);
+  engine.schemas.define(alice, catalog('Item'));
+  engine.schemas.publish(alice, 'Catalog');
+  const error = thrown(() => engine.schemas.define(alice, catalog('Product')), IncompatibleChangeError);
   assert.deepEqual(error.changes, [{ path: 'Item', message: 'the instance type changes from Item to Product' }]);
 });

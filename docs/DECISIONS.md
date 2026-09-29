@@ -934,20 +934,16 @@ canonical bytes, which drop a value its decoder cannot tell from an
 absent key, the meta-schema gives each such property that value as its
 default (section 5), and the loader needs `JSON.parse` source text access
 (Node.js 21 or later, or Bun). `@superschematic/engine`
-(`runtime/engine/typescript`, `runtime/engine/README.md`) has its storage
-and the schema registry: one SQLite file behind a synchronous driver with
-adapters over `node:sqlite` and `bun:sqlite`, migrations recorded per
-owner, `define` and `publish` with the compatibility rule, namespaces
-with a shared one, and a validator per version. It runs on Node.js 24 and
-Bun. It also refuses union and map fields, which the schema runtime does
-not validate, refuses an object key a type does not declare, which the
-compatibility rule needs, and keeps each schema name on one side of the
-shared namespace's lookup. Not built: the tool that copies a declaration
-into its npm package, and the engine's instances, event log, access
-policy, HTTP API, MCP tools and behaviors, and its other packages. Each
-change that lands a piece updates this paragraph, the README layout table
-and the pages that describe it. The names and rules are reversible until
-the first release.
+(`runtime/engine/README.md`) has storage on `node:sqlite` and
+`bun:sqlite`, the schema registry with the compatibility rule,
+namespaces, instances, the event log and the access policy. Beyond the
+schema runtime's checks it refuses union and map fields, which no
+runtime validates yet, and object keys a type does not declare, which the
+compatibility rule depends on. Not built: the tool that copies a
+declaration into its npm package, and the engine's HTTP API, event
+stream, MCP tools and behaviors. Each change that lands a piece updates
+this paragraph, the README layout table and the pages that describe it.
+The names and rules are reversible until the first release.
 
 ## D17. A version graph over versioned tables, with one merge core
 
