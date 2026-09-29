@@ -39,6 +39,15 @@ of a generated artifact is always listed here with the bump it requires.
   API `go.mod` names the modules they produce. Output for a service whose Go
   modules reach no generated module past the ones they import is unchanged,
   apart from the new require line in a public API's `go.mod`. Patch.
+- build-all's dependency graph (`dist/.deps.json`) records the requirements
+  of a generated Go SDK. The Go SDK's `go.mod` writes each one as a
+  single-line `require <module> v0.0.0`, and build-all read only the lines
+  of a `require ( ... )` block, so it recorded none for an SDK. The edge
+  build-all adds from an SDK to the types package of its schema hid the
+  gap, except for a schema whose name ends in `-types`: its Go SDK had no
+  dependencies, and `Closure` from it left out its types module. build-all
+  now reads both forms and still skips `// indirect` requirements.
+  `.deps.json` is unchanged for every other Go SDK. Patch.
 - The generated TypeScript validator checks a scalar field's own rules.
   For a field typed with a scalar it ran the scalar's validator and the
   list bounds only, and dropped the field's `minLength`, `maxLength`,

@@ -105,6 +105,56 @@ func TestCollectFromDist_GoRecordsDirectRequires(t *testing.T) {
 	}
 }
 
+// TestCollectFromDist_GoSDKRecordsSingleLineRequires reads Go SDK go.mod
+// files in the form gosdkgen writes them: one single-line require per
+// module, with the modules its types module reaches marked indirect. The
+// web-types schema's name ends in -types, so ensureSDKTypesEdges, which
+// looks for <stem>-types, adds no edge for its SDK; the require line is the
+// only source of that edge.
+func TestCollectFromDist_GoSDKRecordsSingleLineRequires(t *testing.T) {
+	dist := t.TempDir()
+	const root = "example.com/schemas/"
+	write := func(rel string, lines ...string) {
+		t.Helper()
+		content := "module " + root + rel + "\n\ngo 1.26.4\n\n" + strings.Join(lines, "\n") + "\n"
+		if err := os.MkdirAll(filepath.Join(dist, filepath.FromSlash(rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dist, filepath.FromSlash(rel), "go.mod"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("types/go/common")
+	write("types/go/orders", "require (", "\t"+root+"types/go/common v0.0.0", ")")
+	write("sdk/go/orders",
+		"require "+root+"types/go/orders v0.0.0",
+		"require "+root+"types/go/common v0.0.0 // indirect",
+		"replace "+root+"types/go/orders => ../../../types/go/orders",
+		"replace "+root+"types/go/common => ../../../types/go/common")
+	write("types/go/web-types")
+	write("sdk/go/web-types", "require "+root+"types/go/web-types v0.0.0")
+
+	g, err := CollectFromDist(dist, nil)
+	if err != nil {
+		t.Fatalf("CollectFromDist: %v", err)
+	}
+	for id, want := range map[string]string{
+		"orders-sdk":    "orders-types",
+		"web-types-sdk": "web-types",
+	} {
+		if got := strings.Join(mustPkg(t, g, "go", id).Deps, ","); got != want {
+			t.Errorf("%s deps = [%s], want [%s]", id, got, want)
+		}
+	}
+	closure, err := g.Closure("go", []string{"orders-sdk", "web-types-sdk"})
+	if err != nil {
+		t.Fatalf("Closure: %v", err)
+	}
+	if got, want := strings.Join(closure, ","), "common-types,orders-types,orders-sdk,web-types,web-types-sdk"; got != want {
+		t.Errorf("closure = %s, want %s", got, want)
+	}
+}
+
 func TestCollectFromDist_AnnotatesProducingService(t *testing.T) {
 	dist := t.TempDir()
 	writeTSPackage(t, dist, "types/typescript/orders-api", "@schemas/orders-api-types", map[string]string{
