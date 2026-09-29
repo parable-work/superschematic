@@ -1,0 +1,33 @@
+{
+  "name": "@superschematic/engine",
+  "version": "0.0.0",
+  "description": "An engine that runs a schema with no generated code: it takes schema-file documents as data, versions them, and stores their instances in one SQLite file. Runs on Node.js 24 and Bun. Needs @superschematic/schema-runtime, @superschematic/schema-ir and superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "link-deps": "node scripts/link-local-deps.mjs",
+    "typecheck": "node scripts/link-local-deps.mjs && tsc -p tsconfig.json --noEmit",
+    "build": "node scripts/link-local-deps.mjs && node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "test": "bun run build && bun run test:node && bun run test:bun",
+    "test:node": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && node --test 'test/*.test.ts'",
+    "test:bun": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && bun test ./test"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  },
+  "license": "Apache-2.0"
+}

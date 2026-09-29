@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true
+  },
+  "comment": "The tests are TypeScript that Node.js (type stripping) and Bun run as they are, so they use only erasable syntax. They import the built package from dist/, the code that ships.",
+  "include": ["test/**/*.ts"]
+}
