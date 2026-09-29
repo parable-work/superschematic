@@ -335,10 +335,8 @@ fn validate_schema_value(
         "string" => validate_string_value(value, schema, path, errors),
         "integer" => validate_integer_value(value, schema, path, errors),
         "number" => validate_number_value(value, schema, path, errors),
-        "boolean" => {
-            if !value.is_boolean() {
-                errors.push(format!("{path}: expected boolean"));
-            }
+        "boolean" if !value.is_boolean() => {
+            errors.push(format!("{path}: expected boolean"));
         }
         _ => {}
     }
@@ -370,13 +368,11 @@ fn validate_object_value(
                     errors.push(format!("{field_path}: required field"));
                     skip_fields.insert(field_name.to_string());
                 }
-                Some(Value::String(text)) => {
-                    if text.is_empty() {
-                        if let Some(field_schema) = properties.and_then(|props| props.get(field_name)) {
-                            if schema_expects_string(field_schema, schemas) {
-                                errors.push(format!("{field_path}: required field"));
-                                skip_fields.insert(field_name.to_string());
-                            }
+                Some(Value::String(text)) if text.is_empty() => {
+                    if let Some(field_schema) = properties.and_then(|props| props.get(field_name)) {
+                        if schema_expects_string(field_schema, schemas) {
+                            errors.push(format!("{field_path}: required field"));
+                            skip_fields.insert(field_name.to_string());
                         }
                     }
                 }

@@ -120,9 +120,11 @@ jobs:
 
       - name: Install Rust toolchain
         # Builds the superscalar ffi archive from source; the checkout carries
-        # its own rust-toolchain.toml which rustup reads when it builds.
+        # its own rust-toolchain.toml which rustup reads when it builds. The
+        # rustsdkgen compile tests run cargo clippy on the generated SDK
+        # crates, so this toolchain carries clippy.
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy
           rustup default "$RUST_VERSION"
 
       - name: Build the superscalar dependency
