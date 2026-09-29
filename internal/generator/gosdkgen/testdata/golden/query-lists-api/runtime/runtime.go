@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-{{- if .HasQueryLists}}
 	"strings"
-{{- end}}
 )
 
 type PublicEncryptionKey struct {
@@ -63,7 +61,6 @@ func AddQueryParam(values url.Values, key string, value any) {
 	}
 	values.Set(key, fmt.Sprintf("%v", value))
 }
-{{- if .HasQueryLists}}
 
 // AddQueryList sets key to the items of list as one comma-separated value
 // (?key=a,b), the form the Go route reads a list query parameter in. An
@@ -78,4 +75,3 @@ func AddQueryList[T any](values url.Values, key string, list []T) {
 	}
 	values.Set(key, strings.Join(items, ","))
 }
-{{- end}}
