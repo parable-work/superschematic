@@ -1,6 +1,6 @@
 ---
 title: Version graphs
-description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, and the core from TypeScript.
+description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core from TypeScript, and the Rust engine and facade.
 sidebar:
   order: 8
 ---
@@ -13,9 +13,9 @@ Each ref holds only the rows it overrides. A commit records the exact row
 versions a ref sealed. Work happens on change sets; a primary line takes
 writes only from merges, and each root's release pointer names the tagged
 commit readers see. One core composes, merges, diffs, hashes and
-validates trees. The Go engine runs every graph operation on the core over
-a storage adapter, and a generated Go facade gives each graph typed methods
-over the engine.
+validates trees. The Go and Rust engines run every graph operation on the
+core over a storage adapter, and a generated facade in each language gives
+each graph typed methods over its engine.
 
 The design and the alternatives not taken are D17 and D19 in
 [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md).
@@ -406,8 +406,8 @@ shares (`version_conflict`, `ref_sealed`, `primary_merge_only`,
 scenarios in `runtime/versiongraph/testdata/scenarios` run sequences of
 operations over canonical rows, with the expected trees, content hashes,
 conflicts and errors, against the fixture in
-`runtime/versiongraph/testdata/fixture`; the Go engine runs every one
-against Postgres. Their format is in
+`runtime/versiongraph/testdata/fixture`; the Go and Rust engines run
+every one against Postgres. Their format is in
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#scenarios).
 
 ## The generated facade
@@ -560,6 +560,72 @@ member order included, with the vector. It also fails when a member or
 literal of the types appears in no vector. A member or literal that is
 missing, extra or misnamed in the types therefore fails it.
 
+## Use the engine from Rust
+
+`superschematic-versiongraph-engine`
+([runtime/versiongraph/rust-engine](https://github.com/parable-work/superschematic/tree/main/runtime/versiongraph/rust-engine))
+is the Rust engine. It has every operation, rule and error code of the Go
+engine, runs over the same kind of storage adapter, and calls the core
+natively. Its operations are `async`. Its Postgres adapter
+(`postgres::Adapter`) builds its statements from the descriptor at run
+time and reaches Postgres through `postgres::Client`, a two-trait seam;
+`postgres::TokioPostgres` binds one tokio-postgres connection and is on by
+default (the `tokio-postgres` feature). A service that runs operations side
+by side, or inside a transaction it holds, implements `Client` over its own
+pool or transaction. Every scenario runs through it against Postgres
+(`make versiongraph-scenarios-rust`).
+
+When a DB schema declares a graph and its Rust types are on, the types
+generator writes `src/versiongraph_<name>.rs` beside the types, and the
+crate depends on the engine
+([`versiongraph_rust_crate`](/superschematic/reference/naming/#versiongraph_rust_crate),
+at [`[paths] versiongraph_rust`](/superschematic/reference/naming/#pathsversiongraph_rust)
+when it is set). The file holds the descriptor
+(`RECIPE_GRAPH_DESCRIPTOR`), the schema epoch and snapshot interval, and a
+typed `RecipeGraph` with the Go facade's operations in Rust's spelling:
+
+```rust
+use std::str::FromStr;
+use schemas_recipes_types::{IdentityUUID, RecipeEdits, RecipeGraph, RecipeKindEdits};
+use superschematic_versiongraph_engine::{postgres::TokioPostgres, CommitOptions};
+
+let (client, connection) = tokio_postgres::connect(url, tokio_postgres::NoTls).await?;
+tokio::spawn(connection);
+let graph = RecipeGraph::postgres(TokioPostgres::new(client))?;
+
+let main = graph.create_primary(&actor, &recipe, "main").await?;
+let draft = graph.branch(&actor, &IdentityUUID::from_str(&main.id)?, "first draft").await?;
+let draft_id = IdentityUUID::from_str(&draft.id)?;
+let edits = RecipeEdits {
+    step: RecipeKindEdits { upsert: vec![mix], ..RecipeKindEdits::default() },
+    ..RecipeEdits::default()
+};
+let saved = graph.save(&actor, &draft_id, draft.version, &edits).await?;
+graph.commit(&actor, &draft_id, saved.ref_.version, &CommitOptions::default()).await?;
+let merged = graph
+    .merge(&actor, &draft_id, &IdentityUUID::from_str(&main.id)?, main.version, &[],
+        &CommitOptions { message: "first".into(), tag: true })
+    .await?;
+let tree = graph.materialize(&IdentityUUID::from_str(&merged.commit.unwrap().id)?).await?;
+```
+
+The Rust facade differs from the Go one where the languages do:
+
+- Every write takes its actor as an argument; there is no context user.
+  `sweep` and `run_sweeper` write as `SweepOptions::actor`, and
+  `run_sweeper` stops when its `shutdown` future completes.
+- The types crate has no ORM, so refs, commits and release pointers come
+  back as the engine's `Ref`, `Commit` and `Release`, with ids as canonical
+  strings, rather than as typed rows.
+- A typed row read back through the facade leaves its to-one relations
+  (the root, the ref) `None`, since a canonical row holds only their keys.
+- Errors are the engine's `Error`; `Error::code()` is the stable code
+  (`version_conflict`, `primary_merge_only`, ...).
+
+The facade turns a typed edit into a canonical row from each field's serde
+JSON, and a canonical row back into a typed value, so a field comes back in
+its canonical form, as through the Go facade.
+
 ## Limits
 
 - History is linear per row; a branch exists because each ref writes its
@@ -571,6 +637,11 @@ missing, extra or misnamed in the types therefore fails it.
 - `schemaEpoch` is recorded and checked, but nothing transforms a commit
   from an older epoch.
 - The compiler emits DDL, not migrations.
+- A Rust build in which `serde_json`'s `preserve_order` feature is on
+  computes content hashes the other engines do not, since the core's hash
+  relies on `serde_json`'s sorted maps. superscalar turns the feature on,
+  so a generated Rust types crate hashes a tree with rows differently from
+  Go and TypeScript.
 - Who may commit, seal, merge, tag or release is the application's policy.
   `Sweep` collects discarded drafts and prunes history, but nothing runs it
   unless a service calls it or `RunSweeper`.

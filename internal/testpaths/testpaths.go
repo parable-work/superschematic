@@ -61,6 +61,7 @@ func Local(t *testing.T) naming.LocalPaths {
 		SchemaIR:         filepath.Join(root, "ir"),
 		SchemaRuntimeGo:  filepath.Join(root, "runtime", "schema", "go"),
 		VersionGraphGo:   filepath.Join(root, "runtime", "versiongraph", "go"),
+		VersionGraphRust: filepath.Join(root, "runtime", "versiongraph", "rust-engine"),
 		HTTPRuntimeGo:    filepath.Join(root, "runtime", "http", "go"),
 		HTTPRuntimeRust:  filepath.Join(root, "runtime", "http", "rust"),
 	}

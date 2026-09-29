@@ -82,6 +82,11 @@ type Naming struct {
 	// graph. It links the core's static archive through cgo.
 	VersionGraphGoModule string `toml:"versiongraph_go_module"`
 
+	// VersionGraphRustCrate is the Rust engine of the version graph (D19),
+	// which a generated Rust types crate depends on when its schema
+	// declares a graph: its typed facade runs on the engine.
+	VersionGraphRustCrate string `toml:"versiongraph_rust_crate"`
+
 	// HTTPRuntimeNpmPackage is the npm package the generated TypeScript
 	// API router imports its request pipeline from.
 	HTTPRuntimeNpmPackage string `toml:"http_runtime_npm_package"`
@@ -212,6 +217,8 @@ type PathsConfig struct {
 	SchemaRuntimeGo string `toml:"schema_runtime_go"`
 	// VersionGraphGo holds the version-graph core's Go binding module.
 	VersionGraphGo string `toml:"versiongraph_go"`
+	// VersionGraphRust holds the version graph's Rust engine crate.
+	VersionGraphRust string `toml:"versiongraph_rust"`
 	// HTTPRuntimeGo holds the http runtime Go module.
 	HTTPRuntimeGo string `toml:"http_runtime_go"`
 	// HTTPRuntimeRust holds the http runtime Rust crate.
@@ -230,6 +237,7 @@ type LocalPaths struct {
 	SchemaIR         string
 	SchemaRuntimeGo  string
 	VersionGraphGo   string
+	VersionGraphRust string
 	HTTPRuntimeGo    string
 	HTTPRuntimeRust  string
 	Ptr              string
@@ -250,6 +258,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		SchemaIR:         resolve(n.Paths.SchemaIR),
 		SchemaRuntimeGo:  resolve(n.Paths.SchemaRuntimeGo),
 		VersionGraphGo:   resolve(n.Paths.VersionGraphGo),
+		VersionGraphRust: resolve(n.Paths.VersionGraphRust),
 		HTTPRuntimeGo:    resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:  resolve(n.Paths.HTTPRuntimeRust),
 		Ptr:              resolve(n.Paths.Ptr),
@@ -267,6 +276,7 @@ func (p PathsConfig) checkRelative() error {
 		{"schema_ir", p.SchemaIR},
 		{"schema_runtime_go", p.SchemaRuntimeGo},
 		{"versiongraph_go", p.VersionGraphGo},
+		{"versiongraph_rust", p.VersionGraphRust},
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},
 		{"ptr", p.Ptr},
@@ -363,6 +373,7 @@ func Default() Naming {
 		SchemaIRGoModule:        "github.com/parable-work/superschematic/ir",
 		SchemaRuntimeGoModule:   "github.com/parable-work/superschematic/runtime/schema/go",
 		VersionGraphGoModule:    "github.com/parable-work/superschematic/runtime/versiongraph/go",
+		VersionGraphRustCrate:   "superschematic-versiongraph-engine",
 		HTTPRuntimeGoModule:     "github.com/parable-work/superschematic/runtime/http/go",
 		HTTPRuntimeRustCrate:    "superschematic-http-runtime",
 		PtrGoModule:             "github.com/parable-work/superschematic/runtime/schema/go/ptr",
@@ -407,6 +418,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.SchemaIRGoModule, d.SchemaIRGoModule)
 	fill(&n.SchemaRuntimeGoModule, d.SchemaRuntimeGoModule)
 	fill(&n.VersionGraphGoModule, d.VersionGraphGoModule)
+	fill(&n.VersionGraphRustCrate, d.VersionGraphRustCrate)
 	fill(&n.HTTPRuntimeGoModule, d.HTTPRuntimeGoModule)
 	fill(&n.HTTPRuntimeRustCrate, d.HTTPRuntimeRustCrate)
 	fill(&n.PtrGoModule, d.PtrGoModule)
@@ -582,6 +594,12 @@ func (n Naming) RustAPICrate(schemaName string) string {
 // Cargo name with '-' folded to '_'.
 func (n Naming) ScalarRustCrateIdent() string {
 	return strings.ReplaceAll(n.ScalarRustCrate, "-", "_")
+}
+
+// VersionGraphRustCrateIdent is the version graph's Rust engine crate as
+// Rust source spells it: the Cargo name with '-' folded to '_'.
+func (n Naming) VersionGraphRustCrateIdent() string {
+	return strings.ReplaceAll(n.VersionGraphRustCrate, "-", "_")
 }
 
 // Load reads <schemasRoot>/superschematic.toml. A missing file returns

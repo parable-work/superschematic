@@ -1414,8 +1414,31 @@ change sets as abandoned but never a primary line, and reports nonzero
 counts only; pruning uses each kind's declared
 retention; and the facade's sweep writes as `GraphSweepOptions.Actor`, not
 the context user.
-The TypeScript, Rust and Python engines and facades follow and must pass
-the same scenarios. Each change that lands a piece updates this paragraph.
+The Rust engine is built too: crate `superschematic-versiongraph-engine` in
+`runtime/versiongraph/rust-engine` calls the core natively and implements
+every operation over its `Storage` and `Tx` traits with the Go engine's
+rules and error codes, and its Postgres adapter builds its statements from
+the descriptor and reaches Postgres through a two-trait `Client` seam
+with a tokio-postgres binding, a default cargo feature. Its operations are
+async, and its module `canonical` ports package `canonical`. It runs every
+scenario and every canonical vector against Postgres
+(`make versiongraph-scenarios-rust`, in CI's versiongraph job). The Rust
+types generator writes a typed facade per graph,
+`src/versiongraph_<name>.rs`, over the engine that the naming key
+`versiongraph_rust_crate` and `[paths] versiongraph_rust` name. Six rules
+settled as it was built: the facade takes each write's actor as an
+argument, since Rust has no context user; it returns the engine's refs,
+commits and release pointers, since the Rust types have no ORM; a typed
+row it reads back leaves its to-one relations empty; the tokio-postgres
+binding runs one operation at a time on its connection and rolls back a
+transaction that a dropped operation left open; `run_sweeper` stops when a
+shutdown future completes and lets a pass under way finish; and without
+`[paths] versiongraph_rust` the generated manifest names the engine's
+version. The core's content hash relies on `serde_json`'s sorted maps, so
+a Rust build with `preserve_order` on, which superscalar turns on, hashes
+a tree with rows differently; that stays open.
+The TypeScript and Python engines and facades follow and must pass the
+same scenarios. Each change that lands a piece updates this paragraph.
 
 ## D20. An `EncryptedField<T>` argument encrypts its operation's request body
 

@@ -21,3 +21,10 @@ serde = { version = "1.0.228", features = ["derive"] }
 {{- range .CargoDependencies}}
 {{.Name}} = { path = "{{.RelativePath}}" }
 {{- end}}
+{{- if .VersionGraphs}}
+{{- if .VersionGraphDepPath}}
+{{.Naming.VersionGraphRustCrate}} = { path = "{{.VersionGraphDepPath}}" }
+{{- else}}
+{{.Naming.VersionGraphRustCrate}} = "0.0.0"
+{{- end}}
+{{- end}}
