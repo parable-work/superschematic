@@ -993,7 +993,11 @@ program.
    scalars. `Options.DependencyConfig` supplies their configs;
    `build-all` and `build --with-deps` set it, and without it (a single
    `build`) the run logs the dependencies it did not check.
-5. Run the enabled generators in order.
+5. Run the enabled generators in order. `envConfig` writes the loader of
+   an `@envVars` class in the language `outputs.types` picks: Go when
+   `go` is on, Rust when only `rust` is. The Go loader imports the Go
+   types, so with neither on it writes the class's `values-schema.json`
+   alone and logs that it wrote no loader.
 6. Run the document generators: for every registered `DocumentSpec` with a
    `Generate` whose name is present in `Schema.Documents`, in name order.
    They run whatever the kind's pipeline and the `outputs` switches say. A
