@@ -12,9 +12,10 @@ import (
 )
 
 // secretAPI is a schema with one operation, saveSecret, in the operation set
-// SecretMutations: in an Encrypted set, @encrypted itself, or
-// @manualRouteRegistration as the flags say.
-func secretAPI(setEncrypted, opEncrypted, manual bool) *ir.Schema {
+// SecretMutations: in an Encrypted set, @encrypted itself, taking its secret
+// argument as an EncryptedField<string>, or @manualRouteRegistration as the
+// flags say.
+func secretAPI(setEncrypted, opEncrypted, argEncrypted, manual bool) *ir.Schema {
 	schema := ir.NewSchema("secret-api", ir.SchemaKindAPI)
 	schema.OperationSets = []*ir.OperationSet{{
 		Name:      "SecretMutations",
@@ -27,7 +28,7 @@ func secretAPI(setEncrypted, opEncrypted, manual bool) *ir.Schema {
 			Required:                true,
 			Encrypted:               opEncrypted,
 			ManualRouteRegistration: manual,
-			Arguments:               []*ir.ArgumentDef{{Name: "secret", TypeRef: ir.TypeRef{Name: "string"}, Required: true}},
+			Arguments:               []*ir.ArgumentDef{{Name: "secret", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Encrypted: argEncrypted}},
 		}},
 	}}
 	return schema
@@ -44,19 +45,20 @@ func generateSecretAPI(t *testing.T, schema *ir.Schema) (*APIOutput, error) {
 
 // TestEncryptedOperationsAreRefused: the TypeScript router has no step that
 // decrypts a request body, so it would hand the ciphertext to the body
-// parser. An encrypted operation (in an Encrypted operation set, or
-// @encrypted) fails the build with the operation and the fix named, as a
-// file upload does.
+// parser. An encrypted operation (in an Encrypted operation set, @encrypted,
+// or taking an EncryptedField<T> argument) fails the build with the
+// operation and the fix named, as a file upload does.
 func TestEncryptedOperationsAreRefused(t *testing.T) {
 	for _, tc := range []struct {
-		name                      string
-		setEncrypted, opEncrypted bool
+		name                                    string
+		setEncrypted, opEncrypted, argEncrypted bool
 	}{
-		{"Encrypted operation set", true, false},
-		{"@encrypted operation", false, true},
+		{"Encrypted operation set", true, false, false},
+		{"@encrypted operation", false, true, false},
+		{"EncryptedField<T> argument", false, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := generateSecretAPI(t, secretAPI(tc.setEncrypted, tc.opEncrypted, false))
+			_, err := generateSecretAPI(t, secretAPI(tc.setEncrypted, tc.opEncrypted, tc.argEncrypted, false))
 			if err == nil {
 				t.Fatal("Generate accepted an encrypted operation")
 			}
@@ -73,7 +75,7 @@ func TestEncryptedOperationsAreRefused(t *testing.T) {
 // declared @manualRouteRegistration builds. The router gates it and hands
 // the request to the service's handler, which decrypts the payload.
 func TestEncryptedManualOperationIsMountedByHand(t *testing.T) {
-	output, err := generateSecretAPI(t, secretAPI(true, false, true))
+	output, err := generateSecretAPI(t, secretAPI(true, false, false, true))
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}

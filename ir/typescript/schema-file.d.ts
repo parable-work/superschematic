@@ -39,6 +39,7 @@ export interface ArgumentDef {
   comment?: string;
   default?: string;
   description?: string;
+  encrypted?: boolean;
   isQuery?: boolean;
   name: string;
   required?: boolean;

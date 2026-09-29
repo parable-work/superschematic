@@ -65,8 +65,8 @@ func (s *tags) PlacePoints(_ context.Context, id string, pointByName map[string]
 	return &placed, nil
 }
 
-func (s *tags) FindTags(_ context.Context, labels []string) ([]string, error) {
-	s.record(map[string]any{"labels": labels})
+func (s *tags) FindTags(_ context.Context, codes []string, pages []int64, labels []string, ranks []int64) ([]string, error) {
+	s.record(map[string]any{"codes": codes, "pages": pages, "labels": labels, "ranks": ranks})
 	return labels, nil
 }
 
@@ -604,9 +604,57 @@ func TestAGETSingleValueAndAQueryParameterNameTheirRulesInCamelCase(t *testing.T
 		{"?caption=a", fieldError{"caption", "minLength", "must be at least 2 characters"}},
 		{"?caption=abcdef", fieldError{"caption", "maxLength", "must be at most 5 characters"}},
 		{"?tags=ab,cd,ef", fieldError{"tags", "listMax", "must contain at most 2 items"}},
-		{"?tags=a", fieldError{"tags", "minLength", ""}},
+		{"?tags=ab,a", fieldError{"tags[1]", "minLength", "must be at least 2 characters"}},
 	} {
 		refusedWith(t, server, impl, http.MethodGet, searchPostsPath+tc.query, "", tc.want)
+	}
+}
+
+// find sends a GET to findTags with query and returns what the
+// implementation received.
+func find(t *testing.T, server *httptest.Server, impl *tags, query string) map[string]any {
+	t.Helper()
+	accepted(t, server, impl, http.MethodGet, findTagsPath+query, "")
+	return impl.last
+}
+
+// A list query parameter (@query) follows the rules of a GET list argument
+// (bodyargs.QueryList): an empty item is dropped, no item is an absent
+// list, and each item is read as its JSON type and checked as a list
+// element at name[i], by the scalar's rules and then the parameter's.
+// findTags's codes and pages are query parameters; ranks is an argument.
+func TestAQueryListParameterFollowsTheGETListRules(t *testing.T) {
+	server, impl := serve(t)
+	got := find(t, server, impl, "?labels=a&codes=ab,,cd&codes=ef&pages=1,2&ranks=3")
+	if want := []string{"ab", "cd", "ef"}; !reflect.DeepEqual(got["codes"], want) {
+		t.Errorf("codes = %#v, want %#v", got["codes"], want)
+	}
+	if want := []int64{1, 2}; !reflect.DeepEqual(got["pages"], want) {
+		t.Errorf("pages = %#v, want %#v", got["pages"], want)
+	}
+	if want := []int64{3}; !reflect.DeepEqual(got["ranks"], want) {
+		t.Errorf("ranks = %#v, want %#v", got["ranks"], want)
+	}
+	got = find(t, server, impl, "?labels=a&codes=,%20&pages=")
+	if codes := got["codes"].([]string); codes != nil {
+		t.Errorf("codes with no item = %#v, want an absent list", codes)
+	}
+	if pages := got["pages"].([]int64); pages != nil {
+		t.Errorf("pages with no item = %#v, want an absent list", pages)
+	}
+	for _, tc := range []struct {
+		query string
+		want  fieldError
+	}{
+		{"?labels=a&codes=ab,x", fieldError{"codes[1]", "minLength", "must be at least 2 characters"}},
+		{"?labels=a&codes=ab,A1", fieldError{"codes[1]", "pattern", "invalid format"}},
+		{"?labels=a&pages=1,x", fieldError{"pages[1]", "type", "expected an integer"}},
+		{"?labels=a&pages=1.5", fieldError{"pages[0]", "type", "expected an integer"}},
+		// The scalar's own range: Ordering.Rank starts at 1.
+		{"?labels=a&pages=2,0", fieldError{"pages[1]", "min", "must be at least 1"}},
+		{"?labels=a&ranks=1,0", fieldError{"ranks[1]", "min", "must be at least 1"}},
+	} {
+		refusedWith(t, server, impl, http.MethodGet, findTagsPath+tc.query, "", tc.want)
 	}
 }
 

@@ -117,6 +117,44 @@ describe('parameter decoding', () => {
     expect(decodeParam('query', p({ isArray: true, required: false }), undefined)).toBeUndefined();
   });
 
+  test('a query list item is read as its JSON type and checked as a list element at name[i]', () => {
+    const refusedAt = (spec: ParamSpec, raw: string[], path: string, validator: string, message: string) =>
+      expect(() => decodeParam('query', spec, raw)).toThrow(
+        expect.objectContaining({
+          status: 400,
+          message: `Invalid query parameter ${path}: ${message}`,
+          details: { location: 'query', parameter: 'x', path, reason: message, errors: [{ validator, message }] },
+        })
+      );
+    const integers = p({ kind: 'integer', isArray: true });
+    const numbers = p({ kind: 'number', isArray: true });
+    const booleans = p({ kind: 'boolean', isArray: true });
+    // As the Go router's bodyargs.QueryList reads them: a JSON number, and a
+    // boolean strconv.ParseBool accepts.
+    expect(decodeParam('query', integers, ['1,-2', '3'])).toEqual([1, -2, 3]);
+    expect(decodeParam('query', numbers, ['1.5,-0.25e1'])).toEqual([1.5, -2.5]);
+    expect(decodeParam('query', booleans, ['true,F,1,TRUE,0'])).toEqual([true, false, true, true, false]);
+    refusedAt(integers, ['1,x'], 'x[1]', 'type', 'expected an integer');
+    refusedAt(integers, ['1.5'], 'x[0]', 'type', 'expected an integer');
+    refusedAt(integers, ['+5'], 'x[0]', 'type', 'expected an integer');
+    refusedAt(numbers, ['1', '0x10'], 'x[1]', 'type', 'expected a number');
+    refusedAt(numbers, ['Infinity'], 'x[0]', 'type', 'expected a number');
+    refusedAt(numbers, ['1e400'], 'x[0]', 'type', 'expected a number');
+    refusedAt(booleans, ['true,yes'], 'x[1]', 'type', 'expected a boolean');
+    refusedAt(booleans, ['constructor'], 'x[0]', 'type', 'expected a boolean');
+    // Then the scalar's rules and the argument's, named by the rule.
+    refusedAt(p({ kind: 'integer', isArray: true, scalar: { name: 'Ordering.Rank', min: 1 } }), ['2,0'], 'x[1]', 'min', 'must be at least 1');
+    refusedAt(p({ isArray: true, minLength: 2 }), ['ab,a'], 'x[1]', 'minLength', 'must be at least 2 characters');
+    refusedAt(p({ isArray: true, pattern: '^[a-z]+$' }), ['ab', 'A1'], 'x[1]', 'pattern', 'does not match the required pattern');
+    // The list bounds and a missing required list stay at the name.
+    expect(() => decodeParam('query', p({ isArray: true, listMax: 1 }), ['a,b'])).toThrow(
+      expect.objectContaining({ details: { location: 'query', parameter: 'x', reason: 'expected at most 1 values' } })
+    );
+    expect(() => decodeParam('query', p({ isArray: true }), [', '])).toThrow(
+      expect.objectContaining({ details: { location: 'query', parameter: 'x', reason: 'required' } })
+    );
+  });
+
   test('decodeParams keys results by wire name and drops absent optionals', () => {
     const decoded = decodeParams('query', [p({ name: 'a', kind: 'integer' }), p({ name: 'b', required: false })], name =>
       name === 'a' ? ['1'] : undefined

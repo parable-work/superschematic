@@ -42,7 +42,8 @@ A method's arguments say where each value comes from:
 - **Query**: `QueryParam<T>`. `Nullable<T>` makes it optional, and the Go
   implementation receives a pointer (`limit *float64`) or a nil slice. A
   list is read from repeated keys and comma-separated values
-  (`?statuses=placed,shipped`).
+  (`?statuses=placed,shipped`), and each item is checked at
+  `statuses[i]`.
 - **Body, as an input type**: an argument of an object type, such as
   `input: PlaceOrderInput`, is the JSON body.
 - **Body, as fields**: on a method without an input type, the other
@@ -95,6 +96,43 @@ review service turns it into a 409:
 
 <Snippet file="go/orders.go" symbol="Reviews.WriteReview" />
 
+## Encrypted payloads
+
+An operation is encrypted when its class extends `Encrypted`, when the
+method is declared `@encrypted`, or when its result or one of its arguments
+is an `EncryptedField<T>`:
+
+```ts
+import { EncryptedField, HttpMethod, rest } from "@superschematic/api";
+
+export class CardMutations {
+  @rest(HttpMethod.POST, "customers/{customerId}/cards")
+  storeCard(customerId: string, number: EncryptedField<string>, label: string): CardReceipt {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+The Go server takes an encrypted operation's whole request body as one
+envelope, `{ "algorithm", "payload", "keyId" }` plus `encryptedKey` and
+`iv` for the hybrid algorithm, where `payload` is the body's JSON,
+encrypted. It opens the envelope with its `Config.PayloadDecryptor` before
+it decodes any argument, and answers 400 to a plain JSON body. The
+generated SDKs send the envelope, encrypted with the public key from their
+encryption config or the call's options (`publicEncryptionKey`). Every
+argument in the body travels encrypted, not only the one declared
+`EncryptedField<T>`; `storeCard`'s path parameter `customerId` does not.
+
+The envelope is the body of a `POST`, `PUT` or `PATCH` request. The build
+refuses an `EncryptedField<T>` argument that would travel outside it: a
+path or query parameter, or any argument of a `GET` or `DELETE`
+operation. On a field of an object type, `EncryptedField<T>` is recorded in
+the IR and changes no generated code: an input type with such a field
+does not make its operation encrypted. The TypeScript server has no
+decryption step, so it refuses an encrypted operation that is not
+`@manualRouteRegistration`
+([TypeScript](/superschematic/install/typescript/#serve-a-generated-api)).
+
 ## Traffic controls
 
 Three decorators bound a route's use. On a class they apply to every route
@@ -114,9 +152,9 @@ the timeout around the handler.
 <Snippet file="testdata/generated/api/shop-orders/routes.go" from="createOrderPlaceOrderHandler(" to="Timeout(10*time.Second" />
 
 The cheap refusals come first. A `@hmacVerified` webhook's signature check
-runs before all of them. On an encrypted operation, whose request body the
-client sends as an encrypted envelope, the server's `PayloadDecryptor` runs
-after the permission check and before the timeout. A request the rate
+runs before all of them. On an
+[encrypted operation](#encrypted-payloads), the server's `PayloadDecryptor`
+runs after the permission check and before the timeout. A request the rate
 limit, the body limit or the permission check refuses never reaches the
 decryptor, which in a deployment calls a key service. On such a route
 `@bodyLimit` counts the envelope, not the decrypted payload.

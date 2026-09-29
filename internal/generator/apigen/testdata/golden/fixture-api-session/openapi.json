@@ -290,6 +290,7 @@
             "schema": {
               "items": {
                 "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+                "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
                 "type": "string"
               },
               "maxItems": 100,

@@ -33,7 +33,10 @@ export interface StoreDocumentArgs {
 
 /** Arguments of tag.findTags (GET /api/posts/tags). */
 export interface FindTagsArgs {
+  codes?: string[];
+  pages?: number[];
   labels: string[];
+  ranks?: number[];
 }
 
 /** Arguments of tag.saveTags (PUT /api/posts/{id}/tags). */
@@ -56,7 +59,7 @@ export interface TagImplementation {
    */
   storeDocument(args: StoreDocumentArgs, ctx: RequestContext): Promise<OperationOutcome<GenericJSON>>;
   /**
-   * Find posts by label; the labels travel in the query string.
+   * Find posts by label, rank, code and page, all in the query string.
    *
    * GET /api/posts/tags
    */

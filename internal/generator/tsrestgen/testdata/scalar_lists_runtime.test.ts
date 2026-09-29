@@ -9,7 +9,9 @@ refused at name[i] as required and a wrong-type one as type, "5" is not a
 number, [] satisfies a required list, list bounds and the scalar's own
 pattern, lengths and range apply to each element, and a Generic.JSON
 argument is any JSON value but null. A GET list is still read from
-comma-separated query values.
+comma-separated query values; each item is read as its JSON type and
+checked at name[i], a GET argument and a query parameter (@query) alike,
+as the Go router does.
 */
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
@@ -103,7 +105,12 @@ describe('generated scalar-lists-api router', () => {
       'jsonObject',
       'jsonArray',
     ]);
-    expect(operationSpecs.findTags.queryParams).toEqual([{ name: 'labels', kind: 'string', required: true, isArray: true }]);
+    expect(operationSpecs.findTags.queryParams).toEqual([
+      { name: 'codes', kind: 'string', required: false, isArray: true, minLength: 2, pattern: '^[a-z]+$' },
+      { name: 'pages', kind: 'integer', required: false, isArray: true, scalar: { name: 'Ordering.Rank', min: 1, max: Number.MAX_SAFE_INTEGER } },
+      { name: 'labels', kind: 'string', required: true, isArray: true },
+      { name: 'ranks', kind: 'integer', required: false, isArray: true, scalar: { name: 'Ordering.Rank', min: 1, max: Number.MAX_SAFE_INTEGER } },
+    ]);
   });
 
   test('valid lists reach the implementation as their JSON values', async () => {
@@ -239,5 +246,32 @@ describe('generated scalar-lists-api router', () => {
     const missing = await send('GET', '/api/posts/tags');
     expect(missing.status).toBe(400);
     expect(missing.body.details).toEqual({ location: 'query', parameter: 'labels', reason: 'required' });
+  });
+
+  test('a query list item is checked at name[i], a GET argument and a query parameter alike', async () => {
+    const found = await send('GET', '/api/posts/tags?labels=a&codes=ab,,cd&codes=ef&pages=1,2&ranks=3');
+    expect(found.status).toBe(200);
+    expect(received.at(-1)).toEqual({ labels: ['a'], codes: ['ab', 'cd', 'ef'], pages: [1, 2], ranks: [3] });
+    const none = await send('GET', '/api/posts/tags?labels=a&codes=,%20&pages=');
+    expect(none.status).toBe(200);
+    expect(received.at(-1)).toEqual({ labels: ['a'] });
+    // The same vectors as the Go router's findTags; the message is the TypeScript server's own.
+    for (const [query, parameter, path, validator, reason] of [
+      ['codes=ab,x', 'codes', 'codes[1]', 'minLength', 'must be at least 2 characters'],
+      ['codes=ab,A1', 'codes', 'codes[1]', 'pattern', 'does not match the required pattern'],
+      ['pages=1,x', 'pages', 'pages[1]', 'type', 'expected an integer'],
+      ['pages=1.5', 'pages', 'pages[0]', 'type', 'expected an integer'],
+      ['pages=2,0', 'pages', 'pages[1]', 'min', 'must be at least 1'],
+      ['ranks=1,0', 'ranks', 'ranks[1]', 'min', 'must be at least 1'],
+    ]) {
+      const before = received.length;
+      const response = await send('GET', `/api/posts/tags?labels=a&${query}`);
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({
+        detail: `Invalid query parameter ${path}: ${reason}`,
+        details: { location: 'query', parameter, path, reason, errors: [{ validator, message: reason }] },
+      });
+      expect(received.length).toBe(before);
+    }
   });
 });

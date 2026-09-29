@@ -216,6 +216,8 @@
               "items": {
                 "description": "Positive JavaScript-safe ordering rank",
                 "format": "int64",
+                "maximum": 9007199254740991,
+                "minimum": 1,
                 "type": "integer"
               },
               "maxItems": 3,
@@ -244,6 +246,7 @@
             "schema": {
               "items": {
                 "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+                "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
                 "type": "string"
               },
               "type": "array"
@@ -258,6 +261,7 @@
             "schema": {
               "items": {
                 "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+                "format": "date-time",
                 "type": "string"
               },
               "type": "array"
@@ -308,6 +312,8 @@
             "schema": {
               "description": "Positive JavaScript-safe ordering rank",
               "format": "int64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
               "type": "integer"
             }
           },
@@ -325,6 +331,7 @@
             "required": false,
             "schema": {
               "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
               "type": "string"
             }
           },
@@ -334,6 +341,7 @@
             "required": false,
             "schema": {
               "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+              "format": "date-time",
               "type": "string"
             }
           },
@@ -411,7 +419,7 @@
     },
     "/api/posts/tags": {
       "get": {
-        "description": "Find posts by label; the labels travel in the query string.",
+        "description": "Find posts by label, rank, code and page, all in the query string.",
         "operationId": "TagFindTagsHandler",
         "parameters": [
           {
@@ -422,6 +430,55 @@
             "schema": {
               "items": {
                 "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "ranks",
+            "required": false,
+            "schema": {
+              "items": {
+                "description": "Positive JavaScript-safe ordering rank",
+                "format": "int64",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "codes",
+            "required": false,
+            "schema": {
+              "items": {
+                "minLength": 2,
+                "pattern": "^[a-z]+$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "pages",
+            "required": false,
+            "schema": {
+              "items": {
+                "description": "Positive JavaScript-safe ordering rank",
+                "format": "int64",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": "integer"
               },
               "type": "array"
             },

@@ -47,7 +47,7 @@ export const operationSpecs = {
     method: 'GET',
     path: '/api/posts/tags',
     pathParams: [],
-    queryParams: [{ name: 'labels', kind: 'string', required: true, isArray: true }],
+    queryParams: [{ name: 'codes', kind: 'string', required: false, isArray: true, minLength: 2, pattern: '^[a-z]+$' }, { name: 'pages', kind: 'integer', required: false, isArray: true, scalar: { name: 'Ordering.Rank', min: 1, max: 9007199254740991 } }, { name: 'labels', kind: 'string', required: true, isArray: true }, { name: 'ranks', kind: 'integer', required: false, isArray: true, scalar: { name: 'Ordering.Rank', min: 1, max: 9007199254740991 } }],
     bodyParams: [],
     auth: { public: false, required: false, permissions: [] },
     manual: false,
@@ -105,7 +105,10 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) =>
       implementations.tag.findTags(
         {
+          codes: request.query['codes'] as string[] | undefined,
+          pages: request.query['pages'] as number[] | undefined,
           labels: request.query['labels'] as string[],
+          ranks: request.query['ranks'] as number[] | undefined,
         },
         ctx
       ),

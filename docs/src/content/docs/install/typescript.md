@@ -200,9 +200,13 @@ A list follows the
 [list rules](/superschematic/reference/arrays-of-arrays/#list-rules):
 `[]` satisfies a required list, `listMin` and `listMax` bound the list,
 and each element is checked at `name[i]`. A null element answers 400 with
-`required`, and an element of the wrong JSON type with `type`. A
-scalar-typed argument, in the path, the query or the body, is checked
-against the scalar's own length, pattern and range, and a value that fails
+`required`, and an element of the wrong JSON type with `type`. A list in
+the query string, a `GET` argument or a `QueryParam<T[]>`, is read as the
+Go routes read it: each item is its JSON value (a number is a JSON number,
+so `0x10` is not one, and a boolean is a spelling Go's `strconv.ParseBool`
+accepts) and is checked at `name[i]`. A scalar-typed argument, in the
+path, the query or the body, is checked against the scalar's own length,
+pattern and range, and a value that fails
 answers with the rule it breaks (`pattern`, `minLength`, `maxLength`,
 `min`, `max`). The problem `details` carry the `path` and the rule in
 `errors`. A body argument whose type is a union has no generated decoder,
@@ -243,9 +247,10 @@ Two kinds of operation must be `@manualRouteRegistration`, and the build
 fails with the operation named when one is not:
 
 - An encrypted operation: one in an `Encrypted` operation set, one declared
-  `@encrypted`, or one whose result is an `EncryptedField<T>`. The Go
-  server decrypts such a body with its `PayloadDecryptor` before it parses
-  it. The TypeScript router has no decryption step and would hand the
+  `@encrypted`, or one whose result or an argument is an
+  `EncryptedField<T>` ([Encrypted payloads](/superschematic/guides/api-routes/#encrypted-payloads)).
+  The Go server decrypts such a body with its `PayloadDecryptor` before it
+  parses it. The TypeScript router has no decryption step and would hand the
   ciphertext to the body parser, so the service's handler decrypts the
   payload and decodes it.
 - An operation that uploads files. The router has no multipart adapter.

@@ -234,16 +234,19 @@ item is an absent list, which is `required` when the argument is required.
 JSON value (a number, an integer, a boolean as `strconv.ParseBool` reads
 it, or a string) and then follows the element rules above at `name[i]`:
 `?scores=1,x` is `type` at `scores[1]`, and `?ranks=0` breaks
-`Ordering.Rank`'s `min` at `ranks[0]`. An optional single value that is
-absent reaches the implementation as its type's zero value. Query
-validation names its rules as the body does: `minLength`, `maxLength`,
-`pattern`, `min`, `max`, `listMin` and `listMax`.
+`Ordering.Rank`'s `min` at `ranks[0]`. A list query parameter
+(`QueryParam<T[]>`), on any method, is read the same way. An optional
+single value that is absent reaches the implementation as its type's zero
+value. Query validation names its rules as the body does: `minLength`,
+`maxLength`, `pattern`, `min`, `max`, `listMin` and `listMax`.
 
-`openapi.json` describes a body argument as it describes a field of an
-input type: the scalar's own constraints and the argument's
-(`minLength`, `maxLength`, `pattern`, `minimum`, `maximum`) sit on each
-value, the items of a list or the values of a map, and `listMin` and
-`listMax` are `minItems` and `maxItems` on the list.
+`openapi.json` describes a body argument, and a query parameter, as it
+describes a field of an input type: the scalar's own constraints and the
+argument's (`minLength`, `maxLength`, `pattern`, `minimum`, `maximum`)
+sit on each value, the items of a list or the values of a map, and
+`listMin` and `listMax` are `minItems` and `maxItems` on the list. A
+query parameter's schema is never nullable: the parameter is present or
+absent, which `required` says.
 
 ## Consume a generated SDK
 
