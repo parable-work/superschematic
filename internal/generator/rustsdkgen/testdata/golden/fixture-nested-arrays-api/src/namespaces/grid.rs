@@ -41,7 +41,7 @@ impl GridNamespace {
         id: types::IdentityUUID,
         options: Option<&runtime::RequestOptions>,
     ) -> Result<types::GridView, SDKError> {
-        let path = format!("/api/grids/{}", id);
+        let path = format!("/api/grids/{}", runtime::path_segment(&id));
         let query_params: Vec<(String, String)> = Vec::new();
         self.client
             .request_json("GET", &path, &query_params, None, options)
@@ -59,7 +59,7 @@ impl GridNamespace {
         query: Option<&GridLabelsQueryParams>,
         options: Option<&runtime::RequestOptions>,
     ) -> Result<Vec<Vec<String>>, SDKError> {
-        let path = format!("/api/grids/{}/labels", id);
+        let path = format!("/api/grids/{}/labels", runtime::path_segment(&id));
         let mut query_params: Vec<(String, String)> = Vec::new();
         if let Some(query) = query {
             if let Some(query_param_value) = &query.limit {
@@ -80,7 +80,7 @@ impl GridNamespace {
         input: ReplaceLabelsInput,
         options: Option<&runtime::RequestOptions>,
     ) -> Result<types::GridView, SDKError> {
-        let path = format!("/api/grids/{}/labels", id);
+        let path = format!("/api/grids/{}/labels", runtime::path_segment(&id));
         let query_params: Vec<(String, String)> = Vec::new();
         let body = Some(serde_json::to_value(input)?);
         self.client

@@ -57,6 +57,33 @@ func AddPaintOperation(schema *ir.Schema) error {
 	return fmt.Errorf("schema %s has no GridMutations operation set", schema.Name)
 }
 
+// AddCellOperation adds grid.cell to the loaded fixture-nested-arrays-api
+// schema: a GET whose path takes the grid's id and a string label
+// (grids/{id}/cells/{label}), and whose response is a string. A label may
+// hold any text, %, /, ? and # among it, which a UUID cannot, so an SDK
+// test sends it to check each path value is encoded as one segment.
+func AddCellOperation(schema *ir.Schema) error {
+	for _, set := range schema.OperationSets {
+		if set.Name != "GridQueries" {
+			continue
+		}
+		set.Operations = append(set.Operations, &ir.FieldDef{
+			Name:     "cell",
+			Comment:  "One cell of a grid, by its label.",
+			TypeRef:  ir.TypeRef{Name: "string"},
+			Required: true,
+			Arguments: []*ir.ArgumentDef{
+				{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+				{Name: "label", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			},
+			HTTPMethod: "GET",
+			RestPath:   "grids/{id}/cells/{label}",
+		})
+		return nil
+	}
+	return fmt.Errorf("schema %s has no GridQueries operation set", schema.Name)
+}
+
 // AddPlaceOrderOperation adds grid.placeOrder to the loaded
 // fixture-nested-arrays-api schema: a POST whose input type, PlaceOrderInput,
 // bounds its lines (listMin 1, listMax 3) and each gift code (maxLength 8),

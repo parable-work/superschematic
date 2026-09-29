@@ -83,7 +83,11 @@ app outside a workspace does not install a types package that has a
 
 `schemas/dist/types/typescript/package.json` is a private Bun workspace
 root (`@schemas/types-workspace`) whose workspaces are the generated types
-packages next to it. A types package depends on the scalar library with a
+packages next to it. A types package whose schema declares a
+[version graph](/superschematic/reference/version-graphs/) depends on
+`@superschematic/versiongraph`, with a `file:` path when
+[`paths.versiongraph_typescript`](/superschematic/reference/naming/#pathsversiongraph_typescript)
+is set and `*` otherwise. A types package depends on the scalar library with a
 `file:` path when
 [`paths.scalar_typescript`](/superschematic/reference/naming/#pathsscalar_typescript)
 is set, and on another schema's types package with `workspace:*`. Run

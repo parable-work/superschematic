@@ -356,9 +356,13 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 	{{- end }}
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		{{- if .PathParams }}
-		// Extract path parameters
+		// Extract path parameters, each percent-decoded once
 		{{- range .PathParams }}
-		{{ .GoName }}Str := chi.URLParam(r, "{{ .Name }}")
+		{{ .GoName }}Str, err := runtimerouting.PathParam(r, "{{ .Name }}")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} must be percent-encoded UTF-8")
+			return
+		}
 		{{- if .Required }}
 		if {{ .GoName }}Str == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "{{ .Name }} is required")

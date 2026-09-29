@@ -37,7 +37,7 @@ func (n *PostNamespace) NameThings(
 	Id string,
 	input PostNameThingsInput,
 ) (bool, error) {
-	path := fmt.Sprintf("/api/posts/%v/names", Id)
+	path := fmt.Sprintf("/api/posts/%v/names", pathSegment(Id))
 	validationErrors := types.NewValidationErrors()
 	// shadeByName is a map, sent as a JSON object; {} is a value.
 	// Each value runs its own validation, reported at shadeByName[key].

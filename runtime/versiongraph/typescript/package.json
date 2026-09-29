@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/versiongraph",
   "version": "0.0.0",
-  "description": "The version-graph core built for WebAssembly: compose, merge, diff, contentHash and validate trees of versioned rows over the core's JSON contract, in the browser, bun and Node. Ships the compiled ESM and the wasm module.",
+  "description": "The version-graph core built for WebAssembly (compose, merge, diff, contentHash and validate over the core's JSON contract, in the browser, bun and Node), the version-graph engine over storage adapters, and its Postgres adapter. Ships the compiled ESM and the wasm module.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,6 +9,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./engine": {
+      "types": "./dist/engine.d.ts",
+      "import": "./dist/engine.js"
+    },
+    "./postgres": {
+      "types": "./dist/postgres.d.ts",
+      "import": "./dist/postgres.js"
+    },
+    "./facade": {
+      "types": "./dist/facade.d.ts",
+      "import": "./dist/facade.js"
     },
     "./superschematic_versiongraph.wasm": "./dist/superschematic_versiongraph.wasm"
   },
@@ -23,9 +35,19 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun run build && tsc --noEmit -p tsconfig.test.json && bun test test && node test/node.mjs"
   },
+  "peerDependencies": {
+    "pg": ">=8.11.0"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/bun": "1.4.0",
     "@types/node": "22.19.9",
+    "@types/pg": "8.23.1",
+    "pg": "8.23.0",
     "typescript": "5.9.3"
   },
   "license": "Apache-2.0",

@@ -201,8 +201,12 @@ func createGridSaveGridHandler(impl GridImplementation) gohttp.HandlerFunc {
 // createGridGetGridHandler creates a handler for GET /api/grids/{id}
 func createGridGetGridHandler(impl GridImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
 		if IdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
 			return
@@ -239,8 +243,12 @@ func createGridGetGridHandler(impl GridImplementation) gohttp.HandlerFunc {
 // One grid's labels as a bare list of lists, at most `limit` rows.
 func createGridGridLabelsHandler(impl GridImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
 		if IdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
 			return
@@ -288,8 +296,12 @@ func createGridReplaceLabelsHandler(impl GridImplementation) gohttp.HandlerFunc 
 	// order they are checked (the scalar type's own, then the argument's).
 	bodyLabelsArg := bodyargs.NewArg("labels", bodyargs.String, bodyargs.Required())
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
 		if IdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
 			return

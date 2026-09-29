@@ -120,9 +120,10 @@ jobs:
 
       - name: Install Rust toolchain
         # Builds the superscalar ffi archive from source; the checkout carries
-        # its own rust-toolchain.toml which rustup reads when it builds.
+        # its own rust-toolchain.toml which rustup reads when it builds. The
+        # wasm32 target builds the version-graph TypeScript package.
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
 
       - name: Build the superscalar dependency
@@ -133,6 +134,15 @@ jobs:
         # core's Go binding, and the ormgen tests build and run such modules
         # against the archive this stages under runtime/versiongraph/go/lib.
         run: scripts/versiongraph-archive.sh
+
+      - name: Build the version-graph TypeScript package
+        # A generated TypeScript types package whose schema declares a
+        # version graph depends on it, and tsgen's tests type-check that
+        # facade and run it against Postgres over its dist/.
+        working-directory: runtime/versiongraph/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run build
 
       - name: Install the authoring packages
         # TestEmbeddedDefinitionIsCurrent regenerates the schema-config JSON
@@ -190,8 +200,9 @@ jobs:
           # and drops its own schema, database or role.
           SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
-          # rustgen's version-graph facade test builds the generated crate
-          # and runs it on this database.
+          # tsgen's TestVersionGraphFacadeOnPostgres runs the generated
+          # TypeScript facade against it, and rustgen's version-graph facade
+          # test builds the generated crate and runs it on it.
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
@@ -610,6 +621,12 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
           bun run test
+
+      - name: Scenarios through the TypeScript engine (every scenario, the canonical vectors against Postgres, the adapter, the sweeper and the facade)
+        # Fails, rather than skips, without the database.
+        env:
+          SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+        run: make versiongraph-scenarios-ts
 
   docs:
     # Cheap PR gate: npm ci + astro build. superscalar only builds docs in

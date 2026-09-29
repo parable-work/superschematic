@@ -14,7 +14,8 @@ go/storage/         package storage: the storage adapter interface the engine ru
 go/engine/          package engine: the Go engine, every graph operation over a storage adapter and the binding
 go/postgres/        package postgres: the Postgres storage adapter, with a pgx binding
 rust-engine/        superschematic-versiongraph-engine: the Rust engine, storage traits and Postgres adapter
-typescript/         @superschematic/versiongraph: the wasm32-unknown-unknown build with typed operations
+typescript/         @superschematic/versiongraph: the wasm32-unknown-unknown build with typed operations, and the
+                    TypeScript engine (./engine), its Postgres adapter (./postgres) and the facade base (./facade)
 testdata/vectors/   the core's contract as vectors: {name, op, input, expect}
 testdata/canonical/ the canonical row contract as vectors: {cases} per class, {rows}
 testdata/fixture/   the scenarios' graph: fixture-version-graph-db's descriptor and Postgres DDL
@@ -25,8 +26,8 @@ This page is the contract. The vectors are its executable form: the Rust
 tests, the Go binding and the TypeScript package's tests run every core
 vector, and package `canonical` and the Rust engine's module `canonical`
 run every canonical vector. The scenarios
-are the engines' contract: the Go and Rust engines run every one through
-their Postgres adapters. The package's
+are the engines' contract: the Go, TypeScript and Rust engines run every
+one through their Postgres adapters. The package's
 types for this contract are `typescript/src/contract.ts`.
 
 ## Descriptor
@@ -218,7 +219,8 @@ canonical JSON. Package `canonical` in the Go module
 (`go/canonical`: `Postgres(class, value)` and `PostgresRow(columns, row)`)
 implements the rules and runs every vector, and checks each `postgres`
 against a real Postgres when `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL`
-names one.
+names one; the TypeScript package's `canonicalValue` and `canonicalRow`
+(`typescript/src/canonical.ts`) do the same.
 
 ## Operations
 
@@ -369,9 +371,12 @@ member rows of refs discarded longer ago than the grace, prunes history
 past retention, and writes missing snapshots. The Go engine is package `engine`,
 over the interface in package `storage`; package `postgres` is its Postgres
 adapter, which builds its statements from the descriptor and needs each
-kind's `root`. The Rust engine is the crate in `rust-engine/`, over its
-`Storage` and `Tx` traits, with its Postgres adapter in module `postgres`
-and the canonical rules in module `canonical`.
+kind's `root`. The TypeScript engine, storage interface and Postgres
+adapter are `typescript/src/engine.ts`, `storage.ts` and `postgres.ts`. The
+Rust engine is the crate in `rust-engine/`, over its `Storage` and `Tx`
+traits, with its Postgres adapter in module `postgres` and the canonical
+rules in module `canonical`. Every adapter takes the sweep lock under the
+same key, so sweepers in different languages exclude each other.
 
 Every id an engine takes or returns is a UUID in its canonical form. Each
 write takes an actor, and each write through a ref the ref's expected
@@ -493,13 +498,15 @@ cd runtime/versiongraph/go && go test ./...
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
 make versiongraph-scenarios  # every scenario through the Go engine and the Postgres adapter
+make versiongraph-scenarios-ts  # every scenario through the TypeScript engine and its Postgres adapter
 make versiongraph-scenarios-rust  # every scenario and canonical vector through the Rust engine and its adapter
 ```
 
 The scenarios, the adapter's tests and the canonical vectors' Postgres
 check run against the Postgres that
 `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names, and skip without it;
-`make versiongraph-scenarios` and `make versiongraph-scenarios-rust` fail
+`make versiongraph-scenarios`, `make versiongraph-scenarios-ts` and
+`make versiongraph-scenarios-rust` fail
 without it. The fixture is the
 compiler's output for `fixture-version-graph-db`, and a compiler test
 (`go test ./internal/generator -run TestVersionGraphScenarioFixtureIsCurrent`)

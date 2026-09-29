@@ -74,7 +74,7 @@ func TestSDKTokenMethodsFollowOperationsNotPublic(t *testing.T) {
 		return loadFixtureAPI(t), "example.com/schemas/sdk/go/fixture-api"
 	}
 	nestedArraysAPI := func(t *testing.T) (*apigen.APIOutput, string) {
-		_, apiOutput := loadNestedArraysAPI(t, false)
+		_, apiOutput := loadNestedArraysAPI(t)
 		return apiOutput, nestedArraysSDKModule
 	}
 	for _, test := range []struct {

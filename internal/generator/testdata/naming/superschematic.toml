@@ -20,6 +20,7 @@ versiongraph_rust_crate = "acme-versiongraph-engine"
 http_runtime_go_module = "example.com/acme/http-runtime"
 http_runtime_rust_crate = "acme-http-runtime"
 http_runtime_npm_package = "@acme/http-runtime"
+versiongraph_npm_package = "@acme/versiongraph"
 ptr_go_module = "example.com/acme/ptr"
 schema_language = "Acme Schema"
 package_author = "Acme Corp"
@@ -29,10 +30,11 @@ history_actor_setting = "acme.history_actor_id"
 scalar_jsdoc_tag = "acmeScalar"
 
 # The runs that pass [paths] (the graph fixture and the env-var loader)
-# must replace the fixture's scalar, schema IR and binding modules with
-# these directories, not the default modules.
+# must point the fixture's scalar, schema IR and binding modules and its
+# version-graph package at these directories, not the default modules.
 [paths]
 scalar_go = "vendor/acme-scalars"
 schema_ir = "vendor/acme-schema-ir"
 versiongraph_go = "vendor/acme-versiongraph"
+versiongraph_typescript = "vendor/acme-versiongraph-ts"
 versiongraph_rust = "vendor/acme-versiongraph-engine"

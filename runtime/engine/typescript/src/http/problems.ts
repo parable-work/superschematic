@@ -10,7 +10,7 @@ so `code` is what a client branches on. A BehaviorError, a defect in a
 behavior's code, is not an EngineError: it answers 500 like any failure.
 */
 
-import { HttpProblem, badRequest } from '@superschematic/http-runtime';
+import { HttpProblem } from '@superschematic/http-runtime';
 
 import {
   BehaviorVetoError,
@@ -40,8 +40,7 @@ export const ENGINE_ERROR_STATUS: Readonly<Record<EngineErrorCode, number>> = {
 
 /**
  * engineProblem returns the problem an engine error answers with, or
- * undefined for anything else. A path whose percent-encoding does not
- * decode is a 400 too.
+ * undefined for anything else.
  */
 export function engineProblem(error: unknown): HttpProblem | undefined {
   if (error instanceof EngineError) {
@@ -50,9 +49,6 @@ export function engineProblem(error: unknown): HttpProblem | undefined {
       cause: error,
       ...detailsOf(error),
     });
-  }
-  if (error instanceof URIError) {
-    return badRequest('The request path is not valid percent-encoding', { cause: error });
   }
   return undefined;
 }

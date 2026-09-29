@@ -33,7 +33,11 @@
     "./validators/types/*": {
       "types": "./validators/types/*.ts",
       "import": "./validators/types/*.ts"
-    }{{if .HasEnvConfig}},
+    }{{if .VersionGraphs}},
+    "./versiongraph": {
+      "types": "./versiongraph/index.ts",
+      "import": "./versiongraph/index.ts"
+    }{{end}}{{if .HasEnvConfig}},
     "./config": {
       "types": "./config.ts",
       "import": "./config.ts"
@@ -53,7 +57,8 @@
   "private": true,
   "dependencies": {
     "{{.Naming.ScalarNpmPackage}}": "{{if .ScalarLibSpec}}{{.ScalarLibSpec}}{{else}}*{{end}}",
-    "js-yaml": "4.1.1"{{range .PackageDependencies}},
+    "js-yaml": "4.1.1"{{if .VersionGraphs}},
+    "{{.Naming.VersionGraphNpmPackage}}": "{{if .VersionGraphLibSpec}}{{.VersionGraphLibSpec}}{{else}}*{{end}}"{{end}}{{range .PackageDependencies}},
     "{{.Name}}": "{{.Spec}}"{{end}}
   },
   "devDependencies": {

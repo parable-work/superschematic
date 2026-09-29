@@ -418,13 +418,14 @@ refuses, naming every problem, an implementation whose `operations` or
 `fields` are not exactly the ones its declaration names; a declaration of
 the wrong shape, with an operation named `create`, `get`, `list`,
 `update` or `delete`, or with a schema that does not compile; and
-malformed migrations or columns. The engine adds two rules to the
-compiler's: a name is `<extension>.<Name>` with an extension name of a
-letter, then letters, digits, `_` and `-` (or a core `<Name>`), since the
-migration ledger is keyed by it; and an operation's `paramsSchema` sets
+malformed migrations or columns. An operation's `paramsSchema` sets
 `additionalProperties: false`, so the handler and every guard read the
-same declared parameters and no alias reaches one and not the other. A
-name registers once.
+same declared parameters and no alias reaches one and not the other; the
+compiler refuses the same declaration when it registers. The engine adds
+one rule to the compiler's: a name is `<extension>.<Name>` with an
+extension name of a letter, then letters, digits, `_` and `-` (or a core
+`<Name>`), since the migration ledger is keyed by it. A name registers
+once.
 
 ### Contexts
 
@@ -481,14 +482,13 @@ parameters.
 loader does, with its wording, at `/types/<Type>/behaviors/<i>`: a
 behavior listed twice, a config its `configSchema` (checked with ajv) or
 `parseConfig` refuses, a requirement the type does not list, a conflict
-it does, a field that collides with one of the type's own or another
-behavior's, and two behaviors that add an operation of the same name.
-They also refuse a behavior with no implementation registered, one on a
-type other than the instance type (only it has instances), and a
-behavior field with the JSON key, not only the name, of one of the
-type's own fields. A live version whose behavior has no implementation
-in this engine, as after a restart without it, makes every call on the
-schema `unavailable` until one registers.
+it does, a field that collides with another behavior's or with one of
+the type's own, by its name or its JSON key, and two behaviors that add
+an operation of the same name. They also refuse a behavior with no
+implementation registered, and one on a type other than the instance
+type (only it has instances). A live version whose behavior has no
+implementation in this engine, as after a restart without it, makes
+every call on the schema `unavailable` until one registers.
 
 ### Lifecycle
 

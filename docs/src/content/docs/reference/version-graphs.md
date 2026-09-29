@@ -1,6 +1,6 @@
 ---
 title: Version graphs
-description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core from TypeScript, and the Rust engine and facade.
+description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine and the generated facade from TypeScript, and the Rust engine and facade.
 sidebar:
   order: 8
 ---
@@ -13,9 +13,9 @@ Each ref holds only the rows it overrides. A commit records the exact row
 versions a ref sealed. Work happens on change sets; a primary line takes
 writes only from merges, and each root's release pointer names the tagged
 commit readers see. One core composes, merges, diffs, hashes and
-validates trees. The Go and Rust engines run every graph operation on the
-core over a storage adapter, and a generated facade in each language gives
-each graph typed methods over its engine.
+validates trees. The Go, TypeScript and Rust engines run every graph
+operation on the core over a storage adapter, and a generated facade in
+each language gives each graph typed methods over its engine.
 
 The design and the alternatives not taken are D17 and D19 in
 [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md).
@@ -497,8 +497,8 @@ The binding ships link flags for linux and darwin on amd64 and arm64.
 
 `@superschematic/versiongraph` runs the same core in the browser, bun and
 Node. It ships the `wasm32-unknown-unknown` build and compiled ES modules,
-has no dependencies and no generated glue, and types every input and output
-of the contract.
+and its core entry has no dependencies and no generated glue and types
+every input and output of the contract.
 
 ```ts
 import { init, VersionGraphError, type Descriptor } from "@superschematic/versiongraph";
@@ -560,6 +560,103 @@ member order included, with the vector. It also fails when a member or
 literal of the types appears in no vector. A member or literal that is
 missing, extra or misnamed in the types therefore fails it.
 
+## Use the engine from TypeScript
+
+`@superschematic/versiongraph` also carries the TypeScript engine, its
+Postgres adapter and the base of the generated TypeScript facade. They port
+the Go engine and adapter rule for rule, pass the same
+[scenarios](https://github.com/parable-work/superschematic/tree/main/runtime/versiongraph/testdata/scenarios)
+against Postgres, and fail with the same error codes. Each has an entry
+point of its own, so the core's entry loads in a browser without them:
+
+| Entry | Holds |
+| --- | --- |
+| `@superschematic/versiongraph/engine` | `Engine`, the storage interface (`Storage`, `Tx`), the named errors and `errorCode`, and the canonical rules (`canonicalRow`, `canonicalValue`) with the exact JSON codec they read with. |
+| `@superschematic/versiongraph/postgres` | `PostgresAdapter`, its `Client` interface, and `pgPool` and `pgClient`, which bind the npm package `pg`. |
+| `@superschematic/versiongraph/facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
+
+`pg` is an optional peer dependency. The bindings use only the methods they
+call on a pool or a client, so no entry imports it: install it to use
+`pgPool` or `pgClient`, or implement `Client` over another driver. A
+`Client` runs a transaction, and a `query` inside it that returns every
+column as the text Postgres writes, so no driver's type parsing touches a
+date, a time, an interval, a numeric or a bigint. `pgPool` takes a
+connection of the pool per transaction; `pgClient` runs transactions one
+at a time on one connection, and with `{ savepoint: true }` as savepoints
+of a transaction the caller holds.
+
+```ts
+import pg from "pg";
+import { Engine } from "@superschematic/versiongraph/engine";
+import { PostgresAdapter, pgPool } from "@superschematic/versiongraph/postgres";
+
+const pool = new pg.Pool({ connectionString });
+const adapter = new PostgresAdapter(descriptor, { historyActorSetting: "superschematic.history_actor_id" });
+const engine = await Engine.create(descriptor, adapter.storage(pgPool(pool)), { schemaEpoch: 1, snapshotEvery: 32 });
+
+const main = await engine.createPrimary(actor, root, "main");
+const draft = await engine.branch(actor, main.id, "draft");
+const saved = await engine.save(actor, draft.id, draft.version, {
+  step: { upsert: ['{"entity_key": null, "position": 1, "instruction": "Mix", "timings": {}}'] },
+});
+```
+
+The engine's methods take the Go engine's arguments in the same order,
+with the actor first on every write, and return promises. A canonical row
+is JSON text, as Go's `json.RawMessage` is, so a wide integer or numeric
+keeps its digits: a tree is `Record<string, string[]>`, and a conflict's
+values, a change's row and a resolution's `value` are JSON text. A
+duration argument is in milliseconds. `runSweeper(intervalMs, options,
+onPass, signal)` runs until its `AbortSignal` aborts and then rejects with
+the signal's reason. It runs no pass when the signal has already aborted,
+and a pass under way when it aborts finishes first, where Go's
+`RunSweeper` cancels that pass through its context. The named errors are
+classes with the stable `code` the scenario files name
+(`VersionConflictError` is a `NotFoundError`, as in Go); `errorCode(err)`
+returns it, or the core's code for an input the core refused.
+
+When a schema declares a graph, tsgen writes a typed facade per graph into
+the TypeScript types package, `versiongraph/<name>.ts`, exported as
+`./versiongraph`, and the package depends on the runtime package the
+naming key
+[`versiongraph_npm_package`](/superschematic/reference/naming/#versiongraph_npm_package)
+names, at
+[`[paths] versiongraph_typescript`](/superschematic/reference/naming/#pathsversiongraph_typescript)
+when that is set. The file holds `RecipeGraphDescriptor`,
+`RecipeGraphSchemaEpoch`, `RecipeGraphSnapshotEvery`, the typed tree,
+edits, conflict, resolution and change types, and `RecipeGraph`:
+
+```ts
+import { pgPool } from "@superschematic/versiongraph/postgres";
+import { RecipeGraph } from "@schemas/recipes-db-types/versiongraph";
+
+const graph = new RecipeGraph(pgPool(pool), { actor: userId });
+const draft = await graph.branch(mainId, "rest longer");
+const saved = await graph.save(draft.id, draft.version, { step: { upsert: [{ ...mix, instruction: "Mix well" }] } });
+const { ref, commit } = await graph.commit(draft.id, saved.ref.version);
+const merged = await graph.merge(draft.id, mainId, mainVersion, [], { message: "rest longer", tag: true });
+const { tree } = await graph.released(recipeId);
+```
+
+`RecipeGraph` has the Go facade's operations, from `createPrimary` to
+`runSweeper`, plus `withActor` and `withWalkCeiling`. Every write records
+the facade's `actor` and fails with `NoActorError` without one; a sweep
+writes as its options' `actor`. It turns a typed value into a canonical
+row through the value's JSON (an instant is its ISO string) and back
+through the type's generated `parse<Type>FromJSON`, so a field comes back
+in its canonical form: an instant as a `Date` in UTC, a time of day as
+`HH:MM:SS`, a duration in the scalar core's form and a UUID in base62. A
+relation field comes back as an object holding the target's key. There is
+no TypeScript ORM, so refs, commits and release pointers come back as the
+engine's `Ref`, `Commit` and `Release`.
+
+```
+make versiongraph-scenarios-ts   # every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests
+```
+
+The target needs `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and fails
+without it; CI runs it in the versiongraph job.
+
 ## Use the engine from Rust
 
 `superschematic-versiongraph-engine`
@@ -613,7 +710,8 @@ The Rust facade differs from the Go one where the languages do:
 
 - Every write takes its actor as an argument; there is no context user.
   `sweep` and `run_sweeper` write as `SweepOptions::actor`, and
-  `run_sweeper` stops when its `shutdown` future completes.
+  `run_sweeper` stops when its `shutdown` future completes, and lets a
+  pass under way finish, where Go's `RunSweeper` cancels it.
 - The types crate has no ORM, so refs, commits and release pointers come
   back as the engine's `Ref`, `Commit` and `Release`, with ids as canonical
   strings, rather than as typed rows.

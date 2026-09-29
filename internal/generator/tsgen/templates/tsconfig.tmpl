@@ -17,7 +17,8 @@
     "*.ts",
     "types/**/*.ts",
     "validators/**/*.ts",
-    "mask/**/*.ts"
+    "mask/**/*.ts"{{if .VersionGraphs}},
+    "versiongraph/**/*.ts"{{end}}
   ],
   "exclude": [
     "node_modules",

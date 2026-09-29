@@ -46,6 +46,7 @@ type SDKOutput struct {
 	Namespaces             []NamespaceInfo
 	HasAuth                bool
 	HasFilterableEndpoints bool // Gates FilterSpec in client.py to avoid dead code in non-filterable SDKs.
+	HasPathParams          bool // Gates path_segment in client.py, which encodes a path parameter value.
 	Timestamp              string
 	Version                string
 }
@@ -75,6 +76,9 @@ type NamespaceInfo struct {
 	// _query_list_item helpers of the namespace class, and their Enum
 	// import, for a list query parameter.
 	HasQueryLists bool
+	// HasPathParams gates the path_segment import, for an endpoint whose
+	// path takes a value.
+	HasPathParams bool
 }
 
 // EndpointInfo represents a single API endpoint for the Python SDK.
@@ -271,6 +275,10 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 			if param.IsArray {
 				namespace.HasQueryLists = true
 			}
+		}
+		if converted.PathIsFString {
+			namespace.HasPathParams = true
+			output.HasPathParams = true
 		}
 		if converted.OutputIsArrayOfArrays && converted.OutputModelName != "" {
 			namespace.HasListOfListsModelOutput = true
@@ -549,6 +557,9 @@ func buildMethodParams(
 	return methodParams
 }
 
+// convertPathToPythonTemplate converts path with parameters to the body of
+// a Python f-string. Each value goes through path_segment (client.py), which
+// writes it as one percent-encoded path segment.
 func convertPathToPythonTemplate(path string, pathParams []apigen.PathParam, isScopedNS bool, scopeParamOriginal string) (string, bool) {
 	result := path
 	for _, param := range pathParams {
@@ -557,7 +568,7 @@ func convertPathToPythonTemplate(path string, pathParams []apigen.PathParam, isS
 		if isScopedNS && param.Name == scopeParamOriginal {
 			replacementName = "self._" + replacementName
 		}
-		result = strings.ReplaceAll(result, placeholder, "{"+replacementName+"}")
+		result = strings.ReplaceAll(result, placeholder, "{path_segment("+replacementName+")}")
 	}
 
 	return result, strings.Contains(result, "{")

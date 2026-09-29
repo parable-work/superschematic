@@ -11,7 +11,6 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
-	"github.com/parable-work/superschematic/internal/generator/sdkgen/sdktest"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -25,16 +24,16 @@ const (
 var nestedArraysClock = codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 
 // loadNestedArraysAPI loads fixture-nested-arrays-api: an input type, a
-// PUT body argument and a bare response that are arrays of arrays. With
-// withPaint it adds grid.paint (sdktest.AddPaintOperation).
-func loadNestedArraysAPI(t *testing.T, withPaint bool) (*ir.Schema, *apigen.APIOutput) {
+// PUT body argument and a bare response that are arrays of arrays. Each
+// edit then changes the schema (sdktest.AddPaintOperation, for one).
+func loadNestedArraysAPI(t *testing.T, edits ...func(*ir.Schema) error) (*ir.Schema, *apigen.APIOutput) {
 	t.Helper()
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, nestedArraysService))
 	if err != nil {
 		t.Fatalf("load %s: %v", nestedArraysService, err)
 	}
-	if withPaint {
-		if err := sdktest.AddPaintOperation(schema); err != nil {
+	for _, edit := range edits {
+		if err := edit(schema); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -71,7 +70,7 @@ func writeNestedArraysSDK(t *testing.T, apiOutput *apigen.APIOutput, sdkDir, typ
 // schemas nest items. Regenerate with:
 // go test ./internal/generator/gosdkgen -run TestWriteSDKGoldenNestedArrays -update
 func TestWriteSDKGoldenNestedArrays(t *testing.T) {
-	_, apiOutput := loadNestedArraysAPI(t, false)
+	_, apiOutput := loadNestedArraysAPI(t)
 	root := t.TempDir()
 	sdkDir := filepath.Join(root, "sdk", "go", nestedArraysService)
 	typesDir := filepath.Join(root, "types", "go", nestedArraysService)

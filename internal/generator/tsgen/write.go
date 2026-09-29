@@ -31,6 +31,7 @@ func cleanOutputDir(outputDir string) error {
 		filepath.Join(outputDir, "types"),
 		filepath.Join(outputDir, "validators"),
 		filepath.Join(outputDir, "mask"),
+		filepath.Join(outputDir, "versiongraph"),
 		filepath.Join(outputDir, "dist"),
 	}
 	for _, dir := range generatedDirs {
@@ -313,9 +314,44 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		{Condition: len(output.Types) > 0, Template: "mask_types_index.tmpl", Filename: filepath.Join("types", "index.ts")},
 		{Condition: true, Template: "mask_index.tmpl", Filename: "index.ts"},
 	}
-	return codegen.WriteConditionalFilesParallel(maskFiles, maskDir, func(templateName, outputPath string) error {
+	if err := codegen.WriteConditionalFilesParallel(maskFiles, maskDir, func(templateName, outputPath string) error {
 		return generateFile(generator, templateName, outputPath, output)
+	}); err != nil {
+		return err
+	}
+
+	return writeVersionGraphs(generator, output, filepath.Join(outputDir, "versiongraph"))
+}
+
+// writeVersionGraphs writes each graph's facade, versiongraph/<name>.ts,
+// and versiongraph/index.ts, which exports them. A schema without a graph
+// gets no versiongraph directory.
+func writeVersionGraphs(generator *codegen.FileGenerator, output *ModuleOutput, dir string) error {
+	if len(output.VersionGraphs) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+	tasks := make([]func() error, 0, len(output.VersionGraphs)+1)
+	for i := range output.VersionGraphs {
+		graph := &output.VersionGraphs[i]
+		tasks = append(tasks, func() error {
+			outPath := filepath.Join(dir, graph.FileName+".ts")
+			data := struct {
+				Graph  *VersionGraphInfo
+				Naming naming.Naming
+			}{Graph: graph, Naming: output.Naming}
+			if err := generateFile(generator, "versiongraph_graph.tmpl", outPath, data); err != nil {
+				return fmt.Errorf("failed to generate %s: %w", outPath, err)
+			}
+			return nil
+		})
+	}
+	tasks = append(tasks, func() error {
+		return generateFile(generator, "versiongraph_index.tmpl", filepath.Join(dir, "index.ts"), output)
 	})
+	return codegen.RunParallel(tasks)
 }
 
 // generateFile generates a file from an embedded template. TypeScript

@@ -2,12 +2,14 @@
 #![allow(unused_imports)]
 
 use crate::interfaces::Implementations;
+use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, Method};
+use axum::http::{HeaderMap, Method, Uri};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use superschematic_http_runtime::{
-    error_response, request_id_from_headers, wrap_envelope, RequestContext,
+    error_response, path_is_percent_encoded, request_id_from_headers, wrap_envelope, ApiError,
+    RequestContext,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -136,10 +138,22 @@ async fn handle_tenant_create_tenant(
 async fn handle_tenant_get_tenant(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
-    Path(path_params): Path<HashMap<String, String>>,
+    uri: Uri,
+    path_params: Result<Path<HashMap<String, String>>, PathRejection>,
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let request_id = request_id_from_headers(&headers);
+    // axum decodes each capture once, but keeps an escape it cannot decode
+    // (%ZZ) as text and refuses bytes that are not UTF-8 with a bare 400:
+    // both answer the error envelope here.
+    let path_params = match path_params {
+        Ok(Path(path_params)) if path_is_percent_encoded(uri.path()) => path_params,
+        _ => {
+            return Err(error_response(ApiError::bad_request(
+                "The request path is not valid percent-encoding",
+            )))
+        }
+    };
     let mut ctx = RequestContext::new(method_from_str("get"), "/api/tenants/{id}".to_string());
     ctx.headers = headers_to_map(&headers);
     for (key, value) in path_params {
@@ -162,10 +176,22 @@ async fn handle_tenant_get_tenant(
 async fn handle_tenant_update_secret(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
-    Path(path_params): Path<HashMap<String, String>>,
+    uri: Uri,
+    path_params: Result<Path<HashMap<String, String>>, PathRejection>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let request_id = request_id_from_headers(&headers);
+    // axum decodes each capture once, but keeps an escape it cannot decode
+    // (%ZZ) as text and refuses bytes that are not UTF-8 with a bare 400:
+    // both answer the error envelope here.
+    let path_params = match path_params {
+        Ok(Path(path_params)) if path_is_percent_encoded(uri.path()) => path_params,
+        _ => {
+            return Err(error_response(ApiError::bad_request(
+                "The request path is not valid percent-encoding",
+            )))
+        }
+    };
     let mut ctx = RequestContext::new(method_from_str("patch"), "/api/tenants/{id}".to_string());
     ctx.headers = headers_to_map(&headers);
     for (key, value) in path_params {

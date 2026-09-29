@@ -250,8 +250,12 @@ func createProductCreateProductHandler(impl ProductImplementation) gohttp.Handle
 // createProductGetProductHandler creates a handler for GET /api/products/{id}
 func createProductGetProductHandler(impl ProductImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
 		if IdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
 			return

@@ -23,7 +23,7 @@ const namingFixtureDir = "testdata/naming"
 // defaultCoordinateRE matches every default coordinate a manifest could
 // carry: module roots, npm scope, Python module prefixes, crate prefixes,
 // the runtime modules, the scalar library and the history actor setting.
-var defaultCoordinateRE = regexp.MustCompile(`superschematic\.history_actor_id|example\.com/schemas|@schemas/|schemas_types_|schemas_[a-z0-9_]+_sdk|schemas-[a-z0-9-]+-(types|sdk|api)|parable-work/superschematic|parable-work/superscalar|superschematic-http-runtime|@superschematic/http-runtime|superschematic[-_]versiongraph[-_]engine|\bsuperscalar\b`)
+var defaultCoordinateRE = regexp.MustCompile(`superschematic\.history_actor_id|example\.com/schemas|@schemas/|schemas_types_|schemas_[a-z0-9_]+_sdk|schemas-[a-z0-9-]+-(types|sdk|api)|parable-work/superschematic|parable-work/superscalar|superschematic-http-runtime|@superschematic/http-runtime|@superschematic/versiongraph|superschematic[-_]versiongraph[-_]engine|\bsuperscalar\b`)
 
 // TestRunWithFixtureNamingEmitsFixtureNames builds the fixture services with
 // a superschematic.toml whose every value differs from the core defaults,
@@ -124,10 +124,14 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 	// fixture-version-graph-db writes the version-graph shell into its ORM,
 	// which imports the binding named by versiongraph_go_module and replaces
 	// it with [paths] versiongraph_go, the graph's descriptor into its Go
-	// types, and the typed facade into its Rust types, whose Cargo.toml
-	// depends on the engine named by versiongraph_rust_crate at [paths]
-	// versiongraph_rust. The paths resolve against the output root, so the
-	// golden go.mod and Cargo.toml are the same on every machine.
+	// types, the graph's facade into its TypeScript types, which import the
+	// package named by versiongraph_npm_package and depend on it at [paths]
+	// versiongraph_typescript, and the typed facade into its Rust types,
+	// whose Cargo.toml depends on the engine named by versiongraph_rust_crate
+	// at [paths] versiongraph_rust. The paths resolve against the output
+	// root, so the replace in the golden go.mod, the file: spec in the golden
+	// package.json and the path in the golden Cargo.toml are the same on
+	// every machine.
 	graphSchema, graphCfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, "fixture-version-graph-db"))
 	if err != nil {
 		t.Fatalf("load fixture-version-graph-db: %v", err)
@@ -146,7 +150,7 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("run fixture-version-graph-db: %v", err)
 	}
-	for _, rel := range []string{"orm/fixture-version-graph-db/versiongraph_recipe.go", "types/go/fixture-version-graph-db/versiongraph/recipe.json", "types/rust/fixture-version-graph-db/src/versiongraph_recipe.rs"} {
+	for _, rel := range []string{"orm/fixture-version-graph-db/versiongraph_recipe.go", "types/go/fixture-version-graph-db/versiongraph/recipe.json", "types/typescript/fixture-version-graph-db/versiongraph/recipe.ts", "types/rust/fixture-version-graph-db/src/versiongraph_recipe.rs"} {
 		if _, err := os.Stat(filepath.Join(outputRoot, rel)); err != nil {
 			t.Errorf("fixture-version-graph-db wrote no %s: %v", rel, err)
 		}
@@ -205,6 +209,7 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 		"orm/fixture-db/go.mod",
 		"types/go/fixture-version-graph-db/go.mod",
 		"orm/fixture-version-graph-db/go.mod",
+		"types/typescript/fixture-version-graph-db/package.json",
 		"types/rust/fixture-version-graph-db/Cargo.toml",
 		"api/fixture-env-go/go.mod",
 		"api/fixture-api/go.mod",
