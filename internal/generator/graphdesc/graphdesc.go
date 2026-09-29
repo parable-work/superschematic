@@ -309,9 +309,10 @@ func valueClass(schema *ir.Schema, fd *ir.FieldDef, sqlTypes map[string]string) 
 
 // jsonOf is what the schema runtime's JSON for one value of the named type
 // is: ClassEnum for an enum member's string, ClassJSON for an object or any
-// JSON value, ClassInteger, ClassNumber or ClassBoolean for those, and
-// ClassString for any other string. A scalar holds what its json_schema
-// type mapping names (D14), else what its primitive is.
+// JSON value, ClassNumber for a number, integer or not, ClassBoolean for a
+// boolean, and ClassString for any other string. A scalar holds what its
+// json_schema type mapping names (D14), else what its primitive is. Whether
+// a number is an integer is its SQL type's to say (classOf).
 func jsonOf(schema *ir.Schema, name string) (string, error) {
 	if _, ok := schema.Enums[name]; ok {
 		return ClassEnum, nil
@@ -327,18 +328,13 @@ func jsonOf(schema *ir.Schema, name string) (string, error) {
 			return ClassJSON, nil
 		}
 		switch scalar.TypeMappings["json_schema"] {
-		case "integer":
-			return ClassInteger, nil
-		case "number":
+		case "integer", "number":
 			return ClassNumber, nil
 		case "boolean":
 			return ClassBoolean, nil
 		case "":
 			switch scalar.LanguagePrimitive {
 			case ir.LanguageNumber:
-				if strings.EqualFold(scalar.Primitive, "Int") {
-					return ClassInteger, nil
-				}
 				return ClassNumber, nil
 			case ir.LanguageBoolean:
 				return ClassBoolean, nil
@@ -351,10 +347,8 @@ func jsonOf(schema *ir.Schema, name string) (string, error) {
 	switch name {
 	case codegen.PrimitiveString, "String", "ID":
 		return ClassString, nil
-	case codegen.PrimitiveNumber, "Float":
+	case codegen.PrimitiveNumber, "Float", "Int":
 		return ClassNumber, nil
-	case "Int":
-		return ClassInteger, nil
 	case codegen.PrimitiveBoolean, "Boolean":
 		return ClassBoolean, nil
 	}
@@ -391,7 +385,7 @@ func classOf(holds, sqlType string) string {
 		if sqlType == "TEXT" {
 			return ClassEnum
 		}
-	case ClassInteger, ClassNumber:
+	case ClassNumber:
 		switch sqlType {
 		case "BIGINT", "INTEGER", "INT", "SMALLINT":
 			return ClassInteger

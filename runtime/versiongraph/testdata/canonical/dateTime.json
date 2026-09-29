@@ -110,6 +110,13 @@
       "sql": "'\"2026-09-01T10:00:00+24:00\"'::jsonb",
       "postgres": "\"2026-09-01T10:00:00+24:00\"",
       "error": "an offset is less than a day"
+    },
+    {
+      "name": "refuses a day that does not exist",
+      "class": "dateTime",
+      "sql": "'\"2024-02-30T00:00:00Z\"'::jsonb",
+      "postgres": "\"2024-02-30T00:00:00Z\"",
+      "error": "February 2024 has no 30th"
     }
   ]
 }

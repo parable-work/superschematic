@@ -59,8 +59,9 @@ func TestDescriptorNamesTheGeneratedTables(t *testing.T) {
 		})
 		checkAgainstDDL(t, schema)
 	})
-	// A @jsonField object type, a list of lists of an object type and a map
-	// are stored as JSONB columns, and each is json.
+	// A @jsonField object type, a list of lists of an object type, a map and
+	// a map of a table are stored as JSONB columns, and each is json: a map
+	// of a table holds the rows, not a relation's key.
 	t.Run("JSONB columns", func(t *testing.T) {
 		schema := loadFixture(t)
 		schema.Types["Plating"] = &ir.TypeDef{Name: "Plating", Fields: []*ir.FieldDef{
@@ -70,13 +71,14 @@ func TestDescriptorNamesTheGeneratedTables(t *testing.T) {
 			&ir.FieldDef{Name: "plating", TypeRef: ir.TypeRef{Name: "Plating"}, JsonField: true, Required: true},
 			&ir.FieldDef{Name: "courses", TypeRef: ir.TypeRef{Name: "Plating", IsArray: true, IsArrayOfArrays: true}, Required: true},
 			&ir.FieldDef{Name: "pairings", TypeRef: ir.TypeRef{Name: "string", IsMap: true}, Required: true},
+			&ir.FieldDef{Name: "stations", TypeRef: ir.TypeRef{Name: "Utensil", IsMap: true}, Required: true},
 		)
 		checkAgainstDDL(t, schema)
 		graphs, err := graphdesc.Graphs(schema)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := map[string]string{"plating": graphdesc.ClassJSON, "courses": graphdesc.ClassJSON + "[][]", "pairings": graphdesc.ClassJSON}
+		want := map[string]string{"plating": graphdesc.ClassJSON, "courses": graphdesc.ClassJSON + "[][]", "pairings": graphdesc.ClassJSON, "stations": graphdesc.ClassJSON}
 		for _, kind := range graphs[0].Descriptor.Kinds {
 			if kind.Kind != "tasting" {
 				continue
@@ -330,11 +332,12 @@ func TestValueClassRefusesAStorageWithoutARule(t *testing.T) {
 }
 
 // TestValueClassOfEachKindOfField checks the class each kind of field
-// derives: a map, a @jsonField object type or input and a @jsonField
-// relation are json, whole; a list of lists of an object type or a JSON
-// scalar is json[][]; a to-one relation takes its target key's class;
-// a scalar has the class that reads its SQL type, whatever its primitive;
-// and an object type or input stored as TEXT is refused.
+// derives: a map, a map of a table, a @jsonField object type or input and a
+// @jsonField relation are json, whole; a list of lists of an object type or
+// a JSON scalar is json[][]; a to-one relation takes its target key's class;
+// a scalar has the class that reads its SQL type, whatever its primitive,
+// INT among them; and an object type, an input or an object scalar stored as
+// TEXT is refused.
 func TestValueClassOfEachKindOfField(t *testing.T) {
 	schema := &ir.Schema{
 		Types: map[string]*ir.TypeDef{
@@ -360,6 +363,8 @@ func TestValueClassOfEachKindOfField(t *testing.T) {
 			"Count":   {Name: "Count", LanguagePrimitive: ir.LanguageNumber, Primitive: "Int", TypeMappings: map[string]string{"json_schema": "integer", "sql": "INTEGER"}},
 			"Rank":    {Name: "Rank", LanguagePrimitive: ir.LanguageNumber, Primitive: "Int", TypeMappings: map[string]string{"json_schema": "integer", "sql": "SMALLINT"}},
 			"Gauge":   {Name: "Gauge", LanguagePrimitive: ir.LanguageNumber, TypeMappings: map[string]string{"json_schema": "number", "sql": "REAL"}},
+			"Tally":   {Name: "Tally", LanguagePrimitive: ir.LanguageNumber, Primitive: "Int", TypeMappings: map[string]string{"sql": "INT"}},
+			"Payload": {Name: "Payload", LanguagePrimitive: ir.LanguageObject, Primitive: "Object", TypeMappings: map[string]string{"sql": "TEXT"}},
 		},
 	}
 	for _, tc := range []struct {
@@ -368,6 +373,7 @@ func TestValueClassOfEachKindOfField(t *testing.T) {
 		want string
 	}{
 		{"map", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Serial", IsMap: true}}, graphdesc.ClassJSON},
+		{"map of a table", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Shelf", IsMap: true}}, graphdesc.ClassJSON},
 		{"jsonField object type", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Point"}, JsonField: true}, graphdesc.ClassJSON},
 		{"jsonField object type list", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Point", IsArray: true}, JsonField: true}, graphdesc.ClassJSON + "[]"},
 		{"jsonField input", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "PointInput"}, JsonField: true}, graphdesc.ClassJSON},
@@ -386,6 +392,7 @@ func TestValueClassOfEachKindOfField(t *testing.T) {
 		{"INTEGER", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Count"}}, graphdesc.ClassInteger},
 		{"SMALLINT", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Rank"}}, graphdesc.ClassInteger},
 		{"REAL", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Gauge"}}, graphdesc.ClassNumber},
+		{"INT", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Tally"}}, graphdesc.ClassInteger},
 	} {
 		got, err := graphdesc.ValueClass(schema, tc.fd)
 		if err != nil || got != tc.want {
@@ -400,6 +407,7 @@ func TestValueClassOfEachKindOfField(t *testing.T) {
 		{"object type", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Point"}}, "TEXT"},
 		{"object type list", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Point", IsArray: true}}, "TEXT[]"},
 		{"input", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "PointInput"}}, "TEXT"},
+		{"object scalar", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Payload"}}, "TEXT"},
 	} {
 		got, err := graphdesc.ValueClass(schema, tc.fd)
 		if err == nil || !strings.Contains(err.Error(), "stored as "+tc.sql+",") {
