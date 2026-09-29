@@ -211,7 +211,7 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 		TypesCrate:       typesCrate,
 		TypesCrateModule: rustutil.CrateNameToModulePath(typesCrate),
 		SDKStructName:    toRustTypeName(apiOutput.SchemaName) + "Sdk",
-		HasAuth:          apiOutput.IsPublic && apiOutput.HasAuth,
+		HasAuth:          apiOutput.HasAuth,
 		Timestamp:        clock.RFC3339(),
 		Version:          "1.0.0",
 	}

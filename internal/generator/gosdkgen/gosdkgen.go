@@ -204,7 +204,9 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 		packageName = "sdk"
 	}
 
-	hasAuth := apiOutput.IsPublic && apiOutput.HasAuth
+	// Any operation that needs a caller gives the SDK its token methods,
+	// public API or not, as in the TypeScript SDK.
+	hasAuth := apiOutput.HasAuth
 	output := &SDKOutput{
 		SchemaName:    apiOutput.SchemaName,
 		ModulePath:    modulePath,
