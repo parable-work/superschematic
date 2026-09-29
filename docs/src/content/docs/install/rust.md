@@ -112,7 +112,9 @@ Either way the payload must be a JSON object.
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk` for Rust writes `schemas-<name>-sdk`.
-The struct is `<Name>Sdk`:
+It needs `outputs.types` for Rust too: the SDK path-depends on the types
+crate, and the build refuses the config without it. The struct is
+`<Name>Sdk`:
 
 ```rust
 use schemas_catalog_sdk::{CatalogSdk, ClientConfig};
@@ -130,3 +132,10 @@ let sdk = CatalogSdk::new(ClientConfig {
 `auth_token` is static. `auth_token_provider` / `refresh_auth_token` cover
 per-request tokens and a one-shot refresh on 401. Operation sets become
 fields on the SDK struct.
+
+## Serve a generated API
+
+An API schema with `outputs.api` set to `language: "RUST"` writes the
+axum server crate `schemas-<name>-api` under `schemas/dist/api/<name>`. It
+needs `outputs.types` for Rust too: the crate depends on the types crate,
+and the build refuses the config without it.

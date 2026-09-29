@@ -1,0 +1,120 @@
+package namespaces
+
+import (
+	"fmt"
+	"strings"
+
+	types "example.com/schemas/types/go/query-lists-api"
+)
+
+// ValidationError reports client-side input validation failures.
+type ValidationError struct {
+	Errors types.ValidationErrors
+}
+
+func NewValidationError(errors types.ValidationErrors) *ValidationError {
+	if errors == nil {
+		errors = types.NewValidationErrors()
+	}
+	return &ValidationError{
+		Errors: errors,
+	}
+}
+
+func (e *ValidationError) Error() string {
+	if e == nil || !e.Errors.HasErrors() {
+		return "validation failed"
+	}
+
+	return fmt.Sprintf("validation failed (%d field errors)", len(e.Errors))
+}
+
+type inputValidator interface {
+	Validate() types.ValidationErrors
+}
+
+type requiredScalarValidator interface {
+	ValidateRequired() (bool, []types.ValidationError)
+}
+
+type scalarValidator interface {
+	Validate() (bool, []types.ValidationError)
+}
+
+func mergeValidationErrors(target types.ValidationErrors, source types.ValidationErrors) {
+	if !source.HasErrors() {
+		return
+	}
+
+	for field, fieldErrors := range source {
+		target[field] = fieldErrors
+	}
+}
+
+func appendInputValidationErrors(validationErrors types.ValidationErrors, input any) {
+	validator, ok := input.(inputValidator)
+	if !ok {
+		return
+	}
+
+	mergeValidationErrors(validationErrors, validator.Validate())
+}
+
+func appendRequiredScalarValidationErrors(validationErrors types.ValidationErrors, fieldName string, value any) {
+	validator, ok := value.(requiredScalarValidator)
+	if !ok {
+		return
+	}
+
+	if valid, fieldErrors := validator.ValidateRequired(); !valid {
+		validationErrors.SetFieldErrors(fieldName, fieldErrors)
+	}
+}
+
+func appendScalarValidationErrors(validationErrors types.ValidationErrors, fieldName string, value any) {
+	validator, ok := value.(scalarValidator)
+	if !ok {
+		return
+	}
+
+	if valid, fieldErrors := validator.Validate(); !valid {
+		validationErrors.SetFieldErrors(fieldName, fieldErrors)
+	}
+}
+
+// validateListElement runs the validation of one element of a list argument
+// when its type has one, and records the errors under path
+// ("rows[2][5]"). item points at the element, so object types, whose
+// Validate has a pointer receiver, qualify.
+func validateListElement(validationErrors types.ValidationErrors, path string, item any) {
+	switch validator := item.(type) {
+	case requiredScalarValidator:
+		if valid, itemErrs := validator.ValidateRequired(); !valid {
+			validationErrors.SetFieldErrors(path, itemErrs)
+		}
+	case scalarValidator:
+		if valid, itemErrs := validator.Validate(); !valid {
+			validationErrors.SetFieldErrors(path, itemErrs)
+		}
+	case inputValidator:
+		if itemErrs := validator.Validate(); itemErrs.HasErrors() {
+			validationErrors.AddNestedError(path, itemErrs)
+		}
+	}
+}
+
+// checkQueryListItem reports whether text, one item of a list query
+// parameter, reaches the Go route unchanged in the comma-separated value
+// it is sent in: the route splits the value on commas, trims each item and
+// refuses an empty one. It records the item's error at path when not.
+func checkQueryListItem(validationErrors types.ValidationErrors, path, text string) bool {
+	switch {
+	case strings.TrimSpace(text) == "":
+		validationErrors.AddFieldError(path, "required", "required field")
+	case strings.Contains(text, ",") || strings.TrimSpace(text) != text:
+		validationErrors.AddFieldError(path, "pattern", "must not contain a comma or surrounding space")
+	default:
+		return true
+	}
+	return false
+}

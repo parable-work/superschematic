@@ -1,0 +1,68 @@
+# List query parameters (QueryParam<T[]>): of an enum, of a UUID scalar, of
+# an integer scalar, of strings with rules and of booleans, beside a scalar
+# query parameter. pysdkgen's list query parameter tests load it.
+name: query-lists-api
+kind: API
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+  Generic.Int64:
+    name: Generic.Int64
+    languagePrimitive: number
+enums:
+  # The shade of a post.
+  Shade:
+    name: Shade
+    values:
+      - name: Light
+        serializedAs: light
+      - name: Dark
+        serializedAs: dark
+operationSets:
+  - name: PostQueries
+    operations:
+      # Count the posts that match every filter.
+      - name: countPosts
+        typeRef: { name: number }
+        required: true
+        httpMethod: GET
+        restPath: "posts/count"
+        arguments:
+          # The posts, by id.
+          - name: ids
+            typeRef: { name: Identity.UUID, isArray: true }
+            isQuery: true
+            required: true
+          # Two or three shades.
+          - name: shades
+            typeRef: { name: Shade, isArray: true }
+            isQuery: true
+            validateListMin: 2
+            validateListMax: 3
+          # Ranks from 1 to 100.
+          - name: ranks
+            typeRef: { name: Generic.Int64, isArray: true }
+            isQuery: true
+            validateMin: 1
+            validateMax: 100
+          # Codes of two to four lowercase letters.
+          - name: codes
+            typeRef: { name: string, isArray: true }
+            isQuery: true
+            validateMinLength: 2
+            validateMaxLength: 4
+            validatePattern: "^[a-z]+$"
+          # Free tags.
+          - name: tags
+            typeRef: { name: string, isArray: true }
+            isQuery: true
+          # Flags.
+          - name: flags
+            typeRef: { name: boolean, isArray: true }
+            isQuery: true
+          # At most this many posts.
+          - name: limit
+            typeRef: { name: number }
+            isQuery: true
+            validateMax: 50

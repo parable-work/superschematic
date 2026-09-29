@@ -98,6 +98,10 @@ type QueryParam struct {
 	Required bool   // Whether parameter is required
 	IsArray  bool   // Whether the value is an array, sent as one comma-separated value
 	IsMap    bool   // Whether the value is a string-keyed object
+	// ItemIsText marks a list whose items are not numbers or booleans, so
+	// one may be empty or hold a comma or surrounding space, which the
+	// comma-separated value (?name=a,b) cannot carry.
+	ItemIsText bool
 
 	ValidateMin       *float64 // Minimum numeric value allowed
 	ValidateMax       *float64 // Maximum numeric value allowed
@@ -106,6 +110,52 @@ type QueryParam struct {
 	ValidateListMin   *int     // Minimum list cardinality
 	ValidateListMax   *int     // Maximum list cardinality
 	ValidatePattern   string   // Regex pattern validation
+}
+
+// ChecksItems reports whether the SDK checks each item of a list parameter
+// before the request: that the comma-separated value carries a text item
+// as it is, then the argument's rules, which the route checks per item: a
+// length or pattern rule on a text item, a range rule on a number.
+func (p QueryParam) ChecksItems() bool {
+	if !p.IsArray {
+		return false
+	}
+	if p.ItemIsText {
+		return true
+	}
+	return p.ValidateMin != nil || p.ValidateMax != nil
+}
+
+// ChecksListMin reports whether listMin bounds a value the SDK sends. A
+// list is sent only with at least one item, so a minimum of one or none
+// bounds nothing.
+func (p QueryParam) ChecksListMin() bool {
+	if p.ValidateListMin == nil {
+		return false
+	}
+	return !p.IsArray || *p.ValidateListMin > 1
+}
+
+// ChecksList reports whether the SDK checks a list parameter as a whole:
+// that a required one has an item, or its listMin or listMax.
+func (p QueryParam) ChecksList() bool {
+	return p.IsArray && (p.Required || p.ChecksListMin() || p.ValidateListMax != nil)
+}
+
+// Validates reports whether the SDK checks the parameter before the
+// request: its rules, or, for a list, that a required one has an item and
+// that each item is one the comma-separated value carries.
+func (p QueryParam) Validates() bool {
+	if p.IsArray {
+		return p.ChecksList() || p.ChecksItems()
+	}
+	return p.ValidateMin != nil ||
+		p.ValidateMax != nil ||
+		p.ValidateMinLength != nil ||
+		p.ValidateMaxLength != nil ||
+		p.ValidateListMin != nil ||
+		p.ValidateListMax != nil ||
+		p.ValidatePattern != ""
 }
 
 // SDKOutput contains all generated SDK code metadata
@@ -313,13 +363,14 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 			tsType += "[]"
 		}
 		tsQueryParams[i] = QueryParam{
-			Name:     param.Name,
-			TSName:   tsutil.ToCamelCase(param.Name),
-			TSType:   tsType,
-			IRType:   param.Type,
-			Required: param.Required,
-			IsArray:  param.IsArray,
-			IsMap:    param.IsMap,
+			Name:       param.Name,
+			TSName:     tsutil.ToCamelCase(param.Name),
+			TSType:     tsType,
+			IRType:     param.Type,
+			Required:   param.Required,
+			IsArray:    param.IsArray,
+			IsMap:      param.IsMap,
+			ItemIsText: param.IsArray && sendsText(param),
 
 			ValidateMin:       param.ValidateMin,
 			ValidateMax:       param.ValidateMax,
@@ -643,7 +694,7 @@ func customTemplateFuncs() template.FuncMap {
 		},
 		"has_query_param_validation": func(params []QueryParam) bool {
 			for _, param := range params {
-				if queryParamDefHasValidation(param) {
+				if param.Validates() {
 					return true
 				}
 			}
@@ -968,14 +1019,12 @@ func queryParamHasValidation(param apigen.Param) bool {
 		param.ValidatePattern != ""
 }
 
-func queryParamDefHasValidation(param QueryParam) bool {
-	return param.ValidateMin != nil ||
-		param.ValidateMax != nil ||
-		param.ValidateMinLength != nil ||
-		param.ValidateMaxLength != nil ||
-		param.ValidateListMin != nil ||
-		param.ValidateListMax != nil ||
-		param.ValidatePattern != ""
+// sendsText reports whether a parameter's value is text on the wire: not a
+// number or a boolean, whose text never is empty or holds a comma or
+// surrounding space.
+func sendsText(param apigen.Param) bool {
+	return !param.IsInt && !param.IsFloat && !param.IsBool &&
+		param.Type != codegen.PrimitiveNumber && param.Type != codegen.PrimitiveBoolean
 }
 
 func normalizeTSTypeIdentifier(typeName string) string {

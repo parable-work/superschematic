@@ -547,6 +547,10 @@ func executeBuildAllTask(cmd *cobra.Command, task buildAllTask, ctx buildAllTask
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loadBuildAllDependency(name, ctx, prof)
 		},
+		DependencyConfig: func(name string) (*schemaconfig.SchemaConfig, bool) {
+			dep, ok := ctx.serviceByName[name]
+			return dep.Config, ok
+		},
 		Log:        cmd.OutOrStdout(),
 		Profile:    prof,
 		SkipFormat: ctx.skipFormat,

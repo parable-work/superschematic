@@ -3,6 +3,7 @@ package registry
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -24,6 +25,42 @@ var knownTargetLanguages = map[string]bool{
 	LangTypeScript: true,
 	LangPython:     true,
 	LangRust:       true,
+}
+
+// languageNames spells each target language for messages.
+var languageNames = map[string]string{
+	LangGo:         "Go",
+	LangTypeScript: "TypeScript",
+	LangPython:     "Python",
+	LangRust:       "Rust",
+}
+
+// LanguageName returns the display name of a target language ("Rust" for
+// "rust"), or lang itself when it is not one.
+func LanguageName(lang string) string {
+	if name, ok := languageNames[lang]; ok {
+		return name
+	}
+	return lang
+}
+
+// sdkTypesUse says what the SDK of each language does with the types
+// package of the same language, for the error that refuses an SDK whose
+// types are not enabled.
+var sdkTypesUse = map[string]string{
+	LangGo:         "the Go SDK's methods take and return the Go types",
+	LangTypeScript: "the TypeScript SDK decodes responses and validates inputs with the TypeScript types",
+	LangPython:     "the Python SDK validates with the Python types and skips validation without them",
+	LangRust:       "the Rust SDK depends on the Rust types crate and its methods take and return its types",
+}
+
+// apiTypes gives, for each API server language, the target language of the
+// types package the server imports and what it does with it, for the error
+// that refuses an API whose types are not enabled.
+var apiTypes = map[string]struct{ lang, use string }{
+	APILanguageGo:         {LangGo, "the Go API server decodes requests into the Go types and its handler interfaces take and return them"},
+	APILanguageRust:       {LangRust, "the Rust API server's crate depends on the Rust types crate"},
+	APILanguageTypeScript: {LangTypeScript, "the TypeScript API server validates requests with the TypeScript types and its handler interfaces take and return them"},
 }
 
 // TargetOutputConfig is a per-language enable switch.
@@ -92,7 +129,10 @@ type Outputs struct {
 
 // ParseOutputs decodes the raw outputs block from schema.config into its
 // typed form, rejecting keys no registered generator claims, sections that
-// fail their generator's OutputSchema, and unknown target languages.
+// fail their generator's OutputSchema, unknown target languages, and an API
+// server or SDK whose language has no types output (each imports that
+// package). The Go ORM's need for the Go types depends on the kind, so
+// generator.Run and generator.ExpectedOutputDirs check it.
 func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 	if raw == nil {
 		return &Outputs{}, nil
@@ -131,6 +171,25 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 			return nil, fmt.Errorf("outputs.sdk has unknown target language %q", lang)
 		}
 	}
+	// The API server and each SDK import the types package of their
+	// language, which only outputs.types generates. The API language is
+	// read after its default; an unsupported one is left to the API
+	// generator, which names the supported ones.
+	outputs.applyAPIDefaults()
+	var missingTypes []error
+	if outputs.APIEnabled() {
+		if need, ok := apiTypes[outputs.API.Language]; ok && !outputs.TypesEnabled(need.lang) {
+			missingTypes = append(missingTypes, fmt.Errorf("outputs.api with language %s needs outputs.types.%s: %s", outputs.API.Language, need.lang, need.use))
+		}
+	}
+	for _, lang := range outputs.EnabledSDKLanguages() {
+		if !outputs.TypesEnabled(lang) {
+			missingTypes = append(missingTypes, fmt.Errorf("outputs.sdk.%s needs outputs.types.%s: %s", lang, lang, sdkTypesUse[lang]))
+		}
+	}
+	if err := errors.Join(missingTypes...); err != nil {
+		return nil, err
+	}
 
 	// outputs.sql is read strictly: a misspelt key would otherwise leave
 	// the migrations in the output root or the views owned by the runner
@@ -143,8 +202,6 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 			return nil, fmt.Errorf("outputs.sql: %w", err)
 		}
 	}
-
-	outputs.applyAPIDefaults()
 
 	return outputs, nil
 }

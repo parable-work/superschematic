@@ -1,0 +1,8 @@
+# Only scalars: a service that imports from it regenerates the scalar
+# aliases locally and imports no package of it.
+name: shop-ids
+kind: General
+outputs:
+  types:
+    go: { enabled: true }
+    typescript: { enabled: true }

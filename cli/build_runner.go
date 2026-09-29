@@ -33,6 +33,10 @@ type buildServiceOptions struct {
 	SkipFormat     bool
 	Naming         naming.Naming
 	Registry       *registry.Registry
+
+	// DependencyConfig is generator.Options.DependencyConfig: build-all and
+	// build --with-deps set it, a single build leaves it nil.
+	DependencyConfig func(name string) (*schemaconfig.SchemaConfig, bool)
 }
 
 type buildServiceResult struct {
@@ -108,6 +112,8 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 			SkipFormat:     opts.SkipFormat,
 			Naming:         opts.Naming,
 			Registry:       opts.Registry,
+
+			DependencyConfig: opts.DependencyConfig,
 		})
 		return err
 	}); err != nil {

@@ -10,6 +10,70 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
+// checkIndexTables refuses an @index on a type that gets no table of its
+// own, which sqlgen would leave out of the DDL: a base class, whose fields
+// are copied onto each subclass but whose indexes are not; a @jsonField
+// type, stored as JSON in its parent's column; a @trait; and any other type
+// that is not a DB table. checkProjectionClass refuses one on a @projection
+// class. sqlgen fails on the same indexes, as a backstop.
+func checkIndexTables(schema *ir.Schema, r *Result) {
+	bases := codegen.BaseTypeNames(schema)
+	for _, name := range sortedTypeNames(schema.Types) {
+		td := schema.Types[name]
+		if len(td.Indexes) == 0 || hasTable(td, bases) || td.Role == ir.RoleProjection {
+			continue
+		}
+		var on string
+		switch {
+		case td.Role == ir.RoleTrait:
+			on = "a @trait, which gets no table; declare it on each table that implements " + td.Name
+		case td.Role != ir.RoleDBTable:
+			on = "a type of role " + string(td.Role) + ", which gets no table"
+		case td.JsonField:
+			on = "a @jsonField type, which is stored as JSON and gets no table"
+		default:
+			on = "a base class, which gets no table"
+			if tables := extendingTables(schema, td.Name, bases); len(tables) > 0 {
+				on += "; declare it on each table that extends " + td.Name + " (" + strings.Join(tables, ", ") + ")"
+			}
+		}
+		for _, idx := range td.Indexes {
+			r.errorf(td.Owner, "%s: %s is on %s", td.Name, indexLabel(idx), on)
+		}
+	}
+}
+
+// hasTable reports whether td gets a table of its own, as sqlgen decides: a
+// DB table type that is not a @jsonField payload and is not a base class
+// (bases, from codegen.BaseTypeNames).
+func hasTable(td *ir.TypeDef, bases map[string]bool) bool {
+	return isDBTable(td) && !bases[td.Name]
+}
+
+// extendingTables returns the tables whose chain of base classes reaches
+// base, sorted: the tables base's fields are copied onto.
+func extendingTables(schema *ir.Schema, base string, bases map[string]bool) []string {
+	var tables []string
+	for _, name := range sortedTypeNames(schema.Types) {
+		td := schema.Types[name]
+		if !hasTable(td, bases) {
+			continue
+		}
+		// The bound ends a cyclic chain, which a data form can write.
+		cur := td.Extends
+		for range len(schema.Types) {
+			if cur == "" || cur == base || schema.Types[cur] == nil {
+				break
+			}
+			cur = schema.Types[cur].Extends
+		}
+		if cur == base {
+			tables = append(tables, name)
+		}
+	}
+	return tables
+}
+
 // checkIndexKeys refuses an @index of a DB table that the SQL generator
 // cannot build: one without keys, or one with a key that resolves to no
 // column of the table. sqlgen resolves a key (sqlutil.IndexKeyMatches)
@@ -18,11 +82,13 @@ import (
 // no column in the table, and the generated id, the _version column and a
 // @hasMany back reference's column are added after the keys are resolved,
 // so none of them can be a key. sqlgen fails on the same indexes, as a
-// backstop.
+// backstop. An @index on a type without a table is left to
+// checkIndexTables.
 func checkIndexKeys(schema *ir.Schema, r *Result) {
+	bases := codegen.BaseTypeNames(schema)
 	for _, name := range sortedTypeNames(schema.Types) {
 		td := schema.Types[name]
-		if !isDBTable(td) || len(td.Indexes) == 0 {
+		if !hasTable(td, bases) || len(td.Indexes) == 0 {
 			continue
 		}
 		columns, lists := indexColumns(schema, td)

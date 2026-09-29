@@ -19,7 +19,8 @@ config lists. `shop-db` also holds the order and review tables that
 <Snippet file="schemas/services/shop-db/schema.config.ts" />
 
 A DB schema always gets its SQL and its Go ORM. `outputs.types` adds the
-row types in the languages it lists; the ORM uses the Go ones.
+row types in the languages it lists. The ORM imports the Go ones, so the
+list must include Go; the build refuses a DB config without it.
 
 ## Declare the tables
 

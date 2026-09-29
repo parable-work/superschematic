@@ -381,6 +381,97 @@ export class {{.Namespace.ClassName}} {
     {{- $queryParamsExpr = "requestParams"}}
     {{- end}}
     {{- range .QueryParams}}
+    {{- if .IsArray}}
+    {{- if .Validates}}
+    {
+      // {{.Name}} is sent as one comma-separated value (?{{.Name}}=a,b), and an
+      // empty list is left out: the route refuses a present empty value.
+      {{- if .ItemIsText}}
+      // Each item is checked at {{.TSName}}[i]: the route splits the value on
+      // commas and trims each item, so one must be non-blank, with no comma or
+      // surrounding space{{if or .ValidateMinLength .ValidateMaxLength .ValidatePattern}}, and then pass the argument's rules{{end}}.
+      {{- else if .ChecksItems}}
+      // Each item is checked at {{.TSName}}[i] against the argument's rules.
+      {{- end}}
+      {{- if .ChecksList}}
+      const {{.TSName}}Errors: { validator: string; message: string }[] = [];
+      {{- end}}
+      const {{.TSName}}Value = {{$queryParamsExpr}}?.{{.TSName}};
+      {{- if .Required}}
+      if ({{.TSName}}Value === undefined || {{.TSName}}Value === null || (Array.isArray({{.TSName}}Value) && {{.TSName}}Value.length === 0)) {
+        {{.TSName}}Errors.push({ validator: 'required', message: '{{.Name}} is required' });
+      } else if (Array.isArray({{.TSName}}Value)) {
+      {{- else}}
+      if (Array.isArray({{.TSName}}Value) && {{.TSName}}Value.length > 0) {
+      {{- end}}
+        {{- if .ChecksListMin}}
+        if ({{.TSName}}Value.length < {{.ValidateListMin}}) {
+          {{.TSName}}Errors.push({ validator: 'listMin', message: '{{.Name}} must contain at least {{.ValidateListMin}} items.' });
+        }
+        {{- end}}
+        {{- if .ValidateListMax}}
+        if ({{.TSName}}Value.length > {{.ValidateListMax}}) {
+          {{.TSName}}Errors.push({ validator: 'listMax', message: '{{.Name}} must contain at most {{.ValidateListMax}} items.' });
+        }
+        {{- end}}
+        {{- if .ChecksItems}}
+        {{- if and .ItemIsText .ValidatePattern}}
+        let {{.TSName}}Pattern: RegExp | null = null;
+        try {
+          {{.TSName}}Pattern = new RegExp('{{escape_backslash .ValidatePattern}}');
+        } catch {
+          // An invalid pattern refuses every item.
+        }
+        {{- end}}
+        {{.TSName}}Value.forEach((item: unknown, index: number) => {
+          const itemPath = `{{.TSName}}[${index}]`;
+          {{- if .ItemIsText}}
+          const itemText = String(item);
+          if (/^\p{White_Space}*$/u.test(itemText)) {
+            setFieldErrors(queryParamErrors, itemPath, [{ validator: 'required', message: `{{.Name}}[${index}] is required.` }]);
+          } else if (itemText.includes(',') || /^\p{White_Space}|\p{White_Space}$/u.test(itemText)) {
+            setFieldErrors(queryParamErrors, itemPath, [{ validator: 'pattern', message: `{{.Name}}[${index}] must not contain a comma or surrounding space.` }]);
+          {{- if .ValidateMinLength}}
+          } else if ([...itemText].length < {{.ValidateMinLength}}) {
+            setFieldErrors(queryParamErrors, itemPath, [{ validator: 'minLength', message: `{{.Name}}[${index}] must be at least {{.ValidateMinLength}} characters.` }]);
+          {{- end}}
+          {{- if .ValidateMaxLength}}
+          } else if ([...itemText].length > {{.ValidateMaxLength}}) {
+            setFieldErrors(queryParamErrors, itemPath, [{ validator: 'maxLength', message: `{{.Name}}[${index}] must be at most {{.ValidateMaxLength}} characters.` }]);
+          {{- end}}
+          {{- if .ValidatePattern}}
+          } else if ({{.TSName}}Pattern === null || !{{.TSName}}Pattern.test(itemText)) {
+            setFieldErrors(queryParamErrors, itemPath, [{ validator: 'pattern', message: `{{.Name}}[${index}] has an invalid format.` }]);
+          {{- end}}
+          }
+          {{- else}}
+          const itemNumber = Number(item);
+          if (Number.isNaN(itemNumber)) {
+            return;
+          }
+          {{- $next := "if"}}
+          {{- if .ValidateMin}}
+          {{$next}} (itemNumber < {{.ValidateMin}}) {
+            setFieldErrors(queryParamErrors, itemPath, [{ validator: 'min', message: `{{.Name}}[${index}] must be at least {{.ValidateMin}}.` }]);
+          {{- $next = "} else if"}}
+          {{- end}}
+          {{- if .ValidateMax}}
+          {{$next}} (itemNumber > {{.ValidateMax}}) {
+            setFieldErrors(queryParamErrors, itemPath, [{ validator: 'max', message: `{{.Name}}[${index}] must be at most {{.ValidateMax}}.` }]);
+          {{- end}}
+          }
+          {{- end}}
+        });
+        {{- end}}
+      }
+      {{- if .ChecksList}}
+      if ({{.TSName}}Errors.length > 0) {
+        setFieldErrors(queryParamErrors, "{{.TSName}}", {{.TSName}}Errors);
+      }
+      {{- end}}
+    }
+    {{- end}}
+    {{- else}}
     {
       const {{.TSName}}Errors: { validator: string; message: string }[] = [];
       const {{.TSName}}Value = {{$queryParamsExpr}}?.{{.TSName}};
@@ -443,6 +534,7 @@ export class {{.Namespace.ClassName}} {
         setFieldErrors(queryParamErrors, "{{.TSName}}", {{.TSName}}Errors);
       }
     }
+    {{- end}}
     {{- end}}
     if (Object.keys(queryParamErrors).length > 0) {
       throw new ValidationError(queryParamErrors);

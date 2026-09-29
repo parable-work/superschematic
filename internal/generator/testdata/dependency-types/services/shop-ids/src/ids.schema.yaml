@@ -1,0 +1,6 @@
+name: shop-ids
+kind: General
+scalars:
+  Identity.Slug:
+    name: Identity.Slug
+    languagePrimitive: string

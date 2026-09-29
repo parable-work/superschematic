@@ -3,6 +3,7 @@ package verify
 import (
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -14,8 +15,10 @@ import (
 // operation without a method). Fields of DB, API and General types, request
 // input types and operation responses accept it. A map value is refused by
 // ir.Schema.Validate and by the TypeScript reader; projections refuse it in
-// checkProjections.
+// checkProjections. An @index on a type without a table is left to
+// checkIndexTables.
 func checkArraysOfArrays(schema *ir.Schema, r *Result) {
+	bases := codegen.BaseTypeNames(schema)
 	for _, name := range sortedTypeNames(schema.Types) {
 		td := schema.Types[name]
 		nested := map[string]bool{}
@@ -40,7 +43,7 @@ func checkArraysOfArrays(schema *ir.Schema, r *Result) {
 		}
 		for _, idx := range td.Indexes {
 			for _, key := range idx.Keys {
-				if nested[key] {
+				if nested[key] && hasTable(td, bases) {
 					r.errorf(td.Owner, "%s: @index key %q is an array of arrays, which cannot be an index column", td.Name, key)
 				}
 			}

@@ -1,0 +1,27 @@
+name: shop-orders
+kind: API
+imports:
+  - package: "@schemas/shop-common"
+    types: [Money]
+  - package: "@schemas/shop-db"
+    types: [OrderStatus]
+  - package: "@schemas/shop-ids"
+    types: [Identity.Slug]
+scalars:
+  Identity.Slug:
+    name: Identity.Slug
+    languagePrimitive: string
+types:
+  OrderView:
+    name: OrderView
+    role: EmbeddedStruct
+    fields:
+      - name: slug
+        typeRef: { name: Identity.Slug }
+        required: true
+      - name: total
+        typeRef: { name: Money }
+        required: true
+      - name: status
+        typeRef: { name: OrderStatus }
+        required: true

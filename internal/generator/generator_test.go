@@ -467,7 +467,7 @@ func TestExpectedOutputDirsFollowsPipelineEnabled(t *testing.T) {
 		Outputs: map[string]any{
 			"types": map[string]any{"go": map[string]any{"enabled": true}},
 			"api":   map[string]any{"enabled": false},
-			"sdk":   map[string]any{"typescript": map[string]any{"enabled": true}},
+			"sdk":   map[string]any{"go": map[string]any{"enabled": true}},
 		},
 	}
 	dirs, err := ExpectedOutputDirs(outputRoot, cfg, t.TempDir(), nil)
@@ -476,7 +476,7 @@ func TestExpectedOutputDirsFollowsPipelineEnabled(t *testing.T) {
 	}
 	want := []string{
 		TypesDir(outputRoot, "go", "fixture-api"),
-		SDKDir(outputRoot, "typescript", "fixture-api"),
+		SDKDir(outputRoot, "go", "fixture-api"),
 	}
 	if strings.Join(dirs, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("api disabled: expected output dirs %v, got %v", want, dirs)
@@ -490,7 +490,7 @@ func TestExpectedOutputDirsFollowsPipelineEnabled(t *testing.T) {
 	want = []string{
 		TypesDir(outputRoot, "go", "fixture-api"),
 		APIDir(outputRoot, "fixture-api"),
-		SDKDir(outputRoot, "typescript", "fixture-api"),
+		SDKDir(outputRoot, "go", "fixture-api"),
 	}
 	if strings.Join(dirs, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("api enabled: expected output dirs %v, got %v", want, dirs)

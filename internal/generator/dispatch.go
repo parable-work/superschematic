@@ -623,7 +623,7 @@ func (r run) generateGoAPI() error {
 		return err
 	}
 	if output == nil {
-		return r.generateEnvConfig(false)
+		return r.generateEnvConfig(LangGo)
 	}
 	apiOutput := *output
 	output = &apiOutput
@@ -711,7 +711,7 @@ func (r run) generateRustAPI() error {
 		return fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
 	}
 	if output == nil {
-		return r.generateEnvConfig(true)
+		return r.generateEnvConfig(LangRust)
 	}
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
@@ -732,13 +732,15 @@ func (r run) generateRustAPI() error {
 		r.Logf("  + api scaffolds: %d created, %d skipped (existing) in %s\n",
 			len(scaffolds.Generated), len(scaffolds.Skipped), scaffoldsDir)
 	}
-	return r.generateEnvConfig(true)
+	return r.generateEnvConfig(LangRust)
 }
 
 // generateEnvConfig emits the standalone env-var loader for schemas whose API
 // path does not write it: env-only schemas (no operations) and Rust API
-// schemas. Silently does nothing when the schema declares no @envVars type.
-func (r run) generateEnvConfig(rust bool) error {
+// schemas. lang is the loader's language, LangGo or LangRust; "" writes the
+// values schema alone (see envLoaderLanguage). Silently does nothing when
+// the schema declares no @envVars type.
+func (r run) generateEnvConfig(lang string) error {
 	deps, err := r.loadDependencySchemas()
 	if err != nil {
 		return err
@@ -757,19 +759,25 @@ func (r run) generateEnvConfig(rust bool) error {
 	}
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
-	if rust {
-		err = envgen.WriteRustConfig(output, dir)
-	} else {
+	switch lang {
+	case LangGo:
 		if output.IndirectModules, err = r.goTypesClosure(r.Schema); err != nil {
 			return err
 		}
 		err = envgen.WriteConfigModule(output, dir)
+	case LangRust:
+		err = envgen.WriteRustConfig(output, dir)
+	default:
+		err = envgen.WriteValuesSchema(output, dir)
 	}
 	if err != nil {
 		return fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
 	}
 
 	r.Done("env-config", dir)
+	if lang == "" {
+		r.Logf("  - env-config: values-schema.json only, no loader; enable outputs.types.go for the Go loader, which imports the Go types, or outputs.types.rust for the Rust one\n")
+	}
 	return nil
 }
 

@@ -47,6 +47,27 @@ def _safe_load_yaml(input_data: str | bytes) -> Dict[str, Any]:
         raise ValueError("YAML content must decode to an object")
     return parsed_data
 
+def _add_model_errors(errors: ValidationErrors, key: str, value: Any, by_alias: bool) -> None:
+    """
+    Add the validate_all errors of every generated model value holds, each
+    under its path from key, as the Go and TypeScript validators nest them:
+    the model itself (ship_to.postal_code), a list item (lines[0].quantity),
+    an item of a list of lists (grid[0][1].quantity) and a map value
+    (extras.gift.quantity). Any other value, None or a dict model_construct
+    left unparsed among them, is the field's own checks' to report.
+    """
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _add_model_errors(errors, f"{key}[{index}]", item, by_alias)
+    elif isinstance(value, dict):
+        for name, item in value.items():
+            _add_model_errors(errors, f"{key}.{name}", item, by_alias)
+    elif isinstance(value, BaseModel) and callable(getattr(value, "validate_all", None)):
+        # by_alias only when asked, so a model from a dependency package
+        # generated before it still validates.
+        nested = value.validate_all(by_alias=True) if by_alias else value.validate_all()
+        errors.add_nested_errors(key, nested)
+
 _HistoryValue = TypeVar("_HistoryValue")
 
 def _parse_recorded_at(v: Any) -> Any:
@@ -122,9 +143,18 @@ class Auditable(BaseModel):
 
     updated_at: Optional[TemporalDateTime] = Field(default=None, alias="updatedAt", serialization_alias="updatedAt")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -142,6 +172,12 @@ class Auditable(BaseModel):
                 TypeAdapter(TemporalDateTime).validate_python(self.updated_at)
             except PydanticValidationError as e:
                 errors.add_field_error("updated_at", "invalid", str(e))
+
+        if by_alias:
+            return errors._with_field_names({
+                "created_at": "createdAt",
+                "updated_at": "updatedAt",
+            })
 
         return errors
 
@@ -303,9 +339,18 @@ class Tenant(BaseModel):
 
     version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -405,9 +450,19 @@ class Tenant(BaseModel):
                     if item is None:
                         errors.add_field_error(f"users[{index}]", "required", "required field")
 
+        _add_model_errors(errors, "users", self.users, by_alias)
+
         # Validate _version
         if self.version_ is None:
             errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "created_at": "createdAt",
+                "updated_at": "updatedAt",
+                "is_active": "isActive",
+                "seat_count": "seatCount",
+            })
 
         return errors
 
@@ -561,9 +616,18 @@ class TenantUser(BaseModel):
 
     version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -603,6 +667,8 @@ class TenantUser(BaseModel):
             except PydanticValidationError as e:
                 errors.add_field_error("tenant", "invalid", str(e))
 
+        _add_model_errors(errors, "tenant", self.tenant, by_alias)
+
         # Validate displayName
         if self.display_name is not None:
             try:
@@ -634,6 +700,15 @@ class TenantUser(BaseModel):
         # Validate _version
         if self.version_ is None:
             errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "created_at": "createdAt",
+                "updated_at": "updatedAt",
+                "display_name": "displayName",
+                "deleted_at": "deletedAt",
+                "deleted_by": "deletedBy",
+            })
 
         return errors
 

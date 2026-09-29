@@ -80,6 +80,13 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load fixture-api: %v", err)
 	}
+	// Every SDK needs the types of its language.
+	apiCfg.Outputs["types"] = map[string]any{
+		"typescript": map[string]any{"enabled": true},
+		"go":         map[string]any{"enabled": true},
+		"python":     map[string]any{"enabled": true},
+		"rust":       map[string]any{"enabled": true},
+	}
 	apiCfg.Outputs["sdk"] = map[string]any{
 		"typescript": map[string]any{"enabled": true},
 		"go":         map[string]any{"enabled": true},
