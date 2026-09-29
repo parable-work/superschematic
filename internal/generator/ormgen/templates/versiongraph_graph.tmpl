@@ -7,16 +7,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	types "{{ .TypesModule }}"
 	"github.com/jackc/pgx/v5"
 	versiongraph "{{ .Naming.VersionGraphGoModule }}"
+	"{{ .Naming.VersionGraphGoModule }}/engine"
 )
 
-// {{ .Name }}GraphDescriptor is the descriptor of the {{ .Name }} version graph: which
-// column of each kind's rows plays which role in the version-graph core,
-// how each column merges and which columns are not content. The types
-// module carries the same document as versiongraph/{{ .FileName }}.json.
+// {{ .Name }}GraphDescriptor is the descriptor of the {{ .Name }} version graph: its
+// tables, which column of each kind's rows plays which role, how each
+// column merges, which columns are not content and each column's value
+// class. The types module carries the same document as
+// versiongraph/{{ .FileName }}.json.
 const {{ .Name }}GraphDescriptor = `{{ .Descriptor }}`
 
 // {{ .Name }}GraphSchemaEpoch is the schema epoch every commit of the {{ .Name }}
@@ -24,60 +27,48 @@ const {{ .Name }}GraphDescriptor = `{{ .Descriptor }}`
 // ErrSchemaEpoch.
 const {{ .Name }}GraphSchemaEpoch = {{ .SchemaEpoch }}
 
-var {{ lowerFirst .Name }}GraphSpec = &graphSpec{
-	descriptor:    json.RawMessage({{ .Name }}GraphDescriptor),
+// {{ .Name }}GraphSnapshotEvery is how many commits past the nearest snapshot on
+// its chain a commit of the {{ .Name }} graph is snapshotted at, so reading its
+// tree stops there. A tagged or released commit is snapshotted too.
+const {{ .Name }}GraphSnapshotEvery = {{ .SnapshotEvery }}
+
+var {{ lowerFirst .Name }}GraphRuntime = &graphRuntime{
+	descriptor:    {{ .Name }}GraphDescriptor,
 	schemaEpoch:   {{ .Name }}GraphSchemaEpoch,
-	insertRef:     `{{ .InsertRef }}`,
-	readRef:       `{{ .ReadRef }}`,
-	lockRef:       `{{ .LockRef }}`,
-	touchRef:      `{{ .TouchRef }}`,
-	lockRoot:      `{{ .LockRoot }}`,
-	nextSequence:  `{{ .NextSequence }}`,
-	insertCommit:  `{{ .InsertCommit }}`,
-	insertPatches: `{{ .InsertPatches }}`,
-	walk:          `{{ .Walk }}`,
-	patches:       `{{ .Patches }}`,
-	commitRoot:    `{{ .CommitRoot }}`,
-	refCommits:    `{{ .RefCommits }}`,
-	kinds: []graphKind{
-{{- range .Kinds }}
-		{
-			name:     "{{ .Kind }}",
-			idColumn: "{{ .IDColumn }}",
-			ownRows:  `{{ .OwnRows }}`,
-			slot:     `{{ .Slot }}`,
-			images:   `{{ .Images }}`,
-			upsert:   `{{ .Upsert }}`,
-			unset: func(ctx context.Context, tx pgx.Tx, id {{ $g.UUIDGoType }}) error {
-				return (&{{ .TypeName }}Repository{tx: tx}).DeleteOne(ctx, id)
-			},
-		},
-{{- end }}
-	},
+	snapshotEvery: {{ .Name }}GraphSnapshotEvery,
 }
 
-// {{ .Name }}Graph reads and writes the {{ .Name }} version graph: refs
-// that hold sparse override rows of each member kind, commits that pin the
-// exact row versions a ref sealed, and merges between refs. Every method
-// runs in one transaction and needs a user in the context. Every write
-// through a ref takes the ref's expected _version and fails with
-// ErrVersionConflict when the ref has moved on.
+// {{ .Name }}Graph reads and writes the {{ .Name }} version graph through the
+// version-graph engine: refs that hold sparse override rows of each member
+// kind, commits that pin the exact row versions a ref sealed, and merges
+// between refs. A primary line takes writes only from Merge; work happens on
+// change sets, which Rebase catches up with their parent. Each root's release
+// pointer names one tagged commit. It turns typed edits into canonical rows
+// and the rows the engine returns into typed trees. Every method but Sweep
+// and RunSweeper runs in one transaction and needs a user in the context,
+// the actor of its writes. Every write through a ref takes the ref's
+// expected _version and fails with ErrVersionConflict when the ref has moved
+// on.
 type {{ .Name }}Graph struct {
-	db     *Database
-	engine graphEngine
+	db          *Database
+	walkCeiling int
 }
 
 // {{ .Name }}Graph returns the {{ .Name }} version graph of db.
 func (db *Database) {{ .Name }}Graph() *{{ .Name }}Graph {
-	return &{{ .Name }}Graph{db: db, engine: graphEngine{spec: {{ lowerFirst .Name }}GraphSpec, walkCeiling: DefaultWalkCeiling}}
+	return &{{ .Name }}Graph{db: db, walkCeiling: DefaultWalkCeiling}
 }
 
 // WithWalkCeiling returns a copy of g that reads a commit's tree by walking
 // at most n commits, and fails with ErrWalkCeiling past them.
 func (g *{{ .Name }}Graph) WithWalkCeiling(n int) *{{ .Name }}Graph {
 	copied := *g
-	copied.engine.walkCeiling = n
+	copied.walkCeiling = n
 	return &copied
+}
+
+func (g *{{ .Name }}Graph) run(ctx context.Context, fn func(tx pgx.Tx, e *engine.Engine, actor string) error) error {
+	return runGraph(ctx, g.db, {{ lowerFirst .Name }}GraphRuntime, g.walkCeiling, fn)
 }
 
 // {{ .Name }}Tree is a tree of the {{ .Name }} graph: the live rows of each kind,
@@ -123,9 +114,9 @@ type {{ .Name }}CommitResult struct {
 	Commit *types.{{ .CommitType }}
 }
 
-// {{ .Name }}MergeResult is the target of a merge and the commit written. When
-// Conflicts is not empty nothing was written and Ref is the target as it
-// was.
+// {{ .Name }}MergeResult is the target of a merge, or the change set a rebase
+// moved, and the commit written. When Conflicts is not empty nothing was
+// written and Ref is the ref as it was.
 type {{ .Name }}MergeResult struct {
 	Ref       *types.{{ .RefType }}
 	Commit    *types.{{ .CommitType }}
@@ -134,8 +125,8 @@ type {{ .Name }}MergeResult struct {
 
 // {{ .Name }}Conflict is one unit both sides of a merge changed differently, or
 // an edit against a delete (Path ""). Base, Ours and Theirs are the unit's
-// values as JSON, nil where the unit is absent; the authors are each side's
-// author column.
+// canonical values as JSON, nil where the unit is absent; the authors are
+// each side's author column.
 type {{ .Name }}Conflict struct {
 	Kind         types.{{ .Name }}EntityKind
 	EntityKey    {{ .UUIDGoType }}
@@ -158,8 +149,15 @@ type {{ .Name }}Resolution struct {
 	Value     json.RawMessage
 }
 
+// {{ .Name }}Released is a root's release pointer and the tree of the commit
+// it names.
+type {{ .Name }}Released struct {
+	Release *types.{{ .ReleaseType }}
+	Tree    *{{ .Name }}Tree
+}
+
 // {{ .Name }}Change is one entity two commits differ on. Row is the entity's
-// row in the later tree, absent for a DELETE.
+// canonical row in the later tree, absent for a DELETE.
 type {{ .Name }}Change struct {
 	Kind      types.{{ .Name }}EntityKind
 	EntityKey {{ .UUIDGoType }}
@@ -170,12 +168,12 @@ type {{ .Name }}Change struct {
 // CreatePrimary creates a primary line of root: a ref with no parent.
 func (g *{{ .Name }}Graph) CreatePrimary(ctx context.Context, root {{ .UUIDGoType }}, name string) (*types.{{ .RefType }}, error) {
 	var result *types.{{ .RefType }}
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		id, err := g.engine.createRef(ctx, tx, uuidText(root), "", "", name)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		ref, err := e.CreatePrimary(ctx, actor, uuidText(root), name)
 		if err != nil {
 			return err
 		}
-		result, err = g.ref(ctx, tx, id)
+		result, err = g.ref(ctx, tx, ref.ID)
 		return err
 	})
 	return result, err
@@ -184,69 +182,39 @@ func (g *{{ .Name }}Graph) CreatePrimary(ctx context.Context, root {{ .UUIDGoTyp
 // Branch creates a change set of fromRef whose base is fromRef's head.
 func (g *{{ .Name }}Graph) Branch(ctx context.Context, fromRef {{ .UUIDGoType }}, name string) (*types.{{ .RefType }}, error) {
 	var result *types.{{ .RefType }}
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		from, err := g.engine.readRef(ctx, tx, uuidText(fromRef), nil, false)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		ref, err := e.Branch(ctx, actor, uuidText(fromRef), name)
 		if err != nil {
 			return err
 		}
-		id, err := g.engine.createRef(ctx, tx, from.root, from.id, from.head, name)
-		if err != nil {
-			return err
-		}
-		result, err = g.ref(ctx, tx, id)
+		result, err = g.ref(ctx, tx, ref.ID)
 		return err
 	})
 	return result, err
 }
 
-// Save applies edits to a ref at version: upserts, then deletes, then
-// unsets, kind by kind. It refuses a sealed ref.
+// Save applies edits to a change set at version: upserts, then deletes,
+// then unsets, kind by kind. It refuses a sealed ref, and a primary line
+// with ErrPrimaryMergeOnly.
 func (g *{{ .Name }}Graph) Save(ctx context.Context, ref {{ .UUIDGoType }}, version int64, edits {{ .Name }}Edits) (*{{ .Name }}SaveResult, error) {
 	result := &{{ .Name }}SaveResult{}
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		r, err := g.engine.readRef(ctx, tx, uuidText(ref), &version, true)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		canonicalEdits := engine.Edits{}
+{{- range .Kinds }}
+		if err := {{ lowerFirst $g.Name }}{{ .TypeName }}Edits(canonicalEdits, edits.{{ .TypeName }}); err != nil {
+			return err
+		}
+{{- end }}
+		saved, err := e.Save(ctx, actor, uuidText(ref), version, canonicalEdits)
 		if err != nil {
 			return err
 		}
-{{- range .Kinds }}
-		for _, input := range edits.{{ .TypeName }}.Upsert {
-			row, err := g.upsert{{ .TypeName }}(ctx, tx, r, input)
-			if err != nil {
-				return err
-			}
-			result.Saved.{{ .TypeName }} = append(result.Saved.{{ .TypeName }}, row)
-		}
-{{- end }}
-{{- if .Kinds }}
-		if {{ range $i, $k := .Kinds }}{{ if $i }} || {{ end }}len(edits.{{ $k.TypeName }}.Delete) > 0{{ end }} {
-			composed, _, _, err := g.engine.compose(ctx, tx, r)
-			if err != nil {
-				return err
-			}
-			byKey, err := g.engine.spec.index(composed)
-			if err != nil {
-				return err
-			}
-{{- range .Kinds }}
-			for _, key := range edits.{{ .TypeName }}.Delete {
-				if err := g.engine.deleteEntity(ctx, tx, r, byKey, "{{ .Kind }}", uuidText(key)); err != nil {
-					return err
-				}
-			}
-{{- end }}
-		}
-{{- end }}
-{{- range .Kinds }}
-		for _, key := range edits.{{ .TypeName }}.Unset {
-			if err := g.engine.unsetEntity(ctx, tx, r, "{{ .Kind }}", key); err != nil {
-				return err
-			}
-		}
-{{- end }}
-		if err := g.engine.touchRef(ctx, tx, r, "", false); err != nil {
+		tree, err := g.tree(&engine.TreeResult{Tree: saved.Saved})
+		if err != nil {
 			return err
 		}
-		result.Ref, err = g.ref(ctx, tx, r.id)
+		result.Saved = *tree
+		result.Ref, err = g.ref(ctx, tx, saved.Ref.ID)
 		return err
 	})
 	if err != nil {
@@ -255,32 +223,36 @@ func (g *{{ .Name }}Graph) Save(ctx context.Context, ref {{ .UUIDGoType }}, vers
 	return result, nil
 }
 
-// Commit composes a ref at version, diffs it against its last commit (or
-// its base), writes a commit with a patch per changed entity and moves the
-// ref's head. It returns ErrNothingToCommit when nothing changed, and an
-// *InvalidTreeError when the composed tree breaks the graph's rules.
+// Commit composes a change set at version, diffs it against its last commit
+// (or its base), writes a commit with a patch per changed entity and moves
+// the ref's head. It returns ErrNothingToCommit when nothing changed, an
+// *InvalidTreeError when the composed tree breaks the graph's rules, and
+// ErrPrimaryMergeOnly for a primary line.
 func (g *{{ .Name }}Graph) Commit(ctx context.Context, ref {{ .UUIDGoType }}, version int64, opts {{ .Name }}CommitOptions) (*{{ .Name }}CommitResult, error) {
-	return g.commit(ctx, ref, version, graphCommitOptions{message: opts.Message, tag: opts.Tag}, false, false)
-}
-
-// Seal commits a ref at version when it has changes, and seals it: the ref
-// then refuses writes.
-func (g *{{ .Name }}Graph) Seal(ctx context.Context, ref {{ .UUIDGoType }}, version int64) (*{{ .Name }}CommitResult, error) {
-	return g.commit(ctx, ref, version, graphCommitOptions{}, true, true)
-}
-
-func (g *{{ .Name }}Graph) commit(ctx context.Context, ref {{ .UUIDGoType }}, version int64, opts graphCommitOptions, allowEmpty, seal bool) (*{{ .Name }}CommitResult, error) {
 	result := &{{ .Name }}CommitResult{}
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		r, err := g.engine.readRef(ctx, tx, uuidText(ref), &version, true)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		committed, err := e.Commit(ctx, actor, uuidText(ref), version, engine.CommitOptions{Message: opts.Message, Tag: opts.Tag})
 		if err != nil {
 			return err
 		}
-		commit, err := g.engine.commitAndMove(ctx, tx, r, opts, allowEmpty, seal)
+		return g.commitResult(ctx, tx, committed, &result.Ref, &result.Commit)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// Seal commits a change set at version when it has changes, and seals it:
+// the ref then refuses writes. A primary line is ErrPrimaryMergeOnly.
+func (g *{{ .Name }}Graph) Seal(ctx context.Context, ref {{ .UUIDGoType }}, version int64) (*{{ .Name }}CommitResult, error) {
+	result := &{{ .Name }}CommitResult{}
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		sealed, err := e.Seal(ctx, actor, uuidText(ref), version)
 		if err != nil {
 			return err
 		}
-		return g.commitResult(ctx, tx, r.id, commit, &result.Ref, &result.Commit)
+		return g.commitResult(ctx, tx, sealed, &result.Ref, &result.Commit)
 	})
 	if err != nil {
 		return nil, err
@@ -290,64 +262,17 @@ func (g *{{ .Name }}Graph) commit(ctx context.Context, ref {{ .UUIDGoType }}, ve
 
 // Merge merges source's head into target at targetVersion, against
 // source's base. Without conflicts it writes the result onto target and
-// commits it. With conflicts left after resolutions it returns them and
-// writes nothing.
-func (g *{{ .Name }}Graph) Merge(ctx context.Context, source, target {{ .UUIDGoType }}, targetVersion int64, resolutions []{{ .Name }}Resolution) (*{{ .Name }}MergeResult, error) {
+// commits it in the same transaction, with opts' message and tag. With
+// conflicts left after resolutions it returns them and writes nothing. It is
+// the only write a primary line takes.
+func (g *{{ .Name }}Graph) Merge(ctx context.Context, source, target {{ .UUIDGoType }}, targetVersion int64, resolutions []{{ .Name }}Resolution, opts {{ .Name }}CommitOptions) (*{{ .Name }}MergeResult, error) {
 	result := &{{ .Name }}MergeResult{}
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		t, err := g.engine.readRef(ctx, tx, uuidText(target), &targetVersion, true)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		merged, err := e.Merge(ctx, actor, uuidText(source), uuidText(target), targetVersion, g.resolutions(resolutions), engine.CommitOptions{Message: opts.Message, Tag: opts.Tag})
 		if err != nil {
 			return err
 		}
-		s, err := g.engine.readRef(ctx, tx, uuidText(source), nil, false)
-		if err != nil {
-			return err
-		}
-		if s.root != t.root {
-			return ErrRootMismatch
-		}
-		if s.id == t.id {
-			return fmt.Errorf("version graph: a ref cannot be merged into itself")
-		}
-		coreResolutions := make([]versiongraph.Resolution, 0, len(resolutions))
-		for _, resolution := range resolutions {
-			coreResolutions = append(coreResolutions, versiongraph.Resolution{
-				Kind:      string(resolution.Kind),
-				EntityKey: uuidText(resolution.EntityKey),
-				Path:      resolution.Path,
-				Take:      resolution.Take,
-				Value:     resolution.Value,
-			})
-		}
-		conflicts, err := g.engine.merge(ctx, tx, s, t, coreResolutions)
-		if err != nil {
-			return err
-		}
-		if len(conflicts) > 0 {
-			for _, conflict := range conflicts {
-				key, err := parseUUIDText(conflict.EntityKey)
-				if err != nil {
-					return err
-				}
-				result.Conflicts = append(result.Conflicts, {{ .Name }}Conflict{
-					Kind:         types.{{ .Name }}EntityKind(conflict.Kind),
-					EntityKey:    key,
-					Path:         conflict.Path,
-					Base:         conflict.Base,
-					Ours:         conflict.Ours,
-					Theirs:       conflict.Theirs,
-					OursAuthor:   conflict.OursAuthor,
-					TheirsAuthor: conflict.TheirsAuthor,
-				})
-			}
-			result.Ref, err = g.ref(ctx, tx, t.id)
-			return err
-		}
-		commit, err := g.engine.commitAndMove(ctx, tx, t, graphCommitOptions{}, true, false)
-		if err != nil {
-			return err
-		}
-		return g.commitResult(ctx, tx, t.id, commit, &result.Ref, &result.Commit)
+		return g.mergeResult(ctx, tx, merged, result)
 	})
 	if err != nil {
 		return nil, err
@@ -355,34 +280,39 @@ func (g *{{ .Name }}Graph) Merge(ctx context.Context, source, target {{ .UUIDGoT
 	return result, nil
 }
 
-// Revert writes the rows that make a ref at version compose to the tree of
-// toCommit, and commits them. History is never rewritten.
+// Rebase moves a change set at version onto its parent's head: it merges
+// the parent's head into the change set against the change set's base,
+// with its composed tree, uncommitted work included, as ours. Without
+// conflicts it rewrites the change set's rows over the new base, moves its
+// base and commits on it after its previous head. With conflicts left after
+// resolutions it returns them and writes nothing. A primary line is
+// ErrNoParent.
+func (g *{{ .Name }}Graph) Rebase(ctx context.Context, draft {{ .UUIDGoType }}, version int64, resolutions []{{ .Name }}Resolution) (*{{ .Name }}MergeResult, error) {
+	result := &{{ .Name }}MergeResult{}
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		rebased, err := e.Rebase(ctx, actor, uuidText(draft), version, g.resolutions(resolutions))
+		if err != nil {
+			return err
+		}
+		return g.mergeResult(ctx, tx, rebased, result)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// Revert writes the rows that make a change set at version compose to the
+// tree of toCommit, and commits them. History is never rewritten. A primary
+// line is ErrPrimaryMergeOnly: revert a change set of it and merge that.
 func (g *{{ .Name }}Graph) Revert(ctx context.Context, ref {{ .UUIDGoType }}, version int64, toCommit {{ .UUIDGoType }}) (*{{ .Name }}CommitResult, error) {
 	result := &{{ .Name }}CommitResult{}
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		r, err := g.engine.readRef(ctx, tx, uuidText(ref), &version, true)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		reverted, err := e.Revert(ctx, actor, uuidText(ref), version, uuidText(toCommit))
 		if err != nil {
 			return err
 		}
-		root, err := g.engine.commitRoot(ctx, tx, uuidText(toCommit))
-		if err != nil {
-			return err
-		}
-		if root != r.root {
-			return ErrRootMismatch
-		}
-		tree, err := g.engine.materialize(ctx, tx, uuidText(toCommit))
-		if err != nil {
-			return err
-		}
-		if err := g.engine.revert(ctx, tx, r, tree); err != nil {
-			return err
-		}
-		commit, err := g.engine.commitAndMove(ctx, tx, r, graphCommitOptions{}, true, false)
-		if err != nil {
-			return err
-		}
-		return g.commitResult(ctx, tx, r.id, commit, &result.Ref, &result.Commit)
+		return g.commitResult(ctx, tx, reverted, &result.Ref, &result.Commit)
 	})
 	if err != nil {
 		return nil, err
@@ -390,19 +320,54 @@ func (g *{{ .Name }}Graph) Revert(ctx context.Context, ref {{ .UUIDGoType }}, ve
 	return result, nil
 }
 
-// Materialize reads a commit's tree by walking its parents: each entity's
-// nearest patch wins, and a DELETE removes it.
-func (g *{{ .Name }}Graph) Materialize(ctx context.Context, commit {{ .UUIDGoType }}) (*{{ .Name }}Tree, error) {
-	var result *{{ .Name }}Tree
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		tree, err := g.engine.materialize(ctx, tx, uuidText(commit))
+// Release points root's release at commit, a tagged commit of root, fenced
+// by the pointer's version: 0 for the root's first release. It writes no
+// member rows, so a rollback is a Release to an earlier tagged commit, and
+// the pointer's history is the release log. An untagged commit is
+// ErrNotTagged.
+func (g *{{ .Name }}Graph) Release(ctx context.Context, root, commit {{ .UUIDGoType }}, version int64) (*types.{{ .ReleaseType }}, error) {
+	var result *types.{{ .ReleaseType }}
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		release, err := e.Release(ctx, actor, uuidText(root), uuidText(commit), version)
 		if err != nil {
 			return err
 		}
-		if tree, err = g.engine.order(tree); err != nil {
+		result, err = g.release(ctx, tx, release.ID)
+		return err
+	})
+	return result, err
+}
+
+// Released reads root's release pointer and the tree of the commit it
+// names: the released content. A root never released is ErrNotFound.
+func (g *{{ .Name }}Graph) Released(ctx context.Context, root {{ .UUIDGoType }}) (*{{ .Name }}Released, error) {
+	var result *{{ .Name }}Released
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, _ string) error {
+		released, err := e.Released(ctx, uuidText(root))
+		if err != nil {
 			return err
 		}
-		result, err = g.tree(tree, nil)
+		result = &{{ .Name }}Released{}
+		if result.Tree, err = g.tree(&released.TreeResult); err != nil {
+			return err
+		}
+		result.Release, err = g.release(ctx, tx, released.Release.ID)
+		return err
+	})
+	return result, err
+}
+
+// Materialize reads a commit's tree: the nearest snapshot on its chain with
+// each later commit's patches laid over it, the nearest winning and a DELETE
+// removing the entity.
+func (g *{{ .Name }}Graph) Materialize(ctx context.Context, commit {{ .UUIDGoType }}) (*{{ .Name }}Tree, error) {
+	var result *{{ .Name }}Tree
+	err := g.run(ctx, func(_ pgx.Tx, e *engine.Engine, _ string) error {
+		tree, err := e.Materialize(ctx, uuidText(commit))
+		if err != nil {
+			return err
+		}
+		result, err = g.tree(tree)
 		return err
 	})
 	return result, err
@@ -412,16 +377,12 @@ func (g *{{ .Name }}Graph) Materialize(ctx context.Context, commit {{ .UUIDGoTyp
 // rows laid over it.
 func (g *{{ .Name }}Graph) Compose(ctx context.Context, ref {{ .UUIDGoType }}) (*{{ .Name }}Tree, error) {
 	var result *{{ .Name }}Tree
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		r, err := g.engine.readRef(ctx, tx, uuidText(ref), nil, false)
+	err := g.run(ctx, func(_ pgx.Tx, e *engine.Engine, _ string) error {
+		tree, err := e.Compose(ctx, uuidText(ref))
 		if err != nil {
 			return err
 		}
-		tree, findings, _, err := g.engine.compose(ctx, tx, r)
-		if err != nil {
-			return err
-		}
-		result, err = g.tree(tree, findings)
+		result, err = g.tree(tree)
 		return err
 	})
 	return result, err
@@ -430,21 +391,13 @@ func (g *{{ .Name }}Graph) Compose(ctx context.Context, ref {{ .UUIDGoType }}) (
 // Diff lists the entities the trees of two commits differ on.
 func (g *{{ .Name }}Graph) Diff(ctx context.Context, from, to {{ .UUIDGoType }}) ([]{{ .Name }}Change, error) {
 	var result []{{ .Name }}Change
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		fromTree, err := g.engine.materialize(ctx, tx, uuidText(from))
-		if err != nil {
-			return err
-		}
-		toTree, err := g.engine.materialize(ctx, tx, uuidText(to))
-		if err != nil {
-			return err
-		}
-		changes, err := g.engine.diff(fromTree, toTree)
+	err := g.run(ctx, func(_ pgx.Tx, e *engine.Engine, _ string) error {
+		changes, err := e.Diff(ctx, uuidText(from), uuidText(to))
 		if err != nil {
 			return err
 		}
 		for _, change := range changes {
-			key, err := parseUUIDText(change.EntityKey)
+			key, err := parseGraphID(change.EntityKey)
 			if err != nil {
 				return err
 			}
@@ -463,17 +416,13 @@ func (g *{{ .Name }}Graph) Diff(ctx context.Context, from, to {{ .UUIDGoType }})
 // History lists the commits a ref wrote, newest first.
 func (g *{{ .Name }}Graph) History(ctx context.Context, ref {{ .UUIDGoType }}) ([]*types.{{ .CommitType }}, error) {
 	var result []*types.{{ .CommitType }}
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		r, err := g.engine.readRef(ctx, tx, uuidText(ref), nil, false)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, _ string) error {
+		commits, err := e.History(ctx, uuidText(ref))
 		if err != nil {
 			return err
 		}
-		ids, err := g.engine.refCommits(ctx, tx, r)
-		if err != nil {
-			return err
-		}
-		for _, id := range ids {
-			commit, err := g.commitRow(ctx, tx, id)
+		for _, c := range commits {
+			commit, err := g.commitRow(ctx, tx, c.ID)
 			if err != nil {
 				return err
 			}
@@ -486,48 +435,122 @@ func (g *{{ .Name }}Graph) History(ctx context.Context, ref {{ .UUIDGoType }}) (
 
 // Discard soft-deletes a ref at version, which frees its name.
 func (g *{{ .Name }}Graph) Discard(ctx context.Context, ref {{ .UUIDGoType }}, version int64) error {
-	return runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		if _, err := g.engine.readRef(ctx, tx, uuidText(ref), &version, false); err != nil {
-			return err
-		}
-		return (&{{ .RefType }}Repository{tx: tx, txDB: g.db}).DeleteOneIfVersion(ctx, ref, version)
+	return g.run(ctx, func(_ pgx.Tx, e *engine.Engine, actor string) error {
+		return e.Discard(ctx, actor, uuidText(ref), version)
+	})
+}
+
+// Sweep runs one maintenance pass of the graph in a transaction of its own,
+// as opts.Actor, under the graph's sweep lock; while another pass holds the
+// lock it does nothing and reports Skipped. It discards change sets idle
+// past opts.AbandonAfter, deletes the member rows of refs discarded longer
+// ago than opts.DiscardGrace, prunes each kind's history past its retention
+// while keeping every pinned row version, and writes missing snapshots.
+// Nothing calls it unless a service does.
+func (g *{{ .Name }}Graph) Sweep(ctx context.Context, opts GraphSweepOptions) (*GraphSweepReport, error) {
+	var report *GraphSweepReport
+	err := sweepGraph(g.db, {{ lowerFirst .Name }}GraphRuntime, g.walkCeiling, func(e *engine.Engine) error {
+		var err error
+		report, err = e.Sweep(ctx, opts.engine())
+		return err
+	})
+	return report, err
+}
+
+// RunSweeper runs a Sweep pass now and then once every interval until ctx
+// is done, and returns ctx's error. One replica sweeps at a time: a pass
+// that finds the sweep lock held is skipped. onPass, when not nil, receives
+// each pass's report or error; an error does not stop the sweeper.
+func (g *{{ .Name }}Graph) RunSweeper(ctx context.Context, interval time.Duration, opts GraphSweepOptions, onPass func(*GraphSweepReport, error)) error {
+	return sweepGraph(g.db, {{ lowerFirst .Name }}GraphRuntime, g.walkCeiling, func(e *engine.Engine) error {
+		return e.RunSweeper(ctx, interval, opts.engine(), func(report *GraphSweepReport, err error) {
+			if onPass != nil {
+				onPass(report, graphError(err))
+			}
+		})
 	})
 }
 
 func (g *{{ .Name }}Graph) ref(ctx context.Context, tx pgx.Tx, id string) (*types.{{ .RefType }}, error) {
-	refID, err := parseUUIDText(id)
+	refID, err := parseGraphID(id)
 	if err != nil {
 		return nil, err
 	}
 	return (&{{ .RefType }}Repository{tx: tx, txDB: g.db}).GetOne(ctx, refID, nil)
 }
 
+func (g *{{ .Name }}Graph) release(ctx context.Context, tx pgx.Tx, id string) (*types.{{ .ReleaseType }}, error) {
+	releaseID, err := parseGraphID(id)
+	if err != nil {
+		return nil, err
+	}
+	return (&{{ .ReleaseType }}Repository{tx: tx, txDB: g.db}).GetOne(ctx, releaseID, nil)
+}
+
 func (g *{{ .Name }}Graph) commitRow(ctx context.Context, tx pgx.Tx, id string) (*types.{{ .CommitType }}, error) {
-	commitID, err := parseUUIDText(id)
+	commitID, err := parseGraphID(id)
 	if err != nil {
 		return nil, err
 	}
 	return (&{{ .CommitType }}Repository{tx: tx, txDB: g.db}).GetOne(ctx, commitID, nil)
 }
 
-// commitResult reads a ref and, unless commit is "", a commit.
-func (g *{{ .Name }}Graph) commitResult(ctx context.Context, tx pgx.Tx, ref, commit string, refOut **types.{{ .RefType }}, commitOut **types.{{ .CommitType }}) error {
+// commitResult reads the typed ref and, unless none was written, the typed
+// commit of an engine result, in the operation's transaction.
+func (g *{{ .Name }}Graph) commitResult(ctx context.Context, tx pgx.Tx, result *engine.CommitResult, refOut **types.{{ .RefType }}, commitOut **types.{{ .CommitType }}) error {
 	var err error
-	if *refOut, err = g.ref(ctx, tx, ref); err != nil {
+	if *refOut, err = g.ref(ctx, tx, result.Ref.ID); err != nil {
 		return err
 	}
-	if commit == "" {
+	if result.Commit == nil {
 		return nil
 	}
-	*commitOut, err = g.commitRow(ctx, tx, commit)
+	*commitOut, err = g.commitRow(ctx, tx, result.Commit.ID)
 	return err
 }
 
-// tree types a tree the core returned, and hashes it.
-func (g *{{ .Name }}Graph) tree(tree graphTree, findings []versiongraph.Finding) (*{{ .Name }}Tree, error) {
-	result := &{{ .Name }}Tree{Findings: findings}
+// resolutions are typed resolutions as the engine takes them.
+func (g *{{ .Name }}Graph) resolutions(resolutions []{{ .Name }}Resolution) []versiongraph.Resolution {
+	out := make([]versiongraph.Resolution, 0, len(resolutions))
+	for _, resolution := range resolutions {
+		out = append(out, versiongraph.Resolution{
+			Kind:      string(resolution.Kind),
+			EntityKey: uuidText(resolution.EntityKey),
+			Path:      resolution.Path,
+			Take:      resolution.Take,
+			Value:     resolution.Value,
+		})
+	}
+	return out
+}
+
+// mergeResult types a merge's or a rebase's result: its conflicts, its ref
+// and, unless none was written, its commit.
+func (g *{{ .Name }}Graph) mergeResult(ctx context.Context, tx pgx.Tx, merged *engine.MergeResult, out *{{ .Name }}MergeResult) error {
+	for _, conflict := range merged.Conflicts {
+		key, err := parseGraphID(conflict.EntityKey)
+		if err != nil {
+			return err
+		}
+		out.Conflicts = append(out.Conflicts, {{ .Name }}Conflict{
+			Kind:         types.{{ .Name }}EntityKind(conflict.Kind),
+			EntityKey:    key,
+			Path:         conflict.Path,
+			Base:         conflict.Base,
+			Ours:         conflict.Ours,
+			Theirs:       conflict.Theirs,
+			OursAuthor:   conflict.OursAuthor,
+			TheirsAuthor: conflict.TheirsAuthor,
+		})
+	}
+	return g.commitResult(ctx, tx, &engine.CommitResult{Ref: merged.Ref, Commit: merged.Commit}, &out.Ref, &out.Commit)
+}
+
+// tree types a tree of canonical rows the engine returned.
+func (g *{{ .Name }}Graph) tree(tree *engine.TreeResult) (*{{ .Name }}Tree, error) {
+	result := &{{ .Name }}Tree{ContentHash: tree.ContentHash, Findings: tree.Findings}
 {{- range .Kinds }}
-	for _, raw := range tree["{{ .Kind }}"] {
+	for _, raw := range tree.Tree["{{ .Kind }}"] {
 		row, err := decode{{ .TypeName }}HistoryData(raw)
 		if err != nil {
 			return nil, err
@@ -535,60 +558,55 @@ func (g *{{ .Name }}Graph) tree(tree graphTree, findings []versiongraph.Finding)
 		result.{{ .TypeName }} = append(result.{{ .TypeName }}, row)
 	}
 {{- end }}
-	hash, err := g.engine.contentHash(tree)
-	if err != nil {
-		return nil, err
-	}
-	result.ContentHash = hash
 	return result, nil
 }
 {{- range .Kinds }}
 
-// upsert{{ .TypeName }} writes input as the ref's row of its entity: an update of
-// the ref's existing row, or a new row. A new entity gets its key from the
-// database. The row's id, root, ref and deletedOnRef are the shell's.
-func (g *{{ $g.Name }}Graph) upsert{{ .TypeName }}(ctx context.Context, tx pgx.Tx, ref graphRef, input *types.{{ .TypeName }}) (*types.{{ .TypeName }}, error) {
-	if input == nil {
+// {{ lowerFirst $g.Name }}{{ .TypeName }}Edits adds the typed {{ .Kind }} edits of a Save to
+// its canonical edits.
+func {{ lowerFirst $g.Name }}{{ .TypeName }}Edits(out engine.Edits, edits GraphEdits[types.{{ .TypeName }}]) error {
+	if len(edits.Upsert) == 0 && len(edits.Delete) == 0 && len(edits.Unset) == 0 {
+		return nil
+	}
+	var kind engine.KindEdits
+	for _, input := range edits.Upsert {
+		row, err := {{ lowerFirst $g.Name }}{{ .TypeName }}Row(input)
+		if err != nil {
+			return err
+		}
+		kind.Upsert = append(kind.Upsert, row)
+	}
+	for _, key := range edits.Delete {
+		kind.Delete = append(kind.Delete, uuidText(key))
+	}
+	for _, key := range edits.Unset {
+		kind.Unset = append(kind.Unset, uuidText(key))
+	}
+	out["{{ .Kind }}"] = kind
+	return nil
+}
+
+// {{ lowerFirst $g.Name }}{{ .TypeName }}Row is the canonical row of a typed {{ .Kind }},
+// whose every column holds the schema runtime's JSON of its field. The
+// engine writes the id, root, ref, tombstone, version and audit columns,
+// and a nil EntityKey makes a new entity.
+func {{ lowerFirst $g.Name }}{{ .TypeName }}Row(v *types.{{ .TypeName }}) (json.RawMessage, error) {
+	if v == nil {
 		return nil, fmt.Errorf("version graph: a nil {{ .Kind }} upsert")
 	}
-	rootID, err := parseUUIDText(ref.root)
-	if err != nil {
-		return nil, err
+	values := map[string]any{}
+{{- range .Columns }}
+{{- if .Guard }}
+	values["{{ .Column }}"] = nil
+	if {{ .Guard }} != nil {
+		values["{{ .Column }}"] = graphOptional({{ .Value }})
 	}
-	refID, err := parseUUIDText(ref.id)
-	if err != nil {
-		return nil, err
-	}
-	row := *input
-{{- if .KeyPointer }}
-	row.{{ .KeyGoName }} = nil
+{{- else if .Optional }}
+	values["{{ .Column }}"] = graphOptional({{ .Value }})
 {{- else }}
-	// Every ref holds its own row of an entity, so the caller's id is
-	// ignored: a zero key leaves the id to the table's default.
-	row.{{ .KeyGoName }} = types.{{ .TypeName }}{}.{{ .KeyGoName }}
+	values["{{ .Column }}"] = {{ .Value }}
 {{- end }}
-	row.{{ .RootGoName }} = {{ if .RootPointer }}&{{ end }}{{ .RootGoType }}{ {{- .RootKeyGoName }}: {{ if .RootKeyPointer }}&{{ end }}rootID}
-	row.{{ .RefGoName }} = types.{{ $g.RefType }}{ {{- if .RefKeyPointer }}Id: &refID{{ else }}Id: refID{{ end }}}
-	// deleted_on_ref has no SQL DEFAULT: the shell always writes it.
-	row.DeletedOnRef = false
-	repository := &{{ .TypeName }}Repository{tx: tx, txDB: g.db}
-	if row.EntityKey != nil {
-		kind, err := g.engine.spec.kind("{{ .Kind }}")
-		if err != nil {
-			return nil, err
-		}
-		id, err := g.engine.slot(ctx, tx, kind, ref.id, uuidText(*row.EntityKey))
-		if err != nil {
-			return nil, err
-		}
-		if id != "" {
-			rowID, err := parseUUIDText(id)
-			if err != nil {
-				return nil, err
-			}
-			return repository.UpdateOne(ctx, rowID, New{{ .TypeName }}SnapshotUpdate(&row))
-		}
-	}
-	return repository.CreateOne(ctx, &row)
+{{- end }}
+	return {{ lowerFirst $g.Name }}GraphRuntime.row("{{ .Kind }}", values)
 }
 {{- end }}

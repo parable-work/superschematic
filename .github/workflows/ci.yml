@@ -544,7 +544,8 @@ jobs:
 
       - name: Start Postgres
         # Package canonical checks its vectors' Postgres renderings against
-        # it; the test skips without SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL.
+        # it, and the scenarios and the Postgres adapter's tests run on it;
+        # each skips without SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL.
         run: |
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
@@ -557,7 +558,7 @@ jobs:
           docker logs superschematic-pg
           exit 1
 
-      - name: Go binding (build / vet / test over the static archive)
+      - name: Go binding, engine and Postgres adapter (build / vet / test over the static archive)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
@@ -566,6 +567,14 @@ jobs:
           export CGO_LDFLAGS="$(scripts/versiongraph-archive.sh)"
           cd runtime/versiongraph/go
           go build ./... && go vet ./... && go test -count=1 ./...
+
+      - name: Scenarios (every scenario through the Go engine and the Postgres adapter)
+        # Fails, rather than skips, without the database.
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          CGO_ENABLED: "1"
+          SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+        run: make versiongraph-scenarios
 
       - name: golangci-lint (runtime/versiongraph/go)
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0

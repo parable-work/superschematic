@@ -268,6 +268,9 @@ func versionGraphArgs(cfg *ir.VersionGraphConfig) string {
 	if cfg.SchemaEpoch != 0 {
 		parts = append(parts, fmt.Sprintf("schemaEpoch: %d", cfg.SchemaEpoch))
 	}
+	if cfg.SnapshotEvery != nil {
+		parts = append(parts, fmt.Sprintf("snapshotEvery: %d", *cfg.SnapshotEvery))
+	}
 	if len(parts) == 0 {
 		return ""
 	}

@@ -15,6 +15,8 @@ const input: TreeInput = {
     refTable: "recipe_ref",
     commitTable: "recipe_commit",
     patchTable: "recipe_patch",
+    releaseTable: "recipe_release",
+    snapshotTable: "recipe_snapshot_entry",
     kinds: [
       {
         kind: "step",

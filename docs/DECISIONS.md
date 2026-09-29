@@ -1382,10 +1382,58 @@ the scalar core's base62; a date-time's is UTC with `Z`, since a
 Postgres renders a `time`, to which the scalar's `HH:MM` and 12-hour forms
 normalize. The date-time and time rules depart from the table above, which
 calls each value the JSON the schema runtime writes: that JSON keeps the
-offset and the form the value was written in. The generated shell still
-hands the core `to_jsonb` rows. The adapter interface and the Go engine
-come next, with the scenario suite. The release pointer, merge-only
-primary lines, `Rebase`, snapshots and the sweep follow in the Go engine.
+offset and the form the value was written in. The Go engine, its storage
+interface and its Postgres adapter are built too, in packages `engine`,
+`storage` and `postgres` of the Go module: the engine implements today's
+operations once over the interface, and the adapter builds its statements
+from the descriptor, reaches Postgres through a small client interface
+with a pgx binding, and returns canonical rows through package
+`canonical`. The generated shell is now a typed facade over the engine,
+and the shared `versiongraph.go` is gone: the facades' shared declarations
+live in `database.go`, and the named errors are the engine's. The scenario
+suite is in `runtime/versiongraph/testdata/scenarios`, over the fixture in
+`runtime/versiongraph/testdata/fixture` (the compiler's output for
+`fixture-version-graph-db`, which a compiler test keeps current), and CI
+runs every scenario through the Go engine against Postgres
+(`make versiongraph-scenarios`). Five rules settled as they were built:
+each descriptor kind names its `root` column, which the core does not read
+and the adapter needs to write it; an engine's errors have stable codes
+every language shares (`engine.ErrorCode`), with a merge into itself and a
+taken ref name named too; the adapter writes a `json` or list-of-lists
+value as the member itself, so a JSON `null` is stored as JSON rather than
+SQL `NULL`; `Prune` calls a kind's prune function and prunes nothing for a
+kind without `retentionDays`; and the sweep lock is a transaction-scoped
+advisory lock keyed by the graph's ref table. A typed value read back
+through the facade has its canonical form: an instant in UTC, a time of day
+as `HH:MM:SS`. The release pointer, merge-only primary lines, `Rebase`,
+snapshots and the sweep are built in the declarations and the Go engine:
+`@versionGraph({ snapshotEvery })` (default 64, positive), the generated
+`<Name>Release` and `<Name>SnapshotEntry` tables, which the descriptor names
+as `releaseTable` and `snapshotTable`, a second prune pin on every member,
+the engine's `Rebase`, `Release`, `Released`, `Sweep` and `RunSweeper`,
+`Merge`'s message and tag, the facade's typed methods for each, and a
+scenario for every operation and error. Eleven rules settled as they were
+built: `Commit` on a primary line is refused with `ErrPrimaryMergeOnly`
+too, since it is a write; a root's first `Release` passes version 0, and
+`Released` before any release is `not_found`; `Rebase` of a primary line is
+`no_parent`, of a change set already on its parent's head moves only its
+version, and of one with no commit commits with the new base as parent;
+`Rebase` keeps as rows only the entities that differ from the new base and
+removes the rest, which read through; a commit's distance from the nearest
+snapshot counts from before its chain's first commit, so with an interval
+of n the n-th commit of a chain is snapshotted; a commit whose tree is empty
+has no entries to store and reads as having no snapshot, which only makes a
+read walk further; the snapshot interval is, like the schema epoch, an
+engine option and a facade constant rather than a descriptor member;
+verification, not the data form's JSON Schema, rejects a `snapshotEvery`
+that is not positive, since that schema's subset has no numeric bounds; a
+sweep runs in one transaction, keeps discarded refs' rows for seven days
+unless told otherwise, reads a change set's last write from its
+`updatedAt` and leaves one written after it read it, may discard sealed
+change sets as abandoned but never a primary line, and reports nonzero
+counts only; pruning uses each kind's declared
+retention; and the facade's sweep writes as `GraphSweepOptions.Actor`, not
+the context user.
 The TypeScript, Rust and Python engines and facades follow and must pass
 the same scenarios. Each change that lands a piece updates this paragraph.
 

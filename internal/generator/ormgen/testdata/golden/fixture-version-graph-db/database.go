@@ -4,12 +4,20 @@ package orm
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
+	"sync"
+	"time"
 
 	types "example.com/schemas/types/go/fixture-version-graph-db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/parable-work/superschematic/runtime/versiongraph/go/canonical"
+	"github.com/parable-work/superschematic/runtime/versiongraph/go/engine"
+	"github.com/parable-work/superschematic/runtime/versiongraph/go/postgres"
 )
 
 // contextKey is a custom type for context keys to avoid collisions
@@ -22,32 +30,36 @@ const (
 
 // Database represents the ORM database connection
 type Database struct {
-	pool         *pgxpool.Pool
-	Cover        *CoverRepository
-	Ingredient   *IngredientRepository
-	Note         *NoteRepository
-	Recipe       *RecipeRepository
-	RecipeCommit *RecipeCommitRepository
-	RecipePatch  *RecipePatchRepository
-	RecipeRef    *RecipeRefRepository
-	Step         *StepRepository
-	Tasting      *TastingRepository
-	Utensil      *UtensilRepository
+	pool                *pgxpool.Pool
+	Cover               *CoverRepository
+	Ingredient          *IngredientRepository
+	Note                *NoteRepository
+	Recipe              *RecipeRepository
+	RecipeCommit        *RecipeCommitRepository
+	RecipePatch         *RecipePatchRepository
+	RecipeRef           *RecipeRefRepository
+	RecipeRelease       *RecipeReleaseRepository
+	RecipeSnapshotEntry *RecipeSnapshotEntryRepository
+	Step                *StepRepository
+	Tasting             *TastingRepository
+	Utensil             *UtensilRepository
 }
 
 // Tx represents a database transaction with repositories
 type Tx struct {
-	tx           pgx.Tx
-	Cover        *CoverRepository
-	Ingredient   *IngredientRepository
-	Note         *NoteRepository
-	Recipe       *RecipeRepository
-	RecipeCommit *RecipeCommitRepository
-	RecipePatch  *RecipePatchRepository
-	RecipeRef    *RecipeRefRepository
-	Step         *StepRepository
-	Tasting      *TastingRepository
-	Utensil      *UtensilRepository
+	tx                  pgx.Tx
+	Cover               *CoverRepository
+	Ingredient          *IngredientRepository
+	Note                *NoteRepository
+	Recipe              *RecipeRepository
+	RecipeCommit        *RecipeCommitRepository
+	RecipePatch         *RecipePatchRepository
+	RecipeRef           *RecipeRefRepository
+	RecipeRelease       *RecipeReleaseRepository
+	RecipeSnapshotEntry *RecipeSnapshotEntryRepository
+	Step                *StepRepository
+	Tasting             *TastingRepository
+	Utensil             *UtensilRepository
 }
 
 // Config holds database configuration
@@ -83,6 +95,8 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 	db.RecipeCommit = &RecipeCommitRepository{db: db}
 	db.RecipePatch = &RecipePatchRepository{db: db}
 	db.RecipeRef = &RecipeRefRepository{db: db}
+	db.RecipeRelease = &RecipeReleaseRepository{db: db}
+	db.RecipeSnapshotEntry = &RecipeSnapshotEntryRepository{db: db}
 	db.Step = &StepRepository{db: db}
 	db.Tasting = &TastingRepository{db: db}
 	db.Utensil = &UtensilRepository{db: db}
@@ -112,6 +126,8 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 	db.RecipeCommit = &RecipeCommitRepository{db: db}
 	db.RecipePatch = &RecipePatchRepository{db: db}
 	db.RecipeRef = &RecipeRefRepository{db: db}
+	db.RecipeRelease = &RecipeReleaseRepository{db: db}
+	db.RecipeSnapshotEntry = &RecipeSnapshotEntryRepository{db: db}
 	db.Step = &StepRepository{db: db}
 	db.Tasting = &TastingRepository{db: db}
 	db.Utensil = &UtensilRepository{db: db}
@@ -157,6 +173,16 @@ func (db *Database) GetRecipePatchRepository() RecipePatchRepositoryInterface {
 // GetRecipeRefRepository returns the RecipeRef repository interface.
 func (db *Database) GetRecipeRefRepository() RecipeRefRepositoryInterface {
 	return db.RecipeRef
+}
+
+// GetRecipeReleaseRepository returns the RecipeRelease repository interface.
+func (db *Database) GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface {
+	return db.RecipeRelease
+}
+
+// GetRecipeSnapshotEntryRepository returns the RecipeSnapshotEntry repository interface.
+func (db *Database) GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRepositoryInterface {
+	return db.RecipeSnapshotEntry
 }
 
 // GetStepRepository returns the Step repository interface.
@@ -209,6 +235,16 @@ func (tx *Tx) GetRecipeRefRepository() RecipeRefRepositoryInterface {
 	return tx.RecipeRef
 }
 
+// GetRecipeReleaseRepository returns the RecipeRelease transaction repository interface.
+func (tx *Tx) GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface {
+	return tx.RecipeRelease
+}
+
+// GetRecipeSnapshotEntryRepository returns the RecipeSnapshotEntry transaction repository interface.
+func (tx *Tx) GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRepositoryInterface {
+	return tx.RecipeSnapshotEntry
+}
+
 // GetStepRepository returns the Step transaction repository interface.
 func (tx *Tx) GetStepRepository() StepRepositoryInterface {
 	return tx.Step
@@ -241,6 +277,8 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	txWrapper.RecipeCommit = &RecipeCommitRepository{tx: tx, txDB: db}
 	txWrapper.RecipePatch = &RecipePatchRepository{tx: tx, txDB: db}
 	txWrapper.RecipeRef = &RecipeRefRepository{tx: tx, txDB: db}
+	txWrapper.RecipeRelease = &RecipeReleaseRepository{tx: tx, txDB: db}
+	txWrapper.RecipeSnapshotEntry = &RecipeSnapshotEntryRepository{tx: tx, txDB: db}
 	txWrapper.Step = &StepRepository{tx: tx, txDB: db}
 	txWrapper.Tasting = &TastingRepository{tx: tx, txDB: db}
 	txWrapper.Utensil = &UtensilRepository{tx: tx, txDB: db}
@@ -352,3 +390,244 @@ var (
 	// holds for callers written before the two were told apart.
 	ErrVersionConflict = fmt.Errorf("%w at the expected version", ErrNotFound)
 )
+
+// The version-graph facades (versiongraph_<name>.go) run each graph's
+// operations on the version-graph engine (github.com/parable-work/superschematic/runtime/versiongraph/go/engine)
+// over its Postgres adapter, in a transaction of the ORM's pool, with the
+// context user as the actor.
+
+// DefaultWalkCeiling is how many commits Materialize reads, walking a
+// commit's parents, before it stops with ErrWalkCeiling.
+const DefaultWalkCeiling = engine.DefaultWalkCeiling
+
+// The version-graph engine's named errors. A write through a stale ref
+// version returns ErrVersionConflict, and a ref or commit that does not
+// exist, or a discarded ref, ErrNotFound: the ORM's own errors, which the
+// engine's errors of those names are wrapped with.
+var (
+	// ErrRefSealed is returned by a write through a sealed ref.
+	ErrRefSealed = engine.ErrRefSealed
+	// ErrNothingToCommit is returned by Commit when the ref composes to the
+	// tree of its last commit (or of its base).
+	ErrNothingToCommit = engine.ErrNothingToCommit
+	// ErrWalkCeiling is returned when reading a commit's tree would walk
+	// more parent commits than the graph's walk ceiling.
+	ErrWalkCeiling = engine.ErrWalkCeiling
+	// ErrSchemaEpoch is returned when a commit was written at a newer schema
+	// epoch than the graph this binary was generated from.
+	ErrSchemaEpoch = engine.ErrSchemaEpoch
+	// ErrEntityNotFound is returned by an edit that deletes an entity the
+	// ref does not hold, or unsets an override the ref does not have.
+	ErrEntityNotFound = engine.ErrEntityNotFound
+	// ErrHistoryMissing is returned when a row version a commit names is no
+	// longer in its table's history.
+	ErrHistoryMissing = engine.ErrHistoryMissing
+	// ErrInvalidTree is returned by a commit whose tree breaks the graph's
+	// rules; the error is an *InvalidTreeError that lists them.
+	ErrInvalidTree = engine.ErrInvalidTree
+	// ErrRootMismatch is returned when two refs, or a ref and a commit, of
+	// one operation belong to different roots.
+	ErrRootMismatch = engine.ErrRootMismatch
+	// ErrMergeIntoItself is returned by a merge whose source is its target.
+	ErrMergeIntoItself = engine.ErrMergeIntoItself
+	// ErrNameTaken is returned when the root already has a live ref of the
+	// name.
+	ErrNameTaken = engine.ErrNameTaken
+	// ErrNoActor is returned by a sweep with no actor to write as.
+	ErrNoActor = engine.ErrNoActor
+	// ErrPrimaryMergeOnly is returned by a Save, Commit, Seal or Revert on
+	// a primary line, which takes writes only from Merge.
+	ErrPrimaryMergeOnly = engine.ErrPrimaryMergeOnly
+	// ErrNotTagged is returned by a Release of a commit that is not tagged.
+	ErrNotTagged = engine.ErrNotTagged
+	// ErrNoParent is returned by a Rebase of a primary line, which has no
+	// parent to rebase onto.
+	ErrNoParent = engine.ErrNoParent
+)
+
+// DefaultDiscardGrace is how long after a ref is discarded a sweep keeps
+// its member rows, unless GraphSweepOptions.DiscardGrace says otherwise.
+const DefaultDiscardGrace = engine.DefaultDiscardGrace
+
+// GraphSweepOptions configure a graph's maintenance pass (Sweep and
+// RunSweeper). Actor is who the pass writes as. DiscardGrace is how long
+// after a ref is discarded its member rows are kept (0 is
+// DefaultDiscardGrace); a positive AbandonAfter discards every change set
+// with no write for that long; PruneBatch caps how many history images of
+// each kind a pass prunes (0 is no cap).
+type GraphSweepOptions struct {
+	Actor        types.IdentityUUID
+	DiscardGrace time.Duration
+	AbandonAfter time.Duration
+	PruneBatch   int
+}
+
+func (o GraphSweepOptions) engine() engine.SweepOptions {
+	opts := engine.SweepOptions{DiscardGrace: o.DiscardGrace, AbandonAfter: o.AbandonAfter, PruneBatch: o.PruneBatch}
+	if !reflect.ValueOf(o.Actor).IsZero() {
+		opts.Actor = uuidText(o.Actor)
+	}
+	return opts
+}
+
+// GraphSweepReport is what one maintenance pass did.
+type GraphSweepReport = engine.SweepReport
+
+// InvalidTreeError lists what the core's validate found wrong with a tree.
+// It wraps ErrInvalidTree.
+type InvalidTreeError = engine.InvalidTreeError
+
+// GraphEdits are one kind's edits of a ref, applied by a graph's Save:
+// every kind's upserts, then its deletes, then its unsets. Upsert writes
+// each row as the ref's override of its entity, found by EntityKey; a row
+// without one is a new entity, whose key the database generates. Delete
+// writes a row that deletes each entity on the ref. Unset removes the ref's
+// own row of each entity, so the ref reads the entity through its base
+// again.
+type GraphEdits[T any] struct {
+	Upsert []*T
+	Delete []types.IdentityUUID
+	Unset  []types.IdentityUUID
+}
+
+// graphRuntime is one graph's engine and Postgres adapter, built once from
+// its descriptor, and each kind's column classes.
+type graphRuntime struct {
+	descriptor    string
+	schemaEpoch   int64
+	snapshotEvery int64
+
+	once    sync.Once
+	adapter *postgres.Adapter
+	engine  *engine.Engine
+	columns map[string]map[string]string
+	err     error
+}
+
+func (r *graphRuntime) load() error {
+	r.once.Do(func() {
+		descriptor := json.RawMessage(r.descriptor)
+		if r.adapter, r.err = postgres.New(descriptor, postgres.Options{HistoryActorSetting: "superschematic.history_actor_id"}); r.err != nil {
+			return
+		}
+		if r.engine, r.err = engine.New(descriptor, nil, engine.Options{SchemaEpoch: r.schemaEpoch, SnapshotEvery: int(r.snapshotEvery)}); r.err != nil {
+			return
+		}
+		var d struct {
+			Kinds []struct {
+				Kind    string            `json:"kind"`
+				Columns map[string]string `json:"columns"`
+			} `json:"kinds"`
+		}
+		if r.err = json.Unmarshal(descriptor, &d); r.err != nil {
+			return
+		}
+		r.columns = make(map[string]map[string]string, len(d.Kinds))
+		for _, kind := range d.Kinds {
+			r.columns[kind.Kind] = kind.Columns
+		}
+	})
+	return r.err
+}
+
+// row is the canonical row of one kind's values, each the schema
+// runtime's JSON of a typed value's field, keyed by column.
+func (r *graphRuntime) row(kind string, values map[string]any) (json.RawMessage, error) {
+	raw, err := json.Marshal(values)
+	if err != nil {
+		return nil, fmt.Errorf("version graph: encode a %s row: %w", kind, err)
+	}
+	// The engine's contract is canonical rows, so this stays though the adapter normalizes on write.
+	row, err := canonical.Row(r.columns[kind], raw)
+	if err != nil {
+		return nil, fmt.Errorf("version graph: a %s row: %w", kind, err)
+	}
+	return row, nil
+}
+
+// runGraph runs fn in one transaction with a user in the context: the
+// graph's engine is bound to the transaction, at walkCeiling, and the user
+// is its actor.
+func runGraph(ctx context.Context, db *Database, runtime *graphRuntime, walkCeiling int, fn func(tx pgx.Tx, e *engine.Engine, actor string) error) error {
+	if !HasUserID(ctx) {
+		return ErrNoUserInContext
+	}
+	if err := runtime.load(); err != nil {
+		return err
+	}
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback(ctx)
+			panic(p)
+		}
+	}()
+	e := runtime.engine.WithStorage(runtime.adapter.Storage(postgres.Pgx(tx))).WithWalkCeiling(walkCeiling)
+	if err := fn(tx, e, uuidText(GetUserID(ctx))); err != nil {
+		if rbErr := tx.Rollback(ctx); rbErr != nil {
+			return fmt.Errorf("failed to rollback transaction: %w (original error: %v)", rbErr, err)
+		}
+		return graphError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	return nil
+}
+
+// sweepGraph runs fn with the graph's engine over the ORM's pool, at
+// walkCeiling, in a transaction of its own per pass. A sweep writes as its
+// configured actor rather than the context user.
+func sweepGraph(db *Database, runtime *graphRuntime, walkCeiling int, fn func(e *engine.Engine) error) error {
+	if err := runtime.load(); err != nil {
+		return err
+	}
+	e := runtime.engine.WithStorage(runtime.adapter.Storage(postgres.Pgx(db.pool))).WithWalkCeiling(walkCeiling)
+	return graphError(fn(e))
+}
+
+// graphError wraps the engine's ErrVersionConflict and ErrNotFound with the
+// ORM's errors of those names, so errors.Is holds for either.
+func graphError(err error) error {
+	switch {
+	case errors.Is(err, engine.ErrVersionConflict):
+		return &ormGraphError{err: err, orm: ErrVersionConflict}
+	case errors.Is(err, engine.ErrNotFound):
+		return &ormGraphError{err: err, orm: ErrNotFound}
+	}
+	return err
+}
+
+type ormGraphError struct {
+	err error
+	orm error
+}
+
+func (e *ormGraphError) Error() string   { return e.err.Error() }
+func (e *ormGraphError) Unwrap() []error { return []error{e.err, e.orm} }
+
+// uuidText renders a UUID for the engine, which reads it in any form.
+func uuidText(id types.IdentityUUID) string {
+	return id.ToUUID().String()
+}
+
+// parseGraphID reads a UUID the engine returned in its canonical form.
+func parseGraphID(text string) (types.IdentityUUID, error) {
+	var id types.IdentityUUID
+	if err := json.Unmarshal([]byte(`"`+text+`"`), &id); err != nil {
+		return id, fmt.Errorf("version graph: parse UUID %q: %w", text, err)
+	}
+	return id, nil
+}
+
+// graphOptional is value, or nil when it is zero: an optional field left
+// unset, which a canonical row holds as null.
+func graphOptional(value any) any {
+	if value == nil || reflect.ValueOf(value).IsZero() {
+		return nil
+	}
+	return value
+}

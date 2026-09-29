@@ -13,7 +13,7 @@ import {
 } from "@superschematic/db";
 
 // A recipe: the stable identity its steps and ingredients are versioned under.
-@versionGraph({ schemaEpoch: 1 })
+@versionGraph({ schemaEpoch: 1, snapshotEvery: 3 })
 export abstract class Recipe {
   @key
   id: AutoGenerate<Identity.UUID>;

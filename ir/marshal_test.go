@@ -214,7 +214,8 @@ func TestTypeDefFlagKeyOrder(t *testing.T) {
 // Origin and DistinctNull markers survive a JSON and a YAML round trip, and a type, field,
 // index or enum without them marshals exactly as before they existed.
 func TestVersionGraphIRRoundTrip(t *testing.T) {
-	root := &TypeDef{Name: "Recipe", Role: RoleDBTable, VersionGraph: &VersionGraphConfig{Name: "Cookbook", SchemaEpoch: 2}}
+	snapshotEvery := int64(8)
+	root := &TypeDef{Name: "Recipe", Role: RoleDBTable, VersionGraph: &VersionGraphConfig{Name: "Cookbook", SchemaEpoch: 2, SnapshotEvery: &snapshotEvery}}
 	member := &TypeDef{
 		Name: "Step", Role: RoleDBTable, Versioned: true,
 		GraphMember: &GraphMemberConfig{Graph: "Recipe", Parent: &GraphParent{Key: "parentKey", Of: "Step"}, Order: "position", Singleton: true},
@@ -252,6 +253,9 @@ func TestVersionGraphIRRoundTrip(t *testing.T) {
 	}
 	if root.VersionGraphName() != "Cookbook" || (&TypeDef{Name: "Menu", VersionGraph: &VersionGraphConfig{}}).VersionGraphName() != "Menu" || member.VersionGraphName() != "" {
 		t.Error("VersionGraphName must be the declared name, else the root's name, and empty off a root")
+	}
+	if root.VersionGraph.SnapshotInterval() != 8 || (&VersionGraphConfig{}).SnapshotInterval() != DefaultSnapshotEvery {
+		t.Error("SnapshotInterval must be the declared snapshotEvery, else DefaultSnapshotEvery")
 	}
 
 	for _, v := range []any{

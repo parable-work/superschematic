@@ -1,0 +1,44 @@
+{
+  "name": "canonical_rows",
+  "description": "A tasting holds a value of every class a descriptor names. It reads back, live and from history, as the canonical row it was written as, and a row written in the schema runtime's other forms reads back canonical too.",
+  "steps": [
+    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "branch", "from": "main", "name": "tastings", "as": "d"},
+    {"op": "save", "ref": "d", "edits": {"tasting": {"upsert": [
+      {"entity_key": "First", "taster": "Ann", "salty": true, "score": 4.5, "servings": 9007199254740993,
+        "tasted_on": "2026-09-01", "tasted_at": "2026-09-01T10:00:00.12Z", "served_at": "18:30:00",
+        "rested": "1h30m0s", "verdict": "again", "remarks": {"crumb": "open", "crust": [1, 2.50]},
+        "tags": ["sour", "a \"quoted\" tag"], "helpers": ["Bob", "Cy"], "bites": [[1, 2], [3]]}
+    ]}}, "expect": {"saved": {"tasting": [
+      {"entity_key": "First", "taster": "Ann", "salty": true, "score": 4.5, "servings": 9007199254740993,
+        "tasted_on": "2026-09-01", "tasted_at": "2026-09-01T10:00:00.12Z", "served_at": "18:30:00",
+        "rested": "1h30m0s", "verdict": "again", "remarks": {"crumb": "open", "crust": [1, 2.5]},
+        "tags": ["sour", "a \"quoted\" tag"], "helpers": ["Bob", "Cy"], "bites": [[1, 2], [3]],
+        "recipe_id": "Bread", "deleted_on_ref": false, "_version": 1}
+    ]}}},
+    {"op": "commit", "ref": "d", "as": "c1", "expect": {"commit": {"contentHash": "69112bb04ed68f46dac73457f4d479d382ae625d5e8aeb592f1dcd6fb27dd08d"}}},
+    {"op": "materialize", "commit": "c1", "expect": {"contentHash": "69112bb04ed68f46dac73457f4d479d382ae625d5e8aeb592f1dcd6fb27dd08d", "tree": {"tasting": [
+      {"entity_key": "First", "taster": "Ann", "salty": true, "score": 4.5, "servings": 9007199254740993,
+        "tasted_on": "2026-09-01", "tasted_at": "2026-09-01T10:00:00.12Z", "served_at": "18:30:00",
+        "rested": "1h30m0s", "verdict": "again", "remarks": {"crumb": "open", "crust": [1, 2.5]},
+        "tags": ["sour", "a \"quoted\" tag"], "helpers": ["Bob", "Cy"], "bites": [[1, 2], [3]]}
+    ]}}},
+    {"op": "save", "ref": "d", "edits": {"tasting": {"upsert": [
+      {"entity_key": "00000000-0000-0000-0000-000000000002", "taster": "00000000-0000-0000-0000-00000000000a", "salty": false, "score": 1e21, "servings": -3,
+        "tasted_on": "2026-02-28", "tasted_at": "2026-09-01T12:30:00+02:30", "served_at": "2:30 pm",
+        "rested": "-1m30.5s", "verdict": "never", "remarks": null,
+        "tags": [], "helpers": ["00000000-0000-0000-0000-00000000003d"], "bites": []}
+    ]}}, "expect": {"saved": {"tasting": [
+      {"entity_key": "2", "taster": "A", "salty": false, "score": 1e+21, "servings": -3,
+        "tasted_on": "2026-02-28", "tasted_at": "2026-09-01T10:00:00Z", "served_at": "14:30:00",
+        "rested": "-1m30.5s", "verdict": "never", "remarks": null,
+        "tags": [], "helpers": ["z"], "bites": []}
+    ]}}},
+    {"op": "commit", "ref": "d", "as": "c2"},
+    {"op": "materialize", "commit": "c2", "expect": {"contentHashOf": "c2", "tree": {"tasting": [
+      {"entity_key": "2", "tasted_at": "2026-09-01T10:00:00Z", "served_at": "14:30:00", "rested": "-1m30.5s", "score": 1e+21, "helpers": ["z"]},
+      {"entity_key": "First"}
+    ]}}}
+  ]
+}

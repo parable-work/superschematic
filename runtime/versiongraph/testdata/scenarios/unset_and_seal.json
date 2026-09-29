@@ -1,0 +1,41 @@
+{
+  "name": "unset_and_seal",
+  "description": "A change set's override is unset, which removes its row and reads the entity through the base again; a stale version is fenced out; a seal with nothing to commit seals the ref, which then refuses writes; a seal with changes commits them.",
+  "steps": [
+    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "branch", "from": "main", "name": "mix", "as": "mix"},
+    {"op": "save", "ref": "mix", "edits": {"step": {"upsert": [
+      {"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}
+    ]}}},
+    {"op": "commit", "ref": "mix"},
+    {"op": "merge", "source": "mix", "target": "main", "as": "c1"},
+    {"op": "branch", "from": "main", "name": "by hand", "as": "c"},
+    {"op": "save", "ref": "c", "edits": {"step": {"upsert": [
+      {"entity_key": "Mix", "position": 1, "instruction": "Mix by hand", "timings": {}}
+    ]}}, "expect": {"ref": {"version": 2}}},
+    {"op": "compose", "ref": "c", "expect": {"tree": {"step": [{"entity_key": "Mix", "instruction": "Mix by hand"}]}}},
+    {"op": "save", "ref": "c", "actor": "Editor", "edits": {"step": {"unset": ["Mix"]}}, "expect": {"ref": {"version": 3}}},
+    {"op": "rows", "ref": "c", "kind": "step", "expect": {"rows": []}},
+    {"op": "compose", "ref": "c", "expect": {"contentHashOf": "c1", "tree": {"step": [{"entity_key": "Mix", "instruction": "Mix"}]}}},
+    {"op": "save", "ref": "c", "edits": {"step": {"unset": ["Mix"]}}, "expect": {"error": "entity_not_found"}},
+    {"op": "save", "ref": "c", "edits": {"step": {"delete": ["Nothing"]}}, "expect": {"error": "entity_not_found"}},
+    {"op": "save", "ref": "c", "version": 2, "edits": {}, "expect": {"error": "version_conflict"}},
+    {"op": "commit", "ref": "c", "version": 2, "expect": {"error": "version_conflict"}},
+    {"op": "seal", "ref": "c", "expect": {"ref": {"version": 4, "sealed": true, "head": null}, "commit": null}},
+    {"op": "save", "ref": "c", "edits": {}, "expect": {"error": "ref_sealed"}},
+    {"op": "commit", "ref": "c", "expect": {"error": "ref_sealed"}},
+    {"op": "seal", "ref": "c", "expect": {"error": "ref_sealed"}},
+    {"op": "revert", "ref": "c", "toCommit": "c1", "expect": {"error": "ref_sealed"}},
+    {"op": "merge", "source": "main", "target": "c", "expect": {"error": "ref_sealed"}},
+    {"op": "branch", "from": "c", "name": "after the seal", "as": "d", "expect": {"ref": {"parent": "c", "base": null}}},
+
+    {"op": "branch", "from": "main", "name": "rest", "as": "rest"},
+    {"op": "save", "ref": "rest", "edits": {"step": {"upsert": [
+      {"entity_key": "Rest", "position": 2, "instruction": "Rest", "timings": {}}
+    ]}}},
+    {"op": "seal", "ref": "rest", "as": "sealedRest", "expect": {"ref": {"sealed": true, "head": "sealedRest"}, "commit": {"parent": "c1"}}},
+    {"op": "materialize", "commit": "sealedRest", "expect": {"tree": {"step": [{"entity_key": "Mix"}, {"entity_key": "Rest"}]}}},
+    {"op": "merge", "source": "rest", "target": "main", "expect": {"commit": {"parent": "c1", "contentHashOf": "sealedRest"}}}
+  ]
+}

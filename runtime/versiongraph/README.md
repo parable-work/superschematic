@@ -10,14 +10,21 @@ play which role, so it holds no per-kind code.
 rust/               superschematic-versiongraph: the core and its C ABI (rlib, staticlib, cdylib)
 go/                 the Go binding, a module of its own (package versiongraph): cgo over the static archive
 go/canonical/       package canonical: Postgres renderings to canonical rows, plain Go
+go/storage/         package storage: the storage adapter interface the engine runs over, plain Go
+go/engine/          package engine: the Go engine, every graph operation over a storage adapter and the binding
+go/postgres/        package postgres: the Postgres storage adapter, with a pgx binding
 typescript/         @superschematic/versiongraph: the wasm32-unknown-unknown build with typed operations
 testdata/vectors/   the core's contract as vectors: {name, op, input, expect}
 testdata/canonical/ the canonical row contract as vectors: {cases} per class, {rows}
+testdata/fixture/   the scenarios' graph: fixture-version-graph-db's descriptor and Postgres DDL
+testdata/scenarios/ the engines' contract as scenarios: {name, description, steps}
 ```
 
 This page is the contract. The vectors are its executable form: the Rust
 tests, the Go binding and the TypeScript package's tests run every core
-vector, and package `canonical` runs every canonical vector. The package's
+vector, and package `canonical` runs every canonical vector. The scenarios
+are the engines' contract: the Go engine runs every one through its
+Postgres adapter. The package's
 types for this contract are `typescript/src/contract.ts`.
 
 ## Descriptor
@@ -34,6 +41,8 @@ nothing has shipped.
   "refTable": "recipe_ref",
   "commitTable": "recipe_commit",
   "patchTable": "recipe_patch",
+  "releaseTable": "recipe_release",
+  "snapshotTable": "recipe_snapshot_entry",
   "kinds": [
     {
       "kind": "step",
@@ -42,6 +51,7 @@ nothing has shipped.
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
+      "root": "recipe_id",
       "tombstone": "deleted_on_ref",
       "version": "_version",
       "author": "updated_by",
@@ -60,7 +70,7 @@ nothing has shipped.
     {
       "kind": "cover",
       "table": "cover", "historyTable": "cover_history",
-      "key": "entity_key", "id": "id", "ref": "ref_id",
+      "key": "entity_key", "id": "id", "ref": "ref_id", "root": "recipe_id",
       "tombstone": "deleted_on_ref", "version": "_version",
       "singleton": true,
       "excluded": ["recipe_id"],
@@ -76,7 +86,7 @@ nothing has shipped.
 
 The Go ORM generator builds each graph's descriptor from the IR and writes
 it twice: as the constant `<Name>GraphDescriptor` beside the generated
-shell (`versiongraph_<name>.go`) in the ORM package, and as
+facade (`versiongraph_<name>.go`) in the ORM package, and as
 `versiongraph/<name>.json` in the Go types module.
 
 | Member | Meaning |
@@ -84,12 +94,13 @@ shell (`versiongraph_<name>.go`) in the ORM package, and as
 | `version` | `2`. |
 | `graph` | Optional. The graph's name; the core does not read it. |
 | `root` | The graph root's `table` and its `key` column. |
-| `refTable`, `commitTable`, `patchTable` | The tables of the graph's refs, commits and patches. |
+| `refTable`, `commitTable`, `patchTable`, `releaseTable`, `snapshotTable` | The tables of the graph's refs, commits, patches, release pointers and snapshot entries. Each is non-empty; the core does not read them. |
 | `kinds[].kind` | The kind's name: the tree member that holds its rows. Unique. |
 | `table`, `historyTable` | The table that holds the kind's rows, and the one that holds their history images. |
 | `key` | The entity key column: the logical identity rows are matched on. Its value is a non-empty string. |
 | `id` | The row id column. |
 | `ref` | The column naming the ref the row was written on. |
+| `root` | Optional for the core, which does not read it; a storage adapter needs it. The column holding the graph root's key, which the adapter writes on every row. |
 | `tombstone` | A `boolean` column; `true` marks the row as the entity's delete. Absent or `null` is `false`. |
 | `version` | The row version column. |
 | `author` | Optional. The column naming who wrote the row; conflicts report it. |
@@ -100,7 +111,7 @@ shell (`versiongraph_<name>.go`) in the ORM package, and as
 | `excluded` | Optional. Columns that are not content: audit columns and the graph's own columns. |
 | `columns` | Every column of the kind's table, with its value class (below). Every column another member names must be here. |
 
-The role columns (`key`, `id`, `ref`, `tombstone`, `version`, `author`)
+The role columns (`key`, `id`, `ref`, `root`, `tombstone`, `version`, `author`)
 must be distinct and are never content. Every other column of a row is
 content unless it is excluded. Only content is compared, merged, diffed and
 hashed, so two rows with equal content are the same version whatever their
@@ -333,6 +344,118 @@ A refused input returns `{"error": {"code", "message"}}`. `code` is stable;
 | `unmatched_resolution` | A resolution matches no conflict of the merge. |
 | `internal` | The core panicked (a bug). |
 
+## Engine and storage
+
+An engine runs a graph's operations (D19): create a primary line, branch,
+save, commit, seal, merge, rebase, revert, release, released, materialize,
+compose, diff, history, discard and sweep. It drives the core through its
+language's binding and reaches storage only through a storage adapter,
+which holds the transaction of each operation and returns canonical rows.
+
+Every engine keeps the same rules. A primary line takes writes only from
+merge. A root's release pointer names a tagged commit and is fenced by its
+version (0 for the first release); a release writes no member rows. A
+rebase merges the parent's head into a change set against its base, keeps
+as rows only the entities that differ from the new base, moves the base
+and commits after the previous head. A commit is snapshotted when it is
+tagged, released, or `snapshotEvery` commits past the nearest snapshot on
+its chain, counted from before the chain's first commit, and a
+materialize reads the nearest snapshot's pins with the later commits'
+patches over them. A sweep takes the graph's sweep lock or reports itself
+skipped; then it discards idle change sets (when asked), deletes the
+member rows of refs discarded longer ago than the grace, prunes history
+past retention, and writes missing snapshots. The Go engine is package `engine`,
+over the interface in package `storage`; package `postgres` is its Postgres
+adapter, which builds its statements from the descriptor and needs each
+kind's `root`.
+
+Every id an engine takes or returns is a UUID in its canonical form. Each
+write takes an actor, and each write through a ref the ref's expected
+version. An engine's errors have stable codes, shared by every language:
+
+| Code | When |
+|---|---|
+| `not_found` | A ref or commit that does not exist, or a discarded ref. |
+| `version_conflict` | A write through a ref at another version than the one given. |
+| `name_taken` | A new ref whose root already has a live ref of that name. |
+| `no_actor` | A write with no actor. |
+| `ref_sealed` | A write through a sealed ref. |
+| `nothing_to_commit` | A commit of a ref that composes to its last commit's tree (or its base's). |
+| `walk_ceiling` | A commit walk past the engine's ceiling (default 4096). |
+| `schema_epoch` | A commit from a newer schema epoch than the engine's. |
+| `entity_not_found` | A delete of an entity the ref does not hold, or an unset of an override it does not have. |
+| `history_missing` | A row version a commit pins that history no longer holds. |
+| `invalid_tree` | A commit whose tree `validate` finds wrong. |
+| `root_mismatch` | Two refs, or a ref and a commit, of different roots. |
+| `merge_into_itself` | A merge whose source is its target. |
+| `primary_merge_only` | A save, commit, seal or revert on a primary line. |
+| `not_tagged` | A release of a commit that is not tagged. |
+| `no_parent` | A rebase of a primary line. |
+
+An input the core refuses keeps the core's code (`unmatched_resolution`).
+
+## Scenarios
+
+`testdata/scenarios` holds one scenario per file, named by its `name`:
+`{"name", "description", "steps": [step, ...]}`. A runner applies
+`testdata/fixture/create.sql` to an empty Postgres schema, builds its
+engine and Postgres adapter from `testdata/fixture/recipe.json` at schema
+epoch 1 and snapshot interval 3, the fixture graph's, and runs each step in
+order. Unknown members are refused.
+
+A step is `{"op", ...arguments, "expect"?}`. `as` names the ref or commit a
+step returns, and later steps name it: `ref`, `from`, `source` and `target`
+name refs (`from` names commits for `diff`), and `commit`, `toCommit` and
+`to` name commits. `id:<uuid>` names an id no step returned. A write's
+`actor` is `"Cook"` unless the step gives one (`""` is none), and its
+`version` is the named ref's version as the last step that returned the
+ref left it, unless the step gives one; a `release` step's is the root's
+pointer's version as the last release left it, 0 before any. `walkCeiling`,
+`schemaEpoch` and `snapshotEvery` run the step on an engine with that
+ceiling, epoch or interval. Entity keys, roots and
+actors are UUIDs written in their canonical form, which reads as a word
+(`"Mix"`, `"Bread"`).
+
+| `op` | Arguments | Runs |
+|---|---|---|
+| `createPrimary` | `root`, `name` | CreatePrimary |
+| `branch` | `from`, `name` | Branch |
+| `save` | `ref`, `edits`: `{"<kind>": {"upsert": [row], "delete": [key], "unset": [key]}}` | Save |
+| `commit` | `ref`, `message`, `tag` | Commit |
+| `seal` | `ref` | Seal |
+| `merge` | `source`, `target`, `resolutions` (the core's), `message`, `tag` | Merge |
+| `rebase` | `ref`, `resolutions` | Rebase |
+| `revert` | `ref`, `toCommit` | Revert |
+| `release` | `root`, `commit` | Release |
+| `released` | `root` | Released |
+| `sweep` | `sweep`: `{discardGraceSeconds, abandonAfterSeconds, pruneBatch}`, each optional | Sweep |
+| `holdSweepLock`, `releaseSweepLock` | | Take the graph's sweep lock in a transaction of another connection, and end it |
+| `materialize` | `commit` | Materialize |
+| `compose` | `ref` | Compose |
+| `diff` | `from`, `to` | Diff |
+| `history` | `ref` | History |
+| `discard` | `ref` | Discard |
+| `rows` | `ref`, `kind` | The adapter's rows of the ref, by entity key |
+| `patches` | `commit` | The adapter's patches of the commit, by kind and entity key |
+| `snapshot` | `commit` | The adapter's snapshot entries of the commit, by kind and entity key |
+| `sql` | `statement`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text | A statement on the scenario's schema |
+
+`expect` holds what the step must return; a step without `error` must
+succeed.
+
+| Member | Checks |
+|---|---|
+| `error` | The step fails with this code. |
+| `ref` | The returned ref: `version`, `name`, `sealed`, and `parent`, `base` and `head` by name (`null` for none). |
+| `commit` | The commit written, `null` for none: `ref`, `parent` by name, `message`, `sequence` (`null` untagged), `schemaEpoch`, `contentHash` or `contentHashOf` (the hash a named commit recorded). |
+| `saved`, `tree` | Save's rows, or a read's tree: every kind with rows, each kind's rows in order, and each row's listed columns (a listed `null` also matches an absent column). |
+| `contentHash`, `contentHashOf` | A read's content hash. |
+| `findings`, `conflicts`, `changes` | Compose's findings, a merge's conflicts, a diff's changes: in order, each with its listed members. A merge left conflicts only when the step lists them. |
+| `commits` | History's commits, by name, newest first. |
+| `rows`, `patches`, `snapshot` | The listed rows, patches or snapshot entries, in order, each with its listed members; a patch is `{kind, entityKey, operation, entityVersion}` and a snapshot entry `{kind, entityKey, entityVersion}`. |
+| `release` | The release pointer a release or released step returns: `commit` by name and `version`. |
+| `report` | A sweep's report, with its listed members: `skipped`, `abandoned`, `collectedRefs`, `collectedRows` and `pruned` (by kind, nonzero counts only) and `snapshots`. |
+
 ## C ABI
 
 The native library and the wasm module export the same functions:
@@ -365,7 +488,16 @@ make ts                      # among the TypeScript packages: the wasm build, th
 cd runtime/versiongraph/go && go test ./...
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
+make versiongraph-scenarios  # every scenario through the Go engine and the Postgres adapter
 ```
+
+The scenarios, the adapter's tests and the canonical vectors' Postgres
+check run against the Postgres that
+`SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names, and skip without it;
+`make versiongraph-scenarios` fails without it. The fixture is the
+compiler's output for `fixture-version-graph-db`, and a compiler test
+(`go test ./internal/generator -run TestVersionGraphScenarioFixtureIsCurrent`)
+fails when the checked-in copy is stale; `-update` rewrites it.
 
 The Go binding links `libsuperschematic_versiongraph.a` from
 `go/lib/<goos>_<goarch>`, which `make versiongraph` stages; the Makefile

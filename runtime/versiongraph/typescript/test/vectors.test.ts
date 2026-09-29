@@ -223,6 +223,7 @@ const kindDescriptor = decoder<KindDescriptor>("KindDescriptor", {
   key: req(same),
   id: req(same),
   ref: req(same),
+  root: opt(same),
   tombstone: req(same),
   version: req(same),
   author: opt(same),
@@ -241,6 +242,8 @@ const descriptor = decoder<Descriptor>("Descriptor", {
   refTable: req(same),
   commitTable: req(same),
   patchTable: req(same),
+  releaseTable: req(same),
+  snapshotTable: req(same),
   kinds: req(list(kindDescriptor)),
 });
 const finding = decoder<Finding>("Finding", {

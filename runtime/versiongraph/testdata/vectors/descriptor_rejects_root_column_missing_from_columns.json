@@ -1,0 +1,139 @@
+{
+  "name": "descriptor_rejects_root_column_missing_from_columns",
+  "op": "validate",
+  "input": {
+    "descriptor": {
+      "commitTable": "recipe_commit",
+      "graph": "recipe",
+      "kinds": [
+        {
+          "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "created_by": "uuid",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "id": "uuid",
+            "inputs": "json",
+            "parent_step_key": "uuid",
+            "position": "integer",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "timings": "json",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "historyTable": "step_history",
+          "id": "id",
+          "key": "entity_key",
+          "kind": "step",
+          "order": "position",
+          "parent": {
+            "key": "parent_step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "root": "recipe_id",
+          "table": "step",
+          "tombstone": "deleted_on_ref",
+          "units": {
+            "inputs": "jsonSchema",
+            "timings": "keyed"
+          },
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "created_by": "uuid",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "id": "uuid",
+            "position": "integer",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "step_key": "uuid",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "historyTable": "ingredient_history",
+          "id": "id",
+          "key": "entity_key",
+          "kind": "ingredient",
+          "order": "position",
+          "parent": {
+            "key": "step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "root": "root_id",
+          "table": "ingredient",
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "created_by": "uuid",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "id": "uuid",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "historyTable": "cover_history",
+          "id": "id",
+          "key": "entity_key",
+          "kind": "cover",
+          "ref": "ref",
+          "root": "recipe_id",
+          "singleton": true,
+          "table": "cover",
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        }
+      ],
+      "patchTable": "recipe_patch",
+      "refTable": "recipe_ref",
+      "releaseTable": "recipe_release",
+      "root": {
+        "key": "id",
+        "table": "recipe"
+      },
+      "snapshotTable": "recipe_snapshot_entry",
+      "version": 2
+    },
+    "tree": {}
+  },
+  "expect": {
+    "error": {
+      "code": "invalid_descriptor",
+      "message": "descriptor: kind \"ingredient\" root column \"root_id\" is not in its columns"
+    }
+  }
+}

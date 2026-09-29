@@ -2678,6 +2678,579 @@ func RecipeRefFromYAMLNonStrict(data []byte) (*RecipeRef, error) {
 	return decoded, nil
 }
 
+// RecipeRelease - The released commit of one root of the Recipe version graph; its history is the release log.
+type RecipeRelease struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Root Recipe `json:"root"`
+
+	Commit RecipeCommit `json:"commit"`
+
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	CreatedBy IdentityUUID `json:"createdBy"`
+
+	UpdatedAt TemporalDateTime `json:"updatedAt"`
+
+	UpdatedBy IdentityUUID `json:"updatedBy"`
+
+	Version int64 `json:"_version"`
+}
+
+// MaskSecrets returns a copy of RecipeRelease with secret fields cleared.
+func (t *RecipeRelease) MaskSecrets() *RecipeRelease {
+	if t == nil {
+		return nil
+	}
+
+	masked := &RecipeRelease{}
+
+	masked.Id = t.Id
+
+	maskedValueRoot := t.Root.MaskSecrets()
+	if maskedValueRoot != nil {
+		masked.Root = *maskedValueRoot
+	}
+
+	maskedValueCommit := t.Commit.MaskSecrets()
+	if maskedValueCommit != nil {
+		masked.Commit = *maskedValueCommit
+	}
+
+	masked.CreatedAt = t.CreatedAt
+
+	masked.CreatedBy = t.CreatedBy
+
+	masked.UpdatedAt = t.UpdatedAt
+
+	masked.UpdatedBy = t.UpdatedBy
+
+	masked.Version = t.Version
+
+	return masked
+}
+
+// Validate validates all fields in RecipeRelease
+func (t *RecipeRelease) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate root (required nested type)
+
+	if fieldErrs := t.Root.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("root", fieldErrs)
+	}
+
+	// Validate commit (required nested type)
+
+	if fieldErrs := t.Commit.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("commit", fieldErrs)
+	}
+
+	{
+		value := t.CreatedBy
+
+		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
+			errors.AddFieldError("createdBy", "pattern", "invalid format")
+		}
+
+	}
+
+	{
+		value := t.UpdatedBy
+
+		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
+			errors.AddFieldError("updatedBy", "pattern", "invalid format")
+		}
+
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals RecipeRelease to JSON
+func (t *RecipeRelease) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias RecipeRelease
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals RecipeRelease from JSON with validation
+func (t *RecipeRelease) UnmarshalJSON(data []byte) error {
+	type Alias RecipeRelease
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts RecipeRelease into a map representation.
+func (t *RecipeRelease) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert RecipeRelease to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert RecipeRelease to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes RecipeRelease from a map using lenient decoding.
+func (t *RecipeRelease) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode RecipeRelease from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode RecipeRelease from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes RecipeRelease from a map and rejects unknown fields.
+func (t *RecipeRelease) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RecipeRelease from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode RecipeRelease from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes RecipeRelease from JSON and rejects unknown fields.
+func (t *RecipeRelease) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RecipeRelease from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RecipeRelease from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RecipeRelease from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes RecipeRelease from JSON using lenient decoding.
+func (t *RecipeRelease) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RecipeRelease from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RecipeRelease from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RecipeRelease from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes RecipeRelease from YAML and rejects unknown fields.
+func (t *RecipeRelease) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RecipeRelease from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RecipeRelease from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RecipeRelease from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes RecipeRelease from YAML using lenient decoding.
+func (t *RecipeRelease) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RecipeRelease from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RecipeRelease from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RecipeRelease from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RecipeReleaseFromMap builds RecipeRelease from a map using lenient decoding.
+func RecipeReleaseFromMap(value map[string]any) (*RecipeRelease, error) {
+	decoded := &RecipeRelease{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeReleaseFromMapStrict builds RecipeRelease from a map and rejects unknown fields.
+func RecipeReleaseFromMapStrict(value map[string]any) (*RecipeRelease, error) {
+	decoded := &RecipeRelease{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeReleaseFromJSON builds RecipeRelease from JSON and rejects unknown fields.
+func RecipeReleaseFromJSON(data []byte) (*RecipeRelease, error) {
+	decoded := &RecipeRelease{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeReleaseFromJSONNonStrict builds RecipeRelease from JSON using lenient decoding.
+func RecipeReleaseFromJSONNonStrict(data []byte) (*RecipeRelease, error) {
+	decoded := &RecipeRelease{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeReleaseFromYAML builds RecipeRelease from YAML and rejects unknown fields.
+func RecipeReleaseFromYAML(data []byte) (*RecipeRelease, error) {
+	decoded := &RecipeRelease{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeReleaseFromYAMLNonStrict builds RecipeRelease from YAML using lenient decoding.
+func RecipeReleaseFromYAMLNonStrict(data []byte) (*RecipeRelease, error) {
+	decoded := &RecipeRelease{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeSnapshotEntry - One entity of a snapshotted commit of the Recipe version graph, pinned to the row version its tree holds.
+type RecipeSnapshotEntry struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Commit RecipeCommit `json:"commit"`
+
+	EntityKind RecipeEntityKind `json:"entityKind"`
+
+	EntityKey IdentityUUID `json:"entityKey"`
+
+	EntityId IdentityUUID `json:"entityId"`
+
+	EntityVersion GenericInt64 `json:"entityVersion"`
+}
+
+// MaskSecrets returns a copy of RecipeSnapshotEntry with secret fields cleared.
+func (t *RecipeSnapshotEntry) MaskSecrets() *RecipeSnapshotEntry {
+	if t == nil {
+		return nil
+	}
+
+	masked := &RecipeSnapshotEntry{}
+
+	masked.Id = t.Id
+
+	maskedValueCommit := t.Commit.MaskSecrets()
+	if maskedValueCommit != nil {
+		masked.Commit = *maskedValueCommit
+	}
+
+	masked.EntityKind = t.EntityKind
+
+	masked.EntityKey = t.EntityKey
+
+	masked.EntityId = t.EntityId
+
+	masked.EntityVersion = t.EntityVersion
+
+	return masked
+}
+
+// Validate validates all fields in RecipeSnapshotEntry
+func (t *RecipeSnapshotEntry) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate commit (required nested type)
+
+	if fieldErrs := t.Commit.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("commit", fieldErrs)
+	}
+
+	// Validate entityKind (required)
+
+	if valid, fieldErrs := t.EntityKind.ValidateRequired(); !valid {
+		errors.SetFieldErrors("entityKind", fieldErrs)
+	}
+
+	// Validate entityKey (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.EntityKey, true); !valid {
+		errors.SetFieldErrors("entityKey", fieldErrs)
+	}
+
+	// Validate entityId (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.EntityId, true); !valid {
+		errors.SetFieldErrors("entityId", fieldErrs)
+	}
+
+	// Validate entityVersion (required)
+
+	if valid, fieldErrs := validateGenericInt64Value(t.EntityVersion, true); !valid {
+		errors.SetFieldErrors("entityVersion", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals RecipeSnapshotEntry to JSON
+func (t *RecipeSnapshotEntry) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias RecipeSnapshotEntry
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals RecipeSnapshotEntry from JSON with validation
+func (t *RecipeSnapshotEntry) UnmarshalJSON(data []byte) error {
+	type Alias RecipeSnapshotEntry
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts RecipeSnapshotEntry into a map representation.
+func (t *RecipeSnapshotEntry) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert RecipeSnapshotEntry to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert RecipeSnapshotEntry to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes RecipeSnapshotEntry from a map using lenient decoding.
+func (t *RecipeSnapshotEntry) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode RecipeSnapshotEntry from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode RecipeSnapshotEntry from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes RecipeSnapshotEntry from a map and rejects unknown fields.
+func (t *RecipeSnapshotEntry) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RecipeSnapshotEntry from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode RecipeSnapshotEntry from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes RecipeSnapshotEntry from JSON and rejects unknown fields.
+func (t *RecipeSnapshotEntry) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RecipeSnapshotEntry from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RecipeSnapshotEntry from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RecipeSnapshotEntry from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes RecipeSnapshotEntry from JSON using lenient decoding.
+func (t *RecipeSnapshotEntry) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RecipeSnapshotEntry from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RecipeSnapshotEntry from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RecipeSnapshotEntry from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes RecipeSnapshotEntry from YAML and rejects unknown fields.
+func (t *RecipeSnapshotEntry) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RecipeSnapshotEntry from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RecipeSnapshotEntry from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RecipeSnapshotEntry from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes RecipeSnapshotEntry from YAML using lenient decoding.
+func (t *RecipeSnapshotEntry) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RecipeSnapshotEntry from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RecipeSnapshotEntry from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RecipeSnapshotEntry from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RecipeSnapshotEntryFromMap builds RecipeSnapshotEntry from a map using lenient decoding.
+func RecipeSnapshotEntryFromMap(value map[string]any) (*RecipeSnapshotEntry, error) {
+	decoded := &RecipeSnapshotEntry{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeSnapshotEntryFromMapStrict builds RecipeSnapshotEntry from a map and rejects unknown fields.
+func RecipeSnapshotEntryFromMapStrict(value map[string]any) (*RecipeSnapshotEntry, error) {
+	decoded := &RecipeSnapshotEntry{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeSnapshotEntryFromJSON builds RecipeSnapshotEntry from JSON and rejects unknown fields.
+func RecipeSnapshotEntryFromJSON(data []byte) (*RecipeSnapshotEntry, error) {
+	decoded := &RecipeSnapshotEntry{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeSnapshotEntryFromJSONNonStrict builds RecipeSnapshotEntry from JSON using lenient decoding.
+func RecipeSnapshotEntryFromJSONNonStrict(data []byte) (*RecipeSnapshotEntry, error) {
+	decoded := &RecipeSnapshotEntry{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeSnapshotEntryFromYAML builds RecipeSnapshotEntry from YAML and rejects unknown fields.
+func RecipeSnapshotEntryFromYAML(data []byte) (*RecipeSnapshotEntry, error) {
+	decoded := &RecipeSnapshotEntry{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RecipeSnapshotEntryFromYAMLNonStrict builds RecipeSnapshotEntry from YAML using lenient decoding.
+func RecipeSnapshotEntryFromYAMLNonStrict(data []byte) (*RecipeSnapshotEntry, error) {
+	decoded := &RecipeSnapshotEntry{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
 // Step - One step of a recipe, ordered by position; updatedBy names its row's writer.
 type Step struct {
 	Id *IdentityUUID `json:"id,omitempty"`
