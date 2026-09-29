@@ -30,7 +30,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check ts python rust \
-        versiongraph versiongraph-scenarios docs cli-smoke scrub versions clean
+        versiongraph versiongraph-scenarios versiongraph-scenarios-rust docs cli-smoke scrub versions clean
 
 all: build test lint
 
@@ -102,6 +102,8 @@ rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test
+	cd runtime/versiongraph/rust-engine && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+		&& cargo clippy --no-default-features -- -D warnings && cargo test
 
 # The version-graph core's static archive, staged where the Go binding links
 # it (runtime/versiongraph/go/lib/<goos>_<goarch>).
@@ -115,6 +117,15 @@ versiongraph-scenarios: versiongraph
 	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
 		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
 	cd runtime/versiongraph/go && go test -count=1 -v -run '^TestScenarios$$' ./engine/
+
+# Every version-graph scenario through the Rust engine and its Postgres
+# adapter, and the crate's other Postgres tests (every canonical vector's
+# rendering, the adapter, the sweeper), against the Postgres that
+# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
+versiongraph-scenarios-rust:
+	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
+		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
+	cd runtime/versiongraph/rust-engine && cargo test --tests -- --nocapture
 
 # Starlight site. CI runs this as the docs job (D9); release.yml deploys it.
 docs:
@@ -153,6 +164,7 @@ fmt:
 	gofmt -w $$(git ls-files '*.go')
 	cd runtime/http/rust && cargo fmt
 	cd runtime/versiongraph/rust && cargo fmt
+	cd runtime/versiongraph/rust-engine && cargo fmt
 
 clean:
 	rm -rf bin
