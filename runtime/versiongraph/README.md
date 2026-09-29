@@ -116,21 +116,28 @@ values against their classes, and a row may carry a column `columns` lacks.
 
 ### Value classes
 
-A value class says what the schema runtime's JSON for a field's type is
-(`runtime/schema`, D12 and D14), one class per rule that gives the value's
-canonical JSON. The generator derives it from the field's type: an enum is
-`enum`; an object type, a `@jsonField` object, a map, and a scalar that
-holds any JSON value or a JSON object or array are `json`; a scalar whose
-`json_schema` type is `integer`, `number` or `boolean` has that class; a
-string scalar the catalog stores as `UUID`, `TIMESTAMPTZ`, `DATE`, `TIME`
-or `INTERVAL` is `uuid`, `dateTime`, `date`, `time` or `duration`, and one
-stored as text is `string`; the builtins `string`, `number` and `boolean`
-have their own classes. A to-one relation holds its target's key and has
-its class. A list (`T[]`) adds `[]` to its element's class and a list of
-lists (`T[][]`) adds `[][]`. A string scalar stored another way
-(`Geo.Location`'s `POINT`), or a JSON scalar not stored as `JSONB`
-(`Embedding.Vector`), has no class yet, and a graph member with one fails
-generation.
+A value class names the rule that gives a value's canonical JSON (below).
+The generator derives it from two things: what the schema runtime's JSON
+for the field's type is (`runtime/schema`, D12 and D14), and the SQL type
+the sql generator stores the column as, which is the scalar's `sql` type
+mapping or, without one, the type its traits or primitive infer. `JSONB`
+is `json`, whatever it holds. Otherwise a string stored as `UUID`,
+`TIMESTAMPTZ`, `DATE`, `TIME` or `INTERVAL` is `uuid`, `dateTime`, `date`,
+`time` or `duration`, and one stored as `TEXT`, `VARCHAR`, `CITEXT` or
+`INET` is `string`; an enum stored as `TEXT` is `enum`; an integer or a
+number stored as `BIGINT`, `INTEGER` or `SMALLINT` is `integer`, and one
+stored as `DOUBLE PRECISION`, `REAL` or `NUMERIC` is `number`; a boolean
+stored as `BOOLEAN` is `boolean`. A map is `json`. A to-one relation holds
+its target's key and has its class. A list (`T[]`) adds `[]` to its
+element's class and a list of lists (`T[][]`) adds `[][]`. A `@jsonField`
+value and a list of lists are stored as `JSONB` and hold the schema
+runtime's JSON: an object type there is `json`, and any other element has
+the class it would have in a column of its own. Any other pair has no rule
+and a graph member with one fails generation, naming the field and the SQL
+type: a JSON scalar stored as `TEXT` (the catalog's `Embedding.Vector`,
+which has no `sql` mapping), a string stored as `POINT` (`Geo.Location`) or
+as the `BIGINT` a duration's name infers, and an object type without
+`@jsonField`.
 
 ## Trees and rows
 
@@ -167,13 +174,13 @@ turns a value from that rendering into its canonical JSON:
 
 | Class | Canonical JSON | From Postgres |
 |---|---|---|
-| `string` | The JSON string, escaped as the core's canonical JSON escapes: `"` and `\`, `\b` `\f` `\n` `\r` `\t` by name, any other control character as `\u00xx` in lowercase hex, everything else as it is. | Any JSON string. |
+| `string` | The JSON string, escaped as the core's canonical JSON escapes: `"` and `\`, `\b` `\f` `\n` `\r` `\t` by name, any other control character as `\u00xx` in lowercase hex, everything else as it is. | Any JSON string. An `inet` is the text Postgres renders for it: IPv6 in lowercase with zeros compressed, and a single host without its prefix length (`2001:DB8::0001/128` is `2001:db8::1`; `10.1.2.3/8` keeps its `/8`). |
 | `enum` | The member's value, as a `string`. | Any JSON string. |
 | `integer` | The integer's digits, exactly however wide, with an optional minus and no leading zeros; `-0` is `0`. | A JSON number with no fraction or exponent (`bigint` renders so). |
 | `number` | The number's exact decimal value in the layout of ECMAScript's `Number::toString`: plain digits while the decimal point falls within 21 digits of the first and no more than six zeros follow it, else one digit, a fraction and a signed exponent (`1e+21`, `1.5e-7`); no trailing zeros (`1.50` is `1.5`); `-0` is `0`. For a double, this is the text `JSON.stringify` and Go's `encoding/json` write. Digits are never rounded. | Any JSON number. `to_jsonb` renders a `double precision` as a `numeric`, never with an exponent (`1e300` as 301 digits); `NaN` and infinities, which it renders as strings, are refused. |
 | `boolean` | `true` or `false`. | A JSON boolean. |
 | `uuid` | The scalar core's canonical form: base62 of the UUID's 128 bits (`0123456789A-Za-z`), with the nil UUID as `"0"`. | The hyphenated form, in either case, or base62 (a JSON value the ORM stored). |
-| `dateTime` | RFC 3339 in UTC with `Z`, the fraction of a second without trailing zeros and left out when zero: Go's `RFC3339Nano` of the UTC time (`2026-09-01T10:00:00.12Z`). | RFC 3339 with an offset, which may carry seconds (`+00:17:30`). The offset follows the session's time zone, so an image written under another zone normalizes to the same value. A year outside 0000-9999, `BC`, `infinity` and a time without an offset are refused. |
+| `dateTime` | RFC 3339 in UTC with `Z`, the fraction of a second without trailing zeros and left out when zero: Go's `RFC3339Nano` of the UTC time (`2026-09-01T10:00:00.12Z`). | RFC 3339 with an offset, which may carry seconds (`+00:17:30`). The offset follows the session's time zone, so an image written under another zone normalizes to the same value. A year outside 0000-9999, `BC`, `infinity`, a time without an offset and an offset of a day or more (`+24:00`) are refused. |
 | `date` | `YYYY-MM-DD`. | `YYYY-MM-DD`; `BC`, `infinity` and a day that does not exist are refused. |
 | `time` | `HH:MM:SS` on a 24-hour clock, the fraction of a second without trailing zeros and left out when zero: what Postgres renders for a `time`. | `HH:MM:SS` with an optional fraction, and the other forms the scalar accepts, which a JSON value the ORM stored keeps as written: `HH:MM` (`10:00` is `10:00:00`) and a 12-hour clock (`2:30 pm` is `14:30:00`, `12:05 am` is `00:05:00`), each read as Postgres reads it into a `time`. The scalar has no fraction, but a `time` column written past it can hold one, which is kept. `24:00:00`, which the scalar refuses, is refused. |
 | `duration` | The scalar core's canonical form: under a second, the largest of `ms`, `us` and `ns` that holds it whole (`500ms`, `1500us`); from a second, hours and minutes when present, then seconds with their fraction (`1h30m0s`, `1m30s`, `1.5s`); `0s` for zero. | Interval text (`01:30:00`, `1 day 02:00:00`, `-1 days +02:00:00`), where a day is 24 hours, or a duration string (`1h30m0s`, `1.5ms`, a JSON value the ORM stored). Months and years, which have no fixed length, are refused. |

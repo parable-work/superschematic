@@ -318,7 +318,7 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 			expr, selfNamed = resolved, col.Name == name
 			nullable = nullable || col.Nullable || viaLeftJoin
 		}
-		colType := columnType(fd, scalarMapping)
+		colType := sqlutil.ColumnType(fd, scalarMapping)
 		arrow, err := arrowDataType(colType)
 		if err != nil {
 			return view, fmt.Errorf("column %s: %w", name, err)

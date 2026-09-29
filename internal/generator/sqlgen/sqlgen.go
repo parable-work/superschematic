@@ -246,7 +246,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		opts.Clock = codegen.DefaultClock()
 	}
 
-	scalarMapping := buildSQLMapping(schema)
+	scalarMapping := sqlutil.ScalarSQLTypes(schema)
 	compositeDefaults, err := collectCompositeDefaults(schema, opts.Dependencies)
 	if err != nil {
 		return nil, err
@@ -442,50 +442,6 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	return output, nil
 }
 
-// buildSQLMapping returns the scalar-name -> SQL-type map. Scalars with an
-// explicit TypeMappings["sql"] entry use it (via the shared codegen
-// mapping); scalars without one are inferred from their semantic traits
-// (UUID-like -> UUID, datetime-like -> TIMESTAMPTZ, ...) before bottoming
-// out on the host-language primitive.
-func buildSQLMapping(schema *ir.Schema) map[string]string {
-	mapping := codegen.BuildScalarSQLMapping(schema)
-
-	for _, scalarDef := range schema.Scalars {
-		if _, ok := scalarDef.TypeMappings["sql"]; ok {
-			continue
-		}
-		tokens := codegen.BuildScalarTokens(scalarDef.Name)
-		traits := codegen.BuildScalarTraits(scalarDef, tokens, "")
-		if inferred := sqlTypeFromTraits(traits); inferred != "" {
-			mapping[scalarDef.Name] = inferred
-		}
-	}
-
-	return mapping
-}
-
-// sqlTypeFromTraits infers a SQL type from scalar semantics. Returns "" when
-// the traits carry no SQL-relevant signal.
-func sqlTypeFromTraits(traits codegen.ScalarTraits) string {
-	switch {
-	case traits.IsUUIDLike:
-		return "UUID"
-	case traits.IsDateTimeLike:
-		return "TIMESTAMPTZ"
-	case traits.IsDateLike:
-		return "DATE"
-	case traits.IsTimeLike:
-		return "TIME"
-	case traits.IsDurationLike, traits.IsIntegerLike:
-		return "BIGINT"
-	case traits.IsFloatLike:
-		return "DOUBLE PRECISION"
-	case traits.IsJSONLike, traits.IsObjectLike:
-		return "JSONB"
-	}
-	return ""
-}
-
 // tableTypeDefs returns the schema's table-backed type definitions sorted by
 // name: Role == DBTable, not a @jsonField payload, and not a base class
 // (base-class fields arrive pre-flattened on the subclasses, and their
@@ -583,7 +539,7 @@ func convertTypeToTable(
 		column := Column{
 			Name:       columnName,
 			QuotedName: sqlutil.QuoteIdentifier(columnName),
-			Type:       columnType(field, scalarMapping),
+			Type:       sqlutil.ColumnType(field, scalarMapping),
 			Nullable:   !field.Required,
 		}
 
@@ -869,12 +825,12 @@ func keyFieldType(typeDef *ir.TypeDef, scalarMapping map[string]string) string {
 	}
 	for _, field := range typeDef.Fields {
 		if field.Key {
-			return columnType(field, scalarMapping)
+			return sqlutil.ColumnType(field, scalarMapping)
 		}
 	}
 	for _, field := range typeDef.Fields {
 		if field.Name == "id" {
-			return columnType(field, scalarMapping)
+			return sqlutil.ColumnType(field, scalarMapping)
 		}
 	}
 	return "UUID"
@@ -932,30 +888,6 @@ func buildJoinTable(parentTypeName string, field *ir.FieldDef, targetTypeName st
 		RightColumnType:   keyFieldType(schema.Types[targetTypeName], scalarMapping),
 		OriginalField:     field.Name,
 	}
-}
-
-// columnType returns the PostgreSQL column type for an IR field. Maps,
-// @jsonField values and arrays of arrays (T[][]) are JSONB. A T[][] is never
-// a native multi-dimensional array: Postgres requires those to be
-// rectangular, and a list of lists is often ragged.
-func columnType(field *ir.FieldDef, scalarMapping map[string]string) string {
-	if field.JsonField || field.TypeRef.IsMap || field.TypeRef.IsArrayOfArrays {
-		return "JSONB"
-	}
-
-	typeName := field.TypeRef.Name
-	if field.TypeRef.IsArray {
-		if sqlType, ok := scalarMapping[typeName]; ok {
-			return sqlType + "[]"
-		}
-		return "TEXT[]"
-	}
-
-	if sqlType, ok := scalarMapping[typeName]; ok {
-		return sqlType
-	}
-
-	return "TEXT"
 }
 
 // collectExtensions determines which PostgreSQL extensions the DDL requires.

@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -132,6 +133,7 @@ func Graphs(schema *ir.Schema) ([]Graph, error) {
 	}
 	sort.Slice(roots, func(i, j int) bool { return roots[i].Name < roots[j].Name })
 
+	sqlTypes := sqlutil.ScalarSQLTypes(schema)
 	graphs := make([]Graph, 0, len(roots))
 	for _, root := range roots {
 		name := root.VersionGraphName()
@@ -152,7 +154,7 @@ func Graphs(schema *ir.Schema) ([]Graph, error) {
 			PatchTable:  codegen.ToSnakeCase(name + "Patch"),
 		}
 		for _, td := range members {
-			member, kind, err := describe(schema, root, td)
+			member, kind, err := describe(schema, root, td, sqlTypes)
 			if err != nil {
 				return nil, fmt.Errorf("graphdesc: version graph %s: %w", name, err)
 			}
@@ -164,8 +166,9 @@ func Graphs(schema *ir.Schema) ([]Graph, error) {
 	return graphs, nil
 }
 
-// describe builds one member's descriptor entry.
-func describe(schema *ir.Schema, root, td *ir.TypeDef) (Member, Kind, error) {
+// describe builds one member's descriptor entry. sqlTypes is the schema's
+// sqlutil.ScalarSQLTypes.
+func describe(schema *ir.Schema, root, td *ir.TypeDef, sqlTypes map[string]string) (Member, Kind, error) {
 	member := Member{Type: td, Kind: codegen.ToSnakeCase(td.Name)}
 	table := codegen.ToSnakeCase(td.Name)
 	kind := Kind{
@@ -185,7 +188,7 @@ func describe(schema *ir.Schema, root, td *ir.TypeDef) (Member, Kind, error) {
 		if !hasColumn(schema, fd) {
 			continue
 		}
-		class, err := ValueClass(schema, fd)
+		class, err := valueClass(schema, fd, sqlTypes)
 		if err != nil {
 			return Member{}, Kind{}, fmt.Errorf("%s.%s: %w", td.Name, fd.Name, err)
 		}
@@ -228,9 +231,10 @@ func describe(schema *ir.Schema, root, td *ir.TypeDef) (Member, Kind, error) {
 	return member, kind, nil
 }
 
-// The value classes of a descriptor's columns (D19): what the schema
-// runtime's JSON for a field's type distinguishes, one normalization rule
-// each. A list adds "[]" to its element's class, and a list of lists "[][]".
+// The value classes of a descriptor's columns (D19): one normalization rule
+// each, which reads what Postgres renders for the SQL type the column is
+// stored as and what the schema runtime's JSON for the field's type is. A
+// list adds "[]" to its element's class, and a list of lists "[][]".
 const (
 	ClassString   = "string"
 	ClassInteger  = "integer"
@@ -245,11 +249,20 @@ const (
 	ClassJSON     = "json"
 )
 
-// ValueClass is the value class of the column that holds fd: its element's
-// class, with "[]" for a list and "[][]" for a list of lists. A map, a
-// @jsonField object and an object type are "json", whole. A to-one relation
-// holds the target's key and has its class.
+// ValueClass is the value class of the column that holds fd, from the SQL
+// type the sql generator stores it as (sqlutil.ColumnType) and the JSON the
+// schema runtime holds for its type. It fails when no rule reads that pair.
 func ValueClass(schema *ir.Schema, fd *ir.FieldDef) (string, error) {
+	return valueClass(schema, fd, sqlutil.ScalarSQLTypes(schema))
+}
+
+// valueClass is ValueClass with the schema's scalar SQL types. A map is
+// "json", whole. A to-one relation holds the target's key and has its
+// class. A @jsonField value and a list of lists are stored as JSONB and
+// hold the schema runtime's JSON: an object type there is "json", and any
+// other element has the class it would have in a column of its own. Every
+// other element's class comes from its column's SQL type.
+func valueClass(schema *ir.Schema, fd *ir.FieldDef, sqlTypes map[string]string) (string, error) {
 	ref := fd.TypeRef
 	if ref.IsMap {
 		return ClassJSON, nil
@@ -259,17 +272,32 @@ func ValueClass(schema *ir.Schema, fd *ir.FieldDef) (string, error) {
 		if key == nil {
 			return "", fmt.Errorf("the relation to %s needs a key field", target.Name)
 		}
-		return ValueClass(schema, key)
+		return valueClass(schema, key, sqlTypes)
 	}
-	class, err := elementClass(schema, ref.Name)
+	holds, err := jsonOf(schema, ref.Name)
 	if err != nil {
 		return "", err
 	}
-	return class + strings.Repeat("[]", ref.ArrayDepth()), nil
+	lists := strings.Repeat("[]", ref.ArrayDepth())
+	inJSONB := fd.JsonField || ref.IsArrayOfArrays
+	if inJSONB && holds == ClassJSON {
+		return ClassJSON + lists, nil
+	}
+	element := sqlutil.ElementType(ref.Name, sqlTypes)
+	class := classOf(holds, element)
+	if class == "" {
+		return "", fmt.Errorf("%s holds a JSON %s but is stored as %s, which no value class reads",
+			ref.Name, jsonNoun(holds), sqlutil.ColumnType(fd, sqlTypes))
+	}
+	return class + lists, nil
 }
 
-// elementClass is the value class of one value of the named type.
-func elementClass(schema *ir.Schema, name string) (string, error) {
+// jsonOf is what the schema runtime's JSON for one value of the named type
+// is: ClassEnum for an enum member's string, ClassJSON for an object or any
+// JSON value, ClassInteger, ClassNumber or ClassBoolean for those, and
+// ClassString for any other string. A scalar holds what its json_schema
+// type mapping names (D14), else what its primitive is.
+func jsonOf(schema *ir.Schema, name string) (string, error) {
 	if _, ok := schema.Enums[name]; ok {
 		return ClassEnum, nil
 	}
@@ -280,7 +308,30 @@ func elementClass(schema *ir.Schema, name string) (string, error) {
 		return ClassJSON, nil
 	}
 	if scalar := schema.Scalars[name]; scalar != nil {
-		return scalarClass(scalar)
+		if scalar.IsAnyJSON() || scalar.StructuredJSONType() != "" {
+			return ClassJSON, nil
+		}
+		switch scalar.TypeMappings["json_schema"] {
+		case "integer":
+			return ClassInteger, nil
+		case "number":
+			return ClassNumber, nil
+		case "boolean":
+			return ClassBoolean, nil
+		case "":
+			switch scalar.LanguagePrimitive {
+			case ir.LanguageNumber:
+				if strings.EqualFold(scalar.Primitive, "Int") {
+					return ClassInteger, nil
+				}
+				return ClassNumber, nil
+			case ir.LanguageBoolean:
+				return ClassBoolean, nil
+			case ir.LanguageObject:
+				return ClassJSON, nil
+			}
+		}
+		return ClassString, nil
 	}
 	switch name {
 	case codegen.PrimitiveString, "String", "ID":
@@ -295,58 +346,73 @@ func elementClass(schema *ir.Schema, name string) (string, error) {
 	return "", fmt.Errorf("type %s has no value class", name)
 }
 
-// scalarClass is a scalar's value class. The JSON type the schema runtime
-// holds decides it (D14): any JSON value or a JSON object or array is
-// "json", and an integer, a number or a boolean its own class, from the
-// scalar's json_schema type mapping, else its primitive. A
-// string scalar's class is its scalar core's canonical form, told apart by
-// the SQL type the catalog stores it in: a UUID, a date-time, a date, a
-// time of day or a duration. Any other string scalar stored as text is a
-// "string"; one stored another way (Geo.Location's POINT) has no class yet.
-func scalarClass(scalar *ir.ScalarDef) (string, error) {
-	sql := strings.ToUpper(strings.TrimSpace(scalar.TypeMappings["sql"]))
-	if scalar.IsAnyJSON() || scalar.StructuredJSONType() != "" {
-		if sql != "" && sql != "JSONB" {
-			return "", fmt.Errorf("scalar %s holds JSON but is stored as %s, which has no canonical rule", scalar.Name, sql)
+// classOf is the class whose rule reads a value the schema runtime holds as
+// holds (jsonOf) stored as sqlType, or "" when no rule does. JSONB holds
+// any JSON value. A string is a UUID, a date-time, a date, a time of day or
+// a duration by the SQL type that stores it, and a plain string as text;
+// a number is an integer or not by its SQL type.
+func classOf(holds, sqlType string) string {
+	sqlType = strings.ToUpper(strings.TrimSpace(sqlType))
+	if sqlType == "JSONB" {
+		return ClassJSON
+	}
+	switch holds {
+	case ClassString:
+		switch {
+		case sqlType == "UUID":
+			return ClassUUID
+		case sqlType == "TIMESTAMPTZ":
+			return ClassDateTime
+		case sqlType == "DATE":
+			return ClassDate
+		case sqlType == "TIME":
+			return ClassTime
+		case sqlType == "INTERVAL":
+			return ClassDuration
+		case isTextType(sqlType):
+			return ClassString
 		}
-		return ClassJSON, nil
-	}
-	switch scalar.TypeMappings["json_schema"] {
-	case "integer":
-		return ClassInteger, nil
-	case "number":
-		return ClassNumber, nil
-	case "boolean":
-		return ClassBoolean, nil
-	case "":
-		// No mapping: the primitive decides.
-		switch scalar.LanguagePrimitive {
-		case ir.LanguageNumber:
-			if strings.EqualFold(scalar.Primitive, "Int") {
-				return ClassInteger, nil
-			}
-			return ClassNumber, nil
-		case ir.LanguageBoolean:
-			return ClassBoolean, nil
-		case ir.LanguageObject:
-			return ClassJSON, nil
+	case ClassEnum:
+		if sqlType == "TEXT" {
+			return ClassEnum
+		}
+	case ClassInteger, ClassNumber:
+		switch sqlType {
+		case "BIGINT", "INTEGER", "INT", "SMALLINT":
+			return ClassInteger
+		case "DOUBLE PRECISION", "REAL":
+			return ClassNumber
+		}
+		if strings.HasPrefix(sqlType, "NUMERIC") || strings.HasPrefix(sqlType, "DECIMAL") {
+			return ClassNumber
+		}
+	case ClassBoolean:
+		if sqlType == "BOOLEAN" {
+			return ClassBoolean
 		}
 	}
-	switch {
-	case sql == "UUID":
-		return ClassUUID, nil
-	case sql == "TIMESTAMPTZ":
-		return ClassDateTime, nil
-	case sql == "DATE":
-		return ClassDate, nil
-	case sql == "TIME":
-		return ClassTime, nil
-	case sql == "INTERVAL":
-		return ClassDuration, nil
-	case sql == "", sql == "TEXT", sql == "CITEXT", sql == "INET", strings.HasPrefix(sql, "VARCHAR"):
-		return ClassString, nil
+	return ""
+}
+
+// isTextType reports whether Postgres renders a value of sqlType as the
+// string that was stored.
+func isTextType(sqlType string) bool {
+	switch sqlType {
+	case "TEXT", "CITEXT", "INET":
+		return true
 	}
-	return "", fmt.Errorf("scalar %s is stored as %s, which has no value class", scalar.Name, sql)
+	return strings.HasPrefix(sqlType, "VARCHAR")
+}
+
+// jsonNoun names what jsonOf returned, for an error.
+func jsonNoun(holds string) string {
+	switch holds {
+	case ClassJSON:
+		return "value"
+	case ClassEnum:
+		return "enum member"
+	}
+	return holds
 }
 
 // hasColumn reports whether fd is a column of its table: every field but a

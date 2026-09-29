@@ -245,27 +245,30 @@ statements and to normalize the rows it reads:
 ### Value classes and canonical rows
 
 A column's value class comes from its field's type, as the schema runtime's
-JSON tells values apart. Each class has one rule that turns what Postgres
+JSON tells values apart, and from the SQL type the column is stored as: a
+scalar's `sql` type mapping, or the type its traits infer without one. Each
+class has one rule that turns what Postgres
 returns, in `to_jsonb` of a live row or in a history image, into the
 canonical JSON:
 
 | Class | Fields | Canonical JSON |
 | --- | --- | --- |
-| `string` | `string`, and string scalars stored as text | The string. |
+| `string` | `string`, and string scalars stored as `TEXT`, `VARCHAR`, `CITEXT` or `INET` | The string. |
 | `enum` | An enum | The member's value. |
-| `integer` | Integer scalars (`Generic.Int64`) | The digits, exactly, however wide. |
-| `number` | `number`, number scalars | The exact decimal value as `JSON.stringify` lays out a number: `1.5`, `1e+21`, `1.5e-7`. |
+| `integer` | Number scalars stored as `BIGINT`, `INTEGER` or `SMALLINT` (`Generic.Int64`) | The digits, exactly, however wide. |
+| `number` | `number`, number scalars stored as `DOUBLE PRECISION`, `REAL` or `NUMERIC` | The exact decimal value as `JSON.stringify` lays out a number: `1.5`, `1e+21`, `1.5e-7`. |
 | `boolean` | `boolean` | `true` or `false`. |
 | `uuid` | `Identity.UUID`, `Identity.UserID`, a to-one relation to a UUID key | base62, the scalar core's form (`2tLrGjz6ktIRCukXDsqykS`). |
 | `dateTime` | `Temporal.DateTime` | RFC 3339 in UTC with `Z` (`2026-09-01T10:00:00.12Z`), whatever the session's time zone. |
 | `date` | `Temporal.Date` | `2026-09-01`. |
 | `time` | `Temporal.Time` | `18:00:00`, with a fraction of a second when there is one. |
 | `duration` | `Temporal.Duration` | The scalar core's form: `1h30m0s`, `1.5s`, `500ms`, `1500us`. A day is 24 hours; months and years are refused. |
-| `json` | `Generic.JSON`, `Generic.StringMap`, a `@jsonField` object, a map | The value with object members sorted by key, no whitespace, numbers as `number`. |
+| `json` | Any column stored as `JSONB`: `Generic.JSON`, `Generic.StringMap`, a `@jsonField` object, a map | The value with object members sorted by key, no whitespace, numbers as `number`. |
 
 A list adds `[]` to its element's class (`uuid[]`) and a list of lists
-`[][]`. A graph member with a field no class describes (`Geo.Location`,
-stored as `POINT`) fails generation. The contract, with every rule and its
+`[][]`. A graph member with a field no class reads fails generation, naming
+the field and its SQL type: `Geo.Location`, stored as `POINT`, and
+`Embedding.Vector`, a JSON array stored as `TEXT`. The contract, with every rule and its
 vectors in `runtime/versiongraph/testdata/canonical`, is in
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#canonical-rows).
 The Go package `github.com/parable-work/superschematic/runtime/versiongraph/go/canonical`
