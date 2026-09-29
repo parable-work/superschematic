@@ -27,7 +27,7 @@ func declaration(name string, members map[string]any) json.RawMessage {
 func operation(name string, members map[string]any) map[string]any {
 	op := map[string]any{
 		"name":         name,
-		"paramsSchema": map[string]any{"type": "object"},
+		"paramsSchema": closedObject,
 		"resultSchema": map[string]any{"type": "object"},
 	}
 	for key, value := range members {
@@ -35,6 +35,10 @@ func operation(name string, members map[string]any) map[string]any {
 	}
 	return op
 }
+
+// closedObject is the smallest params schema RegisterBehavior takes: an
+// object schema that admits no key it does not declare.
+var closedObject = map[string]any{"type": "object", "additionalProperties": false}
 
 const ratingConfig = `{"type":"object","required":["maxStars"],"additionalProperties":false,"properties":{"maxStars":{"type":"integer","minimum":3,"maximum":10}}}`
 
@@ -151,9 +155,10 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 		{"operation twice", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", nil), operation("rate", nil)}}), `behavior acme.Rating declares operation "rate" twice`},
 		{"builtin operation", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("update", nil)}}), `behavior acme.Rating operation "update" has the name of an operation every schema has (create, get, list, update, delete)`},
 		{"no params schema", "acme", declaration("acme.Rating", map[string]any{"operations": []any{map[string]any{"name": "rate", "resultSchema": objectSchema}}}), "behavior acme.Rating operation rate has no paramsSchema"},
-		{"no result schema", "acme", declaration("acme.Rating", map[string]any{"operations": []any{map[string]any{"name": "rate", "paramsSchema": objectSchema}}}), "behavior acme.Rating operation rate has no resultSchema"},
+		{"no result schema", "acme", declaration("acme.Rating", map[string]any{"operations": []any{map[string]any{"name": "rate", "paramsSchema": closedObject}}}), "behavior acme.Rating operation rate has no resultSchema"},
 		{"params schema", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"paramsSchema": map[string]any{"minimum": "one"}})}}), "behavior acme.Rating operation rate paramsSchema: "},
 		{"params not an object", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"paramsSchema": map[string]any{"type": "integer"}})}}), `behavior acme.Rating operation rate paramsSchema must be an object schema`},
+		{"params a boolean schema", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"paramsSchema": false})}}), `behavior acme.Rating operation rate paramsSchema must be an object schema`},
 		{"result schema", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"resultSchema": map[string]any{"required": "stars"}})}}), "behavior acme.Rating operation rate resultSchema: "},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -175,6 +180,34 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 	if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: ratingDeclaration()}); err == nil ||
 		!strings.Contains(err.Error(), `behavior "acme.Rating" is already registered`) {
 		t.Fatalf("duplicate: err = %v", err)
+	}
+}
+
+// An operation's params schema sets "additionalProperties": false, the
+// engine's rule (D16): an operation's parameters are exactly the ones it
+// declares, so no alias of one reaches the handler without its guards
+// seeing it. The value must be false itself; a schema that closes the
+// object another way is refused as the engine refuses it.
+func TestRegisterBehaviorRefusesOpenParams(t *testing.T) {
+	for _, params := range []string{
+		`{"type":"object"}`,
+		`{"type":"object","properties":{"stars":{"type":"integer"}}}`,
+		`{"type":"object","additionalProperties":true}`,
+		`{"type":"object","additionalProperties":{"type":"integer"}}`,
+		`{"type":"object","additionalProperties":{"not":{}}}`,
+		`{"type":"object","properties":{"stars":{"type":"integer"}},"unevaluatedProperties":false}`,
+	} {
+		reg := New(naming.Default())
+		err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Rating", map[string]any{
+			"operations": []any{operation("rate", nil), operation("ratingSummary", map[string]any{"paramsSchema": json.RawMessage(params)})},
+		})})
+		want := `registry: behavior acme.Rating operation ratingSummary paramsSchema must set "additionalProperties": false, so its parameters are exactly the ones it declares`
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: err = %v, want %q", params, err, want)
+		}
+		if names := reg.BehaviorNames(); len(names) != 0 {
+			t.Errorf("%s: a refused declaration registered %v", params, names)
+		}
 	}
 }
 

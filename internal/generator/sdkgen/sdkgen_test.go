@@ -179,7 +179,7 @@ func TestSDKAuthFollowsOperationsNotPublic(t *testing.T) {
 		return apiOutput, parseable
 	}
 	nestedArraysAPI := func(t *testing.T) (*apigen.APIOutput, map[string]bool) {
-		_, apiOutput, parseable := loadNestedArraysAPI(t, false)
+		_, apiOutput, parseable := loadNestedArraysAPI(t)
 		return apiOutput, parseable
 	}
 	for _, test := range []struct {
@@ -395,22 +395,66 @@ func TestNamespaceBodyInputUsesGeneratedType(t *testing.T) {
 
 func TestConvertEndpointUsesPathAndMethod(t *testing.T) {
 	got := convertEndpoint(apigen.EndpointInfo{
-		Name:   "getTenant",
-		Path:   "/api/tenant/{tenantId}",
+		Name:   "getShelfItem",
+		Path:   "/api/shelves/{shelf_id}/items/{itemId}",
 		Method: "GET",
 		PathParams: []apigen.Param{
-			{Name: "tenantId", Type: "Identity.UUID"},
+			{Name: "shelf_id", Type: "Identity.UUID"},
+			{Name: "itemId", Type: "string"},
 		},
 	}, nil)
 
-	if got.Path != "/api/tenant/{tenantId}" {
+	if got.Path != "/api/shelves/{shelf_id}/items/{itemId}" {
 		t.Errorf("Path = %q", got.Path)
 	}
 	if got.Method != "GET" {
 		t.Errorf("Method = %q", got.Method)
 	}
-	if got.TSPath != "/api/tenant/${tenantId}" {
+	// Each value is one path segment, percent-encoded once.
+	if got.TSPath != "/api/shelves/${encodeURIComponent(shelfId)}/items/${encodeURIComponent(itemId)}" {
 		t.Errorf("TSPath = %q", got.TSPath)
+	}
+}
+
+// TestScopedNamespaceEncodesTheScopeSegment pins that a scoped namespace
+// reads its scope from the instance and encodes it as it encodes every
+// other path parameter.
+func TestScopedNamespaceEncodesTheScopeSegment(t *testing.T) {
+	endpoint := convertEndpoint(apigen.EndpointInfo{
+		Name:   "getItem",
+		Path:   "/api/shelves/{shelfId}/items/{itemId}",
+		Method: "GET",
+		PathParams: []apigen.Param{
+			{Name: "shelfId", Type: "string"},
+			{Name: "itemId", Type: "string"},
+		},
+	}, nil)
+	tmpl, err := template.New("namespace.tmpl").Funcs(
+		codegen.MergeTemplateFuncs(tsutil.BaseTemplateFuncs(), customTemplateFuncs()),
+	).ParseFS(templatesFS, "templates/namespace.tmpl")
+	if err != nil {
+		t.Fatalf("parse namespace template: %v", err)
+	}
+	data := struct {
+		SDK       *SDKOutput
+		Namespace NamespaceInfo
+	}{
+		SDK: &SDKOutput{TypesPackage: "@schemas/shop-api-types"},
+		Namespace: NamespaceInfo{
+			Name:           "items",
+			ClassName:      "ItemsNamespace",
+			IsScopedNS:     true,
+			ScopeParamName: "shelfId",
+			Endpoints:      []EndpointInfo{endpoint},
+		},
+	}
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "namespace.tmpl", data); err != nil {
+		t.Fatalf("execute namespace template: %v", err)
+	}
+	want := "`/api/shelves/${encodeURIComponent(this.shelfId)}/items/${encodeURIComponent(itemId)}`"
+	if got := buf.String(); !strings.Contains(got, want) {
+		t.Fatalf("scoped namespace does not build %s:\n%s", want, got)
 	}
 }
 

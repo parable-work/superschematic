@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/sdkgen/sdktest"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
@@ -29,7 +30,7 @@ func TestNestedArraysSDKBuildsAndRuns(t *testing.T) {
 // fixture-nested-arrays-api, with grid.paint added (runInSDK).
 func runInNestedArraysSDK(t *testing.T, testFile, testSource string) *SDKOutput {
 	t.Helper()
-	schema, apiOutput := loadNestedArraysAPI(t, true)
+	schema, apiOutput := loadNestedArraysAPI(t, sdktest.AddPaintOperation)
 	return runInSDK(t, schema, apiOutput, nestedArraysService, testFile, testSource)
 }
 

@@ -24,16 +24,16 @@ import (
 var nestedArraysClock = codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 
 // loadNestedArraysAPI loads fixture-nested-arrays-api: an input type, a
-// PUT body argument and a bare response that are arrays of arrays. With
-// withPaint it adds grid.paint (sdktest.AddPaintOperation).
-func loadNestedArraysAPI(t *testing.T, withPaint bool) (*ir.Schema, *apigen.APIOutput, map[string]bool) {
+// PUT body argument and a bare response that are arrays of arrays. Each
+// edit then changes the schema (sdktest.AddPaintOperation, for one).
+func loadNestedArraysAPI(t *testing.T, edits ...func(*ir.Schema) error) (*ir.Schema, *apigen.APIOutput, map[string]bool) {
 	t.Helper()
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-nested-arrays-api"))
 	if err != nil {
 		t.Fatalf("load fixture-nested-arrays-api: %v", err)
 	}
-	if withPaint {
-		if err := sdktest.AddPaintOperation(schema); err != nil {
+	for _, edit := range edits {
+		if err := edit(schema); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -56,7 +56,7 @@ func loadNestedArraysAPI(t *testing.T, withPaint bool) (*ir.Schema, *apigen.APIO
 // fixture-nested-arrays-api into dir.
 func writeNestedArraysSDK(t *testing.T, dir string) {
 	t.Helper()
-	_, apiOutput, parseable := loadNestedArraysAPI(t, false)
+	_, apiOutput, parseable := loadNestedArraysAPI(t)
 	sdkOutput, err := Generate(apiOutput, parseable, nestedArraysClock)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -138,7 +138,7 @@ func TestNestedArraysSDKCompilesAndRuns(t *testing.T) {
 		t.Fatalf("resolve temp dir: %v", err)
 	}
 
-	schema, apiOutput, parseable := loadNestedArraysAPI(t, true)
+	schema, apiOutput, parseable := loadNestedArraysAPI(t, sdktest.AddPaintOperation)
 	typesDir := writeTypesPackage(t, bunPath, schema, "fixture-nested-arrays-api", tempRoot)
 
 	sdkOutput, err := Generate(apiOutput, parseable, nestedArraysClock)

@@ -30,6 +30,15 @@ _MAX_RATE_LIMIT_SLEEP_SECONDS = 300
 _NETWORK_RETRY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
+def path_segment(value: Any) -> str:
+    """Write a path parameter value as one path segment, percent-encoded once.
+
+    Every server decodes a path parameter exactly once, so a value holding
+    %, /, ? or # reaches the implementation as it was passed.
+    """
+    return parse.quote(str(value), safe="")
+
+
 @dataclass(slots=True)
 class PublicEncryptionKey:
     public_key: str

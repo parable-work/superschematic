@@ -13,8 +13,10 @@ import (
 // passes its config schema, what it requires is on the type and what it
 // conflicts with is not, the fields it adds collide neither with the type's
 // own fields nor with another behavior's, and no two behaviors add an
-// operation of the same name. A declaration's own operation names are
-// checked when it registers.
+// operation of the same name. A type's own field is taken by its name and
+// by its JSON key (jsonTag), as the engine takes it: behavior fields sit
+// beside the type's own in an instance's JSON. A declaration's own
+// operation names are checked when it registers.
 func checkBehaviors(schema *ir.Schema, reg *registry.Registry, r *Result) {
 	for _, types := range []map[string]*ir.TypeDef{schema.Types, schema.Inputs} {
 		for _, name := range sortedTypeNames(types) {
@@ -53,6 +55,9 @@ func checkTypeBehaviors(td *ir.TypeDef, reg *registry.Registry, r *Result) {
 	for _, f := range td.Fields {
 		if f != nil {
 			own[f.Name] = true
+			if f.JSONTag != "" {
+				own[f.JSONTag] = true
+			}
 		}
 	}
 	fieldOwner := map[string]string{}

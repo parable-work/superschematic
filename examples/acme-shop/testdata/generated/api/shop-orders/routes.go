@@ -307,8 +307,12 @@ func createOrderPlaceOrderHandler(impl OrderImplementation) gohttp.HandlerFunc {
 // createOrderGetOrderHandler creates a handler for GET /api/orders/{id}
 func createOrderGetOrderHandler(impl OrderImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
 		if IdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
 			return
@@ -348,8 +352,12 @@ func createOrderCancelOrderHandler(impl OrderImplementation) gohttp.HandlerFunc 
 	// order they are checked (the scalar type's own, then the argument's).
 	bodyReasonArg := bodyargs.NewArg("reason", bodyargs.String, bodyargs.MaxLength(500))
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
 		if IdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
 			return
@@ -402,8 +410,12 @@ func createOrderCancelOrderHandler(impl OrderImplementation) gohttp.HandlerFunc 
 // createProductReviewsListReviewsHandler creates a handler for GET /api/products/{productId}/reviews
 func createProductReviewsListReviewsHandler(impl ProductReviewsImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		ProductIdStr := chi.URLParam(r, "productId")
+		// Extract path parameters, each percent-decoded once
+		ProductIdStr, err := runtimerouting.PathParam(r, "productId")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "productId must be percent-encoded UTF-8")
+			return
+		}
 		if ProductIdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "productId is required")
 			return
@@ -440,8 +452,12 @@ func createProductReviewsListReviewsHandler(impl ProductReviewsImplementation) g
 // createProductReviewsWriteReviewHandler creates a handler for POST /api/products/{productId}/reviews
 func createProductReviewsWriteReviewHandler(impl ProductReviewsImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		ProductIdStr := chi.URLParam(r, "productId")
+		// Extract path parameters, each percent-decoded once
+		ProductIdStr, err := runtimerouting.PathParam(r, "productId")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "productId must be percent-encoded UTF-8")
+			return
+		}
 		if ProductIdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "productId is required")
 			return
