@@ -29,6 +29,9 @@
     "test:node": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && node --test 'test/*.test.ts'",
     "test:bun": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && bun test ./test"
   },
+  "dependencies": {
+    "ajv": "8.20.0"
+  },
   "peerDependencies": {
     "@superschematic/http-runtime": "*",
     "hono": "4.13.8"

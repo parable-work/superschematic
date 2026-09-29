@@ -8,9 +8,10 @@ import { afterEach, describe, test } from 'node:test';
 import { HttpProblem, type Authenticator } from '@superschematic/http-runtime';
 import { Hono } from 'hono';
 
-import { type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
-import { ENGINE_ERROR_STATUS, MERGE_PATCH_MEDIA_TYPE, engineApp, type EngineHttpOptions } from '../dist/http/index.js';
-import { cleanup, clone, openTestEngine, orderDocument, schemaDocument } from './helpers.ts';
+import { BehaviorError, OperationParamsError, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
+import { ENGINE_ERROR_STATUS, MERGE_PATCH_MEDIA_TYPE, engineApp, engineProblem, type EngineHttpOptions } from '../dist/http/index.js';
+import { counter, flag, itemDocument, openMetaSchema, testBehaviors } from './behavior-fixtures.ts';
+import { alice, cleanup, clone, freshPath, openTestEngine, orderDocument, schemaDocument, thrown } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -103,6 +104,9 @@ async function problem(response: Promise<Response>, status: number): Promise<Rec
 }
 
 const ORDERS = '/namespaces/default/schemas/Order/instances';
+const ITEMS = '/namespaces/default/schemas/Item/instances';
+/** The principal a test acts as when it calls the engine directly: the policy allows it everything. */
+const everything = { subject: 'alice', permissions: ['*'] };
 
 async function withOrders(options: EngineHttpOptions = {}): Promise<Served> {
   const served = serve(options);
@@ -249,12 +253,25 @@ describe('instances', () => {
 
 describe('refusals', () => {
   test('every engine error code answers its status with the code as the problem code', async () => {
-    const { app } = serve();
+    // Gadget composes test.Counter, published by an engine that has it; the
+    // served engine has only test.Flag, so Gadget is unavailable to it.
+    const path = freshPath();
+    const first = openTestEngine({ path, metaSchema: openMetaSchema(), behaviors: [counter] });
+    const gadget = schemaDocument('Gadget', [{ name: 'title', typeRef: { name: 'string' } }]) as { types: { Gadget: Record<string, unknown> } };
+    gadget.types.Gadget.behaviors = [{ name: 'test.Counter' }];
+    first.schemas.define(alice, gadget);
+    first.schemas.publish(alice, 'Gadget');
+    first.close();
+    const { app, engine } = serve({}, { path, metaSchema: openMetaSchema(), behaviors: [flag] });
     const post = (path: string, body: unknown) => call(app, 'POST', path, { body });
     await data(post('/namespaces/default/schemas', orderDocument()));
     await data(post('/namespaces/default/schemas/Order/publish', undefined));
     await data(post('/namespaces/common/schemas', noteDocument));
     await data(post(ORDERS, { id: 'o1', data: { title: 'Desk' } }), 201);
+    await data(post('/namespaces/default/schemas', itemDocument([{ name: 'test.Flag' }])));
+    await data(post('/namespaces/default/schemas/Item/publish', undefined));
+    await data(post(ITEMS, { id: 'i1', data: { title: 'Desk' } }), 201);
+    engine.instances.invoke(everything, 'Item', 'i1', 'flag', { reason: 'on hold' });
     const required = clone(orderDocument()) as { types: { Order: { fields: Array<Record<string, unknown>> } } };
     required.types.Order.fields.push({ name: 'owner', typeRef: { name: 'string' }, required: true });
 
@@ -266,9 +283,11 @@ describe('refusals', () => {
       ['conflict', () => post(ORDERS, { id: 'o1', data: { title: 'Lamp' } })],
       ['name_taken', () => post('/namespaces/east/schemas', noteDocument)],
       ['incompatible_change', () => post('/namespaces/default/schemas', required), 'changes'],
+      ['vetoed', () => call(app, 'PATCH', `${ITEMS}/i1`, { body: { title: 'Lamp' } })],
       ['seq_mismatch', () => call(app, 'DELETE', `${ORDERS}/o1`, { headers: { 'if-match': '"9"' } })],
       ['invalid_schema', () => post('/namespaces/default/schemas', { kind: 'General', types: {} }), 'issues'],
       ['invalid_instance', () => post(ORDERS, { data: { title: 3 } }), 'issues'],
+      ['unavailable', () => call(app, 'GET', '/namespaces/default/schemas/Gadget/instances')],
     ];
     assert.deepEqual(cases.map(([code]) => code).sort(), Object.keys(ENGINE_ERROR_STATUS).sort(), 'a case per engine error code');
     for (const [code, request, details] of cases) {
@@ -278,6 +297,21 @@ describe('refusals', () => {
         assert.ok(Array.isArray(body.details?.[details]) && body.details[details].length > 0, `${code} carries details.${details}`);
       }
     }
+    const veto = await problem(call(app, 'DELETE', `${ITEMS}/i1`), 409);
+    assert.deepEqual(veto.details, { behavior: 'test.Flag', action: 'delete', reason: 'it is flagged: on hold' });
+    assert.equal(engine.instances.get(everything, 'Item', 'i1')?.data.title, 'Desk');
+  });
+
+  test("an operation's refused parameters are a 400 with their issues, and a behavior's defect is not the engine's refusal", async () => {
+    const { engine } = serve({}, { metaSchema: openMetaSchema(), behaviors: testBehaviors });
+    engine.schemas.define(everything, itemDocument([{ name: 'test.Counter' }]));
+    engine.schemas.publish(everything, 'Item');
+    engine.instances.create(everything, 'Item', { title: 'Desk' }, { id: 'i1' });
+    const refused = thrown(() => engine.instances.invoke(everything, 'Item', 'i1', 'increment', { by: 0 }), OperationParamsError);
+    const mapped = engineProblem(refused);
+    assert.deepEqual([mapped?.status, mapped?.code, mapped?.details], [400, 'invalid_argument', { issues: refused.issues }]);
+    assert.ok(refused.issues.length > 0);
+    assert.equal(engineProblem(new BehaviorError('test.Counter', 'a defect')), undefined);
   });
 
   test('the runtime answers an unknown path, bad percent-encoding and a large body as problems', async () => {
@@ -420,5 +454,81 @@ describe('events as JSON', () => {
     await problem(call(app, 'GET', '/namespaces/default/events', { headers: { 'last-event-id': 'abc' } }), 400);
     await problem(call(app, 'GET', '/namespaces/default/events?instanceId=o1'), 400);
     await problem(call(app, 'GET', '/namespaces/default/events?schema=Order', { token: 'writer' }), 403);
+  });
+});
+
+describe('behaviors', () => {
+  async function withItems(): Promise<Served> {
+    const served = serve({}, { metaSchema: openMetaSchema(), behaviors: testBehaviors });
+    await data(call(served.app, 'POST', '/namespaces/default/schemas', { body: itemDocument([{ name: 'test.Counter' }, { name: 'test.Flag' }]) }));
+    await data(call(served.app, 'POST', '/namespaces/default/schemas/Item/publish'));
+    return served;
+  }
+
+  test("an instance carries its behaviors' fields, which POST and PATCH may not set", async () => {
+    const { app } = await withItems();
+    const created = await data(call(app, 'POST', ITEMS, { body: { id: 'i1', data: { title: 'Desk' } } }), 201);
+    assert.deepEqual(created.data, { title: 'Desk', count: 0, flagged: false });
+    assert.deepEqual((await data(call(app, 'GET', `${ITEMS}/i1`))).data, created.data);
+    for (const [method, path, body] of [
+      ['POST', ITEMS, { data: { title: 'Lamp', count: 3 } }],
+      ['PATCH', `${ITEMS}/i1`, { count: 3 }],
+    ] as const) {
+      const refused = await problem(call(app, method, path, { body }), 422);
+      assert.equal(refused.code, 'invalid_instance');
+      assert.deepEqual(
+        refused.details.issues.map((issue: { path: string; rule: string }) => [issue.path, issue.rule]),
+        [['count', 'readOnly']]
+      );
+    }
+  });
+
+  test('a writing operation moves the entity tag, even when no field changes; a read-only one does not', async () => {
+    const { app, engine } = await withItems();
+    await data(call(app, 'POST', ITEMS, { body: { id: 'i1', data: { title: 'Desk' } } }), 201);
+    const etag = async () => (await call(app, 'GET', `${ITEMS}/i1`)).headers.get('etag');
+    assert.equal(await etag(), '"1"');
+
+    assert.deepEqual(engine.instances.invoke(everything, 'Item', 'i1', 'increment'), { count: 1 });
+    assert.equal(await etag(), '"2"');
+    const stale = await problem(call(app, 'PATCH', `${ITEMS}/i1`, { body: { title: 'Lamp' }, headers: { 'if-match': '"1"' } }), 412);
+    assert.equal(stale.code, 'seq_mismatch');
+    await problem(call(app, 'DELETE', `${ITEMS}/i1`, { headers: { 'if-match': '"1"' } }), 412);
+
+    // unflag on an instance that is not flagged changes no field, but it is
+    // a write the log records, so the tag moves.
+    assert.equal(engine.instances.invoke(everything, 'Item', 'i1', 'unflag'), false);
+    assert.equal(await etag(), '"3"');
+    await problem(call(app, 'PATCH', `${ITEMS}/i1`, { body: { title: 'Lamp' }, headers: { 'if-match': '"2"' } }), 412);
+
+    assert.deepEqual(engine.instances.invoke(everything, 'Item', 'i1', 'history'), [1]);
+    assert.equal(await etag(), '"3"');
+    const updated = await data(call(app, 'PATCH', `${ITEMS}/i1`, { body: { title: 'Lamp' }, headers: { 'if-match': '"3"' } }));
+    assert.deepEqual([updated.seq, updated.data], [4, { title: 'Lamp', count: 1, flagged: false }]);
+  });
+
+  test('the JSON event pages carry operation events like any other', async () => {
+    const { app, engine } = await withItems();
+    await data(call(app, 'POST', ITEMS, { body: { id: 'i1', data: { title: 'Desk' } } }), 201);
+    engine.instances.invoke(everything, 'Item', 'i1', 'increment', { by: 2 });
+    engine.instances.invoke(everything, 'Item', 'i1', 'flag', { reason: 'on hold' });
+    const page = await data(call(app, 'GET', '/namespaces/default/events?schema=Item&instanceId=i1'));
+    assert.deepEqual(
+      page.events.map((event: { kind: string; seq: number; change: unknown }) => [event.kind, event.seq, event.change]),
+      [
+        ['create', 1, { title: 'Desk', count: 0, flagged: false }],
+        ['operation', 2, { behavior: 'test.Counter', operation: 'increment', params: { by: 2 }, patch: { count: 2 } }],
+        [
+          'operation',
+          3,
+          { behavior: 'test.Flag', operation: 'flag', params: { reason: 'on hold' }, patch: { flagged: true, flagReason: 'on hold' } },
+        ],
+      ]
+    );
+    const all = await data(call(app, 'GET', '/namespaces/default/events'));
+    assert.deepEqual(
+      all.events.map((event: { kind: string }) => event.kind),
+      ['publish', 'create', 'operation', 'operation']
+    );
   });
 });

@@ -157,7 +157,7 @@ err = reg.Finalize()              // cross-reference checks; now fixed
 ```
 
 `registry.Assemble(naming, exts...)` runs all four; `build`, `build-all`,
-`json-schema` and `format` call it once per invocation.
+`json-schema`, `format` and `behaviors` call it once per invocation.
 `generator.CoreRegistry(naming)` runs them with no extension and panics on
 error. `generator.Run` falls back to a core-only registry when
 `Options.Registry` is nil and returns an error when the naming selects an
@@ -419,8 +419,8 @@ current with `schemadeps.SyncCopy`. The core ships none;
 ### 3.9 The CLI
 
 `cli.New(cli.Config, ...registry.Extension)` returns the root cobra command
-with `build`, `build-all`, `json-schema` and `format`, plus the commands of
-every extension that implements `cli.CommandProvider`:
+with `build`, `build-all`, `json-schema`, `format` and `behaviors`, plus the
+commands of every extension that implements `cli.CommandProvider`:
 
 ```go
 type CommandProvider interface {
@@ -428,12 +428,12 @@ type CommandProvider interface {
 }
 ```
 
-`build`, `build-all`, `json-schema` and `format` each resolve their
-naming file first (`--naming`, or `superschematic.toml` at the schemas
-root; the defaults for `json-schema`) and then assemble a fresh registry
-with `registry.Assemble(naming, exts...)`. The registry therefore cannot exist
-when `cli.New` runs, which is why subcommands hang off the extension value
-rather than the registry. An extension command that needs a
+`build`, `build-all`, `json-schema`, `format` and `behaviors` each resolve
+their naming file first (`--naming`, or `superschematic.toml` at the schemas
+root; the defaults for `json-schema` and `behaviors`) and then assemble a
+fresh registry with `registry.Assemble(naming, exts...)`. The registry
+therefore cannot exist when `cli.New` runs, which is why subcommands hang
+off the extension value rather than the registry. An extension command that needs a
 registry assembles one the same way; acme's `describe` does.
 
 `cli.Config` names the binary in usage text (`Name`) and can replace the
@@ -453,6 +453,8 @@ that uses an extension's kind, decorators, documents or tool invocation
 policy key converts between JSON and YAML in a binary that links the
 extension. The TypeScript writer cannot render an extension's slots or
 documents and fails with the slot's name instead of dropping it.
+`behaviors` writes the declaration of each behavior the binary registers
+into the npm package that implements it (section 3.16).
 
 ### 3.10 Scalar catalog
 
@@ -755,6 +757,21 @@ config in `packages/schema/src/behaviors.ts` (section 10);
 `internal/registry/registrytest` declares two, `acme.Stock` and
 `acme.Audited`, which requires it, with a TypeScript fixture and its JSON
 and YAML twins.
+
+The code that runs a behavior is TypeScript: an implementation for
+`@superschematic/engine` (`runtime/engine/README.md`, "Behaviors") that
+carries the same declaration. `superschematic behaviors --out <dir>`
+copies it there: one canonical `<name>.behavior.json` per behavior the
+binary registers (`--extension <name>` keeps one extension's), and
+`--check` fails, naming each file, on a copy that differs, is missing or
+has no behavior. It is a command of the binary rather than a tool in the
+core module, as `internal/tools/scalarcatalog` is, because an extension's
+declarations are registered only in its own binary: acme's copy comes
+from `acme-schematic behaviors --extension acme`, which acme's smoke runs
+with `--check` (section 10). The copy is canonical, not the source bytes:
+the declaration's keys in `BehaviorDeclaration`'s order, each JSON
+Schema's object keys sorted, two-space indents and a final newline, so
+it changes only when the declaration does.
 
 ## 4. The open IR
 
@@ -1219,7 +1236,7 @@ each surface:
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Configuration | `[extension.acme] region` and `projection_scope_setting`; `metadata_key_prefix`, `scalar_jsdoc_tag`, `[package_aliases]` (`@acme/schema-config`) and `[deps] copy` | `ext/extension.go`, `schemas/superschematic.toml` |
 | Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
-| Behavior | `acme.Rating`, which a General data-form service in `ext/testdata/services/shop-ratings` composes, and its TypeScript twin `shop-ratings-ts` with `@behavior`; its `BehaviorConfigs` augmentation | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts` |
+| Behavior | `acme.Rating`, which a General data-form service in `ext/testdata/services/shop-ratings` composes, and its TypeScript twin `shop-ratings-ts` with `@behavior`; its `BehaviorConfigs` augmentation; its engine implementation over the declaration's copy | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `packages/behaviors` |
 | Binary | `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 | A core mechanism in acme's terms | the `Planogram` version graph (D17): `Bay` and `Facing` members declared with the core's `@versionGraph`, `@graphMember` and `@conflictUnit` | `schemas/services/shop-db/src/planogram.schema.ts` |
 
@@ -1245,7 +1262,11 @@ that way. Two scripts check it, and the `acme` job in
   documents carry acme's keys; `acme.Rating` reaches the IR of
   `shop-ratings` and of its TypeScript twin, `json-schema` and `format`
   accept it (to YAML and to TypeScript), and `build` refuses the service,
-  naming the `types` generator; shop-db's `Planogram` graph expands in
+  naming the `types` generator; the implementation's copy of its
+  declaration is current (`behaviors --check`), and an engine with the
+  implementation publishes `shop-ratings`' `Product`, rates one and reads
+  its rating fields while an engine without it refuses the schema;
+  shop-db's `Planogram` graph expands in
   the IR, its descriptor and shell are written and the ORM and the API
   over it compile, and `format` writes the declarations back rather than
   the expansion. It also asserts that the

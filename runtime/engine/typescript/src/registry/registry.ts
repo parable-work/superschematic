@@ -5,6 +5,7 @@ before it touches the catalog (catalog.ts), which holds the rules.
 */
 
 import { checkPrincipal, type Access, type Principal } from '../access.js';
+import type { BehaviorDeclaration } from '../behaviors/declaration.js';
 import { EngineError, type ValidationIssue } from '../errors.js';
 import type { Namespaces } from '../namespaces.js';
 import type { PublishResult, SchemaCatalog, SchemaRecord, SchemaSummary } from './catalog.js';
@@ -24,6 +25,15 @@ export interface DefineOptions extends SchemaTarget {
 export interface ValidateOptions extends SchemaTarget {
   /** A published version to validate against; the live one when absent. */
   version?: number;
+}
+
+/** A behavior a schema's instance type composes. */
+export interface ComposedBehavior {
+  name: string;
+  /** The type's config of it, as the schema holds it; {} when it gives none. */
+  config: unknown;
+  /** The behavior's declaration: its fields and operations. */
+  declaration: BehaviorDeclaration;
 }
 
 export class SchemaRegistry {
@@ -92,6 +102,23 @@ export class SchemaRegistry {
    * given version, built once per namespace, name and version.
    */
   validator(principal: Principal, name: string, options: ValidateOptions = {}): SchemaValidator {
+    return this.catalog.validatorOf(this.published(principal, name, options));
+  }
+
+  /**
+   * behaviors returns the behaviors the instance type of a name's live
+   * version, or of the given version, composes, in list order. It throws
+   * unavailable when this engine cannot run one of them.
+   */
+  behaviors(principal: Principal, name: string, options: ValidateOptions = {}): ComposedBehavior[] {
+    return this.catalog.runtimeOf(this.published(principal, name, options)).composition.behaviors.map((bound) => ({
+      name: bound.behavior.name,
+      config: bound.json,
+      declaration: bound.behavior.declaration,
+    }));
+  }
+
+  private published(principal: Principal, name: string, options: ValidateOptions): SchemaRecord {
     if (options.version !== undefined) {
       checkVersion(options.version);
     }
@@ -101,7 +128,7 @@ export class SchemaRegistry {
       const which = options.version === undefined ? 'no live version' : `no version ${options.version}`;
       throw new EngineError('not_found', `schema ${name} has ${which} in namespace ${namespace}`);
     }
-    return this.catalog.validatorOf(record);
+    return record;
   }
 
   private target(principal: Principal, name: string, options: SchemaTarget): string {

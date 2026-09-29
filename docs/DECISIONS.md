@@ -962,7 +962,7 @@ the acme example declares one behavior (`acme.<Name>`) with its
 TypeScript implementation and no core edit, asserted by
 `scripts/smoke.sh` (section 10 of `docs/extension-model.md`).
 
-Status: four pieces are built. `internal/tools/schemafiletypes` writes
+Status: five pieces are built. `internal/tools/schemafiletypes` writes
 the data form's TypeScript types and meta-schema into
 `@superschematic/schema-ir` (`./schema-file`, `./schema-file.json`). The
 strict loader is in `@superschematic/schema-runtime`, held to the Go
@@ -977,17 +977,28 @@ default (section 5), and the loader needs `JSON.parse` source text access
 (Node.js 21 or later, or Bun). `@superschematic/engine`
 (`runtime/engine/README.md`) has storage on `node:sqlite` and
 `bun:sqlite`, the schema registry with the compatibility rule,
-namespaces, instances, the event log and the access policy. Beyond the
-schema runtime's checks it refuses union and map fields, which no
-runtime validates yet, and object keys a type does not declare, which the
-compatibility rule depends on. Its `./http` entry point serves the HTTP
-API and the event stream on the HTTP runtime, which ships compiled output
-for it (D15, amended); an instance's sequence is its entity tag, and a
-namespace's stream also carries the shared namespace's publish events.
-Not built: the tool that copies a declaration into its npm package, and
-the engine's MCP tools and behaviors. Each change that lands a piece updates
-this paragraph, the README layout table and the pages that describe it.
-The names and rules are reversible until the first release.
+namespaces, instances, the event log and the access policy; its `./http`
+entry point serves the HTTP API and the event stream on the HTTP runtime
+(D15, amended), with an instance's sequence as its entity tag; and it
+runs behaviors through a plug-in interface (`BehaviorImplementation`),
+checking composition at define and publish, creating a behavior's
+storage at publish, and running its guards, operations, hooks and field
+readers. Beyond the schema runtime's checks it refuses union and map
+fields, which no runtime validates yet, and object keys a type does not
+declare; beyond the compiler's, a behavior composes on the instance type
+only, a behavior field may not take a type field's JSON key, and an
+operation's `paramsSchema` sets `additionalProperties: false`. The
+binary's `behaviors --out <dir> [--check]` command copies a declaration
+into its npm package; it is a command rather than a tool in the core
+module, since an extension's declarations are registered only in its own
+binary (section 3.16 of `docs/extension-model.md`). acme implements
+`acme.Rating` in `@acme/behaviors` over that copy, and its smoke runs it
+in the engine with no core edit. Not built: the engine's MCP tools and
+its HTTP route for behavior operations, and the behaviors the engine
+packages ship, without which the engine runs no behavior with no
+extension linked. Each change that lands a piece updates this paragraph,
+the README layout table and the pages that describe it. The names and
+rules are reversible until the first release.
 
 ## D17. A version graph over versioned tables, with one merge core
 

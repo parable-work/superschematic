@@ -1,0 +1,9 @@
+{
+  "name": "@acme/behaviors",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The acme-schematic example's behavior implementations for @superschematic/engine: acme.Rating, over the declaration acme-schematic behaviors copies into declarations/.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

@@ -18,6 +18,7 @@ import {
   openEngine,
   type Engine,
 } from '../dist/index.js';
+import { counter, openMetaSchema, publishItem } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, freshPath, orderDocument, schemaDocument, track } from './helpers.ts';
 
 afterEach(cleanup);
@@ -77,47 +78,119 @@ const seeds: Record<number, Seed> = {
       );
     },
   },
-  // Version 2 added actors, instances and the event log; version 3 indexed
-  // the publish events alone.
+  // Version 2 added actors, instances and the event log, with no operation
+  // events and no behavior storage.
   2: {
     write(storage) {
       const order = canonical(orderDocument());
       storage.run(
-        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, published_at, defined_by, published_by)
+        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 1, order.text, order.hash, 100, 200, 'alice', 'alice']
-      );
-      storage.run(
-        `INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change)
-         VALUES ('publish', 'default', 'Order', NULL, NULL, 1, 'alice', 200, ?)`,
-        [order.text]
+        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
       );
       storage.run(
         `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
-         VALUES ('default', 'Order', 'o1', 'default', 1, 1, '{"title":"Desk"}', 300, 'alice', 300, 'alice')`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 'o1', 'default', 1, 1, '{"title":"Desk"}', 300, 'alice', 300, 'alice']
       );
       storage.run(
-        `INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change)
-         VALUES ('create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}')`
+        'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text]
+      );
+      storage.run(
+        'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}']
       );
     },
     check(engine) {
       assert.deepEqual(
-        engine.events.read(alice).events.map((event) => [event.kind, event.cursor]),
+        engine.events.read(alice).events.map((event) => [event.cursor, event.kind, event.seq]),
         [
-          ['publish', 1],
-          ['create', 2],
+          [1, 'publish', null],
+          [2, 'create', 1],
         ]
       );
       const updated = engine.instances.update(alice, 'Order', 'o1', { title: 'Lamp' }, { expectedSeq: 1 });
       assert.deepEqual([updated.seq, updated.data], [2, { title: 'Lamp' }]);
-      assert.deepEqual(
-        engine.events.read(alice, { after: 2 }).events.map((event) => [event.kind, event.seq]),
-        [['update', 2]]
+      checkOperationEvents(engine, 3);
+    },
+  },
+  // Version 3 indexed the publish events alone; its rows are version 2's.
+  3: {
+    write(storage) {
+      const order = canonical(orderDocument());
+      storage.run(
+        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
       );
+      storage.run(
+        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 'o1', 'default', 1, 2, '{"title":"Lamp"}', 300, 'alice', 400, 'alice']
+      );
+      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+      storage.run(insert, ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text]);
+      storage.run(insert, ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}']);
+      storage.run(insert, ['update', 'default', 'Order', 'o1', 2, 1, 'alice', 400, '{"title":"Lamp"}']);
+    },
+    check(engine) {
+      assert.deepEqual(
+        engine.events.read(alice).events.map((event) => [event.cursor, event.kind, event.seq]),
+        [
+          [1, 'publish', null],
+          [2, 'create', 1],
+          [3, 'update', 2],
+        ]
+      );
+      assert.deepEqual(engine.events.read(alice, { schema: 'Order', instanceId: 'o1', after: 2 }).events.map((event) => event.change), [
+        { title: 'Lamp' },
+      ]);
+      const updated = engine.instances.update(alice, 'Order', 'o1', { title: 'Chair' }, { expectedSeq: 2 });
+      assert.deepEqual([updated.seq, updated.data], [3, { title: 'Chair' }]);
+      checkOperationEvents(engine, 4);
     },
   },
 };
+
+// checkOperationEvents publishes a schema with a behavior on a migrated file,
+// runs one of its writing operations and reads the events that follow the
+// update the seed's check made at cursor `update`: the log's cursors carry
+// on from the seed's, and the rebuilt kind CHECK admits an operation.
+function checkOperationEvents(engine: Engine, update: number): void {
+  publishItem(engine, [{ name: 'test.Counter' }]);
+  engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i1' });
+  engine.instances.invoke(alice, 'Item', 'i1', 'increment');
+  assert.equal(engine.instances.get(alice, 'Item', 'i1')?.seq, 2);
+  assert.deepEqual(
+    engine.events.read(alice, { after: update - 1 }).events.map((event) => [event.cursor, event.kind]),
+    [
+      [update, 'update'],
+      [update + 1, 'publish'],
+      [update + 2, 'create'],
+      [update + 3, 'operation'],
+    ]
+  );
+}
+
+// The indexes and triggers of engine_events that the code relies on: the
+// instance index a one-instance read names (INDEXED BY), the namespace,
+// schema and publish ranges, and the append-only triggers. The last
+// migration rebuilds the table, which drops its indexes and triggers.
+const EVENT_LOG_OBJECTS = [
+  'index engine_events_instance',
+  'index engine_events_namespace',
+  'index engine_events_publish',
+  'index engine_events_schema',
+  'trigger engine_events_no_delete',
+  'trigger engine_events_no_update',
+];
+
+function eventLogObjects(storage: Storage): string[] {
+  return storage
+    .all("SELECT type, name FROM sqlite_master WHERE tbl_name = 'engine_events' AND type IN ('index', 'trigger') ORDER BY type, name")
+    .map((row) => `${String(row.type)} ${String(row.name)}`);
+}
 
 const latest = engineMigrations.migrations.length;
 
@@ -133,14 +206,18 @@ for (const driver of drivers) {
         seed.write(storage);
         storage.close();
 
-        const engine = track(openEngine({ path, driver, policy: allowAll }));
+        const engine = track(openEngine({ path, driver, policy: allowAll, metaSchema: openMetaSchema(), behaviors: [counter] }));
         assert.deepEqual(
           appliedMigrations(engine.storage, ENGINE_OWNER).map((row) => row.version),
           engineMigrations.migrations.map((migration) => migration.version)
         );
         seed.check(engine);
+        assert.deepEqual(eventLogObjects(engine.storage), EVENT_LOG_OBJECTS);
         engine.schemas.define(alice, { ...orderDocument(), description: 'after the migration' });
         assert.equal(engine.schemas.publish(alice, 'Order').published, true);
+        // The log now holds an event whatever the seed wrote, so its triggers fire.
+        assert.throws(() => engine.storage.run('DELETE FROM engine_events'), /engine_events is append-only/);
+        assert.throws(() => engine.storage.run("UPDATE engine_events SET actor = 'mallory'"), /engine_events is append-only/);
       });
     }
 
