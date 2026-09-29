@@ -16,6 +16,8 @@ go/postgres/        package postgres: the Postgres storage adapter, with a pgx b
 rust-engine/        superschematic-versiongraph-engine: the Rust engine, storage traits and Postgres adapter
 typescript/         @superschematic/versiongraph: the wasm32-unknown-unknown build with typed operations, and the
                     TypeScript engine (./engine), its Postgres adapter (./postgres) and the facade base (./facade)
+python/             superschematic-versiongraph (module superschematic_versiongraph): the Python binding, a PyO3
+                    extension over the core built with maturin, with typed operations
 testdata/vectors/   the core's contract as vectors: {name, op, input, expect}
 testdata/canonical/ the canonical row contract as vectors: {cases} per class, {rows}
 testdata/fixture/   the scenarios' graph: fixture-version-graph-db's descriptor and Postgres DDL
@@ -23,9 +25,9 @@ testdata/scenarios/ the engines' contract as scenarios: {name, description, step
 ```
 
 This page is the contract. The vectors are its executable form: the Rust
-tests, the Go binding and the TypeScript package's tests run every core
-vector, and package `canonical` and the Rust engine's module `canonical`
-run every canonical vector. The scenarios
+tests, the Go binding, the TypeScript package's tests and the Python
+package's tests run every core vector, and package `canonical` and the Rust
+engine's module `canonical` run every canonical vector. The scenarios
 are the engines' contract: the Go, TypeScript and Rust engines run every
 one through their Postgres adapters. The package's
 types for this contract are `typescript/src/contract.ts`.
@@ -486,7 +488,9 @@ document's pointer and length through `out_ptr` and `out_len`. It returns 0
 with the operation's output, 1 with an error document, or 2 when an out
 pointer is null, writing nothing. Release each output with `vg_free`. A wasm
 host allocates its input and the two out slots with `vg_alloc` and releases
-them with `vg_dealloc`. `go/include/versiongraph.h` is the header.
+them with `vg_dealloc`. `go/include/versiongraph.h` is the header. The
+Python binding and the Rust engine do not go through it: they call the
+crate's Rust API, and the binding returns the same documents.
 
 ## Build and test
 
@@ -494,6 +498,7 @@ them with `vg_dealloc`. `go/include/versiongraph.h` is the header.
 make versiongraph            # static archive for the Go binding (scripts/versiongraph-archive.sh)
 make rust                    # fmt, clippy (native and wasm32) and cargo test, then cargo test again with serde_json's preserve_order
 make ts                      # among the TypeScript packages: the wasm build, the package, every vector through it
+make python                  # among the Python packages: the PyO3 extension, every vector through the package
 cd runtime/versiongraph/go && go test ./...
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
