@@ -122,9 +122,14 @@ class Auditable(BaseModel):
 
     updated_at: Optional[TemporalDateTime] = Field(default=None, alias="updatedAt", serialization_alias="updatedAt")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -142,6 +147,12 @@ class Auditable(BaseModel):
                 TypeAdapter(TemporalDateTime).validate_python(self.updated_at)
             except PydanticValidationError as e:
                 errors.add_field_error("updated_at", "invalid", str(e))
+
+        if by_alias:
+            return errors._with_field_names({
+                "created_at": "createdAt",
+                "updated_at": "updatedAt",
+            })
 
         return errors
 
@@ -303,9 +314,14 @@ class Tenant(BaseModel):
 
     version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -408,6 +424,14 @@ class Tenant(BaseModel):
         # Validate _version
         if self.version_ is None:
             errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "created_at": "createdAt",
+                "updated_at": "updatedAt",
+                "is_active": "isActive",
+                "seat_count": "seatCount",
+            })
 
         return errors
 
@@ -561,9 +585,14 @@ class TenantUser(BaseModel):
 
     version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -634,6 +663,15 @@ class TenantUser(BaseModel):
         # Validate _version
         if self.version_ is None:
             errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "created_at": "createdAt",
+                "updated_at": "updatedAt",
+                "display_name": "displayName",
+                "deleted_at": "deletedAt",
+                "deleted_by": "deletedBy",
+            })
 
         return errors
 

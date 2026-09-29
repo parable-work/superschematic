@@ -278,9 +278,14 @@ class {{.Name}}(BaseModel):
     {{.TargetName}}: {{if or (not .Required) .IsRelation}}Optional[{{end}}{{.TargetType}}{{if or (not .Required) .IsRelation}}]{{end}} = Field({{if $default}}default={{$default}}{{else if and .Required (not .IsRelation)}}...{{else}}default=None{{end}}, alias="{{.Name}}", serialization_alias="{{.Name}}")
     {{end}}
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -340,6 +345,15 @@ class {{.Name}}(BaseModel):
 {{template "ruleChecks" .}}
         {{- end}}
         {{end}}
+        {{- $renames := wireNameRenames .Fields}}
+        {{- if $renames}}
+        if by_alias:
+            return errors._with_field_names({
+                {{- range $renames}}
+                "{{.Key}}": "{{.Name}}",
+                {{- end}}
+            })
+        {{- end}}
 
         return errors
 

@@ -71,9 +71,14 @@ class Shelf(BaseModel):
 
     version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -147,6 +152,16 @@ class Shelf(BaseModel):
         # Validate _version
         if self.version_ is None:
             errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "created_at": "createdAt",
+                "created_by": "createdBy",
+                "updated_at": "updatedAt",
+                "updated_by": "updatedBy",
+                "deleted_at": "deletedAt",
+                "deleted_by": "deletedBy",
+            })
 
         return errors
 
@@ -293,9 +308,14 @@ class Stock(BaseModel):
 
     version_: int = Field(default=0, alias="_version", serialization_alias="_version")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.

@@ -341,7 +341,7 @@ func TestWriteSDKGolden(t *testing.T) {
 // such operations; fixture-nested-arrays-api declares none.
 func TestSDKTokenMethodsFollowOperationsNotPublic(t *testing.T) {
 	nestedArraysAPI := func(t *testing.T) *apigen.APIOutput {
-		_, apiOutput := loadNestedArraysAPI(t, false)
+		_, apiOutput := loadNestedArraysAPI(t)
 		return apiOutput
 	}
 	for _, test := range []struct {

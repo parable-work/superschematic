@@ -35,6 +35,7 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 		"structuredJSONListValue":   structuredJSONListValue,
 		"isList":                    isList,
 		"nullEntryCheck":            nullEntryCheck,
+		"wireNameRenames":           wireNameRenames,
 		"pythonFieldDefault": func(field codegen.FieldInfo) string {
 			// The store writes _version; a value without it reads as 0,
 			// as Go decodes it.
@@ -87,6 +88,27 @@ func hasNonRequiredValidations(field codegen.FieldInfo) bool {
 		}
 	}
 	return false
+}
+
+// wireNameRename maps the snake_case name validate_all keys a field's errors
+// by to the field's wire name.
+type wireNameRename struct {
+	Key  string
+	Name string
+}
+
+// wireNameRenames lists the fields whose snake_case error key differs from
+// their wire name, in field order. validate_all(by_alias=True) renames
+// these keys, so its errors are keyed as the Go and TypeScript validators
+// key them.
+func wireNameRenames(fields []codegen.FieldInfo) []wireNameRename {
+	var renames []wireNameRename
+	for _, field := range fields {
+		if key := codegen.ToSnakeCase(field.Name); key != field.Name {
+			renames = append(renames, wireNameRename{Key: key, Name: field.Name})
+		}
+	}
+	return renames
 }
 
 // isList reports whether the field is a list (T[] or T[][]) and not a map.
