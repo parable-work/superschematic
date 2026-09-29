@@ -1,8 +1,9 @@
 // acme.Rating in the engine, the smoke's step 20: an engine with acme's
 // implementation defines and publishes shop-ratings' Product, creates one,
-// rates it and reads the rating fields; an engine without it refuses the
-// schema. ACME_META_SCHEMA is the `acme-schematic json-schema` output, which
-// declares acme.Rating, as a deployment's binary would.
+// rates it and reads the rating fields; its tools carry acme's invocation
+// policy; an engine without it refuses the schema. ACME_META_SCHEMA is the
+// `acme-schematic json-schema` output, which declares acme.Rating and acme's
+// invocation policy, as a deployment's binary would.
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,7 +12,7 @@ import { afterEach, test } from 'node:test';
 
 import { EngineError, OperationParamsError, SchemaDocumentError, allowAll, openEngine, type Engine } from '@superschematic/engine';
 
-import { behaviors } from '../src/index.ts';
+import { behaviors, tools } from '../src/index.ts';
 
 const metaSchemaPath = process.env.ACME_META_SCHEMA;
 if (!metaSchemaPath) {
@@ -40,7 +41,7 @@ afterEach(() => {
 function open(withAcme: boolean): Engine {
   const directory = mkdtempSync(join(tmpdir(), 'acme-engine-'));
   directories.push(directory);
-  const engine = openEngine({ path: join(directory, 'shop.db'), policy: allowAll, metaSchema, behaviors: withAcme ? behaviors : [] });
+  const engine = openEngine({ path: join(directory, 'shop.db'), policy: allowAll, metaSchema, behaviors: withAcme ? behaviors : [], tools });
   engines.push(engine);
   return engine;
 }
@@ -77,6 +78,35 @@ test('an engine with acme.Rating publishes shop-ratings and rates a product', ()
       ['operation', { behavior: 'acme.Rating', operation: 'rate', params: { stars: 5 }, patch: { ratingCount: 2, ratingAverage: 4.5 } }],
     ]
   );
+});
+
+test("the engine's tools carry the invocation policy acme's binary registers", () => {
+  // The meta-schema's mcp record has one key beside its own: the policy's,
+  // with its values and default.
+  const record = (JSON.parse(metaSchema) as { $defs: { OperationMCP: { properties: Record<string, { enum?: string[]; default?: string }> } } }).$defs.OperationMCP
+    .properties;
+  const own = ['_meta', 'description', 'handle', 'hidden', 'hiddenReason', 'icon', 'name'];
+  const [key] = Object.keys(record).filter((name) => !own.includes(name));
+  assert.deepEqual(tools.invocationPolicy, { key, values: record[key].enum, default: record[key].default });
+
+  const engine = open(true);
+  engine.schemas.define(shopper, schema);
+  engine.schemas.publish(shopper, 'Product');
+  const policies = engine.tools
+    .manifest(shopper)
+    .tools.filter((tool) => tool.name.startsWith('product.'))
+    .map((tool) => [tool.name, tool.mcp.hidden ? undefined : tool.mcp.confirm]);
+  assert.deepEqual(policies, [
+    ['product.create', 'never'],
+    ['product.get', 'never'],
+    ['product.list', 'never'],
+    ['product.update', 'never'],
+    ['product.delete', 'never'],
+    ['product.rate', 'always'],
+    ['product.ratingSummary', 'never'],
+  ]);
+  const rate = engine.tools.manifest(shopper).tools.find((tool) => tool.name === 'product.rate');
+  assert.equal(rate?.parameters['x-acme-arguments'], 1);
 });
 
 test('a new version may raise maxStars and may not lower it', () => {

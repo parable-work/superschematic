@@ -46,7 +46,7 @@ Pages on a release tag once the repository is public.
 | `runtime/schema/{go,typescript,python}/` | Schema runtime the generated code links |
 | `runtime/http/{go,rust,typescript}/` | HTTP runtime the generated servers link; the engine's HTTP API is built on the TypeScript one |
 | `runtime/versiongraph/{rust,go,typescript}/` | Version-graph core: compose, merge, diff, hash and validate trees of versioned rows; a Rust crate with a Go binding (its own Go module) and `@superschematic/versiongraph`, the TypeScript package over its wasm build for the browser, bun and Node. `runtime/versiongraph/README.md` is its JSON contract and `testdata/vectors` its executable form. A generated ORM whose schema declares a graph imports the Go binding |
-| `runtime/engine/typescript/` | `@superschematic/engine`: runs a schema with no generated code (D16); its storage, schema registry, instances, event log, access policy, HTTP API with the event stream (`@superschematic/engine/http`) and behavior plug-in interface are built |
+| `runtime/engine/typescript/` | `@superschematic/engine`: runs a schema with no generated code (D16); its storage, schema registry, instances, event log, access policy, HTTP API with the event stream (`@superschematic/engine/http`), behavior plug-in interface, describe and tools documents and MCP endpoint (`@superschematic/engine/mcp`) are built. `runtime/engine/testdata/` holds the Go vectors its tool argument schemas are checked against |
 | `packages/` | `@superschematic/{api,db,schema,schema-config}`: the TypeScript authoring packages |
 | `extensions/` | Example extensions |
 | `superschematic.toml` | The default naming file, written out |

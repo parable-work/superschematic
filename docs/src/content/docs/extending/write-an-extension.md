@@ -664,13 +664,16 @@ so those guards always run. The engine's README ("Behaviors") has the
 whole interface.
 
 A deployment registers the implementation with the engine and passes the
-meta-schema its binary writes, which declares the behavior:
+meta-schema its binary writes, which declares the behavior, and the tool
+invocation policy and vendor keys its binary registers, which the engine
+writes its MCP tools with (an operation's `invocationPolicy` must be one
+of the policy's values):
 
 ```ts
 import { openEngine } from "@superschematic/engine";
-import { behaviors } from "@acme/behaviors";
+import { behaviors, tools } from "@acme/behaviors";
 
-const engine = openEngine({ path: "shop.db", policy, metaSchema: acmeJSONSchema, behaviors });
+const engine = openEngine({ path: "shop.db", policy, metaSchema: acmeJSONSchema, behaviors, tools });
 engine.schemas.define(me, productSchema);   // composes acme.Rating
 engine.schemas.publish(me, "Product");       // creates the rating columns
 engine.instances.invoke(me, "Product", id, "rate", { stars: 4 });

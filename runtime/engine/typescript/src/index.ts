@@ -33,6 +33,7 @@ export { SchemaValidator } from './registry/validator.js';
 
 export { INSTANCE_ID, InstanceStore } from './instances/store.js';
 export type { CreateOptions, DeleteOptions, InstancePage, InstanceRecord, InstanceTarget, ListOptions, UpdateOptions } from './instances/store.js';
+export type { InvokeOptions, OperationOutcome } from './instances/store.js';
 
 export { EventLog } from './events/log.js';
 export type { EngineEvent, EventKind, EventPage, OperationChange, ReadEventsOptions } from './events/log.js';
@@ -75,3 +76,19 @@ export { DEFAULT_BUSY_TIMEOUT_MS, Storage } from './storage/storage.js';
 export type { StorageOptions } from './storage/storage.js';
 export { appliedMigrations, migrate } from './storage/migrations.js';
 export type { AppliedMigration, Migration, MigrationResult, MigrationSet } from './storage/migrations.js';
+
+// Tools: the describe and tools documents and the calls the MCP tools make (runtime/engine/README.md, "Tools").
+export { MCP_HANDLE, MCP_HANDLE_MAX_LENGTH, ToolCatalog, UnknownToolError, kebabCase, snakeCase } from './tools/catalog.js';
+export type {
+  DescribeDocument,
+  DescribedBehavior,
+  DescribedOperation,
+  JSONSchemaObject,
+  ToolDefinition,
+  ToolMCPRecord,
+  ToolManifest,
+  ToolTarget,
+} from './tools/catalog.js';
+export { BUILTIN_TOOLS, DEFAULT_INVOCATION_POLICY, DEFAULT_TOOL_KEYS, resolveToolOptions } from './tools/options.js';
+export type { BuiltinTool, InvocationPolicy, ResolvedToolOptions, ToolKeys, ToolOptions } from './tools/options.js';
+export { ANY_JSON_TYPES, typeArguments } from './tools/schema.js';

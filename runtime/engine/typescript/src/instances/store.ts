@@ -89,6 +89,22 @@ export interface DeleteOptions extends InstanceTarget {
   expectedSeq?: number;
 }
 
+export interface InvokeOptions extends InstanceTarget {
+  /**
+   * As UpdateOptions.expectedSeq: the operation is refused with
+   * seq_mismatch unless the instance is still at this sequence, checked
+   * before any guard runs, inside the write transaction of an operation
+   * that writes.
+   */
+  expectedSeq?: number;
+}
+
+/** What an operation returns, with the instance's sequence after it: its entity tag. */
+export interface OperationOutcome {
+  result: unknown;
+  seq: number;
+}
+
 export interface ListOptions extends InstanceTarget {
   /** At most this many instances, 50 by default and at most 500. */
   limit?: number;
@@ -294,9 +310,19 @@ export class InstanceStore {
    * does. It moves it even when no field changes, since the engine cannot
    * see what the operation changed in its behavior's own tables. A schema
    * or operation the namespace does not have is not_found to a principal
-   * that may read the schema, and forbidden to one that may not.
+   * that may read the schema, and forbidden to one that may not. With
+   * expectedSeq, the instance must still be at that sequence.
    */
-  invoke(principal: Principal, schema: string, id: string, operation: string, params: unknown = {}, options: InstanceTarget = {}): unknown {
+  invoke(principal: Principal, schema: string, id: string, operation: string, params: unknown = {}, options: InvokeOptions = {}): unknown {
+    return this.operate(principal, schema, id, operation, params, options).result;
+  }
+
+  /**
+   * operate is invoke, returning the result with the instance's sequence
+   * after the call: the next one for an operation that writes, the one it
+   * read for an operation that does not.
+   */
+  operate(principal: Principal, schema: string, id: string, operation: string, params: unknown = {}, options: InvokeOptions = {}): OperationOutcome {
     checkPrincipal(principal);
     const namespace = this.namespaces.resolve(options.namespace);
     checkSchemaName(schema);
@@ -316,17 +342,21 @@ export class InstanceStore {
       );
     }
     this.access.require(principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
+    checkExpectedSeq(options.expectedSeq);
     const checked = checkParams(spec, params);
     const now = this.clock();
     if (!spec.writes) {
       const row = this.existing(namespace, schema, id);
-      return this.execution(runtime, record, namespace, principal, now, id, JSON.parse(String(row.data)) as Record<string, unknown>, false).invoke(
+      matchSeq(row, options.expectedSeq);
+      const result = this.execution(runtime, record, namespace, principal, now, id, JSON.parse(String(row.data)) as Record<string, unknown>, false).invoke(
         spec,
         checked
       );
+      return { result, seq: Number(row.seq) };
     }
     return this.storage.transaction(() => {
       const row = this.existing(namespace, schema, id);
+      matchSeq(row, options.expectedSeq);
       const execution = this.execution(runtime, record, namespace, principal, now, id, JSON.parse(String(row.data)) as Record<string, unknown>, true);
       const before = execution.fields();
       const result = execution.invoke(spec, checked);
@@ -350,7 +380,7 @@ export class InstanceStore {
         at: now,
         change: JSON.stringify(change),
       });
-      return result;
+      return { result, seq };
     });
   }
 

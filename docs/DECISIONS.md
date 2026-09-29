@@ -1001,7 +1001,14 @@ entry point serves the HTTP API and the event stream on the HTTP runtime
 runs behaviors through a plug-in interface (`BehaviorImplementation`),
 checking composition at define and publish, creating a behavior's
 storage at publish, and running its guards, operations, hooks and field
-readers. Beyond the schema runtime's checks it refuses union and map
+readers. Its HTTP API routes a behavior operation, with `If-Match` as
+the operation's expected sequence, and serves a describe document per
+schema and a namespace's tools document in `tools/schema.json`'s shape;
+its `./mcp` entry point serves the tools over MCP on the official
+TypeScript SDK, with the policy and vendor keys as engine options and no
+publish tool. `runtime/engine/testdata/tool_parameters_parity.json`,
+written from `toolsutil`, holds its field schemas to the SDK
+generators'. Beyond the schema runtime's checks it refuses union and map
 fields, which no runtime validates yet, and object keys a type does not
 declare; beyond the compiler's, a behavior composes on the instance type
 only. Both refuse an operation whose `paramsSchema` does not set
@@ -1013,8 +1020,7 @@ command rather than a tool in the core module, since an extension's
 declarations are registered only in its own binary (section 3.16 of
 `docs/extension-model.md`). acme implements
 `acme.Rating` in `@acme/behaviors` over that copy, and its smoke runs it
-in the engine with no core edit. Not built: the engine's MCP tools and
-its HTTP route for behavior operations, and the behaviors the engine
+in the engine with no core edit. Not built: the behaviors the engine
 packages ship, without which the engine runs no behavior with no
 extension linked. Each change that lands a piece updates this paragraph,
 the README layout table and the pages that describe it. The names and
