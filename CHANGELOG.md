@@ -13,6 +13,20 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Python SDK: a list `@query` parameter (`QueryParam<T[]>`, or `isQuery`
+  on a `T[]` argument) is typed `list[T]` and sent as one comma-separated
+  value, `?tags=ab,cd`, the form the Go and TypeScript routes read and the
+  TypeScript SDK sends. It was typed `T`, and a list went out as its
+  Python repr, `?tags=['ab', 'cd']`. The SDK now checks the list bounds on
+  the list, validates each element as its type and against the
+  argument's `min`, `max`, `minLength`, `maxLength` and `pattern` (which
+  it skipped for a list), and refuses a value that is not a list as
+  `type`. A required list needs an item, and an empty optional list is
+  left out, since the query string has no form for one. A namespace with
+  such a parameter gains a `_validate_list_query_param` helper. Major: the
+  parameter's type changes from `T` to `list[T]`, and a string, which the
+  old signature asked for, is refused; a caller that passed a list, which
+  never reached the route intact, needs no change.
 - `scripts/bump_version.py` versions the Python runtime's own entry in
   `runtime/schema/python/uv.lock` (`superschematic-schema-runtime`), in
   the PEP 440 form its `pyproject.toml` carries: `set` writes it and

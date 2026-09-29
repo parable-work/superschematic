@@ -71,6 +71,9 @@ type NamespaceInfo struct {
 	// helper of the namespace class.
 	HasListOfListsArgs        bool
 	HasListOfListsModelOutput bool
+
+	// HasListQueryParams gates the _validate_list_query_param helper.
+	HasListQueryParams bool
 }
 
 // EndpointInfo represents a single API endpoint for the Python SDK.
@@ -116,10 +119,16 @@ type PathParam struct {
 
 // QueryParam represents a query string parameter mapped to a Python identifier.
 type QueryParam struct {
-	Name     string
-	PyName   string
-	PyType   string
-	Required bool
+	Name          string
+	PyName        string
+	PyType        string // Full type including the list[] wrapper when IsArray is true
+	PyElementType string // Element type for per-element validation (only set when IsArray is true)
+	Required      bool
+
+	// IsArray marks a T[] parameter. The routes read it from ?name=a,b, so
+	// it is sent as one comma-separated value; min, max, lengths and
+	// pattern apply to each element and the list bounds to the list.
+	IsArray bool
 
 	ValidateMin       *float64
 	ValidateMax       *float64
@@ -256,6 +265,11 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 				namespace.HasListOfListsArgs = true
 			}
 		}
+		for _, param := range converted.QueryParams {
+			if param.IsArray {
+				namespace.HasListQueryParams = true
+			}
+		}
 		if converted.OutputIsArrayOfArrays && converted.OutputModelName != "" {
 			namespace.HasListOfListsModelOutput = true
 		}
@@ -326,11 +340,19 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 
 	queryParams := make([]QueryParam, 0, len(endpoint.QueryParams))
 	for _, param := range endpoint.QueryParams {
+		pyElementType := ""
+		pyType := mapIRTypeToPython(param.Type)
+		if param.IsArray {
+			pyElementType = pyType
+			pyType = pythonListType(pyType, param.ArrayDepth())
+		}
 		queryParams = append(queryParams, QueryParam{
 			Name:              param.Name,
 			PyName:            toPythonIdentifier(param.Name),
-			PyType:            mapIRTypeToPython(param.Type),
+			PyType:            pyType,
+			PyElementType:     pyElementType,
 			Required:          param.Required,
+			IsArray:           param.IsArray,
 			ValidateMin:       param.ValidateMin,
 			ValidateMax:       param.ValidateMax,
 			ValidateMinLength: param.ValidateMinLength,

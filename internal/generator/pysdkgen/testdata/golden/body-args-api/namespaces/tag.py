@@ -6,7 +6,7 @@ import importlib
 import re
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilterableEndpoints}} FilterSpec,{{end}} SyncHTTPClient
+from ..client import EncryptedRequestOptions, FilePart, SyncHTTPClient
 from ..errors import ValidationError
 
 _BUILTIN_VALIDATION_TYPES: dict[str, Any] = {
@@ -27,40 +27,21 @@ def _load_types_package() -> Any | None:
 
     _TYPES_PACKAGE_RESOLVED = True
     try:
-        _TYPES_PACKAGE_MODULE = importlib.import_module("{{.SDK.TypesPackage}}")
+        _TYPES_PACKAGE_MODULE = importlib.import_module("schemas_types_body_args_api")
     except ModuleNotFoundError:
         _TYPES_PACKAGE_MODULE = None
     return _TYPES_PACKAGE_MODULE
-
-
-{{- if .Namespace.Imports}}
 if TYPE_CHECKING:
-    from {{.SDK.TypesPackage}} import (
-{{- range .Namespace.Imports}}
-        {{.}},
-{{- end}}
+    from schemas_types_body_args_api import (
+        Point,
+        Shade,
     )
-{{- end}}
-
-{{- range .Namespace.Endpoints}}
-{{- if .HasFileUpload}}
-class {{.FilesTypeName}}(TypedDict, total=False):
-{{- range .FileUploadFields}}
-    {{.PyName}}: FilePart
-{{- end}}
-
-{{- end}}
-{{- end}}
-class {{.Namespace.ClassName}}:
+class TagNamespace:
     def __init__(
         self,
-        client: SyncHTTPClient{{if .Namespace.IsScopedNS}},
-        {{.Namespace.ScopeParamName}}: {{.Namespace.ScopeParamType}}{{end}},
+        client: SyncHTTPClient,
     ) -> None:
         self._client = client
-{{- if .Namespace.IsScopedNS}}
-        self._{{.Namespace.ScopeParamName}} = {{.Namespace.ScopeParamName}}
-{{- end}}
 
     def _resolve_validation_type(self, type_name: str) -> Any | None:
         builtin_type = _BUILTIN_VALIDATION_TYPES.get(type_name)
@@ -238,7 +219,6 @@ class {{.Namespace.ClassName}}:
             raise ValidationError(
                 self._build_validation_errors(err, default_field=field_name),
             ) from err
-{{- if .Namespace.HasListOfListsArgs}}
 
     def _validate_list_of_lists_argument(self, value: Any, element_type_name: str, field_name: str) -> None:
         """Validate an array-of-arrays argument.
@@ -268,15 +248,6 @@ class {{.Namespace.ClassName}}:
                             for key, errors in err.errors.items()
                         },
                     ) from err
-{{- end}}
-{{- if .Namespace.HasListOfListsModelOutput}}
-
-    def _coerce_list_of_lists_response(self, raw: Any, output_type_name: str) -> Any:
-        """Coerce an array-of-arrays response row by row, as _coerce_response."""
-        if not isinstance(raw, list):
-            return raw
-        return [self._coerce_response(row, output_type_name, True) for row in raw]
-{{- end}}
 
     def _validate_query_param_constraints(
         self,
@@ -338,7 +309,6 @@ class {{.Namespace.ClassName}}:
 
         if field_errors:
             raise ValidationError({field_name: field_errors})
-{{- if .Namespace.HasListQueryParams}}
 
     def _validate_list_query_param(
         self,
@@ -377,352 +347,265 @@ class {{.Namespace.ClassName}}:
                 max_length=max_length,
                 pattern=pattern,
             )
-{{- end}}
-
-{{- range .Namespace.Endpoints}}
-    def {{.MethodName}}(self{{- range .MethodParams}}, {{.Declaration}}{{- end}}) -> {{.OutputTypeHint}}:
-{{- if .PathIsFString}}
-        path = f"{{.PathTemplate}}"
-{{- else}}
-        path = "{{.PathTemplate}}"
-{{- end}}
-{{- if .HasInput}}
-{{- if .InputRequired}}
-        if input_data is None:
-            raise ValidationError(
-                {"": [{"validator": "required", "message": "input is required"}]},
-            )
-{{- end}}
-        validated_input_data = self._validate_input_model(input_data, "{{.InputType}}")
-
-{{- end}}
-
-{{- if .HasQueryParams}}
-        query_params: dict[str, Any] | None = {}
-{{- range .QueryParams}}
-{{- if .IsArray}}
-{{- /* The routes read a list from ?name=a,b and no item as an absent list,
-   so a required list needs an item and an empty optional one is left out. */}}
-{{- if .Required}}
-        if not {{.PyName}}:
-            raise ValidationError(
-                {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
-            )
-        self._validate_list_query_param(
-            {{.PyName}},
-            "{{.PyElementType}}",
-            "{{.PyName}}",
-            {{- if .ValidateMin}} min_value={{.ValidateMin}},{{- end}}
-            {{- if .ValidateMax}} max_value={{.ValidateMax}},{{- end}}
-            {{- if .ValidateMinLength}} min_length={{.ValidateMinLength}},{{- end}}
-            {{- if .ValidateMaxLength}} max_length={{.ValidateMaxLength}},{{- end}}
-            {{- if .ValidatePattern}} pattern={{printf "%q" .ValidatePattern}},{{- end}}
-            {{- if .ValidateListMin}} list_min={{.ValidateListMin}},{{- end}}
-            {{- if .ValidateListMax}} list_max={{.ValidateListMax}},{{- end}}
-        )
-        query_params["{{.Name}}"] = ",".join(str(v) for v in {{.PyName}})
-{{- else}}
-        if {{.PyName}} is not None:
-            self._validate_list_query_param(
-                {{.PyName}},
-                "{{.PyElementType}}",
-                "{{.PyName}}",
-                {{- if .ValidateMin}} min_value={{.ValidateMin}},{{- end}}
-                {{- if .ValidateMax}} max_value={{.ValidateMax}},{{- end}}
-                {{- if .ValidateMinLength}} min_length={{.ValidateMinLength}},{{- end}}
-                {{- if .ValidateMaxLength}} max_length={{.ValidateMaxLength}},{{- end}}
-                {{- if .ValidatePattern}} pattern={{printf "%q" .ValidatePattern}},{{- end}}
-                {{- if .ValidateListMin}} list_min={{.ValidateListMin}},{{- end}}
-                {{- if .ValidateListMax}} list_max={{.ValidateListMax}},{{- end}}
-            )
-            if {{.PyName}}:
-                query_params["{{.Name}}"] = ",".join(str(v) for v in {{.PyName}})
-{{- end}}
-{{- else if .Required}}
-        if {{.PyName}} is None:
-            raise ValidationError(
-                {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
-            )
-{{- if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern .ValidateListMin .ValidateListMax}}
-        self._validate_query_param_constraints(
-            {{.PyName}},
-            "{{.PyName}}",
-            {{- if .ValidateMin}} min_value={{.ValidateMin}},{{- end}}
-            {{- if .ValidateMax}} max_value={{.ValidateMax}},{{- end}}
-            {{- if .ValidateMinLength}} min_length={{.ValidateMinLength}},{{- end}}
-            {{- if .ValidateMaxLength}} max_length={{.ValidateMaxLength}},{{- end}}
-            {{- if .ValidatePattern}} pattern={{printf "%q" .ValidatePattern}},{{- end}}
-            {{- if .ValidateListMin}} list_min={{.ValidateListMin}},{{- end}}
-            {{- if .ValidateListMax}} list_max={{.ValidateListMax}},{{- end}}
-        )
-{{- end}}
-        query_params["{{.Name}}"] = {{.PyName}}
-{{- else}}
-        if {{.PyName}} is not None:
-{{- if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern .ValidateListMin .ValidateListMax}}
-            self._validate_query_param_constraints(
-                {{.PyName}},
-                "{{.PyName}}",
-                {{- if .ValidateMin}} min_value={{.ValidateMin}},{{- end}}
-                {{- if .ValidateMax}} max_value={{.ValidateMax}},{{- end}}
-                {{- if .ValidateMinLength}} min_length={{.ValidateMinLength}},{{- end}}
-                {{- if .ValidateMaxLength}} max_length={{.ValidateMaxLength}},{{- end}}
-                {{- if .ValidatePattern}} pattern={{printf "%q" .ValidatePattern}},{{- end}}
-                {{- if .ValidateListMin}} list_min={{.ValidateListMin}},{{- end}}
-                {{- if .ValidateListMax}} list_max={{.ValidateListMax}},{{- end}}
-            )
-{{- end}}
-            query_params["{{.Name}}"] = {{.PyName}}
-{{- end}}
-{{- end}}
-        if not query_params:
-            query_params = None
-{{- else}}
+    def find_tags(self, labels: list[str], timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> list[str]:
+        path = "/api/posts/tags"
         query_params: dict[str, Any] | None = None
-{{- end}}
-{{- if .Filterable}}
-        if filters:
-            if query_params is None:
-                query_params = {}
-            for _field, _spec in filters.items():
-                if isinstance(_spec, str):
-                    query_params[f"filter[{_field}]"] = _spec
-                else:
-                    query_params[f"filter[{_field}][{_spec['op']}]"] = _spec["value"]
-{{- end}}
-
-{{- if .HasFileUpload}}
-{{- if not .HasRequiredFileField}}
-        if files is None:
-            files = {}
-{{- end}}
-{{- if .HasInput}}
-        payload_data = self._client.prepare_multipart_data(
-            validated_input_data,
-            [
-{{- range .MultipartStripKeys}}
-                "{{.}}",
-{{- end}}
-            ],
-        )
-{{- else}}
-        payload_data: dict[str, Any] = {}
-{{- end}}
-        multipart_data = {"data": self._client.to_json(payload_data)}
-        multipart_files: dict[str, FilePart] = {}
-{{- range .FileUploadFields}}
-{{- if .Required}}
-        if "{{.PyName}}" not in files:
+        if not labels:
             raise ValidationError(
-                {"{{.PyName}}": [{"validator": "required", "message": "required field"}]},
+                {"labels": [{"validator": "required", "message": "labels is required"}]},
             )
-{{- end}}
-        if "{{.PyName}}" in files:
-            multipart_files["{{.Name}}"] = files["{{.PyName}}"]
-{{- end}}
-        response = self._client.request_multipart(
-            method="{{.HTTPMethod}}",
+        for _elem in labels:
+            self._validate_scalar_argument(_elem, "str", "labels")
+        if query_params is None:
+            query_params = {}
+        query_params["labels"] = ",".join(str(v) for v in labels)
+        response = self._client.request(
+            method="GET",
             path=path,
-            data=multipart_data,
-            files=multipart_files,
+            body=None,
             query_params=query_params,
-            requires_auth={{if .RequiresAuth}}True{{else}}False{{end}},
+            requires_auth=False,
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
-{{- else if .HasEncryptedBody}}
-{{- if .HasInput}}
-        payload: Any = self._client.to_dict(validated_input_data)
-{{- else if .HasScalarArgs}}
+        return self._coerce_response(response, "", True)
+    def name_shades(self, id: str, shade_by_name: Shade, links_by_locale: list[str] | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> bool:
+        path = f"/api/posts/{id}/shade-names"
+        query_params: dict[str, Any] | None = None
         payload: dict[str, Any] = {}
-{{- range .ScalarArgs}}
-{{- if .IsArrayOfArrays}}
-{{- if .Required}}
-        if {{.PyName}} is None:
-            raise ValidationError(
-                {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
-            )
-        self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
-        payload["{{.Name}}"] = {{.PyName}}
-{{- else}}
-        if {{.PyName}} is not None:
-            self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
-            payload["{{.Name}}"] = {{.PyName}}
-{{- end}}
-{{- else if .IsArray}}
-{{- if .Required}}
-        for _elem in {{.PyName}}:
-            self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
-        payload["{{.Name}}"] = {{.PyName}}
-{{- else}}
-        if {{.PyName}} is not None:
-            for _elem in {{.PyName}}:
-                self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
-            payload["{{.Name}}"] = {{.PyName}}
-{{- end}}
-{{- else}}
-{{- if .Required}}
-        payload["{{.Name}}"] = self._validate_scalar_argument(
-            {{.PyName}},
-            "{{.PyType}}",
-            "{{.PyName}}",
+        payload["shadeByName"] = self._validate_scalar_argument(
+            shade_by_name,
+            "Shade",
+            "shade_by_name",
         )
-{{- else}}
-        if {{.PyName}} is not None:
-            payload["{{.Name}}"] = self._validate_scalar_argument(
-                {{.PyName}},
-                "{{.PyType}}",
-                "{{.PyName}}",
-            )
-{{- end}}
-{{- end}}
-{{- end}}
-{{- else}}
-        payload: dict[str, Any] = {}
-{{- end}}
-        encrypted_payload = self._client.encrypt_payload(
-            payload,
-            options.public_encryption_key if options is not None else None,
-        )
+        if links_by_locale is not None:
+            for _elem in links_by_locale:
+                self._validate_scalar_argument(_elem, "str", "links_by_locale")
+            payload["linksByLocale"] = links_by_locale
         response = self._client.request(
-            method="{{.HTTPMethod}}",
-            path=path,
-            body=encrypted_payload,
-            query_params=query_params,
-            requires_auth={{if .RequiresAuth}}True{{else}}False{{end}},
-            timeout_seconds=timeout_seconds,
-            extra_headers=extra_headers,
-        )
-        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
-{{- else}}
-{{- if .HasRequestBody}}
-{{- if .HasInput}}
-        payload: Any = self._client.to_dict(validated_input_data)
-{{- else if .HasScalarArgs}}
-        payload: dict[str, Any] = {}
-{{- range .ScalarArgs}}
-{{- if .IsArrayOfArrays}}
-{{- if .Required}}
-        if {{.PyName}} is None:
-            raise ValidationError(
-                {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
-            )
-        self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
-        payload["{{.Name}}"] = {{.PyName}}
-{{- else}}
-        if {{.PyName}} is not None:
-            self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
-            payload["{{.Name}}"] = {{.PyName}}
-{{- end}}
-{{- else if .IsArray}}
-{{- if .Required}}
-        for _elem in {{.PyName}}:
-            self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
-        payload["{{.Name}}"] = {{.PyName}}
-{{- else}}
-        if {{.PyName}} is not None:
-            for _elem in {{.PyName}}:
-                self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
-            payload["{{.Name}}"] = {{.PyName}}
-{{- end}}
-{{- else}}
-{{- if .Required}}
-        payload["{{.Name}}"] = self._validate_scalar_argument(
-            {{.PyName}},
-            "{{.PyType}}",
-            "{{.PyName}}",
-        )
-{{- else}}
-        if {{.PyName}} is not None:
-            payload["{{.Name}}"] = self._validate_scalar_argument(
-                {{.PyName}},
-                "{{.PyType}}",
-                "{{.PyName}}",
-            )
-{{- end}}
-{{- end}}
-{{- end}}
-{{- else}}
-        payload: dict[str, Any] = {}
-{{- end}}
-        response = self._client.request(
-            method="{{.HTTPMethod}}",
+            method="PUT",
             path=path,
             body=payload,
             query_params=query_params,
-            requires_auth={{if .RequiresAuth}}True{{else}}False{{end}},
+            requires_auth=False,
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
-{{- else}}
-{{- if .HasScalarArgs}}
-{{- range .ScalarArgs}}
-{{- if .IsArray}}
-{{- if .Required}}
-        if not {{.PyName}}:
-            raise ValidationError(
-                {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
+        return self._coerce_response(response, "", False)
+    def place_points(self, id: str, point_by_name: Point, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> bool:
+        path = f"/api/posts/{id}/points"
+        query_params: dict[str, Any] | None = None
+        payload: dict[str, Any] = {}
+        payload["pointByName"] = self._validate_scalar_argument(
+            point_by_name,
+            "Point",
+            "point_by_name",
+        )
+        response = self._client.request(
+            method="PUT",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", False)
+    def save_tags(self, id: str, labels: list[str], weights: list[float] | None = None, ranks: list[str] | None = None, shades: list[Shade] | None = None, links: list[str] | None = None, title: str | None = None, priority: float | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> list[str]:
+        path = f"/api/posts/{id}/tags"
+        query_params: dict[str, Any] | None = None
+        payload: dict[str, Any] = {}
+        for _elem in labels:
+            self._validate_scalar_argument(_elem, "str", "labels")
+        payload["labels"] = labels
+        if weights is not None:
+            for _elem in weights:
+                self._validate_scalar_argument(_elem, "float", "weights")
+            payload["weights"] = weights
+        if ranks is not None:
+            for _elem in ranks:
+                self._validate_scalar_argument(_elem, "str", "ranks")
+            payload["ranks"] = ranks
+        if shades is not None:
+            for _elem in shades:
+                self._validate_scalar_argument(_elem, "Shade", "shades")
+            payload["shades"] = shades
+        if links is not None:
+            for _elem in links:
+                self._validate_scalar_argument(_elem, "str", "links")
+            payload["links"] = links
+        if title is not None:
+            payload["title"] = self._validate_scalar_argument(
+                title,
+                "str",
+                "title",
             )
-        for _elem in {{.PyName}}:
-            self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
-{{- else}}
-        if {{.PyName}} is not None:
-            for _elem in {{.PyName}}:
-                self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
-{{- end}}
-{{- else}}
-{{- if .Required}}
-        self._validate_scalar_argument({{.PyName}}, "{{.PyType}}", "{{.PyName}}")
-{{- else}}
-        if {{.PyName}} is not None:
-            self._validate_scalar_argument({{.PyName}}, "{{.PyType}}", "{{.PyName}}")
-{{- end}}
-{{- end}}
-{{- end}}
+        if priority is not None:
+            payload["priority"] = self._validate_scalar_argument(
+                priority,
+                "float",
+                "priority",
+            )
+        response = self._client.request(
+            method="PUT",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", True)
+    def search_posts(self, scores: list[float] | None = None, ranks: list[str] | None = None, flags: list[bool] | None = None, related: list[str] | None = None, days: list[str] | None = None, codes: list[str] | None = None, caption: str | None = None, limit: float | None = None, page: str | None = None, pinned: bool | None = None, author: str | None = None, since: str | None = None, tags: list[str] | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> list[str]:
+        path = "/api/posts/search"
+        query_params: dict[str, Any] | None = {}
+        if tags is not None:
+            self._validate_list_query_param(
+                tags,
+                "str",
+                "tags", min_length=2, list_max=2,
+            )
+            if tags:
+                query_params["tags"] = ",".join(str(v) for v in tags)
+        if not query_params:
+            query_params = None
+        if scores is not None:
+            for _elem in scores:
+                self._validate_scalar_argument(_elem, "float", "scores")
+        if ranks is not None:
+            for _elem in ranks:
+                self._validate_scalar_argument(_elem, "str", "ranks")
+        if flags is not None:
+            for _elem in flags:
+                self._validate_scalar_argument(_elem, "bool", "flags")
+        if related is not None:
+            for _elem in related:
+                self._validate_scalar_argument(_elem, "str", "related")
+        if days is not None:
+            for _elem in days:
+                self._validate_scalar_argument(_elem, "str", "days")
+        if codes is not None:
+            for _elem in codes:
+                self._validate_scalar_argument(_elem, "str", "codes")
+        if caption is not None:
+            self._validate_scalar_argument(caption, "str", "caption")
+        if limit is not None:
+            self._validate_scalar_argument(limit, "float", "limit")
+        if page is not None:
+            self._validate_scalar_argument(page, "str", "page")
+        if pinned is not None:
+            self._validate_scalar_argument(pinned, "bool", "pinned")
+        if author is not None:
+            self._validate_scalar_argument(author, "str", "author")
+        if since is not None:
+            self._validate_scalar_argument(since, "str", "since")
         if query_params is None:
             query_params = {}
-{{- range .ScalarArgs}}
-{{- if .IsArray}}
-{{- if .Required}}
-        query_params["{{.Name}}"] = ",".join(str(v) for v in {{.PyName}})
-{{- else}}
-        if {{.PyName}} is not None:
-            query_params["{{.Name}}"] = ",".join(str(v) for v in {{.PyName}})
-{{- end}}
-{{- else}}
-{{- if .Required}}
-        query_params["{{.Name}}"] = {{.PyName}}
-{{- else}}
-        if {{.PyName}} is not None:
-            query_params["{{.Name}}"] = {{.PyName}}
-{{- end}}
-{{- end}}
-{{- end}}
+        if scores is not None:
+            query_params["scores"] = ",".join(str(v) for v in scores)
+        if ranks is not None:
+            query_params["ranks"] = ",".join(str(v) for v in ranks)
+        if flags is not None:
+            query_params["flags"] = ",".join(str(v) for v in flags)
+        if related is not None:
+            query_params["related"] = ",".join(str(v) for v in related)
+        if days is not None:
+            query_params["days"] = ",".join(str(v) for v in days)
+        if codes is not None:
+            query_params["codes"] = ",".join(str(v) for v in codes)
+        if caption is not None:
+            query_params["caption"] = caption
+        if limit is not None:
+            query_params["limit"] = limit
+        if page is not None:
+            query_params["page"] = page
+        if pinned is not None:
+            query_params["pinned"] = pinned
+        if author is not None:
+            query_params["author"] = author
+        if since is not None:
+            query_params["since"] = since
         response = self._client.request(
-            method="{{.HTTPMethod}}",
+            method="GET",
             path=path,
             body=None,
             query_params=query_params,
-            requires_auth={{if .RequiresAuth}}True{{else}}False{{end}},
+            requires_auth=False,
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
-{{- else}}
+        return self._coerce_response(response, "", True)
+    def set_flags(self, id: str, pinned: bool, score: float, caption: str, rank: str, related: list[str] | None = None, points: list[Point] | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> bool:
+        path = f"/api/posts/{id}/flags"
+        query_params: dict[str, Any] | None = None
+        payload: dict[str, Any] = {}
+        payload["pinned"] = self._validate_scalar_argument(
+            pinned,
+            "bool",
+            "pinned",
+        )
+        payload["score"] = self._validate_scalar_argument(
+            score,
+            "float",
+            "score",
+        )
+        payload["caption"] = self._validate_scalar_argument(
+            caption,
+            "str",
+            "caption",
+        )
+        payload["rank"] = self._validate_scalar_argument(
+            rank,
+            "str",
+            "rank",
+        )
+        if related is not None:
+            for _elem in related:
+                self._validate_scalar_argument(_elem, "str", "related")
+            payload["related"] = related
+        if points is not None:
+            for _elem in points:
+                self._validate_scalar_argument(_elem, "Point", "points")
+            payload["points"] = points
         response = self._client.request(
-            method="{{.HTTPMethod}}",
+            method="POST",
             path=path,
-            body=None,
+            body=payload,
             query_params=query_params,
-            requires_auth={{if .RequiresAuth}}True{{else}}False{{end}},
+            requires_auth=False,
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return {{if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
-{{- end}}
-{{- end}}
-{{- end}}
-
-{{- end}}
+        return self._coerce_response(response, "", False)
+    def store_document(self, document: str, note: str | None = None, extras: list[str] | None = None, grid: list[list[str]] | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> str:
+        path = "/api/documents"
+        query_params: dict[str, Any] | None = None
+        payload: dict[str, Any] = {}
+        payload["document"] = self._validate_scalar_argument(
+            document,
+            "str",
+            "document",
+        )
+        if note is not None:
+            payload["note"] = self._validate_scalar_argument(
+                note,
+                "str",
+                "note",
+            )
+        if extras is not None:
+            for _elem in extras:
+                self._validate_scalar_argument(_elem, "str", "extras")
+            payload["extras"] = extras
+        if grid is not None:
+            self._validate_list_of_lists_argument(grid, "str", "grid")
+            payload["grid"] = grid
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", False)

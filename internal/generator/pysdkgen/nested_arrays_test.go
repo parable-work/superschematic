@@ -24,7 +24,7 @@ var update = flag.Bool("update", false, "rewrite golden files")
 
 const nestedArraysService = "fixture-nested-arrays-api"
 
-var nestedArraysClock = codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+var fixtureClock = codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 
 // loadNestedArraysAPI loads fixture-nested-arrays-api: an input type, a
 // PUT body argument and a bare response that are arrays of arrays. With
@@ -43,7 +43,7 @@ func loadNestedArraysAPI(t *testing.T, withPaint bool) (*ir.Schema, *apigen.APIO
 	apiOutput, err := apigen.Generate(schema, apigen.Options{
 		Provider:   sessionauth.Provider{},
 		SchemaName: nestedArraysService,
-		Clock:      nestedArraysClock,
+		Clock:      fixtureClock,
 	})
 	if err != nil {
 		t.Fatalf("apigen.Generate: %v", err)
@@ -51,9 +51,11 @@ func loadNestedArraysAPI(t *testing.T, withPaint bool) (*ir.Schema, *apigen.APIO
 	return schema, apiOutput
 }
 
-func writeNestedArraysSDK(t *testing.T, apiOutput *apigen.APIOutput, dir string) *SDKOutput {
+// writeFixtureSDK writes the Python SDK of apiOutput to dir, stamped with
+// fixtureClock.
+func writeFixtureSDK(t *testing.T, apiOutput *apigen.APIOutput, dir string) *SDKOutput {
 	t.Helper()
-	sdkOutput, err := Generate(apiOutput, "", "", nestedArraysClock)
+	sdkOutput, err := Generate(apiOutput, "", "", fixtureClock)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -71,7 +73,7 @@ func writeNestedArraysSDK(t *testing.T, apiOutput *apigen.APIOutput, dir string)
 func TestWriteSDKGoldenNestedArrays(t *testing.T) {
 	_, apiOutput := loadNestedArraysAPI(t, false)
 	outDir := t.TempDir()
-	writeNestedArraysSDK(t, apiOutput, outDir)
+	writeFixtureSDK(t, apiOutput, outDir)
 	compareGoldenTree(t, outDir, filepath.Join("testdata", "golden", nestedArraysService))
 }
 
@@ -95,14 +97,14 @@ func TestNestedArraysSDKImportsAndRuns(t *testing.T) {
 	root := t.TempDir()
 	typesDir := filepath.Join(root, "types")
 	sdkDir := filepath.Join(root, "sdk")
-	typesOutput, err := pygen.Generate(schema, pygen.Options{SchemaName: nestedArraysService, Clock: nestedArraysClock})
+	typesOutput, err := pygen.Generate(schema, pygen.Options{SchemaName: nestedArraysService, Clock: fixtureClock})
 	if err != nil {
 		t.Fatalf("pygen.Generate: %v", err)
 	}
 	if err := pygen.WriteTypes(typesOutput, typesDir); err != nil {
 		t.Fatalf("pygen.WriteTypes: %v", err)
 	}
-	sdkOutput := writeNestedArraysSDK(t, apiOutput, sdkDir)
+	sdkOutput := writeFixtureSDK(t, apiOutput, sdkDir)
 	if sdkOutput.TypesPackage != typesOutput.PythonModuleName {
 		t.Fatalf("SDK types package %q, types module %q", sdkOutput.TypesPackage, typesOutput.PythonModuleName)
 	}
