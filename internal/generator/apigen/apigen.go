@@ -329,6 +329,88 @@ func (o *APIOutput) HasBodyArgs() bool {
 	return false
 }
 
+// RoutesNeedTypes gates the types import in routes.go: only a handler
+// factory (written for every endpoint, mounted or not) references the
+// generated types module, as handlerUsesTypes lists.
+func (o *APIOutput) RoutesNeedTypes() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.handlerUsesTypes() {
+			return true
+		}
+	}
+	return false
+}
+
+// handlerUsesTypes reports whether the endpoint's handler factory in
+// routes.go references the generated types module. It follows the branches
+// of routes.tmpl.
+func (e EndpointInfo) handlerUsesTypes() bool {
+	// An input type, with or without file uploads, is decoded into
+	// types.<Input>, and body arguments collect types.ValidationErrors.
+	if e.HasInput || (len(e.ScalarArgs) > 0 && e.Method != "GET") {
+		return true
+	}
+	// A nil inner list of a list-of-lists response is sent as []<Output>{}.
+	if e.OutputType != "" && e.OutputIsArrayOfArrays && strings.HasPrefix(e.OutputGoType, "types.") {
+		return true
+	}
+	// A path parameter of a generated type is parsed (a UUID or a
+	// timestamp) or cast (a string-backed scalar or an enum).
+	for _, param := range e.PathParams {
+		if strings.HasPrefix(param.GoType, "types.") {
+			return true
+		}
+	}
+	for _, param := range e.QueryParams {
+		if param.queryParamUsesTypes() {
+			return true
+		}
+	}
+	if e.Method == "GET" {
+		for _, arg := range e.ScalarArgs {
+			if arg.queryArgUsesTypes() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// queryParamUsesTypes reports whether routes.go references the generated
+// types module to read the @query parameter: a list checks each item
+// against types.ValidationError, a generated type is parsed or cast, and a
+// bound on a number or a length or pattern rule on a string reports a
+// types.ValidationError.
+func (p Param) queryParamUsesTypes() bool {
+	switch {
+	case p.IsArray, strings.HasPrefix(p.GoType, "types."):
+		return true
+	case p.IsInt, p.IsFloat:
+		return p.ValidateMin != nil || p.ValidateMax != nil
+	case p.IsString:
+		return p.ValidateMinLength != nil || p.ValidateMaxLength != nil || p.ValidatePattern != ""
+	}
+	return false
+}
+
+// queryArgUsesTypes reports whether routes.go references the generated
+// types module to read the argument of a GET operation from the query
+// string: a list collects types.ValidationErrors, a bound on a number
+// reports a types.ValidationError, a UUID or a timestamp is parsed into a
+// generated type, and a string, a string-backed scalar or an enum is
+// checked against types.ValidationError. A boolean uses none of them.
+func (p Param) queryArgUsesTypes() bool {
+	switch {
+	case p.IsArray:
+		return true
+	case p.IsInt, p.IsFloat:
+		return p.ValidateMin != nil || p.ValidateMax != nil
+	case p.IsBool:
+		return false
+	}
+	return true
+}
+
 // EndpointOutput is the template data for per-endpoint scaffold files.
 type EndpointOutput struct {
 	SchemaName  string

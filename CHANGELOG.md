@@ -71,6 +71,15 @@ of a generated artifact is always listed here with the bump it requires.
   directory when the schema declares no graph. It removes each
   `versiongraph/*.json` no graph of the schema writes, keeps every other
   file, and removes the directory only when that leaves it empty. Patch.
+- Go API: `routes.go` imported the generated types module whether or not
+  a route used it, so an API whose handlers parse no parameter of a
+  generated type, report no validation error and decode no input type or
+  body arguments, such as one `GET` operation without arguments that
+  returns an object, did not compile
+  (`"<module root>/types/go/<api>" imported as types and not used`). The
+  import is now written only when a handler uses it, and an auth
+  provider's `routes.go` snippets cannot rely on it. Output for every
+  other API is unchanged. Patch.
 
 ### Added
 
