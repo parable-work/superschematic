@@ -256,38 +256,43 @@ func ValueClass(schema *ir.Schema, fd *ir.FieldDef) (string, error) {
 	return valueClass(schema, fd, sqlutil.ScalarSQLTypes(schema))
 }
 
-// valueClass is ValueClass with the schema's scalar SQL types. A map is
-// "json", whole. A to-one relation holds the target's key and has its
-// class. A @jsonField value and a list of lists are stored as JSONB and
-// hold the schema runtime's JSON: an object type there is "json", and any
-// other element has the class it would have in a column of its own. Every
-// other element's class comes from its column's SQL type.
+// valueClass is ValueClass with the schema's scalar SQL types. A to-one
+// relation holds the target's key and has its class. Any other field's
+// column type is sqlutil.ColumnType's. A map's column must be JSONB, and
+// the map is "json", whole. A field whose whole column is JSONB (a
+// @jsonField value or a list of lists) holds the schema runtime's JSON: an
+// object type or JSON value there is "json", and any other element has the
+// class it would have in a column of its own. Every other element's class
+// comes from its own SQL type.
 func valueClass(schema *ir.Schema, fd *ir.FieldDef, sqlTypes map[string]string) (string, error) {
 	ref := fd.TypeRef
-	if ref.IsMap {
-		return ClassJSON, nil
-	}
-	if target := schema.Types[ref.Name]; target != nil && isTable(target) && !fd.JsonField && !ref.IsArray {
+	if target := schema.Types[ref.Name]; target != nil && isTable(target) && !fd.JsonField && !ref.IsArray && !ref.IsMap {
 		key := keyField(target)
 		if key == nil {
 			return "", fmt.Errorf("the relation to %s needs a key field", target.Name)
 		}
 		return valueClass(schema, key, sqlTypes)
 	}
+	column := sqlutil.ColumnType(fd, sqlTypes)
+	inJSONB := column == "JSONB"
+	if ref.IsMap {
+		if !inJSONB {
+			return "", fmt.Errorf("a map of %s is stored as %s, which no value class reads", ref.Name, column)
+		}
+		return ClassJSON, nil
+	}
 	holds, err := jsonOf(schema, ref.Name)
 	if err != nil {
 		return "", err
 	}
 	lists := strings.Repeat("[]", ref.ArrayDepth())
-	inJSONB := fd.JsonField || ref.IsArrayOfArrays
 	if inJSONB && holds == ClassJSON {
 		return ClassJSON + lists, nil
 	}
-	element := sqlutil.ElementType(ref.Name, sqlTypes)
-	class := classOf(holds, element)
+	class := classOf(holds, sqlutil.ElementType(ref.Name, sqlTypes))
 	if class == "" {
 		return "", fmt.Errorf("%s holds a JSON %s but is stored as %s, which no value class reads",
-			ref.Name, jsonNoun(holds), sqlutil.ColumnType(fd, sqlTypes))
+			ref.Name, jsonNoun(holds), column)
 	}
 	return class + lists, nil
 }
