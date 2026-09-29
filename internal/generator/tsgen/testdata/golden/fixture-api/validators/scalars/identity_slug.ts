@@ -2,7 +2,7 @@
 
 import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
 
-const IdentitySlugPattern = new RegExp("^[a-z0-9]+(?:[-_][a-z0-9]+)*$");
+const IdentitySlugPattern = new RegExp("^[a-z0-9]+(?:[-_][a-z0-9]+)*$", "u");
 
 /**
  * Validates a Identity.Slug value

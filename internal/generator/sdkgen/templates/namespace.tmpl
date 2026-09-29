@@ -418,7 +418,7 @@ export class {{.Namespace.ClassName}} {
         {{- if and .ItemIsText .ValidatePattern}}
         let {{.TSName}}Pattern: RegExp | null = null;
         try {
-          {{.TSName}}Pattern = new RegExp('{{escape_backslash .ValidatePattern}}');
+          {{.TSName}}Pattern = new RegExp('{{escape_backslash .ValidatePattern}}', 'u');
         } catch {
           // An invalid pattern refuses every item.
         }
@@ -508,7 +508,7 @@ export class {{.Namespace.ClassName}} {
       {{- if .ValidatePattern}}
       if (typeof {{.TSName}}Value === 'string') {
         try {
-          const {{.TSName}}Pattern = new RegExp('{{escape_backslash .ValidatePattern}}');
+          const {{.TSName}}Pattern = new RegExp('{{escape_backslash .ValidatePattern}}', 'u');
           if (!{{.TSName}}Pattern.test({{.TSName}}Value)) {
             {{.TSName}}Errors.push({ validator: 'pattern', message: '{{.Name}} has an invalid format.' });
           }

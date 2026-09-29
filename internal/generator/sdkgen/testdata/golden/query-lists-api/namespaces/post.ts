@@ -121,7 +121,7 @@ export class PostNamespace {
       if (Array.isArray(codesValue) && codesValue.length > 0) {
         let codesPattern: RegExp | null = null;
         try {
-          codesPattern = new RegExp('^[a-z]+$');
+          codesPattern = new RegExp('^[a-z]+$', 'u');
         } catch {
           // An invalid pattern refuses every item.
         }

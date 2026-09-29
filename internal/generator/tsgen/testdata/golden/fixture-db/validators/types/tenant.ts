@@ -81,7 +81,7 @@ export function validateTenant(value: Tenant | null | undefined): ValidationResu
   {
     const fieldValue = value.email;
 
-    if (typeof fieldValue === "string" && !(new RegExp("@")).test(fieldValue)) {
+    if (typeof fieldValue === "string" && !(new RegExp("@", "u")).test(fieldValue)) {
       addFieldError(errors, "email", "pattern", "invalid format");
     }
 

@@ -2,7 +2,7 @@
 
 import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
 
-const NetworkUrlPattern = new RegExp("^https?://[\\w\\-\\{\\}]+(\\.[\\w\\-\\{\\}]+)+([:/?#][\\w\\-\\._~:/?#\\[\\]@!\\$&'\\(\\)\\*\\+,;=\\{\\}%]*)?$");
+const NetworkUrlPattern = new RegExp("^https?://[\\w\\-\\{\\}]+(\\.[\\w\\-\\{\\}]+)+([:/?#][\\w\\-\\._~:/?#\\[\\]@!\\$&'\\(\\)\\*\\+,;=\\{\\}%]*)?$", "u");
 
 /**
  * Validates a Network.Url value

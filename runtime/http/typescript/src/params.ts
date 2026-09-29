@@ -82,10 +82,11 @@ export interface ParamSpec {
 
 /**
  * A scalar type's own constraints (its IR lengths, pattern and range), as
- * the schema runtimes check them: lengths count code points, the pattern is
- * a JavaScript regular expression without flags. A value that breaks one is
- * refused with one error named by that rule (`minLength`, `maxLength`,
- * `pattern`, `min`, `max`).
+ * the schema runtimes check them: lengths count code points, and the
+ * pattern is a JavaScript regular expression compiled with the u flag, so
+ * it matches code points too. A value that breaks one is refused with one
+ * error named by that rule (`minLength`, `maxLength`, `pattern`, `min`,
+ * `max`).
  */
 export interface ScalarConstraints {
   /** Canonical scalar name, for the refusal (`Network.Url`). */
@@ -199,7 +200,7 @@ function checkNumber(location: ParamLocation, spec: ParamSpec, value: number, pa
 /** Whether a scalar's pattern accepts a value; a pattern JavaScript cannot compile accepts nothing, as in the schema runtime. */
 function matchesScalarPattern(pattern: string, value: string): boolean {
   try {
-    return new RegExp(pattern).test(value);
+    return new RegExp(pattern, 'u').test(value);
   } catch {
     return false;
   }
