@@ -1,0 +1,85 @@
+{
+  "name": "snapshots",
+  "description": "The fixture's graph snapshots every third commit on a chain (snapshotEvery 3), and every tagged commit: a snapshot is the commit's full pin set. Materialize stops at the nearest snapshot: it reads a commit three past the first snapshot under a walk ceiling of three, and still reads it once the patches before the snapshot are gone. Release snapshots a tagged commit that has lost its snapshot.",
+  "steps": [
+    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "branch", "from": "main", "name": "draft", "as": "d"},
+    {"op": "save", "ref": "d", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}},
+    {"op": "commit", "ref": "d", "as": "d1"},
+    {"op": "save", "ref": "d", "edits": {"step": {"upsert": [{"entity_key": "Rest", "position": 2, "instruction": "Rest", "timings": {}}]}}},
+    {"op": "commit", "ref": "d", "as": "d2"},
+    {"op": "save", "ref": "d", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix well", "timings": {}}]}}},
+    {"op": "commit", "ref": "d", "as": "d3"},
+    {"op": "save", "ref": "d", "edits": {"step": {"upsert": [{"entity_key": "Bake", "position": 3, "instruction": "Bake", "timings": {}}]}}},
+    {"op": "commit", "ref": "d", "as": "d4"},
+    {"op": "save", "ref": "d", "edits": {"step": {"upsert": [{"entity_key": "Rest", "position": 2, "instruction": "Rest long", "timings": {}}]}}},
+    {"op": "commit", "ref": "d", "as": "d5"},
+    {"op": "save", "ref": "d", "edits": {"step": {"delete": ["Bake"]}}},
+    {"op": "commit", "ref": "d", "as": "d6"},
+    {"op": "save", "ref": "d", "edits": {"step": {"upsert": [{"entity_key": "Cool", "position": 4, "instruction": "Cool", "timings": {}}]}}},
+    {"op": "commit", "ref": "d", "tag": true, "as": "d7"},
+    {"op": "save", "ref": "d", "edits": {"step": {"upsert": [{"entity_key": "Cool", "position": 4, "instruction": "Cool down", "timings": {}}]}}},
+    {"op": "commit", "ref": "d", "as": "d8", "snapshotEvery": 1},
+
+    {"op": "snapshot", "commit": "d1", "expect": {"snapshot": []}},
+    {"op": "snapshot", "commit": "d2", "expect": {"snapshot": []}},
+    {"op": "snapshot", "commit": "d3", "expect": {"snapshot": [
+      {"kind": "step", "entityKey": "Mix", "entityVersion": 2},
+      {"kind": "step", "entityKey": "Rest", "entityVersion": 1}
+    ]}},
+    {"op": "snapshot", "commit": "d4", "expect": {"snapshot": []}},
+    {"op": "snapshot", "commit": "d5", "expect": {"snapshot": []}},
+    {"op": "snapshot", "commit": "d6", "expect": {"snapshot": [
+      {"kind": "step", "entityKey": "Mix", "entityVersion": 2},
+      {"kind": "step", "entityKey": "Rest", "entityVersion": 2}
+    ]}},
+    {"op": "snapshot", "commit": "d7", "expect": {"snapshot": [
+      {"kind": "step", "entityKey": "Cool", "entityVersion": 1},
+      {"kind": "step", "entityKey": "Mix", "entityVersion": 2},
+      {"kind": "step", "entityKey": "Rest", "entityVersion": 2}
+    ]}},
+    {"op": "snapshot", "commit": "d8", "expect": {"snapshot": [
+      {"kind": "step", "entityKey": "Cool", "entityVersion": 2},
+      {"kind": "step", "entityKey": "Mix", "entityVersion": 2},
+      {"kind": "step", "entityKey": "Rest", "entityVersion": 2}
+    ]}},
+
+    {"op": "materialize", "commit": "d2", "walkCeiling": 1, "expect": {"error": "walk_ceiling"}},
+    {"op": "materialize", "commit": "d5", "walkCeiling": 2, "expect": {"error": "walk_ceiling"}},
+    {"op": "materialize", "commit": "d5", "walkCeiling": 3, "expect": {"contentHashOf": "d5", "tree": {"step": [
+      {"entity_key": "Mix", "instruction": "Mix well"},
+      {"entity_key": "Rest", "instruction": "Rest long"},
+      {"entity_key": "Bake", "instruction": "Bake"}
+    ]}}},
+    {"op": "materialize", "commit": "d6", "walkCeiling": 1, "expect": {"contentHashOf": "d6"}},
+    {"op": "sql", "statement": "DELETE FROM recipe_patch WHERE commit_id IN ($1::uuid, $2::uuid, $3::uuid)", "args": [{"commit": "d1"}, {"commit": "d2"}, {"commit": "d3"}]},
+    {"op": "materialize", "commit": "d2", "expect": {"tree": {}}},
+    {"op": "materialize", "commit": "d3", "expect": {"contentHashOf": "d3", "tree": {"step": [
+      {"entity_key": "Mix", "instruction": "Mix well"},
+      {"entity_key": "Rest", "instruction": "Rest"}
+    ]}}},
+    {"op": "materialize", "commit": "d5", "expect": {"contentHashOf": "d5", "tree": {"step": [
+      {"entity_key": "Mix", "instruction": "Mix well"},
+      {"entity_key": "Rest", "instruction": "Rest long"},
+      {"entity_key": "Bake", "instruction": "Bake"}
+    ]}}},
+    {"op": "compose", "ref": "d", "expect": {"contentHashOf": "d8"}},
+
+    {"op": "merge", "source": "d", "target": "main", "tag": true, "as": "m1"},
+    {"op": "snapshot", "commit": "m1", "expect": {"snapshot": [
+      {"kind": "step", "entityKey": "Cool", "entityVersion": 1},
+      {"kind": "step", "entityKey": "Mix", "entityVersion": 1},
+      {"kind": "step", "entityKey": "Rest", "entityVersion": 1}
+    ]}},
+    {"op": "sql", "statement": "DELETE FROM recipe_snapshot_entry WHERE commit_id = $1::uuid", "args": [{"commit": "m1"}]},
+    {"op": "snapshot", "commit": "m1", "expect": {"snapshot": []}},
+    {"op": "release", "root": "Bread", "commit": "m1", "expect": {"release": {"commit": "m1", "version": 1}}},
+    {"op": "snapshot", "commit": "m1", "expect": {"snapshot": [
+      {"kind": "step", "entityKey": "Cool", "entityVersion": 1},
+      {"kind": "step", "entityKey": "Mix", "entityVersion": 1},
+      {"kind": "step", "entityKey": "Rest", "entityVersion": 1}
+    ]}},
+    {"op": "released", "root": "Bread", "expect": {"contentHashOf": "d8"}}
+  ]
+}

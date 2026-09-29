@@ -540,7 +540,7 @@ func TestTSWriterRoundTripsVersionGraph(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"@versionGraph({ schemaEpoch: 1 })",
+		"@versionGraph({ schemaEpoch: 1, snapshotEvery: 3 })",
 		`@graphMember({ graph: Recipe, order: "position" })`,
 		`@graphMember({ graph: Recipe, parent: { key: "stepKey", of: Step } })`,
 		`@graphMember({ graph: Recipe, parent: { key: "replyTo", of: Note } })`,
@@ -552,7 +552,7 @@ func TestTSWriterRoundTripsVersionGraph(t *testing.T) {
 			t.Errorf("written TypeScript lacks %s:\n%s", want, source)
 		}
 	}
-	for _, expanded := range []string{"RecipeRef", "RecipePatchOperation", "entityKey", "deletedOnRef", "recipe_patch", "entity_ref"} {
+	for _, expanded := range []string{"RecipeRef", "RecipePatchOperation", "RecipeRelease", "RecipeSnapshotEntry", "entityKey", "deletedOnRef", "recipe_patch", "recipe_snapshot_entry", "entity_ref"} {
 		if strings.Contains(string(source), expanded) {
 			t.Errorf("written TypeScript carries the expanded %s:\n%s", expanded, source)
 		}

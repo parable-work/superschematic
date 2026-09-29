@@ -1,11 +1,13 @@
 {
   "name": "lifecycle",
-  "description": "A primary line, a tagged commit, two change sets merged back (one cleanly, one with a conflict a resolution settles), a parent deleted with its children, a revert to the first published version, and the line's history.",
+  "description": "A primary line written only through merges: a first draft merged as a tagged commit, two change sets merged back (one cleanly, one with a conflict a resolution settles), a parent deleted with its children, a revert to the first published version made on a change set and merged, and the line's history.",
   "steps": [
     {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main",
       "expect": {"ref": {"version": 1, "name": "main", "sealed": false, "parent": null, "base": null, "head": null}}},
-    {"op": "save", "ref": "main", "edits": {"step": {"upsert": [
+    {"op": "branch", "from": "main", "name": "first draft", "as": "draft",
+      "expect": {"ref": {"version": 1, "parent": "main", "base": null, "head": null}}},
+    {"op": "save", "ref": "draft", "edits": {"step": {"upsert": [
       {"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {"knead": 10, "rest": 30}},
       {"entity_key": "Bake", "position": 2, "instruction": "Bake", "timings": {"oven": 40}}
     ]}},
@@ -13,14 +15,16 @@
         {"entity_key": "Mix", "instruction": "Mix", "recipe_id": "Bread", "scratch": null, "deleted_on_ref": false, "_version": 1, "updated_by": "Cook", "created_by": "Cook"},
         {"entity_key": "Bake", "instruction": "Bake", "deleted_on_ref": false, "_version": 1}
       ]}}},
-    {"op": "save", "ref": "main", "edits": {"ingredient": {"upsert": [
+    {"op": "save", "ref": "draft", "edits": {"ingredient": {"upsert": [
       {"entity_key": "Flour", "step_key": "Mix", "quantity": "200g flour", "substitutes": {"type": "object"}},
       {"entity_key": "Wash", "step_key": "Bake", "quantity": "1 egg wash", "substitutes": {"type": "object"}}
     ]}},
       "expect": {"ref": {"version": 3}}},
-    {"op": "commit", "ref": "main", "message": "first", "tag": true, "as": "c1",
-      "expect": {"ref": {"version": 4, "head": "c1"}, "commit": {"ref": "main", "parent": null, "message": "first", "sequence": 1, "schemaEpoch": 1, "contentHash": "f92ebfb8f6d8d530338e6d4bbb709864295bc904ff3f520417c097bbd43da38d"}}},
-    {"op": "commit", "ref": "main", "expect": {"error": "nothing_to_commit"}},
+    {"op": "commit", "ref": "draft", "message": "first draft", "as": "draft1",
+      "expect": {"ref": {"version": 4, "head": "draft1"}, "commit": {"ref": "draft", "parent": null, "sequence": null}}},
+    {"op": "merge", "source": "draft", "target": "main", "message": "first", "tag": true, "as": "c1",
+      "expect": {"ref": {"version": 2, "head": "c1"}, "commit": {"ref": "main", "parent": null, "message": "first", "sequence": 1, "schemaEpoch": 1, "contentHash": "f92ebfb8f6d8d530338e6d4bbb709864295bc904ff3f520417c097bbd43da38d"}}},
+    {"op": "merge", "source": "draft", "target": "main", "expect": {"ref": {"version": 3, "head": "c1"}, "commit": null}},
     {"op": "materialize", "commit": "c1", "expect": {
       "contentHashOf": "c1",
       "tree": {
@@ -57,13 +61,13 @@
       "step": [{"instruction": "Mix", "timings": {"knead": 12, "rest": 30}}, {"instruction": "Bake"}]
     }}},
     {"op": "merge", "source": "b", "target": "main",
-      "expect": {"ref": {"version": 5}, "commit": null, "conflicts": [
+      "expect": {"ref": {"version": 4}, "commit": null, "conflicts": [
         {"kind": "ingredient", "entityKey": "Flour", "path": "/quantity", "base": "200g flour", "ours": "250g flour", "theirs": "300g flour", "oursAuthor": null, "theirsAuthor": null}
       ]}},
     {"op": "compose", "ref": "main", "expect": {"contentHashOf": "mergedA"}},
     {"op": "merge", "source": "b", "target": "main", "as": "mergedB",
       "resolutions": [{"kind": "ingredient", "entityKey": "Flour", "path": "/quantity", "take": "theirs"}],
-      "expect": {"ref": {"version": 6, "head": "mergedB"}, "commit": {"parent": "mergedA"}}},
+      "expect": {"ref": {"version": 5, "head": "mergedB"}, "commit": {"parent": "mergedA"}}},
     {"op": "compose", "ref": "main", "expect": {"contentHashOf": "mergedB", "tree": {
       "ingredient": [{"quantity": "300g flour"}, {"quantity": "1 egg wash"}],
       "step": [{"instruction": "Mix", "timings": {"knead": 12, "rest": 45}}, {"instruction": "Bake"}]
@@ -73,18 +77,26 @@
       {"kind": "step", "entityKey": "Mix", "operation": "UPDATE"}
     ]}},
 
-    {"op": "save", "ref": "main", "edits": {"step": {"delete": ["Bake"]}}},
-    {"op": "compose", "ref": "main", "expect": {"tree": {
+    {"op": "branch", "from": "main", "name": "no baking", "as": "nb", "expect": {"ref": {"base": "mergedB"}}},
+    {"op": "save", "ref": "nb", "edits": {"step": {"delete": ["Bake"]}}},
+    {"op": "compose", "ref": "nb", "expect": {"tree": {
       "ingredient": [{"entity_key": "Flour"}],
       "step": [{"entity_key": "Mix"}]
     }}},
-    {"op": "commit", "ref": "main", "message": "no baking", "as": "noBake"},
+    {"op": "commit", "ref": "nb", "message": "no baking", "as": "nbCommit"},
+    {"op": "patches", "commit": "nbCommit", "expect": {"patches": [
+      {"kind": "ingredient", "entityKey": "Wash", "operation": "DELETE", "entityVersion": 1},
+      {"kind": "step", "entityKey": "Bake", "operation": "DELETE", "entityVersion": 1}
+    ]}},
+    {"op": "rows", "ref": "nb", "kind": "ingredient", "expect": {"rows": []}},
+    {"op": "merge", "source": "nb", "target": "main", "message": "no baking", "as": "noBake",
+      "expect": {"commit": {"parent": "mergedB", "message": "no baking", "sequence": null}}},
     {"op": "materialize", "commit": "noBake", "expect": {"contentHashOf": "noBake", "tree": {
       "ingredient": [{"entity_key": "Flour"}],
       "step": [{"entity_key": "Mix"}]
     }}},
     {"op": "patches", "commit": "noBake", "expect": {"patches": [
-      {"kind": "ingredient", "entityKey": "Wash", "operation": "DELETE", "entityVersion": 1},
+      {"kind": "ingredient", "entityKey": "Wash", "operation": "DELETE", "entityVersion": 2},
       {"kind": "step", "entityKey": "Bake", "operation": "DELETE", "entityVersion": 2}
     ]}},
     {"op": "rows", "ref": "main", "kind": "step", "expect": {"rows": [
@@ -92,7 +104,10 @@
       {"entity_key": "Mix", "deleted_on_ref": false}
     ]}},
 
-    {"op": "revert", "ref": "main", "toCommit": "c1", "as": "reverted",
+    {"op": "branch", "from": "main", "name": "back to the first", "as": "back"},
+    {"op": "revert", "ref": "back", "toCommit": "c1", "as": "backCommit",
+      "expect": {"commit": {"ref": "back", "parent": "noBake", "contentHashOf": "c1"}}},
+    {"op": "merge", "source": "back", "target": "main", "as": "reverted",
       "expect": {"commit": {"parent": "noBake", "contentHashOf": "c1"}}},
     {"op": "compose", "ref": "main", "expect": {"contentHashOf": "c1", "tree": {
       "ingredient": [{"quantity": "200g flour"}, {"quantity": "1 egg wash"}],

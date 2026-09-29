@@ -213,6 +213,11 @@ export interface VersionGraphOptions {
   readonly name?: string;
   /** Recorded on every commit of the graph. Defaults to 0. */
   readonly schemaEpoch?: number;
+  /**
+   * A commit this many commits past the nearest snapshot on its chain is
+   * snapshotted, so reading its tree stops there. Positive; defaults to 64.
+   */
+  readonly snapshotEvery?: number;
 }
 
 /**

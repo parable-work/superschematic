@@ -32,6 +32,11 @@ const databaseVariable = "SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL"
 // step names another.
 const fixtureSchemaEpoch = 1
 
+// fixtureSnapshotEvery is the snapshot interval the fixture's Recipe graph
+// declares, which the engine of every step takes snapshots at unless the
+// step names another.
+const fixtureSnapshotEvery = 3
+
 // defaultActor is the actor of a step that names none: "Cook", a UUID in
 // its canonical form.
 const defaultActor = "Cook"
@@ -45,35 +50,44 @@ type scenario struct {
 }
 
 type step struct {
-	Op          string                    `json:"op"`
-	As          string                    `json:"as"`
-	Actor       *string                   `json:"actor"`
-	Root        string                    `json:"root"`
-	Name        string                    `json:"name"`
-	Ref         string                    `json:"ref"`
-	From        string                    `json:"from"`
-	To          string                    `json:"to"`
-	Source      string                    `json:"source"`
-	Target      string                    `json:"target"`
-	Commit      string                    `json:"commit"`
-	ToCommit    string                    `json:"toCommit"`
-	Version     *int64                    `json:"version"`
-	Edits       map[string]kindEdits      `json:"edits"`
-	Message     string                    `json:"message"`
-	Tag         bool                      `json:"tag"`
-	Resolutions []versiongraph.Resolution `json:"resolutions"`
-	WalkCeiling int                       `json:"walkCeiling"`
-	SchemaEpoch *int64                    `json:"schemaEpoch"`
-	Kind        string                    `json:"kind"`
-	Statement   string                    `json:"statement"`
-	Args        []sqlArg                  `json:"args"`
-	Expect      expect                    `json:"expect"`
+	Op            string                    `json:"op"`
+	As            string                    `json:"as"`
+	Actor         *string                   `json:"actor"`
+	Root          string                    `json:"root"`
+	Name          string                    `json:"name"`
+	Ref           string                    `json:"ref"`
+	From          string                    `json:"from"`
+	To            string                    `json:"to"`
+	Source        string                    `json:"source"`
+	Target        string                    `json:"target"`
+	Commit        string                    `json:"commit"`
+	ToCommit      string                    `json:"toCommit"`
+	Version       *int64                    `json:"version"`
+	Edits         map[string]kindEdits      `json:"edits"`
+	Message       string                    `json:"message"`
+	Tag           bool                      `json:"tag"`
+	Resolutions   []versiongraph.Resolution `json:"resolutions"`
+	WalkCeiling   int                       `json:"walkCeiling"`
+	SchemaEpoch   *int64                    `json:"schemaEpoch"`
+	SnapshotEvery int                       `json:"snapshotEvery"`
+	Sweep         *sweepOptions             `json:"sweep"`
+	Kind          string                    `json:"kind"`
+	Statement     string                    `json:"statement"`
+	Args          []sqlArg                  `json:"args"`
+	Expect        expect                    `json:"expect"`
 }
 
 type kindEdits struct {
 	Upsert []json.RawMessage `json:"upsert"`
 	Delete []string          `json:"delete"`
 	Unset  []string          `json:"unset"`
+}
+
+// sweepOptions are a sweep step's options; durations are in seconds.
+type sweepOptions struct {
+	DiscardGraceSeconds int64 `json:"discardGraceSeconds"`
+	AbandonAfterSeconds int64 `json:"abandonAfterSeconds"`
+	PruneBatch          int   `json:"pruneBatch"`
 }
 
 type sqlArg struct {
@@ -98,6 +112,14 @@ type expect struct {
 	Commits       *[]string               `json:"commits"`
 	Rows          *[]partialRow           `json:"rows"`
 	Patches       *[]partialRow           `json:"patches"`
+	Snapshot      *[]partialRow           `json:"snapshot"`
+	Release       *releaseExpect          `json:"release"`
+	Report        partialRow              `json:"report"`
+}
+
+type releaseExpect struct {
+	Commit  string `json:"commit"`
+	Version *int64 `json:"version"`
 }
 
 type refExpect struct {
@@ -180,12 +202,18 @@ func readScenario(t *testing.T, file string) scenario {
 type runner struct {
 	ctx        context.Context
 	descriptor json.RawMessage
+	config     *pgx.ConnConfig
 	conn       *pgx.Conn
 	store      storage.Storage
+	adapter    *postgres.Adapter
 	engine     *engine.Engine
 	refs       map[string]storage.Ref
 	commits    map[string]storage.Commit
+	releases   map[string]storage.Release
 	step       string
+	// holder is the transaction of another connection that holds the
+	// graph's sweep lock, between holdSweepLock and releaseSweepLock.
+	holder pgx.Tx
 }
 
 func newRunner(t *testing.T, dsn string, descriptor, createSQL []byte) *runner {
@@ -226,11 +254,20 @@ func newRunner(t *testing.T, dsn string, descriptor, createSQL []byte) *runner {
 		t.Fatal(err)
 	}
 	store := adapter.Storage(postgres.Pgx(conn))
-	eng, err := engine.New(descriptor, store, engine.Options{SchemaEpoch: fixtureSchemaEpoch})
+	eng, err := engine.New(descriptor, store, engine.Options{SchemaEpoch: fixtureSchemaEpoch, SnapshotEvery: fixtureSnapshotEvery})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &runner{ctx: ctx, descriptor: descriptor, conn: conn, store: store, engine: eng, refs: map[string]storage.Ref{}, commits: map[string]storage.Commit{}}
+	r := &runner{
+		ctx: ctx, descriptor: descriptor, config: config, conn: conn, store: store, adapter: adapter, engine: eng,
+		refs: map[string]storage.Ref{}, commits: map[string]storage.Commit{}, releases: map[string]storage.Release{},
+	}
+	t.Cleanup(func() {
+		if r.holder != nil {
+			_ = r.holder.Rollback(context.Background())
+		}
+	})
+	return r
 }
 
 func (r *runner) fatalf(t *testing.T, format string, args ...any) {
@@ -288,14 +325,21 @@ func (r *runner) trackRef(ref storage.Ref) {
 	}
 }
 
-// engineFor is the scenario's engine, at the step's walk ceiling and
-// schema epoch when it names them.
+// engineFor is the scenario's engine, at the step's walk ceiling, schema
+// epoch and snapshot interval when it names them.
 func (r *runner) engineFor(t *testing.T, st step) *engine.Engine {
 	t.Helper()
 	eng := r.engine
-	if st.SchemaEpoch != nil {
+	if st.SchemaEpoch != nil || st.SnapshotEvery != 0 {
+		opts := engine.Options{SchemaEpoch: fixtureSchemaEpoch, SnapshotEvery: fixtureSnapshotEvery}
+		if st.SchemaEpoch != nil {
+			opts.SchemaEpoch = *st.SchemaEpoch
+		}
+		if st.SnapshotEvery != 0 {
+			opts.SnapshotEvery = st.SnapshotEvery
+		}
 		var err error
-		if eng, err = engine.New(r.descriptor, r.store, engine.Options{SchemaEpoch: *st.SchemaEpoch}); err != nil {
+		if eng, err = engine.New(r.descriptor, r.store, opts); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -324,6 +368,9 @@ func (r *runner) run(t *testing.T, st step) {
 		history     []storage.Commit
 		rows        []json.RawMessage
 		patches     []storage.Patch
+		entries     []storage.SnapshotEntry
+		release     *storage.Release
+		report      *engine.SweepReport
 		commitAware bool
 	)
 	switch st.Op {
@@ -362,12 +409,54 @@ func (r *runner) run(t *testing.T, st step) {
 		if err == nil {
 			ref, commit, commitAware = &result.Ref, result.Commit, true
 		}
-	case "merge":
+	case "merge", "rebase":
 		var result *engine.MergeResult
-		result, err = eng.Merge(ctx, actor, r.refID(t, st.Source), r.refID(t, st.Target), r.version(t, st, st.Target), st.Resolutions)
+		if st.Op == "merge" {
+			opts := engine.CommitOptions{Message: st.Message, Tag: st.Tag}
+			result, err = eng.Merge(ctx, actor, r.refID(t, st.Source), r.refID(t, st.Target), r.version(t, st, st.Target), st.Resolutions, opts)
+		} else {
+			result, err = eng.Rebase(ctx, actor, r.refID(t, st.Ref), r.version(t, st, st.Ref), st.Resolutions)
+		}
 		if err == nil {
 			ref, commit, conflicts, commitAware = &result.Ref, result.Commit, result.Conflicts, true
 		}
+	case "release":
+		version := r.releases[st.Root].Version
+		if st.Version != nil {
+			version = *st.Version
+		}
+		var released storage.Release
+		if released, err = eng.Release(ctx, actor, st.Root, r.commitID(t, st.Commit), version); err == nil {
+			release = &released
+			r.releases[st.Root] = released
+		}
+	case "released":
+		var result *engine.ReleasedResult
+		if result, err = eng.Released(ctx, st.Root); err == nil {
+			release, tree = &result.Release, &result.TreeResult
+		}
+	case "sweep":
+		opts := engine.SweepOptions{Actor: actor}
+		if o := st.Sweep; o != nil {
+			opts.DiscardGrace = time.Duration(o.DiscardGraceSeconds) * time.Second
+			opts.AbandonAfter = time.Duration(o.AbandonAfterSeconds) * time.Second
+			opts.PruneBatch = o.PruneBatch
+		}
+		report, err = eng.Sweep(ctx, opts)
+	case "holdSweepLock":
+		r.holdSweepLock(t)
+	case "releaseSweepLock":
+		if r.holder == nil {
+			r.fatalf(t, "no sweep lock is held")
+		}
+		err = r.holder.Rollback(ctx)
+		r.holder = nil
+	case "snapshot":
+		err = r.store.Transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+			var err error
+			entries, err = tx.Snapshot(ctx, r.commitID(t, st.Commit))
+			return err
+		})
 	case "materialize":
 		tree, err = eng.Materialize(ctx, r.commitID(t, st.Commit))
 	case "compose":
@@ -468,6 +557,36 @@ func (r *runner) run(t *testing.T, st step) {
 		sortRows(t, rows, "entity_key")
 		r.checkList(t, "rows", rows, *x.Rows)
 	}
+	if x.Snapshot != nil {
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].Kind != entries[j].Kind {
+				return entries[i].Kind < entries[j].Kind
+			}
+			return entries[i].EntityKey < entries[j].EntityKey
+		})
+		var got []json.RawMessage
+		for _, e := range entries {
+			got = append(got, mustJSON(t, map[string]any{"kind": e.Kind, "entityKey": e.EntityKey, "entityVersion": e.EntityVersion}))
+		}
+		r.checkList(t, "snapshot", got, *x.Snapshot)
+	}
+	if x.Release != nil {
+		if release == nil {
+			r.fatalf(t, "expects a release, and %s returns none", st.Op)
+		}
+		if got := r.commitName(release.Commit); got != x.Release.Commit {
+			r.fatalf(t, "the release names commit %q, want %q", got, x.Release.Commit)
+		}
+		if x.Release.Version != nil && release.Version != *x.Release.Version {
+			r.fatalf(t, "release version %d, want %d", release.Version, *x.Release.Version)
+		}
+	}
+	if x.Report != nil {
+		if report == nil {
+			r.fatalf(t, "expects a report, and %s returns none", st.Op)
+		}
+		r.checkList(t, "report", []json.RawMessage{mustJSON(t, report)}, []partialRow{x.Report})
+	}
 	if x.Patches != nil {
 		sort.Slice(patches, func(i, j int) bool {
 			if patches[i].Kind != patches[j].Kind {
@@ -480,6 +599,35 @@ func (r *runner) run(t *testing.T, st step) {
 			got = append(got, mustJSON(t, map[string]any{"kind": p.Kind, "entityKey": p.EntityKey, "operation": p.Operation, "entityVersion": p.EntityVersion}))
 		}
 		r.checkList(t, "patches", got, *x.Patches)
+	}
+}
+
+// holdSweepLock takes the graph's sweep lock through the adapter in a
+// transaction of another connection, and keeps it open until
+// releaseSweepLock.
+func (r *runner) holdSweepLock(t *testing.T) {
+	t.Helper()
+	if r.holder != nil {
+		r.fatalf(t, "the sweep lock is already held")
+	}
+	other, err := pgx.ConnectConfig(r.ctx, r.config)
+	if err != nil {
+		r.fatalf(t, "connect: %v", err)
+	}
+	t.Cleanup(func() { _ = other.Close(context.Background()) })
+	holder, err := other.Begin(r.ctx)
+	if err != nil {
+		r.fatalf(t, "begin: %v", err)
+	}
+	r.holder = holder
+	locked := false
+	err = r.adapter.Storage(postgres.Pgx(holder)).Transact(r.ctx, func(ctx context.Context, tx storage.Tx) error {
+		var err error
+		locked, err = tx.SweepLock(ctx)
+		return err
+	})
+	if err != nil || !locked {
+		r.fatalf(t, "take the sweep lock: %v (locked %t)", err, locked)
 	}
 }
 

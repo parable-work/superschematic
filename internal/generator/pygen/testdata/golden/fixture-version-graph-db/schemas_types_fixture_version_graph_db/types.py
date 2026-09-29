@@ -1901,6 +1901,474 @@ class RecipeRef(BaseModel):
             "head_commit": self.head_commit.mask_secrets() if self.head_commit is not None else None,
         })
 
+class RecipeRelease(BaseModel):
+    """
+    The released commit of one root of the Recipe version graph; its history is the release log.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        validate_assignment=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    id: Optional[IdentityUUID] = Field(default=None, alias="id", serialization_alias="id")
+
+    root: Optional[Recipe] = Field(default=None, alias="root", serialization_alias="root")
+
+    commit: Optional[RecipeCommit] = Field(default=None, alias="commit", serialization_alias="commit")
+
+    created_at: TemporalDateTime = Field(..., alias="createdAt", serialization_alias="createdAt")
+
+    created_by: IdentityUUID = Field(..., alias="createdBy", serialization_alias="createdBy")
+
+    updated_at: TemporalDateTime = Field(..., alias="updatedAt", serialization_alias="updatedAt")
+
+    updated_by: IdentityUUID = Field(..., alias="updatedBy", serialization_alias="updatedBy")
+
+    version_: int = Field(default=0, alias="_version", serialization_alias="_version")
+
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+        """
+        Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
+
+        Returns:
+            ValidationErrors object containing any validation errors.
+            If no errors, the errors dict will be empty.
+        """
+        errors = ValidationErrors()
+
+        # Validate id
+        if self.id is not None:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
+                errors.add_field_error("id", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "id" or key.startswith("id[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.id)
+                except PydanticValidationError as e:
+                    errors.add_field_error("id", "invalid", str(e))
+
+        # Validate root
+        if self.root is not None:
+            try:
+                TypeAdapter(Recipe).validate_python(self.root)
+            except PydanticValidationError as e:
+                errors.add_field_error("root", "invalid", str(e))
+
+        _add_model_errors(errors, "root", self.root, by_alias)
+
+        # Validate commit
+        if self.commit is not None:
+            try:
+                TypeAdapter(RecipeCommit).validate_python(self.commit)
+            except PydanticValidationError as e:
+                errors.add_field_error("commit", "invalid", str(e))
+
+        _add_model_errors(errors, "commit", self.commit, by_alias)
+
+        # Validate createdAt
+        if self.created_at is None:
+            errors.add_field_error("created_at", "required", "required field")
+
+        # Validate createdBy
+        if self.created_by is None:
+            errors.add_field_error("created_by", "required", "required field")
+        else:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.created_by)) is None:
+                errors.add_field_error("created_by", "pattern", "invalid format")
+
+        # Validate updatedAt
+        if self.updated_at is None:
+            errors.add_field_error("updated_at", "required", "required field")
+
+        # Validate updatedBy
+        if self.updated_by is None:
+            errors.add_field_error("updated_by", "required", "required field")
+        else:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.updated_by)) is None:
+                errors.add_field_error("updated_by", "pattern", "invalid format")
+
+        # Validate _version
+        if self.version_ is None:
+            errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "created_at": "createdAt",
+                "created_by": "createdBy",
+                "updated_at": "updatedAt",
+                "updated_by": "updatedBy",
+            })
+
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a dictionary.
+
+        Returns:
+            Dictionary representation of the model.
+        """
+        return self.model_dump(mode='python', exclude_none=False)
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a JSON-serializable dictionary.
+
+        Returns:
+            JSON-serializable dictionary representation.
+        """
+        return self.model_dump(mode='json', exclude_none=False)
+
+    def to_json(self) -> str:
+        """
+        Convert the model to a stable JSON string.
+
+        Returns:
+            JSON string representation.
+        """
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "RecipeRelease":
+        """
+        Parse a model from a dictionary using strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_dict_non_strict(cls, input_data: Dict[str, Any]) -> "RecipeRelease":
+        """
+        Parse a model from a dictionary using non-strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=False)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "RecipeRelease":
+        """
+        Parse a model from JSON text/bytes using strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_json_non_strict(cls, input_data: str | bytes) -> "RecipeRelease":
+        """
+        Parse a model from JSON text/bytes using non-strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict_non_strict(parsed_data)
+
+    @classmethod
+    def from_yaml(cls, input_data: str | bytes) -> "RecipeRelease":
+        """
+        Parse a model from YAML text/bytes using strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_yaml_non_strict(cls, input_data: str | bytes) -> "RecipeRelease":
+        """
+        Parse a model from YAML text/bytes using non-strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict_non_strict(parsed_data)
+
+    def mask_secrets(self) -> "RecipeRelease":
+        """
+        Return a copy of this object with secret fields masked.
+        """
+        return self.model_copy(update={
+            "root": self.root.mask_secrets() if self.root is not None else None,
+            "commit": self.commit.mask_secrets() if self.commit is not None else None,
+        })
+
+class RecipeSnapshotEntry(BaseModel):
+    """
+    One entity of a snapshotted commit of the Recipe version graph, pinned to the row version its tree holds.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        validate_assignment=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    id: Optional[IdentityUUID] = Field(default=None, alias="id", serialization_alias="id")
+
+    commit: Optional[RecipeCommit] = Field(default=None, alias="commit", serialization_alias="commit")
+
+    entity_kind: RecipeEntityKind = Field(..., alias="entityKind", serialization_alias="entityKind")
+
+    entity_key: IdentityUUID = Field(..., alias="entityKey", serialization_alias="entityKey")
+
+    entity_id: IdentityUUID = Field(..., alias="entityId", serialization_alias="entityId")
+
+    entity_version: GenericInt64 = Field(..., alias="entityVersion", serialization_alias="entityVersion")
+
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+        """
+        Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
+
+        Returns:
+            ValidationErrors object containing any validation errors.
+            If no errors, the errors dict will be empty.
+        """
+        errors = ValidationErrors()
+
+        # Validate id
+        if self.id is not None:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
+                errors.add_field_error("id", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "id" or key.startswith("id[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.id)
+                except PydanticValidationError as e:
+                    errors.add_field_error("id", "invalid", str(e))
+
+        # Validate commit
+        if self.commit is not None:
+            try:
+                TypeAdapter(RecipeCommit).validate_python(self.commit)
+            except PydanticValidationError as e:
+                errors.add_field_error("commit", "invalid", str(e))
+
+        _add_model_errors(errors, "commit", self.commit, by_alias)
+
+        # Validate entityKind
+        if self.entity_kind is None:
+            errors.add_field_error("entity_kind", "required", "required field")
+
+        # Validate entityKey
+        if self.entity_key is None:
+            errors.add_field_error("entity_key", "required", "required field")
+        else:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key)) is None:
+                errors.add_field_error("entity_key", "pattern", "invalid format")
+
+        # Validate entityId
+        if self.entity_id is None:
+            errors.add_field_error("entity_id", "required", "required field")
+        else:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_id)) is None:
+                errors.add_field_error("entity_id", "pattern", "invalid format")
+
+        # Validate entityVersion
+        if self.entity_version is None:
+            errors.add_field_error("entity_version", "required", "required field")
+        else:
+
+            if float(self.entity_version) < -9007199254740991:
+                errors.add_field_error("entity_version", "min", "must be at least -9007199254740991")
+            if float(self.entity_version) > 9007199254740991:
+                errors.add_field_error("entity_version", "max", "must be at most 9007199254740991")
+
+        if by_alias:
+            return errors._with_field_names({
+                "entity_kind": "entityKind",
+                "entity_key": "entityKey",
+                "entity_id": "entityId",
+                "entity_version": "entityVersion",
+            })
+
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a dictionary.
+
+        Returns:
+            Dictionary representation of the model.
+        """
+        return self.model_dump(mode='python', exclude_none=False)
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a JSON-serializable dictionary.
+
+        Returns:
+            JSON-serializable dictionary representation.
+        """
+        return self.model_dump(mode='json', exclude_none=False)
+
+    def to_json(self) -> str:
+        """
+        Convert the model to a stable JSON string.
+
+        Returns:
+            JSON string representation.
+        """
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "RecipeSnapshotEntry":
+        """
+        Parse a model from a dictionary using strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_dict_non_strict(cls, input_data: Dict[str, Any]) -> "RecipeSnapshotEntry":
+        """
+        Parse a model from a dictionary using non-strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=False)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "RecipeSnapshotEntry":
+        """
+        Parse a model from JSON text/bytes using strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_json_non_strict(cls, input_data: str | bytes) -> "RecipeSnapshotEntry":
+        """
+        Parse a model from JSON text/bytes using non-strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict_non_strict(parsed_data)
+
+    @classmethod
+    def from_yaml(cls, input_data: str | bytes) -> "RecipeSnapshotEntry":
+        """
+        Parse a model from YAML text/bytes using strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_yaml_non_strict(cls, input_data: str | bytes) -> "RecipeSnapshotEntry":
+        """
+        Parse a model from YAML text/bytes using non-strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict_non_strict(parsed_data)
+
+    def mask_secrets(self) -> "RecipeSnapshotEntry":
+        """
+        Return a copy of this object with secret fields masked.
+        """
+        return self.model_copy(update={
+            "commit": self.commit.mask_secrets() if self.commit is not None else None,
+        })
+
 class Step(BaseModel):
     """
     One step of a recipe, ordered by position; updatedBy names its row's writer.

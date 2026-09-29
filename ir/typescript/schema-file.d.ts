@@ -489,6 +489,7 @@ export interface UnionFile {
 export interface VersionGraphConfig {
   name?: string;
   schemaEpoch?: number;
+  snapshotEvery?: number;
 }
 
 export interface VersionedConfig {

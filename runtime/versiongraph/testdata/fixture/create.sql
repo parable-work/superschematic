@@ -103,6 +103,30 @@ CREATE TABLE recipe_ref (
 
 COMMENT ON TABLE recipe_ref IS 'A line of the Recipe version graph: a primary line when parentRef is null, else a change set.';
 
+CREATE TABLE recipe_release (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  root_id UUID NOT NULL,
+  commit_id UUID NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  created_by UUID NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_by UUID NOT NULL,
+  _version BIGINT DEFAULT 1 NOT NULL
+);
+
+COMMENT ON TABLE recipe_release IS 'The released commit of one root of the Recipe version graph; its history is the release log.';
+
+CREATE TABLE recipe_snapshot_entry (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  commit_id UUID NOT NULL,
+  entity_kind TEXT NOT NULL,
+  entity_key UUID NOT NULL,
+  entity_id UUID NOT NULL,
+  entity_version BIGINT NOT NULL
+);
+
+COMMENT ON TABLE recipe_snapshot_entry IS 'One entity of a snapshotted commit of the Recipe version graph, pinned to the row version its tree holds.';
+
 CREATE TABLE step (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   recipe_id UUID NOT NULL,
@@ -221,6 +245,20 @@ CREATE UNIQUE INDEX uq_recipe_ref_history_id_version ON recipe_ref_history (id, 
 CREATE INDEX idx_recipe_ref_history_id_recorded ON recipe_ref_history (id, recorded_at);
 
 COMMENT ON TABLE recipe_ref_history IS 'Version history for recipe_ref';
+
+CREATE TABLE recipe_release_history (
+  history_id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  id UUID NOT NULL,
+  _version BIGINT NOT NULL,
+  operation TEXT NOT NULL,
+  data JSONB NOT NULL,
+  recorded_at TIMESTAMPTZ DEFAULT clock_timestamp() NOT NULL
+);
+
+CREATE UNIQUE INDEX uq_recipe_release_history_id_version ON recipe_release_history (id, _version);
+CREATE INDEX idx_recipe_release_history_id_recorded ON recipe_release_history (id, recorded_at);
+
+COMMENT ON TABLE recipe_release_history IS 'Version history for recipe_release';
 
 CREATE TABLE step_history (
   history_id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -354,6 +392,24 @@ ALTER TABLE recipe_ref
   REFERENCES recipe_commit(id)
   ON DELETE RESTRICT;
 
+ALTER TABLE recipe_release
+  ADD CONSTRAINT fk_recipe_release_root_id
+  FOREIGN KEY (root_id)
+  REFERENCES recipe(id)
+  ON DELETE RESTRICT;
+
+ALTER TABLE recipe_release
+  ADD CONSTRAINT fk_recipe_release_commit_id
+  FOREIGN KEY (commit_id)
+  REFERENCES recipe_commit(id)
+  ON DELETE RESTRICT;
+
+ALTER TABLE recipe_snapshot_entry
+  ADD CONSTRAINT fk_recipe_snapshot_entry_commit_id
+  FOREIGN KEY (commit_id)
+  REFERENCES recipe_commit(id)
+  ON DELETE RESTRICT;
+
 ALTER TABLE step
   ADD CONSTRAINT fk_step_recipe_id
   FOREIGN KEY (recipe_id)
@@ -405,6 +461,12 @@ CREATE UNIQUE INDEX uq_recipe_patch_entity ON recipe_patch USING BTREE (commit_i
 CREATE INDEX idx_recipe_patch_entity_version ON recipe_patch USING BTREE (entity_id, entity_version);
 
 CREATE UNIQUE INDEX uq_recipe_ref_root_name ON recipe_ref USING BTREE (root_id, "name") WHERE deleted_at IS NULL;
+
+CREATE UNIQUE INDEX uq_recipe_release_root ON recipe_release USING BTREE (root_id);
+
+CREATE UNIQUE INDEX uq_recipe_snapshot_entry_entity ON recipe_snapshot_entry USING BTREE (commit_id, entity_kind, entity_key);
+
+CREATE INDEX idx_recipe_snapshot_entry_entity_version ON recipe_snapshot_entry USING BTREE (entity_id, entity_version);
 
 CREATE UNIQUE INDEX uq_step_entity_ref ON step USING BTREE (entity_key, ref_id);
 
@@ -524,6 +586,12 @@ BEGIN
         WHERE pin_1.entity_id = h.id
           AND pin_1.entity_version = h._version
       )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM recipe_snapshot_entry pin_2
+        WHERE pin_2.entity_id = h.id
+          AND pin_2.entity_version = h._version
+      )
     LIMIT max_rows
   ),
   deleted AS (
@@ -628,6 +696,54 @@ CREATE TRIGGER trg_recipe_ref_capture_history_delete
   AFTER DELETE ON recipe_ref
   FOR EACH ROW EXECUTE FUNCTION recipe_ref_capture_history();
 
+CREATE OR REPLACE FUNCTION recipe_release_capture_history() RETURNS trigger AS $$
+BEGIN
+  IF (TG_WHEN = 'BEFORE') THEN
+    -- BEFORE UPDATE: the stored row takes the next version.
+    NEW._version := OLD._version + 1;
+    RETURN NEW;
+  END IF;
+  IF (TG_OP = 'DELETE') THEN
+    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
+    -- the unique history index holds and the latest history row for a deleted key
+    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
+    -- version. Its updated_by is the actor a hard delete set in
+    -- superschematic.history_actor_id for the statement, else the row's own value.
+    INSERT INTO recipe_release_history (id, _version, operation, data)
+    VALUES (
+      OLD.id,
+      OLD._version + 1,
+      'DELETE',
+      to_jsonb(OLD) || jsonb_build_object(
+        '_version', OLD._version + 1,
+        'updated_by', COALESCE(
+          NULLIF(current_setting('superschematic.history_actor_id', true), '')::UUID,
+          OLD.updated_by
+        )
+      )
+    );
+    RETURN OLD;
+  END IF;
+  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
+  -- CONFLICT DO UPDATE records the one UPDATE it made.
+  INSERT INTO recipe_release_history (id, _version, operation, data)
+  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_recipe_release_bump_version
+  BEFORE UPDATE ON recipe_release
+  FOR EACH ROW EXECUTE FUNCTION recipe_release_capture_history();
+
+CREATE TRIGGER trg_recipe_release_capture_history_write
+  AFTER INSERT OR UPDATE ON recipe_release
+  FOR EACH ROW EXECUTE FUNCTION recipe_release_capture_history();
+
+CREATE TRIGGER trg_recipe_release_capture_history_delete
+  AFTER DELETE ON recipe_release
+  FOR EACH ROW EXECUTE FUNCTION recipe_release_capture_history();
+
 CREATE OR REPLACE FUNCTION step_capture_history() RETURNS trigger AS $$
 BEGIN
   IF (TG_WHEN = 'BEFORE') THEN
@@ -700,6 +816,12 @@ BEGIN
         FROM recipe_patch pin_1
         WHERE pin_1.entity_id = h.id
           AND pin_1.entity_version = h._version
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM recipe_snapshot_entry pin_2
+        WHERE pin_2.entity_id = h.id
+          AND pin_2.entity_version = h._version
       )
     LIMIT max_rows
   ),

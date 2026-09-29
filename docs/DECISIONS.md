@@ -1386,7 +1386,33 @@ kind without `retentionDays`; and the sweep lock is a transaction-scoped
 advisory lock keyed by the graph's ref table. A typed value read back
 through the facade has its canonical form: an instant in UTC, a time of day
 as `HH:MM:SS`. The release pointer, merge-only primary lines, `Rebase`,
-snapshots and the sweep follow in the Go engine.
+snapshots and the sweep are built in the declarations and the Go engine:
+`@versionGraph({ snapshotEvery })` (default 64, positive), the generated
+`<Name>Release` and `<Name>SnapshotEntry` tables, which the descriptor names
+as `releaseTable` and `snapshotTable`, a second prune pin on every member,
+the engine's `Rebase`, `Release`, `Released`, `Sweep` and `RunSweeper`,
+`Merge`'s message and tag, the facade's typed methods for each, and a
+scenario for every operation and error. Eleven rules settled as they were
+built: `Commit` on a primary line is refused with `ErrPrimaryMergeOnly`
+too, since it is a write; a root's first `Release` passes version 0, and
+`Released` before any release is `not_found`; `Rebase` of a primary line is
+`no_parent`, of a change set already on its parent's head moves only its
+version, and of one with no commit commits with the new base as parent;
+`Rebase` keeps as rows only the entities that differ from the new base and
+removes the rest, which read through; a commit's distance from the nearest
+snapshot counts from before its chain's first commit, so with an interval
+of n the n-th commit of a chain is snapshotted; a commit whose tree is empty
+has no entries to store and reads as having no snapshot, which only makes a
+read walk further; the snapshot interval is, like the schema epoch, an
+engine option and a facade constant rather than a descriptor member;
+verification, not the data form's JSON Schema, rejects a `snapshotEvery`
+that is not positive, since that schema's subset has no numeric bounds; a
+sweep runs in one transaction, keeps discarded refs' rows for seven days
+unless told otherwise, reads a change set's last write from its
+`updatedAt`, may discard sealed change sets as abandoned but never a primary
+line, and reports nonzero counts only; pruning uses each kind's declared
+retention; and the facade's sweep writes as `GraphSweepOptions.Actor`, not
+the context user.
 The TypeScript, Rust and Python engines and facades follow and must pass
 the same scenarios. Each change that lands a piece updates this paragraph.
 

@@ -1,9 +1,10 @@
 // Package versiongraph expands the version graph declarations of a verified
 // schema into ordinary types, as the frontends copy a trait's fields onto a
-// type. A @versionGraph root gets its ref, commit and patch tables and two
-// enums; each @graphMember gets its entityKey, ref and deletedOnRef fields,
-// a unique (entityKey, ref) index and, when it prunes history, a pin that
-// keeps every row version a patch names.
+// type. A @versionGraph root gets its ref, commit, patch, release and
+// snapshot entry tables and two enums; each @graphMember gets its
+// entityKey, ref and deletedOnRef fields, a unique (entityKey, ref) index
+// and, when it prunes history, pins that keep every row version a patch or
+// a snapshot entry names.
 //
 // The sql, orm and types generators emit the result with no graph-specific
 // code. Every definition the expansion adds carries
@@ -20,7 +21,7 @@ import (
 
 // TypeSuffixes are the suffixes of the types and enums a version graph
 // generates, appended to the graph's name.
-var TypeSuffixes = []string{"Ref", "Commit", "Patch", "EntityKind", "PatchOperation"}
+var TypeSuffixes = []string{"Ref", "Commit", "Patch", "Release", "SnapshotEntry", "EntityKind", "PatchOperation"}
 
 // MemberFields are the fields the expansion adds to every graph member.
 var MemberFields = []string{"entityKey", "ref", "deletedOnRef"}
@@ -34,10 +35,11 @@ const (
 const restrict = "RESTRICT"
 
 // The indexes the expansion adds: a ref's name is unique per root, a
-// commit's sequence is unique per root, a patch names one entity of its
-// commit and is found by the row version it pins, and a member holds one
-// row per (entityKey, ref). Each call returns fresh key slices, so no
-// schema shares them.
+// commit's sequence is unique per root, a patch and a snapshot entry each
+// name one entity of their commit and are found by the row version they
+// pin, a root has one release pointer, and a member holds one row per
+// (entityKey, ref). Each call returns fresh key slices, so no schema shares
+// them.
 func refIndex() ir.IndexDef {
 	return ir.IndexDef{Keys: []string{"root", "name"}, Unique: true, Name: "root_name"}
 }
@@ -51,6 +53,10 @@ func patchIndexes() []ir.IndexDef {
 		{Keys: []string{"commit", "entityKind", "entityKey"}, Unique: true, Name: "entity"},
 		{Keys: []string{"entityId", "entityVersion"}, Name: "entity_version"},
 	}
+}
+
+func releaseIndex() ir.IndexDef {
+	return ir.IndexDef{Keys: []string{"root"}, Unique: true, Name: "root"}
 }
 
 func memberIndex() ir.IndexDef {
@@ -72,6 +78,10 @@ func Indexes(schema *ir.Schema, root *ir.TypeDef) []GeneratedIndex {
 	out := []GeneratedIndex{{g.refType(), refIndex()}, {g.commitType(), commitIndex()}}
 	for _, idx := range patchIndexes() {
 		out = append(out, GeneratedIndex{g.patchType(), idx})
+	}
+	out = append(out, GeneratedIndex{g.releaseType(), releaseIndex()})
+	for _, idx := range patchIndexes() {
+		out = append(out, GeneratedIndex{g.snapshotType(), idx})
 	}
 	for _, member := range g.members {
 		out = append(out, GeneratedIndex{member.Name, memberIndex()})
@@ -147,6 +157,8 @@ func newGraph(schema *ir.Schema, root *ir.TypeDef, actor ir.TypeRef) *graph {
 func (g *graph) refType() string       { return g.name + "Ref" }
 func (g *graph) commitType() string    { return g.name + "Commit" }
 func (g *graph) patchType() string     { return g.name + "Patch" }
+func (g *graph) releaseType() string   { return g.name + "Release" }
+func (g *graph) snapshotType() string  { return g.name + "SnapshotEntry" }
 func (g *graph) kindEnum() string      { return g.name + "EntityKind" }
 func (g *graph) operationEnum() string { return g.name + "PatchOperation" }
 
@@ -155,6 +167,8 @@ func (g *graph) expand() {
 	g.addRef()
 	g.addCommit()
 	g.addPatch()
+	g.addRelease()
+	g.addSnapshotEntry()
 	for _, member := range g.members {
 		g.extendMember(member)
 	}
@@ -258,9 +272,49 @@ func (g *graph) addPatch() {
 	})
 }
 
+// addRelease adds <Name>Release: a root's released pointer, which names a
+// tagged commit. It is versioned, so its _version fences every move and its
+// history is the release log.
+func (g *graph) addRelease() {
+	g.addType(&ir.TypeDef{
+		Name:      g.releaseType(),
+		Comment:   "The released commit of one root of the " + g.name + " version graph; its history is the release log.",
+		Versioned: true,
+		Fields: []*ir.FieldDef{
+			g.idField(),
+			g.relation("root", g.root.Name, true),
+			g.relation("commit", g.commitType(), true),
+			scalarField("createdAt", dateTimeScalar, true),
+			g.actorField("createdBy", true),
+			scalarField("updatedAt", dateTimeScalar, true),
+			g.actorField("updatedBy", true),
+		},
+		Indexes: []ir.IndexDef{releaseIndex()},
+	})
+}
+
+// addSnapshotEntry adds <Name>SnapshotEntry, written once: one entity of a
+// snapshotted commit's tree and the member row version (entityId,
+// entityVersion) it pins. A commit's entries are its full pin set.
+func (g *graph) addSnapshotEntry() {
+	g.addType(&ir.TypeDef{
+		Name:    g.snapshotType(),
+		Comment: "One entity of a snapshotted commit of the " + g.name + " version graph, pinned to the row version its tree holds.",
+		Fields: []*ir.FieldDef{
+			g.idField(),
+			g.relation("commit", g.commitType(), true),
+			scalarField("entityKind", g.kindEnum(), true),
+			scalarField("entityKey", g.uuid, true),
+			scalarField("entityId", g.uuid, true),
+			scalarField("entityVersion", int64Scalar, true),
+		},
+		Indexes: patchIndexes(),
+	})
+}
+
 // extendMember adds a member's graph fields, its (entityKey, ref) slot and,
-// when it prunes history, the pin that keeps every row version a patch
-// names.
+// when it prunes history, the pins that keep every row version a patch or
+// a snapshot entry names.
 func (g *graph) extendMember(member *ir.TypeDef) {
 	entityKey := &ir.FieldDef{
 		Name:          "entityKey",
@@ -285,12 +339,14 @@ func (g *graph) extendMember(member *ir.TypeDef) {
 	member.Fields = append(member.Fields, entityKey, ref, deleted)
 	member.Indexes = append(member.Indexes, memberIndex())
 	if cfg := member.VersionedConfig; cfg != nil && cfg.RetentionDays != nil {
-		cfg.PruneKeepReferencedBy = append(cfg.PruneKeepReferencedBy, &ir.PruneReference{
-			Table:         g.table + "_patch",
-			KeyColumn:     "entity_id",
-			VersionColumn: "entity_version",
-			Origin:        ir.OriginVersionGraph,
-		})
+		for _, table := range []string{g.table + "_patch", g.table + "_snapshot_entry"} {
+			cfg.PruneKeepReferencedBy = append(cfg.PruneKeepReferencedBy, &ir.PruneReference{
+				Table:         table,
+				KeyColumn:     "entity_id",
+				VersionColumn: "entity_version",
+				Origin:        ir.OriginVersionGraph,
+			})
+		}
 	}
 }
 

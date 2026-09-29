@@ -18,6 +18,8 @@ Generated at: 2026-01-02T03:04:05Z
 - `repository_recipe_commit.go` -- RecipeCommit repository
 - `repository_recipe_patch.go` -- RecipePatch repository
 - `repository_recipe_ref.go` -- RecipeRef repository
+- `repository_recipe_release.go` -- RecipeRelease repository
+- `repository_recipe_snapshot_entry.go` -- RecipeSnapshotEntry repository
 - `repository_step.go` -- Step repository
 - `repository_tasting.go` -- Tasting repository
 - `repository_utensil.go` -- Utensil repository

@@ -1,0 +1,90 @@
+{
+  "name": "rebase",
+  "description": "Rebase moves a change set onto its parent's newer head: the parent's head is merged in against the change set's base, with its composed tree, uncommitted work included, as ours. A clean rebase keeps only the change set's own changes as rows, moves its base and commits on it after its previous head; a conflicting one writes nothing until a resolution settles it; one already on the parent's head writes nothing.",
+  "steps": [
+    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "branch", "from": "main", "name": "seed", "as": "seed"},
+    {"op": "save", "ref": "seed", "edits": {
+      "step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {"knead": 10, "rest": 30}}]},
+      "ingredient": {"upsert": [{"entity_key": "Flour", "step_key": "Mix", "quantity": "200g flour", "substitutes": {}}]}
+    }},
+    {"op": "commit", "ref": "seed"},
+    {"op": "merge", "source": "seed", "target": "main", "as": "c1"},
+
+    {"op": "branch", "from": "main", "name": "mix well", "as": "a"},
+    {"op": "save", "ref": "a", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix well", "timings": {"knead": 10, "rest": 30}}]}}},
+    {"op": "commit", "ref": "a", "as": "aCommit"},
+    {"op": "save", "ref": "a", "edits": {"ingredient": {"upsert": [{"entity_key": "Salt", "step_key": "Mix", "quantity": "a pinch", "substitutes": {}}]}}},
+    {"op": "rebase", "ref": "a", "expect": {"commit": null, "ref": {"base": "c1", "head": "aCommit", "version": 5}}},
+
+    {"op": "branch", "from": "main", "name": "rest longer", "as": "b"},
+    {"op": "save", "ref": "b", "edits": {"step": {"upsert": [
+      {"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {"knead": 10, "rest": 45}},
+      {"entity_key": "Bake", "position": 2, "instruction": "Bake", "timings": {}}
+    ]}}},
+    {"op": "commit", "ref": "b"},
+    {"op": "merge", "source": "b", "target": "main", "as": "mergedB"},
+
+    {"op": "rebase", "ref": "a", "as": "rebased",
+      "expect": {"ref": {"base": "mergedB", "head": "rebased", "version": 6}, "commit": {"ref": "a", "parent": "aCommit"}}},
+    {"op": "compose", "ref": "a", "expect": {"contentHashOf": "rebased", "tree": {
+      "ingredient": [{"entity_key": "Flour", "quantity": "200g flour"}, {"entity_key": "Salt", "quantity": "a pinch"}],
+      "step": [
+        {"entity_key": "Mix", "instruction": "Mix well", "timings": {"knead": 10, "rest": 45}},
+        {"entity_key": "Bake", "instruction": "Bake"}
+      ]
+    }}},
+    {"op": "rows", "ref": "a", "kind": "step", "expect": {"rows": [
+      {"entity_key": "Mix", "instruction": "Mix well", "timings": {"knead": 10, "rest": 45}, "_version": 2}
+    ]}},
+    {"op": "rows", "ref": "a", "kind": "ingredient", "expect": {"rows": [{"entity_key": "Salt", "_version": 1}]}},
+    {"op": "history", "ref": "a", "expect": {"commits": ["rebased", "aCommit"]}},
+    {"op": "diff", "from": "mergedB", "to": "rebased", "expect": {"changes": [
+      {"kind": "ingredient", "entityKey": "Salt", "operation": "ADD"},
+      {"kind": "step", "entityKey": "Mix", "operation": "UPDATE"}
+    ]}},
+    {"op": "merge", "source": "a", "target": "main", "as": "mergedA", "expect": {"commit": {"parent": "mergedB", "contentHashOf": "rebased"}}},
+
+    {"op": "branch", "from": "main", "name": "more flour", "as": "c"},
+    {"op": "save", "ref": "c", "edits": {"ingredient": {"upsert": [{"entity_key": "Flour", "step_key": "Mix", "quantity": "250g flour", "substitutes": {}}]}}},
+    {"op": "commit", "ref": "c", "as": "cCommit"},
+    {"op": "branch", "from": "main", "name": "most flour", "as": "d"},
+    {"op": "save", "ref": "d", "edits": {"ingredient": {"upsert": [{"entity_key": "Flour", "step_key": "Mix", "quantity": "300g flour", "substitutes": {}}]}}},
+    {"op": "commit", "ref": "d"},
+    {"op": "merge", "source": "d", "target": "main", "as": "mergedD"},
+    {"op": "rebase", "ref": "c",
+      "expect": {"ref": {"version": 3, "base": "mergedA", "head": "cCommit"}, "commit": null, "conflicts": [
+        {"kind": "ingredient", "entityKey": "Flour", "path": "/quantity", "base": "200g flour", "ours": "250g flour", "theirs": "300g flour"}
+      ]}},
+    {"op": "compose", "ref": "c", "expect": {"contentHashOf": "cCommit"}},
+    {"op": "rebase", "ref": "c", "as": "cRebased",
+      "resolutions": [{"kind": "ingredient", "entityKey": "Flour", "path": "/quantity", "take": "theirs"}],
+      "expect": {"ref": {"version": 4, "base": "mergedD", "head": "cRebased"}, "commit": {"parent": "cCommit", "contentHashOf": "mergedD"}}},
+    {"op": "rows", "ref": "c", "kind": "ingredient", "expect": {"rows": []}},
+    {"op": "compose", "ref": "c", "expect": {"contentHashOf": "mergedD", "tree": {
+      "ingredient": [{"entity_key": "Flour", "quantity": "300g flour"}, {"entity_key": "Salt"}],
+      "step": [{"entity_key": "Mix"}, {"entity_key": "Bake"}]
+    }}},
+    {"op": "rebase", "ref": "c", "expect": {"ref": {"version": 5, "base": "mergedD"}, "commit": null}},
+
+    {"op": "branch", "from": "main", "name": "no bake", "as": "e"},
+    {"op": "save", "ref": "e", "edits": {"step": {"delete": ["Bake"]}}},
+    {"op": "commit", "ref": "e"},
+    {"op": "branch", "from": "main", "name": "bake longer", "as": "f"},
+    {"op": "save", "ref": "f", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix well", "timings": {"knead": 12, "rest": 45}}]}}},
+    {"op": "commit", "ref": "f"},
+    {"op": "merge", "source": "f", "target": "main", "as": "mergedF"},
+    {"op": "rebase", "ref": "e", "as": "eRebased", "expect": {"ref": {"base": "mergedF"}}},
+    {"op": "compose", "ref": "e", "expect": {"contentHashOf": "eRebased", "tree": {
+      "ingredient": [{"entity_key": "Flour"}, {"entity_key": "Salt"}],
+      "step": [{"entity_key": "Mix", "timings": {"knead": 12, "rest": 45}}]
+    }}},
+    {"op": "rows", "ref": "e", "kind": "step", "expect": {"rows": [{"entity_key": "Bake", "deleted_on_ref": true, "_version": 1}]}},
+
+    {"op": "seal", "ref": "e"},
+    {"op": "rebase", "ref": "e", "expect": {"error": "ref_sealed"}},
+    {"op": "rebase", "ref": "main", "expect": {"error": "no_parent"}},
+    {"op": "rebase", "ref": "c", "version": 1, "expect": {"error": "version_conflict"}}
+  ]
+}

@@ -61,6 +61,17 @@ var (
 
 	// ErrMergeIntoItself is returned by a merge whose source is its target.
 	ErrMergeIntoItself = errors.New("a ref cannot be merged into itself")
+
+	// ErrPrimaryMergeOnly is returned by a Save, Commit, Seal or Revert on
+	// a primary line, which takes writes only from Merge.
+	ErrPrimaryMergeOnly = errors.New("a primary line takes writes only from a merge")
+
+	// ErrNotTagged is returned by a Release of a commit that is not tagged.
+	ErrNotTagged = errors.New("the commit is not tagged")
+
+	// ErrNoParent is returned by a Rebase of a primary line, which has no
+	// parent to rebase onto.
+	ErrNoParent = errors.New("a primary line has no parent to rebase onto")
 )
 
 // InvalidTreeError lists what the core's validate found wrong with a tree.
@@ -98,6 +109,9 @@ var codes = []struct {
 	{ErrInvalidTree, "invalid_tree"},
 	{ErrRootMismatch, "root_mismatch"},
 	{ErrMergeIntoItself, "merge_into_itself"},
+	{ErrPrimaryMergeOnly, "primary_merge_only"},
+	{ErrNotTagged, "not_tagged"},
+	{ErrNoParent, "no_parent"},
 }
 
 // ErrorCode is the stable code of err, which every language's engine
