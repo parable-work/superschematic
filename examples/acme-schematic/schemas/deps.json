@@ -23,6 +23,26 @@
       "deps": null
     },
     {
+      "id": "shop-config-api",
+      "language": "go",
+      "kind": "api",
+      "name": "example.com/acme/api/shop-config",
+      "path": "api/shop-config",
+      "service": "shop-config",
+      "deps": [
+        "shop-config-types"
+      ]
+    },
+    {
+      "id": "shop-config-types",
+      "language": "go",
+      "kind": "types",
+      "name": "example.com/acme/types/go/shop-config",
+      "path": "types/go/shop-config",
+      "service": "shop-config",
+      "deps": null
+    },
+    {
       "id": "shop-db-orm",
       "language": "go",
       "kind": "orm",

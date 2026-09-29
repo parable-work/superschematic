@@ -17,3 +17,9 @@ replace {{ .TypesModule }} => ../../types/go/{{ .SchemaName }}
 {{- range .IndirectModules }}
 replace {{ . }} => ../../types/go/{{ base . }}
 {{- end }}
+{{- if .ScalarLibReplacePath }}
+replace {{ .Naming.ScalarGoModule }} => {{ .ScalarLibReplacePath }}
+{{- end }}
+{{- if .SchemaIRReplacePath }}
+replace {{ .Naming.SchemaIRGoModule }} => {{ .SchemaIRReplacePath }}
+{{- end }}

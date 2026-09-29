@@ -40,6 +40,13 @@ type ConfigOutput struct {
 	// before WriteConfigModule, whose go.mod requires them as indirect and
 	// replaces them.
 	IndirectModules []string
+	// Naming supplies the scalar library and schema IR module paths the
+	// standalone module's go.mod replaces.
+	Naming naming.Naming
+	// ScalarLibReplacePath and SchemaIRReplacePath are the go.mod replace
+	// targets computed by SetReplacePaths. Empty values omit the directive.
+	ScalarLibReplacePath string
+	SchemaIRReplacePath  string
 	// Fields are the environment variable fields to generate.
 	Fields []ConfigField
 	// Enums are enum types used by the config fields.
@@ -159,6 +166,7 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 		TypeName:    envVarsType.Name,
 		ModulePath:  names.GoAPIModule(schemaName),
 		TypesModule: names.GoTypesModule(schemaName),
+		Naming:      names,
 		Fields:      []ConfigField{},
 		Enums:       []codegen.EnumInfo{},
 	}
@@ -481,6 +489,22 @@ func WriteConfig(output *ConfigOutput, outputDir string) error {
 		return fmt.Errorf("failed to generate values schema: %w", err)
 	}
 
+	return nil
+}
+
+// SetReplacePaths sets the go.mod replace directive paths for the scalar
+// library and the schema IR, which the types module requires, relative to
+// the output directory of the standalone module. Go reads replace directives
+// only from the main module, so the types module's own do not apply here.
+// An unset path emits no directive.
+func SetReplacePaths(output *ConfigOutput, paths naming.LocalPaths, outputDir string) error {
+	var err error
+	if output.ScalarLibReplacePath, err = naming.RelPath(outputDir, paths.ScalarGo); err != nil {
+		return fmt.Errorf("scalar library replace path: %w", err)
+	}
+	if output.SchemaIRReplacePath, err = naming.RelPath(outputDir, paths.SchemaIR); err != nil {
+		return fmt.Errorf("schema-ir replace path: %w", err)
+	}
 	return nil
 }
 
