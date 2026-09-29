@@ -132,7 +132,7 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- end}}
 ) ({{.OutputGoType}}, error) {
 	{{- if .PathArgs}}
-	path := fmt.Sprintf("{{.PathFormat}}", {{join .PathArgs ", "}})
+	path := fmt.Sprintf("{{.PathFormat}}", {{range $i, $arg := .PathArgs}}{{if $i}}, {{end}}pathSegment({{$arg}}){{end}})
 	{{- else}}
 	path := "{{.PathFormat}}"
 	{{- end}}

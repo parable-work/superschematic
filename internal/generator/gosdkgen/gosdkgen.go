@@ -74,6 +74,10 @@ type SDKOutput struct {
 	// are sent as text; namespaces/validation.go then carries the
 	// checkQueryListItem helper.
 	ChecksQueryListItems bool
+	// HasPathParams reports whether an endpoint's path takes a value;
+	// namespaces/common.go then carries the pathSegment helper that
+	// encodes it.
+	HasPathParams bool
 }
 
 // ModuleReplace describes a go.mod replace directive needed by generated SDK modules.
@@ -370,6 +374,7 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 			}
 			if len(ep.PathArgs) > 0 {
 				ns.NeedsFmtPkg = true
+				output.HasPathParams = true
 			}
 			if ep.HasScalarArgs && ep.HTTPMethod == "GET" {
 				for _, arg := range ep.ScalarArgs {

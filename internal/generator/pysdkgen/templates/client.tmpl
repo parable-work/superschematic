@@ -28,6 +28,17 @@ from .errors import APIError, AuthenticationError, AuthorizationError, NetworkEr
 _MAX_RATE_LIMIT_SLEEP_SECONDS = 300
 # Methods retried after a network failure. A write may have reached the server before the connection dropped, so only these safe reads are retried.
 _NETWORK_RETRY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+{{- if .HasPathParams}}
+
+
+def path_segment(value: Any) -> str:
+    """Write a path parameter value as one path segment, percent-encoded once.
+
+    Every server decodes a path parameter exactly once, so a value holding
+    %, /, ? or # reaches the implementation as it was passed.
+    """
+    return parse.quote(str(value), safe="")
+{{- end}}
 
 
 @dataclass(slots=True)

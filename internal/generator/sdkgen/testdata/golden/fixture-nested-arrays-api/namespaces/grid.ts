@@ -69,7 +69,7 @@ export class GridNamespace {
   ): Promise<GridView> {
     // Make GET request
     const result = await this.client.get<GridView>(
-      `/api/grids/${id}`,
+      `/api/grids/${encodeURIComponent(id)}`,
       { signal }
     );
     return parseGridViewFromJSON(result);
@@ -92,7 +92,7 @@ export class GridNamespace {
   ): Promise<string[][]> {
     // Make GET request
     const result = await this.client.get<string[][]>(
-      `/api/grids/${id}/labels`,
+      `/api/grids/${encodeURIComponent(id)}/labels`,
       { signal, params }
     );
     return result;
@@ -141,7 +141,7 @@ export class GridNamespace {
     }
     // Make PUT request
     const result = await this.client.put<GridView>(
-      `/api/grids/${id}/labels`,
+      `/api/grids/${encodeURIComponent(id)}/labels`,
       scalarInput,
       {signal: requestSignal }
     );

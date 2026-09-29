@@ -18,4 +18,5 @@ aes-gcm = "0.10"
 rand = "0.8"
 rsa = { version = "0.9", features = ["pem"] }
 sha2 = "0.10.9"
+percent-encoding = "2.3"
 acme-fixture-api-types = { path = "../../../types/rust/fixture-api" }
