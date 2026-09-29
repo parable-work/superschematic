@@ -10,6 +10,9 @@ require (
 {{- if .VersionGraphs }}
 	{{ .Naming.VersionGraphGoModule }} v0.0.0-00010101000000-000000000000
 {{- end }}
+{{- range .IndirectModules }}
+	{{ . }} v0.0.0-00010101000000-000000000000 // indirect
+{{- end }}
 )
 
 require (

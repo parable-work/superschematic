@@ -16,6 +16,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
+	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -223,6 +224,13 @@ type APIOutput struct {
 	// on; the API go.mod carries replace directives for them.
 	ModuleDependencies []string
 
+	// IndirectModules are the generated Go types modules the API module
+	// reaches only through TypesModule and the upstream ORM: the upstream
+	// types module, and what AddIndirectModules adds. go.mod requires each
+	// as indirect and replaces it, since Go takes neither from a
+	// dependency's go.mod.
+	IndirectModules []string
+
 	ORMModule           string // upstream ORM module path (public APIs only)
 	IsPublic            bool
 	UpstreamSchema      string // upstream DB schema name (public APIs only)
@@ -309,6 +317,20 @@ type APIOutput struct {
 	SchemaRuntimeReplacePath string
 	PtrReplacePath           string
 	VersionGraphReplacePath  string
+}
+
+// AddIndirectModules adds modules to IndirectModules: the dispatch layer
+// adds the Go types modules the types module and the upstream types module
+// import, directly or through one another, to its copy of the output before
+// it writes the Go server.
+func (o *APIOutput) AddIndirectModules(modules []string) {
+	o.IndirectModules = goutil.UniqueModules([]string{o.TypesModule}, o.IndirectModules, modules)
+}
+
+// TypesModuleReplaces lists the generated Go types modules go.mod replaces
+// beside TypesModule: the declared dependencies' and IndirectModules, sorted.
+func (o *APIOutput) TypesModuleReplaces() []string {
+	return goutil.UniqueModules([]string{o.TypesModule}, o.ModuleDependencies, o.IndirectModules)
 }
 
 // HasConstants reports whether constants.go is generated: public schemas
@@ -468,6 +490,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	if opts.UpstreamSchema != "" && opts.UpstreamIR == nil {
 		return nil, fmt.Errorf("apigen: upstream schema %s declared but no upstream IR provided", opts.UpstreamSchema)
 	}
+	output.IndirectModules = goutil.UniqueModules([]string{output.TypesModule}, []string{upstreamTypesModule})
 	output.UpstreamVersionGraph = declaresVersionGraph(opts.UpstreamIR)
 	auth, err := opts.Provider.Analyze(schema, opts.UpstreamIR)
 	if err != nil {
