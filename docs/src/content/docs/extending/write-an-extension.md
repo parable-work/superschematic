@@ -540,11 +540,13 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
 - `requires` and `conflicts` name other behaviors a type must, or may not,
   list with this one.
 - `fields` carry a name and a description. The loader refuses a field
-  that collides with the type's own or another behavior's.
+  that collides with another behavior's or with one of the type's own,
+  by its name or its JSON key.
 - `operations` are camelCase and may not be `create`, `get`, `list`,
   `update` or `delete`, which every schema has. `paramsSchema` is an
-  object schema; the engine also requires `"additionalProperties": false`,
-  so an operation's parameters are exactly the ones it declares.
+  object schema that sets `"additionalProperties": false`, so an
+  operation's parameters are exactly the ones it declares; the registry
+  and the engine both refuse one that does not.
   `invocationPolicy` is a value of the registry's tool invocation policy;
   left out, the policy's default applies.
 

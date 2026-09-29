@@ -17,7 +17,7 @@ func behaviorRegistry(t *testing.T) *registry.Registry {
 	t.Helper()
 	reg := registry.New(naming.Naming{})
 	op := func(name string) string {
-		return `{"name":"` + name + `","paramsSchema":{"type":"object"},"resultSchema":{"type":"object"}}`
+		return `{"name":"` + name + `","paramsSchema":{"type":"object","additionalProperties":false},"resultSchema":{"type":"object"}}`
 	}
 	for _, decl := range []string{
 		`{"name":"Stock","configSchema":{"type":"object","required":["aisles"],"properties":{"aisles":{"type":"integer","minimum":1}}},` +
@@ -98,6 +98,34 @@ func TestBehaviorsVerify(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A behavior field may not take the JSON key of one of the type's own
+// fields any more than its name, as the engine refuses it: an instance's
+// JSON holds the behavior's fields beside the type's own. The wording is
+// the engine's for both.
+func TestBehaviorsVerifyFieldJSONKey(t *testing.T) {
+	reg := behaviorRegistry(t)
+	for _, field := range []*ir.FieldDef{
+		{Name: "onHand", TypeRef: ir.TypeRef{Name: "string"}},
+		{Name: "unitsOnHand", JSONTag: "onHand", TypeRef: ir.TypeRef{Name: "string"}},
+		{Name: "onHand", JSONTag: "units_on_hand", TypeRef: ir.TypeRef{Name: "string"}},
+	} {
+		schema := behaviorSchema(stock(`{"aisles":2}`))
+		schema.Types["Item"].Fields = append(schema.Types["Item"].Fields, field)
+		r := Run(schema, Input{Registry: reg})
+		want := "src/item.schema.json: type Item: behavior Stock adds field onHand, which the type declares"
+		if got := errorStrings(r); len(got) != 1 || got[0] != want {
+			t.Errorf("field %s (jsonTag %q): errors = %v, want [%q]", field.Name, field.JSONTag, got, want)
+		}
+	}
+
+	// A JSON key that is no behavior field's collides with nothing.
+	schema := behaviorSchema(stock(`{"aisles":2}`))
+	schema.Types["Item"].Fields = append(schema.Types["Item"].Fields, &ir.FieldDef{Name: "count", JSONTag: "item_count", TypeRef: ir.TypeRef{Name: "string"}})
+	if got := errorStrings(Run(schema, Input{Registry: reg})); len(got) != 0 {
+		t.Fatalf("errors = %v, want none", got)
 	}
 }
 

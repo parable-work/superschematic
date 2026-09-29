@@ -986,12 +986,14 @@ storage at publish, and running its guards, operations, hooks and field
 readers. Beyond the schema runtime's checks it refuses union and map
 fields, which no runtime validates yet, and object keys a type does not
 declare; beyond the compiler's, a behavior composes on the instance type
-only, a behavior field may not take a type field's JSON key, and an
-operation's `paramsSchema` sets `additionalProperties: false`. The
-binary's `behaviors --out <dir> [--check]` command copies a declaration
-into its npm package; it is a command rather than a tool in the core
-module, since an extension's declarations are registered only in its own
-binary (section 3.16 of `docs/extension-model.md`). acme implements
+only. Both refuse an operation whose `paramsSchema` does not set
+`additionalProperties: false`, the compiler when the declaration
+registers, and a behavior field that takes a type field's JSON key, the
+compiler when the schema loads. The binary's `behaviors --out <dir>
+[--check]` command copies a declaration into its npm package; it is a
+command rather than a tool in the core module, since an extension's
+declarations are registered only in its own binary (section 3.16 of
+`docs/extension-model.md`). acme implements
 `acme.Rating` in `@acme/behaviors` over that copy, and its smoke runs it
 in the engine with no core edit. Not built: the engine's MCP tools and
 its HTTP route for behavior operations, and the behaviors the engine
