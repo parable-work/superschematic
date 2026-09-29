@@ -24,7 +24,7 @@ const valuesSchemaFileName = "values-schema.json"
 // valuesSchema is the on-disk format. It is a JSON Schema draft 2020-12
 // object describing a single service's env var contract, extended with an
 // x-superschematic section that carries superschematic-specific metadata (type names,
-// required/default info, scalar primitives) in a typed form.
+// required/default info, scalar primitives, secret flags) in a typed form.
 //
 // The JSON Schema portion is compatible with generic schema tooling; the
 // x-superschematic extension is what the drift check consumes.
@@ -58,16 +58,20 @@ type valuesSchemaExtension struct {
 
 // valuesSchemaEnvVar describes a single env var entry.
 type valuesSchemaEnvVar struct {
-	Name        string   `json:"name"`
-	IRType      string   `json:"irType"`
-	Primitive   string   `json:"primitive"`
-	Required    bool     `json:"required"`
-	HasDefault  bool     `json:"hasDefault"`
-	Default     string   `json:"default,omitempty"`
-	IsEnum      bool     `json:"isEnum,omitempty"`
-	IsScalar    bool     `json:"isScalar,omitempty"`
-	EnumValues  []string `json:"enumValues,omitempty"`
-	Description string   `json:"description,omitempty"`
+	Name       string   `json:"name"`
+	IRType     string   `json:"irType"`
+	Primitive  string   `json:"primitive"`
+	Required   bool     `json:"required"`
+	HasDefault bool     `json:"hasDefault"`
+	Default    string   `json:"default,omitempty"`
+	IsEnum     bool     `json:"isEnum,omitempty"`
+	IsScalar   bool     `json:"isScalar,omitempty"`
+	EnumValues []string `json:"enumValues,omitempty"`
+	// Secret marks a Secret<T> field: a deployment's values bind it through
+	// a secret reference and its local tooling delivers it from a secret
+	// store, never as a literal.
+	Secret      bool   `json:"secret,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // BuildValuesSchema converts a ConfigOutput into the on-disk values-schema
@@ -107,6 +111,7 @@ func BuildValuesSchema(output *ConfigOutput) *valuesSchema {
 			IsEnum:      field.IsEnum,
 			IsScalar:    field.IsScalar,
 			EnumValues:  field.EnumValues,
+			Secret:      field.Secret,
 			Description: field.Description,
 		})
 	}

@@ -54,7 +54,8 @@
         "irType": "string",
         "primitive": "string",
         "required": true,
-        "hasDefault": false
+        "hasDefault": false,
+        "secret": true
       },
       {
         "name": "PORT",
