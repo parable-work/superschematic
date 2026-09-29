@@ -1,0 +1,77 @@
+package runtime
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"strings"
+)
+
+type PublicEncryptionKey struct {
+	PublicKey string
+	Algorithm string
+	KeyID     string
+}
+
+type EncryptedRequestOptions struct {
+	PublicEncryptionKey *PublicEncryptionKey
+}
+
+type EncryptedPayloadEnvelope struct {
+	Algorithm    string `json:"algorithm"`
+	Payload      string `json:"payload"`
+	EncryptedKey string `json:"encryptedKey,omitempty"`
+	IV           string `json:"iv,omitempty"`
+	KeyID        string `json:"keyId"`
+}
+
+type UploadFile struct {
+	Filename    string
+	Reader      []byte
+	ContentType string
+}
+
+type MultipartBody struct {
+	JSONData any
+	Files    map[string]UploadFile
+}
+
+func StripFieldsForMultipart(input any, fieldNames []string) (any, error) {
+	if input == nil || len(fieldNames) == 0 {
+		return input, nil
+	}
+
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("marshal multipart input: %w", err)
+	}
+	result := map[string]any{}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal multipart input: %w", err)
+	}
+	for _, fieldName := range fieldNames {
+		delete(result, fieldName)
+	}
+	return result, nil
+}
+
+func AddQueryParam(values url.Values, key string, value any) {
+	if value == nil {
+		return
+	}
+	values.Set(key, fmt.Sprintf("%v", value))
+}
+
+// AddQueryList sets key to the items of list as one comma-separated value
+// (?key=a,b), the form the Go route reads a list query parameter in. An
+// empty list sets nothing: the route refuses a present empty value.
+func AddQueryList[T any](values url.Values, key string, list []T) {
+	if len(list) == 0 {
+		return
+	}
+	items := make([]string, len(list))
+	for i, item := range list {
+		items[i] = fmt.Sprint(item)
+	}
+	values.Set(key, strings.Join(items, ","))
+}

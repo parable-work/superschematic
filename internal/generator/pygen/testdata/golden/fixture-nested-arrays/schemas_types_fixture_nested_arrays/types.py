@@ -38,6 +38,27 @@ def _safe_load_yaml(input_data: str | bytes) -> Dict[str, Any]:
         raise ValueError("YAML content must decode to an object")
     return parsed_data
 
+def _add_model_errors(errors: ValidationErrors, key: str, value: Any, by_alias: bool) -> None:
+    """
+    Add the validate_all errors of every generated model value holds, each
+    under its path from key, as the Go and TypeScript validators nest them:
+    the model itself (ship_to.postal_code), a list item (lines[0].quantity),
+    an item of a list of lists (grid[0][1].quantity) and a map value
+    (extras.gift.quantity). Any other value, None or a dict model_construct
+    left unparsed among them, is the field's own checks' to report.
+    """
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _add_model_errors(errors, f"{key}[{index}]", item, by_alias)
+    elif isinstance(value, dict):
+        for name, item in value.items():
+            _add_model_errors(errors, f"{key}.{name}", item, by_alias)
+    elif isinstance(value, BaseModel) and callable(getattr(value, "validate_all", None)):
+        # by_alias only when asked, so a model from a dependency package
+        # generated before it still validates.
+        nested = value.validate_all(by_alias=True) if by_alias else value.validate_all()
+        errors.add_nested_errors(key, nested)
+
 class Drawing(BaseModel):
     """
     A drawing made of lists of lists: grid rows of cells, polygons as lists
@@ -64,9 +85,18 @@ class Drawing(BaseModel):
     # Sample vectors in batches of at most 64; absent before sampling.
     samples: Optional[List[List[float]]] = Field(default=None, alias="samples", serialization_alias="samples")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -121,6 +151,8 @@ class Drawing(BaseModel):
                         for inner_index, item in enumerate(row):
                             if item is None:
                                 errors.add_field_error(f"polygons[{index}][{inner_index}]", "required", "required field")
+
+        _add_model_errors(errors, "polygons", self.polygons, by_alias)
 
         # Validate samples
         if self.samples is not None:
@@ -285,9 +317,18 @@ class Point(BaseModel):
 
     y: float = Field(..., alias="y", serialization_alias="y")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
 
         Returns:
             ValidationErrors object containing any validation errors.

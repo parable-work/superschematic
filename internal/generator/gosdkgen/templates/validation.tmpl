@@ -2,6 +2,9 @@ package namespaces
 
 import (
 	"fmt"
+{{- if .ChecksQueryListItems}}
+	"strings"
+{{- end}}
 
 	types "{{.TypesModule}}"
 )
@@ -101,5 +104,23 @@ func validateListElement(validationErrors types.ValidationErrors, path string, i
 			validationErrors.AddNestedError(path, itemErrs)
 		}
 	}
+}
+{{- end}}
+{{- if .ChecksQueryListItems}}
+
+// checkQueryListItem reports whether text, one item of a list query
+// parameter, reaches the Go route unchanged in the comma-separated value
+// it is sent in: the route splits the value on commas, trims each item and
+// refuses an empty one. It records the item's error at path when not.
+func checkQueryListItem(validationErrors types.ValidationErrors, path, text string) bool {
+	switch {
+	case strings.TrimSpace(text) == "":
+		validationErrors.AddFieldError(path, "required", "required field")
+	case strings.Contains(text, ",") || strings.TrimSpace(text) != text:
+		validationErrors.AddFieldError(path, "pattern", "must not contain a comma or surrounding space")
+	default:
+		return true
+	}
+	return false
 }
 {{- end}}

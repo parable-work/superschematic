@@ -71,6 +71,10 @@ type NamespaceInfo struct {
 	// helper of the namespace class.
 	HasListOfListsArgs        bool
 	HasListOfListsModelOutput bool
+	// HasQueryLists gates the _validate_query_list, _query_list_value and
+	// _query_list_item helpers of the namespace class, and their Enum
+	// import, for a list query parameter.
+	HasQueryLists bool
 }
 
 // EndpointInfo represents a single API endpoint for the Python SDK.
@@ -118,8 +122,15 @@ type PathParam struct {
 type QueryParam struct {
 	Name     string
 	PyName   string
-	PyType   string
+	PyType   string // Full type including the list[] wrapper when IsArray is true
 	Required bool
+
+	// IsArray marks a list parameter (QueryParam<T[]>), typed list[T] and
+	// sent as one comma-separated value, the form the Go route reads; an
+	// empty list is left out. PyElementType is T, as which each item is
+	// validated at name[i].
+	IsArray       bool
+	PyElementType string
 
 	ValidateMin       *float64
 	ValidateMax       *float64
@@ -256,6 +267,11 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 				namespace.HasListOfListsArgs = true
 			}
 		}
+		for _, param := range converted.QueryParams {
+			if param.IsArray {
+				namespace.HasQueryLists = true
+			}
+		}
 		if converted.OutputIsArrayOfArrays && converted.OutputModelName != "" {
 			namespace.HasListOfListsModelOutput = true
 		}
@@ -318,11 +334,19 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 
 	queryParams := make([]QueryParam, 0, len(endpoint.QueryParams))
 	for _, param := range endpoint.QueryParams {
+		pyElementType := ""
+		pyType := pythonParamType(param)
+		if param.IsArray {
+			pyElementType = pyType
+			pyType = pythonListType(pyType, 1)
+		}
 		queryParams = append(queryParams, QueryParam{
 			Name:              param.Name,
 			PyName:            toPythonIdentifier(param.Name),
-			PyType:            pythonParamType(param),
+			PyType:            pyType,
 			Required:          param.Required,
+			IsArray:           param.IsArray,
+			PyElementType:     pyElementType,
 			ValidateMin:       param.ValidateMin,
 			ValidateMax:       param.ValidateMax,
 			ValidateMinLength: param.ValidateMinLength,

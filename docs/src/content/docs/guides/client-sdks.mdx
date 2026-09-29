@@ -96,11 +96,16 @@ server is a `NetworkError`, or `SDKError::Network` in Rust.
 
 ## Checks before sending
 
-The Go and TypeScript SDKs check an input against its type and
+The Go, TypeScript and Python SDKs check an input against its type and
 constraints before sending it, and fail with a `ValidationError` without a
-request. The Rust SDK checks an input against the schema before sending
-too. The Python SDK's inputs are pydantic models, so a value of the wrong
-type fails when you build the model.
+request. The error names each broken rule at its path, the same in all
+three (`lines` for `listMin`, `lines[1].quantity` for `min`), except that
+Go keys a map value `field[key]` where TypeScript and Python key it
+`field.key`. The Python SDK checks with the generated types package,
+pydantic for the types and `validate_all` for the constraints, so it
+needs that package installed. The Rust SDK checks an input against the
+schema before sending too, and fails with one `SDKError::Config` message
+that names each path.
 
 ## Timeouts, retries and hooks
 

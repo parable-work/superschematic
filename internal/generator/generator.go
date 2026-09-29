@@ -1,8 +1,11 @@
 package generator
 
 import (
+	"errors"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -86,6 +89,9 @@ func Run(schema *ir.Schema, cfg *schemaconfig.SchemaConfig, opts Options) (*Resu
 	kind, ok := reg.Kind(string(schema.Kind))
 	if !ok {
 		return nil, fmt.Errorf("generator: unknown schema kind %q", schema.Kind)
+	}
+	if err := refuseORMWithoutGoTypes(kind.Name, outputs, reg); err != nil {
+		return nil, fmt.Errorf("schema config for %s: %w", cfg.Name, err)
 	}
 
 	r, _ := newRun(schema, cfg, outputs, opts, reg)
@@ -180,6 +186,9 @@ func (r run) runPipeline(pipeline []registry.GeneratorSpec) error {
 	if err := refuseBehaviors(r.Schema, enabled); err != nil {
 		return err
 	}
+	if err := r.refuseMissingDependencyTypes(enabled); err != nil {
+		return err
+	}
 	for _, gen := range enabled {
 		if err := gen.Generate(r.GenerateContext); err != nil {
 			return err
@@ -205,6 +214,76 @@ func refuseBehaviors(schema *ir.Schema, enabled []registry.GeneratorSpec) error 
 		}
 	}
 	return nil
+}
+
+// refuseMissingDependencyTypes fails, before any generator runs, when a
+// type library the types generator writes imports a dependency that does
+// not generate its own types in that language: the Go module would require,
+// the TypeScript package depend on and the Rust crate path-depend on a
+// package the build never writes, and the Python package would bind the
+// imported types to Any and drop their validation. The error names every
+// such language and dependency. A dependency whose config the build does
+// not have (every one, for a single build without Options.DependencyConfig)
+// is logged as not checked instead.
+func (r run) refuseMissingDependencyTypes(enabled []registry.GeneratorSpec) error {
+	langs := r.Outputs.EnabledTypeLanguages()
+	if len(langs) == 0 || len(r.Schema.Imports) == 0 {
+		return nil
+	}
+	if !slices.ContainsFunc(enabled, func(gen registry.GeneratorSpec) bool { return gen.Name == typesGenerator }) {
+		return nil
+	}
+	deps, err := r.loadDependencySchemas()
+	if err != nil {
+		return err
+	}
+
+	var problems []error
+	var unchecked []string
+	for _, dep := range codegen.TypeDependencies(r.Schema, deps) {
+		var cfg *schemaconfig.SchemaConfig
+		ok := false
+		if r.Options.DependencyConfig != nil {
+			cfg, ok = r.Options.DependencyConfig(dep)
+		}
+		if !ok {
+			unchecked = append(unchecked, dep)
+			continue
+		}
+		depOutputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+		if err != nil {
+			return fmt.Errorf("schema config for %s: %w", dep, err)
+		}
+		var names, switches []string
+		for _, lang := range langs {
+			if !depOutputs.TypesEnabled(lang) {
+				names = append(names, registry.LanguageName(lang))
+				switches = append(switches, "outputs.types."+lang)
+			}
+		}
+		if len(names) > 0 {
+			problems = append(problems, fmt.Errorf("%s generates %s types, which use %s's %s types; enable %s in %s",
+				r.Config.Name, joinAnd(names), dep, joinAnd(names), joinAnd(switches), dep))
+		}
+	}
+
+	if len(unchecked) > 0 {
+		switches := make([]string, 0, len(langs))
+		for _, lang := range langs {
+			switches = append(switches, "outputs.types."+lang)
+		}
+		r.Logf("  - not checked: %s must enable %s, since %s's types import theirs; build --with-deps and build-all check it\n",
+			joinAnd(unchecked), joinAnd(switches), r.Config.Name)
+	}
+	return errors.Join(problems...)
+}
+
+// joinAnd joins items as "a", "a and b" or "a, b and c".
+func joinAnd(items []string) string {
+	if len(items) <= 1 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
 }
 
 func (r run) measure(phase string, fn func() error) error {

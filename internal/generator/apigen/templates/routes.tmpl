@@ -50,7 +50,9 @@ import (
 {{- if .IsPublic }}
 	orm "{{ .ORMModule }}"
 {{- end }}
+{{- if .RoutesNeedTypes }}
 	types "{{ .TypesModule }}"
+{{- end }}
 	"go.uber.org/zap"
 )
 

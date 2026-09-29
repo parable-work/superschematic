@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
@@ -58,12 +59,18 @@ func ParseOutputs(raw map[string]any) (*Outputs, error) {
 // kind's pipeline whose Enabled check passes (or that has none) contributes
 // its Dirs, so the cache surface and the run agree by construction. A nil reg
 // means the core registry.
+//
+// It refuses the configs Run refuses before generating (ParseOutputs, and
+// refuseORMWithoutGoTypes), so build-all fails at discovery.
 func ExpectedOutputDirs(root string, cfg *schemaconfig.SchemaConfig, serviceDir string, reg *registry.Registry) ([]string, error) {
 	if reg == nil {
 		reg = CoreRegistry(naming.Default())
 	}
 	outputs, err := registry.ParseOutputs(cfg.Outputs, reg)
 	if err != nil {
+		return nil, fmt.Errorf("schema config for %s: %w", cfg.Name, err)
+	}
+	if err := refuseORMWithoutGoTypes(string(cfg.Kind), outputs, reg); err != nil {
 		return nil, fmt.Errorf("schema config for %s: %w", cfg.Name, err)
 	}
 
@@ -106,4 +113,20 @@ func ExpectedOutputDirs(root string, cfg *schemaconfig.SchemaConfig, serviceDir 
 		unique = append(unique, dir)
 	}
 	return unique, nil
+}
+
+// refuseORMWithoutGoTypes fails when the kind's pipeline runs the Go ORM
+// generator and outputs.types.go is off: the ORM's go.mod requires the
+// schema's Go types module and its files import it, and only outputs.types
+// generates that module. The ORM has no switch (the DB kind implies it), so
+// the check needs the kind and cannot live in the kind-agnostic
+// registry.ParseOutputs.
+func refuseORMWithoutGoTypes(kind string, outputs *registry.Outputs, reg *registry.Registry) error {
+	if outputs.TypesEnabled(LangGo) {
+		return nil
+	}
+	if !slices.ContainsFunc(reg.Pipeline(kind), func(gen registry.GeneratorSpec) bool { return gen.Name == ormGenerator }) {
+		return nil
+	}
+	return fmt.Errorf("kind %s needs outputs.types.go: the Go ORM, which the %s kind always generates, imports the Go types", kind, kind)
 }

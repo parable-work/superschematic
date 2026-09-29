@@ -38,6 +38,7 @@ SDK to call it. You write the business logic and say who the caller is.
 <Snippet file="schemas/services/shop-api/schema.config.ts" />
 
 - `api: { enabled: true }` generates the Go server, the default language.
+  The server decodes requests into the Go types, so `types` lists Go.
 - `public: true` marks an API whose callers the Go server authenticates. It
   turns on the auth provider's middleware and stores in the Go server.
   Without it, a `@requirePermission` route answers 401 unless the

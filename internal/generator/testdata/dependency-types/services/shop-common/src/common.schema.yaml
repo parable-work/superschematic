@@ -1,0 +1,21 @@
+name: shop-common
+kind: General
+types:
+  Money:
+    name: Money
+    role: EmbeddedStruct
+    fields:
+      - name: amount
+        typeRef: { name: number }
+        required: true
+      - name: currency
+        typeRef: { name: Currency }
+        required: true
+enums:
+  Currency:
+    name: Currency
+    values:
+      - name: USD
+        serializedAs: usd
+      - name: EUR
+        serializedAs: eur
