@@ -19,16 +19,15 @@ export function mergePatch(target: unknown, patch: unknown): unknown {
     if (value === null) {
       delete result[key];
     } else {
-      // defineProperty, so a member named __proto__ stays a member.
-      Object.defineProperty(result, key, {
-        value: mergePatch(result[key], value),
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      });
+      setMember(result, key, mergePatch(result[key], value));
     }
   }
   return result;
+}
+
+/** setMember sets an own member, so one named __proto__ stays a member. */
+export function setMember(target: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
 }
 
 /** jsonEqual compares two JSON values; object members compare in any order. */

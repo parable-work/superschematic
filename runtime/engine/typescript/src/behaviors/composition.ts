@@ -1,0 +1,338 @@
+/*
+A type's behaviors, checked against the registered implementations and
+bound to their configs. The engine checks a schema's list at define and at
+publish as the compiler's loader does (internal/loader/verify), with the
+same wording, and refuses what the loader would: a behavior listed twice,
+a config its configSchema rejects, a requirement the type does not list, a
+conflict it does, a field that collides with the type's own or another
+behavior's, and two behaviors that add an operation of the same name. It
+refuses three things more:
+
+- a behavior with no implementation registered with this engine, which
+  covers one the deployment's binary does not declare;
+- a behavior on a type other than the instance type: only the instance
+  type has instances, so a nested type has nothing to add fields,
+  operations or storage to;
+- a behavior field with the JSON key of one of the type's own fields, not
+  only its name, since behavior fields sit beside the type's own in an
+  instance.
+
+A config passes parseConfig after its configSchema. An operation named
+like a built-in never gets here: registration refuses its declaration.
+
+configChanges is the behaviors' half of the compatibility rule: a new
+version keeps a behavior's config unless the implementation allows the
+change, and adds or removes a behavior on a schema with instances only
+when the implementation opts in.
+*/
+
+import type { Document, TypeDef } from '@superschematic/schema-ir/schema-file';
+
+import { BehaviorError, type SchemaChange, type SchemaIssue } from '../errors.js';
+import { isPlainObject, jsonEqual } from '../instances/patch.js';
+import { jsonKey, pointer } from '../registry/document.js';
+import { BehaviorConfigError, type ConfigTarget } from './behavior.js';
+import { deepFreeze } from './json.js';
+import { BehaviorRegistry, type OperationSpec, type RegisteredBehavior } from './registry.js';
+import { synchronous } from './storage.js';
+
+/** One behavior on the instance type, with its config. */
+export interface BoundBehavior {
+  readonly behavior: RegisteredBehavior;
+  /** Its position in the type's list. */
+  readonly index: number;
+  /** The config as the schema holds it; {} when the type gives none. */
+  readonly json: unknown;
+  /** What parseConfig returned, or the JSON config; deep-frozen. */
+  readonly config: unknown;
+}
+
+/** The behaviors of a schema's instance type, in list order. */
+export class Composition {
+  /** Each behavior field's owner, by field name. */
+  readonly fields: ReadonlyMap<string, BoundBehavior>;
+  /** Every behavior operation on the type, by name. */
+  readonly operations: ReadonlyMap<string, OperationSpec>;
+
+  constructor(
+    readonly type: string,
+    readonly behaviors: readonly BoundBehavior[]
+  ) {
+    const fields = new Map<string, BoundBehavior>();
+    const operations = new Map<string, OperationSpec>();
+    for (const bound of behaviors) {
+      for (const field of bound.behavior.fields) {
+        fields.set(field.name, bound);
+      }
+      for (const [name, operation] of bound.behavior.operations) {
+        operations.set(name, operation);
+      }
+    }
+    this.fields = fields;
+    this.operations = operations;
+  }
+
+  /** bound returns the entry of a behavior on the type. */
+  bound(name: string): BoundBehavior | undefined {
+    return this.behaviors.find((bound) => bound.behavior.name === name);
+  }
+}
+
+/** What compose checks: a schema's document and instance type. */
+export interface ComposeTarget {
+  readonly name: string;
+  readonly instanceType: string;
+  readonly document: Document;
+}
+
+/**
+ * compose checks every type's behaviors and binds the instance type's. It
+ * returns the composition, or every issue it found.
+ */
+export function compose(target: ComposeTarget, registry: BehaviorRegistry): { composition?: Composition; issues: SchemaIssue[] } {
+  const issues: SchemaIssue[] = [];
+  const types = target.document.types ?? {};
+  for (const typeName of Object.keys(types).sort()) {
+    if (typeName === target.instanceType) {
+      continue;
+    }
+    (types[typeName].behaviors ?? []).forEach((ref, index) => {
+      issues.push({
+        path: `${pointer('types', typeName)}/behaviors/${index}`,
+        message: `type ${typeName}: behavior ${ref.name} composes on the instance type, ${target.instanceType}; ${typeName} is a nested type, which has no instances`,
+      });
+    });
+  }
+
+  const type = types[target.instanceType] as TypeDef;
+  const typePath = pointer('types', target.instanceType);
+  const refs = type.behaviors ?? [];
+  const listed = refs.map((ref) => ref.name);
+  const own = new Set<string>();
+  for (const field of type.fields ?? []) {
+    own.add(field.name);
+    own.add(jsonKey(field));
+  }
+  const configTarget: ConfigTarget = deepFreeze({
+    schema: target.name,
+    type: target.instanceType,
+    fields: (type.fields ?? []).map(jsonKey),
+    behaviors: [...listed],
+  });
+
+  const bound: BoundBehavior[] = [];
+  const seen = new Set<string>();
+  refs.forEach((ref, index) => {
+    const path = `${typePath}/behaviors/${index}`;
+    if (seen.has(ref.name)) {
+      issues.push({ path, message: `type ${target.instanceType} lists behavior ${ref.name} twice` });
+      return;
+    }
+    seen.add(ref.name);
+    const behavior = registry.lookup(ref.name);
+    if (!behavior) {
+      issues.push({ path, message: `behavior ${ref.name} on type ${target.instanceType}: no implementation registered` });
+      return;
+    }
+    const parsed = parseConfig(behavior, ref.config, configTarget);
+    if ('problem' in parsed) {
+      issues.push({ path: `${path}/config`, message: `type ${target.instanceType}: ${parsed.problem}` });
+      return;
+    }
+    bound.push({ behavior, index, json: parsed.json, config: parsed.config });
+  });
+
+  const fieldOwner = new Map<string, string>();
+  const operationOwner = new Map<string, string>();
+  for (const { behavior, index } of bound) {
+    const path = `${typePath}/behaviors/${index}`;
+    const name = behavior.name;
+    for (const required of behavior.declaration.requires ?? []) {
+      if (!listed.includes(required)) {
+        issues.push({
+          path,
+          message: `type ${target.instanceType}: behavior ${name} requires behavior ${required}, which the type does not list`,
+        });
+      }
+    }
+    for (const conflict of behavior.declaration.conflicts ?? []) {
+      if (listed.includes(conflict)) {
+        issues.push({
+          path,
+          message: `type ${target.instanceType}: behavior ${name} conflicts with behavior ${conflict}, which the type also lists`,
+        });
+      }
+    }
+    for (const field of behavior.fields) {
+      const previous = fieldOwner.get(field.name);
+      if (own.has(field.name)) {
+        issues.push({ path, message: `type ${target.instanceType}: behavior ${name} adds field ${field.name}, which the type declares` });
+      } else if (previous !== undefined) {
+        issues.push({ path, message: `type ${target.instanceType}: behaviors ${previous} and ${name} both add field ${field.name}` });
+      } else {
+        fieldOwner.set(field.name, name);
+      }
+    }
+    for (const operation of behavior.operations.keys()) {
+      const previous = operationOwner.get(operation);
+      if (previous !== undefined) {
+        issues.push({ path, message: `type ${target.instanceType}: behaviors ${previous} and ${name} both add operation ${operation}` });
+      } else {
+        operationOwner.set(operation, name);
+      }
+    }
+  }
+  return issues.length > 0 ? { issues } : { composition: new Composition(target.instanceType, bound), issues };
+}
+
+/**
+ * configChanges lists what a new version does to the instance type's
+ * behaviors that the rule refuses. hasInstances is asked at most once.
+ */
+export function configChanges(
+  before: ComposeTarget,
+  after: ComposeTarget,
+  registry: BehaviorRegistry,
+  hasInstances: () => boolean
+): SchemaChange[] {
+  const changes: SchemaChange[] = [];
+  const type = after.instanceType;
+  const beforeRefs = (before.document.types ?? {})[before.instanceType]?.behaviors ?? [];
+  const afterRefs = (after.document.types ?? {})[type]?.behaviors ?? [];
+  let instances: boolean | undefined;
+  const populated = (): boolean => (instances ??= hasInstances());
+  const targetOf = (target: ComposeTarget): ConfigTarget => {
+    const typeDef = (target.document.types ?? {})[target.instanceType] as TypeDef;
+    return deepFreeze({
+      schema: target.name,
+      type: target.instanceType,
+      fields: (typeDef.fields ?? []).map(jsonKey),
+      behaviors: (typeDef.behaviors ?? []).map((ref) => ref.name),
+    });
+  };
+
+  for (const ref of afterRefs) {
+    const earlier = beforeRefs.find((candidate) => candidate.name === ref.name);
+    const path = `${type}.behaviors.${ref.name}`;
+    const behavior = registry.lookup(ref.name);
+    if (earlier !== undefined) {
+      if (jsonEqual(earlier.config ?? {}, ref.config ?? {})) {
+        continue;
+      }
+      const reason = decide(behavior, earlier.config, targetOf(before), ref.config, targetOf(after), 'it allows no config change');
+      if (reason !== undefined) {
+        changes.push({
+          path,
+          message: `behavior ${ref.name} on type ${type} cannot change its config from ${JSON.stringify(earlier.config ?? {})} to ${JSON.stringify(ref.config ?? {})}: ${reason}`,
+        });
+      }
+    } else if (populated()) {
+      const reason = decide(
+        behavior,
+        undefined,
+        undefined,
+        ref.config,
+        targetOf(after),
+        'it cannot be added to a schema that has instances'
+      );
+      if (reason !== undefined) {
+        changes.push({ path, message: `behavior ${ref.name} cannot be added to type ${type}, which has instances: ${reason}` });
+      }
+    }
+  }
+  for (const ref of beforeRefs) {
+    if (afterRefs.some((candidate) => candidate.name === ref.name) || !populated()) {
+      continue;
+    }
+    const reason = decide(
+      registry.lookup(ref.name),
+      ref.config,
+      targetOf(before),
+      undefined,
+      undefined,
+      'it cannot be removed from a schema that has instances'
+    );
+    if (reason !== undefined) {
+      changes.push({
+        path: `${type}.behaviors.${ref.name}`,
+        message: `behavior ${ref.name} cannot be removed from type ${type}, which has instances: ${reason}`,
+      });
+    }
+  }
+  return changes;
+}
+
+// decide asks an implementation's configChange; undefined allows.
+function decide(
+  behavior: RegisteredBehavior | undefined,
+  beforeJSON: unknown,
+  beforeTarget: ConfigTarget | undefined,
+  afterJSON: unknown,
+  afterTarget: ConfigTarget | undefined,
+  refusal: string
+): string | undefined {
+  if (!behavior) {
+    return 'no implementation is registered to allow it';
+  }
+  const configChange = behavior.implementation.configChange;
+  if (!configChange) {
+    return refusal;
+  }
+  const parse = (json: unknown, target: ConfigTarget | undefined): { config: unknown } | { problem: string } | undefined =>
+    target === undefined ? undefined : parseConfig(behavior, json, target);
+  const before = parse(beforeJSON, beforeTarget);
+  const after = parse(afterJSON, afterTarget);
+  for (const side of [before, after]) {
+    if (side !== undefined && 'problem' in side) {
+      return side.problem;
+    }
+  }
+  const answer: unknown = configChange.call(
+    behavior.implementation,
+    before === undefined ? undefined : (before as { config: unknown }).config,
+    after === undefined ? undefined : (after as { config: unknown }).config
+  );
+  synchronous(behavior.name, 'configChange', answer);
+  if (answer === undefined || answer === null) {
+    return undefined;
+  }
+  if (typeof answer !== 'string' || answer === '') {
+    throw new BehaviorError(behavior.name, 'configChange returns a reason (a non-empty string) to refuse, or undefined to allow');
+  }
+  return answer;
+}
+
+// parseConfig checks a config against the behavior's configSchema, then
+// its parseConfig. An absent config is checked as {}.
+function parseConfig(
+  behavior: RegisteredBehavior,
+  raw: unknown,
+  target: ConfigTarget
+): { json: unknown; config: unknown } | { problem: string } {
+  const json = deepFreeze(raw === undefined ? {} : (JSON.parse(JSON.stringify(raw)) as unknown));
+  if (behavior.config === undefined) {
+    if (!isPlainObject(json) || Object.keys(json).length > 0) {
+      return { problem: `behavior ${behavior.name} takes no config` };
+    }
+  } else if (!behavior.config(json)) {
+    const detail = BehaviorRegistry.issues(behavior.config.errors)
+      .map((issue) => (issue.path ? `${issue.path} ${issue.message}` : issue.message))
+      .join('; ');
+    return { problem: `behavior ${behavior.name} config: ${detail}` };
+  }
+  const parse = behavior.implementation.parseConfig;
+  if (!parse) {
+    return { json, config: json };
+  }
+  let config: unknown;
+  try {
+    config = parse.call(behavior.implementation, json, target);
+  } catch (error) {
+    if (error instanceof BehaviorConfigError) {
+      return { problem: `behavior ${behavior.name} config: ${error.message}` };
+    }
+    throw error;
+  }
+  synchronous(behavior.name, 'parseConfig', config);
+  return { json, config: deepFreeze(config) };
+}
