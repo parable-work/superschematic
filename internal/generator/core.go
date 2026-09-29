@@ -100,8 +100,8 @@ func RegisterCore(reg *registry.Registry) error {
 		},
 		{
 			// The standalone env-var loader for schemas whose kind has no API
-			// path; a no-op when the schema declares no @envVars class. Rust
-			// output when the schema emits Rust types and no Go types.
+			// path; a no-op when the schema declares no @envVars class. Its
+			// language follows outputs.types (envLoaderLanguage).
 			Name: "envConfig",
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{APIDir(c.Options.OutputRoot, c.Config.Name)}
@@ -109,7 +109,7 @@ func RegisterCore(reg *registry.Registry) error {
 			Generate: func(c registry.GenerateContext) error {
 				r := run{c}
 				return r.measure("output.env-config", func() error {
-					return r.generateEnvConfig(c.Outputs.TypesEnabled(LangRust) && !c.Outputs.TypesEnabled(LangGo))
+					return r.generateEnvConfig(envLoaderLanguage(c.Outputs))
 				})
 			},
 		},
@@ -120,4 +120,20 @@ func RegisterCore(reg *registry.Registry) error {
 		}
 	}
 	return nil
+}
+
+// envLoaderLanguage picks the language of the standalone env-var loader
+// from outputs.types: Go when the Go types are on, Rust when only the Rust
+// types are, and "" (the values schema alone) when neither is. The Go
+// loader requires, replaces and imports the Go types module, so without
+// that module it could not compile.
+func envLoaderLanguage(outputs *registry.Outputs) string {
+	switch {
+	case outputs.TypesEnabled(LangGo):
+		return LangGo
+	case outputs.TypesEnabled(LangRust):
+		return LangRust
+	default:
+		return ""
+	}
 }

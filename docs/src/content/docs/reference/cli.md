@@ -71,6 +71,13 @@ fails the build:
   A plain `build` does not read them: it builds, and logs a
   `- not checked:` line naming the dependencies and the switches they need.
 
+A General schema whose class carries `@envVars` gets the class's
+`values-schema.json` in `api/<name>`, and an environment loader next to it
+in the language `outputs.types` picks: Go when `go` is on, Rust when only
+`rust` is. The Go loader imports the Go types, so with neither on the build
+writes no loader, rather than a Go module that cannot compile, and logs
+`- env-config: values-schema.json only, no loader; enable outputs.types.go for the Go loader, which imports the Go types, or outputs.types.rust for the Rust one`.
+
 `--with-deps` also builds every service the target transitively depends
 on (declared `dependencies` plus `authDb`), dependencies first. The
 closure is resolved from the sibling services under the target's parent

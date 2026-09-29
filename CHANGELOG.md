@@ -57,6 +57,25 @@ of a generated artifact is always listed here with the bump it requires.
   builds is unchanged. Patch, except that a DB schema built without Go
   types for its SQL alone, whose DDL was usable though its ORM was not,
   now fails until it enables `outputs.types.go`: Major for that case only.
+- A General schema with an `@envVars` class and neither
+  `outputs.types.go` nor `outputs.types.rust` no longer gets a Go env
+  loader that cannot compile. The `envConfig` generator wrote
+  `api/<name>/go.mod` and `config.go` whenever the Rust types were off,
+  and that `go.mod` requires and replaces the schema's Go types module,
+  which provides the loader's config type, enums, scalar parsers and
+  validation errors, and which the build wrote only when
+  `outputs.types.go` asked for it. The loader's language now follows
+  `outputs.types`: Go when `go` is on, Rust when only `rust` is (the Rust
+  loader uses no types crate). With neither, the build writes the
+  language-neutral `values-schema.json` alone, `.deps.json` no longer
+  lists the module, and the build logs `- env-config: values-schema.json
+  only, no loader; enable outputs.types.go for the Go loader, which
+  imports the Go types, or outputs.types.rust for the Rust one`. The
+  config is not refused, so a TypeScript- or Python-only schema, or one
+  that declares `@envVars` for the deploy extension, keeps building. A
+  rebuild into an existing output root leaves an earlier `go.mod` and
+  `config.go` behind; delete `api/<name>` to drop them. Output for every
+  other config is unchanged. Patch.
 - `build-all` and `build --with-deps` refuse a service whose types in a
   language import the types of a dependency that does not generate that
   language: the dependencies it takes an enum, a union or an object type
