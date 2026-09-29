@@ -13,7 +13,8 @@
 //	PGCHECK_VIEW_OWNER    the role the up migration creates the view as
 //
 // TestUserTableOnPostgres (user_table_test.go) checks a User table's
-// create.sql and drop.sql.
+// create.sql and drop.sql. TestListDefaultsOnPostgres (list_defaults_test.go)
+// checks the defaults of required temporal, list and JSONB columns.
 package pgcheck
 
 import (
@@ -78,6 +79,37 @@ func mustExec(t *testing.T, ctx context.Context, conn *pgx.Conn, sql string, arg
 	if _, err := conn.Exec(ctx, sql, args...); err != nil {
 		t.Fatalf("%s: %v", sql, err)
 	}
+}
+
+// scratchDatabase creates a database named prefix and a timestamp on
+// PGCHECK_DATABASE_URL, drops it when t ends, and returns a connection to it.
+func scratchDatabase(t *testing.T, ctx context.Context, prefix string) *pgx.Conn {
+	t.Helper()
+	adminURL := env(t, "PGCHECK_DATABASE_URL")
+	admin, err := pgx.Connect(ctx, adminURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = admin.Close(context.Background()) })
+	database := fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
+	t.Cleanup(func() {
+		if _, err := admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+database+" WITH (FORCE)"); err != nil {
+			t.Errorf("drop database: %v", err)
+		}
+	})
+	mustExec(t, ctx, admin, "CREATE DATABASE "+database)
+
+	dbURL, err := url.Parse(adminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbURL.Path = "/" + database
+	conn, err := pgx.Connect(ctx, dbURL.String())
+	if err != nil {
+		t.Fatalf("connect %s: %v", database, err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	return conn
 }
 
 // row is one served row, reduced to what the checks compare.
