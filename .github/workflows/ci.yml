@@ -120,9 +120,10 @@ jobs:
 
       - name: Install Rust toolchain
         # Builds the superscalar ffi archive from source; the checkout carries
-        # its own rust-toolchain.toml which rustup reads when it builds.
+        # its own rust-toolchain.toml which rustup reads when it builds. The
+        # wasm32 target builds the version-graph TypeScript package.
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
 
       - name: Build the superscalar dependency
@@ -133,6 +134,15 @@ jobs:
         # core's Go binding, and the ormgen tests build and run such modules
         # against the archive this stages under runtime/versiongraph/go/lib.
         run: scripts/versiongraph-archive.sh
+
+      - name: Build the version-graph TypeScript package
+        # A generated TypeScript types package whose schema declares a
+        # version graph depends on it, and tsgen's tests type-check that
+        # facade and run it against Postgres over its dist/.
+        working-directory: runtime/versiongraph/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run build
 
       - name: Install the authoring packages
         # TestEmbeddedDefinitionIsCurrent regenerates the schema-config JSON
@@ -190,6 +200,9 @@ jobs:
           # and drops its own schema, database or role.
           SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+          # tsgen's TestVersionGraphFacadeOnPostgres runs the generated
+          # TypeScript facade against it.
+          SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
           for m in . ir runtime/schema/go runtime/http/go; do

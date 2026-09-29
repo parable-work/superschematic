@@ -270,7 +270,10 @@ func (r run) generateTSTypes() error {
 
 	dir := TypesDir(r.Options.OutputRoot, "typescript", r.Config.Name)
 	if err := r.measure("output.types-typescript.prepare", func() error {
-		return tsgen.SetScalarLibSpec(output, r.Options.Paths, dir)
+		if err := tsgen.SetScalarLibSpec(output, r.Options.Paths, dir); err != nil {
+			return err
+		}
+		return tsgen.SetVersionGraphLibSpec(output, r.Options.Paths, dir)
 	}); err != nil {
 		return fmt.Errorf("generator: typescript types for %s: %w", r.Config.Name, err)
 	}

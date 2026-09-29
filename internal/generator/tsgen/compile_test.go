@@ -2,6 +2,7 @@ package tsgen
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -72,6 +73,14 @@ func buildTSPackages(t *testing.T, cases []tsPackageCase) (typesRoot, bunPath st
 		if err := SetScalarLibSpec(output, paths, outDir); err != nil {
 			t.Fatalf("set superscalar spec for %s: %v", tc.name, err)
 		}
+		if len(output.VersionGraphs) > 0 {
+			// A facade imports the version-graph package, whose types and
+			// wasm build are its dist/.
+			requireVersionGraphPackage(t, paths)
+			if err := SetVersionGraphLibSpec(output, paths, outDir); err != nil {
+				t.Fatalf("set version-graph spec for %s: %v", tc.name, err)
+			}
+		}
 		if err := WriteTypes(output, outDir); err != nil {
 			t.Fatalf("write %s: %v", tc.name, err)
 		}
@@ -97,6 +106,19 @@ func buildTSPackages(t *testing.T, cases []tsPackageCase) (typesRoot, bunPath st
 		}
 	}
 	return typesRoot, bunPath
+}
+
+// requireVersionGraphPackage skips, or fails under
+// SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1, when the version-graph package a
+// generated facade depends on has not been built: its dist/ holds the
+// declarations tsc reads and the wasm module the facade loads.
+func requireVersionGraphPackage(t *testing.T, paths naming.LocalPaths) {
+	t.Helper()
+	for _, file := range []string{"facade.d.ts", "superschematic_versiongraph.wasm"} {
+		if _, err := os.Stat(filepath.Join(paths.VersionGraphTypeScript, "dist", file)); err != nil {
+			requireOrSkipTSTooling(t, fmt.Sprintf("build %s (bun install && bun run build) for the version-graph facade: %v", paths.VersionGraphTypeScript, err))
+		}
+	}
 }
 
 // TestGeneratedPackagesCompile generates the TypeScript type packages for

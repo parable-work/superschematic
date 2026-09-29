@@ -192,6 +192,17 @@ type ModuleOutput struct {
 	// via SetScalarLibSpec.
 	ScalarLibSpec string
 
+	// VersionGraphs are the version graphs the schema declares, each written
+	// as a typed facade in versiongraph/<name>.ts (D19). With any, the
+	// package depends on Naming.VersionGraphNpmPackage and exports
+	// "./versiongraph".
+	VersionGraphs []VersionGraphInfo
+
+	// VersionGraphLibSpec is the package.json dependency spec for the
+	// version-graph runtime package, computed relative to the output
+	// directory via SetVersionGraphLibSpec.
+	VersionGraphLibSpec string
+
 	// Naming supplies the scalar package name the templates import from
 	// and the scalar JSDoc tag types.ts writes above scalar fields.
 	Naming naming.Naming
@@ -333,6 +344,10 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	output.Types = convertTypes(objectTypes, output.Scalars, enumLookup)
 	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, enumLookup)...)
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
+
+	if output.VersionGraphs, err = versionGraphs(schema); err != nil {
+		return nil, err
+	}
 
 	return output, nil
 }
