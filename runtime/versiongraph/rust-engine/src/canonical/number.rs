@@ -15,7 +15,8 @@ static NUMBER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Keeps an integer's digits exactly, however wide: an optional minus and no
-/// leading zeros, with -0 written 0. A fraction or an exponent is refused.
+/// leading zeros. A fraction or an exponent is refused. -0 needs no rule:
+/// `serde_json` reads it as the integer 0, which writes `0`.
 pub(super) fn integer_rule(value: &Value) -> Result<String, String> {
     let Value::Number(n) = value else {
         return Err(format!("{} is not an integer", describe(value)));
@@ -23,9 +24,6 @@ pub(super) fn integer_rule(value: &Value) -> Result<String, String> {
     let text = n.to_string();
     if !INTEGER_PATTERN.is_match(&text) {
         return Err(format!("{} is not an integer", describe(value)));
-    }
-    if text == "-0" {
-        return Ok("0".to_owned());
     }
     Ok(text)
 }

@@ -938,8 +938,8 @@ impl Engine {
             let images = tx.images(&k.name, want).await?;
             if images.len() != want.len() {
                 return Err(Error::HistoryMissing(format!(
-                    "{} of {} {} rows",
-                    want.len() - images.len(),
+                    "history returned {} images for {} pinned {} rows",
+                    images.len(),
                     want.len(),
                     k.name
                 )));

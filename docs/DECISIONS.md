@@ -1474,7 +1474,11 @@ binding runs one operation at a time on its connection and rolls back a
 transaction that a dropped operation left open; `run_sweeper` stops when a
 shutdown future completes and lets a pass under way finish; and without
 `[paths] versiongraph_rust` the generated manifest names the engine's
-version.
+version. Every engine's scenarios cover a commit with nothing to commit,
+the actor the history of a row an unset or a sweep removes records, and a
+sweep's prune cap, and every adapter's tests a ref lock another
+transaction waits for and the version fences of updating and discarding a
+ref; an `sql` step that expects rows reads the statement's rows as text.
 The Python engine and facade follow and must pass the same scenarios.
 Each change that lands a piece updates this paragraph.
 

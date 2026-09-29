@@ -447,7 +447,7 @@ actors are UUIDs written in their canonical form, which reads as a word
 | `rows` | `ref`, `kind` | The adapter's rows of the ref, by entity key |
 | `patches` | `commit` | The adapter's patches of the commit, by kind and entity key |
 | `snapshot` | `commit` | The adapter's snapshot entries of the commit, by kind and entity key |
-| `sql` | `statement`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text | A statement on the scenario's schema |
+| `sql` | `statement`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text | A statement on the scenario's schema; with `rows` expected, a query whose rows the step returns |
 
 `expect` holds what the step must return; a step without `error` must
 succeed.
@@ -461,7 +461,7 @@ succeed.
 | `contentHash`, `contentHashOf` | A read's content hash. |
 | `findings`, `conflicts`, `changes` | Compose's findings, a merge's conflicts, a diff's changes: in order, each with its listed members. A merge left conflicts only when the step lists them. |
 | `commits` | History's commits, by name, newest first. |
-| `rows`, `patches`, `snapshot` | The listed rows, patches or snapshot entries, in order, each with its listed members; a patch is `{kind, entityKey, operation, entityVersion}` and a snapshot entry `{kind, entityKey, entityVersion}`. |
+| `rows`, `patches`, `snapshot` | The listed rows, patches or snapshot entries, in order, each with its listed members; a patch is `{kind, entityKey, operation, entityVersion}` and a snapshot entry `{kind, entityKey, entityVersion}`. An `sql` step's rows are the statement's, in the order it returns them, each an object of its columns read as text, so the statement casts what it selects (a history image's actor, say, mapped to a name with `CASE`). |
 | `release` | The release pointer a release or released step returns: `commit` by name and `version`. |
 | `report` | A sweep's report, with its listed members: `skipped`, `abandoned`, `collectedRefs`, `collectedRows` and `pruned` (by kind, nonzero counts only) and `snapshots`. |
 

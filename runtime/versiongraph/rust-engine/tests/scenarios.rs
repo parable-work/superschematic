@@ -332,7 +332,7 @@ impl Runner {
             .unwrap_or_else(|| support::DEFAULT_ACTOR.to_owned());
         let mut out = Returned::default();
         let result = match st.op.as_str() {
-            "holdSweepLock" | "releaseSweepLock" | "sql" => self.control(st).await,
+            "holdSweepLock" | "releaseSweepLock" | "sql" => self.control(st, &mut out).await,
             "released" | "snapshot" | "materialize" | "compose" | "diff" | "history" | "rows"
             | "patches" => self.read(st, &engine, &mut out).await,
             _ => self.write(st, &engine, &actor, &mut out).await,
@@ -557,8 +557,10 @@ impl Runner {
         }
     }
 
-    /// Runs a step that takes or releases the sweep lock, or runs SQL.
-    async fn control(&mut self, st: &Step) -> Result<(), Error> {
+    /// Runs a step that takes or releases the sweep lock, or runs SQL. An
+    /// `sql` step that expects rows returns the statement's rows, in the
+    /// order it returns them, each column read as text.
+    async fn control(&mut self, st: &Step, out: &mut Returned) -> Result<(), Error> {
         match st.op.as_str() {
             "holdSweepLock" => {
                 self.hold_sweep_lock().await;
@@ -580,11 +582,37 @@ impl Runner {
                     .prepare_typed(&st.statement, &types)
                     .await
                     .unwrap_or_else(|e| fail!(self, "prepare {}: {e}", st.statement));
-                client
-                    .execute(&statement, &params)
+                if st.expect.rows.is_none() {
+                    return client
+                        .execute(&statement, &params)
+                        .await
+                        .map(|_| ())
+                        .map_err(Error::storage);
+                }
+                let rows = client
+                    .query(&statement, &params)
                     .await
-                    .map(|_| ())
-                    .map_err(Error::storage)
+                    .map_err(Error::storage)?;
+                out.rows = rows
+                    .iter()
+                    .map(|row| {
+                        let columns = row.columns().iter().enumerate().map(|(i, column)| {
+                            let text: Option<String> = row.try_get(i).unwrap_or_else(|e| {
+                                fail!(
+                                    self,
+                                    "read {} as text (cast it in the statement): {e}",
+                                    column.name()
+                                )
+                            });
+                            (
+                                column.name().to_owned(),
+                                text.map_or(Value::Null, Value::String),
+                            )
+                        });
+                        Value::Object(columns.collect())
+                    })
+                    .collect();
+                Ok(())
             }
             op => fail!(self, "unknown op {op:?}"),
         }
