@@ -850,6 +850,11 @@ The parity matrix has vectors with astral and multi-byte BMP characters
 for a field's lengths, a scalar's lengths, and list and list-of-lists
 elements.
 
+The loader counts code points too when it checks a composite default (a
+`*.platform-default.json` file) against a scalar's or a field's
+`minLength` and `maxLength`, so a default loads exactly when the
+validators accept it; it had counted UTF-8 bytes.
+
 A `pattern` on astral characters first stayed different. Go's `regexp`
 and Python's `re` match code points. The generated TypeScript validator,
 the TypeScript runtime, the TypeScript SDK and the TypeScript API server's
@@ -1304,12 +1309,30 @@ The Go engine keeps the operations and names the generated shell has
 today, and adds `Rebase`, `Release`, `Released`, `Sweep` and
 `RunSweeper`. The generated shell's code moves into the runtime.
 
-Status: nothing is built. The canonical row form, the adapter interface
-and the Go engine come first, with the scenario suite. The release
-pointer, merge-only primary lines, `Rebase`, snapshots and the sweep
-follow in the Go engine. The TypeScript, Rust and Python engines and
-facades follow and must pass the same scenarios. Each change that lands a
-piece updates this paragraph.
+Status: the descriptor's version 2 and the canonical row form are built.
+The descriptor names the graph's root, ref, commit and patch tables and
+each kind's table and history table, and gives every column a value class
+(`string`, `integer`, `number`, `boolean`, `uuid`, `dateTime`, `date`,
+`time`, `duration`, `enum`, `json`, each also as a list or a list of
+lists), derived from what the schema runtime's JSON for the field's type
+is and the SQL type the sql generator stores the column as; a pair no rule
+reads fails generation. The core, the Go binding and the TypeScript
+package read version 2 only. `runtime/versiongraph/README.md` holds the
+canonical row contract, one rule per class from what Postgres returns;
+`runtime/versiongraph/testdata/canonical` holds its vectors, and package
+`canonical` in the Go module implements the Postgres rules for the adapter
+to use. Three rules settled as they were built: a UUID's canonical form is
+the scalar core's base62; a date-time's is UTC with `Z`, since a
+`timestamptz` keeps no offset; and a time of day's is `HH:MM:SS`, as
+Postgres renders a `time`, to which the scalar's `HH:MM` and 12-hour forms
+normalize. The date-time and time rules depart from the table above, which
+calls each value the JSON the schema runtime writes: that JSON keeps the
+offset and the form the value was written in. The generated shell still
+hands the core `to_jsonb` rows. The adapter interface and the Go engine
+come next, with the scenario suite. The release pointer, merge-only
+primary lines, `Rebase`, snapshots and the sweep follow in the Go engine.
+The TypeScript, Rust and Python engines and facades follow and must pass
+the same scenarios. Each change that lands a piece updates this paragraph.
 
 ## D20. An `EncryptedField<T>` argument encrypts its operation's request body
 
@@ -1355,3 +1378,27 @@ or `""` is still left out of the JSON. The same fix would apply to them,
 but it changes far more fields and has not been needed.
 
 The rule is reversible until the first release.
+### D20, amended: the envelope carries the body itself, and a route that cannot decrypt it is refused
+
+Three gaps in how an encrypted operation travels, each older than D20:
+
+- The Go and Rust SDKs wrapped the request body before they encrypted it,
+  so the envelope opened to `{"input": <body>}`. The Go server's payload
+  decryptor hands the plaintext to the argument decoder unchanged, so every
+  argument was missing: a required scalar argument answered 400, and an
+  input type decoded empty. The TypeScript and Python SDKs encrypted the
+  body itself.
+- The Rust server neither decrypted an encrypted operation nor refused it.
+  It handed the envelope to the implementation as the body.
+- An operation in an `Encrypted` set, declared `@encrypted` or returning an
+  `EncryptedField<T>` could be a `GET` or `DELETE`. The Go router mounted
+  the payload decryptor on it, but no SDK encrypts a request without a
+  body, so the decryptor found no envelope and answered 400.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every SDK encrypts the JSON an unencrypted request would send. One test sends Go SDK calls through the generated Go server and the runtime's payload decryptor, with a key the test generates, and checks the arguments the implementation receives. Another opens the Rust SDK's envelopes and compares each plaintext with the body. | Teaching the Go server to unwrap `input`. The plaintext would then depend on which SDK sent it, while the TypeScript and Python SDKs, the documented envelope and the decryptor already agree on the body itself. |
+| The Rust server's generator refuses an encrypted operation that is not `@manualRouteRegistration` and names the operation and the fix, as the TypeScript server's generator does (D15). The Rust router mounts every operation and hands its implementation the body as JSON, so a manual operation's implementation receives the envelope and decrypts it. | A decryption step in the Rust runtime, the counterpart of the Go runtime's `PayloadDecryptor` seam. Nothing needs it yet, and it can replace the refusal later. |
+| The loader's verify pass refuses an encrypted `GET` or `DELETE` operation, as it already refuses an `EncryptedField<T>` argument of one. apigen refuses the same once it resolves the method, which also catches an operation without a method that its set's name makes a `GET`. | Skipping decryption for a method without a body. That keeps the router working, but it drops the encryption the schema declares without a word, and no fixture or example declares such an operation. |
+
+The rules are reversible until the first release.

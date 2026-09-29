@@ -19,6 +19,7 @@ Generated at: 2026-01-02T03:04:05Z
 - `repository_recipe_patch.go` -- RecipePatch repository
 - `repository_recipe_ref.go` -- RecipeRef repository
 - `repository_step.go` -- Step repository
+- `repository_tasting.go` -- Tasting repository
 - `repository_utensil.go` -- Utensil repository
 - `versiongraph.go` -- the machinery the version graph shells share
 - `versiongraph_recipe.go` -- the Recipe version graph: `db.RecipeGraph()`

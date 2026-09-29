@@ -1,0 +1,109 @@
+{
+  "cases": [
+    {
+      "name": "text",
+      "class": "string",
+      "sql": "'Chop the onions'::text",
+      "postgres": "\"Chop the onions\"",
+      "canonical": "\"Chop the onions\""
+    },
+    {
+      "name": "escapes",
+      "class": "string",
+      "sql": "E'tab\\there \"quoted\" \\\\ back\\nline'::text",
+      "postgres": "\"tab\\there \\\"quoted\\\" \\\\ back\\nline\"",
+      "canonical": "\"tab\\there \\\"quoted\\\" \\\\ back\\nline\""
+    },
+    {
+      "name": "backspace, form feed and carriage return by name",
+      "class": "string",
+      "sql": "E'a\\bb\\fc\\rd'::text",
+      "postgres": "\"a\\bb\\fc\\rd\"",
+      "canonical": "\"a\\bb\\fc\\rd\""
+    },
+    {
+      "name": "control characters as lowercase unicode escapes",
+      "class": "string",
+      "sql": "E'bell\\x07 unit\\x1f'::text",
+      "postgres": "\"bell\\u0007 unit\\u001f\"",
+      "canonical": "\"bell\\u0007 unit\\u001f\""
+    },
+    {
+      "name": "non-ascii as it is",
+      "class": "string",
+      "sql": "'crème brûlée 🍮'::text",
+      "postgres": "\"crème brûlée 🍮\"",
+      "canonical": "\"crème brûlée 🍮\""
+    },
+    {
+      "name": "varchar",
+      "class": "string",
+      "sql": "'Mixed Case'::varchar(80)",
+      "postgres": "\"Mixed Case\"",
+      "canonical": "\"Mixed Case\""
+    },
+    {
+      "name": "inet as Postgres renders it",
+      "class": "string",
+      "sql": "'2001:DB8::0001/128'::inet",
+      "postgres": "\"2001:db8::1\"",
+      "canonical": "\"2001:db8::1\""
+    },
+    {
+      "name": "inet keeps a network's prefix length",
+      "class": "string",
+      "sql": "'10.1.2.3/8'::inet",
+      "postgres": "\"10.1.2.3/8\"",
+      "canonical": "\"10.1.2.3/8\""
+    },
+    {
+      "name": "null",
+      "class": "string",
+      "sql": "NULL::text",
+      "postgres": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "list",
+      "class": "string[]",
+      "sql": "ARRAY['a', 'b\"c', '']::text[]",
+      "postgres": "[\"a\", \"b\\\"c\", \"\"]",
+      "canonical": "[\"a\",\"b\\\"c\",\"\"]"
+    },
+    {
+      "name": "list of lists",
+      "class": "string[][]",
+      "sql": "'[[\"a\", \"b\"], []]'::jsonb",
+      "postgres": "[[\"a\", \"b\"], []]",
+      "canonical": "[[\"a\",\"b\"],[]]"
+    },
+    {
+      "name": "refuses a number",
+      "class": "string",
+      "sql": "5::bigint",
+      "postgres": "5",
+      "error": "a string column holds a string"
+    },
+    {
+      "name": "refuses a null list element",
+      "class": "string[]",
+      "sql": "ARRAY['a', NULL]::text[]",
+      "postgres": "[\"a\", null]",
+      "error": "a list element is never null"
+    },
+    {
+      "name": "refuses a null inner list element",
+      "class": "string[][]",
+      "sql": "'[[\"a\", null]]'::jsonb",
+      "postgres": "[[\"a\", null]]",
+      "error": "a list element is never null"
+    },
+    {
+      "name": "refuses a value that is not a list",
+      "class": "string[]",
+      "sql": "'a'::text",
+      "postgres": "\"a\"",
+      "error": "a list class holds a list"
+    }
+  ]
+}

@@ -90,7 +90,8 @@
 #      @versionGraph, @graphMember and @conflictUnit and no core edit,
 #      expands in the IR into PlanogramRef, PlanogramCommit, PlanogramPatch,
 #      their enums and each member's graph fields; the types module writes
-#      its descriptor and the ORM its shell (db.PlanogramGraph()), which
+#      its descriptor (version 2: the graph's tables and every column's
+#      value class) and the ORM its shell (db.PlanogramGraph()), which
 #      compiled with the ORM module in step 17; format writes the
 #      declarations, not the expansion, and the YAML twin expands to the
 #      same types.
@@ -468,11 +469,17 @@ for member in Bay Facing; do
   jq -e --arg m "$member" '.types[$m].versionedConfig.pruneKeepReferencedBy == [{"table": "planogram_patch", "keyColumn": "entity_id", "versionColumn": "entity_version", "origin": "versionGraph"}]' \
     "$OUT/db-ir.json" >/dev/null
 done
-# The descriptor the core reads: a keyed conflict unit on Bay.shelf_heights,
-# the parent edge and order on Facing, and the audit and root columns left
-# out of the content.
+# The descriptor the core reads: version 2, with the graph's tables, a keyed
+# conflict unit on Bay.shelf_heights, the parent edge and order on Facing,
+# the audit and root columns left out of the content, and every column's
+# value class.
 DESCRIPTOR="$DIST/types/go/shop-db/versiongraph/planogram.json"
-jq -e '.graph == "planogram" and ([.kinds[].kind] == ["bay", "facing"])' "$DESCRIPTOR" >/dev/null
+jq -e '.version == 2 and .graph == "planogram" and ([.kinds[].kind] == ["bay", "facing"])' "$DESCRIPTOR" >/dev/null
+jq -e '.root == {"table": "planogram", "key": "id"} and .refTable == "planogram_ref" and .commitTable == "planogram_commit" and .patchTable == "planogram_patch"' \
+  "$DESCRIPTOR" >/dev/null
+jq -e '[.kinds[] | [.table, .historyTable]] == [["bay", "bay_history"], ["facing", "facing_history"]]' "$DESCRIPTOR" >/dev/null
+jq -e '.kinds[1].columns == {"_version": "integer", "bay_key": "uuid", "deleted_on_ref": "boolean", "entity_key": "uuid", "id": "uuid", "planogram_id": "uuid", "position": "integer", "ref_id": "uuid", "sku": "string", "width": "number"}' \
+  "$DESCRIPTOR" >/dev/null
 jq -e '.kinds[0].units == {"shelf_heights": "keyed"} and .kinds[0].excluded == ["planogram_id", "created_at", "updated_at"]' \
   "$DESCRIPTOR" >/dev/null
 jq -e '.kinds[1].parent == {"key": "bay_key", "kind": "bay"} and .kinds[1].order == "position"' "$DESCRIPTOR" >/dev/null

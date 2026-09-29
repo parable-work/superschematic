@@ -1,0 +1,5 @@
+# Test-local to apigen, so no other generator's goldens read it. The Go and
+# Rust SDK tests load it.
+name: encrypted-body-api
+kind: API
+outputs: {}

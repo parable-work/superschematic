@@ -62,7 +62,8 @@ func TestWriteORMGolden(t *testing.T) {
 		{"fixture-nested-arrays-db", []string{"repository_board.go"}},
 		{"fixture-version-graph-db", []string{
 			"repository_cover.go", "repository_ingredient.go", "repository_note.go", "repository_recipe.go",
-			"repository_recipe_commit.go", "repository_recipe_patch.go", "repository_recipe_ref.go", "repository_step.go", "repository_utensil.go",
+			"repository_recipe_commit.go", "repository_recipe_patch.go", "repository_recipe_ref.go", "repository_step.go", "repository_tasting.go",
+			"repository_utensil.go",
 			"versiongraph.go", "versiongraph_recipe.go",
 		}},
 		{"fixture-optimistic-db", []string{"repository_shelf.go", "repository_stock.go"}},
@@ -1032,6 +1033,37 @@ func TestGenerateRefusesTablesWithoutAUUIDScalar(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name %q", err, want)
 		}
+	}
+}
+
+// TestGenerateRefusesAGraphColumnNoValueClassReads adds to a graph member a
+// string scalar the sql generator stores as POINT, as it stores the
+// catalog's Geo.Location. No value class reads POINT, so the graph has no
+// descriptor, and Generate fails with the descriptor's error, naming the
+// field and the SQL type, rather than writing a shell without one.
+func TestGenerateRefusesAGraphColumnNoValueClassReads(t *testing.T) {
+	const svc = "fixture-version-graph-db"
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, svc))
+	if err != nil {
+		t.Fatalf("load %s: %v", svc, err)
+	}
+	schema.Scalars["Test.Location"] = &ir.ScalarDef{
+		Name: "Test.Location", LanguagePrimitive: ir.LanguageString, Primitive: "String",
+		Pattern:      `^-?\d+(\.\d+)?,-?\d+(\.\d+)?$`,
+		TypeMappings: map[string]string{"json_schema": ir.JSONSchemaObjectType, "sql": "POINT"},
+	}
+	schema.Types["Utensil"].Fields = append(schema.Types["Utensil"].Fields, &ir.FieldDef{
+		Name: "shelf", TypeRef: ir.TypeRef{Name: "Test.Location"}, Required: true,
+	})
+
+	_, err = Generate(schema, Options{
+		SchemaName:  svc,
+		ModulePath:  "example.com/schemas/orm/" + svc,
+		TypesModule: "example.com/schemas/types/go/" + svc,
+		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+	})
+	if err == nil || !strings.HasPrefix(err.Error(), "graphdesc: version graph Recipe: Utensil.shelf: ") || !strings.Contains(err.Error(), "stored as POINT,") {
+		t.Fatalf("Generate = %v, want the descriptor's refusal of Utensil.shelf stored as POINT", err)
 	}
 }
 

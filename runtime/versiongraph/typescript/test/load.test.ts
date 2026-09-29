@@ -10,15 +10,23 @@ const wasmBytes = readFileSync(wasmUrl);
 
 const input: TreeInput = {
   descriptor: {
+    version: 2,
+    root: { table: "recipe", key: "id" },
+    refTable: "recipe_ref",
+    commitTable: "recipe_commit",
+    patchTable: "recipe_patch",
     kinds: [
       {
         kind: "step",
+        table: "step",
+        historyTable: "step_history",
         key: "entity_key",
         id: "id",
         ref: "ref",
         tombstone: "deleted_on_ref",
         version: "_version",
         singleton: true,
+        columns: { entity_key: "uuid", id: "uuid", ref: "uuid", _version: "integer", title: "string", deleted_on_ref: "boolean" },
       },
     ],
   },

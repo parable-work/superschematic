@@ -51,6 +51,35 @@ func ParseIdentityUUID(s string) (IdentityUUID, error) {
 	return IdentityUUID(parsed), nil
 }
 
+// Identity.UserID - UUID v4 string as base62
+type IdentityUserID = scalars.IdentityUserID
+
+// IdentityUserIDPattern is the validation pattern for Identity.UserID.
+var IdentityUserIDPattern = scalars.IdentityUserIDPattern
+
+// ParseIdentityUserID parses a string and returns a Identity.UserID scalar.
+func ParseIdentityUserID(s string) (IdentityUserID, error) {
+	parsed, err := scalars.ParseUUID(s)
+	if err != nil {
+		var zero IdentityUserID
+		return zero, err
+	}
+	return IdentityUserID(parsed), nil
+}
+
+// Temporal.Date - Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).
+type TemporalDate = scalars.TemporalDate
+
+// ParseTemporalDate parses a string and returns a Temporal.Date scalar.
+func ParseTemporalDate(s string) (TemporalDate, error) {
+	parsed, err := scalars.ParseTemporalDate(s)
+	if err != nil {
+		var zero TemporalDate
+		return zero, err
+	}
+	return TemporalDate(parsed), nil
+}
+
 // Temporal.DateTime - ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
 type TemporalDateTime = scalars.TemporalDateTime
 
@@ -62,6 +91,38 @@ func ParseTemporalDateTime(s string) (TemporalDateTime, error) {
 		return zero, err
 	}
 	return TemporalDateTime(parsed), nil
+}
+
+// Temporal.Duration - Duration for timeouts and intervals
+type TemporalDuration = scalars.TemporalDuration
+
+// TemporalDurationPattern is the validation pattern for Temporal.Duration.
+var TemporalDurationPattern = scalars.TemporalDurationPattern
+
+// ParseTemporalDuration parses a string and returns a Temporal.Duration scalar.
+func ParseTemporalDuration(s string) (TemporalDuration, error) {
+	parsed, err := scalars.ParseDuration(s)
+	if err != nil {
+		var zero TemporalDuration
+		return zero, err
+	}
+	return TemporalDuration(parsed), nil
+}
+
+// Temporal.Time - Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.
+type TemporalTime = scalars.TemporalTime
+
+// TemporalTimePattern is the validation pattern for Temporal.Time.
+var TemporalTimePattern = scalars.TemporalTimePattern
+
+// ParseTemporalTime parses a string and returns a Temporal.Time scalar.
+func ParseTemporalTime(s string) (TemporalTime, error) {
+	parsed, err := scalars.ParseTemporalTime(s)
+	if err != nil {
+		var zero TemporalTime
+		return zero, err
+	}
+	return TemporalTime(parsed), nil
 }
 
 // =============================================================================

@@ -46,12 +46,14 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	versiongraph "github.com/parable-work/superschematic/runtime/versiongraph/go"
+	"github.com/parable-work/superschematic/runtime/versiongraph/go/canonical"
 	types "example.com/schemas/types/go/fixture-version-graph-db"
 )
 
@@ -626,6 +628,140 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	}
 	if _, err := g.Compose(ctx, *b.Id); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Compose a discarded ref = %v, want ErrNotFound", err)
+	}
+
+	assertCanonicalRows(t, db, pool)
+}
+
+// assertCanonicalRows normalizes every row the lifecycle left, live and in
+// every history image, read under another session time zone, by the
+// descriptor's value classes (D19): the
+// descriptor names each kind's table and history table and declares every
+// column, and each column's class reads what Postgres renders for it. Each
+// live step's canonical row then matches the typed row's JSON, the schema
+// runtime's JSON for its fields: exactly for its UUIDs, integer and string,
+// as the same instant for its date-times, and as the same JSON value for
+// its JSON column.
+func assertCanonicalRows(t *testing.T, db *Database, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	var descriptor struct {
+		Version int ` + "`json:\"version\"`" + `
+		Kinds   []struct {
+			Kind         string            ` + "`json:\"kind\"`" + `
+			Table        string            ` + "`json:\"table\"`" + `
+			HistoryTable string            ` + "`json:\"historyTable\"`" + `
+			Columns      map[string]string ` + "`json:\"columns\"`" + `
+		} ` + "`json:\"kinds\"`" + `
+	}
+	if err := json.Unmarshal([]byte(RecipeGraphDescriptor), &descriptor); err != nil || descriptor.Version != 2 {
+		t.Fatalf("read the descriptor: version %d, %v", descriptor.Version, err)
+	}
+	// Read under a session time zone other than the writers': a live row's
+	// date-times render with its offset, and still normalize to UTC.
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire a connection: %v", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "SET TIME ZONE 'Asia/Kolkata'"); err != nil {
+		t.Fatalf("set the time zone: %v", err)
+	}
+	defer func() { _, _ = conn.Exec(ctx, "RESET TIME ZONE") }()
+	read := func(query string, args ...any) []string {
+		rows, err := conn.Query(ctx, query, args...)
+		if err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var text string
+			if err := rows.Scan(&text); err != nil {
+				t.Fatalf("%s: %v", query, err)
+			}
+			out = append(out, text)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+		return out
+	}
+	live, images := 0, 0
+	for _, kind := range descriptor.Kinds {
+		for _, row := range read("SELECT to_jsonb(t)::text FROM " + kind.Table + " AS t") {
+			if _, err := canonical.PostgresRow(kind.Columns, json.RawMessage(row)); err != nil {
+				t.Fatalf("%s live row %s: %v", kind.Kind, row, err)
+			}
+			live++
+		}
+		for _, image := range read("SELECT data::text FROM " + kind.HistoryTable) {
+			if _, err := canonical.PostgresRow(kind.Columns, json.RawMessage(image)); err != nil {
+				t.Fatalf("%s history image %s: %v", kind.Kind, image, err)
+			}
+			images++
+		}
+	}
+	if live == 0 || images == 0 {
+		t.Fatalf("normalized %d live rows and %d history images; the lifecycle left both", live, images)
+	}
+
+	var columns map[string]string
+	for _, kind := range descriptor.Kinds {
+		if kind.Kind == "step" {
+			columns = kind.Columns
+		}
+	}
+	steps := read("SELECT to_jsonb(t)::text FROM step AS t")
+	for _, row := range steps {
+		out, err := canonical.PostgresRow(columns, json.RawMessage(row))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]json.RawMessage
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatal(err)
+		}
+		var id types.IdentityUUID
+		if err := json.Unmarshal(got["id"], &id); err != nil {
+			t.Fatalf("the canonical id %s is not an Identity.UUID: %v", got["id"], err)
+		}
+		step, err := db.Step.GetOne(ctx, id, nil)
+		if err != nil {
+			t.Fatalf("read step %s: %v", got["id"], err)
+		}
+		typedJSON, err := json.Marshal(step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var typed map[string]json.RawMessage
+		if err := json.Unmarshal(typedJSON, &typed); err != nil {
+			t.Fatal(err)
+		}
+		for column, field := range map[string]string{"id": "id", "entity_key": "entityKey", "position": "position", "instruction": "instruction", "updated_by": "updatedBy"} {
+			if string(got[column]) != string(typed[field]) {
+				t.Fatalf("step %s: canonical %s is %s, the typed row's %s is %s", got["id"], column, got[column], field, typed[field])
+			}
+		}
+		for column, field := range map[string]string{"created_at": "createdAt", "updated_at": "updatedAt"} {
+			var want, have time.Time
+			if err := json.Unmarshal(got[column], &have); err != nil || !strings.HasSuffix(string(got[column]), "Z\"") {
+				t.Fatalf("step %s: canonical %s is %s, not a UTC date-time", got["id"], column, got[column])
+			}
+			if err := json.Unmarshal(typed[field], &want); err != nil || !have.Equal(want) {
+				t.Fatalf("step %s: canonical %s is %s, the typed row's %s is %s", got["id"], column, got[column], field, typed[field])
+			}
+		}
+		var fromRow, fromType any
+		if err := json.Unmarshal(got["timings"], &fromRow); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(typed["timings"], &fromType); err != nil || !reflect.DeepEqual(fromRow, fromType) {
+			t.Fatalf("step %s: canonical timings %s, the typed row's %s", got["id"], got["timings"], typed["timings"])
+		}
+	}
+	if len(steps) == 0 {
+		t.Fatal("the lifecycle left no step rows")
 	}
 }
 

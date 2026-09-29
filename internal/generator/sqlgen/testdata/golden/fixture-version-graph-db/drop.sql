@@ -4,6 +4,7 @@
 
 -- Drop indexes
 DROP INDEX IF EXISTS uq_utensil_entity_ref CASCADE;
+DROP INDEX IF EXISTS uq_tasting_entity_ref CASCADE;
 DROP INDEX IF EXISTS uq_step_entity_ref CASCADE;
 DROP INDEX IF EXISTS uq_recipe_ref_root_name CASCADE;
 DROP INDEX IF EXISTS uq_recipe_patch_entity CASCADE;
@@ -18,6 +19,10 @@ DROP TRIGGER IF EXISTS trg_utensil_bump_version ON utensil;
 DROP TRIGGER IF EXISTS trg_utensil_capture_history_write ON utensil;
 DROP TRIGGER IF EXISTS trg_utensil_capture_history_delete ON utensil;
 DROP FUNCTION IF EXISTS utensil_capture_history();
+DROP TRIGGER IF EXISTS trg_tasting_bump_version ON tasting;
+DROP TRIGGER IF EXISTS trg_tasting_capture_history_write ON tasting;
+DROP TRIGGER IF EXISTS trg_tasting_capture_history_delete ON tasting;
+DROP FUNCTION IF EXISTS tasting_capture_history();
 DROP TRIGGER IF EXISTS trg_step_bump_version ON step;
 DROP TRIGGER IF EXISTS trg_step_capture_history_write ON step;
 DROP TRIGGER IF EXISTS trg_step_capture_history_delete ON step;
@@ -44,6 +49,8 @@ DROP FUNCTION IF EXISTS cover_capture_history();
 -- Drop history indexes
 DROP INDEX IF EXISTS idx_utensil_history_id_recorded CASCADE;
 DROP INDEX IF EXISTS uq_utensil_history_id_version CASCADE;
+DROP INDEX IF EXISTS idx_tasting_history_id_recorded CASCADE;
+DROP INDEX IF EXISTS uq_tasting_history_id_version CASCADE;
 DROP INDEX IF EXISTS idx_step_history_id_recorded CASCADE;
 DROP INDEX IF EXISTS uq_step_history_id_version CASCADE;
 DROP INDEX IF EXISTS idx_recipe_ref_history_id_recorded CASCADE;
@@ -57,6 +64,7 @@ DROP INDEX IF EXISTS uq_cover_history_id_version CASCADE;
 
 -- Drop history tables
 DROP TABLE IF EXISTS utensil_history CASCADE;
+DROP TABLE IF EXISTS tasting_history CASCADE;
 DROP TABLE IF EXISTS step_history CASCADE;
 DROP TABLE IF EXISTS recipe_ref_history CASCADE;
 DROP TABLE IF EXISTS note_history CASCADE;
@@ -67,6 +75,7 @@ DROP TABLE IF EXISTS cover_history CASCADE;
 
 -- Drop tables in reverse order (to handle foreign key dependencies)
 DROP TABLE IF EXISTS utensil CASCADE;
+DROP TABLE IF EXISTS tasting CASCADE;
 DROP TABLE IF EXISTS step CASCADE;
 DROP TABLE IF EXISTS recipe_ref CASCADE;
 DROP TABLE IF EXISTS recipe_patch CASCADE;

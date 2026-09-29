@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -64,8 +65,8 @@ func TestColumnTypeByArrayDepth(t *testing.T) {
 		{ir.TypeRef{Name: "string", IsArray: true}, "TEXT[]"},
 		{ir.TypeRef{Name: "string", IsArray: true, IsArrayOfArrays: true}, "JSONB"},
 	} {
-		if got := columnType(&ir.FieldDef{Name: "f", TypeRef: tc.typeRef}, scalars); got != tc.want {
-			t.Errorf("columnType(%+v) = %q, want %q", tc.typeRef, got, tc.want)
+		if got := sqlutil.ColumnType(&ir.FieldDef{Name: "f", TypeRef: tc.typeRef}, scalars); got != tc.want {
+			t.Errorf("ColumnType(%+v) = %q, want %q", tc.typeRef, got, tc.want)
 		}
 	}
 }

@@ -139,3 +139,11 @@ An API schema with `outputs.api` set to `language: "RUST"` writes the
 axum server crate `schemas-<name>-api` under `schemas/dist/api/<name>`. It
 needs `outputs.types` for Rust too: the crate depends on the types crate,
 and the build refuses the config without it.
+
+The router hands each implementation the request body as a
+`serde_json::Value` and has no step that decrypts one. The build refuses
+an encrypted operation
+([Encrypted payloads](/superschematic/guides/api-routes/#encrypted-payloads))
+unless it is `@manualRouteRegistration`. Such an operation's
+implementation receives the envelope as its body and decrypts it, as the
+Go server's `PayloadDecryptor` does.

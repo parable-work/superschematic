@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "name": "hyphenated to base62",
+      "class": "uuid",
+      "sql": "'5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90'::uuid",
+      "postgres": "\"5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90\"",
+      "canonical": "\"2tLrGjz6ktIRCukXDsqykS\""
+    },
+    {
+      "name": "upper case from a stored JSON value",
+      "class": "uuid",
+      "sql": "'\"5F0C3A52-8A5E-4C1B-9D1E-2F6F1B7C8D90\"'::jsonb",
+      "postgres": "\"5F0C3A52-8A5E-4C1B-9D1E-2F6F1B7C8D90\"",
+      "canonical": "\"2tLrGjz6ktIRCukXDsqykS\""
+    },
+    {
+      "name": "the nil UUID is 0",
+      "class": "uuid",
+      "sql": "'00000000-0000-0000-0000-000000000000'::uuid",
+      "postgres": "\"00000000-0000-0000-0000-000000000000\"",
+      "canonical": "\"0\""
+    },
+    {
+      "name": "the largest UUID",
+      "class": "uuid",
+      "sql": "'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid",
+      "postgres": "\"ffffffff-ffff-ffff-ffff-ffffffffffff\"",
+      "canonical": "\"7n42DGM5Tflk9n8mt7Fhc7\""
+    },
+    {
+      "name": "base62 stays as it is",
+      "class": "uuid",
+      "sql": "'\"RL9PXyoT57JGFsG8bqhP0\"'::jsonb",
+      "postgres": "\"RL9PXyoT57JGFsG8bqhP0\"",
+      "canonical": "\"RL9PXyoT57JGFsG8bqhP0\""
+    },
+    {
+      "name": "null",
+      "class": "uuid",
+      "sql": "NULL::uuid",
+      "postgres": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "list",
+      "class": "uuid[]",
+      "sql": "ARRAY['5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90', '0e7d4b1a-3c2f-4a6e-8b9d-1f2e3d4c5b6a']::uuid[]",
+      "postgres": "[\"5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90\", \"0e7d4b1a-3c2f-4a6e-8b9d-1f2e3d4c5b6a\"]",
+      "canonical": "[\"2tLrGjz6ktIRCukXDsqykS\",\"RL9PXyoT57JGFsG8bqhP0\"]"
+    },
+    {
+      "name": "list of lists written as base62",
+      "class": "uuid[][]",
+      "sql": "'[[\"2tLrGjz6ktIRCukXDsqykS\"], []]'::jsonb",
+      "postgres": "[[\"2tLrGjz6ktIRCukXDsqykS\"], []]",
+      "canonical": "[[\"2tLrGjz6ktIRCukXDsqykS\"],[]]"
+    },
+    {
+      "name": "refuses text that is not a UUID",
+      "class": "uuid",
+      "sql": "'not-a-uuid'::text",
+      "postgres": "\"not-a-uuid\"",
+      "error": "neither form of a UUID"
+    },
+    {
+      "name": "refuses base62 wider than 128 bits",
+      "class": "uuid",
+      "sql": "'\"zzzzzzzzzzzzzzzzzzzzzz\"'::jsonb",
+      "postgres": "\"zzzzzzzzzzzzzzzzzzzzzz\"",
+      "error": "wider than a UUID"
+    }
+  ]
+}

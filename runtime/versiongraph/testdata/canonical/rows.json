@@ -1,0 +1,70 @@
+{
+  "rows": [
+    {
+      "name": "a row of every class",
+      "columns": {
+        "id": "uuid",
+        "taster": "uuid",
+        "salty": "boolean",
+        "score": "number",
+        "servings": "integer",
+        "tasted_on": "date",
+        "tasted_at": "dateTime",
+        "served_at": "time",
+        "rested": "duration",
+        "verdict": "enum",
+        "remarks": "json",
+        "tags": "string[]",
+        "helpers": "uuid[]",
+        "bites": "integer[][]",
+        "_version": "integer",
+        "deleted_on_ref": "boolean"
+      },
+      "sql": "'5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90'::uuid AS id, '0e7d4b1a-3c2f-4a6e-8b9d-1f2e3d4c5b6a'::uuid AS taster, true AS salty, 0.75::float8 AS score, 4::bigint AS servings, '2026-09-01'::date AS tasted_on, '2026-09-01 18:30:00.25+00'::timestamptz AS tasted_at, '18:00:00'::time AS served_at, '00:20:00'::interval AS rested, 'again'::text AS verdict, '{\"salt\": \"more\", \"heat\": 2.0}'::jsonb AS remarks, ARRAY['weeknight', 'soup']::text[] AS tags, ARRAY['0e7d4b1a-3c2f-4a6e-8b9d-1f2e3d4c5b6a']::uuid[] AS helpers, '[[1, 2], [3]]'::jsonb AS bites, 3::bigint AS _version, false AS deleted_on_ref",
+      "timeZone": "Europe/Amsterdam",
+      "postgres": "{\"id\": \"5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90\", \"tags\": [\"weeknight\", \"soup\"], \"bites\": [[1, 2], [3]], \"salty\": true, \"score\": 0.75, \"rested\": \"00:20:00\", \"taster\": \"0e7d4b1a-3c2f-4a6e-8b9d-1f2e3d4c5b6a\", \"helpers\": [\"0e7d4b1a-3c2f-4a6e-8b9d-1f2e3d4c5b6a\"], \"remarks\": {\"heat\": 2.0, \"salt\": \"more\"}, \"verdict\": \"again\", \"_version\": 3, \"servings\": 4, \"served_at\": \"18:00:00\", \"tasted_at\": \"2026-09-01T20:30:00.25+02:00\", \"tasted_on\": \"2026-09-01\", \"deleted_on_ref\": false}",
+      "canonical": "{\"_version\":3,\"bites\":[[1,2],[3]],\"deleted_on_ref\":false,\"helpers\":[\"RL9PXyoT57JGFsG8bqhP0\"],\"id\":\"2tLrGjz6ktIRCukXDsqykS\",\"remarks\":{\"heat\":2,\"salt\":\"more\"},\"rested\":\"20m0s\",\"salty\":true,\"score\":0.75,\"served_at\":\"18:00:00\",\"servings\":4,\"tags\":[\"weeknight\",\"soup\"],\"tasted_at\":\"2026-09-01T18:30:00.25Z\",\"tasted_on\":\"2026-09-01\",\"taster\":\"RL9PXyoT57JGFsG8bqhP0\",\"verdict\":\"again\"}"
+    },
+    {
+      "name": "a declared column the row lacks stays absent",
+      "columns": {
+        "id": "uuid",
+        "title": "string",
+        "scratch": "string"
+      },
+      "sql": "'5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90'::uuid AS id, 'Chop'::text AS title",
+      "postgres": "{\"id\": \"5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90\", \"title\": \"Chop\"}",
+      "canonical": "{\"id\":\"2tLrGjz6ktIRCukXDsqykS\",\"title\":\"Chop\"}"
+    },
+    {
+      "name": "nulls stay null",
+      "columns": {
+        "id": "uuid",
+        "reply_to": "uuid",
+        "tags": "string[]"
+      },
+      "sql": "'5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90'::uuid AS id, NULL::uuid AS reply_to, NULL::text[] AS tags",
+      "postgres": "{\"id\": \"5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90\", \"tags\": null, \"reply_to\": null}",
+      "canonical": "{\"id\":\"2tLrGjz6ktIRCukXDsqykS\",\"reply_to\":null,\"tags\":null}"
+    },
+    {
+      "name": "refuses a column the descriptor does not declare",
+      "columns": {
+        "id": "uuid"
+      },
+      "sql": "'5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90'::uuid AS id, 'Chop'::text AS title",
+      "postgres": "{\"id\": \"5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90\", \"title\": \"Chop\"}",
+      "error": "every column of a row needs a value class"
+    },
+    {
+      "name": "refuses a value its class refuses",
+      "columns": {
+        "id": "uuid",
+        "rested": "duration"
+      },
+      "sql": "'5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90'::uuid AS id, '1 mon'::interval AS rested",
+      "postgres": "{\"id\": \"5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90\", \"rested\": \"1 mon\"}",
+      "error": "a month has no fixed length"
+    }
+  ]
+}

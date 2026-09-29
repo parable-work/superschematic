@@ -4,6 +4,7 @@ import type { ScalarValidationResult, ValidationError } from 'superscalar/valida
 import {
   RecipeEntityKind,
   RecipePatchOperation,
+  Verdict,
 } from '../types';
 
 /**
@@ -100,4 +101,52 @@ export function validateRecipePatchOperationRequired(
   }
 
   return validateRecipePatchOperation(value);
+}
+
+/**
+ * Checks if a value is a valid Verdict
+ */
+export function isValidVerdict(value: unknown): value is Verdict {
+  return Object.values(Verdict).includes(value as Verdict);
+}
+
+/**
+ * Validates a Verdict value (optional field)
+ */
+export function validateVerdict(
+  value: Verdict | string | null | undefined
+): ScalarValidationResult {
+  const errors: ValidationError[] = [];
+
+  if (value === null || value === undefined) {
+    return [true, null];
+  }
+
+  // A value of another JSON type is "type"; a string outside the enum is
+  // "enum".
+  if (typeof value !== "string") {
+    return [false, [{ validator: "type", message: "expected a string" }]];
+  }
+
+  if (!isValidVerdict(value)) {
+    errors.push({ validator: "enum", message: `must be a valid Verdict value` });
+  }
+
+  return errors.length > 0 ? [false, errors] : [true, null];
+}
+
+/**
+ * Validates a Verdict value (required field)
+ */
+export function validateVerdictRequired(
+  value: Verdict | string | null | undefined
+): ScalarValidationResult {
+  const errors: ValidationError[] = [];
+
+  if (value === null || value === undefined) {
+    errors.push({ validator: "required", message: "required field" });
+    return [false, errors];
+  }
+
+  return validateVerdict(value);
 }

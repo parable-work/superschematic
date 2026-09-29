@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "name": "double",
+      "class": "number",
+      "sql": "0.1::float8",
+      "postgres": "0.1",
+      "canonical": "0.1"
+    },
+    {
+      "name": "integral double",
+      "class": "number",
+      "sql": "3::float8",
+      "postgres": "3",
+      "canonical": "3"
+    },
+    {
+      "name": "decimal keeps its value and drops trailing zeros",
+      "class": "number",
+      "sql": "1.50::numeric",
+      "postgres": "1.50",
+      "canonical": "1.5"
+    },
+    {
+      "name": "wide decimal, exactly",
+      "class": "number",
+      "sql": "12345678901234567890.123456789::numeric",
+      "postgres": "12345678901234567890.123456789",
+      "canonical": "12345678901234567890.123456789"
+    },
+    {
+      "name": "large double takes an exponent",
+      "class": "number",
+      "sql": "1e300::float8",
+      "postgres": "1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "canonical": "1e+300"
+    },
+    {
+      "name": "exponent from 10^21",
+      "class": "number",
+      "sql": "1e21::float8",
+      "postgres": "1000000000000000000000",
+      "canonical": "1e+21"
+    },
+    {
+      "name": "plain below 10^21",
+      "class": "number",
+      "sql": "1e20::float8",
+      "postgres": "100000000000000000000",
+      "canonical": "100000000000000000000"
+    },
+    {
+      "name": "small double takes an exponent",
+      "class": "number",
+      "sql": "1.5e-7::float8",
+      "postgres": "0.00000015",
+      "canonical": "1.5e-7"
+    },
+    {
+      "name": "plain down to 10^-6",
+      "class": "number",
+      "sql": "0.000001::float8",
+      "postgres": "0.000001",
+      "canonical": "0.000001"
+    },
+    {
+      "name": "negative",
+      "class": "number",
+      "sql": "(-2.25)::float8",
+      "postgres": "-2.25",
+      "canonical": "-2.25"
+    },
+    {
+      "name": "negative zero is zero",
+      "class": "number",
+      "sql": "'-0'::float8",
+      "postgres": "0",
+      "canonical": "0"
+    },
+    {
+      "name": "decimal zero is zero",
+      "class": "number",
+      "sql": "0.000::numeric",
+      "postgres": "0.000",
+      "canonical": "0"
+    },
+    {
+      "name": "null",
+      "class": "number",
+      "sql": "NULL::float8",
+      "postgres": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "list",
+      "class": "number[]",
+      "sql": "ARRAY[0.5, 2.50]::numeric[]",
+      "postgres": "[0.5, 2.50]",
+      "canonical": "[0.5,2.5]"
+    },
+    {
+      "name": "list of lists written with exponents",
+      "class": "number[][]",
+      "sql": "'[[1e2, 2.5E-8], []]'::jsonb",
+      "postgres": "[[100, 0.000000025], []]",
+      "canonical": "[[100,2.5e-8],[]]"
+    },
+    {
+      "name": "refuses NaN",
+      "class": "number",
+      "sql": "'NaN'::float8",
+      "postgres": "\"NaN\"",
+      "error": "NaN is not a JSON number"
+    }
+  ]
+}

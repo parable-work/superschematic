@@ -3,9 +3,10 @@
 // of versioned rows, described by a graph descriptor.
 //
 // Every function sends one JSON document through the core's C ABI and reads
-// one back. Trees and rows stay json.RawMessage: rows are the JSON objects
-// Postgres to_jsonb gives them, keyed by column name, and the core reads them
-// as such. runtime/versiongraph/README.md is the contract.
+// one back. Trees and rows stay json.RawMessage: a row is a JSON object keyed
+// by column name, a canonical row once a storage adapter has normalized it
+// (package canonical), and the core reads it as such. The descriptor is
+// version 2. runtime/versiongraph/README.md is the contract.
 //
 // The package links libsuperschematic_versiongraph.a through cgo. Build it
 // with `make versiongraph` (scripts/versiongraph-archive.sh), which stages it

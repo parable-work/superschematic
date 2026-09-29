@@ -13,12 +13,14 @@ pub enum RecipeEntityKind {
     Note,
     #[serde(rename = "step")]
     Step,
+    #[serde(rename = "tasting")]
+    Tasting,
     #[serde(rename = "utensil")]
     Utensil,
 }
 
 impl RecipeEntityKind {
-    pub const ALL: &'static [Self] = &[Self::Cover, Self::Ingredient, Self::Note, Self::Step, Self::Utensil, ];
+    pub const ALL: &'static [Self] = &[Self::Cover, Self::Ingredient, Self::Note, Self::Step, Self::Tasting, Self::Utensil, ];
 
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -26,6 +28,7 @@ impl RecipeEntityKind {
             Self::Ingredient => "ingredient",
             Self::Note => "note",
             Self::Step => "step",
+            Self::Tasting => "tasting",
             Self::Utensil => "utensil",
         }
     }
@@ -61,6 +64,35 @@ impl RecipePatchOperation {
 }
 
 impl std::fmt::Display for RecipePatchOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// How a tasting went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Verdict {
+    #[serde(rename = "again")]
+    Again,
+    #[serde(rename = "tweak")]
+    Tweak,
+    #[serde(rename = "never")]
+    Never,
+}
+
+impl Verdict {
+    pub const ALL: &'static [Self] = &[Self::Again, Self::Tweak, Self::Never, ];
+
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Again => "again",
+            Self::Tweak => "tweak",
+            Self::Never => "never",
+        }
+    }
+}
+
+impl std::fmt::Display for Verdict {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
