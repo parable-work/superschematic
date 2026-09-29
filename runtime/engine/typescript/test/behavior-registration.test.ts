@@ -9,6 +9,9 @@ import { cleanup, clone, drivers, openTestEngine } from './helpers.ts';
 
 afterEach(cleanup);
 
+// The core's behaviors, which every engine registers when it opens.
+const CORE = ['Comments', 'Revisions', 'Workflow'];
+
 // refusal registers an implementation with a fresh engine and returns the message it is refused with.
 function refusal(implementation: AnyBehaviorImplementation): string {
   const engine = openTestEngine();
@@ -16,7 +19,7 @@ function refusal(implementation: AnyBehaviorImplementation): string {
     engine.behaviors.register(implementation);
   } catch (error) {
     assert.ok(error instanceof TypeError, `expected a TypeError, got ${String(error)}`);
-    assert.deepEqual(engine.behaviors.names(), []);
+    assert.deepEqual(engine.behaviors.names(), CORE);
     return error.message;
   }
   assert.fail('registration succeeded');
@@ -32,9 +35,9 @@ for (const driver of drivers) {
   describe(`behavior registration (${driver})`, () => {
     test('behaviors register when the engine opens, and later', () => {
       const engine = openTestEngine({ driver, behaviors: [counter] });
-      assert.deepEqual(engine.behaviors.names(), ['test.Counter']);
+      assert.deepEqual(engine.behaviors.names(), [...CORE, 'test.Counter']);
       engine.behaviors.register(flag);
-      assert.deepEqual(engine.behaviors.names(), ['test.Counter', 'test.Flag']);
+      assert.deepEqual(engine.behaviors.names(), [...CORE, 'test.Counter', 'test.Flag']);
       assert.equal(engine.behaviors.has('test.Flag'), true);
       assert.deepEqual(engine.behaviors.declaration('test.Counter'), counterDeclaration);
       assert.ok(Object.isFrozen(engine.behaviors.declaration('test.Counter')?.operations?.[0]));
@@ -138,6 +141,6 @@ describe('behavior registration refuses', () => {
     const implementation = { declaration: { name: 'test.Nothing' } };
     assert.equal(defineBehavior(implementation), implementation);
     const engine = openTestEngine({ behaviors: [...testBehaviors, implementation] });
-    assert.deepEqual(engine.behaviors.names(), ['test.Counter', 'test.Flag', 'test.Nothing', 'test.Tally']);
+    assert.deepEqual(engine.behaviors.names(), [...CORE, 'test.Counter', 'test.Flag', 'test.Nothing', 'test.Tally']);
   });
 });

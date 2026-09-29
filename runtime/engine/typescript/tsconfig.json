@@ -10,6 +10,7 @@
     "strict": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
+    "resolveJsonModule": true,
     "types": ["node"]
   },
   "comment": "The engine ships compiled ESM with declarations: Node.js does not strip types from files under node_modules, so a server library must be built. NodeNext resolution reads the exports maps of @superschematic/schema-runtime, @superschematic/schema-ir and @superschematic/http-runtime, which scripts/link-local-deps.mjs links into node_modules.",

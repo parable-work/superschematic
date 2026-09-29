@@ -322,7 +322,9 @@ handle is the same two parts in snake case (`line_item_add_note`); three
 more list, describe and define schemas, and none publishes. The engine
 writes empty guidance, takes the invocation policy and the vendor keys
 above as options, and takes a behavior operation's policy from its
-declaration. Its argument schemas are the generators':
+declaration, else the default: the core's behaviors (`Workflow`,
+`Comments` and `Revisions`), which every engine registers, name none.
+Its argument schemas are the generators':
 `runtime/engine/testdata/tool_parameters_parity.json` holds them to
 `toolsutil`. `runtime/engine/README.md` ("Tools", "MCP") has the rest.
 

@@ -783,7 +783,10 @@ each operation takes the policy's default. Every `paramsSchema` sets
 accepts can still fail in the engine, whose implementation checks what
 JSON Schema cannot (a Workflow transition that names a state the config
 does not list, say); `runtime/engine/README.md`, "Core behaviors", has
-each one's config, fields and operations.
+each one's config, fields and operations. The engine registers its
+implementations of them when it opens, so a schema that composes them
+runs with no extension linked (D10), its operations served over HTTP and
+as MCP tools like any behavior's.
 
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |

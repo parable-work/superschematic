@@ -1,9 +1,10 @@
 /*
 The engine: one SQLite file, brought up to the engine's migrations when it
 opens, the namespaces the deployment configures, the access policy it
-supplies, the behavior implementations it registers, and the schema
-registry, instance store and event log, each of which asks that policy on
-every call, and the tool catalog, which reads and calls through them.
+supplies, the core's behaviors and the implementations it registers, the
+schema registry, instance store and event log, each of which asks that
+policy on every call, and the tool catalog, which reads and calls through
+them.
 */
 
 import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
@@ -11,6 +12,7 @@ import { SchemaFileLoader } from '@superschematic/schema-runtime';
 
 import { Access, type AccessPolicy } from './access.js';
 import type { AnyBehaviorImplementation } from './behaviors/behavior.js';
+import { coreBehaviors } from './behaviors/core/index.js';
 import { BehaviorRegistry } from './behaviors/registry.js';
 import { EventLog } from './events/log.js';
 import { InstanceStore, defaultIds } from './instances/store.js';
@@ -43,8 +45,9 @@ export interface EngineOptions extends StorageOptions {
   /** The time in epoch milliseconds; Date.now by default. */
   clock?: () => number;
   /**
-   * The behavior implementations this engine runs, registered when it
-   * opens; engine.behaviors.register adds more later. A schema that
+   * The behavior implementations this engine runs besides the core's
+   * (Workflow, Comments and Revisions, which it registers first), registered
+   * when it opens; engine.behaviors.register adds more later. A schema that
    * composes a behavior without one is refused.
    */
   behaviors?: readonly AnyBehaviorImplementation[];
@@ -108,7 +111,7 @@ export class Engine {
     const behaviors = new BehaviorRegistry(storage, clock, tools.invocationPolicy);
     try {
       migrate(storage, engineMigrations, clock());
-      for (const implementation of options.behaviors ?? []) {
+      for (const implementation of [...coreBehaviors, ...(options.behaviors ?? [])]) {
         behaviors.register(implementation);
       }
     } catch (error) {

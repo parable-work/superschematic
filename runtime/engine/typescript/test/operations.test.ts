@@ -1,7 +1,8 @@
 // Behavior operations over HTTP and with an expected sequence: the
 // operation route (the body as its parameters, If-Match, the result with
 // the instance's new ETag, every refusal's status), invoke's and
-// operate's expectedSeq, and the describe and tools routes.
+// operate's expectedSeq, the describe and tools routes, and the core's
+// behaviors through the route.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -11,7 +12,7 @@ import type { Hono } from 'hono';
 import { EngineError, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { flag, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, freshPath, openTestEngine, orderDocument, thrown } from './helpers.ts';
+import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, thrown } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -206,5 +207,68 @@ describe('the describe and tools routes', () => {
     const visible = tools.tools.filter((tool: { mcp: { hidden: boolean } }) => !tool.mcp.hidden).map((tool: { name: string }) => tool.name);
     assert.deepEqual(visible, ['engine.listSchemas', 'engine.describeSchema', 'engine.defineSchema', 'item.get', 'item.list', 'item.history']);
     await problem(call(app, 'GET', '/namespaces/nowhere/tools'), 404);
+  });
+});
+
+describe("the core's behaviors over HTTP", () => {
+  // An engine with the core meta-schema and only its own behaviors, and
+  // documents, which composes all three. The bearer token is the caller:
+  // alice may do everything but holds no permission a behavior's config
+  // names, reader may only read, and pat holds documents.publish, which
+  // the transition from review to published needs.
+  const permissions: Record<string, string[]> = { alice: ['*'], reader: ['read'], pat: ['read', 'write', 'documents.publish'] };
+  const people: Authenticator = async (ctx) => {
+    const token = ctx.bearerToken;
+    return token !== undefined && Object.hasOwn(permissions, token) ? { subject: token, permissions: permissions[token] } : null;
+  };
+  const DOCUMENT = '/namespaces/default/schemas/documents/instances/doc-1';
+  const TRANSITION = `${DOCUMENT}/operations/transition`;
+
+  function withDocument(): { engine: Engine; app: Hono } {
+    const engine = openTestEngine({ policy });
+    engine.schemas.define(alice, documentsDocument());
+    engine.schemas.publish(alice, 'documents');
+    engine.instances.create(alice, 'documents', { title: 'Launch plan' }, { id: 'doc-1' });
+    return { engine, app: engineApp(engine, { authenticate: people }) };
+  }
+
+  test('a Workflow transition runs through the operation route with If-Match and answers the new ETag', async () => {
+    const { app } = withDocument();
+    assert.deepEqual(await data(call(app, 'POST', TRANSITION, { body: { to: 'review' }, headers: { 'if-match': '"1"' } })), {
+      data: { from: 'draft', to: 'review' },
+      etag: '"2"',
+    });
+    // The same If-Match again names a sequence the instance has left.
+    assert.equal((await problem(call(app, 'POST', TRANSITION, { body: { to: 'draft' }, headers: { 'if-match': '"1"' } }), 412)).code, 'seq_mismatch');
+    // Its guard: a move the config does not list is vetoed, a state it does not list is invalid,
+    // and transition takes to alone.
+    const unlisted = await problem(call(app, 'POST', TRANSITION, { body: { to: 'archived' }, headers: { 'if-match': '"2"' } }), 409);
+    assert.deepEqual([unlisted.code, unlisted.details.behavior], ['vetoed', 'Workflow']);
+    assert.equal((await problem(call(app, 'POST', TRANSITION, { body: { to: 'gone' } }), 400)).code, 'invalid_argument');
+    assert.equal((await problem(call(app, 'POST', TRANSITION, { body: { to: 'draft', status: 'draft' } }), 400)).code, 'invalid_argument');
+    const read = await data(call(app, 'GET', DOCUMENT));
+    assert.deepEqual([read.etag, read.data.data.status], ['"2"', 'review']);
+  });
+
+  test('a transition whose permission the caller lacks is 403 and writes nothing; one who holds it moves the instance', async () => {
+    const { app, engine } = withDocument();
+    engine.instances.invoke(alice, 'documents', 'doc-1', 'transition', { to: 'review' });
+    const refused = await problem(call(app, 'POST', TRANSITION, { body: { to: 'published' }, headers: { 'if-match': '"2"' } }), 403);
+    assert.equal(refused.code, 'forbidden');
+    assert.match(refused.detail, /the transition needs permission documents\.publish/);
+    assert.equal(engine.instances.get(alice, 'documents', 'doc-1')?.seq, 2, 'nothing was written');
+    assert.deepEqual(await data(call(app, 'POST', TRANSITION, { token: 'pat', body: { to: 'published' }, headers: { 'if-match': '"2"' } })), {
+      data: { from: 'review', to: 'published' },
+      etag: '"3"',
+    });
+  });
+
+  test('listComments is a read: a reader may call it, and it answers the ETag it read', async () => {
+    const { app } = withDocument();
+    const comment = await data(call(app, 'POST', `${DOCUMENT}/operations/comment`, { body: { body: 'First pass is up.' }, headers: { 'if-match': '"1"' } }));
+    assert.deepEqual([comment.data.id, comment.data.body, comment.etag], [1, 'First pass is up.', '"2"']);
+    const page = await data(call(app, 'POST', `${DOCUMENT}/operations/listComments`, { token: 'reader', body: { limit: 10 }, headers: { 'if-match': '"2"' } }));
+    assert.deepEqual([page.data.items.map((item: { body: string }) => item.body), page.data.next, page.etag], [['First pass is up.'], null, '"2"']);
+    assert.equal((await problem(call(app, 'POST', `${DOCUMENT}/operations/comment`, { token: 'reader', body: { body: 'Me too.' } }), 403)).code, 'forbidden');
   });
 });

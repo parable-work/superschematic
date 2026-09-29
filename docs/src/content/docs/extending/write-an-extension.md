@@ -684,8 +684,11 @@ engine.instances.invoke(me, "Product", id, "rate", { stars: 4 });
 ```
 
 An engine without the implementation refuses a schema that composes the
-behavior. acme's `packages/behaviors` is the whole example, and its smoke
-runs it.
+behavior. The engine registers the core's own behaviors, `Workflow`,
+`Comments` and `Revisions`, when it opens; `behaviors` adds yours beside
+them. No core operation names an invocation policy, so their tools take
+the default of the policy you pass. acme's `packages/behaviors` is the
+whole example, and its smoke runs it.
 
 ## A command
 

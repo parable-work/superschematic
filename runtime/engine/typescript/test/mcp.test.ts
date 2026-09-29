@@ -2,9 +2,10 @@
 // (@modelcontextprotocol/client): initialize, tools/list and tools/call
 // through the HTTP runtime's gate and the engine's access policy, a
 // refused call as a tool error carrying the problem document, an unknown
-// tool as a JSON-RPC error, and the 2026-07-28 revision beside the 2025
-// ones. The HTTP API and the MCP endpoint are mounted on one app. On
-// Node.js the server is @hono/node-server, on Bun it is Bun.serve.
+// tool as a JSON-RPC error, the 2026-07-28 revision beside the 2025 ones,
+// and the core's behaviors' operations as tools. The HTTP API and the MCP
+// endpoint are mounted on one app. On Node.js the server is
+// @hono/node-server, on Bun it is Bun.serve.
 import assert from 'node:assert/strict';
 import type { Server as NodeServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -19,7 +20,7 @@ import { defineBehavior, type AccessPolicy, type Engine, type EngineOptions } fr
 import { engineApp } from '../dist/http/index.js';
 import { MCP_PATH, engineMcp, type EngineMcpOptions } from '../dist/mcp/index.js';
 import { openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, openTestEngine, orderDocument } from './helpers.ts';
+import { alice, cleanup, documentsDocument, openTestEngine, orderDocument } from './helpers.ts';
 
 // The bearer token is the caller's subject; reader may only read.
 const authenticate: Authenticator = async (ctx) => {
@@ -346,5 +347,82 @@ describe('tools/call', () => {
         return true;
       });
     }
+  });
+});
+
+describe("the core's behaviors", () => {
+  // An engine with the core meta-schema (the loader's default) and only its
+  // own behaviors, and documents, which composes all three, with one
+  // instance. The bearer token is the caller: alice may do everything but
+  // holds no permission a behavior's config names, reader may only read,
+  // and pat holds documents.publish, which the transition from review to
+  // published needs.
+  const permissions: Record<string, string[]> = { alice: ['*'], reader: ['read'], pat: ['read', 'write', 'documents.publish'] };
+  const people: Authenticator = async (ctx) => {
+    const token = ctx.bearerToken;
+    return token !== undefined && Object.hasOwn(permissions, token) ? { subject: token, permissions: permissions[token] } : null;
+  };
+  const withDocument = () =>
+    served({ metaSchema: undefined, behaviors: [] }, { authenticate: people }, (engine) => {
+      engine.schemas.define(everything, documentsDocument());
+      engine.schemas.publish(everything, 'documents');
+      engine.instances.create(everything, 'documents', { title: 'Launch plan' }, { id: 'doc-1' });
+    });
+  const call = async (client: Client, name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as CallToolResult;
+
+  test('tools/list lists their operations with the default policy, the list operations read-only', async () => {
+    const { url } = await withDocument();
+    const { client } = await connect(endpoint(url));
+    assert.deepEqual(
+      (await client.listTools()).tools
+        .filter((tool) => tool.name.startsWith('documents_'))
+        .map((tool) => [tool.name, tool.annotations?.readOnlyHint, tool._meta?.invocationPolicy]),
+      [
+        ['documents_create', false, 'auto'],
+        ['documents_get', true, 'auto'],
+        ['documents_list', true, 'auto'],
+        ['documents_update', false, 'auto'],
+        ['documents_delete', false, 'auto'],
+        ['documents_transition', false, 'auto'],
+        ['documents_comment', false, 'auto'],
+        ['documents_list_comments', true, 'auto'],
+        ['documents_list_revisions', true, 'auto'],
+        ['documents_propose', false, 'auto'],
+        ['documents_approve', false, 'auto'],
+        ['documents_reject', false, 'auto'],
+        ['documents_list_proposals', true, 'auto'],
+      ]
+    );
+    // A reader is listed only the tools that read.
+    const { client: reader } = await connect(endpoint(url), 'reader');
+    assert.deepEqual(
+      (await reader.listTools()).tools.map((tool) => tool.name).filter((name) => name.startsWith('documents_')),
+      ['documents_get', 'documents_list', 'documents_list_comments', 'documents_list_revisions', 'documents_list_proposals']
+    );
+  });
+
+  test('tools/call runs them, listComments for a reader, and a transition whose permission the caller lacks is a tool error with the 403 problem', async () => {
+    const { url, engine } = await withDocument();
+    const { client } = await connect(endpoint(url));
+    const commented = await call(client, 'documents_comment', { id: 'doc-1', params: { body: 'First pass is up.' }, expectedSeq: 1 });
+    assert.deepEqual([commented.isError, (commented.structuredContent as { id: number }).id], [undefined, 1]);
+    const { client: reader } = await connect(endpoint(url), 'reader');
+    const page = await call(reader, 'documents_list_comments', { id: 'doc-1', params: { limit: 10 } });
+    assert.deepEqual(
+      [page.isError, (page.structuredContent as { items: Array<{ body: string }>; next: unknown }).items.map((item) => item.body), (page.structuredContent as { next: unknown }).next],
+      [undefined, ['First pass is up.'], null]
+    );
+    assert.equal(problemOf(await call(reader, 'documents_comment', { id: 'doc-1', params: { body: 'Me too.' } })).status, 403);
+
+    const moved = await call(client, 'documents_transition', { id: 'doc-1', params: { to: 'review' }, expectedSeq: 2 });
+    assert.deepEqual(moved.structuredContent, { from: 'draft', to: 'review' });
+    const refused = problemOf(await call(client, 'documents_transition', { id: 'doc-1', params: { to: 'published' } }));
+    assert.deepEqual([refused.status, refused.code, refused.title], [403, 'forbidden', 'Forbidden']);
+    assert.match(refused.detail, /the transition needs permission documents\.publish/);
+    assert.equal(engine.instances.get(alice, 'documents', 'doc-1')?.seq, 3, 'nothing was written');
+    const { client: pat } = await connect(endpoint(url), 'pat');
+    const published = await call(pat, 'documents_transition', { id: 'doc-1', params: { to: 'published' }, expectedSeq: 3 });
+    assert.deepEqual(published.structuredContent, { from: 'review', to: 'published' });
+    assert.equal(engine.instances.get(alice, 'documents', 'doc-1')?.data.status, 'published');
   });
 });

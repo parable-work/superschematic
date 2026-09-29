@@ -8,9 +8,10 @@ instances and an event log in one SQLite file.
 Built: the storage layer and its migrations, the schema registry with its
 compatibility rule, instances, the event log, the access policy, the
 HTTP API with the event stream (`@superschematic/engine/http`), the
-behavior plug-in interface, the describe and tools documents and the MCP
-endpoint (`@superschematic/engine/mcp`). Not built yet: the behaviors the
-engine packages ship.
+behavior plug-in interface, the describe and tools documents, the MCP
+endpoint (`@superschematic/engine/mcp`), and the core's behaviors:
+`Workflow`, `Comments` and `Revisions`. Not built yet: the other
+behaviors D16 lists.
 
 ```ts
 import { allowAll, openEngine } from '@superschematic/engine';
@@ -370,9 +371,10 @@ write from a read, a promise from a synchronous function.
 A behavior adds fields, operations, checks and storage to a schema's
 instance type (D16 in `docs/DECISIONS.md`). The compiler declares it in a
 JSON file (section 3.16 of `docs/extension-model.md`); the engine runs an
-implementation of it that carries the same file. The engine names no
-behavior: a deployment registers the implementations it runs, when the
-engine opens or later.
+implementation of it that carries the same file. The engine registers
+the core's behaviors when it opens ("Core behaviors"); a deployment
+registers the implementations of its own, when the engine opens or
+later.
 
 ```ts
 import { defineBehavior, openEngine } from '@superschematic/engine';
@@ -570,6 +572,135 @@ operation that expects the sequence from before the operation is refused
 (`seq_mismatch`) before any guard is asked. A read-only operation checks
 `expectedSeq` against the sequence it reads and moves nothing.
 
+### Core behaviors
+
+The core declares three behaviors (`internal/registry/behaviors`, section
+3.16 of `docs/extension-model.md`), so every binary's meta-schema admits
+them, and the engine implements them in `src/behaviors/core` and
+registers them when it opens, before `behaviors`: a schema that composes
+them runs with no extension linked. Each implementation imports the copy
+of its declaration in `src/behaviors/core/declarations`, which the core
+binary writes (`make behaviors`) and CI checks (`make behaviors-check`).
+They reach the engine only through the plug-in interface above. A
+deployment cannot register another implementation under their names.
+
+```json
+"behaviors": [
+  { "name": "Workflow", "config": {
+      "states": ["draft", "review", "published"],
+      "transitions": [
+        { "from": "draft", "to": "review" },
+        { "from": "review", "to": "published", "permission": "documents.publish" }
+      ] } },
+  { "name": "Comments" },
+  { "name": "Revisions", "config": { "review": { "permission": "documents.review" } } }
+]
+```
+
+Their records number from 1 per instance (a comment's id, a revision, a
+proposal's id), so a number says nothing about another instance. Their
+list operations are read-only, so the policy is asked for `read` and they
+append no event: they take `limit` (1 to 500, 50 by default) and
+`cursor`, and return `{ items, next }` in the order the records were
+made, as `instances.list` does. Deleting an instance deletes what they
+keep for it.
+
+Their operations are served as any behavior's are. For a schema named
+`documents`, the operation route runs `transition` with `If-Match`
+(`POST .../schemas/documents/instances/{id}/operations/transition`, body
+`{"to": "review"}`), and it is the tool `documents.transition`, MCP handle
+`documents_transition`; the list operations' tools only read (`replay`
+`read_only`, `readOnlyHint`). None names an invocation policy, so each
+takes the default of the policy the engine is given, the core's or a
+distribution's (D11, "The invocation policy and the vendor keys"). A
+refusal is the HTTP API's problem: a transition whose permission the
+caller lacks is 403 `forbidden`, and over MCP a tool error carrying that
+problem.
+
+#### Workflow
+
+A state machine on the instance's `status`.
+
+| | |
+| --- | --- |
+| Config | `states` (one or more names: a letter, then letters, digits, `_` and `-`), `initial` (the first state when absent), `transitions`: `{ from, to, permission? }` |
+| Fields | `status` |
+| Operations | `transition({ to })` -> `{ from, to }`, writes |
+| Guards | its own `transition`, whoever asks: `to` not a state is `invalid_argument`; the state the instance is in, a transition the config does not list and a move out of a terminal state are `vetoed`; a transition that names a permission the caller lacks (`can`) is `forbidden` |
+| Events | `transition`'s operation event, `patch: { status }` |
+| `configChange` | every old state stays; transitions, permissions and `initial` may change. Not added to or removed from a schema with instances |
+
+A new instance starts in `initial`. The status is Workflow's own column,
+so a create or an update that sets it is refused (`readOnly`), and
+another behavior moves it only by calling `transition`, whose guard runs
+for that call as for a caller's. `transition` takes `to` and nothing else;
+its closed `paramsSchema` lets no alias through. Beyond its config
+schema, which the compiler checks too, the engine refuses a config whose
+`initial` or a transition names a state it does not list, and a
+transition from a state to itself or listed twice. A state no transition
+reaches is allowed: a new version keeps every state an instance may be
+in, one it no longer enters included.
+
+A state that no transition leaves is terminal. `isTerminalState(config,
+state)`, exported by the package, answers that for a config as a schema
+holds it (`schemas.behaviors` lists it): true for one of its states that
+no transition leaves.
+
+#### Comments
+
+Comments on the instance, each a reply to one of its comments or not.
+
+| | |
+| --- | --- |
+| Config | none |
+| Fields | `commentCount` |
+| Operations | `comment({ body, replyTo? })` -> the comment, writes; `listComments({ limit?, cursor? })` -> a page, read-only |
+| Guards | none; `comment`'s `replyTo` must name a comment of the same instance (`invalid_argument`), and `body` must hold a non-space character, at most 10000 code points |
+| Events | `comment`'s operation event, `patch: { commentCount }` |
+| `configChange` | added to a schema with instances, which start with none; not removed from one, since their comments would stay behind |
+
+A comment is `{ id, replyTo?, body, createdBy, createdAt }`: the caller's
+subject and the engine clock's time.
+
+#### Revisions
+
+Immutable revisions of the instance's own fields, with an optional review
+step.
+
+| | |
+| --- | --- |
+| Config | `review: { permission }`, optional |
+| Fields | `revision`: the latest revision's number, absent before the first |
+| Operations | `listRevisions({ limit?, cursor? })`, read-only; with review, `propose({ patch, note? })`, `approve({ proposal })`, `reject({ proposal, reason? })`, which write, and `listProposals({ state?, limit?, cursor? })`, read-only |
+| Guards | without review, the four review operations are `vetoed`; `approve` and `reject` need the review permission (`can`), else `forbidden`, whoever calls them |
+| Events | a create's and an update's event carry `revision`; `propose` appends an operation event with an empty `patch`; `approve`'s carries the fields its patch changed and `revision` |
+| `configChange` | `review` may be added, removed or changed. Added to a schema with instances, whose history starts at their next change; not removed from one |
+
+A create records revision 1 and every change of the own fields the next,
+in its transaction: an update that changes something, and an operation
+that changes them with `update()`, an approval included. A revision is
+`{ revision, data, createdBy, createdAt, proposal? }`, where `data` is the
+own fields as the change left them, never a behavior's field. An
+operation that changes no own field, a comment or a transition, records
+none.
+
+`propose` checks its patch with `validateUpdate`: one that sets a
+behavior's field or leaves the instance invalid is `invalid_instance`,
+and one that changes nothing is `invalid_argument`. It stores the patch
+as a pending proposal and changes nothing a reader sees. Who may propose
+is the access policy's call: it is asked for `write` with the operation
+`propose`, apart from a plain update, which names no operation. `approve`
+applies a pending proposal's patch with `update()`, so the update's
+validation and every guard run, and records the revision it makes with
+the proposal's id; a refusal leaves the proposal pending. The patch
+applies to the instance as it is then, not as it was proposed; `base` is
+the revision it was proposed against, so a reviewer can see the instance
+moved. `reject` settles it with an optional reason. A proposal is `{ id,
+patch, note?, base?, state, createdBy, createdAt, reviewedBy?,
+reviewedAt?, reason?, revision? }`, `state` one of `pending`, `approved`
+and `rejected`; approving or rejecting one that is not pending is
+`vetoed`, and naming none is `invalid_argument`.
+
 ## Namespaces
 
 Schemas and instances live in namespaces. There is one, `default`, unless the
@@ -653,7 +784,7 @@ read-only operation leaves where it was.
 | 400 | `invalid_argument` | a page size, cursor, instance id, schema name or version the engine refuses; an operation's parameters its `paramsSchema` refuses (`OperationParamsError`), `details.issues` |
 | 400 | `bad_request` | a parameter or body the runtime cannot decode, a create body that is not `{id?, data}`, a path that is not valid percent-encoding |
 | 401 | `unauthorized` | the `Authenticator` returned no caller, or one without a subject |
-| 403 | `forbidden` | the access policy refused |
+| 403 | `forbidden` | the access policy refused, or a behavior refused a caller without the permission its config names |
 | 404 | `not_found` | no such version, draft or instance in the namespace, or no such route |
 | 404 | `unknown_namespace` | the namespace is not configured |
 | 409 | `conflict` | an instance with the id exists |
@@ -862,7 +993,8 @@ openEngine({
   operation or schema tool takes `invocation`'s value for it, else the
   default; a behavior operation takes its declaration's `invocationPolicy`,
   else the default. Registration refuses a declaration whose value is not
-  one of the values, as the compiler's `Finalize` does.
+  one of the values, as the compiler's `Finalize` does. The core's
+  behaviors name none, so they register under any policy.
 - `keys` are `apigen.ToolKeys` (section 3.14 of `docs/extension-model.md`):
   the key a property names its scalar under, the `_meta` key of a tool's
   guidance, and keys written at the root of every argument schema.

@@ -70,6 +70,19 @@ export type { BehaviorDeclaration, BehaviorFieldDeclaration, BehaviorOperationDe
 export { BehaviorRegistry } from './behaviors/registry.js';
 export { MAX_CALL_DEPTH } from './behaviors/execution.js';
 
+// The core's behaviors, which every engine registers (runtime/engine/README.md, "Core behaviors").
+export { isTerminalState } from './behaviors/core/index.js';
+export type {
+  CommentRecord,
+  ProposalRecord,
+  ProposalState,
+  RevisionRecord,
+  RevisionsConfig,
+  WorkflowConfig,
+  WorkflowStates,
+  WorkflowTransition,
+} from './behaviors/core/index.js';
+
 // Storage.
 export { SQLITE_BUSY, SqliteError, isBun, openDriver } from './storage/driver.js';
 export type { DriverName, Row, RunResult, SqlDriver, SqlValue } from './storage/driver.js';
