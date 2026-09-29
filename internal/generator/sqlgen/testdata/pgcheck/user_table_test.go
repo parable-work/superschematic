@@ -2,12 +2,8 @@ package pgcheck
 
 import (
 	"context"
-	"fmt"
-	"net/url"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // TestUserTableOnPostgres applies create.sql for a schema whose User table
@@ -18,33 +14,9 @@ import (
 // tables. TestUserTableCreateSQLOnPostgres in the sqlgen package runs it
 // with PGCHECK_DATABASE_URL and PGCHECK_SQL_DIR.
 func TestUserTableOnPostgres(t *testing.T) {
-	adminURL := env(t, "PGCHECK_DATABASE_URL")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-
-	admin, err := pgx.Connect(ctx, adminURL)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	t.Cleanup(func() { _ = admin.Close(context.Background()) })
-	database := fmt.Sprintf("superschematic_user_table_%d", time.Now().UnixNano())
-	t.Cleanup(func() {
-		if _, err := admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+database+" WITH (FORCE)"); err != nil {
-			t.Errorf("drop database: %v", err)
-		}
-	})
-	mustExec(t, ctx, admin, "CREATE DATABASE "+database)
-
-	dbURL, err := url.Parse(adminURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dbURL.Path = "/" + database
-	conn, err := pgx.Connect(ctx, dbURL.String())
-	if err != nil {
-		t.Fatalf("connect %s: %v", database, err)
-	}
-	defer func() { _ = conn.Close(context.Background()) }()
+	conn := scratchDatabase(t, ctx, "superschematic_user_table")
 
 	execScript(t, ctx, conn, "create.sql", readSQL(t, "create.sql"))
 	var users int
