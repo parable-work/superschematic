@@ -1161,6 +1161,47 @@ comes back into the core.
 
 The removal is reversible until the first release.
 
+### D18, amended: `semanticRole` and `exclude` leave the core IR
+
+Two more `ir.FieldDef` fields from the source tree fail D18's rule and are
+removed on it:
+
+- `semanticRole`, a free string. Its comment listed the roles a
+  distribution's data-quality rules bind to: a business key, an event
+  time, a metadata timestamp. The core declares no roles, and no core
+  decorator, check, generator or runtime reads one. The TypeScript writer
+  refused a data field that carried it.
+- `exclude`, a flag. Its comment described a data pipeline's serving
+  layer: a field an overlay hides from promotion and the query catalog
+  while ingestion still collects it. The core has no serving layer. Every
+  core generator emitted an excluded field like any other, and the
+  TypeScript writer dropped the flag without an error.
+
+As with the `transform*` fields, only the forms carried them: the
+schema-file JSON Schema admitted them, the TypeScript IR types declared
+them, and the TypeScript schema runtime read and wrote them, as
+`x-semantic-role` and `x-exclude` in the JSON Schema wire form. A JSON or
+YAML schema file whose field still carries either key now fails
+validation against the schema-file JSON Schema.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Both move to the extension slot. A distribution registers a field decorator per directive: one with a string `Args` (an `enum` of its roles, if it wants the frontends to check them) for the role, one without `Args` for the flag. They store as `"extensions": {"<extension>": {"semanticRole": "event_time", "exclude": true}}`. acme's `@shelf` (an argument) and `@feedKey` (a flag) are the two shapes. | Keeping `semanticRole` as a generic tag. A string no core code reads means what each deployment says it means, which is D18's test for an extension directive; the slot carries the same string. |
+| The TypeScript writer refuses a field with extension data (`docs/extension-model.md`, section 11, gap 6), so it now refuses the flag too instead of dropping it. | Keeping `exclude` as a generic "not served" flag. Nothing in the core serves or hides a field by it, so the core would own a name and no meaning. |
+
+`@versioned({ exclude })` and `@conflictUnit("excluded")` are not this
+flag and stay. The first names the fields a versioned table leaves out of
+its history rows, which the core's SQL and ORM generators read and the
+loader checks; the second marks a field the version graph neither merges
+nor hashes.
+
+`scripts/scrub-check.sh` now also fails on a semantic-role identifier in
+any spelling and on the `x-exclude` vendor key. It does not search the
+plain key `exclude`, which `@versioned` uses. This file names the removed
+fields and is the one file that check skips.
+
+The removal is reversible until the first release.
+
 ## D19. The version graph's engine is a runtime in every language, over storage adapters
 
 D17 built the version graph with its engine in generated Go: a
