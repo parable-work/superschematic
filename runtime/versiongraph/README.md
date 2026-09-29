@@ -120,24 +120,26 @@ A value class names the rule that gives a value's canonical JSON (below).
 The generator derives it from two things: what the schema runtime's JSON
 for the field's type is (`runtime/schema`, D12 and D14), and the SQL type
 the sql generator stores the column as, which is the scalar's `sql` type
-mapping or, without one, the type its traits or primitive infer. `JSONB`
-is `json`, whatever it holds. Otherwise a string stored as `UUID`,
-`TIMESTAMPTZ`, `DATE`, `TIME` or `INTERVAL` is `uuid`, `dateTime`, `date`,
-`time` or `duration`, and one stored as `TEXT`, `VARCHAR`, `CITEXT` or
-`INET` is `string`; an enum stored as `TEXT` is `enum`; an integer or a
-number stored as `BIGINT`, `INTEGER` or `SMALLINT` is `integer`, and one
-stored as `DOUBLE PRECISION`, `REAL` or `NUMERIC` is `number`; a boolean
-stored as `BOOLEAN` is `boolean`. A map is `json`. A to-one relation holds
-its target's key and has its class. A list (`T[]`) adds `[]` to its
-element's class and a list of lists (`T[][]`) adds `[][]`. A `@jsonField`
-value and a list of lists are stored as `JSONB` and hold the schema
-runtime's JSON: an object type there is `json`, and any other element has
-the class it would have in a column of its own. Any other pair has no rule
-and a graph member with one fails generation, naming the field and the SQL
-type: a JSON scalar stored as `TEXT` (the catalog's `Embedding.Vector`,
-which has no `sql` mapping), a string stored as `POINT` (`Geo.Location`) or
-as the `BIGINT` a duration's name infers, and an object type without
-`@jsonField`.
+mapping or, without one, the type its traits or primitive infer. An
+element whose scalar is stored as `JSONB` is `json`, whatever JSON it
+holds. Otherwise a string stored as `UUID`, `TIMESTAMPTZ`, `DATE`, `TIME`
+or `INTERVAL` is `uuid`, `dateTime`, `date`, `time` or `duration`, and one
+stored as `TEXT`, `VARCHAR`, `CITEXT` or `INET` is `string`; an enum
+stored as `TEXT` is `enum`; an integer or a number stored as `BIGINT`,
+`INTEGER` or `SMALLINT` is `integer`, and one stored as
+`DOUBLE PRECISION`, `REAL`, `NUMERIC` or `DECIMAL` is `number`; a boolean
+stored as `BOOLEAN` is `boolean`. A map is stored as `JSONB` and is
+`json`. A to-one relation holds its target's key and has its class. A list
+(`T[]`) adds `[]` to its element's class and a list of lists (`T[][]`)
+adds `[][]`. A `@jsonField` value and a list of lists are stored in a
+`JSONB` column and hold the schema runtime's JSON: an object type or a
+JSON value there is `json`, and any other element has the class it would
+have in a column of its own (a list of lists of `Generic.Int64` is
+`integer[][]`). Any other pair has no rule and a graph member with one
+fails generation, naming the field and the SQL type: a JSON scalar stored
+as `TEXT` (the catalog's `Embedding.Vector`, which has no `sql` mapping),
+a string stored as `POINT` (`Geo.Location`) or as the `BIGINT` a
+duration's name infers, and an object type without `@jsonField`.
 
 ## Trees and rows
 

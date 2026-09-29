@@ -256,17 +256,20 @@ canonical JSON:
 | `string` | `string`, and string scalars stored as `TEXT`, `VARCHAR`, `CITEXT` or `INET` | The string. |
 | `enum` | An enum | The member's value. |
 | `integer` | Number scalars stored as `BIGINT`, `INTEGER` or `SMALLINT` (`Generic.Int64`) | The digits, exactly, however wide. |
-| `number` | `number`, number scalars stored as `DOUBLE PRECISION`, `REAL` or `NUMERIC` | The exact decimal value as `JSON.stringify` lays out a number: `1.5`, `1e+21`, `1.5e-7`. |
+| `number` | `number`, number scalars stored as `DOUBLE PRECISION`, `REAL`, `NUMERIC` or `DECIMAL` | The exact decimal value as `JSON.stringify` lays out a number: `1.5`, `1e+21`, `1.5e-7`. |
 | `boolean` | `boolean` | `true` or `false`. |
 | `uuid` | `Identity.UUID`, `Identity.UserID`, a to-one relation to a UUID key | base62, the scalar core's form (`2tLrGjz6ktIRCukXDsqykS`). |
 | `dateTime` | `Temporal.DateTime` | RFC 3339 in UTC with `Z` (`2026-09-01T10:00:00.12Z`), whatever the session's time zone. |
 | `date` | `Temporal.Date` | `2026-09-01`. |
 | `time` | `Temporal.Time` | `18:00:00`, with a fraction of a second when there is one. |
 | `duration` | `Temporal.Duration` | The scalar core's form: `1h30m0s`, `1.5s`, `500ms`, `1500us`. A day is 24 hours; months and years are refused. |
-| `json` | Any column stored as `JSONB`: `Generic.JSON`, `Generic.StringMap`, a `@jsonField` object, a map | The value with object members sorted by key, no whitespace, numbers as `number`. |
+| `json` | A scalar stored as `JSONB` (`Generic.JSON`, `Generic.StringMap`), an object type in a `@jsonField` column, a map | The value with object members sorted by key, no whitespace, numbers as `number`. |
 
 A list adds `[]` to its element's class (`uuid[]`) and a list of lists
-`[][]`. A graph member with a field no class reads fails generation, naming
+`[][]`. A `@jsonField` value and a list of lists live in a `JSONB` column;
+an element there that is not an object type or a JSON value keeps its own
+class (`integer[][]`). A graph member with a field no class reads fails
+generation, naming
 the field and its SQL type: `Geo.Location`, stored as `POINT`, and
 `Embedding.Vector`, a JSON array stored as `TEXT`. The contract, with every rule and its
 vectors in `runtime/versiongraph/testdata/canonical`, is in
