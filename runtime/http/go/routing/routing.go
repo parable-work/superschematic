@@ -1,10 +1,41 @@
 package routing
 
 import (
+	"errors"
 	"net/http"
+	"net/url"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 )
+
+// ErrPathParamEncoding reports a path parameter that is not percent-encoded
+// UTF-8.
+var ErrPathParamEncoding = errors.New("path parameter is not percent-encoded UTF-8")
+
+// PathParam returns the named path parameter of r, percent-decoded once.
+//
+// chi matches a route against r.URL.RawPath when net/url keeps one, that is
+// when the request did not encode its path the way Go would (%41 for A, a
+// %2F inside a segment, lowercase hex), and its captures are then still
+// encoded. Otherwise it matches against r.URL.Path, whose captures are
+// already decoded. PathParam decodes the first and not the second, so a
+// value arrives the same however the client encoded it. A value that does
+// not decode, or is not UTF-8 once decoded, is ErrPathParamEncoding.
+func PathParam(r *http.Request, name string) (string, error) {
+	value := chi.URLParam(r, name)
+	if r.URL.RawPath != "" {
+		decoded, err := url.PathUnescape(value)
+		if err != nil {
+			return "", ErrPathParamEncoding
+		}
+		value = decoded
+	}
+	if !utf8.ValidString(value) {
+		return "", ErrPathParamEncoding
+	}
+	return value, nil
+}
 
 // Middleware matches standard net/http middleware signatures.
 type Middleware = func(http.Handler) http.Handler

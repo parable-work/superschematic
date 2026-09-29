@@ -294,10 +294,28 @@ async function failureResponse(error: unknown, ctx: RequestContext, options: Rou
   return problemResponse(internal(undefined, { cause: error }), ctx.requestId);
 }
 
+/**
+ * Refuses a request whose path does not decode once the route has captured
+ * a path parameter. Hono decodes each capture once, but leaves an escape it
+ * cannot decode (bad hex, or bytes that are not UTF-8) as text, so `%ZZ`
+ * and `%25ZZ` would otherwise reach the implementation as the same value.
+ */
+function refuseUndecodablePath(ctx: RequestContext): void {
+  if (Object.keys(ctx.pathParams).length === 0) return;
+  try {
+    decodeURIComponent(ctx.path);
+  } catch (error) {
+    throw badRequest('The request path is not valid percent-encoding', { cause: error, details: { location: 'path' } });
+  }
+}
+
 async function decode(ctx: RequestContext, spec: OperationSpec): Promise<DecodedRequest> {
+  // ctx.pathParams is already decoded: decoding it again would turn a
+  // value such as `100%` into a URIError and `a%2541` into `aA`.
+  refuseUndecodablePath(ctx);
   const path = decodeParams('path', spec.pathParams, name => {
     const value = ctx.pathParams[name];
-    return value === undefined ? undefined : [decodeURIComponent(value)];
+    return value === undefined ? undefined : [value];
   });
   const query = decodeParams('query', spec.queryParams, name => {
     const values = ctx.query.getAll(name);
@@ -430,6 +448,7 @@ export function mountManualOperation<E extends Env>(
           if (rateLimitPerMinute) await admit(ctx, rateLimitPerMinute, options);
           await establishCaller(ctx, options);
           if (!handler) throw notImplemented(`${spec.name} has no manual route handler`);
+          refuseUndecodablePath(ctx);
           return handler(c, ctx);
         } catch (error) {
           return failureResponse(error, ctx, options);

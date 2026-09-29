@@ -145,6 +145,32 @@ describe('mountOperation', () => {
     expect(await badQuery.json()).toMatchObject({ details: { location: 'query', parameter: 'includeArchived' } });
   });
 
+  test('decodes each path parameter exactly once, and refuses a path whose percent-encoding does not decode', async () => {
+    const app = new Hono();
+    const getItem: OperationSpec = { ...health, name: 'getItem', path: '/api/items/{id}', pathParams: [{ name: 'id', kind: 'string', required: true }] };
+    mountOperation(app, getItem, async (_ctx, request) => ({ id: request.path.id }));
+    app.onError(errorHandler());
+    const idOf = async (segment: string) => {
+      const response = await app.request(`/api/items/${segment}`);
+      expect(response.status).toBe(200);
+      return (await response.json()).data.id;
+    };
+    // A value with a literal % (or an escape sequence as text) is sent
+    // encoded once and must arrive as it was sent.
+    for (const id of ['%', 'a%25b', '100%', 'x%41y', '%E9', 'a/b', 'caf\u00e9', 'a+b c']) {
+      expect(await idOf(encodeURIComponent(id))).toBe(id);
+    }
+    // Encodings other than encodeURIComponent's decode to the same value.
+    expect(await idOf('%41')).toBe('A');
+    expect(await idOf('caf%c3%a9')).toBe('caf\u00e9');
+    expect(await idOf('a%2fb')).toBe('a/b');
+    for (const segment of ['%', '100%', '%ZZ', 'a%2', '%E9', '%C3%28']) {
+      const response = await app.request(`/api/items/${segment}`);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ status: 400, code: 'bad_request', details: { location: 'path' } });
+    }
+  });
+
   test('parses the body through the strict parser and honours the body cap', async () => {
     const created = await build().request('/api/orders', { method: 'POST', headers: { 'x-user': 'writer' }, body: '{"name":"x"}' });
     expect(created.status).toBe(201);
@@ -334,6 +360,17 @@ describe('mountManualOperation', () => {
     expect(await missing.json()).toMatchObject({ status: 501, code: 'not_implemented' });
     const alias = await app.request('/stream', { method: 'POST' });
     expect(await alias.text()).toBe('alias');
+  });
+
+  test('hands the hook path parameters decoded once, and refuses a path that does not decode', async () => {
+    const app = new Hono();
+    const fetchItem: OperationSpec = { ...stream, path: '/api/items/{id}', pathParams: [{ name: 'id', kind: 'string', required: true }], auth: { public: true, required: false, permissions: [] } };
+    mountManualOperation(app, fetchItem, (c, ctx) => c.text(ctx.pathParams.id ?? ''));
+    const decoded = await app.request(`/api/items/${encodeURIComponent('a%41%')}`, { method: 'POST' });
+    expect(await decoded.text()).toBe('a%41%');
+    const malformed = await app.request('/api/items/a%ZZ', { method: 'POST' });
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({ status: 400, code: 'bad_request', details: { location: 'path' } });
   });
 });
 

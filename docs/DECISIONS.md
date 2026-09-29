@@ -629,6 +629,24 @@ a generated package still ships TypeScript sources, since its consumer
 already runs a TypeScript-aware toolchain. That reason holds for the
 generated package, not for a runtime a compiled package imports.
 
+### D15, amended: a path parameter is decoded exactly once
+
+Each server hands the implementation a path parameter percent-decoded
+exactly once, however the client encoded it, and answers 400 to a path
+whose escapes do not decode. Before, the TypeScript runtime decoded Hono's
+already decoded capture a second time: `/items/%25` (the id `%`) threw a
+URIError and answered 500, and `/items/x%2541y` reached the implementation
+as `xAy`, not `x%41y`. The Go routes read chi's capture, which is still
+encoded when chi matched the route against `r.URL.RawPath` (a client that
+wrote `%41` for `A`, a `%2F` inside a segment, or lowercase hex), so
+`/items/%41` reached the implementation as `%41`. The Rust router, on
+axum's `Path`, already decoded once.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A path with an escape that is not two hex digits, or whose escapes do not decode to UTF-8, answers 400 in every server. The TypeScript runtime checks the request path when the route captured a parameter; the Go routes read each capture through `routing.PathParam` (net/http already refuses a bad escape); the Rust router checks the path with `path_is_percent_encoded`, and answers bytes that are not UTF-8 in the error envelope too, not with axum's bare 400. | Passing the text Hono and axum could not decode on to the implementation, where `%ZZ` and `%25ZZ` would arrive as the same value |
+| `routing.PathParam` decodes a capture when `r.URL.RawPath` is set, which is when chi matched against the raw path, and not otherwise. | Clearing `RawPath` before routing, which would split a value holding `%2F` into two segments |
+
 ## D14. A failing scalar value is one error, named by the rule it breaks
 
 A scalar value its scalar rejects is one validation error in every

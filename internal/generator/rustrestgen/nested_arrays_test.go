@@ -104,8 +104,9 @@ func TestWriteRustAPIGoldenNestedArrays(t *testing.T) {
 // and the Rust API crate of fixture-nested-arrays-api, with grid.paint
 // added, into a temp tree laid out as a build writes it, and runs cargo
 // test on the API crate with nestedArraysRouterTest: a list-of-lists body
-// reaches the implementation as nested JSON arrays and a list-of-lists
-// result comes back in the success envelope. The types crate resolves
+// reaches the implementation as nested JSON arrays, a list-of-lists result
+// comes back in the success envelope, and a path parameter reaches it
+// decoded exactly once. The types crate resolves
 // superscalar from the checkout scripts/superscalar-dep.sh stands up.
 // CARGO_TARGET_DIR is honored when set.
 func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
@@ -255,6 +256,35 @@ async fn a_list_of_lists_result_is_the_envelope_data() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(envelope["data"], polygons);
+}
+
+// The id is sent encoded once, as encodeURIComponent writes it, and in
+// other encodings of the same value: the implementation receives it decoded
+// exactly once, as behind the TypeScript and Go routers. A path whose
+// escapes do not decode to UTF-8 answers 400 in the error envelope.
+#[tokio::test]
+async fn a_path_parameter_is_decoded_once() {
+    for (segment, want) in [
+        ("%25", "%"),
+        ("a%2525b", "a%25b"),
+        ("100%25", "100%"),
+        ("x%2541y", "x%41y"),
+        ("a%2Fb", "a/b"),
+        ("caf%C3%A9", "caf\u{e9}"),
+        ("a%2Bb%20c", "a+b c"),
+        ("%41", "A"),
+        ("caf%c3%a9", "caf\u{e9}"),
+        ("a%2fb", "a/b"),
+    ] {
+        let (status, envelope) = call("PUT", format!("/api/grids/{segment}/labels"), Some(json!({"labels": []}))).await;
+        assert_eq!(status, StatusCode::OK, "{segment}");
+        assert_eq!(envelope["data"]["id"], want, "{segment}");
+    }
+    for segment in ["%", "100%", "%ZZ", "a%2", "%E9", "%C3%28"] {
+        let (status, envelope) = call("PUT", format!("/api/grids/{segment}/labels"), Some(json!({"labels": []}))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{segment}");
+        assert_eq!(envelope["error"]["code"], "bad_request", "{segment}");
+    }
 }
 
 #[tokio::test]
