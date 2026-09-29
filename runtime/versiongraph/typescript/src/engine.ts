@@ -718,7 +718,9 @@ export class Engine {
    * signal aborts, and then rejects with the signal's reason. Each pass
    * takes the graph's sweep lock, so one replica sweeps at a time and a pass
    * that finds it held is skipped. onPass, when given, receives each pass's
-   * report or error; an error does not stop the sweeper.
+   * report or error; an error does not stop the sweeper. An already-aborted
+   * signal runs no pass, and a pass under way when the signal aborts
+   * finishes before the sweeper stops.
    */
   async runSweeper(
     intervalMs: number,
@@ -731,6 +733,9 @@ export class Engine {
     }
     let next = Date.now();
     for (;;) {
+      if (signal?.aborted) {
+        throw signal.reason;
+      }
       next += intervalMs;
       try {
         const report = await this.sweep(options);
@@ -738,9 +743,7 @@ export class Engine {
       } catch (err) {
         onPass?.(null, err);
       }
-      if (signal?.aborted) {
-        throw signal.reason;
-      }
+      // sleep rejects at once when the signal aborted during the pass.
       await sleep(Math.max(0, next - Date.now()), signal);
       next = Math.max(next, Date.now());
     }

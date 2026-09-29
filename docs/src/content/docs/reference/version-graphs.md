@@ -608,7 +608,9 @@ keeps its digits: a tree is `Record<string, string[]>`, and a conflict's
 values, a change's row and a resolution's `value` are JSON text. A
 duration argument is in milliseconds. `runSweeper(intervalMs, options,
 onPass, signal)` runs until its `AbortSignal` aborts and then rejects with
-the signal's reason. The named errors are classes with the stable `code`
+the signal's reason. It runs no pass when the signal has already aborted,
+and a pass under way when it aborts finishes first, where Go's
+`RunSweeper` cancels that pass through its context. The named errors are classes with the stable `code`
 the scenario files name (`VersionConflictError` is a `NotFoundError`, as
 in Go); `errorCode(err)` returns it, or the core's code for an input the
 core refused.
@@ -649,7 +651,7 @@ no TypeScript ORM, so refs, commits and release pointers come back as the
 engine's `Ref`, `Commit` and `Release`.
 
 ```
-make versiongraph-scenarios-ts   # every scenario, the canonical vectors against Postgres, the adapter's and the sweeper's tests
+make versiongraph-scenarios-ts   # every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests
 ```
 
 The target needs `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and fails

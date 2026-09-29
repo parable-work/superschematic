@@ -612,7 +612,7 @@ jobs:
           bun run typecheck
           bun run test
 
-      - name: Scenarios through the TypeScript engine (every scenario, the canonical vectors against Postgres, the adapter and the sweeper)
+      - name: Scenarios through the TypeScript engine (every scenario, the canonical vectors against Postgres, the adapter, the sweeper and the facade)
         # Fails, rather than skips, without the database.
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable

@@ -61,7 +61,8 @@ operation for operation: `createPrimary`, `branch`, `save`, `commit`,
 walk ceiling, the snapshots, the schema-epoch check and the named errors
 and their stable codes. A canonical row is JSON text, so a number keeps its
 digits; durations are milliseconds; `runSweeper` stops when its
-`AbortSignal` aborts.
+`AbortSignal` aborts, runs no pass when it has already aborted, and lets a
+pass under way finish.
 
 The adapter builds its statements at run time from the descriptor
 (version 2) and reaches Postgres through `Client`, whose `query` returns
@@ -95,8 +96,8 @@ driver refused (`test/node.mjs`). With the variable set it also runs every
 scenario in `runtime/versiongraph/testdata/scenarios` through the engine
 and the adapter (`test/scenarios.test.ts`), checks each canonical vector's
 rendering against Postgres, and runs the adapter's
-(`test/adapter.test.ts`) and the sweeper's (`test/sweeper.test.ts`) own
-tests; without it they skip.
+(`test/adapter.test.ts`), the sweeper's (`test/sweeper.test.ts`) and the
+facade's (`test/facade.test.ts`) own tests; without it they skip.
 
 The reference page is "Version graphs" in the docs site
 (`docs/src/content/docs/reference/version-graphs.md`).

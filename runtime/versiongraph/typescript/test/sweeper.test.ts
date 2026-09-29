@@ -46,6 +46,24 @@ test("runSweeper refuses an interval that is not positive", async () => {
   expect(called).toBe(false);
 });
 
+// A sweeper whose signal has already aborted stops with its reason before
+// a pass: it opens no transaction and reports nothing.
+test("runSweeper with an aborted signal runs no pass", async () => {
+  let transactions = 0;
+  const engine = new Engine(core, descriptor, {
+    transact: () => {
+      transactions++;
+      return Promise.reject(new Error("no storage"));
+    },
+  });
+  const controller = new AbortController();
+  const reason = new Error("stopped");
+  controller.abort(reason);
+  let passes = 0;
+  await expect(engine.runSweeper(3_600_000, { actor }, () => passes++, controller.signal)).rejects.toBe(reason);
+  expect([transactions, passes]).toEqual([0, 0]);
+});
+
 // runSweeper runs while another transaction holds the graph's sweep lock:
 // its passes are skipped until the lock is released, the next pass sweeps,
 // and aborting its signal stops it with the signal's reason.

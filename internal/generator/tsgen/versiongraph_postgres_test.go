@@ -1,9 +1,13 @@
 package tsgen
 
 import (
+	"bytes"
+	"encoding/xml"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -55,23 +59,84 @@ func TestVersionGraphFacadeOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read bun's report: %v\n%s", err, out)
 	}
+	cases, err := junitTestcases(junit)
+	if err != nil {
+		t.Fatalf("parse bun's report: %v\n%s", err, junit)
+	}
 	// Each test ran and passed: a testcase with no failure and no skip.
 	for _, name := range []string{"the facade keeps every class", "the facade merges, releases, rebases and sweeps"} {
-		at := strings.Index(string(junit), `<testcase name="`+name+`"`)
-		if at < 0 {
+		tc, ok := cases[name]
+		if !ok {
 			t.Fatalf("bun did not run %q:\n%s", name, junit)
 		}
-		testcase := string(junit[at:])
-		if end := strings.Index(testcase, "</testcase>"); end >= 0 {
-			testcase = testcase[:end]
-		} else if end := strings.Index(testcase, "/>"); end >= 0 {
-			testcase = testcase[:end]
-		}
-		if strings.Contains(testcase, "<failure") || strings.Contains(testcase, "<skipped") {
-			t.Fatalf("%q did not pass:\n%s", name, testcase)
+		if tc.Failure != nil || tc.Skipped != nil {
+			t.Fatalf("%q did not pass:\n%s", name, junit)
 		}
 	}
 	t.Logf("bun ran the facade tests:\n%s", out)
+}
+
+// junitTestcase is one testcase of a junit report: a failure or skipped
+// element, when there is one, is non-nil.
+type junitTestcase struct {
+	Name    string    `xml:"name,attr"`
+	Failure *struct{} `xml:"failure"`
+	Skipped *struct{} `xml:"skipped"`
+}
+
+// junitTestcases reads every testcase of a junit report, at any depth of
+// testsuite nesting, keyed by name.
+func junitTestcases(report []byte) (map[string]junitTestcase, error) {
+	cases := map[string]junitTestcase{}
+	decoder := xml.NewDecoder(bytes.NewReader(report))
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return cases, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok || start.Name.Local != "testcase" {
+			continue
+		}
+		var tc junitTestcase
+		if err := decoder.DecodeElement(&tc, &start); err != nil {
+			return nil, err
+		}
+		cases[tc.Name] = tc
+	}
+}
+
+// TestJunitTestcases reads each testcase on its own: a self-closing passing
+// testcase before a failing one passes, and the failure and the skip stay
+// with the testcases that hold them.
+func TestJunitTestcases(t *testing.T) {
+	report := []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="a.test.ts">
+    <testcase name="passes" classname="a" time="0.1" />
+    <testcase name="fails" classname="a" time="0.1">
+      <failure type="AssertionError" />
+    </testcase>
+    <testsuite name="nested">
+      <testcase name="skips" classname="a"><skipped /></testcase>
+    </testsuite>
+  </testsuite>
+</testsuites>`)
+	cases, err := junitTestcases(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][2]bool{}
+	for name, tc := range cases {
+		got[name] = [2]bool{tc.Failure != nil, tc.Skipped != nil}
+	}
+	want := map[string][2]bool{"passes": {false, false}, "fails": {true, false}, "skips": {false, true}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("testcases = %v, want %v", got, want)
+	}
 }
 
 // versionGraphFacadeTest drives the generated RecipeGraph with bun. PG_MODULE

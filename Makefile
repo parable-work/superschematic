@@ -118,13 +118,14 @@ versiongraph-scenarios: versiongraph
 
 # Every version-graph scenario through the TypeScript engine and its Postgres
 # adapter, with the canonical vectors checked against Postgres and the
-# adapter's and the sweeper's own tests, against the Postgres that
-# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
+# adapter's, the sweeper's and the facade's own tests, against the Postgres
+# that SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
 versiongraph-scenarios-ts:
 	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
 		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build && \
-		bun test test/scenarios.test.ts test/canonical.test.ts test/adapter.test.ts test/sweeper.test.ts
+		bun test test/scenarios.test.ts test/canonical.test.ts test/adapter.test.ts test/sweeper.test.ts \
+		test/facade.test.ts
 
 # Starlight site. CI runs this as the docs job (D9); release.yml deploys it.
 docs:

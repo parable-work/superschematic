@@ -1448,7 +1448,9 @@ number keeps its digits; the adapter's client returns every column as the
 text Postgres writes, so no driver's type parsing touches a value, and its
 `pg` bindings call only the methods they need, so `pg` is an optional peer
 dependency no entry imports and the core loads without it; durations are
-milliseconds and `runSweeper` stops when its `AbortSignal` aborts; the
+milliseconds, and `runSweeper` stops when its `AbortSignal` aborts, runs no
+pass when it has already aborted, and lets a pass under way finish, where
+Go's `RunSweeper` cancels that pass through its context; the
 TypeScript facade returns the engine's refs, commits and release pointers,
 since there is no TypeScript ORM to read them typed; and it records its
 writes as the actor it is given, a sweep as its options' actor.
