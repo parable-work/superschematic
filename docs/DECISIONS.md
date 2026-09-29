@@ -827,11 +827,18 @@ The parity matrix has vectors with astral and multi-byte BMP characters
 for a field's lengths, a scalar's lengths, and list and list-of-lists
 elements.
 
-Still different, and not in the parity matrix: a `pattern` on astral
-characters. Go's `regexp` and Python's `re` match code points, and the
-generated TypeScript validator and the TypeScript runtime build a
-`RegExp` without the `u` flag, which matches UTF-16 units, so `.` matches
-half an emoji there.
+A `pattern` on astral characters first stayed different. Go's `regexp`
+and Python's `re` match code points. The generated TypeScript validator,
+the TypeScript runtime, the TypeScript SDK and the TypeScript API server's
+check of a scalar's pattern built a `RegExp` without the `u` flag, which
+matches UTF-16 units: `.` matched half an emoji, and `[^a-z]{2}` took one
+emoji for two characters. The API server already compiled an argument's
+own pattern with `u`. Patterns now match code points too:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every TypeScript `RegExp` built from a scalar's or a field's `pattern` has the `u` flag: in the generated validator, in the runtime (and its check that a scalar's pattern compiles), in the SDK and in the API server. The parity matrix's `PatternMatrix` holds `.`, `\W` and a negated class with a count on a string, a list, a list of lists and a string scalar, with vectors of astral characters, and the six validators agree. | Leaving TypeScript on UTF-16 units; rewriting each pattern per language |
+| A pattern must also be valid in the `u` flag's stricter syntax, which refuses an escaped character that has no special meaning (`\-` outside a class, `\_`), a lone `{` or `}`, and an incomplete quantifier. Such a pattern fails as a pattern JavaScript cannot compile failed before: the runtime, the SDK and the API server's scalar check refuse every value, and the generated validator and the API server's argument check throw. Every pattern in superscalar's catalog, the fixtures and the examples compiles with `u`. The loader checks a pattern only with Go's `regexp`, when it checks a default value. | A loader check of JavaScript's pattern syntax, which needs a JavaScript engine or a second implementation of its grammar |
 
 ## D16. An engine takes schemas as data, and behaviors compose on its types
 

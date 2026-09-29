@@ -130,6 +130,14 @@ const schemaConfigJSON = `{
 // element. A value either rule set rejects fails with that rule's name; a
 // rule checks only a value of its own JSON type, so a mistyped value is one
 // "type" error.
+//
+// PatternMatrix holds field patterns that match one character at a time
+// (".", "\W", a negated class with a count), on a builtin string, a list,
+// a list of lists and a string scalar. A pattern matches code points in
+// every validator (D14, amended): an astral character is one character, as
+// in Go's regexp and Python's re, and TypeScript compiles every pattern
+// with the "u" flag. Without it "." and "[^a-z]" match one UTF-16 unit,
+// half an astral character.
 const parityMatrixSchemaJSON = `{
   "scalars": {
     "Generic.Int64": {
@@ -468,6 +476,48 @@ const parityMatrixSchemaJSON = `{
           "name": "rankGrid",
           "typeRef": { "name": "Ordering.Rank", "isArray": true, "isArrayOfArrays": true },
           "validateMax": 10
+        }
+      ]
+    },
+    "PatternMatrix": {
+      "name": "PatternMatrix",
+      "role": "EmbeddedStruct",
+      "jsonField": true,
+      "fields": [
+        {
+          "name": "glyph",
+          "typeRef": { "name": "string" },
+          "validatePattern": "^.$"
+        },
+        {
+          "name": "glyphs",
+          "typeRef": { "name": "string", "isArray": true },
+          "validatePattern": "^.$"
+        },
+        {
+          "name": "glyphGrid",
+          "typeRef": { "name": "string", "isArray": true, "isArrayOfArrays": true },
+          "validatePattern": "^.$"
+        },
+        {
+          "name": "spaced",
+          "typeRef": { "name": "string" },
+          "validatePattern": "^\\w\\W\\w$"
+        },
+        {
+          "name": "pair",
+          "typeRef": { "name": "string" },
+          "validatePattern": "^[^a-z]{2}$"
+        },
+        {
+          "name": "pairName",
+          "typeRef": { "name": "Identity.Name" },
+          "validatePattern": "^[^a-z]{2}$"
+        },
+        {
+          "name": "pairNames",
+          "typeRef": { "name": "Identity.Name", "isArray": true },
+          "validatePattern": "^[^a-z]{2}$"
         }
       ]
     }
@@ -1412,6 +1462,32 @@ var vectors = []parityVector{
 		want:          map[string][]string{"reqAmount": {"type"}, "optName": {"type"}, "names[0]": {"type"}},
 		decodeRejects: []string{"go", "python"},
 	},
+	{
+		// A pattern matches code points (D14, amended): an astral character
+		// (U+1F600) is one "." and one "\W", and two of them are two
+		// "[^a-z]". Without the "u" flag TypeScript saw two UTF-16 units in
+		// each astral character and refused every value that holds one.
+		name:     "pattern_astral_character_is_one_character",
+		typeName: "PatternMatrix",
+		payload: `{"glyph": "\ud83d\ude00", "glyphs": ["\ud83d\ude00", "\u00e9", "a"],
+			"glyphGrid": [["\ud83d\ude00"], ["a", "\ud83d\ude00"]], "spaced": "a\ud83d\ude00b",
+			"pair": "\ud83d\ude00\ud83d\ude00", "pairName": "\ud83d\ude00\ud83d\ude00", "pairNames": ["\ud83d\ude00\ud83d\ude00", "12"]}`,
+		want: map[string][]string{},
+	},
+	{
+		// One astral character is not two characters, which TypeScript
+		// without the "u" flag accepted as two UTF-16 units; two are not one
+		// "." or one "\W".
+		name:     "pattern_astral_character_is_not_two",
+		typeName: "PatternMatrix",
+		payload: `{"glyph": "\ud83d\ude00\ud83d\ude00", "glyphs": ["a", "\ud83d\ude00\ud83d\ude00"],
+			"glyphGrid": [["a"], ["\ud83d\ude00", "ab"]], "spaced": "a\ud83d\ude00\ud83d\ude00b",
+			"pair": "\ud83d\ude00", "pairNames": ["\ud83d\ude00a"]}`,
+		want: map[string][]string{
+			"glyph": {"pattern"}, "glyphs[1]": {"pattern"}, "glyphGrid[1][1]": {"pattern"},
+			"spaced": {"pattern"}, "pair": {"pattern"}, "pairNames[0]": {"pattern"},
+		},
+	},
 }
 
 // knownDivergences pins where a language's generated validator disagrees with
@@ -1594,6 +1670,8 @@ func newParityValue(typeName string) parityValidatable {
 		return &StructuredMatrix{}
 	case "ScalarRuleMatrix":
 		return &ScalarRuleMatrix{}
+	case "PatternMatrix":
+		return &PatternMatrix{}
 	}
 	return nil
 }
@@ -1664,6 +1742,7 @@ import {
   validateJsonMatrix,
   validateListMatrix,
   validateParityMatrix,
+  validatePatternMatrix,
   validateScalarRuleMatrix,
   validateStructuredMatrix,
 } from './validators/types';
@@ -1688,6 +1767,7 @@ const validators: Record<string, (value: never) => true | Errors> = {
   JsonMatrix: validateJsonMatrix as never,
   StructuredMatrix: validateStructuredMatrix as never,
   ScalarRuleMatrix: validateScalarRuleMatrix as never,
+  PatternMatrix: validatePatternMatrix as never,
 };
 const vectors = JSON.parse(readFileSync(process.env.PARITY_VECTORS as string, 'utf8'));
 const results: Record<string, Record<string, string[]>> = {};

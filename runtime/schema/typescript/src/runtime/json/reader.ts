@@ -496,7 +496,7 @@ function parseScalarDefinition(
   const pattern = asString(definition.pattern);
   if (pattern) {
     try {
-      new RegExp(pattern);
+      new RegExp(pattern, "u");
     } catch (error) {
       throw new Error(
         `runtime schema parse error: invalid regex pattern for scalar ${name}: ${String(error)}`,

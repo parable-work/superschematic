@@ -483,6 +483,67 @@
         ],
         "jsonField": true
       },
+      "PatternMatrix": {
+        "name": "PatternMatrix",
+        "owner": "src/parity-matrix.schema.json",
+        "role": "EmbeddedStruct",
+        "fields": [
+          {
+            "name": "glyph",
+            "typeRef": {
+              "name": "string"
+            },
+            "validatePattern": "^.$"
+          },
+          {
+            "name": "glyphs",
+            "typeRef": {
+              "name": "string",
+              "isArray": true
+            },
+            "validatePattern": "^.$"
+          },
+          {
+            "name": "glyphGrid",
+            "typeRef": {
+              "name": "string",
+              "isArray": true,
+              "isArrayOfArrays": true
+            },
+            "validatePattern": "^.$"
+          },
+          {
+            "name": "spaced",
+            "typeRef": {
+              "name": "string"
+            },
+            "validatePattern": "^\\w\\W\\w$"
+          },
+          {
+            "name": "pair",
+            "typeRef": {
+              "name": "string"
+            },
+            "validatePattern": "^[^a-z]{2}$"
+          },
+          {
+            "name": "pairName",
+            "typeRef": {
+              "name": "Identity.Name"
+            },
+            "validatePattern": "^[^a-z]{2}$"
+          },
+          {
+            "name": "pairNames",
+            "typeRef": {
+              "name": "Identity.Name",
+              "isArray": true
+            },
+            "validatePattern": "^[^a-z]{2}$"
+          }
+        ],
+        "jsonField": true
+      },
       "ScalarRuleMatrix": {
         "name": "ScalarRuleMatrix",
         "owner": "src/parity-matrix.schema.json",
@@ -3155,6 +3216,80 @@
         ],
         "reqAmount": [
           "type"
+        ]
+      }
+    },
+    {
+      "name": "pattern_astral_character_is_one_character",
+      "type": "PatternMatrix",
+      "payload": {
+        "glyph": "\ud83d\ude00",
+        "glyphs": [
+          "\ud83d\ude00",
+          "\u00e9",
+          "a"
+        ],
+        "glyphGrid": [
+          [
+            "\ud83d\ude00"
+          ],
+          [
+            "a",
+            "\ud83d\ude00"
+          ]
+        ],
+        "spaced": "a\ud83d\ude00b",
+        "pair": "\ud83d\ude00\ud83d\ude00",
+        "pairName": "\ud83d\ude00\ud83d\ude00",
+        "pairNames": [
+          "\ud83d\ude00\ud83d\ude00",
+          "12"
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "pattern_astral_character_is_not_two",
+      "type": "PatternMatrix",
+      "payload": {
+        "glyph": "\ud83d\ude00\ud83d\ude00",
+        "glyphs": [
+          "a",
+          "\ud83d\ude00\ud83d\ude00"
+        ],
+        "glyphGrid": [
+          [
+            "a"
+          ],
+          [
+            "\ud83d\ude00",
+            "ab"
+          ]
+        ],
+        "spaced": "a\ud83d\ude00\ud83d\ude00b",
+        "pair": "\ud83d\ude00",
+        "pairNames": [
+          "\ud83d\ude00a"
+        ]
+      },
+      "want": {
+        "glyph": [
+          "pattern"
+        ],
+        "glyphGrid[1][1]": [
+          "pattern"
+        ],
+        "glyphs[1]": [
+          "pattern"
+        ],
+        "pair": [
+          "pattern"
+        ],
+        "pairNames[0]": [
+          "pattern"
+        ],
+        "spaced": [
+          "pattern"
         ]
       }
     }
