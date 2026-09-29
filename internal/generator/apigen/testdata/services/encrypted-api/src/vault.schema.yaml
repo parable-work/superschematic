@@ -1,0 +1,48 @@
+# An Encrypted operation set whose routes also carry a permission, a body
+# limit, a rate limit and a timeout. The Go route tests in apigen load it and
+# check that a request those refuse never reaches the payload decryptor.
+name: encrypted-api
+kind: API
+types:
+  # What a vault operation returns.
+  SecretReceipt:
+    name: SecretReceipt
+    role: APIView
+    fields:
+      - name: name
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: VaultMutations
+    encrypted: true
+    operations:
+      # Store a secret under a name.
+      - name: storeSecret
+        typeRef: { name: SecretReceipt }
+        required: true
+        httpMethod: POST
+        restPath: secrets
+        permissions: [secrets.write]
+        middleware: { bodyLimit: 1, timeout: 5 }
+        arguments:
+          - name: name
+            typeRef: { name: string }
+            required: true
+          - name: value
+            typeRef: { name: string }
+            required: true
+      # Rotate the key a secret is stored under.
+      - name: rotateSecret
+        typeRef: { name: SecretReceipt }
+        required: true
+        httpMethod: POST
+        restPath: "secrets/{name}/rotate"
+        permissions: [secrets.write]
+        middleware: { rateLimit: 1 }
+        arguments:
+          - name: name
+            typeRef: { name: string }
+            required: true
+          - name: reason
+            typeRef: { name: string }
+            required: true

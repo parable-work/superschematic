@@ -220,14 +220,12 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 	return routes
 }
 
+{{- /* routeMiddlewares lists a route's middlewares in the order they run: chi's With runs the first entry first. The cheap refusals come first (the webhook signature, the rate limit, the body limit, the permission check), so only a request that passes them reaches the payload decryptor, which in a deployment calls a key service. The timeout wraps the handler. */ -}}
 {{- define "routeMiddlewares" }}
 			{{- if or .Encrypted .RateLimit .BodyLimit .Timeout .RequiredPerms (ne .WebhookHMACProviderTypesExpr "") }}
 			Middlewares: []runtimerouting.Middleware{
 				{{- if ne .WebhookHMACProviderTypesExpr "" }}
 				webhookHMACVerifierMiddleware(cfg, {{ .WebhookHMACProviderTypesExpr }}),
-				{{- end }}
-				{{- if .Encrypted }}
-				runtimemiddleware.DecryptPayloadMiddleware(cfg.PayloadDecryptor, LoggerFromContext),
 				{{- end }}
 				{{- if .RateLimit }}
 				runtimemiddleware.RateLimit({{ .RateLimit }}, time.Minute, LoggerFromContext),
@@ -235,11 +233,14 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 				{{- if .BodyLimit }}
 				runtimemiddleware.BodyLimit({{ .BodyLimit }}, RespondError),
 				{{- end }}
-				{{- if .Timeout }}
-				runtimemiddleware.Timeout({{ .Timeout }}*time.Second, LoggerFromContext),
-				{{- end }}
 				{{- if .RequiredPerms }}
 				{{- authSnippet "routePermissions" . }}
+				{{- end }}
+				{{- if .Encrypted }}
+				runtimemiddleware.DecryptPayloadMiddleware(cfg.PayloadDecryptor, LoggerFromContext),
+				{{- end }}
+				{{- if .Timeout }}
+				runtimemiddleware.Timeout({{ .Timeout }}*time.Second, LoggerFromContext),
 				{{- end }}
 			},
 			{{- end }}

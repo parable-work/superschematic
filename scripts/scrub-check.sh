@@ -4,8 +4,8 @@
 # module paths, import specifiers and publisher registrations, and the
 # maintainer lines in the contributor docs; when it carries an identifier
 # or id shape from the source tree's planning, names one of the source
-# tree's schema kinds or carries a transform* field directive; or when core
-# source uses tenancy vocabulary.
+# tree's schema kinds or carries a field directive D18 moved out of the core
+# IR; or when core source uses tenancy vocabulary.
 # Everything else is a leftover from the source tree.
 #
 # The search runs with ripgrep when it is installed and with git grep
@@ -189,6 +189,22 @@ transforms="$(scan '[Tt]ransform([A-Z]|_[a-z])' . -- "${hashes[@]}")"
 if [ -n "$transforms" ]; then
   echo "scrub: transform* identifiers:" >&2
   echo "$transforms" >&2
+  exit 1
+fi
+
+# D18, amended, moved two more distribution directives out of the core IR: a
+# field's semantic role for quality rules and the flag that hid a field from
+# a pipeline's serving layer. A semantic-role identifier fails here in any
+# spelling (semanticRole, SemanticRole, semantic_role, x-semantic-role), and
+# so does the flag's x-exclude vendor key. The flag's IR key, exclude, is not
+# searched: @versioned({ exclude }) uses the same word. docs/DECISIONS.md
+# names the removed fields and is the one file skipped.
+fielddirectives="$(scan '[Ss]emantic[-_]?[Rr]ole|(^|[^A-Za-z0-9_-])x-exclude([^A-Za-z0-9_-]|$)' . -- "${hashes[@]}" \
+  | drop '^\./docs/DECISIONS\.md:[0-9]+:')"
+
+if [ -n "$fielddirectives" ]; then
+  echo "scrub: distribution field directives:" >&2
+  echo "$fielddirectives" >&2
   exit 1
 fi
 

@@ -79,13 +79,11 @@ export interface FieldDef {
   jsonField: boolean;
   secret: boolean;
   uiHidden: boolean;
-  semanticRole: string;
   // Wire encoding of a Temporal.DateTime field whose source sends a bare
   // epoch count instead of ISO text: unix, unix_millis,
   // unix_micros, or unix_nanos. temporalFormat in the runtime-IR wire form,
   // x-temporal-format in the legacy JSON-Schema form. Empty = ISO text.
   temporalFormat: string;
-  exclude: boolean;
   internalMetadata: boolean;
   auth: boolean;
   encrypted: boolean;

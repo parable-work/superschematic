@@ -113,7 +113,7 @@ of them; run them locally before pushing.
 | `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
 | `make cli-smoke`      | `bin/superschematic build` with no extension builds the DB, API and General fixtures |
-| `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript` and `runtime/versiongraph/typescript` typecheck, build and test; the last builds the version-graph core for wasm32 and runs every vector through the package |
+| `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript` and `runtime/engine/typescript` typecheck, build and test; the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and the engine's tests run under Node.js and Bun |
 | `make python`         | `runtime/schema/python` pytest                                       |
 | `make rust`           | `runtime/http/rust` and `runtime/versiongraph/rust` fmt, clippy `-D warnings` (the core for native and wasm32), test |
 | `make versiongraph`   | Builds the version-graph core's static archive the Go binding links (`scripts/versiongraph-archive.sh`) |
@@ -182,7 +182,7 @@ and concrete.
 
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
 `api`, `schema-config`, `schema-ir`, `schema-runtime`, `http-runtime`,
-`versiongraph`), the
+`versiongraph`, `engine`), the
 PyPI distribution (`superschematic-schema-runtime`), the crates
 (`superschematic-http-runtime`, and `superschematic-versiongraph`, which is
 not published) and the five Go modules all carry the SemVer
