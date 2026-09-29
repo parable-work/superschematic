@@ -39,8 +39,11 @@ type SDKOutput struct {
 	// ChecksQueryListItems reports whether a list query parameter's items
 	// are sent as text; src/runtime.rs then carries check_query_list_item.
 	ChecksQueryListItems bool
-	Timestamp            string
-	Version              string
+	// HasPathParams reports whether an endpoint's path takes a value;
+	// src/runtime.rs then carries path_segment, which encodes it.
+	HasPathParams bool
+	Timestamp     string
+	Version       string
 }
 
 // NamespaceInfo represents a namespace with its endpoints.
@@ -283,6 +286,9 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 			if param.ItemIsText {
 				output.ChecksQueryListItems = true
 			}
+		}
+		if len(converted.PathArgs) > 0 {
+			output.HasPathParams = true
 		}
 		ns.Endpoints = append(ns.Endpoints, converted)
 	}

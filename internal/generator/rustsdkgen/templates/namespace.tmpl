@@ -173,7 +173,7 @@ impl {{.Namespace.StructName}} {
 {{- end}}
 {{- end}}
 {{- if .PathArgs}}
-        let path = &format!("{{.PathFormat}}", {{join .PathArgs ", "}});
+        let path = &format!("{{.PathFormat}}", {{range $i, $arg := .PathArgs}}{{if $i}}, {{end}}runtime::path_segment(&{{$arg}}){{end}});
 {{- else}}
         let path = "{{.PathFormat}}";
 {{- end}}
@@ -438,7 +438,7 @@ impl {{.Namespace.StructName}} {
 {{- end}}
 {{- end}}
 {{- if .PathArgs}}
-        let path = &format!("{{.PathFormat}}", {{join .PathArgs ", "}});
+        let path = &format!("{{.PathFormat}}", {{range $i, $arg := .PathArgs}}{{if $i}}, {{end}}runtime::path_segment(&{{$arg}}){{end}});
 {{- else}}
         let path = "{{.PathFormat}}";
 {{- end}}

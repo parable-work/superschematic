@@ -13,16 +13,17 @@ import (
 )
 
 // TestNestedArraysSDKCrateBuildsAndRuns generates the Rust types crate and
-// the Rust SDK crate of fixture-nested-arrays-api, with grid.paint and
-// grid.placeOrder added, into a temp tree laid out as a build writes it,
-// checks the SDK crate with cargo clippy (cargoClippyAndTest) and runs
-// cargo test on it with nestedArraysSDKTest:
+// the Rust SDK crate of fixture-nested-arrays-api, with grid.paint,
+// grid.placeOrder and grid.cell added, into a temp tree laid out as a build
+// writes it, checks the SDK crate with cargo clippy (cargoClippyAndTest)
+// and runs cargo test on it with nestedArraysSDKTest:
 // Vec<Vec<T>> arguments and responses cross a local HTTP server as nested
 // JSON arrays, an input type with lists of lists passes the SDK's schema
 // validation, and an input that breaks a list bound or a nested object's
-// rule is refused before the request. The types crate resolves superscalar
-// from the checkout scripts/superscalar-dep.sh stands up. CARGO_TARGET_DIR
-// is honored when set.
+// rule is refused before the request; and with pathParamsSDKTest: each path
+// value is sent as one segment, encoded once. The types crate resolves
+// superscalar from the checkout scripts/superscalar-dep.sh stands up.
+// CARGO_TARGET_DIR is honored when set.
 func TestNestedArraysSDKCrateBuildsAndRuns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
@@ -32,7 +33,7 @@ func TestNestedArraysSDKCrateBuildsAndRuns(t *testing.T) {
 		t.Skip("cargo not available; skipping the Rust SDK build")
 	}
 	paths := testpaths.Local(t)
-	schema, apiOutput := loadNestedArraysAPI(t, sdktest.AddPaintOperation, sdktest.AddPlaceOrderOperation)
+	schema, apiOutput := loadNestedArraysAPI(t, sdktest.AddPaintOperation, sdktest.AddPlaceOrderOperation, sdktest.AddCellOperation)
 
 	root := t.TempDir()
 	typesDir := filepath.Join(root, "types", "rust", nestedArraysService)
@@ -58,6 +59,7 @@ superscalar = { path = "`+filepath.ToSlash(paths.ScalarRust)+`" }
 `)
 	crate := strings.ReplaceAll(sdkOutput.CrateName, "-", "_")
 	writeFile(t, filepath.Join(sdkDir, "tests", "nested_arrays.rs"), strings.ReplaceAll(nestedArraysSDKTest, "SDK_CRATE", crate))
+	writeFile(t, filepath.Join(sdkDir, "tests", "path_params.rs"), strings.ReplaceAll(pathParamsSDKTest, "SDK_CRATE", crate))
 
 	cargoClippyAndTest(t, cargoPath, sdkDir)
 }

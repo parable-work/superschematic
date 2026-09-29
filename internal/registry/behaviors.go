@@ -62,8 +62,11 @@ type BehaviorOperation struct {
 	// Name is the operation name, camelCase.
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
-	// ParamsSchema is the JSON Schema of the operation's parameters, an
-	// object schema, as an MCP tool's parameters are.
+	// ParamsSchema is the JSON Schema of the operation's parameters: an
+	// object schema, as an MCP tool's parameters are, that sets
+	// "additionalProperties": false, so the parameters are exactly the ones
+	// it declares and none reaches an engine's handler without its guards
+	// seeing it.
 	ParamsSchema json.RawMessage `json:"paramsSchema"`
 	// ResultSchema is the JSON Schema of the operation's result.
 	ResultSchema json.RawMessage `json:"resultSchema"`
@@ -103,12 +106,14 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // not have; a malformed name; a core name that is not bare or an extension
 // name whose prefix is not the registering extension; a duplicate name; a
 // config, params or result schema that does not compile; a params schema
-// that is not an object schema; an operation name that is not camelCase,
-// repeats, or is one an engine gives every schema (create, get, list,
-// update, delete); and a field name that is not an
-// identifier or repeats. Finalize checks what needs the whole registry:
-// requires and conflicts name registered behaviors, and each operation's
-// invocation policy is a value of the registry's policy.
+// that is not an object schema or does not set "additionalProperties":
+// false, the engine's rule, so no parameter reaches a handler without its
+// guards seeing it; an operation name that is not camelCase, repeats, or
+// is one an engine gives every schema (create, get, list, update, delete);
+// and a field name that is not an identifier or repeats. Finalize checks
+// what needs the whole registry: requires and conflicts name registered
+// behaviors, and each operation's invocation policy is a value of the
+// registry's policy.
 func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	var decl BehaviorDeclaration
 	dec := json.NewDecoder(bytes.NewReader(spec.Declaration))
@@ -221,10 +226,14 @@ func checkBehaviorOperations(decl BehaviorDeclaration) error {
 			}
 		}
 		var params struct {
-			Type any `json:"type"`
+			Type                 any `json:"type"`
+			AdditionalProperties any `json:"additionalProperties"`
 		}
 		if err := json.Unmarshal(op.ParamsSchema, &params); err != nil || params.Type != "object" {
 			return fmt.Errorf("registry: behavior %s operation %s paramsSchema must be an object schema (\"type\": \"object\")", decl.Name, op.Name)
+		}
+		if params.AdditionalProperties != false {
+			return fmt.Errorf("registry: behavior %s operation %s paramsSchema must set \"additionalProperties\": false, so its parameters are exactly the ones it declares", decl.Name, op.Name)
 		}
 	}
 	return nil

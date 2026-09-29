@@ -452,10 +452,18 @@ func convertPathToTS(path string, pathParams []apigen.Param) string {
 	tsPath := path
 	for _, param := range pathParams {
 		placeholder := fmt.Sprintf("{%s}", param.Name)
-		replacement := fmt.Sprintf("${%s}", tsutil.ToCamelCase(param.Name))
-		tsPath = strings.ReplaceAll(tsPath, placeholder, replacement)
+		tsPath = strings.ReplaceAll(tsPath, placeholder, tsPathSegment(tsutil.ToCamelCase(param.Name)))
 	}
 	return tsPath
+}
+
+// tsPathSegment is the template literal substitution that writes the value
+// of expr as one path segment, percent-encoded once by encodeURIComponent.
+// Every server decodes a path parameter exactly once, so a value holding %,
+// /, ? or # reaches the implementation as it was passed; `new URL` would
+// leave % and / as they are and cut the path at ? and #.
+func tsPathSegment(expr string) string {
+	return "${encodeURIComponent(" + expr + ")}"
 }
 
 // toSDKClassName converts schema name to SDK class name
@@ -640,11 +648,9 @@ func customTemplateFuncs() template.FuncMap {
 			return false
 		},
 		"scoped_path": func(path string, isScopedNS bool, scopeParamName string) string {
-			// For scoped namespaces, replace ${<scope>} with ${this.<scope>}
+			// For scoped namespaces, the scope segment reads this.<scope>.
 			if isScopedNS {
-				placeholder := fmt.Sprintf("${%s}", scopeParamName)
-				replacement := fmt.Sprintf("${this.%s}", scopeParamName)
-				return strings.ReplaceAll(path, placeholder, replacement)
+				return strings.ReplaceAll(path, tsPathSegment(scopeParamName), tsPathSegment("this."+scopeParamName))
 			}
 			return path
 		},
