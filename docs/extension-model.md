@@ -183,7 +183,7 @@ Each `Register*` method checks its own spec:
 | `RegisterToolHook` | an empty name, no `Edit`, a duplicate name |
 | `RegisterScalars` | an empty owner, a nil catalog, a second catalog |
 | `RegisterToolInvocationPolicy` | no `Extension`, a key, value list or default that fails `Validate`, a second policy |
-| `RegisterBehavior` | a declaration that does not decode or has an unknown key, a malformed name or one that does not belong to the registering extension, a duplicate name, a schema that does not compile, a params schema that is not an object schema, an operation or field name that is malformed or repeats, an operation named like one every schema has (section 3.16) |
+| `RegisterBehavior` | a declaration that does not decode or has an unknown key, a malformed name or one that does not belong to the registering extension, a duplicate name, a schema that does not compile, a params schema that is not an object schema or does not set `"additionalProperties": false`, an operation or field name that is malformed or repeats, an operation named like one every schema has (section 3.16) |
 
 Every one of them fails after `Finalize`.
 
@@ -672,7 +672,7 @@ shape is `BehaviorDeclaration`:
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
 | `fields` | the fields it adds: `name` and `description` |
-| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema), `resultSchema`, `writes`, and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
 
 A field carries only a name and a description. A field's type can depend
 on the behavior's config, and the loader needs only the name to refuse a
@@ -689,6 +689,18 @@ policy is fixed only once every extension has registered.
 `Registry.Behavior(name)` returns a registered `Behavior`: the declaration,
 the registering extension, `ConfigRequired()` (its config schema rejects
 `{}`) and `ValidateConfig`.
+
+An operation's `paramsSchema` sets `"additionalProperties": false`, so its
+parameters are exactly the ones it declares. An engine runs a behavior's
+guards and the operation's handler on the same validated object, and a
+key a guard does not know, such as an alias of a parameter it checks,
+could otherwise reach the handler unchecked. `RegisterBehavior` refuses
+any other value, or none, as the engine does and in its words: `behavior
+<B> operation <op> paramsSchema must set "additionalProperties": false,
+so its parameters are exactly the ones it declares`. The value must be
+`false` itself: a schema that closes the object another way, with
+`unevaluatedProperties: false` or `additionalProperties: {"not": {}}`, is
+refused too.
 
 In the IR a type lists its behaviors in `TypeDef.Behaviors`, a list of
 `ir.BehaviorRef{Name, Config}` written after `implements` and omitted when
@@ -736,8 +748,12 @@ type and the behavior: a behavior that is not registered, one listed
 twice, a config its schema rejects, a requirement the type does not list,
 a conflict it does, a field that collides with the type's own fields or
 another behavior's, and two behaviors that add an operation of the same
-name. The data-form readers check names and configs before JSON Schema
-validation, with the same wording (section 5). The strict loader in
+name. A behavior field collides with a type's own field that has its
+name or its JSON key (`jsonTag`), since an instance's JSON holds the two
+side by side; either fails as `type <T>: behavior <B> adds field <f>,
+which the type declares`, the engine's wording. The data-form readers
+check names and configs before JSON Schema validation, with the same
+wording (section 5). The strict loader in
 `@superschematic/schema-runtime` checks them through the meta-schema
 alone, with the same verdicts, and the schema-file TypeScript types in
 `@superschematic/schema-ir` type an entry as `BehaviorRef`, with the name

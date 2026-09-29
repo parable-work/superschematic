@@ -4,18 +4,16 @@ bound to their configs. The engine checks a schema's list at define and at
 publish as the compiler's loader does (internal/loader/verify), with the
 same wording, and refuses what the loader would: a behavior listed twice,
 a config its configSchema rejects, a requirement the type does not list, a
-conflict it does, a field that collides with the type's own or another
-behavior's, and two behaviors that add an operation of the same name. It
-refuses three things more:
+conflict it does, a field that collides with another behavior's or with
+one of the type's own, by its name or its JSON key (behavior fields sit
+beside the type's own in an instance), and two behaviors that add an
+operation of the same name. It refuses two things more:
 
 - a behavior with no implementation registered with this engine, which
   covers one the deployment's binary does not declare;
 - a behavior on a type other than the instance type: only the instance
   type has instances, so a nested type has nothing to add fields,
-  operations or storage to;
-- a behavior field with the JSON key of one of the type's own fields, not
-  only its name, since behavior fields sit beside the type's own in an
-  instance.
+  operations or storage to.
 
 A config passes parseConfig after its configSchema. An operation named
 like a built-in never gets here: registration refuses its declaration.
