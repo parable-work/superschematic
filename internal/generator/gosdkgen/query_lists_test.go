@@ -3,6 +3,8 @@ package gosdkgen
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
@@ -73,6 +75,118 @@ func TestListQueryParamsAreGoSlices(t *testing.T) {
 	if !sdkOutput.HasQueryLists || !sdkOutput.ChecksQueryListItems || !sdkOutput.ValidatesListElements {
 		t.Errorf("HasQueryLists %t, ChecksQueryListItems %t, ValidatesListElements %t, want all true",
 			sdkOutput.HasQueryLists, sdkOutput.ChecksQueryListItems, sdkOutput.ValidatesListElements)
+	}
+}
+
+// TestFixtureListQueryParamsAreGoSlices pins the query struct of the
+// fixture operations with a list query parameter: fixture-api's listTenants
+// (a required UUID list, an optional enum list) and apigen's body-args-api
+// searchPosts (an optional string list). Each list field is a slice, is
+// checked against its list bounds and item rules, and is sent with
+// runtime.AddQueryList.
+func TestFixtureListQueryParamsAreGoSlices(t *testing.T) {
+	bodyArgsAPI := func(t *testing.T) *apigen.APIOutput {
+		schema, err := loader.LoadService(filepath.Join("..", "apigen", "testdata", "services", "body-args-api"))
+		if err != nil {
+			t.Fatalf("load body-args-api: %v", err)
+		}
+		apiOutput, err := apigen.Generate(schema, apigen.Options{
+			Provider:    sessionauth.Provider{},
+			SchemaName:  "body-args-api",
+			ModulePath:  "example.com/schemas/api/body-args-api",
+			TypesModule: "example.com/schemas/types/go/body-args-api",
+			Clock:       nestedArraysClock,
+		})
+		if err != nil {
+			t.Fatalf("apigen.Generate: %v", err)
+		}
+		return apiOutput
+	}
+	for _, test := range []struct {
+		service string
+		load    func(t *testing.T) *apigen.APIOutput
+		method  string
+		// fields are the query struct's fields, gofmt's alignment dropped.
+		fields []string
+		// checks are lines of the method's validation and encoding.
+		checks []string
+	}{
+		{
+			service: "fixture-api",
+			load:    loadFixtureAPI,
+			method:  "ListTenants",
+			fields: []string{
+				"Ids []types.IdentityUUID `json:\"ids\"`",
+				"Statuses []types.TenantListStatus `json:\"statuses,omitzero\"`",
+			},
+			checks: []string{
+				"if query == nil || len(query.Ids) == 0 {",
+				"if len(query.Ids) > 100 {",
+				"for i, item := range query.Ids {",
+				"if len(query.Statuses) > 10 {",
+				"for i, item := range query.Statuses {",
+				`runtime.AddQueryList(queryValues, "ids", query.Ids)`,
+				`runtime.AddQueryList(queryValues, "statuses", query.Statuses)`,
+			},
+		},
+		{
+			service: "body-args-api",
+			load:    bodyArgsAPI,
+			method:  "SearchPosts",
+			fields: []string{
+				"Tags []string `json:\"tags,omitzero\"`",
+			},
+			checks: []string{
+				"if len(query.Tags) > 2 {",
+				"for i, item := range query.Tags {",
+				"if len([]rune(itemText)) < 2 {",
+				`runtime.AddQueryList(queryValues, "tags", query.Tags)`,
+			},
+		},
+	} {
+		t.Run(test.service, func(t *testing.T) {
+			apiOutput := test.load(t)
+			sdkOutput, err := Generate(apiOutput, "example.com/schemas/sdk/go/"+test.service, "sdk", nestedArraysClock)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			sdkDir := t.TempDir()
+			if err := WriteSDKWithTools(sdkOutput, apiOutput, sdkDir, t.TempDir(), nestedArraysClock); err != nil {
+				t.Fatalf("WriteSDKWithTools: %v", err)
+			}
+			var namespace, structName string
+			for _, ns := range sdkOutput.Namespaces {
+				for _, ep := range ns.Endpoints {
+					if ep.MethodName == test.method {
+						namespace, structName = ns.Name, ep.QueryStructName
+					}
+				}
+			}
+			if structName == "" {
+				t.Fatalf("no endpoint %s", test.method)
+			}
+			source, err := os.ReadFile(filepath.Join(sdkDir, "namespaces", strings.ToLower(namespace)+".go"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, body, found := strings.Cut(string(source), "type "+structName+" struct {\n")
+			body, _, closed := strings.Cut(body, "\n}\n")
+			if !found || !closed {
+				t.Fatalf("no struct %s in namespace %s", structName, namespace)
+			}
+			var fields []string
+			for _, line := range strings.Split(body, "\n") {
+				fields = append(fields, strings.Join(strings.Fields(line), " "))
+			}
+			if !reflect.DeepEqual(fields, test.fields) {
+				t.Errorf("%s fields = %q, want %q", structName, fields, test.fields)
+			}
+			for _, check := range test.checks {
+				if !strings.Contains(string(source), check) {
+					t.Errorf("namespace %s has no %q", namespace, check)
+				}
+			}
+		})
 	}
 }
 
