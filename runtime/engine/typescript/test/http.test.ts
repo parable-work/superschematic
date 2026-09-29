@@ -318,7 +318,12 @@ describe('refusals', () => {
     const { app } = await withOrders({ bodyLimitBytes: 2048 });
     await problem(call(app, 'GET', '/namespaces/default/nothing'), 404);
     await problem(call(app, 'PUT', `${ORDERS}/o1`, { body: { title: 'Desk' } }), 404);
-    await problem(call(app, 'GET', `${ORDERS}/%25`), 400);
+    // An id is decoded once: %25 is the id %, a%2541 the id a%41.
+    assert.match((await problem(call(app, 'GET', `${ORDERS}/%25`), 404)).detail, /^Order % does not exist/);
+    assert.match((await problem(call(app, 'GET', `${ORDERS}/a%2541`), 404)).detail, /^Order a%41 does not exist/);
+    await data(call(app, 'POST', ORDERS, { body: { id: 'o:1', data: { title: 'Desk' } } }), 201);
+    assert.equal((await data(call(app, 'GET', `${ORDERS}/o%3A1`))).id, 'o:1');
+    assert.equal((await problem(call(app, 'GET', `${ORDERS}/%ZZ`), 400)).code, 'bad_request');
     const large = await problem(call(app, 'POST', ORDERS, { body: { data: { title: 'x'.repeat(4096) } } }), 413);
     assert.equal(large.code, 'payload_too_large');
     await data(call(app, 'POST', ORDERS, { body: { data: { title: 'Desk' } } }), 201);

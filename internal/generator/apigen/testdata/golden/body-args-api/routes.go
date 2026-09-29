@@ -534,8 +534,12 @@ func createTagSetFlagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 	bodyRelatedArg := bodyargs.NewArg("related", bodyargs.String, bodyargs.Pattern(`^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`))
 	bodyPointsArg := bodyargs.NewArg("points", bodyargs.Object)
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
 		if IdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
 			return
@@ -600,8 +604,12 @@ func createTagPlacePointsHandler(impl TagImplementation) gohttp.HandlerFunc {
 	// order they are checked (the scalar type's own, then the argument's).
 	bodyPointByNameArg := bodyargs.NewArg("pointByName", bodyargs.Object, bodyargs.Required())
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
 		if IdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
 			return
@@ -656,8 +664,12 @@ func createTagNameShadesHandler(impl TagImplementation) gohttp.HandlerFunc {
 	bodyShadeByNameArg := bodyargs.NewArg("shadeByName", bodyargs.String, bodyargs.Required())
 	bodyLinksByLocaleArg := bodyargs.NewArg("linksByLocale", bodyargs.String, bodyargs.MaxLength(2048), bodyargs.Pattern(`^https?://[\w\-\{\}]+(\.[\w\-\{\}]+)+([:/?#][\w\-\._~:/?#\[\]@!\$&'\(\)\*\+,;=\{\}%]*)?$`), bodyargs.Pattern(`^https://`))
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
 		if IdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
 			return
@@ -719,8 +731,12 @@ func createTagSaveTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 	bodyTitleArg := bodyargs.NewArg("title", bodyargs.String)
 	bodyPriorityArg := bodyargs.NewArg("priority", bodyargs.Number)
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
 		if IdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
 			return

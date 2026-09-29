@@ -3,8 +3,8 @@
 // generated routes with an implementation that records what each call
 // received, and drives them over httptest with the vectors the TypeScript
 // server's scalar list test uses, plus required single values of every
-// builtin type, a UUID list and a list of objects, and the query string of
-// a GET operation.
+// builtin type, a UUID list and a list of objects, the query string of a
+// GET operation, and a path parameter in each encoding of its value.
 package bodyargsapi_test
 
 import (
@@ -289,6 +289,34 @@ func TestAListElementIsOneJSONValue(t *testing.T) {
 	}
 	if !jsonEqual(t, response["data"], `["a,b", "", " c "]`) {
 		t.Errorf("data = %v", response["data"])
+	}
+}
+
+// TestAPathParameterIsDecodedOnce sends saveTags's id encoded once, as
+// encodeURIComponent writes it, and in other encodings of the same value.
+// The implementation receives the value decoded exactly once, as it does
+// behind the TypeScript router, and a value that is not UTF-8 once decoded
+// is refused. (net/http refuses a bad escape such as %ZZ before routing.)
+func TestAPathParameterIsDecodedOnce(t *testing.T) {
+	server, impl := serve(t)
+	for _, tc := range []struct{ segment, want string }{
+		{"%25", "%"},
+		{"a%2525b", "a%25b"},
+		{"100%25", "100%"},
+		{"x%2541y", "x%41y"},
+		{"a%2Fb", "a/b"},
+		{"caf%C3%A9", "caf\u00e9"},
+		{"a%2Bb%20c", "a+b c"},
+		{"%41", "A"},
+		{"caf%c3%a9", "caf\u00e9"},
+	} {
+		accepted(t, server, impl, http.MethodPut, "/api/posts/"+tc.segment+"/tags", `{"labels": []}`)
+		if impl.last["id"] != tc.want {
+			t.Errorf("id sent as %s = %q, want %q", tc.segment, impl.last["id"], tc.want)
+		}
+	}
+	for _, segment := range []string{"%E9", "%C3%28"} {
+		refused(t, server, impl, http.MethodPut, "/api/posts/"+segment+"/tags", `{"labels": []}`)
 	}
 }
 

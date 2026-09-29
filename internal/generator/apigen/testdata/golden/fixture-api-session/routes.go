@@ -371,8 +371,12 @@ func createTenantCreateTenantHandler(impl TenantImplementation) gohttp.HandlerFu
 // Fetch one tenant by id.
 func createTenantGetTenantHandler(impl TenantImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
 		if IdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
 			return
@@ -412,8 +416,12 @@ func createTenantUpdateSecretHandler(impl TenantImplementation) gohttp.HandlerFu
 	// order they are checked (the scalar type's own, then the argument's).
 	bodySecretArg := bodyargs.NewArg("secret", bodyargs.String, bodyargs.Required())
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
-		// Extract path parameters
-		IdStr := chi.URLParam(r, "id")
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
 		if IdStr == "" {
 			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
 			return
