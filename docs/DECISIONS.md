@@ -1232,21 +1232,22 @@ The descriptor names the graph's root, ref, commit and patch tables and
 each kind's table and history table, and gives every column a value class
 (`string`, `integer`, `number`, `boolean`, `uuid`, `dateTime`, `date`,
 `time`, `duration`, `enum`, `json`, each also as a list or a list of
-lists), derived from the field's type as the schema runtime's JSON tells
-values apart. The core, the Go binding and the TypeScript package read
-version 2 only. `runtime/versiongraph/README.md` holds the canonical row
-contract, one rule per class from what Postgres returns;
+lists), derived from what the schema runtime's JSON for the field's type
+is and the SQL type the sql generator stores the column as; a pair no rule
+reads fails generation. The core, the Go binding and the TypeScript
+package read version 2 only. `runtime/versiongraph/README.md` holds the
+canonical row contract, one rule per class from what Postgres returns;
 `runtime/versiongraph/testdata/canonical` holds its vectors, and package
 `canonical` in the Go module implements the Postgres rules for the adapter
-to use. Three rules settled as they were built: a UUID's canonical form
-is the scalar core's base62; a date-time's is UTC with `Z`, since a
+to use. Three rules settled as they were built: a UUID's canonical form is
+the scalar core's base62; a date-time's is UTC with `Z`, since a
 `timestamptz` keeps no offset; and a time of day's is `HH:MM:SS`, as
 Postgres renders a `time`, to which the scalar's `HH:MM` and 12-hour forms
 normalize. The date-time and time rules depart from the table above, which
 calls each value the JSON the schema runtime writes: that JSON keeps the
-offset and the form the value was written in. The generated shell still hands the core
-`to_jsonb` rows. The adapter interface and the Go engine come next, with
-the scenario suite. The release pointer, merge-only primary lines,
-`Rebase`, snapshots and the sweep follow in the Go engine. The TypeScript,
-Rust and Python engines and facades follow and must pass the same
-scenarios. Each change that lands a piece updates this paragraph.
+offset and the form the value was written in. The generated shell still
+hands the core `to_jsonb` rows. The adapter interface and the Go engine
+come next, with the scenario suite. The release pointer, merge-only
+primary lines, `Rebase`, snapshots and the sweep follow in the Go engine.
+The TypeScript, Rust and Python engines and facades follow and must pass
+the same scenarios. Each change that lands a piece updates this paragraph.
