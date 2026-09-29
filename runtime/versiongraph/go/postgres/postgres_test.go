@@ -67,6 +67,41 @@ func TestNew(t *testing.T) {
 	}
 }
 
+// TestUpsertRowRefusesMoreColumnsThanATable: a row with more members than a
+// Postgres table has columns is refused before any statement runs.
+func TestUpsertRowRefusesMoreColumnsThanATable(t *testing.T) {
+	members := map[string]int{}
+	for i := 0; i <= 1600; i++ {
+		members[fmt.Sprintf("c%d", i)] = i
+	}
+	s := adapter(t).Storage(noStatements{t})
+	err := s.Transact(context.Background(), func(ctx context.Context, tx storage.Tx) error {
+		_, err := tx.UpsertRow(ctx, "step", storage.RowWrite{Ref: "1", Root: "1", Row: mustJSON(t, members), Actor: "2"})
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "at most 1600") {
+		t.Fatalf("a row of %d members: %v, want it refused", len(members), err)
+	}
+}
+
+// noStatements is a Client whose transactions fail the test on any
+// statement.
+type noStatements struct{ t *testing.T }
+
+func (c noStatements) Transact(ctx context.Context, fn func(ctx context.Context, conn postgres.Conn) error) error {
+	return fn(ctx, c)
+}
+
+func (c noStatements) Query(_ context.Context, sql string, _ []any, _ func(scan func(dest ...any) error) error) error {
+	c.t.Fatalf("ran %s", sql)
+	return nil
+}
+
+func (c noStatements) Exec(_ context.Context, sql string, _ ...any) (int64, error) {
+	c.t.Fatalf("ran %s", sql)
+	return 0, nil
+}
+
 // connect opens a connection whose search path is a schema of its own that
 // holds the fixture's DDL, and returns a second connection to the same
 // schema.
