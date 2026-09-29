@@ -4,7 +4,7 @@ import type { ScalarValidationResult, ValidationError } from 'superscalar/valida
 
 import { validateTemporalDuration as validateTemporalDurationFromLib, normalizeTemporalDuration as normalizeTemporalDurationFromLib, parseTemporalDuration as parseTemporalDurationFromLib } from 'superscalar/scalars';
 
-const TemporalDurationPattern = new RegExp("^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$");
+const TemporalDurationPattern = new RegExp("^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$", "u");
 
 /**
  * Validates a Temporal.Duration value

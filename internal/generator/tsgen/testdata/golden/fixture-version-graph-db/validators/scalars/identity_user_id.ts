@@ -4,7 +4,7 @@ import type { ScalarValidationResult, ValidationError } from 'superscalar/valida
 
 import { parseIdentityUserID as parseIdentityUserIDFromLib } from 'superscalar/scalars';
 
-const IdentityUserIDPattern = new RegExp("^[0-9A-Za-z]{1,22}$");
+const IdentityUserIDPattern = new RegExp("^[0-9A-Za-z]{1,22}$", "u");
 
 /**
  * Validates a Identity.UserID value

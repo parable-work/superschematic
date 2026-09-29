@@ -79,12 +79,12 @@ func decodeTastingHistoryData(raw []byte) (*types.Tasting, error) {
 		}
 	}
 	if rawValue, ok := values["tags"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
-		if err := json.Unmarshal(rawValue, &result.Tags); err != nil {
+		if err := unmarshalJSONListFieldValue(rawValue, &result.Tags, "tags", 1); err != nil {
 			return nil, fmt.Errorf("failed to decode history field tags: %w", err)
 		}
 	}
 	if rawValue, ok := values["helpers"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
-		if err := json.Unmarshal(rawValue, &result.Helpers); err != nil {
+		if err := unmarshalJSONListFieldValue(rawValue, &result.Helpers, "helpers", 1); err != nil {
 			return nil, fmt.Errorf("failed to decode history field helpers: %w", err)
 		}
 	}
@@ -681,6 +681,8 @@ func (r *TastingRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 
 	var tempTastedOn pgtype.Date
 	var tempRemarks []byte
+	var tempTags []*string
+	var tempHelpers []*types.IdentityUUID
 	var tempBites []byte
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
@@ -723,9 +725,9 @@ func (r *TastingRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 			case "remarks":
 				scanDest[i] = &tempRemarks
 			case "tags":
-				scanDest[i] = &result.Tags
+				scanDest[i] = &tempTags
 			case "helpers":
-				scanDest[i] = &result.Helpers
+				scanDest[i] = &tempHelpers
 			case "bites":
 				scanDest[i] = &tempBites
 			case "entity_key":
@@ -757,6 +759,12 @@ func (r *TastingRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 				if err := unmarshalGenericJSONFieldValue(tempRemarks, &result.Remarks); err != nil {
 					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field remarks: %w", err)
 				}
+			}
+			if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
+				jsonFieldDecodeErr = fmt.Errorf("failed to decode field tags: %w", err)
+			}
+			if err := copyListElements("helpers", tempHelpers, &result.Helpers); err != nil {
+				jsonFieldDecodeErr = fmt.Errorf("failed to decode field helpers: %w", err)
 			}
 			if len(tempBites) > 0 {
 				if err := unmarshalJSONListFieldValue(tempBites, &result.Bites, "bites", 2); err != nil {
@@ -798,9 +806,9 @@ func (r *TastingRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 
 			&tempRemarks,
 
-			&result.Tags,
+			&tempTags,
 
-			&result.Helpers,
+			&tempHelpers,
 
 			&tempBites,
 
@@ -823,6 +831,12 @@ func (r *TastingRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 				if err := unmarshalGenericJSONFieldValue(tempRemarks, &result.Remarks); err != nil {
 					return nil, fmt.Errorf("failed to decode JSON field remarks: %w", err)
 				}
+			}
+			if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
+				return nil, fmt.Errorf("failed to decode field tags: %w", err)
+			}
+			if err := copyListElements("helpers", tempHelpers, &result.Helpers); err != nil {
+				return nil, fmt.Errorf("failed to decode field helpers: %w", err)
 			}
 			if len(tempBites) > 0 {
 				if err := unmarshalJSONListFieldValue(tempBites, &result.Bites, "bites", 2); err != nil {
@@ -949,6 +963,8 @@ func (r *TastingRepository) GetManyByIDs(ctx context.Context, ids []types.Identi
 
 		var tempTastedOn pgtype.Date
 		var tempRemarks []byte
+		var tempTags []*string
+		var tempHelpers []*types.IdentityUUID
 		var tempBites []byte
 
 		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
@@ -982,9 +998,9 @@ func (r *TastingRepository) GetManyByIDs(ctx context.Context, ids []types.Identi
 
 			&tempRemarks,
 
-			&entity.Tags,
+			&tempTags,
 
-			&entity.Helpers,
+			&tempHelpers,
 
 			&tempBites,
 
@@ -1009,6 +1025,12 @@ func (r *TastingRepository) GetManyByIDs(ctx context.Context, ids []types.Identi
 			if err := unmarshalGenericJSONFieldValue(tempRemarks, &entity.Remarks); err != nil {
 				return nil, fmt.Errorf("failed to decode JSON field remarks: %w", err)
 			}
+		}
+		if err := copyListElements("tags", tempTags, &entity.Tags); err != nil {
+			return nil, fmt.Errorf("failed to decode field tags: %w", err)
+		}
+		if err := copyListElements("helpers", tempHelpers, &entity.Helpers); err != nil {
+			return nil, fmt.Errorf("failed to decode field helpers: %w", err)
 		}
 		if len(tempBites) > 0 {
 			if err := unmarshalJSONListFieldValue(tempBites, &entity.Bites, "bites", 2); err != nil {
@@ -1141,6 +1163,8 @@ func (r *TastingRepository) FindOne(ctx context.Context, filter *TastingFilter, 
 
 	var tempTastedOn pgtype.Date
 	var tempRemarks []byte
+	var tempTags []*string
+	var tempHelpers []*types.IdentityUUID
 	var tempBites []byte
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
@@ -1183,9 +1207,9 @@ func (r *TastingRepository) FindOne(ctx context.Context, filter *TastingFilter, 
 			case "remarks":
 				scanDest[i] = &tempRemarks
 			case "tags":
-				scanDest[i] = &result.Tags
+				scanDest[i] = &tempTags
 			case "helpers":
-				scanDest[i] = &result.Helpers
+				scanDest[i] = &tempHelpers
 			case "bites":
 				scanDest[i] = &tempBites
 			case "entity_key":
@@ -1217,6 +1241,12 @@ func (r *TastingRepository) FindOne(ctx context.Context, filter *TastingFilter, 
 				if err := unmarshalGenericJSONFieldValue(tempRemarks, &result.Remarks); err != nil {
 					jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field remarks: %w", err)
 				}
+			}
+			if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
+				jsonFieldDecodeErr = fmt.Errorf("failed to decode field tags: %w", err)
+			}
+			if err := copyListElements("helpers", tempHelpers, &result.Helpers); err != nil {
+				jsonFieldDecodeErr = fmt.Errorf("failed to decode field helpers: %w", err)
 			}
 			if len(tempBites) > 0 {
 				if err := unmarshalJSONListFieldValue(tempBites, &result.Bites, "bites", 2); err != nil {
@@ -1263,9 +1293,9 @@ func (r *TastingRepository) FindOne(ctx context.Context, filter *TastingFilter, 
 
 			&tempRemarks,
 
-			&result.Tags,
+			&tempTags,
 
-			&result.Helpers,
+			&tempHelpers,
 
 			&tempBites,
 
@@ -1288,6 +1318,12 @@ func (r *TastingRepository) FindOne(ctx context.Context, filter *TastingFilter, 
 				if err := unmarshalGenericJSONFieldValue(tempRemarks, &result.Remarks); err != nil {
 					return nil, fmt.Errorf("failed to decode JSON field remarks: %w", err)
 				}
+			}
+			if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
+				return nil, fmt.Errorf("failed to decode field tags: %w", err)
+			}
+			if err := copyListElements("helpers", tempHelpers, &result.Helpers); err != nil {
+				return nil, fmt.Errorf("failed to decode field helpers: %w", err)
 			}
 			if len(tempBites) > 0 {
 				if err := unmarshalJSONListFieldValue(tempBites, &result.Bites, "bites", 2); err != nil {
@@ -1491,6 +1527,8 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 
 		var tempTastedOn pgtype.Date
 		var tempRemarks []byte
+		var tempTags []*string
+		var tempHelpers []*types.IdentityUUID
 		var tempBites []byte
 
 		// Create temporary variables for relationship foreign keys (we don't store these directly on the struct)
@@ -1530,9 +1568,9 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 			case "remarks":
 				scanDest[i] = &tempRemarks
 			case "tags":
-				scanDest[i] = &result.Tags
+				scanDest[i] = &tempTags
 			case "helpers":
-				scanDest[i] = &result.Helpers
+				scanDest[i] = &tempHelpers
 			case "bites":
 				scanDest[i] = &tempBites
 			case "entity_key":
@@ -1566,6 +1604,12 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 			if err := unmarshalGenericJSONFieldValue(tempRemarks, &result.Remarks); err != nil {
 				jsonFieldDecodeErr = fmt.Errorf("failed to decode JSON field remarks: %w", err)
 			}
+		}
+		if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
+			jsonFieldDecodeErr = fmt.Errorf("failed to decode field tags: %w", err)
+		}
+		if err := copyListElements("helpers", tempHelpers, &result.Helpers); err != nil {
+			jsonFieldDecodeErr = fmt.Errorf("failed to decode field helpers: %w", err)
 		}
 		if len(tempBites) > 0 {
 			if err := unmarshalJSONListFieldValue(tempBites, &result.Bites, "bites", 2); err != nil {
@@ -1827,6 +1871,8 @@ func (r *TastingRepository) CreateOne(ctx context.Context, input *types.Tasting)
 
 	var tempTastedOn pgtype.Date
 	var tempRemarks []byte
+	var tempTags []*string
+	var tempHelpers []*types.IdentityUUID
 	var tempBites []byte
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
@@ -1860,9 +1906,9 @@ func (r *TastingRepository) CreateOne(ctx context.Context, input *types.Tasting)
 
 		&tempRemarks,
 
-		&result.Tags,
+		&tempTags,
 
-		&result.Helpers,
+		&tempHelpers,
 
 		&tempBites,
 
@@ -1886,6 +1932,12 @@ func (r *TastingRepository) CreateOne(ctx context.Context, input *types.Tasting)
 		if err := unmarshalGenericJSONFieldValue(tempRemarks, &result.Remarks); err != nil {
 			return nil, fmt.Errorf("failed to decode JSON field remarks: %w", err)
 		}
+	}
+	if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
+		return nil, fmt.Errorf("failed to decode field tags: %w", err)
+	}
+	if err := copyListElements("helpers", tempHelpers, &result.Helpers); err != nil {
+		return nil, fmt.Errorf("failed to decode field helpers: %w", err)
 	}
 	if len(tempBites) > 0 {
 		if err := unmarshalJSONListFieldValue(tempBites, &result.Bites, "bites", 2); err != nil {
@@ -2093,6 +2145,8 @@ func (r *TastingRepository) CreateMany(ctx context.Context, inputs []*types.Tast
 
 		var tempTastedOn pgtype.Date
 		var tempRemarks []byte
+		var tempTags []*string
+		var tempHelpers []*types.IdentityUUID
 		var tempBites []byte
 
 		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
@@ -2126,9 +2180,9 @@ func (r *TastingRepository) CreateMany(ctx context.Context, inputs []*types.Tast
 
 			&tempRemarks,
 
-			&result.Tags,
+			&tempTags,
 
-			&result.Helpers,
+			&tempHelpers,
 
 			&tempBites,
 
@@ -2153,6 +2207,12 @@ func (r *TastingRepository) CreateMany(ctx context.Context, inputs []*types.Tast
 			if err := unmarshalGenericJSONFieldValue(tempRemarks, &result.Remarks); err != nil {
 				return nil, fmt.Errorf("failed to decode JSON field remarks: %w", err)
 			}
+		}
+		if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
+			return nil, fmt.Errorf("failed to decode field tags: %w", err)
+		}
+		if err := copyListElements("helpers", tempHelpers, &result.Helpers); err != nil {
+			return nil, fmt.Errorf("failed to decode field helpers: %w", err)
 		}
 		if len(tempBites) > 0 {
 			if err := unmarshalJSONListFieldValue(tempBites, &result.Bites, "bites", 2); err != nil {
@@ -2351,6 +2411,8 @@ func (r *TastingRepository) updateOne(ctx context.Context, id types.IdentityUUID
 
 	var tempTastedOn pgtype.Date
 	var tempRemarks []byte
+	var tempTags []*string
+	var tempHelpers []*types.IdentityUUID
 	var tempBites []byte
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
@@ -2384,9 +2446,9 @@ func (r *TastingRepository) updateOne(ctx context.Context, id types.IdentityUUID
 
 		&tempRemarks,
 
-		&result.Tags,
+		&tempTags,
 
-		&result.Helpers,
+		&tempHelpers,
 
 		&tempBites,
 
@@ -2416,6 +2478,12 @@ func (r *TastingRepository) updateOne(ctx context.Context, id types.IdentityUUID
 		if err := unmarshalGenericJSONFieldValue(tempRemarks, &result.Remarks); err != nil {
 			return nil, fmt.Errorf("failed to decode JSON field remarks: %w", err)
 		}
+	}
+	if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
+		return nil, fmt.Errorf("failed to decode field tags: %w", err)
+	}
+	if err := copyListElements("helpers", tempHelpers, &result.Helpers); err != nil {
+		return nil, fmt.Errorf("failed to decode field helpers: %w", err)
 	}
 	if len(tempBites) > 0 {
 		if err := unmarshalJSONListFieldValue(tempBites, &result.Bites, "bites", 2); err != nil {

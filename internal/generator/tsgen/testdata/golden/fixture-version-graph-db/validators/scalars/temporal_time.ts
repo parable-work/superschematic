@@ -2,7 +2,7 @@
 
 import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
 
-const TemporalTimePattern = new RegExp("^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$");
+const TemporalTimePattern = new RegExp("^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$", "u");
 
 /**
  * Validates a Temporal.Time value
