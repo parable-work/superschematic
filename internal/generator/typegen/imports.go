@@ -39,6 +39,24 @@ func (r *resolvedImports) moduleDependencies(selfModulePath string) []string {
 	return deps
 }
 
+// ImportedDependencies returns the sorted names of the dependency services
+// whose Go types modules the types module of schema imports: the ones it
+// takes an enum, a union or an object type from. Imported scalars resolve
+// through superscalar and import no module. deps holds the loaded schema of
+// every service schema imports from.
+func ImportedDependencies(schema *ir.Schema, deps map[string]*ir.Schema) ([]string, error) {
+	imported, err := resolveImports(schema, Options{Dependencies: deps})
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(imported.modulePaths))
+	for name := range imported.modulePaths {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
 // DependencyServiceName extracts the service name from a schema import
 // package (e.g. "@schemas/web-db" -> "web-db").
 func DependencyServiceName(pkg string) string {

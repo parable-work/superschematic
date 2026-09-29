@@ -35,6 +35,9 @@ require (
 {{- if .HasFileUpload }}
 	golang.org/x/image v0.18.0
 {{- end }}
+{{- range .IndirectModules }}
+	{{ . }} v0.0.0-00010101000000-000000000000 // indirect
+{{- end }}
 )
 
 // Local module paths for development.
@@ -55,12 +58,11 @@ replace {{ $.Naming.ScalarGoModule }} => {{ .ScalarLibReplacePath }}
 {{- if .PtrReplacePath }}
 replace {{ $.Naming.PtrGoModule }} => {{ .PtrReplacePath }}
 {{- end }}
-{{- range .ModuleDependencies }}
+{{- range .TypesModuleReplaces }}
 replace {{ . }} => ../../types/go/{{ base . }}
 {{- end }}
 {{- if .IsPublic }}
 replace {{ .ORMModule }} => ../../orm/{{ .UpstreamSchema }}
-replace {{ .UpstreamTypesModule }} => ../../types/go/{{ .UpstreamSchema }}
 {{- end }}
 {{- if .VersionGraphReplacePath }}
 replace {{ $.Naming.VersionGraphGoModule }} => {{ .VersionGraphReplacePath }}

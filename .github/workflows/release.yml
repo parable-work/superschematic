@@ -89,8 +89,7 @@ jobs:
             dry_run=false
             tag="$REF_NAME"
             version="${tag#v}"
-            # Refuses a tag whose version the tree does not carry, and a
-            # version without a CHANGELOG section.
+            # Refuses a tag whose version the tree does not carry.
             python3 scripts/bump_version.py check --expect "$version"
           fi
           prerelease=false
@@ -203,7 +202,7 @@ jobs:
           # commit instead.
           go build -trimpath -buildvcs=false -ldflags "-s -w" -o "$out/superschematic" ./cmd/superschematic
           "$out/superschematic" --help >/dev/null
-          cp LICENSE README.md CHANGELOG.md "$out/"
+          cp LICENSE README.md "$out/"
           # The commit every binary must agree on; assemble refuses a set
           # built from more than one.
           printf '%s\n' "$GITHUB_SHA" > "$out/BUILD_COMMIT"
@@ -395,13 +394,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.preflight.outputs.tag }}
-          VERSION: ${{ needs.preflight.outputs.version }}
           PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
         run: |
           set -euo pipefail
           {
-            python3 scripts/bump_version.py notes "$VERSION"
-            echo
             echo "## Artifacts"
             echo
             echo "Every binary was built from commit \`$GITHUB_SHA\` and is listed in \`SHA256SUMS\`."
@@ -415,6 +411,7 @@ jobs:
             --verify-tag \
             --title "superschematic $TAG" \
             --notes-file notes.md \
+            --generate-notes \
             "${flags[@]}" \
             release-assets/*.tar.gz release-assets/SHA256SUMS release-assets/*.spdx.json \
             release-assets/npm/*.tgz release-assets/python/*
