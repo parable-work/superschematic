@@ -70,6 +70,9 @@ func checkGraphRoot(schema *ir.Schema, td *ir.TypeDef, memberCount int, generate
 	if td.VersionGraph.SchemaEpoch < 0 {
 		r.errorf(td.Owner, "%s: @versionGraph schemaEpoch must not be negative", td.Name)
 	}
+	if every := td.VersionGraph.SnapshotEvery; every != nil && *every <= 0 {
+		r.errorf(td.Owner, "%s: @versionGraph snapshotEvery must be positive", td.Name)
+	}
 	if memberCount == 0 {
 		r.errorf(td.Owner, "%s: @versionGraph needs at least one @graphMember type", td.Name)
 	}

@@ -89,7 +89,8 @@
 #  19. shop-db's Planogram version graph, declared with the core's
 #      @versionGraph, @graphMember and @conflictUnit and no core edit,
 #      expands in the IR into PlanogramRef, PlanogramCommit, PlanogramPatch,
-#      their enums and each member's graph fields; the types module writes
+#      PlanogramRelease, PlanogramSnapshotEntry, their enums and each
+#      member's graph fields and prune pins; the types module writes
 #      its descriptor (version 2: the graph's tables and every column's
 #      value class) and the ORM its facade (db.PlanogramGraph()), which
 #      compiled with the ORM module in step 17; format writes the
@@ -466,7 +467,7 @@ grep -q 'behavior "acme.Rating" on type "Product" is not a registered behavior (
 echo "==> version graph: shop-db's Planogram, declared with no core edit"
 # The loader expands the declarations into ordinary types, marked with their
 # origin; the members keep their own fields and gain the graph's.
-jq -e '[.types[] | select(.origin == "versionGraph") | .name] | sort == ["PlanogramCommit", "PlanogramPatch", "PlanogramRef"]' \
+jq -e '[.types[] | select(.origin == "versionGraph") | .name] | sort == ["PlanogramCommit", "PlanogramPatch", "PlanogramRef", "PlanogramRelease", "PlanogramSnapshotEntry"]' \
   "$OUT/db-ir.json" >/dev/null
 jq -e '[.enums[] | select(.origin == "versionGraph") | .name] | sort == ["PlanogramEntityKind", "PlanogramPatchOperation"]' \
   "$OUT/db-ir.json" >/dev/null
@@ -476,7 +477,7 @@ jq -e '.types.Facing.graphMember == {"graph": "Planogram", "parent": {"key": "ba
 for member in Bay Facing; do
   jq -e --arg m "$member" '[.types[$m].fields[] | select(.origin == "versionGraph") | .name] == ["entityKey", "ref", "deletedOnRef"]' \
     "$OUT/db-ir.json" >/dev/null
-  jq -e --arg m "$member" '.types[$m].versionedConfig.pruneKeepReferencedBy == [{"table": "planogram_patch", "keyColumn": "entity_id", "versionColumn": "entity_version", "origin": "versionGraph"}]' \
+  jq -e --arg m "$member" '.types[$m].versionedConfig.pruneKeepReferencedBy == [{"table": "planogram_patch", "keyColumn": "entity_id", "versionColumn": "entity_version", "origin": "versionGraph"}, {"table": "planogram_snapshot_entry", "keyColumn": "entity_id", "versionColumn": "entity_version", "origin": "versionGraph"}]' \
     "$OUT/db-ir.json" >/dev/null
 done
 # The descriptor the core reads: version 2, with the graph's tables, a keyed
@@ -485,7 +486,7 @@ done
 # value class.
 DESCRIPTOR="$DIST/types/go/shop-db/versiongraph/planogram.json"
 jq -e '.version == 2 and .graph == "planogram" and ([.kinds[].kind] == ["bay", "facing"])' "$DESCRIPTOR" >/dev/null
-jq -e '.root == {"table": "planogram", "key": "id"} and .refTable == "planogram_ref" and .commitTable == "planogram_commit" and .patchTable == "planogram_patch"' \
+jq -e '.root == {"table": "planogram", "key": "id"} and .refTable == "planogram_ref" and .commitTable == "planogram_commit" and .patchTable == "planogram_patch" and .releaseTable == "planogram_release" and .snapshotTable == "planogram_snapshot_entry"' \
   "$DESCRIPTOR" >/dev/null
 jq -e '[.kinds[] | [.table, .historyTable]] == [["bay", "bay_history"], ["facing", "facing_history"]]' "$DESCRIPTOR" >/dev/null
 jq -e '.kinds[1].columns == {"_version": "integer", "bay_key": "uuid", "deleted_on_ref": "boolean", "entity_key": "uuid", "id": "uuid", "planogram_id": "uuid", "position": "integer", "ref_id": "uuid", "sku": "string", "width": "number"}' \
@@ -500,6 +501,8 @@ grep -q $'^\tversiongraph "github.com/parable-work/superschematic/runtime/versio
   "$DIST/orm/shop-db/versiongraph_planogram.go"
 grep -q '^CREATE TABLE planogram_ref ($' "$DIST/sql/shop-db/create.sql"
 grep -q '^CREATE TABLE planogram_patch ($' "$DIST/sql/shop-db/create.sql"
+grep -q '^CREATE TABLE planogram_release ($' "$DIST/sql/shop-db/create.sql"
+grep -q '^CREATE TABLE planogram_snapshot_entry ($' "$DIST/sql/shop-db/create.sql"
 # format writes the declarations and skips what the loader added; the YAML
 # twin loads back to the same expanded types and enums.
 PLANOGRAM="$OUT/planogram-yaml"
@@ -514,7 +517,7 @@ fi
 printf '{"name": "shop-db", "kind": "DB", "outputs": {}}\n' >"$PLANOGRAM/schema.config.json"
 "$OUT/acme-schematic" build "$PLANOGRAM" --emit-ir --naming "$SCHEMAS/superschematic.toml" --out "$OUT/ir-dist" >"$OUT/planogram-ir.json"
 GRAPH_DEFS='[.types, .enums | to_entries[] | select(.key | test("^(Planogram|Bay$|Facing$)")) | .value | del(.owner)]'
-jq -e "$GRAPH_DEFS | length == 8" "$OUT/planogram-ir.json" >/dev/null
+jq -e "$GRAPH_DEFS | length == 10" "$OUT/planogram-ir.json" >/dev/null
 cmp <(jq -S "$GRAPH_DEFS" "$OUT/db-ir.json") <(jq -S "$GRAPH_DEFS" "$OUT/planogram-ir.json")
 
 echo "==> behaviors: acme.Rating runs in the engine"

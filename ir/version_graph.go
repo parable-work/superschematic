@@ -39,6 +39,26 @@ type VersionGraphConfig struct {
 	// the member types change in a way a stored commit must be transformed
 	// across. Zero is the first epoch.
 	SchemaEpoch int64 `json:"schemaEpoch,omitempty" yaml:"schemaEpoch,omitempty"`
+
+	// SnapshotEvery is how many commits past the nearest snapshot on its
+	// chain a commit is snapshotted at: its full pin set is stored, so
+	// reading its tree stops there. Nil means DefaultSnapshotEvery; a set
+	// value is positive. Verification enforces that, not the data form's
+	// JSON Schema, whose subset has no numeric bounds.
+	SnapshotEvery *int64 `json:"snapshotEvery,omitempty" yaml:"snapshotEvery,omitempty"`
+}
+
+// DefaultSnapshotEvery is a version graph's snapshot interval when
+// @versionGraph does not set snapshotEvery.
+const DefaultSnapshotEvery = 64
+
+// SnapshotInterval returns the graph's snapshot interval: SnapshotEvery, or
+// DefaultSnapshotEvery when it is unset.
+func (c *VersionGraphConfig) SnapshotInterval() int64 {
+	if c == nil || c.SnapshotEvery == nil {
+		return DefaultSnapshotEvery
+	}
+	return *c.SnapshotEvery
 }
 
 // GraphMemberConfig is the @graphMember declaration of one entity kind of a

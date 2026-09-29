@@ -41,7 +41,8 @@ the core's `@versionGraph`, `@graphMember` and `@conflictUnit` and no core
 edit (`schemas/services/shop-db/src/planogram.schema.ts`): a `Planogram`
 root, its `Bay` members ordered by position with a `keyed` conflict unit
 on `shelfHeights`, and `Facing` members under each bay. The loader adds
-`PlanogramRef`, `PlanogramCommit` and `PlanogramPatch`; the Go types write
+`PlanogramRef`, `PlanogramCommit`, `PlanogramPatch`, `PlanogramRelease` and
+`PlanogramSnapshotEntry`; the Go types write
 the graph's descriptor and the ORM `db.PlanogramGraph()`. The ORM, and
 `shop-api` through it, link the version-graph core's static archive,
 which `make setup` builds (`scripts/versiongraph-archive.sh`).

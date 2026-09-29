@@ -108,7 +108,8 @@ func checkTyped[Req, Res any](t *testing.T, v vector, fn func(Req) (*Res, error)
 
 func TestErrorIsReturnedAsError(t *testing.T) {
 	descriptor := `{"version":2,"root":{"table":"recipe","key":"id"},"refTable":"recipe_ref",` +
-		`"commitTable":"recipe_commit","patchTable":"recipe_patch","kinds":[]}`
+		`"commitTable":"recipe_commit","patchTable":"recipe_patch","releaseTable":"recipe_release",` +
+		`"snapshotTable":"recipe_snapshot_entry","kinds":[]}`
 	_, err := Validate(TreeRequest{Descriptor: json.RawMessage(descriptor), Tree: json.RawMessage(`[]`)})
 	var coreErr *Error
 	if !errors.As(err, &coreErr) {

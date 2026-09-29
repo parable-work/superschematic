@@ -208,7 +208,7 @@ func checkAgainstDDL(t *testing.T, schema *ir.Schema) {
 	if !ok || root.PrimaryKey != d.Root.Key {
 		t.Errorf("root %+v: no table with that primary key", d.Root)
 	}
-	for _, name := range []string{d.RefTable, d.CommitTable, d.PatchTable} {
+	for _, name := range []string{d.RefTable, d.CommitTable, d.PatchTable, d.ReleaseTable, d.SnapshotTable} {
 		if _, ok := tables[name]; !ok {
 			t.Errorf("the descriptor names table %s, which the DDL does not create", name)
 		}

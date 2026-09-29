@@ -27,6 +27,8 @@ struct Descriptor {
     ref_table: String,
     commit_table: String,
     patch_table: String,
+    release_table: String,
+    snapshot_table: String,
     kinds: Vec<KindDescriptor>,
 }
 
@@ -263,6 +265,8 @@ impl Graph {
             ("refTable", &raw.ref_table),
             ("commitTable", &raw.commit_table),
             ("patchTable", &raw.patch_table),
+            ("releaseTable", &raw.release_table),
+            ("snapshotTable", &raw.snapshot_table),
         ];
         if let Some((member, _)) = tables.iter().find(|(_, name)| name.is_empty()) {
             return Err(Error::descriptor(format!(

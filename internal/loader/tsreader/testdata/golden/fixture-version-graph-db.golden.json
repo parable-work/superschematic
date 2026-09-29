@@ -246,7 +246,8 @@
         }
       ],
       "versionGraph": {
-        "schemaEpoch": 1
+        "schemaEpoch": 1,
+        "snapshotEvery": 3
       }
     },
     "Step": {

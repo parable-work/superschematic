@@ -212,6 +212,44 @@ pub struct RecipeRef {
     pub version: i64,
 }
 
+/// The released commit of one root of the Recipe version graph; its history is the release log.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecipeRelease {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<Recipe>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<RecipeCommit>,
+    #[serde(rename = "createdAt")]
+    pub created_at: TemporalDateTime,
+    #[serde(rename = "createdBy")]
+    pub created_by: IdentityUUID,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: TemporalDateTime,
+    #[serde(rename = "updatedBy")]
+    pub updated_by: IdentityUUID,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
+}
+
+/// One entity of a snapshotted commit of the Recipe version graph, pinned to the row version its tree holds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecipeSnapshotEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<RecipeCommit>,
+    #[serde(rename = "entityKind")]
+    pub entity_kind: RecipeEntityKind,
+    #[serde(rename = "entityKey")]
+    pub entity_key: IdentityUUID,
+    #[serde(rename = "entityId")]
+    pub entity_id: IdentityUUID,
+    #[serde(rename = "entityVersion")]
+    pub entity_version: GenericInt64,
+}
+
 fn default_step_deleted_on_ref() -> bool {
     false
 }

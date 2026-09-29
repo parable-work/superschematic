@@ -54,6 +54,8 @@ from .types import (
     RecipeCommit,
     RecipePatch,
     RecipeRef,
+    RecipeRelease,
+    RecipeSnapshotEntry,
     Step,
     Tasting,
     Utensil
@@ -89,6 +91,8 @@ __all__ = [
     "RecipeCommit",
     "RecipePatch",
     "RecipeRef",
+    "RecipeRelease",
+    "RecipeSnapshotEntry",
     "Step",
     "Tasting",
     "Utensil",

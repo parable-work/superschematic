@@ -19,11 +19,13 @@ type VersionGraph struct {
 
 	// Descriptor is the graph descriptor JSON the engine and its Postgres
 	// adapter read.
-	Descriptor  string
-	SchemaEpoch int64
+	Descriptor    string
+	SchemaEpoch   int64
+	SnapshotEvery int64
 
-	RefType    string // e.g. "RecipeRef"
-	CommitType string // e.g. "RecipeCommit"
+	RefType     string // e.g. "RecipeRef"
+	CommitType  string // e.g. "RecipeCommit"
+	ReleaseType string // e.g. "RecipeRelease"
 
 	Kinds []VersionGraphKind
 }
@@ -75,16 +77,20 @@ func versionGraphs(schema *ir.Schema, repositories []Repository) ([]VersionGraph
 		}
 		ref := byType[g.Name+"Ref"]
 		commit := byType[g.Name+"Commit"]
-		if byType[g.Root.Name] == nil || ref == nil || commit == nil || byType[g.Name+"Patch"] == nil {
-			return nil, fmt.Errorf("ormgen: version graph %s is missing its root, ref, commit or patch table", g.Name)
+		release := byType[g.Name+"Release"]
+		if byType[g.Root.Name] == nil || ref == nil || commit == nil || release == nil ||
+			byType[g.Name+"Patch"] == nil || byType[g.Name+"SnapshotEntry"] == nil {
+			return nil, fmt.Errorf("ormgen: version graph %s is missing its root, ref, commit, patch, release or snapshot entry table", g.Name)
 		}
 		vg := VersionGraph{
-			Name:        g.Name,
-			FileName:    g.FileName,
-			Descriptor:  strings.TrimSuffix(string(descriptor), "\n"),
-			SchemaEpoch: g.Root.VersionGraph.SchemaEpoch,
-			RefType:     ref.TypeName,
-			CommitType:  commit.TypeName,
+			Name:          g.Name,
+			FileName:      g.FileName,
+			Descriptor:    strings.TrimSuffix(string(descriptor), "\n"),
+			SchemaEpoch:   g.Root.VersionGraph.SchemaEpoch,
+			SnapshotEvery: g.Root.VersionGraph.SnapshotInterval(),
+			RefType:       ref.TypeName,
+			CommitType:    commit.TypeName,
+			ReleaseType:   release.TypeName,
 		}
 		for _, member := range g.Members {
 			repo := byType[member.Type.Name]

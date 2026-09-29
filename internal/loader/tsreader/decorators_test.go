@@ -313,6 +313,35 @@ export abstract class Cover {
 			},
 		},
 		{
+			name: "version graph snapshot interval errors",
+			kind: "DB",
+			source: `import { Identity } from "superscalar";
+import { Relation, graphMember, key, versionGraph, versioned } from "@superschematic/db";
+// @ts-expect-error snapshotEvery is not a number
+@versionGraph({ snapshotEvery: "often" })
+export abstract class Recipe {
+  @key
+  id: Identity.UUID;
+}
+@versionGraph({ snapshotEvery: 2.5 })
+export abstract class Menu {
+  @key
+  id: Identity.UUID;
+}
+@versioned
+@graphMember({ graph: Recipe })
+export abstract class Step {
+  @key
+  id: Identity.UUID;
+  recipe: Relation<Recipe>;
+}
+`,
+			want: []string{
+				"a.schema.ts:4:1: @versionGraph snapshotEvery must be an integer literal",
+				"a.schema.ts:9:1: @versionGraph snapshotEvery must be an integer literal",
+			},
+		},
+		{
 			name: "middleware errors keep the operation",
 			kind: "API",
 			source: `import { rateLimit } from "@superschematic/api";

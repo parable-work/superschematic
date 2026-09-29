@@ -93,6 +93,34 @@ func TestVersionGraphDeclarations(t *testing.T) {
 			want:   "Recipe: @versionGraph schemaEpoch must not be negative",
 		},
 		{
+			name:   "a positive snapshot interval",
+			mutate: func(s *ir.Schema) { s.Types["Recipe"].VersionGraph.SnapshotEvery = int64Ptr(1) },
+		},
+		{
+			name:   "a zero snapshot interval",
+			mutate: func(s *ir.Schema) { s.Types["Recipe"].VersionGraph.SnapshotEvery = int64Ptr(0) },
+			want:   "Recipe: @versionGraph snapshotEvery must be positive",
+		},
+		{
+			name:   "a negative snapshot interval",
+			mutate: func(s *ir.Schema) { s.Types["Recipe"].VersionGraph.SnapshotEvery = int64Ptr(-4) },
+			want:   "Recipe: @versionGraph snapshotEvery must be positive",
+		},
+		{
+			name: "a generated release type the schema already defines",
+			mutate: func(s *ir.Schema) {
+				s.Types["RecipeRelease"] = &ir.TypeDef{Name: "RecipeRelease", Role: ir.RoleEmbeddedStruct}
+			},
+			want: `Recipe: version graph "Recipe" generates RecipeRelease, which the schema already defines`,
+		},
+		{
+			name: "a generated snapshot entry type the schema already defines",
+			mutate: func(s *ir.Schema) {
+				s.Types["RecipeSnapshotEntry"] = &ir.TypeDef{Name: "RecipeSnapshotEntry", Role: ir.RoleEmbeddedStruct}
+			},
+			want: `Recipe: version graph "Recipe" generates RecipeSnapshotEntry, which the schema already defines`,
+		},
+		{
 			name:   "a root that is also a member",
 			mutate: func(s *ir.Schema) { s.Types["Recipe"].GraphMember = &ir.GraphMemberConfig{Graph: "Recipe"} },
 			want:   "Recipe: a type belongs to at most one version graph",
@@ -366,3 +394,5 @@ func TestVersionGraphDeclarations(t *testing.T) {
 		})
 	}
 }
+
+func int64Ptr(n int64) *int64 { return &n }

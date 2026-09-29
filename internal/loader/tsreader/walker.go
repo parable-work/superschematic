@@ -311,9 +311,9 @@ func (w *walker) versionedConfigFromDecorator(d decoratorRef) (*ir.VersionedConf
 	return out, nil
 }
 
-// versionGraphFromDecorator reads @versionGraph({ name?, schemaEpoch? }?).
-// The bare and empty forms give the zero config: the graph takes the root's
-// name and epoch 0.
+// versionGraphFromDecorator reads @versionGraph({ name?, schemaEpoch?,
+// snapshotEvery? }?). The bare and empty forms give the zero config: the
+// graph takes the root's name, epoch 0 and the default snapshot interval.
 func (w *walker) versionGraphFromDecorator(d decoratorRef) (*ir.VersionGraphConfig, *SchemaError) {
 	out := &ir.VersionGraphConfig{}
 	if len(d.args) == 0 {
@@ -344,6 +344,13 @@ func (w *walker) versionGraphFromDecorator(d decoratorRef) (*ir.VersionGraphConf
 				return nil, errorAtNode(d.node, "@versionGraph schemaEpoch must be an integer literal")
 			}
 			out.SchemaEpoch = int64(f)
+		case "snapshotEvery":
+			f, ok := value.(float64)
+			if !ok || f != float64(int64(f)) {
+				return nil, errorAtNode(d.node, "@versionGraph snapshotEvery must be an integer literal")
+			}
+			n := int64(f)
+			out.SnapshotEvery = &n
 		default:
 			return nil, errorAtNode(d.node, "@versionGraph config has unknown key %q", key)
 		}

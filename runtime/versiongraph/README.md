@@ -41,6 +41,8 @@ nothing has shipped.
   "refTable": "recipe_ref",
   "commitTable": "recipe_commit",
   "patchTable": "recipe_patch",
+  "releaseTable": "recipe_release",
+  "snapshotTable": "recipe_snapshot_entry",
   "kinds": [
     {
       "kind": "step",
@@ -92,7 +94,7 @@ facade (`versiongraph_<name>.go`) in the ORM package, and as
 | `version` | `2`. |
 | `graph` | Optional. The graph's name; the core does not read it. |
 | `root` | The graph root's `table` and its `key` column. |
-| `refTable`, `commitTable`, `patchTable` | The tables of the graph's refs, commits and patches. |
+| `refTable`, `commitTable`, `patchTable`, `releaseTable`, `snapshotTable` | The tables of the graph's refs, commits, patches, release pointers and snapshot entries. Each is non-empty; the core does not read them. |
 | `kinds[].kind` | The kind's name: the tree member that holds its rows. Unique. |
 | `table`, `historyTable` | The table that holds the kind's rows, and the one that holds their history images. |
 | `key` | The entity key column: the logical identity rows are matched on. Its value is a non-empty string. |
@@ -345,10 +347,24 @@ A refused input returns `{"error": {"code", "message"}}`. `code` is stable;
 ## Engine and storage
 
 An engine runs a graph's operations (D19): create a primary line, branch,
-save, commit, seal, merge, revert, materialize, compose, diff, history and
-discard. It drives the core through its language's binding and reaches
-storage only through a storage adapter, which holds the transaction of each
-operation and returns canonical rows. The Go engine is package `engine`,
+save, commit, seal, merge, rebase, revert, release, released, materialize,
+compose, diff, history, discard and sweep. It drives the core through its
+language's binding and reaches storage only through a storage adapter,
+which holds the transaction of each operation and returns canonical rows.
+
+Every engine keeps the same rules. A primary line takes writes only from
+merge. A root's release pointer names a tagged commit and is fenced by its
+version (0 for the first release); a release writes no member rows. A
+rebase merges the parent's head into a change set against its base, keeps
+as rows only the entities that differ from the new base, moves the base
+and commits after the previous head. A commit is snapshotted when it is
+tagged, released, or `snapshotEvery` commits past the nearest snapshot on
+its chain, counted from before the chain's first commit, and a
+materialize reads the nearest snapshot's pins with the later commits'
+patches over them. A sweep takes the graph's sweep lock or reports itself
+skipped; then it discards idle change sets (when asked), deletes the
+member rows of refs discarded longer ago than the grace, prunes history
+past retention, and writes missing snapshots. The Go engine is package `engine`,
 over the interface in package `storage`; package `postgres` is its Postgres
 adapter, which builds its statements from the descriptor and needs each
 kind's `root`.
@@ -372,6 +388,9 @@ version. An engine's errors have stable codes, shared by every language:
 | `invalid_tree` | A commit whose tree `validate` finds wrong. |
 | `root_mismatch` | Two refs, or a ref and a commit, of different roots. |
 | `merge_into_itself` | A merge whose source is its target. |
+| `primary_merge_only` | A save, commit, seal or revert on a primary line. |
+| `not_tagged` | A release of a commit that is not tagged. |
+| `no_parent` | A rebase of a primary line. |
 
 An input the core refuses keeps the core's code (`unmatched_resolution`).
 
@@ -381,8 +400,8 @@ An input the core refuses keeps the core's code (`unmatched_resolution`).
 `{"name", "description", "steps": [step, ...]}`. A runner applies
 `testdata/fixture/create.sql` to an empty Postgres schema, builds its
 engine and Postgres adapter from `testdata/fixture/recipe.json` at schema
-epoch 1, the fixture graph's, and runs each step in order. Unknown members
-are refused.
+epoch 1 and snapshot interval 3, the fixture graph's, and runs each step in
+order. Unknown members are refused.
 
 A step is `{"op", ...arguments, "expect"?}`. `as` names the ref or commit a
 step returns, and later steps name it: `ref`, `from`, `source` and `target`
@@ -390,8 +409,10 @@ name refs (`from` names commits for `diff`), and `commit`, `toCommit` and
 `to` name commits. `id:<uuid>` names an id no step returned. A write's
 `actor` is `"Cook"` unless the step gives one (`""` is none), and its
 `version` is the named ref's version as the last step that returned the
-ref left it, unless the step gives one. `walkCeiling` and `schemaEpoch` run
-the step on an engine with that ceiling or epoch. Entity keys, roots and
+ref left it, unless the step gives one; a `release` step's is the root's
+pointer's version as the last release left it, 0 before any. `walkCeiling`,
+`schemaEpoch` and `snapshotEvery` run the step on an engine with that
+ceiling, epoch or interval. Entity keys, roots and
 actors are UUIDs written in their canonical form, which reads as a word
 (`"Mix"`, `"Bread"`).
 
@@ -402,8 +423,13 @@ actors are UUIDs written in their canonical form, which reads as a word
 | `save` | `ref`, `edits`: `{"<kind>": {"upsert": [row], "delete": [key], "unset": [key]}}` | Save |
 | `commit` | `ref`, `message`, `tag` | Commit |
 | `seal` | `ref` | Seal |
-| `merge` | `source`, `target`, `resolutions` (the core's) | Merge |
+| `merge` | `source`, `target`, `resolutions` (the core's), `message`, `tag` | Merge |
+| `rebase` | `ref`, `resolutions` | Rebase |
 | `revert` | `ref`, `toCommit` | Revert |
+| `release` | `root`, `commit` | Release |
+| `released` | `root` | Released |
+| `sweep` | `sweep`: `{discardGraceSeconds, abandonAfterSeconds, pruneBatch}`, each optional | Sweep |
+| `holdSweepLock`, `releaseSweepLock` | | Take the graph's sweep lock in a transaction of another connection, and end it |
 | `materialize` | `commit` | Materialize |
 | `compose` | `ref` | Compose |
 | `diff` | `from`, `to` | Diff |
@@ -411,6 +437,7 @@ actors are UUIDs written in their canonical form, which reads as a word
 | `discard` | `ref` | Discard |
 | `rows` | `ref`, `kind` | The adapter's rows of the ref, by entity key |
 | `patches` | `commit` | The adapter's patches of the commit, by kind and entity key |
+| `snapshot` | `commit` | The adapter's snapshot entries of the commit, by kind and entity key |
 | `sql` | `statement`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text | A statement on the scenario's schema |
 
 `expect` holds what the step must return; a step without `error` must
@@ -425,7 +452,9 @@ succeed.
 | `contentHash`, `contentHashOf` | A read's content hash. |
 | `findings`, `conflicts`, `changes` | Compose's findings, a merge's conflicts, a diff's changes: in order, each with its listed members. A merge left conflicts only when the step lists them. |
 | `commits` | History's commits, by name, newest first. |
-| `rows`, `patches` | The listed rows or patches, in order, each with its listed members; a patch is `{kind, entityKey, operation, entityVersion}`. |
+| `rows`, `patches`, `snapshot` | The listed rows, patches or snapshot entries, in order, each with its listed members; a patch is `{kind, entityKey, operation, entityVersion}` and a snapshot entry `{kind, entityKey, entityVersion}`. |
+| `release` | The release pointer a release or released step returns: `commit` by name and `version`. |
+| `report` | A sweep's report, with its listed members: `skipped`, `abandoned`, `collectedRefs`, `collectedRows` and `pruned` (by kind, nonzero counts only) and `snapshots`. |
 
 ## C ABI
 
