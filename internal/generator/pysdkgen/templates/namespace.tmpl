@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import importlib
 import re
+{{- if .Namespace.HasQueryLists}}
+from enum import Enum
+{{- end}}
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
 from ..client import EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilterableEndpoints}} FilterSpec,{{end}} SyncHTTPClient
@@ -368,6 +371,93 @@ class {{.Namespace.ClassName}}:
 
         if field_errors:
             raise ValidationError({field_name: field_errors})
+{{- if .Namespace.HasQueryLists}}
+
+    @staticmethod
+    def _query_list_item(item: Any) -> str:
+        """Return the text one item of a list query parameter is sent as:
+        an enum member's serialized value, true or false for a bool."""
+        if isinstance(item, Enum):
+            return str(item.value)
+        if isinstance(item, bool):
+            return "true" if item else "false"
+        return str(item)
+
+    def _query_list_value(self, value: list[Any] | tuple[Any, ...]) -> str:
+        """Join the items of a list query parameter into the one
+        comma-separated value (?name=a,b) the API reads it from."""
+        return ",".join(self._query_list_item(item) for item in value)
+
+    def _validate_query_list(
+        self,
+        value: Any,
+        field_name: str,
+        element_type_name: str,
+        *,
+        min_value: float | None = None,
+        max_value: float | None = None,
+        min_length: int | None = None,
+        max_length: int | None = None,
+        pattern: str | None = None,
+        list_min: int | None = None,
+        list_max: int | None = None,
+    ) -> None:
+        """Validate a list query parameter before the request.
+
+        The list is sent as one comma-separated value and an empty list is
+        left out, so list_min and list_max bound a non-empty list. The API
+        splits the value on commas and trims each item, so a text item
+        (not an int, float or bool) that is empty is required at
+        field[i], and one with a comma or surrounding space fails its
+        pattern. Every other item is checked against the rules, then
+        validated as element_type_name. Every failure is raised at once.
+        """
+        if not isinstance(value, (list, tuple)):
+            raise ValidationError(
+                {field_name: [{"validator": "type", "message": f"{field_name} must be a list"}]},
+            )
+        if not value:
+            return
+
+        validation_errors: dict[str, list[dict[str, str]]] = {}
+        try:
+            self._validate_query_param_constraints(value, field_name, list_min=list_min, list_max=list_max)
+        except ValidationError as err:
+            validation_errors.update(err.errors)
+
+        text_items = element_type_name not in ("int", "float", "bool")
+        for index, item in enumerate(value):
+            item_path = f"{field_name}[{index}]"
+            if text_items:
+                text = self._query_list_item(item)
+                if item is None or text.strip() == "":
+                    validation_errors[item_path] = [{"validator": "required", "message": f"{item_path} is required"}]
+                    continue
+                if "," in text or text.strip() != text:
+                    validation_errors[item_path] = [
+                        {
+                            "validator": "pattern",
+                            "message": f"{item_path} must not contain a comma or surrounding space.",
+                        },
+                    ]
+                    continue
+            try:
+                self._validate_query_param_constraints(
+                    item,
+                    item_path,
+                    min_value=min_value,
+                    max_value=max_value,
+                    min_length=min_length,
+                    max_length=max_length,
+                    pattern=pattern,
+                )
+                self._validate_scalar_argument(item, element_type_name, item_path)
+            except ValidationError as err:
+                validation_errors.update(err.errors)
+
+        if validation_errors:
+            raise ValidationError(validation_errors)
+{{- end}}
 
 {{- range .Namespace.Endpoints}}
     def {{.MethodName}}(self{{- range .MethodParams}}, {{.Declaration}}{{- end}}) -> {{.OutputTypeHint}}:
@@ -390,7 +480,21 @@ class {{.Namespace.ClassName}}:
 {{- if .HasQueryParams}}
         query_params: dict[str, Any] | None = {}
 {{- range .QueryParams}}
+{{- if .IsArray}}
 {{- if .Required}}
+        if not {{.PyName}}:
+            raise ValidationError(
+                {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
+            )
+        self._validate_query_list({{template "queryListArgs" .}})
+        query_params["{{.Name}}"] = self._query_list_value({{.PyName}})
+{{- else}}
+        if {{.PyName}} is not None:
+            self._validate_query_list({{template "queryListArgs" .}})
+            if {{.PyName}}:
+                query_params["{{.Name}}"] = self._query_list_value({{.PyName}})
+{{- end}}
+{{- else if .Required}}
         if {{.PyName}} is None:
             raise ValidationError(
                 {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
@@ -677,4 +781,14 @@ class {{.Namespace.ClassName}}:
 {{- end}}
 {{- end}}
 
+{{- end}}
+{{- define "queryListArgs" -}}
+{{.PyName}}, "{{.PyName}}", "{{.PyElementType}}"
+{{- if .ValidateMin}}, min_value={{.ValidateMin}}{{end}}
+{{- if .ValidateMax}}, max_value={{.ValidateMax}}{{end}}
+{{- if .ValidateMinLength}}, min_length={{.ValidateMinLength}}{{end}}
+{{- if .ValidateMaxLength}}, max_length={{.ValidateMaxLength}}{{end}}
+{{- if .ValidatePattern}}, pattern={{printf "%q" .ValidatePattern}}{{end}}
+{{- if .ValidateListMin}}, list_min={{.ValidateListMin}}{{end}}
+{{- if .ValidateListMax}}, list_max={{.ValidateListMax}}{{end}}
 {{- end}}
