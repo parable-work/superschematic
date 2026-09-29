@@ -25,10 +25,11 @@ require (
 	example.com/acme/http-runtime v0.0.0-00010101000000-000000000000
 	example.com/acme/scalars v1.0.0
 	go.uber.org/zap v1.28.0
+	example.com/acme/schemas/types/go/fixture-db v0.0.0-00010101000000-000000000000 // indirect
 )
 
 // Local module paths for development.
 // When consuming this module externally, these resolve via go.work or go.sum.
 replace example.com/acme/schemas/types/go/fixture-api => ../../types/go/fixture-api
-replace example.com/acme/schemas/orm/fixture-db => ../../orm/fixture-db
 replace example.com/acme/schemas/types/go/fixture-db => ../../types/go/fixture-db
+replace example.com/acme/schemas/orm/fixture-db => ../../orm/fixture-db

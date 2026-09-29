@@ -29,6 +29,8 @@ from .validation_errors import (
 )
 
 from .scalars import (
+    GenericInt64,
+    IdentityName,
     NetworkUrl
 )
 
@@ -51,6 +53,8 @@ __all__ = [
     "RequiredFieldError",
     "ValidationErrors",
     # Scalars
+    "GenericInt64",
+    "IdentityName",
     "NetworkUrl",
 
     # Enums

@@ -39,9 +39,11 @@ SDK to call it. You write the business logic and say who the caller is.
 
 - `api: { enabled: true }` generates the Go server, the default language.
   The server decodes requests into the Go types, so `types` lists Go.
-- `public: true` marks an API whose callers authenticate. It turns on the
-  auth provider's code in the Go server, the security scheme in OpenAPI and
-  the token handling in the SDKs.
+- `public: true` marks an API whose callers the Go server authenticates. It
+  turns on the auth provider's middleware and stores in the Go server.
+  Without it, a `@requirePermission` route answers 401 unless the
+  service's own middleware puts the caller on the context. The SDKs send
+  a token either way, since those routes need a caller.
 - `authDb` names the DB schema the auth provider reads its stores from.
   The core provider, `session`, finds `shop-db`'s `Session` and `User`
   tables and generates stores over the ORM for them.
