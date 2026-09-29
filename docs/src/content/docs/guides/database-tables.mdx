@@ -143,6 +143,11 @@ writes the order and its lines together:
 
 <Snippet file="go/orders.go" symbol="Orders.PlaceOrder" />
 
+The transaction also takes raw SQL for what the repositories do not
+express: `Exec` for a write, and `Query` for a read such as a keyset-paged
+join across tables. `Query` returns pgx rows, which the caller closes; the
+no-op transaction returns none.
+
 `ErrNotFound` from a lookup, and the unique index's `23505` error from
 Postgres, are the errors an implementation usually turns into a 404 or a
 409; [API routes](/superschematic/guides/api-routes/) shows how.

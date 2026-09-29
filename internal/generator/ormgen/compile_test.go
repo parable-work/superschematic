@@ -904,6 +904,9 @@ func findSnapshotUser(t *testing.T, users []types.TenantUser, id types.IdentityU
 	if err := os.WriteFile(filepath.Join(ormDir, "enum_default_test.go"), []byte(enumDefaultTest), 0o644); err != nil {
 		t.Fatalf("write enum default test: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(ormDir, "tx_query_test.go"), []byte(txQueryTest), 0o644); err != nil {
+		t.Fatalf("write tx query test: %v", err)
+	}
 
 	tidy := exec.Command("go", "mod", "tidy")
 	tidy.Dir = ormDir
@@ -1006,6 +1009,65 @@ func TestCreateBindsTheEnumDefaultWhenUnset(t *testing.T) {
 	want := []types.TenantStatus{types.TenantStatus_Active, types.TenantStatus_Suspended}
 	if got := boundStatuses(tx.args); !reflect.DeepEqual(got, want) {
 		t.Errorf("CreateMany bound %q, want %q", got, want)
+	}
+}
+`
+
+// txQueryTest runs in the generated ORM module. TxInterface.Query reads
+// rows inside the open transaction, so it sees a setting the same
+// transaction made; the no-op transaction returns an exhausted result.
+const txQueryTest = `package orm
+
+import (
+	"context"
+	"testing"
+)
+
+func TestNoOpTxQueryReturnsNoRows(t *testing.T) {
+	ctx := context.Background()
+	err := NewNoOpDatabase().Transaction(ctx, func(tx TxInterface) error {
+		rows, err := tx.Query(ctx, "SELECT 1")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		if rows.Next() {
+			t.Fatal("no-op Query returned a row")
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTxQueryReadsInsideTheTransaction(t *testing.T) {
+	db, _ := openStrategyADatabase(t)
+	ctx := context.Background()
+	var names []string
+	err := db.Transaction(ctx, func(tx TxInterface) error {
+		if _, err := tx.Exec(ctx, "SET LOCAL application_name = 'tx-query'"); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, "SELECT current_setting('application_name') UNION ALL SELECT $1::text", "second")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				return err
+			}
+			names = append(names, name)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 2 || names[0] != "tx-query" || names[1] != "second" {
+		t.Fatalf("Query read %q, want [tx-query second]", names)
 	}
 }
 `
