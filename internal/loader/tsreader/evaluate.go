@@ -37,7 +37,10 @@ const maxEvalDepth = 16
 // values.
 //
 // Results are Go values: string, float64, bool, nil, []any, map[string]any,
-// and serviceHandle.
+// and serviceHandle. Only the null literal evaluates to nil: [] and {}
+// evaluate to an empty, non-nil []any and map[string]any, so they marshal
+// as the empty list and object the data forms write for the same argument
+// (extension-model.md, sections 2 and 4).
 func (w *walker) evaluateExpression(node *astNode) (any, *SchemaError) {
 	return w.evaluateExpressionDepth(node, 0)
 }
@@ -84,7 +87,8 @@ func (w *walker) evaluateExpressionDepth(node *astNode, depth int) (any, *Schema
 
 	case kindArrayLiteralExpression:
 		elems := node.AsArrayLiteralExpression().Elements
-		var out []any
+		// Not nil, which would marshal to null (see evaluateExpression).
+		out := []any{}
 		if elems != nil {
 			for _, e := range elems.Nodes {
 				v, serr := w.evaluateExpressionDepth(e, depth+1)

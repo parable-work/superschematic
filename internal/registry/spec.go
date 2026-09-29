@@ -159,11 +159,13 @@ type DecoratorSpec struct {
 	Args json.RawMessage
 	// Apply writes the decorator into the IR node. args holds the
 	// statically evaluated decorator arguments (string, float64, bool, nil,
-	// []any, map[string]any), in order. A nil Apply marks a decorator the
-	// frontend interprets itself (role selection, @source linkage, @envVars,
-	// @versioned): it still passes the origin, target and kind checks and
-	// appears in the JSON Schema, but its arguments are not evaluated.
-	// Extensions must set Apply.
+	// []any, map[string]any), in order. Only the null literal is nil; an
+	// empty list or object is an empty []any or map[string]any, as the data
+	// forms decode it. A nil Apply marks a decorator the frontend interprets
+	// itself (role selection, @source linkage, @envVars, @versioned): it
+	// still passes the origin, target and kind checks and appears in the
+	// JSON Schema, but its arguments are not evaluated. Extensions must set
+	// Apply.
 	Apply func(node Node, args []any, at Site) error
 
 	// recordsErrors keeps the node when Apply fails instead of dropping it:

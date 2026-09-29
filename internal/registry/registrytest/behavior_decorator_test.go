@@ -14,14 +14,15 @@ import (
 )
 
 // tsProject writes the tsconfig.json and package.json a TypeScript service
-// in dir needs: the core packages and the fixture's BehaviorConfigs
-// augmentation resolve by absolute path.
+// in dir needs: the core packages, the fixture's authoring package and its
+// BehaviorConfigs augmentation resolve by absolute path.
 func tsProject(t *testing.T, dir string) {
 	t.Helper()
 	root := testpaths.RepoRoot(t)
 	abs := func(parts ...string) string {
 		return filepath.ToSlash(filepath.Join(append([]string{root}, parts...)...))
 	}
+	fixturePackage := []string{"internal", "registry", "registrytest", "testdata", "packages", "schematic", "src"}
 	tsconfig := map[string]any{
 		"compilerOptions": map[string]any{
 			"target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler", "lib": []string{"ES2022"},
@@ -31,9 +32,10 @@ func tsProject(t *testing.T, dir string) {
 				"superscalar":                   []string{filepath.ToSlash(filepath.Join(testpaths.Local(t).ScalarTypeScript, "src", "index.ts"))},
 				"@superschematic/schema":        []string{abs("packages", "schema", "src", "index.ts")},
 				"@superschematic/schema-config": []string{abs("packages", "schema-config", "src", "index.ts")},
+				"@acme/schematic":               []string{abs(append(fixturePackage, "index.ts")...)},
 			},
 		},
-		"include": []string{"schema.config.ts", "src/**/*.ts", abs("internal", "registry", "registrytest", "testdata", "packages", "schematic", "src", "behaviors.ts")},
+		"include": []string{"schema.config.ts", "src/**/*.ts", abs(append(fixturePackage, "behaviors.ts")...)},
 	}
 	data, err := json.MarshalIndent(tsconfig, "", "  ")
 	if err != nil {
@@ -121,6 +123,120 @@ func TestBehaviorsRoundTripThroughEveryForm(t *testing.T) {
 				t.Fatalf("IR changed across %s -> TS\nwant:\n%s\ngot:\n%s", target, want, got)
 			}
 		})
+	}
+}
+
+// lifecycleBehavior is a core behavior these tests declare, whose config
+// holds lists a type may leave empty.
+var lifecycleBehavior = json.RawMessage(`{
+  "name": "Lifecycle",
+  "description": "Moves an item through named states.",
+  "configSchema": {
+    "type": "object",
+    "required": ["states", "transitions"],
+    "additionalProperties": false,
+    "properties": {
+      "states": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+      "transitions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["from", "to"],
+          "additionalProperties": false,
+          "properties": { "from": { "type": "string" }, "to": { "type": "string" } }
+        }
+      },
+      "guards": { "type": "object" }
+    }
+  }
+}`)
+
+// lifecycleConfigs types Lifecycle's config for tsc, as an authoring
+// package's BehaviorConfigs augmentation does.
+const lifecycleConfigs = `import "@superschematic/schema";
+
+declare module "@superschematic/schema" {
+  interface BehaviorConfigs {
+    Lifecycle: {
+      readonly states: readonly string[];
+      readonly transitions: readonly { readonly from: string; readonly to: string }[];
+      readonly guards?: Readonly<Record<string, unknown>>;
+    };
+  }
+}
+`
+
+// An empty list or object in a @behavior config is the value the data
+// forms write for it (extension-model.md, sections 2 and 4.2): the
+// TypeScript form loads to its JSON twin's IR, where [] used to evaluate
+// to null and fail the config schema. The JSON twin written to TypeScript
+// spells the empty list [] and reloads to the same IR.
+func TestBehaviorConfigWithEmptyListsMatchesTheDataForm(t *testing.T) {
+	reg := acmeRegistry(t, lifecycleBehavior)
+	jsonDir := t.TempDir()
+	writeFiles(t, jsonDir, map[string][]byte{
+		"schema.config.json": []byte(`{"name": "stock", "kind": "General", "outputs": {}}`),
+		"src/item.schema.json": []byte(`{
+  "types": {
+    "Item": {
+      "name": "Item",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        { "name": "Lifecycle", "config": { "states": ["open"], "transitions": [], "guards": {} } }
+      ],
+      "fields": [{ "name": "name", "typeRef": { "name": "string" }, "required": true }]
+    }
+  }
+}`),
+	})
+	jsonSchema, err := loader.LoadService(jsonDir, loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("loading the JSON form: %v", err)
+	}
+	want := normalized(t, jsonSchema)
+	if config := string(jsonSchema.Types["Item"].Behaviors[0].Config); config != `{"guards":{},"states":["open"],"transitions":[]}` {
+		t.Fatalf("JSON form config = %s", config)
+	}
+
+	tsDir := tsStockService(t, `import { behavior } from "@superschematic/schema";
+
+@behavior("Lifecycle", { states: ["open"], transitions: [], guards: {} })
+export abstract class Item {
+  name: string;
+}
+`)
+	writeFiles(t, tsDir, map[string][]byte{"src/lifecycle.ts": []byte(lifecycleConfigs)})
+	tsSchema, err := loader.LoadService(tsDir, loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("loading the TypeScript form: %v", err)
+	}
+	if got := normalized(t, tsSchema); got != want {
+		t.Fatalf("TypeScript and JSON forms produced different IR\njson:\n%s\nts:\n%s", want, got)
+	}
+
+	writtenDir := t.TempDir()
+	written, err := writer.WriteService(jsonSchema, writer.FormatTS, writtenDir)
+	if err != nil {
+		t.Fatalf("WriteService(ts): %v", err)
+	}
+	source, err := os.ReadFile(filepath.Join(writtenDir, written[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wantTS := `@behavior("Lifecycle", { guards: {}, states: ["open"], transitions: [] })`; !strings.Contains(string(source), wantTS) {
+		t.Errorf("TypeScript form lacks %s:\n%s", wantTS, source)
+	}
+	writeFiles(t, writtenDir, map[string][]byte{
+		"schema.config.json": []byte(`{"name": "stock", "kind": "General", "outputs": {}}`),
+		"src/lifecycle.ts":   []byte(lifecycleConfigs),
+	})
+	tsProject(t, writtenDir)
+	reloaded, err := loader.LoadService(writtenDir, loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("reloading the written TypeScript form: %v\n%s", err, source)
+	}
+	if got := normalized(t, reloaded); got != want {
+		t.Fatalf("IR changed across JSON -> TS\nwant:\n%s\ngot:\n%s", want, got)
 	}
 }
 
