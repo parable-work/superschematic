@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { NetworkUrl, FixtureEnvironment, FixtureConfig, FixtureFilter, RetryPolicy,  } from '@schemas/fixture-general-types/types';
+import type { GenericInt64, IdentityName, NetworkUrl, FixtureEnvironment, FixtureConfig, FixtureFilter, RetryPolicy,  } from '@schemas/fixture-general-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-general-types';
@@ -76,7 +76,19 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 ## Type System
 
 
-### Scalars (1)
+### Scalars (3)
+
+
+- **Generic.Int64** - Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
+  - TypeScript type: `number`
+  - Minimum: -9007199254740991
+  - Maximum: 9007199254740991
+
+
+- **Identity.Name** - An objects name
+  - TypeScript type: `string`
+  - Min length: 2
+  - Max length: 80
 
 
 - **Network.Url** - Valid HTTP/HTTPS URL

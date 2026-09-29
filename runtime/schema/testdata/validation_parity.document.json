@@ -167,13 +167,15 @@
       "maximum": 9007199254740991,
       "minimum": -9007199254740991,
       "type": "integer",
-      "x-example": "1000",
       "x-hasCustomParse": true,
       "x-scalar": "Generic_Int64",
       "x-typeMapping": {
         "go": "GenericInt64",
         "json_schema": "integer",
-        "sql": "BIGINT"
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
       }
     },
     "Generic_JSON": {
@@ -681,6 +683,59 @@
       },
       "x-kind": "enum",
       "x-owner": "parity-fixture"
+    },
+    "ScalarRuleMatrix": {
+      "properties": {
+        "names": {
+          "items": {
+            "$ref": "#/definitions/scalars/Identity_Name"
+          },
+          "type": "array",
+          "x-validateListMax": 2,
+          "x-validateMaxLength": 5
+        },
+        "optName": {
+          "$ref": "#/definitions/scalars/Identity_Name",
+          "x-validateMaxLength": 5,
+          "x-validatePattern": "^[a-z]+$"
+        },
+        "optRank": {
+          "$ref": "#/definitions/scalars/Ordering_Rank",
+          "x-validateMax": 10
+        },
+        "optShare": {
+          "$ref": "#/definitions/scalars/Generic_Probability",
+          "x-validateMax": 0.5
+        },
+        "rankGrid": {
+          "items": {
+            "items": {
+              "$ref": "#/definitions/scalars/Ordering_Rank"
+            },
+            "type": "array"
+          },
+          "type": "array",
+          "x-validateMax": 10
+        },
+        "reqAmount": {
+          "$ref": "#/definitions/scalars/Generic_Int64",
+          "x-validateMax": 1000,
+          "x-validateMin": 0
+        },
+        "reqRanks": {
+          "items": {
+            "$ref": "#/definitions/scalars/Ordering_Rank"
+          },
+          "type": "array",
+          "x-validateMax": 10
+        }
+      },
+      "required": [
+        "reqAmount",
+        "reqRanks"
+      ],
+      "type": "object",
+      "x-kind": "type"
     },
     "StructuredMatrix": {
       "properties": {
