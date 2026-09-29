@@ -13,6 +13,14 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- `scripts/bump_version.py` versions the Python runtime's own entry in
+  `runtime/schema/python/uv.lock` (`superschematic-schema-runtime`), in
+  the PEP 440 form its `pyproject.toml` carries: `set` writes it and
+  `check` fails when it disagrees with `versions.env`. The committed
+  lockfile said `0.1.0` while every other site said `0.0.0`, so `uv sync`
+  (and `make setup`) rewrote it and left the tree dirty; it now says
+  `0.0.0`. The script has tests, which CI's scrub job and
+  `make versions` run. Patch (release tooling only).
 - The generated TypeScript validator checks a scalar field's own rules.
   For a field typed with a scalar it ran the scalar's validator and the
   list bounds only, and dropped the field's `minLength`, `maxLength`,
