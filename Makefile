@@ -30,7 +30,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check ts python rust \
-        versiongraph versiongraph-scenarios docs cli-smoke scrub versions clean
+        versiongraph versiongraph-scenarios versiongraph-scenarios-ts docs cli-smoke scrub versions clean
 
 all: build test lint
 
@@ -115,6 +115,16 @@ versiongraph-scenarios: versiongraph
 	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
 		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
 	cd runtime/versiongraph/go && go test -count=1 -v -run '^TestScenarios$$' ./engine/
+
+# Every version-graph scenario through the TypeScript engine and its Postgres
+# adapter, with the canonical vectors checked against Postgres and the
+# adapter's and the sweeper's own tests, against the Postgres that
+# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
+versiongraph-scenarios-ts:
+	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
+		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
+	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build && \
+		bun test test/scenarios.test.ts test/canonical.test.ts test/adapter.test.ts test/sweeper.test.ts
 
 # Starlight site. CI runs this as the docs job (D9); release.yml deploys it.
 docs:

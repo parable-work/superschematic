@@ -599,6 +599,12 @@ jobs:
           bun run typecheck
           bun run test
 
+      - name: Scenarios through the TypeScript engine (every scenario, the canonical vectors against Postgres, the adapter and the sweeper)
+        # Fails, rather than skips, without the database.
+        env:
+          SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+        run: make versiongraph-scenarios-ts
+
   docs:
     # Cheap PR gate: npm ci + astro build. superscalar only builds docs in
     # release.yml; this job is D9. It does not deploy.
