@@ -146,6 +146,20 @@
       "canonical": "{\"operationSets\":[{\"encrypted\":true,\"name\":\"Ops\",\"operations\":[]}]}"
     },
     {
+      "name": "an encrypted operation argument",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"CardOps\", \"operations\": [\n\t\t{\"name\": \"storeCard\", \"typeRef\": {\"name\": \"Card\"}, \"httpMethod\": \"POST\", \"arguments\": [\n\t\t\t{\"name\": \"number\", \"typeRef\": {\"name\": \"String\"}, \"required\": true, \"encrypted\": true}]}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"CardOps\",\"operations\":[{\"arguments\":[{\"encrypted\":true,\"name\":\"number\",\"required\":true,\"typeRef\":{\"name\":\"String\"}}],\"httpMethod\":\"POST\",\"name\":\"storeCard\",\"typeRef\":{\"name\":\"Card\"}}]}]}"
+    },
+    {
+      "name": "a non-boolean encrypted argument flag",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"CardOps\", \"operations\": [\n\t\t{\"name\": \"storeCard\", \"typeRef\": {\"name\": \"Card\"}, \"arguments\": [{\"name\": \"number\", \"typeRef\": {\"name\": \"String\"}, \"encrypted\": \"yes\"}]}]}",
+      "accept": false,
+      "error": "a non-boolean encrypted argument flag: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/arguments/0/encrypted': got string, want boolean"
+    },
+    {
       "name": "visible tool without a policy gets the default",
       "registry": "core",
       "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"deleteOrder\", \"typeRef\": {\"name\": \"Order\"}, \"httpMethod\": \"DELETE\", \"mcp\": {\"handle\": \"delete_order\", \"hidden\": false}}]}",

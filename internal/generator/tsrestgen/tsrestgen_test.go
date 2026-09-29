@@ -41,6 +41,9 @@ func loadFixtureAPI(t *testing.T) (*ir.Schema, *ir.Schema) {
 		set.Encrypted = false
 		for _, op := range set.Operations {
 			op.Encrypted = false
+			for _, arg := range op.Arguments {
+				arg.Encrypted = false
+			}
 		}
 	}
 	dbSchema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-db"))

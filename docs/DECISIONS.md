@@ -560,13 +560,13 @@ The runtime has no step that decrypts a request body, and none that reads
 a multipart one. The generator refuses an operation that needs one unless
 it is `@manualRouteRegistration`, naming the operation: a file upload, and
 an encrypted operation (an `Encrypted` operation set, `@encrypted`, or an
-`EncryptedField<T>` result). The service's handler decrypts the payload,
-as the Go server's `PayloadDecryptor` does. Before, the generator mounted
-an encrypted operation as an ordinary JSON route, which handed the
-ciphertext to the body parser. A decryption step in the runtime, the
-counterpart of the Go runtime's `PayloadDecryptor` seam, would let the
-router mount such an operation; until it exists, refusing is the only
-behavior that cannot parse ciphertext.
+`EncryptedField<T>` result or argument, D20). The service's handler
+decrypts the payload, as the Go server's `PayloadDecryptor` does. Before,
+the generator mounted an encrypted operation as an ordinary JSON route,
+which handed the ciphertext to the body parser. A decryption step in the
+runtime, the counterpart of the Go runtime's `PayloadDecryptor` seam, would
+let the router mount such an operation; until it exists, refusing is the
+only behavior that cannot parse ciphertext.
 
 This entry was first recorded as a second D12, next to the arrays-of-arrays
 entry. It was renumbered D15 so that each number names one decision.
@@ -1295,3 +1295,24 @@ pointer, merge-only primary lines, `Rebase`, snapshots and the sweep
 follow in the Go engine. The TypeScript, Rust and Python engines and
 facades follow and must pass the same scenarios. Each change that lands a
 piece updates this paragraph.
+
+## D20. An `EncryptedField<T>` argument encrypts its operation's request body
+
+An operation argument declared `EncryptedField<T>` did not reach the IR:
+`ir.ArgumentDef` had no flag, so the TypeScript reader dropped the
+wrapper. Outside an `Encrypted` operation set the operation was plain to
+every generator. The Go server did not decrypt it, the SDKs sent the
+value in clear JSON, and the TypeScript server could not refuse it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `ir.ArgumentDef.Encrypted` carries the declaration. The TypeScript reader sets it, the data forms and the schema-file JSON Schema carry it as `encrypted`, and the TypeScript writer writes it back as `EncryptedField<T>`. | Folding it into the operation's `Encrypted` flag at load, which the TypeScript writer would write back as an `EncryptedField<T>` result |
+| An encrypted argument makes its operation encrypted, as an `Encrypted` set, `@encrypted` and an `EncryptedField<T>` result do: the client sends the whole request body as one envelope and the Go server decrypts it with the `PayloadDecryptor` before it decodes any argument. apigen computes this once (`EndpointInfo.Encrypted`), so the Go router, the four SDKs, the MCP tool documents and the TypeScript server's refusal all follow it. It is the only envelope the Go runtime and the SDKs implement, and `EncryptedField<T>` on a result already meant it. | Encrypting that argument's value alone, as an envelope in its place in the body. No runtime or SDK has such a form; it needs a second wire format, a per-field decryption step in each server and encryption in each SDK. |
+| The envelope is a `POST`, `PUT` or `PATCH` body, so the loader's verify pass refuses an `EncryptedField<T>` argument that would travel outside it: a query parameter, a path parameter the rest path names, and an argument of a `GET` or `DELETE` operation or of one without a method. apigen refuses the same, and a path parameter an operation without a rest path takes from its type. | Accepting such an argument, which the SDKs would send unencrypted in the URL or in a body they do not encrypt |
+
+`EncryptedField<T>` on a field of an object type stays a flag no generator
+reads: an input type with such a field does not make its operation
+encrypted. The Rust server has no decryption step and does not refuse an
+encrypted operation of any form; that gap predates this entry.
+
+The rule is reversible until the first release.

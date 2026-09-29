@@ -643,4 +643,12 @@ type ArgumentDef struct {
 	// IsQuery indicates this argument should be a URL query parameter instead
 	// of a path parameter (@query).
 	IsQuery bool `json:"isQuery,omitempty" yaml:"isQuery,omitempty"`
+
+	// Encrypted marks an argument declared EncryptedField<T>. It makes its
+	// operation encrypted, as an Encrypted operation set, @encrypted and an
+	// EncryptedField<T> result do: the client sends the whole request body
+	// as one encrypted envelope and the server decrypts it before decoding
+	// any argument. Only an argument of a POST, PUT or PATCH request body
+	// may carry it; a path or query parameter travels outside the envelope.
+	Encrypted bool `json:"encrypted,omitempty" yaml:"encrypted,omitempty"`
 }

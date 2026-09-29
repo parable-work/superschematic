@@ -790,6 +790,9 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	if err := checkMapsInBody(namespace, op.Name, method, pathParams, queryParams, scalarArgs); err != nil {
 		return nil, err
 	}
+	if err := checkEncryptedArguments(namespace, op, method, pathParams, queryParams); err != nil {
+		return nil, err
+	}
 
 	if hasInput && len(scalarArgs) > 0 {
 		names := make([]string, len(scalarArgs))
@@ -861,7 +864,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		RateLimit:                    rateLimit,
 		BodyLimit:                    bodyLimit,
 		Timeout:                      timeout,
-		Encrypted:                    set.Encrypted || op.Encrypted,
+		Encrypted:                    operationEncrypted(set, op),
 		Filterable:                   op.Filterable,
 		ManualRouteRegistration:      op.ManualRouteRegistration,
 		IsWebhook:                    op.Webhook,
