@@ -423,7 +423,6 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 	rest.SearchField, rest.JsonField, rest.Secret = false, false, false
 	rest.UIHidden, rest.Virtual, rest.Encrypted = false, false, false
 	rest.SourceMustProject = false
-	rest.Exclude = false
 	rest.TemporalFormat = ""
 	rest.ConflictUnit = ""
 	rest.Relation = nil

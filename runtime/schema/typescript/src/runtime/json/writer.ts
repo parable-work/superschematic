@@ -207,14 +207,8 @@ function serializeField(field: FieldDef, scalarNames: Set<string>): JsonObject {
   if (field.uiHidden) {
     output['x-uiHidden'] = true;
   }
-  if (field.semanticRole) {
-    output['x-semantic-role'] = field.semanticRole;
-  }
   if (field.temporalFormat) {
     output['x-temporal-format'] = field.temporalFormat;
-  }
-  if (field.exclude) {
-    output['x-exclude'] = true;
   }
   if (field.internalMetadata) {
     output['x-internal-metadata'] = true;

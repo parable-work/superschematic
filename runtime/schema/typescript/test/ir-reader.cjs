@@ -66,7 +66,6 @@ const sampleIR = {
           name: 'secretNote',
           typeRef: { name: 'String' },
           uiHidden: true,
-          semanticRole: 'metadata_timestamp',
         },
         {
           name: 'occurredAt',
@@ -128,7 +127,6 @@ test('maps field directive metadata and array typeRefs', () => {
 
   const hidden = fields.find((f) => f.name === 'secretNote');
   assert.strictEqual(hidden.uiHidden, true);
-  assert.strictEqual(hidden.semanticRole, 'metadata_timestamp');
   assert.strictEqual(hidden.required, false);
   assert.strictEqual(hidden.jsonKey, 'secretNote');
 
@@ -303,7 +301,6 @@ test('x-temporal-format survives the legacy JSON reader/writer round trip', () =
         properties: {
           event_at: {
             $ref: '#/definitions/scalars/Temporal.DateTime',
-            'x-semantic-role': 'event_time',
             'x-temporal-format': 'unix',
           },
         },

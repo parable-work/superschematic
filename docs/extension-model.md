@@ -279,7 +279,7 @@ TypeScript walker does not.
 Core decorators write typed IR fields. Extension decorators write the
 node's `Extensions[<extension name>]` slot (section 4). A directive that
 only one distribution reads is an extension decorator, not a typed field:
-D18 in `docs/DECISIONS.md` removed ten such fields from the core IR on
+D18 in `docs/DECISIONS.md` removed twelve such fields from the core IR on
 that rule. A spec with no `Args` takes no argument, as acme's `@feedKey`
 does, and the data forms write its value as `true`. A spec with a nil
 `Apply` is a marker the frontend interprets itself; only the core registers
