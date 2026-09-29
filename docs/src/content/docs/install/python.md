@@ -93,10 +93,12 @@ payload = money.to_json()
 `from_json` / `from_dict` are strict. `from_json_non_strict` /
 `from_dict_non_strict` are not. YAML variants exist when the package
 depends on PyYAML. Field names in Python are snake_case; JSON keys stay
-as the schema spelled them. `validate_all()` keys its errors by the
+as the schema spelled them. `validate_all()` checks the model's fields
+and every model they hold, in lists and maps too, each nested error
+under its path (`lines[0].quantity`). It keys its errors by the
 snake_case names; `validate_all(by_alias=True)` keys them by the JSON
-names, as the Go and TypeScript validators do. `str()` of the result
-lists each error.
+names, nested fields included, as the Go and TypeScript validators do.
+`str()` of the result lists each error.
 
 ## Consume a generated SDK
 

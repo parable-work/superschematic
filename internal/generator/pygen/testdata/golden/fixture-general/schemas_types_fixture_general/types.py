@@ -67,10 +67,14 @@ class FixtureConfig(BaseModel):
         """
         Perform comprehensive validation and return all errors.
 
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
         Args:
             by_alias: Key errors by the fields' wire names, as the Go and
                 TypeScript validators and the SDK do, instead of their
-                snake_case names.
+                snake_case names, nested models' fields included.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -254,10 +258,14 @@ class FixtureFilter(BaseModel):
         """
         Perform comprehensive validation and return all errors.
 
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
         Args:
             by_alias: Key errors by the fields' wire names, as the Go and
                 TypeScript validators and the SDK do, instead of their
-                snake_case names.
+                snake_case names, nested models' fields included.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -439,10 +447,14 @@ class RetryPolicy(BaseModel):
         """
         Perform comprehensive validation and return all errors.
 
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
         Args:
             by_alias: Key errors by the fields' wire names, as the Go and
                 TypeScript validators and the SDK do, instead of their
-                snake_case names.
+                snake_case names, nested models' fields included.
 
         Returns:
             ValidationErrors object containing any validation errors.

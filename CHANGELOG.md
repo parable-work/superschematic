@@ -28,9 +28,26 @@ of a generated artifact is always listed here with the bump it requires.
   `extras[gift].quantity`. For the wire names, the Python types'
   `validate_all` takes a keyword-only `by_alias`: `False`, the default,
   keys errors by snake_case name as before, and `True` keys them by wire
-  name. With a types package generated before `by_alias`, the SDK keys
-  errors by snake_case name. Minor (new keyword; the SDK refuses inputs
-  it sent before).
+  name. With a types package generated before `by_alias`, the SDK checks
+  the input's own fields and keys their errors by snake_case name. Minor
+  (new keyword; the SDK refuses inputs it sent before).
+- The Python types' `validate_all` checks the models a field holds, as
+  Go's `Validate` and TypeScript's `validate<Type>` do. It checked only
+  the model's own fields, so a rule of a nested type, such as
+  `OrderLine.quantity` with `min: 1` in `PlaceOrderInput.lines`, was never
+  reported. It now runs `validate_all` on each model held in a field, a
+  list, a list of lists, a map or a map of lists, and keys its errors
+  under the path that reaches it: `lines[0].quantity`,
+  `ship_to.postal_code`, `grid[0][1].quantity`, `extras.gift.quantity` (a
+  map key as given, as TypeScript keys it; Go keys it
+  `extras[gift].quantity`). With `by_alias=True` the nested fields are
+  keyed by wire name too (`lines[1].productId`, `shipTo.postalCode`).
+  Each error is reported once, by the model that holds the field. A value
+  that is not a model, such as a dict `model_construct` left unparsed, is
+  not walked. The Python SDK's input check is now one
+  `validate_all(by_alias=True)` call in place of its own walk over the
+  input, with the same errors. Minor (`validate_all` reports errors it did
+  not report before).
 - Python types: `str()` of a `ValidationErrors` lists its errors. It
   returned the message `Exception` was built with, and `validate_all`
   builds the container empty and adds errors afterwards, so a container
