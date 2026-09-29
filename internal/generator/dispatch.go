@@ -763,6 +763,9 @@ func (r run) generateEnvConfig(rust bool) error {
 		if output.IndirectModules, err = r.goTypesClosure(r.Schema); err != nil {
 			return err
 		}
+		if err = envgen.SetReplacePaths(output, r.Options.Paths, dir); err != nil {
+			return fmt.Errorf("generator: env config replace paths for %s: %w", r.Config.Name, err)
+		}
 		err = envgen.WriteConfigModule(output, dir)
 	}
 	if err != nil {

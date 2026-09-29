@@ -8,3 +8,7 @@ require (
 	example.com/acme/schema-ir v0.0.0-00010101000000-000000000000
 	gopkg.in/yaml.v3 v3.0.1
 )
+
+replace example.com/acme/scalars => ../../../vendor/acme-scalars
+
+replace example.com/acme/schema-ir => ../../../vendor/acme-schema-ir

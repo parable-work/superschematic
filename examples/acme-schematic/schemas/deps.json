@@ -34,6 +34,15 @@
       ]
     },
     {
+      "id": "shop-config-types",
+      "language": "go",
+      "kind": "types",
+      "name": "example.com/acme/types/go/shop-config",
+      "path": "types/go/shop-config",
+      "service": "shop-config",
+      "deps": null
+    },
+    {
       "id": "shop-db-orm",
       "language": "go",
       "kind": "orm",

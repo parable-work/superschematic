@@ -27,7 +27,10 @@ metadata_key_prefix = "acme."
 history_actor_setting = "acme.history_actor_id"
 scalar_jsdoc_tag = "acmeScalar"
 
-# Only the version-graph binding's path is set: the graph fixture's ORM
-# go.mod must replace the fixture's binding module with it.
+# The runs that pass [paths] (the graph fixture and the env-var loader)
+# must replace the fixture's scalar, schema IR and binding modules with
+# these directories, not the default modules.
 [paths]
+scalar_go = "vendor/acme-scalars"
+schema_ir = "vendor/acme-schema-ir"
 versiongraph_go = "vendor/acme-versiongraph"

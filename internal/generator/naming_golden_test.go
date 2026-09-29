@@ -143,6 +143,23 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 		}
 	}
 
+	// fixture-env-go is a General service with Go types and an @envVars
+	// class: build writes the standalone env-var loader, whose go.mod
+	// replaces the scalar library and the schema IR the types module
+	// requires with [paths] scalar_go and schema_ir.
+	envSchema, envCfg, err := loader.LoadServiceWithConfig(filepath.Join("testdata", "services", "fixture-env-go"))
+	if err != nil {
+		t.Fatalf("load fixture-env-go: %v", err)
+	}
+	if _, err := Run(envSchema, envCfg, Options{
+		OutputRoot: outputRoot,
+		Naming:     names,
+		Paths:      names.LocalPaths(outputRoot),
+		Clock:      fixedClock,
+	}); err != nil {
+		t.Fatalf("run fixture-env-go: %v", err)
+	}
+
 	if err := filepath.WalkDir(outputRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -179,6 +196,7 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 		"orm/fixture-db/go.mod",
 		"types/go/fixture-version-graph-db/go.mod",
 		"orm/fixture-version-graph-db/go.mod",
+		"api/fixture-env-go/go.mod",
 		"api/fixture-api/go.mod",
 		"types/typescript/fixture-api/package.json",
 		"sdk/typescript/fixture-api/package.json",
