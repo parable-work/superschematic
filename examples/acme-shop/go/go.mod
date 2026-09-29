@@ -10,7 +10,7 @@ require (
 	example.com/acme/sdk/go/shop-orders v0.0.0-00010101000000-000000000000
 	example.com/acme/types/go/shop-api v0.0.0
 	example.com/acme/types/go/shop-common v0.0.0-00010101000000-000000000000
-	example.com/acme/types/go/shop-db v0.0.0-00010101000000-000000000000
+	example.com/acme/types/go/shop-db v0.0.0
 	example.com/acme/types/go/shop-orders v0.0.0
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/jackc/pgx/v5 v5.11.0
