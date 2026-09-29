@@ -9,5 +9,17 @@ pub type GenericJSON = serde_json::Value;
 /// UUID v4 with automatic base62 encoding for client-facing APIs
 pub type IdentityUUID = superscalar::Uuid;
 
+/// UUID v4 string as base62
+pub type IdentityUserID = superscalar::Uuid;
+
+/// Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).
+pub type TemporalDate = String;
+
 /// ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
 pub type TemporalDateTime = superscalar::DateTime;
+
+/// Duration for timeouts and intervals
+pub type TemporalDuration = String;
+
+/// Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.
+pub type TemporalTime = String;

@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "name": "UTC session",
+      "class": "dateTime",
+      "sql": "'2026-09-01 10:00:00+00'::timestamptz",
+      "postgres": "\"2026-09-01T10:00:00+00:00\"",
+      "canonical": "\"2026-09-01T10:00:00Z\""
+    },
+    {
+      "name": "the same instant under another session time zone",
+      "class": "dateTime",
+      "sql": "'2026-09-01 10:00:00+00'::timestamptz",
+      "timeZone": "Europe/Amsterdam",
+      "postgres": "\"2026-09-01T12:00:00+02:00\"",
+      "canonical": "\"2026-09-01T10:00:00Z\""
+    },
+    {
+      "name": "a half-hour offset and microseconds",
+      "class": "dateTime",
+      "sql": "'2026-09-01 10:00:00.000001+00'::timestamptz",
+      "timeZone": "Asia/Kolkata",
+      "postgres": "\"2026-09-01T15:30:00.000001+05:30\"",
+      "canonical": "\"2026-09-01T10:00:00.000001Z\""
+    },
+    {
+      "name": "a fraction loses its trailing zeros",
+      "class": "dateTime",
+      "sql": "'2026-09-01 10:00:00.120+00'::timestamptz",
+      "postgres": "\"2026-09-01T10:00:00.12+00:00\"",
+      "canonical": "\"2026-09-01T10:00:00.12Z\""
+    },
+    {
+      "name": "an offset with seconds",
+      "class": "dateTime",
+      "sql": "'1890-01-01 10:00:00+00'::timestamptz",
+      "timeZone": "Europe/Amsterdam",
+      "postgres": "\"1890-01-01T10:17:30+00:17:30\"",
+      "canonical": "\"1890-01-01T10:00:00Z\""
+    },
+    {
+      "name": "an offset that crosses a year",
+      "class": "dateTime",
+      "sql": "'2026-01-01 00:30:00+00'::timestamptz",
+      "timeZone": "America/New_York",
+      "postgres": "\"2025-12-31T19:30:00-05:00\"",
+      "canonical": "\"2026-01-01T00:30:00Z\""
+    },
+    {
+      "name": "null",
+      "class": "dateTime",
+      "sql": "NULL::timestamptz",
+      "postgres": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "list",
+      "class": "dateTime[]",
+      "sql": "ARRAY['2026-09-01 10:00:00+00', '2026-09-02 11:30:00.5+00']::timestamptz[]",
+      "timeZone": "Europe/Amsterdam",
+      "postgres": "[\"2026-09-01T12:00:00+02:00\", \"2026-09-02T13:30:00.5+02:00\"]",
+      "canonical": "[\"2026-09-01T10:00:00Z\",\"2026-09-02T11:30:00.5Z\"]"
+    },
+    {
+      "name": "list of lists written with offsets",
+      "class": "dateTime[][]",
+      "sql": "'[[\"2026-09-01T12:00:00.5+02:00\", \"2026-09-01T10:00:00Z\"]]'::jsonb",
+      "postgres": "[[\"2026-09-01T12:00:00.5+02:00\", \"2026-09-01T10:00:00Z\"]]",
+      "canonical": "[[\"2026-09-01T10:00:00.5Z\",\"2026-09-01T10:00:00Z\"]]"
+    },
+    {
+      "name": "refuses infinity",
+      "class": "dateTime",
+      "sql": "'infinity'::timestamptz",
+      "postgres": "\"infinity\"",
+      "error": "infinity is not an instant the schema runtime holds"
+    },
+    {
+      "name": "refuses BC",
+      "class": "dateTime",
+      "sql": "'0044-03-15 12:00:00+00 BC'::timestamptz",
+      "postgres": "\"0044-03-15T12:00:00+00:00 BC\"",
+      "error": "BC is outside the years 0000-9999"
+    },
+    {
+      "name": "refuses a five-digit year",
+      "class": "dateTime",
+      "sql": "'12026-01-01 00:00:00+00'::timestamptz",
+      "postgres": "\"12026-01-01T00:00:00+00:00\"",
+      "error": "outside the years 0000-9999"
+    },
+    {
+      "name": "refuses an instant past 9999 in UTC",
+      "class": "dateTime",
+      "sql": "'10000-01-01 00:30:00+00'::timestamptz",
+      "timeZone": "Etc/GMT+1",
+      "postgres": "\"9999-12-31T23:30:00-01:00\"",
+      "error": "UTC takes it to the year 10000"
+    },
+    {
+      "name": "refuses a time without an offset",
+      "class": "dateTime",
+      "sql": "'2026-09-01 10:00:00'::timestamp",
+      "postgres": "\"2026-09-01T10:00:00\"",
+      "error": "a timestamp without a time zone names no instant"
+    }
+  ]
+}

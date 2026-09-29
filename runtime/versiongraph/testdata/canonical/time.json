@@ -1,0 +1,53 @@
+{
+  "cases": [
+    {
+      "name": "time",
+      "class": "time",
+      "sql": "'10:00:00'::time",
+      "postgres": "\"10:00:00\"",
+      "canonical": "\"10:00:00\""
+    },
+    {
+      "name": "a fraction loses its trailing zeros",
+      "class": "time",
+      "sql": "'10:00:00.500'::time",
+      "postgres": "\"10:00:00.5\"",
+      "canonical": "\"10:00:00.5\""
+    },
+    {
+      "name": "microseconds",
+      "class": "time",
+      "sql": "'23:59:59.999999'::time",
+      "postgres": "\"23:59:59.999999\"",
+      "canonical": "\"23:59:59.999999\""
+    },
+    {
+      "name": "null",
+      "class": "time",
+      "sql": "NULL::time",
+      "postgres": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "list",
+      "class": "time[]",
+      "sql": "ARRAY['08:00', '20:15:30']::time[]",
+      "postgres": "[\"08:00:00\", \"20:15:30\"]",
+      "canonical": "[\"08:00:00\",\"20:15:30\"]"
+    },
+    {
+      "name": "refuses 24:00:00",
+      "class": "time",
+      "sql": "'24:00:00'::time",
+      "postgres": "\"24:00:00\"",
+      "error": "the scalar refuses hour 24"
+    },
+    {
+      "name": "refuses hours and minutes alone",
+      "class": "time",
+      "sql": "'\"10:00\"'::jsonb",
+      "postgres": "\"10:00\"",
+      "error": "Postgres renders seconds; a stored JSON value must too"
+    }
+  ]
+}

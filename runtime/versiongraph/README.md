@@ -1,53 +1,74 @@
 # Version-graph core
 
 The version-graph core composes, merges, diffs, hashes and validates trees
-of versioned rows (D17 in `docs/DECISIONS.md`). It is one Rust crate with
-no IO, clock or randomness. Its operations take one JSON document and return
-one. A graph descriptor tells it which columns of each kind's rows play which
-role, so it holds no per-kind code.
+of versioned rows (D17 and D19 in `docs/DECISIONS.md`). It is one Rust crate
+with no IO, clock or randomness. Its operations take one JSON document and
+return one. A graph descriptor tells it which columns of each kind's rows
+play which role, so it holds no per-kind code.
 
 ```
-rust/             superschematic-versiongraph: the core and its C ABI (rlib, staticlib, cdylib)
-go/               the Go binding, a module of its own (package versiongraph): cgo over the static archive
-typescript/       @superschematic/versiongraph: the wasm32-unknown-unknown build with typed operations
-testdata/vectors/ the contract as vectors: {name, op, input, expect}
+rust/               superschematic-versiongraph: the core and its C ABI (rlib, staticlib, cdylib)
+go/                 the Go binding, a module of its own (package versiongraph): cgo over the static archive
+go/canonical/       package canonical: Postgres renderings to canonical rows, plain Go
+typescript/         @superschematic/versiongraph: the wasm32-unknown-unknown build with typed operations
+testdata/vectors/   the core's contract as vectors: {name, op, input, expect}
+testdata/canonical/ the canonical row contract as vectors: {cases} per class, {rows}
 ```
 
 This page is the contract. The vectors are its executable form: the Rust
-tests, the Go binding and the TypeScript package's tests run every one of
-them. The package's types for this contract are `typescript/src/contract.ts`.
+tests, the Go binding and the TypeScript package's tests run every core
+vector, and package `canonical` runs every canonical vector. The package's
+types for this contract are `typescript/src/contract.ts`.
 
 ## Descriptor
 
+The descriptor is version 2. The core refuses any other version with
+`invalid_descriptor`; a descriptor without `version` is version 1, which
+nothing has shipped.
+
 ```json
 {
+  "version": 2,
   "graph": "recipe",
+  "root": { "table": "recipe", "key": "id" },
+  "refTable": "recipe_ref",
+  "commitTable": "recipe_commit",
+  "patchTable": "recipe_patch",
   "kinds": [
     {
       "kind": "step",
+      "table": "step",
+      "historyTable": "step_history",
       "key": "entity_key",
       "id": "id",
-      "ref": "ref",
+      "ref": "ref_id",
       "tombstone": "deleted_on_ref",
       "version": "_version",
       "author": "updated_by",
       "parent": { "key": "parent_step_key", "kind": "step" },
       "order": "position",
       "units": { "timings": "keyed", "inputs": "jsonSchema" },
-      "excluded": ["created_at", "created_by", "updated_at", "recipe_id"]
-    },
-    {
-      "kind": "ingredient",
-      "key": "entity_key", "id": "id", "ref": "ref",
-      "tombstone": "deleted_on_ref", "version": "_version", "author": "updated_by",
-      "parent": { "key": "step_key", "kind": "step" },
-      "excluded": ["created_at", "created_by", "updated_at", "recipe_id"]
+      "excluded": ["created_at", "created_by", "updated_at", "recipe_id"],
+      "columns": {
+        "_version": "integer", "created_at": "dateTime", "created_by": "uuid",
+        "deleted_on_ref": "boolean", "entity_key": "uuid", "id": "uuid",
+        "inputs": "json", "parent_step_key": "uuid", "position": "integer",
+        "recipe_id": "uuid", "ref_id": "uuid", "timings": "json",
+        "title": "string", "updated_at": "dateTime", "updated_by": "uuid"
+      }
     },
     {
       "kind": "cover",
-      "key": "entity_key", "id": "id", "ref": "ref",
+      "table": "cover", "historyTable": "cover_history",
+      "key": "entity_key", "id": "id", "ref": "ref_id",
       "tombstone": "deleted_on_ref", "version": "_version",
-      "singleton": true
+      "singleton": true,
+      "excluded": ["recipe_id"],
+      "columns": {
+        "_version": "integer", "deleted_on_ref": "boolean", "entity_key": "uuid",
+        "id": "uuid", "photo_url": "string", "recipe_id": "uuid", "ref_id": "uuid",
+        "tags": "string[]"
+      }
     }
   ]
 }
@@ -60,19 +81,24 @@ shell (`versiongraph_<name>.go`) in the ORM package, and as
 
 | Member | Meaning |
 |---|---|
+| `version` | `2`. |
 | `graph` | Optional. The graph's name; the core does not read it. |
+| `root` | The graph root's `table` and its `key` column. |
+| `refTable`, `commitTable`, `patchTable` | The tables of the graph's refs, commits and patches. |
 | `kinds[].kind` | The kind's name: the tree member that holds its rows. Unique. |
+| `table`, `historyTable` | The table that holds the kind's rows, and the one that holds their history images. |
 | `key` | The entity key column: the logical identity rows are matched on. Its value is a non-empty string. |
 | `id` | The row id column. |
 | `ref` | The column naming the ref the row was written on. |
-| `tombstone` | A boolean column; `true` marks the row as the entity's delete. Absent or `null` is `false`. |
+| `tombstone` | A `boolean` column; `true` marks the row as the entity's delete. Absent or `null` is `false`. |
 | `version` | The row version column. |
 | `author` | Optional. The column naming who wrote the row; conflicts report it. |
-| `parent` | Optional. `key` is a column holding the parent row's entity key (a string, or `null` for none), and `kind` is the parent's kind, which may be the kind itself. |
-| `order` | Optional. An integer column that orders siblings. |
+| `parent` | Optional. `key` is a column holding the parent row's entity key (a string, or `null` for none), with the class of the parent kind's `key` column, and `kind` is the parent's kind, which may be the kind itself. |
+| `order` | Optional. An `integer` column that orders siblings. |
 | `singleton` | Optional, default `false`. At most one live row. |
-| `units` | Optional. A conflict unit per column: `atomic` (the default), `keyed` or `jsonSchema`. |
+| `units` | Optional. A conflict unit per column: `atomic` (the default), `keyed` or `jsonSchema`. `keyed` and `jsonSchema` need a `json` column. |
 | `excluded` | Optional. Columns that are not content: audit columns and the graph's own columns. |
+| `columns` | Every column of the kind's table, with its value class (below). Every column another member names must be here. |
 
 The role columns (`key`, `id`, `ref`, `tombstone`, `version`, `author`)
 must be distinct and are never content. Every other column of a row is
@@ -80,15 +106,40 @@ content unless it is excluded. Only content is compared, merged, diffed and
 hashed, so two rows with equal content are the same version whatever their
 ids, refs, versions and audit columns say. Role columns may also be listed in
 `excluded`. The `parent` key and `order` columns must be content, and a unit
-may only name a content column. Unknown members are refused.
+may only name a content column. Unknown members are refused, and so is an
+empty table or column name.
+
+The tables and the value classes are for a storage adapter, which builds its
+statements from them and normalizes each row it reads (below). The core
+checks that they are there and fit the roles; it does not check a row's
+values against their classes, and a row may carry a column `columns` lacks.
+
+### Value classes
+
+A value class says what the schema runtime's JSON for a field's type is
+(`runtime/schema`, D12 and D14), one class per rule that gives the value's
+canonical JSON. The generator derives it from the field's type: an enum is
+`enum`; an object type, a `@jsonField` object, a map, and a scalar that
+holds any JSON value or a JSON object or array are `json`; a scalar whose
+`json_schema` type is `integer`, `number` or `boolean` has that class; a
+string scalar the catalog stores as `UUID`, `TIMESTAMPTZ`, `DATE`, `TIME`
+or `INTERVAL` is `uuid`, `dateTime`, `date`, `time` or `duration`, and one
+stored as text is `string`; the builtins `string`, `number` and `boolean`
+have their own classes. A to-one relation holds its target's key and has
+its class. A list (`T[]`) adds `[]` to its element's class and a list of
+lists (`T[][]`) adds `[][]`. A string scalar stored another way
+(`Geo.Location`'s `POINT`), or a JSON scalar not stored as `JSONB`
+(`Embedding.Vector`), has no class yet, and a graph member with one fails
+generation.
 
 ## Trees and rows
 
 A tree is `{"<kind>": [row, ...]}`. A kind the descriptor lacks is refused;
-a missing kind has no rows. A row is a JSON object keyed by column name, as
-Postgres `to_jsonb(row)` renders it: the form of a history image, so a live
-row and its history image compare and hash the same. Numbers keep the digits
-they were written with, so a `numeric` wider than a double survives.
+a missing kind has no rows. A row is a canonical row (below): a JSON object
+keyed by column name, the same whether a storage adapter read it live or
+from a history image, so a live row and its history image compare and hash
+the same. Numbers keep the digits they were written with, so a `numeric`
+wider than a double survives.
 
 A row whose tombstone is `true` is a delete. Everywhere but `compose`, a
 tombstone row and an absent row are the same deleted state.
@@ -98,6 +149,54 @@ number holds exactly; outside it, a browser would sort rows differently from
 the server. An integer of any width outside the range, even one too wide for
 64 bits, is out of range; a number with a fraction or an exponent is not an
 integer.
+
+## Canonical rows
+
+A canonical row is a JSON object keyed by column name. Each value is the
+schema runtime's JSON for the field's type, in one canonical form per value
+class, so a content hash does not depend on the database that stored the
+row (D19). A storage adapter normalizes what its database returns, live rows
+and history images alike, and hands the core only canonical rows.
+`null` is `null` in every class.
+
+For Postgres, a live row is `to_jsonb(row)` and a history image is the JSONB
+the history trigger stored from `to_jsonb(NEW)`; each is rendered as text in
+the session's settings (a `timestamptz` in the session's time zone, an
+`interval` in `IntervalStyle` `postgres`, the default). One rule per class
+turns a value from that rendering into its canonical JSON:
+
+| Class | Canonical JSON | From Postgres |
+|---|---|---|
+| `string` | The JSON string, escaped as the core's canonical JSON escapes: `"` and `\`, `\b` `\f` `\n` `\r` `\t` by name, any other control character as `\u00xx` in lowercase hex, everything else as it is. | Any JSON string. |
+| `enum` | The member's value, as a `string`. | Any JSON string. |
+| `integer` | The integer's digits, exactly however wide, with an optional minus and no leading zeros; `-0` is `0`. | A JSON number with no fraction or exponent (`bigint` renders so). |
+| `number` | The number's exact decimal value in the layout of ECMAScript's `Number::toString`: plain digits while the decimal point falls within 21 digits of the first and no more than six zeros follow it, else one digit, a fraction and a signed exponent (`1e+21`, `1.5e-7`); no trailing zeros (`1.50` is `1.5`); `-0` is `0`. For a double, this is the text `JSON.stringify` and Go's `encoding/json` write. Digits are never rounded. | Any JSON number. `to_jsonb` renders a `double precision` as a `numeric`, never with an exponent (`1e300` as 301 digits); `NaN` and infinities, which it renders as strings, are refused. |
+| `boolean` | `true` or `false`. | A JSON boolean. |
+| `uuid` | The scalar core's canonical form: base62 of the UUID's 128 bits (`0123456789A-Za-z`), with the nil UUID as `"0"`. | The hyphenated form, in either case, or base62 (a JSON value the ORM stored). |
+| `dateTime` | RFC 3339 in UTC with `Z`, the fraction of a second without trailing zeros and left out when zero: Go's `RFC3339Nano` of the UTC time (`2026-09-01T10:00:00.12Z`). | RFC 3339 with an offset, which may carry seconds (`+00:17:30`). The offset follows the session's time zone, so an image written under another zone normalizes to the same value. A year outside 0000-9999, `BC`, `infinity` and a time without an offset are refused. |
+| `date` | `YYYY-MM-DD`. | `YYYY-MM-DD`; `BC`, `infinity` and a day that does not exist are refused. |
+| `time` | `HH:MM:SS` on a 24-hour clock, the fraction of a second without trailing zeros and left out when zero. | `HH:MM:SS` with an optional fraction; `24:00:00`, which the scalar refuses, and `HH:MM` are refused. |
+| `duration` | The scalar core's canonical form: under a second, the largest of `ms`, `us` and `ns` that holds it whole (`500ms`, `1500us`); from a second, hours and minutes when present, then seconds with their fraction (`1h30m0s`, `1m30s`, `1.5s`); `0s` for zero. | Interval text (`01:30:00`, `1 day 02:00:00`, `-1 days +02:00:00`), where a day is 24 hours, or a duration string (`1h30m0s`, `1.5ms`, a JSON value the ORM stored). Months and years, which have no fixed length, are refused. |
+| `json` | The JSON value with object members sorted by key (by code point, not jsonb's order by length), no whitespace, strings as `string`, and every number as `number`. | Any JSON value. |
+| `<class>[]`, `<class>[][]` | A JSON array of the element class's canonical values, or of such arrays. A null element is refused (D12). | A native array renders as a JSON array; a list of lists is JSONB. |
+
+A canonical row's members are sorted by column name. A column the row has
+and the descriptor's `columns` lacks is refused; a declared column the row
+lacks (a history image leaves out a `@versioned({ exclude })` column) stays
+absent.
+
+`testdata/canonical` holds the vectors: one file per element class,
+`{"cases": [{"name", "class", "sql", "timeZone"?, "postgres", "canonical"}]}`,
+with `"error"` (why, not compared) in place of `canonical` for a value the
+rule refuses, and `rows.json`, `{"rows": [{"name", "columns", "sql",
+"timeZone"?, "postgres", "canonical"}]}`. `postgres` is the value as it
+appears in `to_jsonb` of a row that holds `sql` under the session time zone
+`timeZone` (UTC when absent), and `canonical` is the exact text of its
+canonical JSON. Package `canonical` in the Go module
+(`go/canonical`: `Postgres(class, value)` and `PostgresRow(columns, row)`)
+implements the rules and runs every vector, and checks each `postgres`
+against a real Postgres when `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL`
+names one.
 
 ## Operations
 
@@ -216,7 +315,7 @@ A refused input returns `{"error": {"code", "message"}}`. `code` is stable;
 |---|---|
 | `invalid_json` | The input is not JSON. |
 | `invalid_request` | The input is not an object, a member is missing or unknown, or a tree is not an object of arrays. |
-| `invalid_descriptor` | The descriptor is malformed or breaks a rule above. |
+| `invalid_descriptor` | The descriptor is malformed, is not version 2, or breaks a rule above. |
 | `unknown_kind` | A tree names a kind the descriptor lacks. |
 | `invalid_row` | A row is not an object, or its key, tombstone, parent key or order has the wrong type. |
 | `duplicate_entity_key` | Two rows of a kind share an entity key (every operation but `validate`, which reports it). |
@@ -255,6 +354,7 @@ make versiongraph            # static archive for the Go binding (scripts/versio
 make rust                    # fmt, clippy (native and wasm32) and cargo test
 make ts                      # among the TypeScript packages: the wasm build, the package, every vector through it
 cd runtime/versiongraph/go && go test ./...
+SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
 ```
 

@@ -71,8 +71,12 @@ func versionGraphs(schema *ir.Schema, repositories []Repository) ([]VersionGraph
 	for i := range repositories {
 		byType[repositories[i].TypeName] = &repositories[i]
 	}
+	described, err := graphdesc.Graphs(schema)
+	if err != nil {
+		return nil, err
+	}
 	var graphs []VersionGraph
-	for _, g := range graphdesc.Graphs(schema) {
+	for _, g := range described {
 		descriptor, err := g.Descriptor.JSON()
 		if err != nil {
 			return nil, err

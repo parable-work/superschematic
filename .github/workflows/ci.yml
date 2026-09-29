@@ -531,10 +531,26 @@ jobs:
           cargo clippy --target wasm32-unknown-unknown -- -D warnings
           cargo test
 
+      - name: Start Postgres
+        # Package canonical checks its vectors' Postgres renderings against
+        # it; the test skips without SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL.
+        run: |
+          docker run --detach --name superschematic-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 5432:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 1 60); do
+            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-pg
+          exit 1
+
       - name: Go binding (build / vet / test over the static archive)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
+          SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           export CGO_LDFLAGS="$(scripts/versiongraph-archive.sh)"
           cd runtime/versiongraph/go

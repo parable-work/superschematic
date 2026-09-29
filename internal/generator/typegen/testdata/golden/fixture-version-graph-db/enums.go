@@ -19,6 +19,9 @@ const (
 	// RecipeEntityKindStep
 	RecipeEntityKind_Step RecipeEntityKind = "step"
 
+	// RecipeEntityKindTasting
+	RecipeEntityKind_Tasting RecipeEntityKind = "tasting"
+
 	// RecipeEntityKindUtensil
 	RecipeEntityKind_Utensil RecipeEntityKind = "utensil"
 )
@@ -44,6 +47,9 @@ func (e RecipeEntityKind) IsValid() bool {
 	case RecipeEntityKind_Step:
 		return true
 
+	case RecipeEntityKind_Tasting:
+		return true
+
 	case RecipeEntityKind_Utensil:
 		return true
 
@@ -59,6 +65,7 @@ func (RecipeEntityKind) Values() []RecipeEntityKind {
 		RecipeEntityKind_Ingredient,
 		RecipeEntityKind_Note,
 		RecipeEntityKind_Step,
+		RecipeEntityKind_Tasting,
 		RecipeEntityKind_Utensil,
 	}
 }
@@ -150,6 +157,80 @@ func (e RecipePatchOperation) Validate() (bool, []ValidationError) {
 
 // ValidateRequired with required check and returns whether validation passed along with any errors.
 func (e RecipePatchOperation) ValidateRequired() (bool, []ValidationError) {
+	var errs []ValidationError
+
+	if e == "" {
+		errs = append(errs, ValidationError{Validator: "required", Message: "required field"})
+		return false, errs
+	}
+
+	if !e.IsValid() {
+		errs = append(errs, ValidationError{Validator: "enum", Message: "invalid enum value"})
+	}
+
+	return len(errs) == 0, errs
+}
+
+// Verdict - How a tasting went.
+type Verdict string
+
+const (
+
+	// VerdictAgain
+	Verdict_Again Verdict = "again"
+
+	// VerdictTweak
+	Verdict_Tweak Verdict = "tweak"
+
+	// VerdictNever
+	Verdict_Never Verdict = "never"
+)
+
+// String returns the string representation of Verdict
+func (e Verdict) String() string {
+	return string(e)
+}
+
+// IsValid returns true if the Verdict value is valid
+func (e Verdict) IsValid() bool {
+	switch e {
+
+	case Verdict_Again:
+		return true
+
+	case Verdict_Tweak:
+		return true
+
+	case Verdict_Never:
+		return true
+
+	}
+	return false
+}
+
+// Values returns every Verdict member in schema declaration order.
+// Each call returns a new slice.
+func (Verdict) Values() []Verdict {
+	return []Verdict{
+		Verdict_Again,
+		Verdict_Tweak,
+		Verdict_Never,
+	}
+}
+
+// Validate and returns whether validation passed along with any errors.
+func (e Verdict) Validate() (bool, []ValidationError) {
+	var errs []ValidationError
+
+	if !e.IsValid() {
+		errs = append(errs, ValidationError{Validator: "enum", Message: "invalid enum value"})
+	}
+
+	return len(errs) == 0, errs
+}
+
+// ValidateRequired with required check and returns whether validation passed along with any errors.
+func (e Verdict) ValidateRequired() (bool, []ValidationError) {
 	var errs []ValidationError
 
 	if e == "" {

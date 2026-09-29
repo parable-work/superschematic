@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityUUID, TemporalDateTime, RecipeEntityKind, RecipePatchOperation, Cover, Ingredient, Note, Recipe, RecipeCommit, RecipePatch, RecipeRef, Step, Utensil,  } from '@schemas/fixture-version-graph-db-types/types';
+import type { GenericInt64, GenericJSON, IdentityUUID, IdentityUserID, TemporalDate, TemporalDateTime, TemporalDuration, TemporalTime, RecipeEntityKind, RecipePatchOperation, Verdict, Cover, Ingredient, Note, Recipe, RecipeCommit, RecipePatch, RecipeRef, Step, Tasting, Utensil,  } from '@schemas/fixture-version-graph-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-version-graph-db-types';
@@ -76,7 +76,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 ## Type System
 
 
-### Scalars (4)
+### Scalars (8)
 
 
 - **Generic.Int64** - Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
@@ -94,27 +94,51 @@ Validation errors follow a standardized format (see `validation_errors.md`):
   - Pattern: `^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`
 
 
+- **Identity.UserID** - UUID v4 string as base62
+  - TypeScript type: `string`
+  - Pattern: `^[0-9A-Za-z]{1,22}$`
+
+
+- **Temporal.Date** - Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).
+  - TypeScript type: `string`
+  - Max length: 40
+
+
 - **Temporal.DateTime** - ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
   - TypeScript type: `JSDate`
   - Wire format: TypeScript schemas use `@temporalFormat('...')`; JSON/YAML schemas use `x-temporal-format`.
 
 
+- **Temporal.Duration** - Duration for timeouts and intervals
+  - TypeScript type: `string`
+  - Pattern: `^(\d+(\.\d+)?(ns|us|µs|ms|s|m|h))+$`
+  - Max length: 32
+
+
+- **Temporal.Time** - Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.
+  - TypeScript type: `string`
+  - Pattern: `^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\s?[AaPp][Mm])$`
 
 
 
-### Enums (2)
+
+
+### Enums (3)
 
 
 - **RecipeEntityKind** - The entity kinds of the Recipe version graph.
-  - Values: `Cover`, `Ingredient`, `Note`, `Step`, `Utensil`
+  - Values: `Cover`, `Ingredient`, `Note`, `Step`, `Tasting`, `Utensil`
 
 - **RecipePatchOperation** - What a patch of the Recipe version graph does to one entity.
   - Values: `Add`, `Update`, `Delete`
 
+- **Verdict** - How a tasting went.
+  - Values: `Again`, `Tweak`, `Never`
 
 
 
-### Types (9)
+
+### Types (10)
 
 
 - **Cover** - The recipe's cover photo: at most one per ref.
@@ -132,6 +156,9 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - **RecipeRef** - A line of the Recipe version graph: a primary line when parentRef is null, else a change set.
 
 - **Step** - One step of a recipe, ordered by position; updatedBy names its row's writer.
+
+- **Tasting** - A tasting of the recipe. Its columns hold a value of every class a
+descriptor names.
 
 - **Utensil** - A utensil the recipe needs, keyed by a plain UUID rather than an
 AutoGenerate one.

@@ -22,6 +22,8 @@ class RecipeEntityKind(str, Enum):
 
     Step = "step"
 
+    Tasting = "tasting"
+
     Utensil = "utensil"
 
     @classmethod
@@ -45,6 +47,28 @@ class RecipePatchOperation(str, Enum):
     Update = "UPDATE"
 
     Delete = "DELETE"
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        return core_schema.no_info_before_validator_function(
+            cls,
+            handler(source_type),
+        )
+
+    def __str__(self) -> str:
+        """Return the string value of the enum."""
+        return self.value
+
+class Verdict(str, Enum):
+    """
+    How a tasting went.
+    """
+
+    Again = "again"
+
+    Tweak = "tweak"
+
+    Never = "never"
 
     @classmethod
     def __get_pydantic_core_schema__(cls, source_type, handler):

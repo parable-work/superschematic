@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "name": "hours and minutes",
+      "class": "duration",
+      "sql": "'1 hour 30 minutes'::interval",
+      "postgres": "\"01:30:00\"",
+      "canonical": "\"1h30m0s\""
+    },
+    {
+      "name": "more than a day of hours",
+      "class": "duration",
+      "sql": "'36 hours'::interval",
+      "postgres": "\"36:00:00\"",
+      "canonical": "\"36h0m0s\""
+    },
+    {
+      "name": "a day is 24 hours",
+      "class": "duration",
+      "sql": "'1 day 2 hours'::interval",
+      "postgres": "\"1 day 02:00:00\"",
+      "canonical": "\"26h0m0s\""
+    },
+    {
+      "name": "mixed signs",
+      "class": "duration",
+      "sql": "'-1 day +2 hours'::interval",
+      "postgres": "\"-1 days +02:00:00\"",
+      "canonical": "\"-22h0m0s\""
+    },
+    {
+      "name": "negative",
+      "class": "duration",
+      "sql": "'-01:30:00'::interval",
+      "postgres": "\"-01:30:00\"",
+      "canonical": "\"-1h30m0s\""
+    },
+    {
+      "name": "minutes and seconds",
+      "class": "duration",
+      "sql": "'90 seconds'::interval",
+      "postgres": "\"00:01:30\"",
+      "canonical": "\"1m30s\""
+    },
+    {
+      "name": "a fraction of a second over one second",
+      "class": "duration",
+      "sql": "'1.5 seconds'::interval",
+      "postgres": "\"00:00:01.5\"",
+      "canonical": "\"1.5s\""
+    },
+    {
+      "name": "under a second in milliseconds",
+      "class": "duration",
+      "sql": "'0.5 seconds'::interval",
+      "postgres": "\"00:00:00.5\"",
+      "canonical": "\"500ms\""
+    },
+    {
+      "name": "under a second in microseconds",
+      "class": "duration",
+      "sql": "'1500 microseconds'::interval",
+      "postgres": "\"00:00:00.0015\"",
+      "canonical": "\"1500us\""
+    },
+    {
+      "name": "days alone",
+      "class": "duration",
+      "sql": "'2 days'::interval",
+      "postgres": "\"2 days\"",
+      "canonical": "\"48h0m0s\""
+    },
+    {
+      "name": "zero",
+      "class": "duration",
+      "sql": "'0'::interval",
+      "postgres": "\"00:00:00\"",
+      "canonical": "\"0s\""
+    },
+    {
+      "name": "null",
+      "class": "duration",
+      "sql": "NULL::interval",
+      "postgres": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "list",
+      "class": "duration[]",
+      "sql": "ARRAY['1 hour', '5 minutes']::interval[]",
+      "postgres": "[\"01:00:00\", \"00:05:00\"]",
+      "canonical": "[\"1h0m0s\",\"5m0s\"]"
+    },
+    {
+      "name": "list of lists written as duration strings",
+      "class": "duration[][]",
+      "sql": "'[[\"1h30m0s\", \"1.5ms\", \"1µs\"]]'::jsonb",
+      "postgres": "[[\"1h30m0s\", \"1.5ms\", \"1µs\"]]",
+      "canonical": "[[\"1h30m0s\",\"1500us\",\"1us\"]]"
+    },
+    {
+      "name": "refuses months",
+      "class": "duration",
+      "sql": "'1 mon'::interval",
+      "postgres": "\"1 mon\"",
+      "error": "a month has no fixed length"
+    },
+    {
+      "name": "refuses years",
+      "class": "duration",
+      "sql": "'1 year 2 mons 3 days'::interval",
+      "postgres": "\"1 year 2 mons 3 days\"",
+      "error": "a year has no fixed length"
+    }
+  ]
+}

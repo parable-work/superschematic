@@ -8,6 +8,7 @@ export enum RecipeEntityKind {
   Ingredient = "ingredient",
   Note = "note",
   Step = "step",
+  Tasting = "tasting",
   Utensil = "utensil",
 }
 
@@ -18,4 +19,13 @@ export enum RecipePatchOperation {
   Add = "ADD",
   Update = "UPDATE",
   Delete = "DELETE",
+}
+
+/**
+ * Verdict - How a tasting went.
+ */
+export enum Verdict {
+  Again = "again",
+  Tweak = "tweak",
+  Never = "never",
 }

@@ -1,0 +1,88 @@
+{
+  "cases": [
+    {
+      "name": "object members sorted, numbers canonical",
+      "class": "json",
+      "sql": "'{\"b\": 1, \"a\": [1.50, {\"d\": null}], \"aa\": \"é\"}'::jsonb",
+      "postgres": "{\"a\": [1.50, {\"d\": null}], \"b\": 1, \"aa\": \"é\"}",
+      "canonical": "{\"a\":[1.5,{\"d\":null}],\"aa\":\"é\",\"b\":1}"
+    },
+    {
+      "name": "keys sort by code point, not as jsonb orders them",
+      "class": "json",
+      "sql": "'{\"bb\": 1, \"a\": 2, \"é\": 3, \"Z\": 4}'::jsonb",
+      "postgres": "{\"Z\": 4, \"a\": 2, \"bb\": 1, \"é\": 3}",
+      "canonical": "{\"Z\":4,\"a\":2,\"bb\":1,\"é\":3}"
+    },
+    {
+      "name": "array",
+      "class": "json",
+      "sql": "'[3, \"x\", true, null, {}]'::jsonb",
+      "postgres": "[3, \"x\", true, null, {}]",
+      "canonical": "[3,\"x\",true,null,{}]"
+    },
+    {
+      "name": "a string value",
+      "class": "json",
+      "sql": "'\"just text\"'::jsonb",
+      "postgres": "\"just text\"",
+      "canonical": "\"just text\""
+    },
+    {
+      "name": "a number jsonb already rewrote",
+      "class": "json",
+      "sql": "'1e2'::jsonb",
+      "postgres": "100",
+      "canonical": "100"
+    },
+    {
+      "name": "a wide number, exactly",
+      "class": "json",
+      "sql": "'{\"n\": 12345678901234567890}'::jsonb",
+      "postgres": "{\"n\": 12345678901234567890}",
+      "canonical": "{\"n\":12345678901234567890}"
+    },
+    {
+      "name": "escapes in keys and values",
+      "class": "json",
+      "sql": "E'{\"line\\\\nbreak\": \"tab\\\\tcontrol\\\\u0001\"}'::jsonb",
+      "postgres": "{\"line\\nbreak\": \"tab\\tcontrol\\u0001\"}",
+      "canonical": "{\"line\\nbreak\":\"tab\\tcontrol\\u0001\"}"
+    },
+    {
+      "name": "empty object",
+      "class": "json",
+      "sql": "'{}'::jsonb",
+      "postgres": "{}",
+      "canonical": "{}"
+    },
+    {
+      "name": "null",
+      "class": "json",
+      "sql": "NULL::jsonb",
+      "postgres": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "list",
+      "class": "json[]",
+      "sql": "ARRAY['{\"b\": 1, \"a\": 2}'::jsonb, '[]'::jsonb]",
+      "postgres": "[{\"a\": 2, \"b\": 1}, []]",
+      "canonical": "[{\"a\":2,\"b\":1},[]]"
+    },
+    {
+      "name": "list of lists",
+      "class": "json[][]",
+      "sql": "'[[{\"b\": 1.0}], []]'::jsonb",
+      "postgres": "[[{\"b\": 1.0}], []]",
+      "canonical": "[[{\"b\":1}],[]]"
+    },
+    {
+      "name": "refuses a null list element",
+      "class": "json[]",
+      "sql": "ARRAY['{}'::jsonb, 'null'::jsonb]",
+      "postgres": "[{}, null]",
+      "error": "a list element is never null, a JSON null included"
+    }
+  ]
+}

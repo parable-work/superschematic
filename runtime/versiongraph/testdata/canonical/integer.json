@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "name": "small",
+      "class": "integer",
+      "sql": "42::bigint",
+      "postgres": "42",
+      "canonical": "42"
+    },
+    {
+      "name": "negative",
+      "class": "integer",
+      "sql": "(-7)::bigint",
+      "postgres": "-7",
+      "canonical": "-7"
+    },
+    {
+      "name": "largest bigint, exactly",
+      "class": "integer",
+      "sql": "9223372036854775807::bigint",
+      "postgres": "9223372036854775807",
+      "canonical": "9223372036854775807"
+    },
+    {
+      "name": "smallest bigint, exactly",
+      "class": "integer",
+      "sql": "(-9223372036854775808)::bigint",
+      "postgres": "-9223372036854775808",
+      "canonical": "-9223372036854775808"
+    },
+    {
+      "name": "wider than a double holds exactly",
+      "class": "integer",
+      "sql": "9007199254740993::bigint",
+      "postgres": "9007199254740993",
+      "canonical": "9007199254740993"
+    },
+    {
+      "name": "null",
+      "class": "integer",
+      "sql": "NULL::bigint",
+      "postgres": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "list",
+      "class": "integer[]",
+      "sql": "ARRAY[1, 2, 3]::bigint[]",
+      "postgres": "[1, 2, 3]",
+      "canonical": "[1,2,3]"
+    },
+    {
+      "name": "list of lists",
+      "class": "integer[][]",
+      "sql": "'[[1, 2], [], [9007199254740993]]'::jsonb",
+      "postgres": "[[1, 2], [], [9007199254740993]]",
+      "canonical": "[[1,2],[],[9007199254740993]]"
+    },
+    {
+      "name": "refuses a fraction",
+      "class": "integer",
+      "sql": "1.5::numeric",
+      "postgres": "1.5",
+      "error": "an integer has no fraction"
+    },
+    {
+      "name": "refuses a string",
+      "class": "integer",
+      "sql": "'42'::text",
+      "postgres": "\"42\"",
+      "error": "an integer is a JSON number"
+    }
+  ]
+}

@@ -31,6 +31,7 @@ type Database struct {
 	RecipePatch  *RecipePatchRepository
 	RecipeRef    *RecipeRefRepository
 	Step         *StepRepository
+	Tasting      *TastingRepository
 	Utensil      *UtensilRepository
 }
 
@@ -45,6 +46,7 @@ type Tx struct {
 	RecipePatch  *RecipePatchRepository
 	RecipeRef    *RecipeRefRepository
 	Step         *StepRepository
+	Tasting      *TastingRepository
 	Utensil      *UtensilRepository
 }
 
@@ -82,6 +84,7 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 	db.RecipePatch = &RecipePatchRepository{db: db}
 	db.RecipeRef = &RecipeRefRepository{db: db}
 	db.Step = &StepRepository{db: db}
+	db.Tasting = &TastingRepository{db: db}
 	db.Utensil = &UtensilRepository{db: db}
 
 	return db, nil
@@ -110,6 +113,7 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 	db.RecipePatch = &RecipePatchRepository{db: db}
 	db.RecipeRef = &RecipeRefRepository{db: db}
 	db.Step = &StepRepository{db: db}
+	db.Tasting = &TastingRepository{db: db}
 	db.Utensil = &UtensilRepository{db: db}
 
 	return db, nil
@@ -160,6 +164,11 @@ func (db *Database) GetStepRepository() StepRepositoryInterface {
 	return db.Step
 }
 
+// GetTastingRepository returns the Tasting repository interface.
+func (db *Database) GetTastingRepository() TastingRepositoryInterface {
+	return db.Tasting
+}
+
 // GetUtensilRepository returns the Utensil repository interface.
 func (db *Database) GetUtensilRepository() UtensilRepositoryInterface {
 	return db.Utensil
@@ -205,6 +214,11 @@ func (tx *Tx) GetStepRepository() StepRepositoryInterface {
 	return tx.Step
 }
 
+// GetTastingRepository returns the Tasting transaction repository interface.
+func (tx *Tx) GetTastingRepository() TastingRepositoryInterface {
+	return tx.Tasting
+}
+
 // GetUtensilRepository returns the Utensil transaction repository interface.
 func (tx *Tx) GetUtensilRepository() UtensilRepositoryInterface {
 	return tx.Utensil
@@ -228,6 +242,7 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	txWrapper.RecipePatch = &RecipePatchRepository{tx: tx, txDB: db}
 	txWrapper.RecipeRef = &RecipeRefRepository{tx: tx, txDB: db}
 	txWrapper.Step = &StepRepository{tx: tx, txDB: db}
+	txWrapper.Tasting = &TastingRepository{tx: tx, txDB: db}
 	txWrapper.Utensil = &UtensilRepository{tx: tx, txDB: db}
 
 	defer func() {

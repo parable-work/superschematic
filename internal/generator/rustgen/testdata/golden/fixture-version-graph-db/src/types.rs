@@ -250,6 +250,48 @@ pub struct Step {
     pub version: i64,
 }
 
+fn default_tasting_deleted_on_ref() -> bool {
+    false
+}
+
+/// A tasting of the recipe. Its columns hold a value of every class a
+/// descriptor names.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Tasting {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<Recipe>,
+    pub taster: IdentityUserID,
+    pub salty: bool,
+    pub score: f64,
+    pub servings: GenericInt64,
+    #[serde(rename = "tastedOn")]
+    pub tasted_on: TemporalDate,
+    #[serde(rename = "tastedAt")]
+    pub tasted_at: TemporalDateTime,
+    #[serde(rename = "servedAt")]
+    pub served_at: TemporalTime,
+    pub rested: TemporalDuration,
+    pub verdict: Verdict,
+    #[serde(deserialize_with = "superscalar::scalars::json_scalar::serde::deserialize")]
+    pub remarks: GenericJSON,
+    pub tags: Vec<String>,
+    pub helpers: Vec<IdentityUUID>,
+    pub bites: Vec<Vec<GenericInt64>>,
+    /// The entity's logical identity, shared by its rows on every ref.
+    #[serde(default, rename = "entityKey", skip_serializing_if = "Option::is_none")]
+    pub entity_key: Option<IdentityUUID>,
+    /// The ref this row overrides the entity on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<RecipeRef>,
+    /// True when the row deletes the entity on its ref.
+    #[serde(default = "default_tasting_deleted_on_ref", rename = "deletedOnRef")]
+    pub deleted_on_ref: bool,
+    #[serde(default, rename = "_version")]
+    pub version: i64,
+}
+
 fn default_utensil_deleted_on_ref() -> bool {
     false
 }

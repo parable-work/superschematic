@@ -1294,6 +1294,225 @@ type StepHistoryOptions struct {
 	Offset int
 }
 
+// TastingFields specifies which Tasting fields to select
+type TastingFields struct {
+	Id           bool
+	Taster       bool
+	Salty        bool
+	Score        bool
+	Servings     bool
+	TastedOn     bool
+	TastedAt     bool
+	ServedAt     bool
+	Rested       bool
+	Verdict      bool
+	Remarks      bool
+	Tags         bool
+	Helpers      bool
+	Bites        bool
+	EntityKey    bool
+	DeletedOnRef bool
+	Version      bool
+	// Recipe selects the recipe_id foreign key field
+	Recipe bool
+	// RecipeNested selects fields for the related Recipe
+	RecipeNested RecipeFields
+	// Ref selects the ref_id foreign key field
+	Ref bool
+	// RefNested selects fields for the related RecipeRef
+	RefNested RecipeRefFields
+}
+
+// ToStringSlice converts TastingFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f TastingFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Recipe {
+		fields = append(fields, "recipe_id")
+	}
+	if f.Taster {
+		fields = append(fields, "taster")
+	}
+	if f.Salty {
+		fields = append(fields, "salty")
+	}
+	if f.Score {
+		fields = append(fields, "score")
+	}
+	if f.Servings {
+		fields = append(fields, "servings")
+	}
+	if f.TastedOn {
+		fields = append(fields, "tasted_on")
+	}
+	if f.TastedAt {
+		fields = append(fields, "tasted_at")
+	}
+	if f.ServedAt {
+		fields = append(fields, "served_at")
+	}
+	if f.Rested {
+		fields = append(fields, "rested")
+	}
+	if f.Verdict {
+		fields = append(fields, "verdict")
+	}
+	if f.Remarks {
+		fields = append(fields, "remarks")
+	}
+	if f.Tags {
+		fields = append(fields, "tags")
+	}
+	if f.Helpers {
+		fields = append(fields, "helpers")
+	}
+	if f.Bites {
+		fields = append(fields, "bites")
+	}
+	if f.EntityKey {
+		fields = append(fields, "entity_key")
+	}
+	if f.Ref {
+		fields = append(fields, "ref_id")
+	}
+	if f.DeletedOnRef {
+		fields = append(fields, "deleted_on_ref")
+	}
+	if f.Version {
+		fields = append(fields, "_version")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f TastingFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.RecipeNested.IsZero() {
+		return false
+	}
+	if !f.RefNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a TastingFields with all fields selected
+func (TastingFields) All() TastingFields {
+	return TastingFields{
+		Id:           true,
+		Taster:       true,
+		Salty:        true,
+		Score:        true,
+		Servings:     true,
+		TastedOn:     true,
+		TastedAt:     true,
+		ServedAt:     true,
+		Rested:       true,
+		Verdict:      true,
+		Remarks:      true,
+		Tags:         true,
+		Helpers:      true,
+		Bites:        true,
+		EntityKey:    true,
+		DeletedOnRef: true,
+		Version:      true,
+		Recipe:       true,
+		Ref:          true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (TastingFields) Minimal() TastingFields {
+	return TastingFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (TastingFields) WithoutAudit() TastingFields {
+	return TastingFields{
+		Id:           true,
+		Taster:       true,
+		Salty:        true,
+		Score:        true,
+		Servings:     true,
+		TastedOn:     true,
+		TastedAt:     true,
+		ServedAt:     true,
+		Rested:       true,
+		Verdict:      true,
+		Remarks:      true,
+		Tags:         true,
+		Helpers:      true,
+		Bites:        true,
+		EntityKey:    true,
+		DeletedOnRef: true,
+		Version:      true,
+	}
+}
+
+// TastingOrderByField represents a field that can be used for ordering
+type TastingOrderByField string
+
+const (
+	TastingOrderById           TastingOrderByField = "id"
+	TastingOrderByTaster       TastingOrderByField = "taster"
+	TastingOrderBySalty        TastingOrderByField = "salty"
+	TastingOrderByScore        TastingOrderByField = "score"
+	TastingOrderByServings     TastingOrderByField = "servings"
+	TastingOrderByTastedOn     TastingOrderByField = "tasted_on"
+	TastingOrderByTastedAt     TastingOrderByField = "tasted_at"
+	TastingOrderByServedAt     TastingOrderByField = "served_at"
+	TastingOrderByRested       TastingOrderByField = "rested"
+	TastingOrderByVerdict      TastingOrderByField = "verdict"
+	TastingOrderByRemarks      TastingOrderByField = "remarks"
+	TastingOrderByTags         TastingOrderByField = "tags"
+	TastingOrderByHelpers      TastingOrderByField = "helpers"
+	TastingOrderByBites        TastingOrderByField = "bites"
+	TastingOrderByEntityKey    TastingOrderByField = "entity_key"
+	TastingOrderByDeletedOnRef TastingOrderByField = "deleted_on_ref"
+	TastingOrderByVersion      TastingOrderByField = "_version"
+)
+
+// TastingOrderBy specifies ordering for Tasting queries
+type TastingOrderBy struct {
+	Field TastingOrderByField
+	Desc  bool
+}
+
+// TastingGetOptions contains options for Tasting GetOne operations
+type TastingGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields TastingFields
+}
+
+// TastingFindOptions contains options for Tasting Find operations
+type TastingFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields TastingFields
+	// OrderBy specifies sorting order
+	OrderBy []TastingOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// TastingHistoryOptions contains options for Tasting version history reads.
+type TastingHistoryOptions struct {
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+}
+
 // UtensilFields specifies which Utensil fields to select
 type UtensilFields struct {
 	Id           bool
@@ -2245,6 +2464,9 @@ type RecipeFilter struct {
 	// ReferencedByStepRecipe filters on the presence or absence of a
 	// Step whose recipe points at this row.
 	ReferencedByStepRecipe *ReferencedByFilter
+	// ReferencedByTastingRecipe filters on the presence or absence of a
+	// Tasting whose recipe points at this row.
+	ReferencedByTastingRecipe *ReferencedByFilter
 	// ReferencedByUtensilRecipe filters on the presence or absence of a
 	// Utensil whose recipe points at this row.
 	ReferencedByUtensilRecipe *ReferencedByFilter
@@ -2420,6 +2642,14 @@ func (f *RecipeFilter) buildWhereClause(args *[]interface{}, paramOffset int) st
 	if f.ReferencedByStepRecipe != nil {
 		probe := `SELECT 1 FROM step WHERE step.recipe_id = recipe.id`
 		if f.ReferencedByStepRecipe.Exists {
+			conditions = append(conditions, `EXISTS (`+probe+`)`)
+		} else {
+			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+		}
+	}
+	if f.ReferencedByTastingRecipe != nil {
+		probe := `SELECT 1 FROM tasting WHERE tasting.recipe_id = recipe.id`
+		if f.ReferencedByTastingRecipe.Exists {
 			conditions = append(conditions, `EXISTS (`+probe+`)`)
 		} else {
 			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
@@ -3137,6 +3367,9 @@ type RecipeRefFilter struct {
 	// ReferencedByStepRef filters on the presence or absence of a
 	// Step whose ref points at this row.
 	ReferencedByStepRef *ReferencedByFilter
+	// ReferencedByTastingRef filters on the presence or absence of a
+	// Tasting whose ref points at this row.
+	ReferencedByTastingRef *ReferencedByFilter
 	// ReferencedByUtensilRef filters on the presence or absence of a
 	// Utensil whose ref points at this row.
 	ReferencedByUtensilRef *ReferencedByFilter
@@ -3581,6 +3814,14 @@ func (f *RecipeRefFilter) buildWhereClause(args *[]interface{}, paramOffset int)
 			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
 		}
 	}
+	if f.ReferencedByTastingRef != nil {
+		probe := `SELECT 1 FROM tasting WHERE tasting.ref_id = recipe_ref.id`
+		if f.ReferencedByTastingRef.Exists {
+			conditions = append(conditions, `EXISTS (`+probe+`)`)
+		} else {
+			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+		}
+	}
 	if f.ReferencedByUtensilRef != nil {
 		probe := `SELECT 1 FROM utensil WHERE utensil.ref_id = recipe_ref.id`
 		if f.ReferencedByUtensilRef.Exists {
@@ -4011,6 +4252,548 @@ func (f *StepFilter) buildWhereClause(args *[]interface{}, paramOffset int) stri
 				conditions = append(conditions, `step.ref_id IS NULL`)
 			} else {
 				conditions = append(conditions, `step.ref_id IS NOT NULL`)
+			}
+		}
+	}
+
+	if len(conditions) == 0 {
+		return ""
+	}
+
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// TastingFilter provides filtering for Tasting queries
+type TastingFilter struct {
+	Id           *UUIDFilter
+	Taster       *UUIDFilter
+	Salty        *BoolFilter
+	Score        *FloatFilter
+	Servings     *Int64Filter
+	TastedOn     *DateFilter
+	TastedAt     *DateTimeFilter
+	ServedAt     *StringFilter
+	Rested       *StringFilter
+	Verdict      *StringFilter
+	Remarks      *StringFilter
+	Tags         *ArrayStringFilter
+	Helpers      *ArrayStringFilter
+	Bites        *ArrayStringFilter
+	EntityKey    *UUIDFilter
+	DeletedOnRef *BoolFilter
+	Version      *Int64Filter
+	// RecipeID allows filtering by foreign key
+	RecipeID *UUIDFilter
+	// RefID allows filtering by foreign key
+	RefID *UUIDFilter
+}
+
+// TastingUpdate provides fields that can be updated
+type TastingUpdate struct {
+	Taster       *types.IdentityUserID
+	Salty        *bool
+	Score        *float64
+	Servings     *types.GenericInt64
+	TastedOn     *types.TemporalDate
+	TastedAt     *types.TemporalDateTime
+	ServedAt     *types.TemporalTime
+	Rested       *types.TemporalDuration
+	Verdict      *types.Verdict
+	Remarks      *types.GenericJSON
+	Tags         *[]string
+	Helpers      *[]types.IdentityUUID
+	Bites        *[][]types.GenericInt64
+	EntityKey    *types.IdentityUUID
+	DeletedOnRef *bool
+	// RecipeID allows updating the foreign key for recipe
+	RecipeID *types.IdentityUUID
+	// RefID allows updating the foreign key for ref
+	RefID *types.IdentityUUID
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewTastingSnapshotUpdate maps every mutable field from a complete
+// Tasting value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewTastingSnapshotUpdate(input *types.Tasting) *TastingUpdate {
+	update := &TastingUpdate{}
+	if input == nil {
+		return update
+	}
+	update.Taster = &input.Taster
+	update.Salty = &input.Salty
+	update.Score = &input.Score
+	update.Servings = &input.Servings
+	update.TastedOn = &input.TastedOn
+	update.TastedAt = &input.TastedAt
+	update.ServedAt = &input.ServedAt
+	update.Rested = &input.Rested
+	update.Verdict = &input.Verdict
+	update.Remarks = &input.Remarks
+	update.Tags = &input.Tags
+	update.Helpers = &input.Helpers
+	update.Bites = &input.Bites
+	update.EntityKey = input.EntityKey
+	update.DeletedOnRef = &input.DeletedOnRef
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *TastingUpdate) ApplyTo(row *types.Tasting) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.Taster != nil {
+		row.Taster = *u.Taster
+	}
+	if u.Salty != nil {
+		row.Salty = *u.Salty
+	}
+	if u.Score != nil {
+		row.Score = *u.Score
+	}
+	if u.Servings != nil {
+		row.Servings = *u.Servings
+	}
+	if u.TastedOn != nil {
+		row.TastedOn = *u.TastedOn
+	}
+	if u.TastedAt != nil {
+		row.TastedAt = *u.TastedAt
+	}
+	if u.ServedAt != nil {
+		row.ServedAt = *u.ServedAt
+	}
+	if u.Rested != nil {
+		row.Rested = *u.Rested
+	}
+	if u.Verdict != nil {
+		row.Verdict = *u.Verdict
+	}
+	if u.Remarks != nil {
+		row.Remarks = *u.Remarks
+	}
+	if u.Tags != nil {
+		row.Tags = *u.Tags
+	}
+	if u.Helpers != nil {
+		row.Helpers = *u.Helpers
+	}
+	if u.Bites != nil {
+		row.Bites = *u.Bites
+	}
+	if u.EntityKey != nil {
+		row.EntityKey = u.EntityKey
+	}
+	if u.DeletedOnRef != nil {
+		row.DeletedOnRef = *u.DeletedOnRef
+	}
+	if u.RecipeID != nil {
+		row.Recipe.Id = u.RecipeID
+	}
+	if u.RefID != nil {
+		row.Ref.Id = u.RefID
+	}
+}
+
+// buildWhereClause builds a WHERE clause from a TastingFilter
+func (f *TastingFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	if f == nil {
+		return ""
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `tasting.id IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Taster != nil {
+		if f.Taster.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.taster = $%d`, paramNum))
+			*args = append(*args, f.Taster.Eq.ToUUID())
+		}
+		if len(f.Taster.In) > 0 {
+			placeholders := make([]string, len(f.Taster.In))
+			for i, id := range f.Taster.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.taster IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Taster.IsNull != nil {
+			if *f.Taster.IsNull {
+				conditions = append(conditions, `tasting.taster IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.taster IS NOT NULL`)
+			}
+		}
+	}
+	if f.Salty != nil && f.Salty.Eq != nil {
+		paramNum++
+		conditions = append(conditions, fmt.Sprintf(`tasting.salty = $%d`, paramNum))
+		*args = append(*args, *f.Salty.Eq)
+	}
+	if f.Score != nil {
+		if f.Score.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.score = $%d`, paramNum))
+			*args = append(*args, *f.Score.Eq)
+		}
+		if f.Score.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.score > $%d`, paramNum))
+			*args = append(*args, *f.Score.Gt)
+		}
+		if f.Score.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.score >= $%d`, paramNum))
+			*args = append(*args, *f.Score.Gte)
+		}
+		if f.Score.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.score < $%d`, paramNum))
+			*args = append(*args, *f.Score.Lt)
+		}
+		if f.Score.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.score <= $%d`, paramNum))
+			*args = append(*args, *f.Score.Lte)
+		}
+		if f.Score.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.score >= $%d`, paramNum))
+			*args = append(*args, f.Score.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.score <= $%d`, paramNum))
+			*args = append(*args, f.Score.Between.Max)
+		}
+	}
+	if f.Servings != nil {
+		if f.Servings.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.servings = $%d`, paramNum))
+			*args = append(*args, *f.Servings.Eq)
+		}
+		if f.Servings.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.servings > $%d`, paramNum))
+			*args = append(*args, *f.Servings.Gt)
+		}
+		if f.Servings.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.servings >= $%d`, paramNum))
+			*args = append(*args, *f.Servings.Gte)
+		}
+		if f.Servings.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.servings < $%d`, paramNum))
+			*args = append(*args, *f.Servings.Lt)
+		}
+		if f.Servings.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.servings <= $%d`, paramNum))
+			*args = append(*args, *f.Servings.Lte)
+		}
+		if f.Servings.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.servings >= $%d`, paramNum))
+			*args = append(*args, f.Servings.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.servings <= $%d`, paramNum))
+			*args = append(*args, f.Servings.Between.Max)
+		}
+	}
+	if f.TastedOn != nil {
+		if f.TastedOn.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_on = $%d`, paramNum))
+			*args = append(*args, *f.TastedOn.Eq)
+		}
+		if f.TastedOn.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_on > $%d`, paramNum))
+			*args = append(*args, *f.TastedOn.Gt)
+		}
+		if f.TastedOn.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_on >= $%d`, paramNum))
+			*args = append(*args, *f.TastedOn.Gte)
+		}
+		if f.TastedOn.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_on < $%d`, paramNum))
+			*args = append(*args, *f.TastedOn.Lt)
+		}
+		if f.TastedOn.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_on <= $%d`, paramNum))
+			*args = append(*args, *f.TastedOn.Lte)
+		}
+		if f.TastedOn.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_on >= $%d`, paramNum))
+			*args = append(*args, f.TastedOn.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_on <= $%d`, paramNum))
+			*args = append(*args, f.TastedOn.Between.End)
+		}
+	}
+	if f.TastedAt != nil {
+		if f.TastedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_at = $%d`, paramNum))
+			*args = append(*args, *f.TastedAt.Eq)
+		}
+		if f.TastedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_at > $%d`, paramNum))
+			*args = append(*args, *f.TastedAt.Gt)
+		}
+		if f.TastedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_at >= $%d`, paramNum))
+			*args = append(*args, *f.TastedAt.Gte)
+		}
+		if f.TastedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_at < $%d`, paramNum))
+			*args = append(*args, *f.TastedAt.Lt)
+		}
+		if f.TastedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_at <= $%d`, paramNum))
+			*args = append(*args, *f.TastedAt.Lte)
+		}
+		if f.TastedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_at >= $%d`, paramNum))
+			*args = append(*args, f.TastedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.tasted_at <= $%d`, paramNum))
+			*args = append(*args, f.TastedAt.Between.End)
+		}
+		if f.TastedAt.IsNull != nil {
+			if *f.TastedAt.IsNull {
+				conditions = append(conditions, `tasting.tasted_at IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.tasted_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.ServedAt != nil {
+		if f.ServedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.served_at = $%d`, paramNum))
+			*args = append(*args, *f.ServedAt.Eq)
+		}
+		if len(f.ServedAt.In) > 0 {
+			placeholders := make([]string, len(f.ServedAt.In))
+			for i, value := range f.ServedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.served_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.ServedAt.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.served_at ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.ServedAt.ILike+"%")
+		}
+	}
+	if f.Rested != nil {
+		if f.Rested.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.rested = $%d`, paramNum))
+			*args = append(*args, *f.Rested.Eq)
+		}
+		if len(f.Rested.In) > 0 {
+			placeholders := make([]string, len(f.Rested.In))
+			for i, value := range f.Rested.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.rested IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Rested.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.rested ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Rested.ILike+"%")
+		}
+	}
+	if f.Verdict != nil {
+		if f.Verdict.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.verdict = $%d`, paramNum))
+			*args = append(*args, *f.Verdict.Eq)
+		}
+		if len(f.Verdict.In) > 0 {
+			placeholders := make([]string, len(f.Verdict.In))
+			for i, value := range f.Verdict.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.verdict IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Verdict.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.verdict ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Verdict.ILike+"%")
+		}
+	}
+	if f.Remarks != nil {
+		if f.Remarks.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.remarks = $%d`, paramNum))
+			*args = append(*args, *f.Remarks.Eq)
+		}
+		if len(f.Remarks.In) > 0 {
+			placeholders := make([]string, len(f.Remarks.In))
+			for i, value := range f.Remarks.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.remarks IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Remarks.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.remarks ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Remarks.ILike+"%")
+		}
+	}
+	if f.EntityKey != nil {
+		if f.EntityKey.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.entity_key = $%d`, paramNum))
+			*args = append(*args, f.EntityKey.Eq.ToUUID())
+		}
+		if len(f.EntityKey.In) > 0 {
+			placeholders := make([]string, len(f.EntityKey.In))
+			for i, id := range f.EntityKey.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.entity_key IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.EntityKey.IsNull != nil {
+			if *f.EntityKey.IsNull {
+				conditions = append(conditions, `tasting.entity_key IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.entity_key IS NOT NULL`)
+			}
+		}
+	}
+	if f.DeletedOnRef != nil && f.DeletedOnRef.Eq != nil {
+		paramNum++
+		conditions = append(conditions, fmt.Sprintf(`tasting.deleted_on_ref = $%d`, paramNum))
+		*args = append(*args, *f.DeletedOnRef.Eq)
+	}
+	if f.Version != nil {
+		if f.Version.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting._version = $%d`, paramNum))
+			*args = append(*args, *f.Version.Eq)
+		}
+		if f.Version.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting._version > $%d`, paramNum))
+			*args = append(*args, *f.Version.Gt)
+		}
+		if f.Version.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting._version >= $%d`, paramNum))
+			*args = append(*args, *f.Version.Gte)
+		}
+		if f.Version.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting._version < $%d`, paramNum))
+			*args = append(*args, *f.Version.Lt)
+		}
+		if f.Version.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting._version <= $%d`, paramNum))
+			*args = append(*args, *f.Version.Lte)
+		}
+		if f.Version.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting._version >= $%d`, paramNum))
+			*args = append(*args, f.Version.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting._version <= $%d`, paramNum))
+			*args = append(*args, f.Version.Between.Max)
+		}
+	}
+	if f.RecipeID != nil {
+		if f.RecipeID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.recipe_id = $%d`, paramNum))
+			*args = append(*args, f.RecipeID.Eq.ToUUID())
+		}
+		if len(f.RecipeID.In) > 0 {
+			placeholders := make([]string, len(f.RecipeID.In))
+			for i, id := range f.RecipeID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.recipe_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.RecipeID.IsNull != nil {
+			if *f.RecipeID.IsNull {
+				conditions = append(conditions, `tasting.recipe_id IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.recipe_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.RefID != nil {
+		if f.RefID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.ref_id = $%d`, paramNum))
+			*args = append(*args, f.RefID.Eq.ToUUID())
+		}
+		if len(f.RefID.In) > 0 {
+			placeholders := make([]string, len(f.RefID.In))
+			for i, id := range f.RefID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`tasting.ref_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.RefID.IsNull != nil {
+			if *f.RefID.IsNull {
+				conditions = append(conditions, `tasting.ref_id IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.ref_id IS NOT NULL`)
 			}
 		}
 	}

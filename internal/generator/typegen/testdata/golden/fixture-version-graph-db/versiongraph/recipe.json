@@ -1,8 +1,18 @@
 {
+  "version": 2,
   "graph": "recipe",
+  "root": {
+    "table": "recipe",
+    "key": "id"
+  },
+  "refTable": "recipe_ref",
+  "commitTable": "recipe_commit",
+  "patchTable": "recipe_patch",
   "kinds": [
     {
       "kind": "cover",
+      "table": "cover",
+      "historyTable": "cover_history",
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
@@ -11,10 +21,21 @@
       "singleton": true,
       "excluded": [
         "recipe_id"
-      ]
+      ],
+      "columns": {
+        "_version": "integer",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "id": "uuid",
+        "photo_url": "string",
+        "recipe_id": "uuid",
+        "ref_id": "uuid"
+      }
     },
     {
       "kind": "ingredient",
+      "table": "ingredient",
+      "historyTable": "ingredient_history",
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
@@ -29,10 +50,23 @@
       },
       "excluded": [
         "recipe_id"
-      ]
+      ],
+      "columns": {
+        "_version": "integer",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "id": "uuid",
+        "quantity": "string",
+        "recipe_id": "uuid",
+        "ref_id": "uuid",
+        "step_key": "uuid",
+        "substitutes": "json"
+      }
     },
     {
       "kind": "note",
+      "table": "note",
+      "historyTable": "note_history",
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
@@ -44,10 +78,22 @@
       },
       "excluded": [
         "recipe_id"
-      ]
+      ],
+      "columns": {
+        "_version": "integer",
+        "body": "string",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "id": "uuid",
+        "recipe_id": "uuid",
+        "ref_id": "uuid",
+        "reply_to": "uuid"
+      }
     },
     {
       "kind": "step",
+      "table": "step",
+      "historyTable": "step_history",
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
@@ -64,10 +110,28 @@
         "created_at",
         "created_by",
         "updated_at"
-      ]
+      ],
+      "columns": {
+        "_version": "integer",
+        "created_at": "dateTime",
+        "created_by": "uuid",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "id": "uuid",
+        "instruction": "string",
+        "position": "integer",
+        "recipe_id": "uuid",
+        "ref_id": "uuid",
+        "scratch": "string",
+        "timings": "json",
+        "updated_at": "dateTime",
+        "updated_by": "uuid"
+      }
     },
     {
-      "kind": "utensil",
+      "kind": "tasting",
+      "table": "tasting",
+      "historyTable": "tasting_history",
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
@@ -75,7 +139,50 @@
       "version": "_version",
       "excluded": [
         "recipe_id"
-      ]
+      ],
+      "columns": {
+        "_version": "integer",
+        "bites": "integer[][]",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "helpers": "uuid[]",
+        "id": "uuid",
+        "recipe_id": "uuid",
+        "ref_id": "uuid",
+        "remarks": "json",
+        "rested": "duration",
+        "salty": "boolean",
+        "score": "number",
+        "served_at": "time",
+        "servings": "integer",
+        "tags": "string[]",
+        "tasted_at": "dateTime",
+        "tasted_on": "date",
+        "taster": "uuid",
+        "verdict": "enum"
+      }
+    },
+    {
+      "kind": "utensil",
+      "table": "utensil",
+      "historyTable": "utensil_history",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "excluded": [
+        "recipe_id"
+      ],
+      "columns": {
+        "_version": "integer",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "id": "uuid",
+        "name": "string",
+        "recipe_id": "uuid",
+        "ref_id": "uuid"
+      }
     }
   ]
 }

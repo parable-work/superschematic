@@ -5,7 +5,11 @@ export type {
   GenericInt64,
   GenericJSON,
   IdentityUUID,
+  IdentityUserID,
+  TemporalDate,
   TemporalDateTime,
+  TemporalDuration,
+  TemporalTime,
 } from 'superscalar/scalars';
 
 export type { JSONValue } from 'superscalar/scalars';

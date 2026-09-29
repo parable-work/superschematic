@@ -19,12 +19,17 @@ from .scalars import (
     GenericInt64,
     GenericJSON,
     IdentityUUID,
-    TemporalDateTime
+    IdentityUserID,
+    TemporalDate,
+    TemporalDateTime,
+    TemporalDuration,
+    TemporalTime
 )
 
 from .enums import (
     RecipeEntityKind,
-    RecipePatchOperation
+    RecipePatchOperation,
+    Verdict
 )
 
 from .validation_errors import ValidationErrors
@@ -2194,6 +2199,391 @@ class Step(BaseModel):
         return cls.from_dict_non_strict(parsed_data)
 
     def mask_secrets(self) -> "Step":
+        """
+        Return a copy of this object with secret fields masked.
+        """
+        return self.model_copy(update={
+            "recipe": self.recipe.mask_secrets() if self.recipe is not None else None,
+            "ref": self.ref.mask_secrets() if self.ref is not None else None,
+        })
+
+class Tasting(BaseModel):
+    """
+    A tasting of the recipe. Its columns hold a value of every class a
+# descriptor names.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        validate_assignment=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    id: Optional[IdentityUUID] = Field(default=None, alias="id", serialization_alias="id")
+
+    recipe: Optional[Recipe] = Field(default=None, alias="recipe", serialization_alias="recipe")
+
+    taster: IdentityUserID = Field(..., alias="taster", serialization_alias="taster")
+
+    salty: bool = Field(..., alias="salty", serialization_alias="salty")
+
+    score: float = Field(..., alias="score", serialization_alias="score")
+
+    servings: GenericInt64 = Field(..., alias="servings", serialization_alias="servings")
+
+    tasted_on: TemporalDate = Field(..., alias="tastedOn", serialization_alias="tastedOn")
+
+    tasted_at: TemporalDateTime = Field(..., alias="tastedAt", serialization_alias="tastedAt")
+
+    served_at: TemporalTime = Field(..., alias="servedAt", serialization_alias="servedAt")
+
+    rested: TemporalDuration = Field(..., alias="rested", serialization_alias="rested")
+
+    verdict: Verdict = Field(..., alias="verdict", serialization_alias="verdict")
+
+    remarks: GenericJSON = Field(..., alias="remarks", serialization_alias="remarks")
+
+    tags: List[str] = Field(..., alias="tags", serialization_alias="tags")
+
+    helpers: List[IdentityUUID] = Field(..., alias="helpers", serialization_alias="helpers")
+
+    bites: List[List[GenericInt64]] = Field(..., alias="bites", serialization_alias="bites")
+
+    # The entity's logical identity, shared by its rows on every ref.
+    entity_key: Optional[IdentityUUID] = Field(default=None, alias="entityKey", serialization_alias="entityKey")
+
+    # The ref this row overrides the entity on.
+    ref: Optional[RecipeRef] = Field(default=None, alias="ref", serialization_alias="ref")
+
+    # True when the row deletes the entity on its ref.
+    deleted_on_ref: bool = Field(default=False, alias="deletedOnRef", serialization_alias="deletedOnRef")
+
+    version_: int = Field(default=0, alias="_version", serialization_alias="_version")
+
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+        """
+        Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
+
+        Returns:
+            ValidationErrors object containing any validation errors.
+            If no errors, the errors dict will be empty.
+        """
+        errors = ValidationErrors()
+
+        # Validate id
+        if self.id is not None:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id)) is None:
+                errors.add_field_error("id", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "id" or key.startswith("id[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.id)
+                except PydanticValidationError as e:
+                    errors.add_field_error("id", "invalid", str(e))
+
+        # Validate recipe
+        if self.recipe is not None:
+            try:
+                TypeAdapter(Recipe).validate_python(self.recipe)
+            except PydanticValidationError as e:
+                errors.add_field_error("recipe", "invalid", str(e))
+
+        _add_model_errors(errors, "recipe", self.recipe, by_alias)
+
+        # Validate taster
+        if self.taster is None:
+            errors.add_field_error("taster", "required", "required field")
+        else:
+
+            if re.search(r"^[0-9A-Za-z]{1,22}$", str(self.taster)) is None:
+                errors.add_field_error("taster", "pattern", "invalid format")
+
+        # Validate salty
+        if self.salty is None:
+            errors.add_field_error("salty", "required", "required field")
+
+        # Validate score
+        if self.score is None:
+            errors.add_field_error("score", "required", "required field")
+
+        # Validate servings
+        if self.servings is None:
+            errors.add_field_error("servings", "required", "required field")
+        else:
+
+            if float(self.servings) < -9007199254740991:
+                errors.add_field_error("servings", "min", "must be at least -9007199254740991")
+            if float(self.servings) > 9007199254740991:
+                errors.add_field_error("servings", "max", "must be at most 9007199254740991")
+
+        # Validate tastedOn
+        if self.tasted_on is None:
+            errors.add_field_error("tasted_on", "required", "required field")
+        else:
+
+            if len(str(self.tasted_on)) > 40:
+                errors.add_field_error("tasted_on", "maxLength", "must be at most 40 characters")
+
+        # Validate tastedAt
+        if self.tasted_at is None:
+            errors.add_field_error("tasted_at", "required", "required field")
+
+        # Validate servedAt
+        if self.served_at is None:
+            errors.add_field_error("served_at", "required", "required field")
+        else:
+
+            if re.search(r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\s?[AaPp][Mm])$", str(self.served_at)) is None:
+                errors.add_field_error("served_at", "pattern", "invalid format")
+
+        # Validate rested
+        if self.rested is None:
+            errors.add_field_error("rested", "required", "required field")
+        else:
+
+            if len(str(self.rested)) > 32:
+                errors.add_field_error("rested", "maxLength", "must be at most 32 characters")
+            if re.search(r"^(\d+(\.\d+)?(ns|us|µs|ms|s|m|h))+$", str(self.rested)) is None:
+                errors.add_field_error("rested", "pattern", "invalid format")
+
+        # Validate verdict
+        if self.verdict is None:
+            errors.add_field_error("verdict", "required", "required field")
+
+        # Validate remarks
+        # Any JSON value but None is a value; None is a missing one.
+        if self.remarks is None:
+            errors.add_field_error("remarks", "required", "required field")
+        else:
+            try:
+                TypeAdapter(GenericJSON).validate_python(self.remarks)
+            except PydanticValidationError as e:
+                errors.add_field_error("remarks", "invalid", str(e))
+
+        # Validate tags
+        if self.tags is None:
+            errors.add_field_error("tags", "required", "required field")
+        else:
+
+            if isinstance(self.tags, list):
+                for index, item in enumerate(self.tags):
+                    if item is None:
+                        errors.add_field_error(f"tags[{index}]", "required", "required field")
+
+        # Validate helpers
+        if self.helpers is None:
+            errors.add_field_error("helpers", "required", "required field")
+        else:
+
+            if isinstance(self.helpers, list):
+                for index, item in enumerate(self.helpers):
+                    if item is None:
+                        errors.add_field_error(f"helpers[{index}]", "required", "required field")
+            if isinstance(self.helpers, list):
+                for index, item in enumerate(self.helpers):
+                    if item is not None and re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(item)) is None:
+                        errors.add_field_error(f"helpers[{index}]", "pattern", "invalid format")
+
+        # Validate bites
+        if self.bites is None:
+            errors.add_field_error("bites", "required", "required field")
+        else:
+
+            if isinstance(self.bites, list):
+                for index, row in enumerate(self.bites):
+                    if row is None:
+                        errors.add_field_error(f"bites[{index}]", "required", "required field")
+                    elif not isinstance(row, list):
+                        errors.add_field_error(f"bites[{index}]", "type", "expected an array")
+                    else:
+                        for inner_index, item in enumerate(row):
+                            if item is None:
+                                errors.add_field_error(f"bites[{index}][{inner_index}]", "required", "required field")
+            if isinstance(self.bites, list):
+                for index, row in enumerate(self.bites):
+                    if not isinstance(row, list):
+                        continue
+                    for inner_index, item in enumerate(row):
+                        if item is not None and float(item) < -9007199254740991:
+                            errors.add_field_error(f"bites[{index}][{inner_index}]", "min", "must be at least -9007199254740991")
+            if isinstance(self.bites, list):
+                for index, row in enumerate(self.bites):
+                    if not isinstance(row, list):
+                        continue
+                    for inner_index, item in enumerate(row):
+                        if item is not None and float(item) > 9007199254740991:
+                            errors.add_field_error(f"bites[{index}][{inner_index}]", "max", "must be at most 9007199254740991")
+
+        # Validate entityKey
+        if self.entity_key is not None:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.entity_key)) is None:
+                errors.add_field_error("entity_key", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "entity_key" or key.startswith("entity_key[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.entity_key)
+                except PydanticValidationError as e:
+                    errors.add_field_error("entity_key", "invalid", str(e))
+
+        # Validate ref
+        if self.ref is not None:
+            try:
+                TypeAdapter(RecipeRef).validate_python(self.ref)
+            except PydanticValidationError as e:
+                errors.add_field_error("ref", "invalid", str(e))
+
+        _add_model_errors(errors, "ref", self.ref, by_alias)
+
+        # Validate deletedOnRef
+        if self.deleted_on_ref is None:
+            errors.add_field_error("deleted_on_ref", "required", "required field")
+
+        # Validate _version
+        if self.version_ is None:
+            errors.add_field_error("_version", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "tasted_on": "tastedOn",
+                "tasted_at": "tastedAt",
+                "served_at": "servedAt",
+                "entity_key": "entityKey",
+                "deleted_on_ref": "deletedOnRef",
+            })
+
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a dictionary.
+
+        Returns:
+            Dictionary representation of the model.
+        """
+        return self.model_dump(mode='python', exclude_none=False)
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a JSON-serializable dictionary.
+
+        Returns:
+            JSON-serializable dictionary representation.
+        """
+        return self.model_dump(mode='json', exclude_none=False)
+
+    def to_json(self) -> str:
+        """
+        Convert the model to a stable JSON string.
+
+        Returns:
+            JSON string representation.
+        """
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "Tasting":
+        """
+        Parse a model from a dictionary using strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_dict_non_strict(cls, input_data: Dict[str, Any]) -> "Tasting":
+        """
+        Parse a model from a dictionary using non-strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=False)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "Tasting":
+        """
+        Parse a model from JSON text/bytes using strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_json_non_strict(cls, input_data: str | bytes) -> "Tasting":
+        """
+        Parse a model from JSON text/bytes using non-strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict_non_strict(parsed_data)
+
+    @classmethod
+    def from_yaml(cls, input_data: str | bytes) -> "Tasting":
+        """
+        Parse a model from YAML text/bytes using strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_yaml_non_strict(cls, input_data: str | bytes) -> "Tasting":
+        """
+        Parse a model from YAML text/bytes using non-strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict_non_strict(parsed_data)
+
+    def mask_secrets(self) -> "Tasting":
         """
         Return a copy of this object with secret fields masked.
         """

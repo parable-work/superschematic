@@ -132,6 +132,9 @@ The database tests (the generated ORM and history triggers, the
 version-graph shell, the projection migrations) skip unless `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` and
 `SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL` name a Postgres whose role may
 create schemas, databases and roles; each test creates and drops its own.
+The canonical-row vectors' check against Postgres
+(`runtime/versiongraph/go/canonical`) skips unless
+`SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names one; it only reads.
 CI runs them against a `postgres:16-alpine` container. Locally a throwaway
 container is enough:
 
@@ -139,6 +142,7 @@ container is enough:
 docker run -d --name superschematic-pg -e POSTGRES_PASSWORD=superschematic -p 55432:5432 postgres:16-alpine
 export SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL='postgres://postgres:superschematic@localhost:55432/postgres?sslmode=disable'
 export SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL="$SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL"
+export SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL="$SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL"
 ```
 
 ## Rules

@@ -166,11 +166,13 @@ take one JSON document and return one:
 | `content_hash` | `{descriptor, tree}` | `{contentHash}`: SHA-256 over the canonical JSON of each kind's content columns, rows sorted by entity key. |
 | `validate` | `{descriptor, tree}` | `{findings}`: duplicate entity keys, the singleton rule, absent parents, parent cycles, orders outside the integers a JavaScript number holds exactly. |
 
-A tree is `{"<kind>": [row, ...]}`, and a row is the JSON Postgres
-`to_jsonb` gives it, keyed by column name: the form of a history image, so
-a live row and its history image hash the same. A refused input returns
-`{"error": {"code", "message"}}` with a stable code. The contract, with
-the descriptor's members, every rule, the error codes and the C ABI, is
+A tree is `{"<kind>": [row, ...]}`, and a row is a canonical row: a JSON
+object keyed by column name whose values are the schema runtime's JSON for
+each field's type, in one form per value class (below), so a live row and
+its history image hash the same whatever database stored them. A refused
+input returns `{"error": {"code", "message"}}` with a stable code. The
+contract, with the descriptor's members, every rule, the error codes and the
+C ABI, is
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md).
 Its vectors in `runtime/versiongraph/testdata/vectors` are the executable
 form: the Rust tests, the Go binding and the TypeScript package's tests run
@@ -191,29 +193,84 @@ another runtime reads the same one. Writing the types module removes each
 `versiongraph/*.json` that no graph of the schema writes and leaves any
 other file there.
 
+The descriptor is version 2, and the core refuses any other. Besides each
+kind's roles, it names the graph's tables and gives every column of each
+kind's table a value class, which a storage adapter reads to build its
+statements and to normalize the rows it reads:
+
 ```json
 {
+  "version": 2,
   "graph": "recipe",
+  "root": { "table": "recipe", "key": "id" },
+  "refTable": "recipe_ref",
+  "commitTable": "recipe_commit",
+  "patchTable": "recipe_patch",
   "kinds": [
     {
       "kind": "ingredient",
+      "table": "ingredient",
+      "historyTable": "ingredient_history",
       "key": "entity_key", "id": "id", "ref": "ref_id",
       "tombstone": "deleted_on_ref", "version": "_version",
       "parent": { "key": "step_key", "kind": "step" },
-      "excluded": ["recipe_id"]
+      "excluded": ["recipe_id"],
+      "columns": {
+        "_version": "integer", "deleted_on_ref": "boolean", "entity_key": "uuid",
+        "id": "uuid", "quantity": "string", "recipe_id": "uuid", "ref_id": "uuid",
+        "step_key": "uuid"
+      }
     },
     {
       "kind": "step",
+      "table": "step",
+      "historyTable": "step_history",
       "key": "entity_key", "id": "id", "ref": "ref_id",
       "tombstone": "deleted_on_ref", "version": "_version",
       "author": "updated_by",
       "order": "position",
       "units": { "timings": "keyed" },
-      "excluded": ["recipe_id", "scratch", "updated_at"]
+      "excluded": ["recipe_id", "scratch", "updated_at"],
+      "columns": {
+        "_version": "integer", "deleted_on_ref": "boolean", "entity_key": "uuid",
+        "id": "uuid", "instruction": "string", "position": "integer",
+        "recipe_id": "uuid", "ref_id": "uuid", "scratch": "string",
+        "timings": "json", "updated_at": "dateTime", "updated_by": "uuid"
+      }
     }
   ]
 }
 ```
+
+### Value classes and canonical rows
+
+A column's value class comes from its field's type, as the schema runtime's
+JSON tells values apart. Each class has one rule that turns what Postgres
+returns, in `to_jsonb` of a live row or in a history image, into the
+canonical JSON:
+
+| Class | Fields | Canonical JSON |
+| --- | --- | --- |
+| `string` | `string`, and string scalars stored as text | The string. |
+| `enum` | An enum | The member's value. |
+| `integer` | Integer scalars (`Generic.Int64`) | The digits, exactly, however wide. |
+| `number` | `number`, number scalars | The exact decimal value as `JSON.stringify` lays out a number: `1.5`, `1e+21`, `1.5e-7`. |
+| `boolean` | `boolean` | `true` or `false`. |
+| `uuid` | `Identity.UUID`, `Identity.UserID`, a to-one relation to a UUID key | base62, the scalar core's form (`2tLrGjz6ktIRCukXDsqykS`). |
+| `dateTime` | `Temporal.DateTime` | RFC 3339 in UTC with `Z` (`2026-09-01T10:00:00.12Z`), whatever the session's time zone. |
+| `date` | `Temporal.Date` | `2026-09-01`. |
+| `time` | `Temporal.Time` | `18:00:00`, with a fraction of a second when there is one. |
+| `duration` | `Temporal.Duration` | The scalar core's form: `1h30m0s`, `1.5s`, `500ms`, `1500us`. A day is 24 hours; months and years are refused. |
+| `json` | `Generic.JSON`, `Generic.StringMap`, a `@jsonField` object, a map | The value with object members sorted by key, no whitespace, numbers as `number`. |
+
+A list adds `[]` to its element's class (`uuid[]`) and a list of lists
+`[][]`. A graph member with a field no class describes (`Geo.Location`,
+stored as `POINT`) fails generation. The contract, with every rule and its
+vectors in `runtime/versiongraph/testdata/canonical`, is in
+[runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#canonical-rows).
+The Go package `github.com/parable-work/superschematic/runtime/versiongraph/go/canonical`
+implements the Postgres rules. The generated shell still hands the core
+`to_jsonb` rows until its engine moves into the runtime (D19).
 
 ## The generated shell
 
