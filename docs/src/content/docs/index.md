@@ -39,10 +39,10 @@ an extension: a Go package you pass to `cli.New`. The `cmd/superschematic`
 binary links no extension.
 
 `examples/acme-schematic` is a complete downstream example. The
-[write an extension](/superschematic/guides/write-an-extension/) guide walks
+[write an extension](/superschematic/extending/write-an-extension/) guide walks
 the same surfaces. `extensions/deploy` and `extensions/platform` are smaller
-worked examples; see [deploy](/superschematic/guides/deploy/) and
-[platform](/superschematic/guides/platform/).
+worked examples; see [deploy](/superschematic/extending/deploy/) and
+[platform](/superschematic/extending/platform/).
 
 Names of generated packages come from `superschematic.toml` at the schemas
 root. The [naming-file reference](/superschematic/reference/naming/) lists
@@ -56,12 +56,26 @@ tree of such tables can be branched, committed and merged as a whole
 
 ## Where to start
 
-Pick the language you will consume generated code in:
+1. [Prerequisites](/superschematic/start/prerequisites/): the toolchain,
+   and setting up a checkout.
+2. [Getting started](/superschematic/start/getting-started/): build one
+   schema and use its Go and TypeScript types.
+3. [How it works](/superschematic/start/how-it-works/): services, kinds,
+   outputs, the naming file and the IR.
+4. [Your first project](/superschematic/first-project/): grow the acme shop
+   into a database, a Go API and a TypeScript API, with SDKs for both.
+5. The guides, one per area: [modeling types](/superschematic/guides/modeling-types/),
+   [database tables](/superschematic/guides/database-tables/),
+   [API routes](/superschematic/guides/api-routes/),
+   [auth and permissions](/superschematic/guides/auth-and-permissions/) and
+   [client SDKs](/superschematic/guides/client-sdks/) in Go, TypeScript,
+   Python and Rust.
 
-- [Go](/superschematic/install/go/)
-- [TypeScript](/superschematic/install/typescript/)
-- [Python](/superschematic/install/python/)
-- [Rust](/superschematic/install/rust/)
+The tutorial's code is `examples/acme-shop`, which CI builds and tests on
+every pull request.
 
-Each page installs the CLI, writes a small schema, builds it, and consumes
-the generated types (and an SDK when the schema is an API).
+For what the generated code offers in one language, see the language
+pages: [Go](/superschematic/install/go/),
+[TypeScript](/superschematic/install/typescript/),
+[Python](/superschematic/install/python/) and
+[Rust](/superschematic/install/rust/).

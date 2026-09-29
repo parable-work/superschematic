@@ -1,0 +1,19 @@
+[package]
+name = "acme-shop-orders-client"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# The generated crates under ../schemas/dist, which scripts/check.sh builds.
+# The SDK brings no async runtime of its own; the caller picks one.
+[dependencies]
+acme-shop-orders-sdk = { path = "../schemas/dist/sdk/rust/shop-orders" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# src/types_test.rs decodes shop-common's types.
+[dev-dependencies]
+acme-shop-common-types = { path = "../schemas/dist/types/rust/shop-common" }
+serde_json = "1"
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

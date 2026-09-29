@@ -1,0 +1,139 @@
+---
+title: Client SDKs
+description: Generate a client for an API in Go, TypeScript, Python and Rust, and call it the same way from each.
+sidebar:
+  order: 5
+---
+
+import { TabItem, Tabs } from '@astrojs/starlight/components';
+import Snippet from '../../../components/Snippet.astro';
+
+An API schema can generate a client SDK in each of Go, TypeScript, Python
+and Rust, whatever language serves the API. Each SDK has a method per
+route, with the route's arguments typed from the schema, and returns the
+schema's types. `shop-orders` generates all four, and a test calls its Go
+server from each and checks they see the same answers.
+
+## Generate them
+
+List the SDK languages under `outputs.sdk`, and the same languages under
+`outputs.types`: an SDK decodes and validates with the types package of its
+own language.
+
+<Snippet file="schemas/services/shop-orders/schema.config.ts" from="outputs: {" to="});" />
+
+The types of a service that another service imports must exist in those
+languages too. `shop-orders` uses `shop-db`'s `ShippingAddress` and
+`OrderStatus`, so `shop-db` generates types in all four languages as well.
+
+The naming file names the packages:
+
+| Language | Package | Client |
+| --- | --- | --- |
+| Go | module `example.com/acme/sdk/go/shop-orders` (`go_module_root`) | `sdk.New(sdk.SDKConfig{...})` returns a `*ShopOrdersSDK` |
+| TypeScript | `@acme/shop-orders-sdk` (`npm_scope`) | `new ShopOrdersSDK({...})` |
+| Python | `acme_shop_orders_sdk` (`python_sdk_module_prefix`, `_suffix`) | `ShopOrdersSDK(ClientConfig(...))` |
+| Rust | crate `acme-shop-orders-sdk` (`rust_crate_prefix`) | `ShopOrdersSdk::new(ClientConfig {...})` |
+
+## Call an API
+
+Each client has one member per namespace of the API: `OrderNamespace` in
+Go, `order` in TypeScript, Python and Rust, and so on. Each method takes
+the route's path, query and body arguments, in the language's own style:
+Go and Rust take a context or options, TypeScript returns a promise,
+Python is synchronous, and Rust is async on the runtime you choose.
+
+These four programs make the same four calls against the Go server. They
+list a product's reviews with no token, write a review with no token, place
+an order for a product that does not exist, and fetch a missing order:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    <Snippet file="go/clients_test.go" symbol="ordersClientGo" />
+  </TabItem>
+  <TabItem label="TypeScript">
+    <Snippet file="typescript/orders-client.ts" />
+  </TabItem>
+  <TabItem label="Python">
+    <Snippet file="python/orders_client.py" />
+  </TabItem>
+  <TabItem label="Rust">
+    <Snippet file="rust/src/main.rs" />
+  </TabItem>
+</Tabs>
+
+Each prints:
+
+```
+reviews: 0
+write a review without a token: 401
+order a product that does not exist: 400
+get a missing order: 404
+```
+
+`scripts/check.sh` runs all four against one server and fails if any
+prints something else:
+
+<Snippet file="go/clients_test.go" symbol="TestEverySDKCallsTheGoServer" />
+
+## Errors
+
+A response outside 2xx is an error that carries the status, the problem's
+`detail` as its message, its `code` and the request id.
+
+| Language | Any status | 401 | 403 | 429 |
+| --- | --- | --- | --- | --- |
+| Go | `*APIError` | `*AuthenticationError` | `*AuthorizationError` | `*RateLimitError` (`RetryAfter`) |
+| TypeScript | `ApiError` (`statusCode`) | `AuthenticationError` | `AuthorizationError` | `RateLimitError` (`retryAfter`) |
+| Python | `APIError` (`status_code`) | `AuthenticationError` | `AuthorizationError` | `RateLimitError` (`retry_after`) |
+| Rust | `SDKError::Api { status_code, .. }` | `is_auth_denied()` | `is_auth_denied()` | `is_transient()` |
+
+In TypeScript and Python the 401, 403 and 429 classes extend the general
+one. In Go they embed `*APIError` but are types of their own, so
+`errors.As(err, &apiErr)` does not match them; check for them first, as
+`status` in the Go program above does. A request that never reached the
+server is a `NetworkError`, or `SDKError::Network` in Rust.
+
+## Checks before sending
+
+The Go, TypeScript and Python SDKs check an input against its type and
+constraints before sending it, and fail with a `ValidationError` without a
+request. The error names each broken rule at its path, the same in all
+three (`lines` for `listMin`, `lines[1].quantity` for `min`), except that
+Go keys a map value `field[key]` where TypeScript and Python key it
+`field.key`. The Python SDK checks with the generated types package,
+pydantic for the types and `validate_all` for the constraints, so it
+needs that package installed. The Rust SDK checks an input against the
+schema before sending too, and fails with one `SDKError::Config` message
+that names each path.
+
+## Timeouts, retries and hooks
+
+| | Go | TypeScript | Python | Rust |
+| --- | --- | --- | --- | --- |
+| Timeout (default 30 s) | `Timeout` (ms) | `timeout` (ms) | `timeout_seconds` | `timeout_ms` |
+| Token per request | `AuthConfig.GetToken` | `auth.getToken` | `auth_token_provider` | `auth_token_provider` |
+| Refresh after a 401 | `AuthConfig.RefreshToken` | `auth.refreshToken` | `auth_token_refresher` | `refresh_auth_token` |
+| Retries a 429 | up to 3 times, after `Retry-After` (`MaxRateLimitRetries`) | no | up to 3 times, after `Retry-After` (`max_rate_limit_retries`) | no |
+| Edit each request | `RequestInterceptor`, `Transport` | `requestInterceptor`, `fetch` | `request_interceptor`, `default_headers` | `request_interceptor` |
+
+The Python SDK also retries a `GET`, `HEAD` or `OPTIONS` that failed on the
+network, and logs each failed request through its logger.
+
+## Install them
+
+Until the packages are published, a service uses the generated packages
+from `schemas/dist`:
+
+- **Go**: require the module and add a `replace` line pointing at its
+  directory, for the SDK and the types modules it imports.
+- **TypeScript**: `schemas/dist/types/typescript` is a Bun workspace of the
+  types packages; link the SDK and its types package into your
+  `node_modules`, as `scripts/check.sh` does.
+- **Python**: put the SDK's and the types packages' directories on
+  `PYTHONPATH`, or install them with pip from their directories.
+- **Rust**: depend on the crate by path. It brings no async runtime; add
+  `tokio` or another.
+
+The [language pages](/superschematic/install/go/) cover each in more
+detail.

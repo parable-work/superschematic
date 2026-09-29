@@ -122,8 +122,20 @@ const schemaConfigJSON = `{
 // "type"; null, or an empty string, is a missing value. What the object or
 // array holds is the scalar core's check, whose name differs by validator,
 // so no vector breaks it.
+//
+// ScalarRuleMatrix holds scalar fields with rules of their own
+// (Validate<Generic.Int64, { min: 0 }>): the scalar's validation runs
+// first, and the field's minLength, maxLength, pattern, min and max follow
+// it, on a single value, every T[] element and every innermost T[][]
+// element. A value either rule set rejects fails with that rule's name; a
+// rule checks only a value of its own JSON type, so a mistyped value is one
+// "type" error.
 const parityMatrixSchemaJSON = `{
   "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "languagePrimitive": "number"
+    },
     "Network.Url": {
       "name": "Network.Url",
       "languagePrimitive": "string"
@@ -411,6 +423,53 @@ const parityMatrixSchemaJSON = `{
           "typeRef": { "name": "Embedding.Vector", "isArray": true }
         }
       ]
+    },
+    "ScalarRuleMatrix": {
+      "name": "ScalarRuleMatrix",
+      "role": "EmbeddedStruct",
+      "jsonField": true,
+      "fields": [
+        {
+          "name": "reqAmount",
+          "typeRef": { "name": "Generic.Int64" },
+          "required": true,
+          "validateMin": 0,
+          "validateMax": 1000
+        },
+        {
+          "name": "optRank",
+          "typeRef": { "name": "Ordering.Rank" },
+          "validateMax": 10
+        },
+        {
+          "name": "optShare",
+          "typeRef": { "name": "Generic.Probability" },
+          "validateMax": 0.5
+        },
+        {
+          "name": "optName",
+          "typeRef": { "name": "Identity.Name" },
+          "validateMaxLength": 5,
+          "validatePattern": "^[a-z]+$"
+        },
+        {
+          "name": "names",
+          "typeRef": { "name": "Identity.Name", "isArray": true },
+          "validateMaxLength": 5,
+          "validateListMax": 2
+        },
+        {
+          "name": "reqRanks",
+          "typeRef": { "name": "Ordering.Rank", "isArray": true },
+          "required": true,
+          "validateMax": 10
+        },
+        {
+          "name": "rankGrid",
+          "typeRef": { "name": "Ordering.Rank", "isArray": true, "isArrayOfArrays": true },
+          "validateMax": 10
+        }
+      ]
     }
   }
 }`
@@ -455,6 +514,25 @@ func listMatrix(fields string) string {
 	for _, required := range []string{"reqGrid", "reqUrlGrid", "reqShadeGrid", "reqShadeList", "reqPayloads"} {
 		if _, ok := payload[required]; !ok {
 			payload[required] = json.RawMessage(`[]`)
+		}
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
+}
+
+// scalarRuleMatrix builds a ScalarRuleMatrix payload: reqAmount 0 and
+// reqRanks [] unless fields sets them, plus the given fields.
+func scalarRuleMatrix(fields string) string {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte("{"+fields+"}"), &payload); err != nil {
+		panic(fmt.Sprintf("scalarRuleMatrix(%q): %v", fields, err))
+	}
+	for key, value := range map[string]string{"reqAmount": `0`, "reqRanks": `[]`} {
+		if _, ok := payload[key]; !ok {
+			payload[key] = json.RawMessage(value)
 		}
 	}
 	encoded, err := json.Marshal(payload)
@@ -1247,6 +1325,93 @@ var vectors = []parityVector{
 		want:          map[string][]string{"mapList": {"type"}, "vecList": {"type"}},
 		decodeRejects: []string{"go", "python"},
 	},
+
+	// A scalar field's own rules follow the scalar's validation. The
+	// generated TypeScript validator dropped them: {"reqAmount": -1} passed
+	// Validate<Generic.Int64, { min: 0 }> there and failed "min" elsewhere.
+	{
+		// Every bound is inclusive.
+		name:     "scalar_rules_at_bounds",
+		typeName: "ScalarRuleMatrix",
+		payload: scalarRuleMatrix(`"reqAmount": 1000, "optRank": 10, "optShare": 0.5, "optName": "abcde",
+			"names": ["ab", "cde"], "reqRanks": [1, 10], "rankGrid": [[1, 10], []]`),
+		want: map[string][]string{},
+	},
+	{
+		name:     "scalar_rules_optional_absent",
+		typeName: "ScalarRuleMatrix",
+		payload:  scalarRuleMatrix(``),
+		want:     map[string][]string{},
+	},
+	{
+		name:     "scalar_field_min",
+		typeName: "ScalarRuleMatrix",
+		payload:  scalarRuleMatrix(`"reqAmount": -1`),
+		want:     map[string][]string{"reqAmount": {"min"}},
+	},
+	{
+		// A float bound (0.5) and an integer scalar's field maximum under
+		// the scalar's own.
+		name:     "scalar_field_max",
+		typeName: "ScalarRuleMatrix",
+		payload:  scalarRuleMatrix(`"reqAmount": 1001, "optRank": 11, "optShare": 0.75`),
+		want:     map[string][]string{"reqAmount": {"max"}, "optRank": {"max"}, "optShare": {"max"}},
+	},
+	{
+		// The field's maxLength (5) is under the scalar's (80), and counts
+		// code points: five astral characters pass, six accented ones fail.
+		name:     "scalar_field_max_length",
+		typeName: "ScalarRuleMatrix",
+		payload: scalarRuleMatrix(`"optName": "abcdef",
+			"names": ["\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00", "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"]`),
+		want: map[string][]string{"optName": {"maxLength"}, "names[1]": {"maxLength"}},
+	},
+	{
+		name:     "scalar_field_pattern",
+		typeName: "ScalarRuleMatrix",
+		payload:  scalarRuleMatrix(`"optName": "abC"`),
+		want:     map[string][]string{"optName": {"pattern"}},
+	},
+	{
+		// The field's rules apply to every element and innermost element.
+		name:     "scalar_field_rules_on_elements",
+		typeName: "ScalarRuleMatrix",
+		payload:  scalarRuleMatrix(`"reqRanks": [1, 11], "rankGrid": [[2], [3, 12]]`),
+		want:     map[string][]string{"reqRanks[1]": {"max"}, "rankGrid[1][1]": {"max"}},
+	},
+	{
+		// The list bound and the element rules together.
+		name:     "scalar_field_list_max_and_element",
+		typeName: "ScalarRuleMatrix",
+		payload:  scalarRuleMatrix(`"names": ["ab", "abcdef", "cd"]`),
+		want:     map[string][]string{"names": {"listMax"}, "names[1]": {"maxLength"}},
+	},
+	{
+		// A value only the scalar's own rules reject is still one error,
+		// named by the scalar's rule. (An optional 0 would be the Go type's
+		// zero value, which its Validate skips as absent.)
+		name:     "scalar_own_rules_beside_field_rules",
+		typeName: "ScalarRuleMatrix",
+		payload:  scalarRuleMatrix(`"optRank": -1, "reqRanks": [0], "optName": "a"`),
+		want:     map[string][]string{"optRank": {"min"}, "reqRanks[0]": {"min"}, "optName": {"minLength"}},
+	},
+	{
+		// The field's rules run after a scalar failure, as in the Go types:
+		// "A" is under the scalar's minLength and outside the field's pattern.
+		name:     "scalar_and_field_rules_fail",
+		typeName: "ScalarRuleMatrix",
+		payload:  scalarRuleMatrix(`"optName": "A"`),
+		want:     map[string][]string{"optName": {"minLength", "pattern"}},
+	},
+	{
+		// A value of the wrong JSON type is one "type" error: the field's
+		// rules check only a value of their own type.
+		name:          "scalar_field_rules_wrong_type",
+		typeName:      "ScalarRuleMatrix",
+		payload:       scalarRuleMatrix(`"reqAmount": "-5", "optName": 42, "names": [7]`),
+		want:          map[string][]string{"reqAmount": {"type"}, "optName": {"type"}, "names[0]": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
 }
 
 // knownDivergences pins where a language's generated validator disagrees with
@@ -1427,6 +1592,8 @@ func newParityValue(typeName string) parityValidatable {
 		return &JsonMatrix{}
 	case "StructuredMatrix":
 		return &StructuredMatrix{}
+	case "ScalarRuleMatrix":
+		return &ScalarRuleMatrix{}
 	}
 	return nil
 }
@@ -1497,6 +1664,7 @@ import {
   validateJsonMatrix,
   validateListMatrix,
   validateParityMatrix,
+  validateScalarRuleMatrix,
   validateStructuredMatrix,
 } from './validators/types';
 
@@ -1519,6 +1687,7 @@ const validators: Record<string, (value: never) => true | Errors> = {
   ListMatrix: validateListMatrix as never,
   JsonMatrix: validateJsonMatrix as never,
   StructuredMatrix: validateStructuredMatrix as never,
+  ScalarRuleMatrix: validateScalarRuleMatrix as never,
 };
 const vectors = JSON.parse(readFileSync(process.env.PARITY_VECTORS as string, 'utf8'));
 const results: Record<string, Record<string, string[]>> = {};

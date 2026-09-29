@@ -1,0 +1,164 @@
+---
+title: Modeling types
+description: Declare object types, scalars, enums, lists, maps, defaults and constraints once, and get the same checks in Go, TypeScript, Python and Rust.
+sidebar:
+  order: 1
+---
+
+import { TabItem, Tabs } from '@astrojs/starlight/components';
+import Snippet from '../../../components/Snippet.astro';
+
+Every kind of schema declares its types the same way. This guide uses the
+acme shop's `shop-common` service, which generates types in all four
+languages, and the address type in `shop-db`. For each construct it shows
+what the generated code does, and every example here runs in
+`examples/acme-shop` in each language.
+
+## Object types
+
+An abstract class declares an object type, and each property a field. The
+shop reads its suppliers' product feeds as `FeedItem` rows:
+
+<Snippet file="schemas/services/shop-common/src/feed.schema.ts" symbol="FeedItem" />
+
+- A field's type is a scalar, another object type, an enum, a list or a
+  map. `Price` comes from the same service, so it needs no import beyond
+  the file.
+- The comment above a type or a field becomes its documentation in every
+  language, in OpenAPI and, for a table, in the SQL. Write it for the
+  reader of the API.
+- `extends` copies the base class's fields, first, into the subclass. The
+  base class is still generated as a type of its own. In a DB schema it is
+  not a table: `shop-db`'s `Auditable` gives every table its timestamps.
+
+## Scalars
+
+A scalar is a value type from
+[superscalar](https://github.com/parable-work/superscalar), grouped in
+namespaces: `Identity`, `Contact`, `Temporal`, `Generic`, `Network`,
+`Localization`, `Geo`, `Text`, `Ordering`, `Finance`, `File`, `Crypto` and
+more. Each parses and validates the same way in every language. The
+scalars the shop uses become:
+
+| Schema | Go | TypeScript | Python | Rust |
+| --- | --- | --- | --- | --- |
+| `Identity.UUID` | `IdentityUUID` (a `uuid.UUID`) | `string` | `str` | `superscalar::Uuid` |
+| `Identity.Name`, `Identity.Slug`, `Contact.Email`, `Contact.PhoneNumber` | a named `string` type | `string` | `str` | `String` |
+| `Generic.Int64` | `GenericInt64` (an `int64`) | `number` | `int` | `i64` |
+| `Temporal.DateTime` | `TemporalDateTime` (a `time.Time`) | `Date` | `datetime` | `superscalar::DateTime` |
+| `string`, `number`, `boolean` | `string`, `float64`, `bool` | the same | `str`, `float`, `bool` | `String`, `f64`, `bool` |
+
+- `Generic.Int64` is limited to JavaScript's safe-integer range, so a value
+  means the same in TypeScript as elsewhere.
+- `Identity.UUID` accepts a UUID in its usual hyphenated form or in its
+  short base62 form. Python's parser writes the base62 form, which the Go
+  server takes like any other.
+- The scalar decides the SQL column type too: `Contact.Email` is `CITEXT`,
+  which compares case-insensitively. [Database tables](/superschematic/guides/database-tables/)
+  has the list.
+
+## Required, nullable and optional
+
+A field is required unless it is `Nullable<T>` or declared optional with
+`name?: T`. The two mean the same thing: the field may be absent or null.
+
+| Language | A nullable field |
+| --- | --- |
+| Go | a pointer for a scalar or object type (`UpdatedAt *TemporalDateTime`); the plain value, left out when empty, for `string`, `number` and `boolean` |
+| TypeScript | `updatedAt?: Date \| null` |
+| Python | `Optional[T]` with a default of `None` |
+| Rust | `Option<T>` |
+
+## Defaults
+
+`Default<T, V>` fills in a value when a payload leaves the field out. It is
+a default for decoders, not for the database: the Go, TypeScript, Python
+and Rust decoders all apply it, and the SQL column has no default. A new
+order starts `Placed`:
+
+<Snippet file="schemas/services/shop-db/src/orders.schema.ts" from="export abstract class Order extends" to="status: Default" />
+
+## Constraints
+
+`Validate<T, C>` adds constraints to a field. `shop-db`'s address bounds
+its lines and checks the country code:
+
+<Snippet file="schemas/services/shop-db/src/orders.schema.ts" symbol="ShippingAddress" />
+
+| Constraint | Applies to |
+| --- | --- |
+| `min`, `max` | numbers |
+| `minLength`, `maxLength`, `pattern` | strings; lengths count Unicode code points |
+| `listMin`, `listMax` | lists (`Validate<T[], { ... }>`); `[]` satisfies a required list |
+| `uploadMaxBytes` | file-upload scalars |
+
+The generated validators check them: `Validate()` in Go, `validate<Type>`
+and the parsers in TypeScript, `validate_all()` in Python. A failure names
+the rule it broke:
+
+<Snippet file="go/types_test.go" symbol="ExampleShippingAddress_Validate" />
+
+The generated servers check every request against them and answer 400,
+and every generated SDK checks an input before it sends it. The database
+does not: constraints are not part of the DDL.
+
+## Enums
+
+An enum is a TypeScript `enum` of string values. Numeric enums are refused.
+
+<Snippet file="schemas/services/shop-common/src/price.schema.ts" symbol="Currency" />
+
+Go gets `type Currency string` with a constant per member, `IsValid()` and
+`Values()`. TypeScript gets the same `enum`, Python a `str` `Enum` and Rust
+an `enum` with one serde rename per member. A value outside the enum fails
+validation with the `enum` rule.
+
+## Lists and maps
+
+- `T[]` is a list: a slice in Go, an array in TypeScript, `List[T]` in
+  Python and `Vec<T>` in Rust. `T[][]` is a list of lists; see
+  [arrays of arrays](/superschematic/reference/arrays-of-arrays/).
+- `Record<string, T>` is a map with string keys: `map[string]T`,
+  `Record<string, T>`, `Dict[str, T]` and `HashMap<String, T>`. Its values
+  may be scalars, enums, object types or lists. A map is stored as `JSONB`
+  in a table, and an API takes one only in a request body.
+
+Here is `FeedItem` as the Rust types crate declares it:
+
+<Snippet file="testdata/generated/types/rust/shop-common/src/types.rs" symbol="FeedItem" />
+
+## Strict decoding
+
+By default the decoders are lenient about keys a type does not declare, in
+the way each language usually is:
+
+- Go: `FeedItemFromJSON` refuses an unknown key and `FeedItemFromJSONNonStrict`
+  skips it.
+- TypeScript: `parseFeedItemJson` refuses one and `parseFeedItemJsonNonStrict`
+  skips it.
+- Python: the pydantic models skip unknown keys.
+- Rust: serde skips unknown keys.
+
+`@strictJSON` on a type makes every decoder of it refuse a key it does not
+declare, non-strict ones included. It suits a closed contract like a
+supplier feed, where a misspelled key that quietly disappears is the bug.
+It applies to that type only; a nested type opts in on its own. The same
+payload with an extra `colour` key, in each language:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    <Snippet file="go/types_test.go" symbol="ExampleFeedItemFromJSON" />
+  </TabItem>
+  <TabItem label="TypeScript">
+    <Snippet file="typescript/types.test.ts" from="test('@strictJSON refuses" to="});" />
+  </TabItem>
+  <TabItem label="Python">
+    <Snippet file="python/types_test.py" symbol="test_strict_json_refuses_an_undeclared_key" />
+  </TabItem>
+  <TabItem label="Rust">
+    <Snippet file="rust/src/types_test.rs" symbol="strict_json_refuses_an_undeclared_key" />
+  </TabItem>
+</Tabs>
+
+`@denyUnknownFields` is the Rust half alone: it adds
+`#[serde(deny_unknown_fields)]` and changes no other language.

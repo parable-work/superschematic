@@ -2,5 +2,7 @@
 
 export type {
   JSDate,
+  GenericInt64,
+  IdentityName,
   NetworkUrl,
 } from 'superscalar/scalars';
