@@ -16,6 +16,12 @@ var sqlOutputSchema = json.RawMessage(`{
 	}
 }`)
 
+// typesGenerator is the name of the core generator behind outputs.types.
+const typesGenerator = "types"
+
+// ormGenerator is the name of the core generator of the Go ORM.
+const ormGenerator = "orm"
+
 // RegisterCore adds the core generators to reg. The kinds are registered by
 // registry.New; this half lives here because the generator closures call
 // the dispatch methods of this package. Core registers no documents and no
@@ -26,7 +32,7 @@ var sqlOutputSchema = json.RawMessage(`{
 func RegisterCore(reg *registry.Registry) error {
 	specs := []registry.GeneratorSpec{
 		{
-			Name:      "types",
+			Name:      typesGenerator,
 			OutputKey: "types",
 			Dirs: func(c registry.GenerateContext) []string {
 				var dirs []string
@@ -55,7 +61,7 @@ func RegisterCore(reg *registry.Registry) error {
 			},
 		},
 		{
-			Name: "orm",
+			Name: ormGenerator,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{ORMDir(c.Options.OutputRoot, c.Config.Name)}
 			},
