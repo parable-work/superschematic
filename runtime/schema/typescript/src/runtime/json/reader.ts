@@ -349,9 +349,7 @@ function parseFieldDef(
     jsonField: asBoolean(field["x-jsonField"]),
     secret: asBoolean(field["x-secret"]),
     uiHidden: asBoolean(field["x-uiHidden"]),
-    semanticRole: asString(field["x-semantic-role"]),
     temporalFormat: asString(field["x-temporal-format"]),
-    exclude: asBoolean(field["x-exclude"]),
     internalMetadata: asBoolean(field["x-internal-metadata"]),
     auth: asBoolean(field["x-auth"]),
     encrypted: middleware?.encrypted ?? asBoolean(field["x-encrypted"]),
@@ -496,7 +494,7 @@ function parseScalarDefinition(
   const pattern = asString(definition.pattern);
   if (pattern) {
     try {
-      new RegExp(pattern);
+      new RegExp(pattern, "u");
     } catch (error) {
       throw new Error(
         `runtime schema parse error: invalid regex pattern for scalar ${name}: ${String(error)}`,

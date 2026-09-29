@@ -337,6 +337,28 @@ func isJSONNullToken(value json.RawMessage) bool {
 	return bytes.Equal(bytes.TrimSpace(value), []byte("null"))
 }
 {{- end }}
+{{- if .HasElementPointerLists }}
+
+// copyListElements sets *dst to a native array that was scanned through
+// pointer elements into values, and returns an error that names the first
+// nil element, a SQL NULL, at field[i]: a list element is never null. A nil
+// values, a NULL column, sets *dst to nil.
+func copyListElements[T any](field string, values []*T, dst *[]T) error {
+	if values == nil {
+		*dst = nil
+		return nil
+	}
+	list := make([]T, len(values))
+	for i, value := range values {
+		if value == nil {
+			return fmt.Errorf("%s[%d]: null element", field, i)
+		}
+		list[i] = *value
+	}
+	*dst = list
+	return nil
+}
+{{- end }}
 {{- if .HasGenericJSONLists }}
 
 // refuseNullGenericJSONElements returns an error that names the first null

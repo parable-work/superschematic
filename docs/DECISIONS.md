@@ -397,10 +397,18 @@ whether they should refuse it as open. They refuse it:
 | The ORM refuses one in both storage forms, with `<field>[i]: null element` (`<field>[i][j]` for a list of lists): a JSONB list column through `unmarshalJSONListFieldValue`, and a native `JSONB[]` column (a `Generic.JSON[]` without `@jsonField`), where pgx reads a SQL NULL element as nil and a JSON null element as the token without an error, by checking the scanned list. The history decoder refuses one too. | Leaving the native column to pgx |
 | The ORM writes none: `CreateOne`, `CreateMany`, `UpdateOne` and `UpdateMany` refuse a nil element or the JSON null token before the statement runs. A Go caller can put one in the list, and without the check a write would store it and the `RETURNING` read of the same call would refuse it after the row was written. | Writing it and refusing it on the next read |
 
-Still open: a native array column of a scalar whose Go type scans SQL NULL
-as its zero value (a UUID, a timestamp, or a string scalar such as
-`Identity.Name`) reads a NULL element another writer stored as that zero
-value. pgx refuses one for a string, an enum and a number.
+That change also recorded as open a native array column of a scalar whose
+Go type's `Scan` takes a nil source and sets the zero value: a UUID, a
+timestamp, or a string scalar such as `Identity.Name`. Such a column read a
+NULL element another writer stored as that zero value (the zero UUID, the
+zero time, `""`) with no error, while pgx refused one for a string, an enum
+and a number with an error of its own. Every native array column now
+refuses one:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The ORM scans every native array column but a `Generic.JSON[]` into a list of pointers (`[]*T`), where pgx reads a SQL NULL element as nil, then copies it into the entity's `[]T` and fails the read at the first nil with `<field>[i]: null element`: GetOne, FindOne, FindMany, GetManyByIDs and the `RETURNING` reads of the writes. A string, enum or number list reports this error in place of pgx's. The history decoder reads a native list through `unmarshalJSONListFieldValue`. No Go type changes; a scan through pointers costs one allocation per element. | A scan target that implements pgx's `ArraySetter` and refuses a NULL element as it scans, which skips the copy but ties the ORM to pgx's array interface and must reproduce the element scan pgx plans for `T`; checking only the element types whose `Scan` takes a nil source, which follows superscalar's implementations; `[]*T` in the generated types |
+| The ORM writes none. A native list's Go element is a value, never a pointer, and no element type but `Generic.JSON` has a `Value` method that returns nil, so no element binds as SQL NULL; the write check above covers `Generic.JSON`. | A write check for every native list |
 
 The generated TypeScript validator rejects a null element, validates a
 nested object element of every type, and reports a non-string element of a
@@ -827,11 +835,18 @@ The parity matrix has vectors with astral and multi-byte BMP characters
 for a field's lengths, a scalar's lengths, and list and list-of-lists
 elements.
 
-Still different, and not in the parity matrix: a `pattern` on astral
-characters. Go's `regexp` and Python's `re` match code points, and the
-generated TypeScript validator and the TypeScript runtime build a
-`RegExp` without the `u` flag, which matches UTF-16 units, so `.` matches
-half an emoji there.
+A `pattern` on astral characters first stayed different. Go's `regexp`
+and Python's `re` match code points. The generated TypeScript validator,
+the TypeScript runtime, the TypeScript SDK and the TypeScript API server's
+check of a scalar's pattern built a `RegExp` without the `u` flag, which
+matches UTF-16 units: `.` matched half an emoji, and `[^a-z]{2}` took one
+emoji for two characters. The API server already compiled an argument's
+own pattern with `u`. Patterns now match code points too:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every TypeScript `RegExp` built from a scalar's or a field's `pattern` has the `u` flag: in the generated validator, in the runtime (and its check that a scalar's pattern compiles), in the SDK and in the API server. The parity matrix's `PatternMatrix` holds `.`, `\W` and a negated class with a count on a string, a list, a list of lists and a string scalar, with vectors of astral characters, and the six validators agree. | Leaving TypeScript on UTF-16 units; rewriting each pattern per language |
+| A pattern must also be valid in the `u` flag's stricter syntax, which refuses an escaped character that has no special meaning (`\-` outside a class, `\_`), a lone `{` or `}`, and an incomplete quantifier. Such a pattern fails as a pattern JavaScript cannot compile failed before: the runtime, the SDK and the API server's scalar check refuse every value, and the generated validator and the API server's argument check throw. Every pattern in superscalar's catalog, the fixtures and the examples compiles with `u`. The loader checks a pattern only with Go's `regexp`, when it checks a default value. | A loader check of JavaScript's pattern syntax, which needs a JavaScript engine or a second implementation of its grammar |
 
 ## D16. An engine takes schemas as data, and behaviors compose on its types
 
@@ -906,7 +921,7 @@ the acme example declares one behavior (`acme.<Name>`) with its
 TypeScript implementation and no core edit, asserted by
 `scripts/smoke.sh` (section 10 of `docs/extension-model.md`).
 
-Status: three pieces are built. `internal/tools/schemafiletypes` writes
+Status: four pieces are built. `internal/tools/schemafiletypes` writes
 the data form's TypeScript types and meta-schema into
 `@superschematic/schema-ir` (`./schema-file`, `./schema-file.json`). The
 strict loader is in `@superschematic/schema-runtime`, held to the Go
@@ -918,11 +933,17 @@ generator refuses a type that declares one. To match the Go reader's
 canonical bytes, which drop a value its decoder cannot tell from an
 absent key, the meta-schema gives each such property that value as its
 default (section 5), and the loader needs `JSON.parse` source text access
-(Node.js 21 or later, or Bun). Not built: the tool that copies a
-declaration into its npm package, and the engine with its packages. Each
-change that lands a piece updates this paragraph, the README layout table
-and the pages that describe it. The names and rules are reversible until
-the first release.
+(Node.js 21 or later, or Bun). `@superschematic/engine`
+(`runtime/engine/README.md`) has storage on `node:sqlite` and
+`bun:sqlite`, the schema registry with the compatibility rule,
+namespaces, instances, the event log and the access policy. Beyond the
+schema runtime's checks it refuses union and map fields, which no
+runtime validates yet, and object keys a type does not declare, which the
+compatibility rule depends on. Not built: the tool that copies a
+declaration into its npm package, and the engine's HTTP API, event
+stream, MCP tools and behaviors. Each change that lands a piece updates
+this paragraph, the README layout table and the pages that describe it.
+The names and rules are reversible until the first release.
 
 ## D17. A version graph over versioned tables, with one merge core
 
@@ -1152,6 +1173,47 @@ moves each value into its slot: a flag a field set to `true` becomes
 `"extensions": {"<extension>": {"<name>": true}}`.
 `scripts/scrub-check.sh` fails on any `transform*` identifier, so none
 comes back into the core.
+
+The removal is reversible until the first release.
+
+### D18, amended: `semanticRole` and `exclude` leave the core IR
+
+Two more `ir.FieldDef` fields from the source tree fail D18's rule and are
+removed on it:
+
+- `semanticRole`, a free string. Its comment listed the roles a
+  distribution's data-quality rules bind to: a business key, an event
+  time, a metadata timestamp. The core declares no roles, and no core
+  decorator, check, generator or runtime reads one. The TypeScript writer
+  refused a data field that carried it.
+- `exclude`, a flag. Its comment described a data pipeline's serving
+  layer: a field an overlay hides from promotion and the query catalog
+  while ingestion still collects it. The core has no serving layer. Every
+  core generator emitted an excluded field like any other, and the
+  TypeScript writer dropped the flag without an error.
+
+As with the `transform*` fields, only the forms carried them: the
+schema-file JSON Schema admitted them, the TypeScript IR types declared
+them, and the TypeScript schema runtime read and wrote them, as
+`x-semantic-role` and `x-exclude` in the JSON Schema wire form. A JSON or
+YAML schema file whose field still carries either key now fails
+validation against the schema-file JSON Schema.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Both move to the extension slot. A distribution registers a field decorator per directive: one with a string `Args` (an `enum` of its roles, if it wants the frontends to check them) for the role, one without `Args` for the flag. They store as `"extensions": {"<extension>": {"semanticRole": "event_time", "exclude": true}}`. acme's `@shelf` (an argument) and `@feedKey` (a flag) are the two shapes. | Keeping `semanticRole` as a generic tag. A string no core code reads means what each deployment says it means, which is D18's test for an extension directive; the slot carries the same string. |
+| The TypeScript writer refuses a field with extension data (`docs/extension-model.md`, section 11, gap 6), so it now refuses the flag too instead of dropping it. | Keeping `exclude` as a generic "not served" flag. Nothing in the core serves or hides a field by it, so the core would own a name and no meaning. |
+
+`@versioned({ exclude })` and `@conflictUnit("excluded")` are not this
+flag and stay. The first names the fields a versioned table leaves out of
+its history rows, which the core's SQL and ORM generators read and the
+loader checks; the second marks a field the version graph neither merges
+nor hashes.
+
+`scripts/scrub-check.sh` now also fails on a semantic-role identifier in
+any spelling and on the `x-exclude` vendor key. It does not search the
+plain key `exclude`, which `@versioned` uses. This file names the removed
+fields and is the one file that check skips.
 
 The removal is reversible until the first release.
 

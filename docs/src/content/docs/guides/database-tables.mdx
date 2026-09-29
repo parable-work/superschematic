@@ -47,9 +47,12 @@ The field's type decides its column:
 | `string`, an enum | `TEXT` |
 | `number` | `DOUBLE PRECISION` |
 | `boolean` | `BOOLEAN` |
+| a list of any type above, like `Temporal.DateTime[]` | an array of its column, like `TIMESTAMPTZ[]` |
 | a `@jsonField` type, a map, a list of lists | `JSONB` |
 
-A field is `NOT NULL` unless it is `Nullable<T>`. `Validate` constraints
+A field is `NOT NULL` unless it is `Nullable<T>`. A required array column
+defaults to the empty array `'{}'`, whatever its element type, and a
+required `JSONB` column has no default. `Validate` constraints
 and enum membership are checked by the generated code, not by the
 database, and `Default<T, V>` fills in decoded payloads, not columns.
 

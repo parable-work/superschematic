@@ -684,6 +684,52 @@
       "x-kind": "enum",
       "x-owner": "parity-fixture"
     },
+    "PatternMatrix": {
+      "properties": {
+        "glyph": {
+          "$ref": "#/definitions/string",
+          "x-validatePattern": "^.$"
+        },
+        "glyphGrid": {
+          "items": {
+            "items": {
+              "$ref": "#/definitions/string"
+            },
+            "type": "array"
+          },
+          "type": "array",
+          "x-validatePattern": "^.$"
+        },
+        "glyphs": {
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array",
+          "x-validatePattern": "^.$"
+        },
+        "pair": {
+          "$ref": "#/definitions/string",
+          "x-validatePattern": "^[^a-z]{2}$"
+        },
+        "pairName": {
+          "$ref": "#/definitions/scalars/Identity_Name",
+          "x-validatePattern": "^[^a-z]{2}$"
+        },
+        "pairNames": {
+          "items": {
+            "$ref": "#/definitions/scalars/Identity_Name"
+          },
+          "type": "array",
+          "x-validatePattern": "^[^a-z]{2}$"
+        },
+        "spaced": {
+          "$ref": "#/definitions/string",
+          "x-validatePattern": "^\\w\\W\\w$"
+        }
+      },
+      "type": "object",
+      "x-kind": "type"
+    },
     "ScalarRuleMatrix": {
       "properties": {
         "names": {

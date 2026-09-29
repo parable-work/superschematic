@@ -166,8 +166,8 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Middlewares: []runtimerouting.Middleware{
 				runtimemiddleware.RateLimit(60, time.Minute, LoggerFromContext),
 				runtimemiddleware.BodyLimit(1, RespondError),
-				runtimemiddleware.Timeout(10*time.Second, LoggerFromContext),
 				runtimesession.RequirePermissions("orders.write"),
+				runtimemiddleware.Timeout(10*time.Second, LoggerFromContext),
 			},
 		},
 		{

@@ -54,10 +54,15 @@ type ORMOutput struct {
 	HasArraysOfArrays bool
 
 	// HasJSONListFields is true when a JSONB column holds a list or a list
-	// of lists of a non-union type, or a history row holds a native
-	// Generic.JSON list; it emits the decoder that refuses a null element in
-	// one (Field.JSONListDepth).
+	// of lists of a non-union type, or a history row holds a native list; it
+	// emits the decoder that refuses a null element in one
+	// (Field.JSONListDepth, Field.NativeList).
 	HasJSONListFields bool
+
+	// HasElementPointerLists is true when a native array column is scanned
+	// through pointer elements (Field.ScansElementPointers); it emits the
+	// copy that refuses a nil one.
+	HasElementPointerLists bool
 
 	// HasGenericJSONLists is true when a column holds a Generic.JSON list
 	// (Field.IsGenericJSONList); it emits the check that refuses a null
@@ -245,11 +250,32 @@ func (f Field) JSONListDepth() int {
 	return f.ArrayDepth()
 }
 
+// NativeList reports whether the field is a list stored in a native
+// Postgres array column: a T[] without @jsonField. A T[][] is always a JSONB
+// column. A history row is to_jsonb(row), where the column is a JSON list
+// whose NULL element is null; the history decoder refuses one.
+func (f Field) NativeList() bool {
+	return f.IsArray && !f.IsJSONField
+}
+
 // NativeGenericJSONList reports whether the field is a Generic.JSON list
-// stored in a native JSONB[] column: a T[] without @jsonField. A T[][] is
-// always a JSONB column.
+// stored in a native JSONB[] column.
 func (f Field) NativeGenericJSONList() bool {
-	return f.IsGenericJSONList && !f.IsJSONField
+	return f.IsGenericJSONList && f.NativeList()
+}
+
+// ScansElementPointers reports whether the repository scans the field's
+// native array into a list of pointers ([]*T) and copies it into the
+// entity's []T, refusing a nil element: every native list but a
+// Generic.JSON one. A list element is never null (D12, amended). pgx reads
+// a SQL NULL element into a pointer as nil. Scanned into T itself, a NULL
+// element of a type whose Scan method takes a nil source (a UUID, a
+// timestamp, a string scalar such as Identity.Name) reads as T's zero value
+// with no error, and one of a string, an enum or a number fails with pgx's
+// own message. A Generic.JSON element's Go type holds a null itself, so the
+// repository checks that scanned list instead (NativeGenericJSONList).
+func (f Field) ScansElementPointers() bool {
+	return f.NativeList() && !f.IsGenericJSONList
 }
 
 // GenericJSONNullCheck is the call that returns an error naming the first
@@ -439,6 +465,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	hasArraysOfArrays := false
 	hasJSONListFields := false
 	hasGenericJSONLists := false
+	hasElementPointerLists := false
 	for _, repo := range repositories {
 		if repo.HasSoftDelete {
 			hasSoftDeletes = true
@@ -459,8 +486,11 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			if field.IsArrayOfArrays {
 				hasArraysOfArrays = true
 			}
-			if field.JSONListDepth() > 0 || (field.NativeGenericJSONList() && repo.Versioned) {
+			if field.JSONListDepth() > 0 || (field.NativeList() && repo.Versioned) {
 				hasJSONListFields = true
+			}
+			if field.ScansElementPointers() {
+				hasElementPointerLists = true
 			}
 			if field.IsGenericJSONList {
 				hasGenericJSONLists = true
@@ -484,6 +514,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		HasArraysOfArrays:        hasArraysOfArrays,
 		HasJSONListFields:        hasJSONListFields,
 		HasGenericJSONLists:      hasGenericJSONLists,
+		HasElementPointerLists:   hasElementPointerLists,
 		Timestamp:                opts.Clock.RFC3339(),
 		UUIDGoType:               uuidGoType,
 		UserIDGoType:             resolveUserIDGoType(tableTypes, scalarMap, uuidGoType),

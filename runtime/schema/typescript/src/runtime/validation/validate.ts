@@ -149,7 +149,7 @@ function validateStringConstraints(
 
   if (scalar.pattern) {
     try {
-      const pattern = new RegExp(scalar.pattern);
+      const pattern = new RegExp(scalar.pattern, 'u');
       if (!pattern.test(value)) {
         errors.push({
           validator: 'pattern',
@@ -408,7 +408,7 @@ function validateFieldLevelStringConstraints(field: FieldDef, value: string): Va
   }
   if (field.validatePattern) {
     try {
-      const pattern = new RegExp(field.validatePattern);
+      const pattern = new RegExp(field.validatePattern, 'u');
       if (!pattern.test(value)) {
         fieldErrors.push({
           validator: 'pattern',

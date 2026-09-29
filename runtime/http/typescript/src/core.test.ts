@@ -377,6 +377,12 @@ describe('JSON body parameters of a scalar, enum or JSON type', () => {
     expect(decodeJsonParam('body', p({ minLength: 2, maxLength: 2 }), '\u{1F600}\u{1F600}')).toBe('\u{1F600}\u{1F600}');
     refusedAt(p({ maxLength: 2 }), '\u{1F600}\u{1F600}\u{1F600}', undefined, 'maxLength', 'must be at most 2 characters');
     refusedAt(p({ minLength: 2 }), '\u{1F600}', undefined, 'minLength', 'must be at least 2 characters');
+    // A pattern matches code points too: one emoji is one '.', for the scalar's pattern and the argument's.
+    const glyph = p({ scalar: { name: 'Text.Glyph', pattern: '^.$' } });
+    expect(decodeJsonParam('body', glyph, '\u{1F600}')).toBe('\u{1F600}');
+    refusedAt(glyph, '\u{1F600}\u{1F600}', undefined, 'pattern', 'is not a valid Text.Glyph');
+    expect(decodeJsonParam('body', p({ pattern: '^.$' }), '\u{1F600}')).toBe('\u{1F600}');
+    refusedAt(p({ pattern: '^.$' }), '\u{1F600}\u{1F600}', undefined, 'pattern', 'does not match the required pattern');
     // A path or query value is checked against its scalar too.
     expect(() => decodeParam('query', p({ scalar: url }), ['nope'])).toThrow(
       expect.objectContaining({ details: expect.objectContaining({ parameter: 'x', reason: 'is not a valid Network.Url', errors: [{ validator: 'pattern', message: 'is not a valid Network.Url' }] }) })

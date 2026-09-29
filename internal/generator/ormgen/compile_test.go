@@ -155,6 +155,38 @@ func TestDecodeTenantHistoryDataSnakeCaseRoundTrip(t *testing.T) {
 		t.Fatalf("decode a null list element = %v, want an error naming metadataList[0]", err)
 	}
 
+	// So does a native array column. A history row is to_jsonb(row), where
+	// a NULL element of a UUID[], TIMESTAMPTZ[] or VARCHAR(n)[] column is
+	// null, which encoding/json decodes to the element's zero value.
+	native, err := decodeTenantHistoryData([]byte(` + "`" + `{
+		"metadata": {},
+		"member_ids": ["00000000-0000-0000-0000-000000000001"],
+		"renewed_at": ["2026-01-02T03:04:05+00:00"],
+		"aliases": ["acme"],
+		"tags": [],
+		"past_statuses": ["active"],
+		"seat_counts": [1.5]
+	}` + "`" + `))
+	if err != nil {
+		t.Fatalf("decode native lists: %v", err)
+	}
+	if len(native.MemberIds) != 1 || len(native.RenewedAt) != 1 || len(native.Aliases) != 1 || native.Aliases[0] != "acme" ||
+		native.Tags == nil || len(native.PastStatuses) != 1 || len(native.SeatCounts) != 1 {
+		t.Fatalf("native lists = %+v", native)
+	}
+	for _, tc := range []struct{ raw, want string }{
+		{` + "`" + `{"member_ids": ["00000000-0000-0000-0000-000000000001", null]}` + "`" + `, "memberIds[1]: null element"},
+		{` + "`" + `{"renewed_at": [null]}` + "`" + `, "renewedAt[0]: null element"},
+		{` + "`" + `{"aliases": ["acme", null]}` + "`" + `, "aliases[1]: null element"},
+		{` + "`" + `{"tags": [null]}` + "`" + `, "tags[0]: null element"},
+		{` + "`" + `{"past_statuses": [null, "active"]}` + "`" + `, "pastStatuses[0]: null element"},
+		{` + "`" + `{"seat_counts": [1, null]}` + "`" + `, "seatCounts[1]: null element"},
+	} {
+		if _, err := decodeTenantHistoryData([]byte(tc.raw)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("decode %s = %v, want an error naming %q", tc.raw, err, tc.want)
+		}
+	}
+
 	// A required Generic.JSON column cannot be SQL NULL, so null is the
 	// JSON null value.
 	nullRoot, err := decodeTenantHistoryData([]byte(` + "`" + `{"metadata":null}` + "`" + `))
@@ -163,6 +195,27 @@ func TestDecodeTenantHistoryDataSnakeCaseRoundTrip(t *testing.T) {
 	}
 	if string(nullRoot.Metadata) != "null" {
 		t.Fatalf("null-root Metadata = %q, want the JSON null token", string(nullRoot.Metadata))
+	}
+}
+
+// A native array column is scanned through pointer elements, where pgx
+// reads a SQL NULL element as nil, and copied into the entity's list.
+func TestCopyListElementsRefusesANilElement(t *testing.T) {
+	var ids []types.IdentityUUID
+	if err := copyListElements("memberIds", nil, &ids); err != nil || ids != nil {
+		t.Fatalf("copy a NULL column = %v, %v; want a nil list", ids, err)
+	}
+	if err := copyListElements("memberIds", []*types.IdentityUUID{}, &ids); err != nil || ids == nil || len(ids) != 0 {
+		t.Fatalf("copy an empty array = %#v, %v; want an empty list", ids, err)
+	}
+	first, second := "a", "b"
+	var tags []string
+	if err := copyListElements("tags", []*string{&first, &second}, &tags); err != nil || len(tags) != 2 || tags[1] != "b" {
+		t.Fatalf("copy [a b] = %v, %v", tags, err)
+	}
+	err := copyListElements("tags", []*string{&first, nil}, &tags)
+	if err == nil || err.Error() != "tags[1]: null element" {
+		t.Fatalf("copy [a NULL] = %v, want tags[1]: null element", err)
 	}
 }
 `
@@ -528,9 +581,15 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb
 
 	// A Generic.JSON list element is never null (D12, amended). The ORM
 	// writes none, but a row another writer stored with one fails the read
-	// at its index through the full scan, a selected-field scan, the map
-	// result and the history decoder, as every other list column does.
+	// at its index through the full scan, a selected-field scan, FindOne,
+	// FindMany, the map result, the history decoder and an update's
+	// RETURNING read, as every other list column does. The update runs last:
+	// it writes the row before its RETURNING read refuses it.
 	execStrategyASQL(t, pool, ` + "`" + `UPDATE tenant SET metadata_list = $1::jsonb WHERE id = $2` + "`" + `, ` + "`" + `[null,true]` + "`" + `, jsonTenantID.ToUUID())
+	listFields := TenantFields{
+		Id: true, Metadata: true, MetadataList: true, PayloadList: true, PayloadGrid: true,
+		MemberIds: true, RenewedAt: true, Aliases: true, Tags: true, PastStatuses: true, SeatCounts: true,
+	}
 	assertReadsRefused := func(id types.IdentityUUID, stored, want string) {
 		t.Helper()
 		refused := func(label string, err error) {
@@ -539,16 +598,24 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb
 				t.Fatalf("%s with a stored %s: err = %v, want one naming %q", label, stored, err, want)
 			}
 		}
+		byID := &TenantFilter{Id: &UUIDFilter{Eq: &id}}
 		_, err := db.Tenant.GetOne(context.Background(), id, nil)
 		refused("GetOne", err)
-		_, err = db.Tenant.GetOne(context.Background(), id, &TenantGetOptions{
-			Fields: TenantFields{Metadata: true, MetadataList: true, PayloadList: true, PayloadGrid: true},
-		})
+		_, err = db.Tenant.GetOne(context.Background(), id, &TenantGetOptions{Fields: listFields})
 		refused("selected GetOne", err)
+		_, err = db.Tenant.FindOne(context.Background(), byID, nil)
+		refused("FindOne", err)
+		_, err = db.Tenant.FindOne(context.Background(), byID, &TenantFindOptions{Fields: listFields})
+		refused("selected FindOne", err)
+		_, _, err = db.Tenant.FindMany(context.Background(), byID, &TenantFindOptions{Fields: listFields})
+		refused("FindMany", err)
 		_, err = db.Tenant.GetManyByIDs(context.Background(), []types.IdentityUUID{id})
 		refused("GetManyByIDs", err)
 		_, err = db.Tenant.ListVersions(context.Background(), id, nil)
 		refused("history", err)
+		renamed := types.IdentityName("Renamed Corp")
+		_, err = db.Tenant.UpdateOne(context.Background(), id, &TenantUpdate{Name: &renamed})
+		refused("UpdateOne RETURNING", err)
 	}
 	assertReadsRefused(jsonTenantID, "[null,true] metadata_list", "metadataList[0]: null element")
 	execStrategyASQL(t, pool, ` + "`" + `UPDATE tenant SET metadata_list = $1::jsonb WHERE id = $2` + "`" + `, ` + "`" + `[]` + "`" + `, jsonTenantID.ToUUID())
@@ -565,6 +632,28 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb
 		execStrategyASQL(t, pool, ` + "`" + `INSERT INTO tenant (id, name, slug, email, status, is_active, seat_count, metadata, metadata_list, metadata_by_name, ` + "`" + `+tc.column+` + "`" + `)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, ` + "`" + `+tc.value+` + "`" + `)` + "`" + `,
 			id.ToUUID(), "Null Corp", fmt.Sprintf("null-%d", i), "null@example.com", "active", true, 5,
+			` + "`" + `{}` + "`" + `, ` + "`" + `[]` + "`" + `, ` + "`" + `{}` + "`" + `)
+		assertReadsRefused(id, tc.column+" = "+tc.value, tc.want)
+	}
+
+	// A native array column of a scalar, an enum or a primitive holds no
+	// null element either. pgx refuses a SQL NULL element of a string, an
+	// enum or a number with an error of its own, and reads one of a UUID, a
+	// timestamp or a string scalar such as Identity.Name as that type's zero
+	// value, because their Scan methods take a nil source. Every read path
+	// refuses each at its index.
+	for i, tc := range []struct{ column, value, want string }{
+		{"member_ids", "ARRAY['00000000-0000-0000-0000-000000000001'::uuid, NULL]", "memberIds[1]: null element"},
+		{"renewed_at", "ARRAY[NULL, '2026-01-02T03:04:05Z']::timestamptz[]", "renewedAt[0]: null element"},
+		{"aliases", "ARRAY['acme', NULL]", "aliases[1]: null element"},
+		{"tags", "ARRAY['a', 'b', NULL]", "tags[2]: null element"},
+		{"past_statuses", "ARRAY[NULL]::text[]", "pastStatuses[0]: null element"},
+		{"seat_counts", "ARRAY[1, NULL]::double precision[]", "seatCounts[1]: null element"},
+	} {
+		id := mustUUID(t, fmt.Sprintf("00000000-0000-0000-0000-0000000005%02d", i))
+		execStrategyASQL(t, pool, ` + "`" + `INSERT INTO tenant (id, name, slug, email, status, is_active, seat_count, metadata, metadata_list, metadata_by_name, ` + "`" + `+tc.column+` + "`" + `)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, ` + "`" + `+tc.value+` + "`" + `)` + "`" + `,
+			id.ToUUID(), "Null Corp", fmt.Sprintf("native-null-%d", i), "null@example.com", "active", true, 5,
 			` + "`" + `{}` + "`" + `, ` + "`" + `[]` + "`" + `, ` + "`" + `{}` + "`" + `)
 		assertReadsRefused(id, tc.column+" = "+tc.value, tc.want)
 	}
@@ -941,6 +1030,14 @@ func extendFixtureForCompileCoverage(schema *ir.Schema) {
 		&ir.FieldDef{Name: "payloadList", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsArray: true}},
 		&ir.FieldDef{Name: "payloadGrid", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsArray: true, IsArrayOfArrays: true}},
 		&ir.FieldDef{Name: "metadataByName", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsMap: true}, Required: true, JsonField: true},
+		// Native array columns: UUID[], TIMESTAMPTZ[], VARCHAR(n)[] of a
+		// string scalar, TEXT[], an enum list and a number list.
+		&ir.FieldDef{Name: "memberIds", TypeRef: ir.TypeRef{Name: "Identity.UUID", IsArray: true}},
+		&ir.FieldDef{Name: "renewedAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime", IsArray: true}},
+		&ir.FieldDef{Name: "aliases", TypeRef: ir.TypeRef{Name: "Identity.Name", IsArray: true}},
+		&ir.FieldDef{Name: "tags", TypeRef: ir.TypeRef{Name: "string", IsArray: true}},
+		&ir.FieldDef{Name: "pastStatuses", TypeRef: ir.TypeRef{Name: "TenantStatus", IsArray: true}},
+		&ir.FieldDef{Name: "seatCounts", TypeRef: ir.TypeRef{Name: "number", IsArray: true}},
 	)
 
 	createdKind, updatedKind := "created", "updated"

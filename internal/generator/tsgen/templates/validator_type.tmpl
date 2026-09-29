@@ -359,7 +359,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
           addFieldError(errors, path, "maxLength", "{{escapeString .Message}}");
         }
         {{else if eq .Validator "pattern"}}
-        if (typeof item === "string" && !(new RegExp({{jsonString .Value}})).test(item)) {
+        if (typeof item === "string" && !(new RegExp({{jsonString .Value}}, "u")).test(item)) {
           addFieldError(errors, path, "pattern", "{{escapeString .Message}}");
         }
         {{else if eq .Validator "min"}}
@@ -429,7 +429,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     for (const [mapKey, mapVal] of Object.entries(fieldValue)) {
       if (Array.isArray(mapVal)) {
         mapVal.forEach((item, index) => {
-          if (typeof item === "string" && !(new RegExp({{jsonString .Value}})).test(item)) {
+          if (typeof item === "string" && !(new RegExp({{jsonString .Value}}, "u")).test(item)) {
             addFieldError(errors, `{{$field.TSName}}.${mapKey}[${index}]`, "pattern", "{{escapeString .Message}}");
           }
         });
@@ -437,7 +437,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     }
     {{else}}
     for (const [mapKey, mapVal] of Object.entries(fieldValue)) {
-      if (typeof mapVal === "string" && !(new RegExp({{jsonString .Value}})).test(mapVal)) {
+      if (typeof mapVal === "string" && !(new RegExp({{jsonString .Value}}, "u")).test(mapVal)) {
         addFieldError(errors, `{{$field.TSName}}.${mapKey}`, "pattern", "{{escapeString .Message}}");
       }
     }
@@ -527,13 +527,13 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     {{if $field.IsArray}}
     if (Array.isArray(fieldValue)) {
       fieldValue.forEach((item, index) => {
-        if (typeof item === "string" && !(new RegExp({{jsonString .Value}})).test(item)) {
+        if (typeof item === "string" && !(new RegExp({{jsonString .Value}}, "u")).test(item)) {
           addFieldError(errors, `{{$field.TSName}}[${index}]`, "pattern", "{{escapeString .Message}}");
         }
       });
     }
     {{else}}
-    if (typeof fieldValue === "string" && !(new RegExp({{jsonString .Value}})).test(fieldValue)) {
+    if (typeof fieldValue === "string" && !(new RegExp({{jsonString .Value}}, "u")).test(fieldValue)) {
       addFieldError(errors, "{{$field.TSName}}", "pattern", "{{escapeString .Message}}");
     }
     {{end}}
@@ -594,7 +594,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     });
     {{else if eq .Validator "pattern"}}
     fieldValue.forEach((item, index) => {
-      if (typeof item === "string" && !(new RegExp({{jsonString .Value}})).test(item)) {
+      if (typeof item === "string" && !(new RegExp({{jsonString .Value}}, "u")).test(item)) {
         addFieldError(errors, `{{$field.TSName}}[${index}]`, "pattern", "{{escapeString .Message}}");
       }
     });
@@ -626,7 +626,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
       addFieldError(errors, "{{$field.TSName}}", "maxLength", "{{escapeString .Message}}");
     }
     {{else if eq .Validator "pattern"}}
-    if (typeof fieldValue === "string" && !(new RegExp({{jsonString .Value}})).test(fieldValue)) {
+    if (typeof fieldValue === "string" && !(new RegExp({{jsonString .Value}}, "u")).test(fieldValue)) {
       addFieldError(errors, "{{$field.TSName}}", "pattern", "{{escapeString .Message}}");
     }
     {{else if eq .Validator "min"}}
