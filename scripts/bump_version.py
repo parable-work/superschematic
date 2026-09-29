@@ -9,14 +9,9 @@ and it refuses to continue if any site matched a different number of times
 than expected.
 
   bump_version.py current                 print the version (versions.env)
-  bump_version.py set <version>           write <version> everywhere and cut the
-                                          CHANGELOG "Unreleased" section into a
-                                          dated "[<version>]" section
-  bump_version.py check [--expect <v>]    every site agrees (and equals <v>);
-                                          with --expect, the changelog must
-                                          also carry a "[<v>]" section
+  bump_version.py set <version>           write <version> everywhere
+  bump_version.py check [--expect <v>]    every site agrees (and equals <v>)
   bump_version.py pep440 <version>        the PEP 440 form of a SemVer version
-  bump_version.py notes <version>         print the CHANGELOG section for <version>
   bump_version.py go-modules              print the Go module tag prefixes, one
                                           per line ("" for the root module)
 
@@ -46,7 +41,6 @@ Version sites (relative to the repository root):
                                       .../superschematic/ir vX.Y.Z
   examples/acme-schematic/go.mod      require .../superschematic vX.Y.Z and
                                       .../superschematic/ir vX.Y.Z
-  CHANGELOG.md                        the released sections and their links
 
 The Go requires carry the release version so a consumer at a tag resolves
 the sibling modules from their own tags (ir/vX.Y.Z and so on, all cut on the
@@ -60,13 +54,11 @@ because PyPI could not carry them.
 Python 3.9+, standard library only.
 """
 import argparse
-import datetime
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-REPO_URL = "https://github.com/parable-work/superschematic"
 GO_MODULE = "github.com/parable-work/superschematic"
 
 NPM_WORKSPACE_PACKAGES = ["api", "db", "schema", "schema-config"]
@@ -285,8 +277,6 @@ def check(expect=None) -> str:
         want = format_version(version, form)
         if found != want:
             problems.append(f"{path.relative_to(ROOT)}: {found} (want {want})")
-    if expect is not None and changelog_section(version) is None:
-        problems.append(f"CHANGELOG.md: no '## [{version}]' section")
     if problems:
         raise VersionError("version sites disagree:\n  " + "\n  ".join(problems))
     return version
@@ -306,66 +296,6 @@ def write_sites(version: str) -> None:
         path.write_text(text, encoding="utf-8")
 
 
-# --- changelog ---------------------------------------------------------------
-
-CHANGELOG = ROOT / "CHANGELOG.md"
-SECTION = re.compile(r"^## \[(?P<name>[^\]]+)\](?: - (?P<date>\d{4}-\d{2}-\d{2}))?$", re.M)
-
-
-def changelog_sections():
-    """Return [(name, date, body)] in file order. body excludes the heading."""
-    text = CHANGELOG.read_text(encoding="utf-8")
-    heads = list(SECTION.finditer(text))
-    out = []
-    for i, h in enumerate(heads):
-        end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
-        body = text[h.end() : end]
-        # The link reference block at the end of the file is not part of a section.
-        body = re.sub(r"(?:^\[[^\]]+\]: \S+\n?)+\Z", "", body, flags=re.M)
-        out.append((h.group("name"), h.group("date"), body.strip("\n")))
-    return out
-
-
-def changelog_section(version: str):
-    for name, _, body in changelog_sections():
-        if name == version:
-            return body
-    return None
-
-
-def cut_changelog(version: str, today: str) -> None:
-    text = CHANGELOG.read_text(encoding="utf-8")
-    sections = changelog_sections()
-    if not sections or sections[0][0] != "Unreleased":
-        raise VersionError("CHANGELOG.md must start its sections with '## [Unreleased]'")
-    if changelog_section(version) is not None:
-        raise VersionError(f"CHANGELOG.md already has a '## [{version}]' section")
-    if not sections[0][2].strip():
-        raise VersionError("CHANGELOG.md: the Unreleased section is empty; nothing to release")
-    previous = sections[1][0] if len(sections) > 1 else None
-
-    heading = f"## [{version}] - {today}"
-    text, n = re.subn(r"^## \[Unreleased\]\n", "## [Unreleased]\n\n" + heading + "\n", text, count=1, flags=re.M)
-    if n != 1:
-        raise VersionError("CHANGELOG.md: could not find the Unreleased heading")
-
-    unreleased_link = f"[Unreleased]: {REPO_URL}/compare/v{version}...HEAD"
-    if previous is None:
-        version_link = f"[{version}]: {REPO_URL}/releases/tag/v{version}"
-    else:
-        version_link = f"[{version}]: {REPO_URL}/compare/v{previous}...v{version}"
-    text, n = re.subn(
-        r"^\[Unreleased\]: \S+$",
-        unreleased_link + "\n" + version_link,
-        text,
-        count=1,
-        flags=re.M,
-    )
-    if n != 1:
-        raise VersionError("CHANGELOG.md: could not find the [Unreleased] link reference")
-    CHANGELOG.write_text(text, encoding="utf-8")
-
-
 # --- commands ----------------------------------------------------------------
 
 
@@ -378,11 +308,9 @@ def cmd_set(args) -> int:
     version = validate(args.version)
     before = current_version()
     check()
-    today = args.date or datetime.date.today().isoformat()
-    cut_changelog(version, today)
     write_sites(version)
     check(expect=version)
-    print(f"version {before} -> {version} (PyPI {pep440(version)}); CHANGELOG cut at {today}")
+    print(f"version {before} -> {version} (PyPI {pep440(version)})")
     return 0
 
 
@@ -394,14 +322,6 @@ def cmd_check(args) -> int:
 
 def cmd_pep440(args) -> int:
     print(pep440(args.version))
-    return 0
-
-
-def cmd_notes(args) -> int:
-    body = changelog_section(validate(args.version))
-    if body is None:
-        raise VersionError(f"CHANGELOG.md has no '## [{args.version}]' section")
-    print(body)
     return 0
 
 
@@ -417,7 +337,6 @@ def main(argv) -> int:
     sub.add_parser("current").set_defaults(func=cmd_current)
     p = sub.add_parser("set")
     p.add_argument("version")
-    p.add_argument("--date", help="changelog date (YYYY-MM-DD); default today")
     p.set_defaults(func=cmd_set)
     p = sub.add_parser("check")
     p.add_argument("--expect")
@@ -425,9 +344,6 @@ def main(argv) -> int:
     p = sub.add_parser("pep440")
     p.add_argument("version")
     p.set_defaults(func=cmd_pep440)
-    p = sub.add_parser("notes")
-    p.add_argument("version")
-    p.set_defaults(func=cmd_notes)
     sub.add_parser("go-modules").set_defaults(func=cmd_go_modules)
     args = parser.parse_args(argv)
     try:
