@@ -13,53 +13,14 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
-- The Python SDK checks an input's schema rules before the request, as the
-  Go and TypeScript SDKs do. It ran only pydantic's `model_validate`,
-  which checks types and required fields but none of the rules (`listMin`,
-  `listMax`, `minLength`, `maxLength`, `min`, `max`, `pattern`), so an
-  order with no lines under `listMin: 1` was sent and the server answered
-  400. The SDK now runs the types package's `validate_all` on the input and
-  on every object it holds, a model the caller built included, and raises
-  `ValidationError` with the errors keyed as the Go and TypeScript SDKs
-  key them: `lines` (`listMin`), `lines[1].quantity` (`min`),
-  `shipTo.postalCode` (`pattern`), `giftCodes[1]` (`maxLength`). A map
-  value's errors are keyed `extras.gift.quantity`, as the TypeScript SDK
-  and pydantic's errors key them; the Go SDK keys them
-  `extras[gift].quantity`. For the wire names, the Python types'
-  `validate_all` takes a keyword-only `by_alias`: `False`, the default,
-  keys errors by snake_case name as before, and `True` keys them by wire
-  name. With a types package generated before `by_alias`, the SDK checks
-  the input's own fields and keys their errors by snake_case name. Minor
-  (new keyword; the SDK refuses inputs it sent before).
-- The Python types' `validate_all` checks the models a field holds, as
-  Go's `Validate` and TypeScript's `validate<Type>` do. It checked only
-  the model's own fields, so a rule of a nested type, such as
-  `OrderLine.quantity` with `min: 1` in `PlaceOrderInput.lines`, was never
-  reported. It now runs `validate_all` on each model held in a field, a
-  list, a list of lists, a map or a map of lists, and keys its errors
-  under the path that reaches it: `lines[0].quantity`,
-  `ship_to.postal_code`, `grid[0][1].quantity`, `extras.gift.quantity` (a
-  map key as given, as TypeScript keys it; Go keys it
-  `extras[gift].quantity`). With `by_alias=True` the nested fields are
-  keyed by wire name too (`lines[1].productId`, `shipTo.postalCode`).
-  Each error is reported once, by the model that holds the field. A value
-  that is not a model, such as a dict `model_construct` left unparsed, is
-  not walked. The Python SDK's input check is now one
-  `validate_all(by_alias=True)` call in place of its own walk over the
-  input, with the same errors. Minor (`validate_all` reports errors it did
-  not report before).
-- Python types: `str()` of a `ValidationErrors` lists its errors. It
-  returned the message `Exception` was built with, and `validate_all`
-  builds the container empty and adds errors afterwards, so a container
-  whose `has_errors()` was true read "No validation errors". That text
-  now means there are none. Patch.
-- The Rust SDK's input validation checks a list's `listMin` and `listMax`
-  (`minItems` and `maxItems` in its embedded schemas) before the request.
-  It checked lengths, bounds, patterns and required fields at every depth,
-  but not a list's size, so an order with no lines under `listMin: 1` was
-  sent. Its errors stay one `SDKError::Config` message naming each path
-  (`input.lines: must contain at least 1 items`), without the Go and
-  TypeScript SDKs' rule names. Patch.
+- `scripts/bump_version.py` versions the Python runtime's own entry in
+  `runtime/schema/python/uv.lock` (`superschematic-schema-runtime`), in
+  the PEP 440 form its `pyproject.toml` carries: `set` writes it and
+  `check` fails when it disagrees with `versions.env`. The committed
+  lockfile said `0.1.0` while every other site said `0.0.0`, so `uv sync`
+  (and `make setup`) rewrote it and left the tree dirty; it now says
+  `0.0.0`. The script has tests, which CI's scrub job and
+  `make versions` run. Patch (release tooling only).
 - The generated TypeScript validator checks a scalar field's own rules.
   For a field typed with a scalar it ran the scalar's validator and the
   list bounds only, and dropped the field's `minLength`, `maxLength`,
