@@ -159,7 +159,7 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 		if err := {{ .JSONDecodeCall "rawValue" (printf "&result.%s" (toGoName .Name)) }}; err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
 		}
-		{{- else if .NativeGenericJSONList }}
+		{{- else if .NativeList }}
 		if err := unmarshalJSONListFieldValue(rawValue, &result.{{ toGoName .Name }}, {{ printf "%q" .Name }}, 1); err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
 		}
@@ -195,6 +195,8 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 {{- if $member.IsRelationship }}
 {{- else if $member.Field.IsJSONField }}
 var temp{{ toGoName $member.Field.Name }} []byte
+{{- else if $member.Field.ScansElementPointers }}
+var temp{{ toGoName $member.Field.Name }} []*{{ $member.Field.GoType }}
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 var temp{{ toGoName $member.Field.Name }} pgtype.Date
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) (eq $member.Field.GoType "string") }}
@@ -224,6 +226,10 @@ if len(temp{{ toGoName $member.Field.Name }}) > 0 {
 }
 {{- else if $member.Field.NativeGenericJSONList }}
 if err := {{ $member.Field.GenericJSONNullCheck (printf "result.%s" (toGoName $member.Field.Name)) }}; err != nil {
+	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
+}
+{{- else if $member.Field.ScansElementPointers }}
+if err := copyListElements({{ printf "%q" $member.Field.Name }}, temp{{ toGoName $member.Field.Name }}, &result.{{ toGoName $member.Field.Name }}); err != nil {
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
@@ -278,6 +284,10 @@ if len(temp{{ toGoName $member.Field.Name }}) > 0 {
 if err := {{ $member.Field.GenericJSONNullCheck (printf "entity.%s" (toGoName $member.Field.Name)) }}; err != nil {
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
+{{- else if $member.Field.ScansElementPointers }}
+if err := copyListElements({{ printf "%q" $member.Field.Name }}, temp{{ toGoName $member.Field.Name }}, &entity.{{ toGoName $member.Field.Name }}); err != nil {
+	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
+}
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	{{- if $member.Field.IsNullableScalar }}
@@ -312,6 +322,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 &tempRel{{ toGoName $member.Relationship.FieldName }},
 {{- else if $member.Field.IsJSONField }}
 &temp{{ toGoName $member.Field.Name }},
+{{- else if $member.Field.ScansElementPointers }}
+&temp{{ toGoName $member.Field.Name }},
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 &temp{{ toGoName $member.Field.Name }},
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) }}
@@ -327,6 +339,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 &tempRel{{ toGoName $member.Relationship.FieldName }},
 {{- else if $member.Field.IsJSONField }}
 &temp{{ toGoName $member.Field.Name }},
+{{- else if $member.Field.ScansElementPointers }}
+&temp{{ toGoName $member.Field.Name }},
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 &temp{{ toGoName $member.Field.Name }},
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) }}
@@ -340,6 +354,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 {{- range $field := . }}
 {{- if $field.IsJSONField }}
 var temp{{ toGoName $field.Name }} []byte
+{{- else if $field.ScansElementPointers }}
+var temp{{ toGoName $field.Name }} []*{{ $field.GoType }}
 {{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
 var temp{{ toGoName $field.Name }} pgtype.Date
 {{- else if and (not $field.IsRequired) (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (eq $field.GoType "string") }}
@@ -364,6 +380,8 @@ var selected{{ toGoName $field.Name }} bool
 {{- $field := . -}}
 case "{{ $field.DBName }}":
 	{{- if $field.IsJSONField }}
+	scanDest[i] = &temp{{ toGoName $field.Name }}
+	{{- else if $field.ScansElementPointers }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
 	{{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
@@ -395,6 +413,10 @@ if len(temp{{ toGoName $field.Name }}) > 0 {
 }
 {{- else if $field.NativeGenericJSONList }}
 if err := {{ $field.GenericJSONNullCheck (printf "result.%s" (toGoName $field.Name)) }}; err != nil {
+	jsonFieldDecodeErr = fmt.Errorf("failed to decode field {{ $field.Name }}: %w", err)
+}
+{{- else if $field.ScansElementPointers }}
+if err := copyListElements({{ printf "%q" $field.Name }}, temp{{ toGoName $field.Name }}, &result.{{ toGoName $field.Name }}); err != nil {
 	jsonFieldDecodeErr = fmt.Errorf("failed to decode field {{ $field.Name }}: %w", err)
 }
 {{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
