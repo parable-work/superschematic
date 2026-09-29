@@ -12,7 +12,8 @@ import (
 var (
 	dateTimePattern = regexp.MustCompile(`^([0-9]{4})-([0-9]{2})-([0-9]{2})[T ]([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?(Z|[+-][0-9]{2}(?::[0-9]{2}(?::[0-9]{2})?)?)$`)
 	datePattern     = regexp.MustCompile(`^([0-9]{4})-([0-9]{2})-([0-9]{2})$`)
-	timePattern     = regexp.MustCompile(`^([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?$`)
+	timePattern     = regexp.MustCompile(`^([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\.([0-9]{1,9}))?)?$`)
+	clockPattern    = regexp.MustCompile(`^([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?\s?([AaPp])[Mm]$`)
 	hyphenatedUUID  = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	base62UUID      = regexp.MustCompile(`^[0-9A-Za-z]{1,22}$`)
 	intervalTime    = regexp.MustCompile(`^([+-]?)([0-9]+):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?$`)
@@ -135,19 +136,40 @@ func dateRule(value any) (string, error) {
 
 // timeRule writes a time of day as HH:MM:SS on a 24-hour clock, its
 // fraction of a second without trailing zeros and left out when zero, the
-// form Postgres renders. 24:00:00, which Postgres stores, is refused, as the
-// scalar refuses it.
+// form Postgres renders. It also reads the other forms the scalar accepts,
+// which a JSON value the ORM stored keeps as written: HH:MM, and a 12-hour
+// clock (2:30 pm, 12:05:09AM), each as Postgres reads it into a time. The
+// scalar has no fraction, but a time column written past it can hold one,
+// which is kept. 24:00:00, which Postgres stores, is refused, as the scalar
+// refuses it.
 func timeRule(value any) (string, error) {
 	s, ok := value.(string)
 	if !ok {
 		return "", fmt.Errorf("%s is not a string", describe(value))
 	}
-	m := timePattern.FindStringSubmatch(s)
-	if m == nil || atoi(m[1]) > 23 || atoi(m[2]) > 59 || atoi(m[3]) > 59 {
+	var hour, minute, second int
+	var fraction string
+	if m := timePattern.FindStringSubmatch(s); m != nil {
+		hour, minute, fraction = atoi(m[1]), atoi(m[2]), m[4]
+		if m[3] != "" {
+			second = atoi(m[3])
+		}
+	} else if m := clockPattern.FindStringSubmatch(s); m != nil && atoi(m[1]) >= 1 && atoi(m[1]) <= 12 {
+		hour, minute = atoi(m[1])%12, atoi(m[2])
+		if m[3] != "" {
+			second = atoi(m[3])
+		}
+		if m[4] == "p" || m[4] == "P" {
+			hour += 12
+		}
+	} else {
 		return "", fmt.Errorf("%q is not a time of day", s)
 	}
-	out := m[1] + ":" + m[2] + ":" + m[3]
-	if fraction := strings.TrimRight(m[4], "0"); fraction != "" {
+	if hour > 23 || minute > 59 || second > 59 {
+		return "", fmt.Errorf("%q is not a time of day", s)
+	}
+	out := fmt.Sprintf("%02d:%02d:%02d", hour, minute, second)
+	if fraction = strings.TrimRight(fraction, "0"); fraction != "" {
 		out += "." + fraction
 	}
 	return `"` + out + `"`, nil

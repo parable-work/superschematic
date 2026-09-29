@@ -360,6 +360,11 @@ fn check_kind(raw: KindDescriptor, index: &HashMap<String, usize>) -> Result<Kin
             )));
         }
     }
+    if raw.columns.contains_key("") {
+        return Err(Error::descriptor(format!(
+            "descriptor: kind {name:?} has a column with an empty name in its columns"
+        )));
+    }
     let named = roles
         .iter()
         .map(|(role, column)| (*role, column.as_str()))

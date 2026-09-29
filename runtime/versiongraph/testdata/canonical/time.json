@@ -8,7 +8,7 @@
       "canonical": "\"10:00:00\""
     },
     {
-      "name": "a fraction loses its trailing zeros",
+      "name": "a fraction as Postgres renders it",
       "class": "time",
       "sql": "'10:00:00.500'::time",
       "postgres": "\"10:00:00.5\"",
@@ -43,11 +43,60 @@
       "error": "the scalar refuses hour 24"
     },
     {
-      "name": "refuses hours and minutes alone",
+      "name": "a stored fraction loses its trailing zeros",
+      "class": "time",
+      "sql": "'\"10:00:00.500\"'::jsonb",
+      "postgres": "\"10:00:00.500\"",
+      "canonical": "\"10:00:00.5\""
+    },
+    {
+      "name": "hours and minutes gain seconds",
       "class": "time",
       "sql": "'\"10:00\"'::jsonb",
       "postgres": "\"10:00\"",
-      "error": "Postgres renders seconds; a stored JSON value must too"
+      "canonical": "\"10:00:00\""
+    },
+    {
+      "name": "a 12-hour clock after noon",
+      "class": "time",
+      "sql": "'\"2:30 pm\"'::jsonb",
+      "postgres": "\"2:30 pm\"",
+      "canonical": "\"14:30:00\""
+    },
+    {
+      "name": "12 pm is noon",
+      "class": "time",
+      "sql": "'\"12:30PM\"'::jsonb",
+      "postgres": "\"12:30PM\"",
+      "canonical": "\"12:30:00\""
+    },
+    {
+      "name": "12 am is midnight",
+      "class": "time",
+      "sql": "'\"12:05:09 am\"'::jsonb",
+      "postgres": "\"12:05:09 am\"",
+      "canonical": "\"00:05:09\""
+    },
+    {
+      "name": "list of lists in the forms the scalar accepts",
+      "class": "time[][]",
+      "sql": "'[[\"10:00:00.500\", \"10:00\"], [\"9:15 AM\"]]'::jsonb",
+      "postgres": "[[\"10:00:00.500\", \"10:00\"], [\"9:15 AM\"]]",
+      "canonical": "[[\"10:00:00.5\",\"10:00:00\"],[\"09:15:00\"]]"
+    },
+    {
+      "name": "refuses a 12-hour clock past 12",
+      "class": "time",
+      "sql": "'\"13:00 pm\"'::jsonb",
+      "postgres": "\"13:00 pm\"",
+      "error": "a 12-hour clock has no hour 13"
+    },
+    {
+      "name": "refuses a single-digit hour on a 24-hour clock",
+      "class": "time",
+      "sql": "'\"9:15\"'::jsonb",
+      "postgres": "\"9:15\"",
+      "error": "the scalar's 24-hour form has two-digit hours"
     }
   ]
 }

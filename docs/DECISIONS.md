@@ -1238,9 +1238,13 @@ version 2 only. `runtime/versiongraph/README.md` holds the canonical row
 contract, one rule per class from what Postgres returns;
 `runtime/versiongraph/testdata/canonical` holds its vectors, and package
 `canonical` in the Go module implements the Postgres rules for the adapter
-to use. Two rules settled as they were built: a UUID's canonical form is
-the scalar core's base62, and a date-time's is UTC with `Z`, since a
-`timestamptz` keeps no offset. The generated shell still hands the core
+to use. Three rules settled as they were built: a UUID's canonical form
+is the scalar core's base62; a date-time's is UTC with `Z`, since a
+`timestamptz` keeps no offset; and a time of day's is `HH:MM:SS`, as
+Postgres renders a `time`, to which the scalar's `HH:MM` and 12-hour forms
+normalize. The date-time and time rules depart from the table above, which
+calls each value the JSON the schema runtime writes: that JSON keeps the
+offset and the form the value was written in. The generated shell still hands the core
 `to_jsonb` rows. The adapter interface and the Go engine come next, with
 the scenario suite. The release pointer, merge-only primary lines,
 `Rebase`, snapshots and the sweep follow in the Go engine. The TypeScript,

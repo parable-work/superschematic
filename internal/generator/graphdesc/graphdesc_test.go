@@ -165,22 +165,74 @@ func TestEveryElementClassIsDerived(t *testing.T) {
 }
 
 // TestValueClassRefusesAStorageWithoutARule checks that a member column
-// whose scalar is stored in a way no rule reads fails the descriptor.
+// whose scalar is stored in a way no rule reads fails the descriptor: a
+// string scalar stored as POINT, and a scalar holding JSON (an array, an
+// object or any value) stored as TEXT rather than JSONB.
 func TestValueClassRefusesAStorageWithoutARule(t *testing.T) {
-	schema := loadFixture(t)
-	schema.Scalars["Geo.Location"] = &ir.ScalarDef{
-		Name:              "Geo.Location",
-		LanguagePrimitive: ir.LanguageString,
-		Primitive:         "String",
-		Pattern:           `^-?\d+(\.\d+)?,-?\d+(\.\d+)?$`,
-		TypeMappings:      map[string]string{"sql": "POINT", "json_schema": "object"},
+	for _, tc := range []struct {
+		name, scalar, pattern, jsonSchema, sql string
+	}{
+		{name: "string scalar as POINT", scalar: "Test.Location", pattern: `^-?\d+(\.\d+)?,-?\d+(\.\d+)?$`, jsonSchema: "object", sql: "POINT"},
+		{name: "JSON array scalar as TEXT", scalar: "Test.Vector", jsonSchema: ir.JSONSchemaArrayType, sql: "TEXT"},
+		{name: "JSON object scalar as TEXT", scalar: "Test.StringMap", jsonSchema: ir.JSONSchemaObjectType, sql: "TEXT"},
+		{name: "any JSON scalar as TEXT", scalar: "Test.AnyJSON", jsonSchema: ir.JSONSchemaAnyType, sql: "TEXT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := loadFixture(t)
+			schema.Scalars[tc.scalar] = &ir.ScalarDef{
+				Name:              tc.scalar,
+				LanguagePrimitive: ir.LanguageString,
+				Primitive:         "String",
+				Pattern:           tc.pattern,
+				TypeMappings:      map[string]string{"sql": tc.sql, "json_schema": tc.jsonSchema},
+			}
+			schema.Types["Utensil"].Fields = append(schema.Types["Utensil"].Fields, &ir.FieldDef{
+				Name: "shelf", TypeRef: ir.TypeRef{Name: tc.scalar}, Required: true,
+			})
+			_, err := graphdesc.Graphs(schema)
+			if err == nil || !strings.Contains(err.Error(), "Utensil.shelf") || !strings.Contains(err.Error(), tc.sql) {
+				t.Fatalf("Graphs = %v, want a refusal naming Utensil.shelf and %s", err, tc.sql)
+			}
+		})
 	}
-	schema.Types["Utensil"].Fields = append(schema.Types["Utensil"].Fields, &ir.FieldDef{
-		Name: "shelf", TypeRef: ir.TypeRef{Name: "Geo.Location"}, Required: true,
-	})
-	_, err := graphdesc.Graphs(schema)
-	if err == nil || !strings.Contains(err.Error(), "Utensil.shelf") || !strings.Contains(err.Error(), "POINT") {
-		t.Fatalf("Graphs = %v, want a refusal naming Utensil.shelf and POINT", err)
+}
+
+// TestValueClassOfEachKindOfField checks the class each kind of field
+// derives: a map, an object type and a @jsonField relation are json, whole;
+// a to-one relation takes its target key's class; a scalar mapped to a
+// json_schema number or boolean has that class whatever its primitive.
+func TestValueClassOfEachKindOfField(t *testing.T) {
+	schema := &ir.Schema{
+		Types: map[string]*ir.TypeDef{
+			"Shelf": {Name: "Shelf", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{
+				{Name: "id", TypeRef: ir.TypeRef{Name: "Int"}, Key: true},
+			}},
+			"Point": {Name: "Point", Fields: []*ir.FieldDef{{Name: "x", TypeRef: ir.TypeRef{Name: "Float"}}}},
+		},
+		Scalars: map[string]*ir.ScalarDef{
+			"Weight":  {Name: "Weight", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"json_schema": "number"}},
+			"Checked": {Name: "Checked", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"json_schema": "boolean"}},
+			"Ratio":   {Name: "Ratio", LanguagePrimitive: ir.LanguageNumber, Primitive: "Int", TypeMappings: map[string]string{"json_schema": "number"}},
+		},
+	}
+	for _, tc := range []struct {
+		name string
+		fd   *ir.FieldDef
+		want string
+	}{
+		{"map", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Int", IsMap: true}}, graphdesc.ClassJSON},
+		{"object type", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Point"}}, graphdesc.ClassJSON},
+		{"object type list", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Point", IsArray: true}}, graphdesc.ClassJSON + "[]"},
+		{"jsonField relation", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Shelf"}, JsonField: true}, graphdesc.ClassJSON},
+		{"to-one relation", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Shelf"}}, graphdesc.ClassInteger},
+		{"json_schema number over a string primitive", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Weight"}}, graphdesc.ClassNumber},
+		{"json_schema number over an Int primitive", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Ratio"}}, graphdesc.ClassNumber},
+		{"json_schema boolean over a string primitive", &ir.FieldDef{Name: "f", TypeRef: ir.TypeRef{Name: "Checked"}}, graphdesc.ClassBoolean},
+	} {
+		got, err := graphdesc.ValueClass(schema, tc.fd)
+		if err != nil || got != tc.want {
+			t.Errorf("%s: ValueClass = %q, %v; want %q", tc.name, got, err, tc.want)
+		}
 	}
 }
 

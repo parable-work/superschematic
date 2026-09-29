@@ -15,6 +15,13 @@
       "canonical": "\"tab\\there \\\"quoted\\\" \\\\ back\\nline\""
     },
     {
+      "name": "backspace, form feed and carriage return by name",
+      "class": "string",
+      "sql": "E'a\\bb\\fc\\rd'::text",
+      "postgres": "\"a\\bb\\fc\\rd\"",
+      "canonical": "\"a\\bb\\fc\\rd\""
+    },
+    {
       "name": "control characters as lowercase unicode escapes",
       "class": "string",
       "sql": "E'bell\\x07 unit\\x1f'::text",
