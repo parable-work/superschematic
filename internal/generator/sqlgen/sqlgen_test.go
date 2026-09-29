@@ -746,6 +746,32 @@ func TestUnbuildableIndexFails(t *testing.T) {
 	}
 }
 
+// TestIndexWithoutTableFails: verification refuses an @index on a type that
+// gets no table (a base class, a @jsonField type); the generator fails on
+// both too, as a backstop, instead of leaving the index out of the DDL.
+func TestIndexWithoutTableFails(t *testing.T) {
+	for _, typ := range []string{"Auditable", "Address"} {
+		str := ir.TypeRef{Name: "string"}
+		schema := ir.NewSchema("synthetic", ir.SchemaKindDB)
+		schema.Types["Auditable"] = &ir.TypeDef{Name: "Auditable", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{
+			{Name: "createdAt", TypeRef: str, Required: true},
+		}}
+		schema.Types["Tenant"] = &ir.TypeDef{Name: "Tenant", Role: ir.RoleDBTable, Extends: "Auditable", Fields: []*ir.FieldDef{
+			{Name: "createdAt", TypeRef: str, Required: true, InheritedFrom: "Auditable"},
+			{Name: "address", TypeRef: ir.TypeRef{Name: "Address"}},
+		}}
+		schema.Types["Address"] = &ir.TypeDef{Name: "Address", Role: ir.RoleDBTable, JsonField: true, Fields: []*ir.FieldDef{
+			{Name: "createdAt", TypeRef: str, Required: true},
+		}}
+		schema.Types[typ].Indexes = []ir.IndexDef{{Keys: []string{"createdAt"}}}
+		_, err := Generate(schema, Options{SchemaName: "synthetic"})
+		want := "type " + typ + " declares an @index but gets no table"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: error = %v, want %q", typ, err, want)
+		}
+	}
+}
+
 // TestDetermineIndexType verifies index access method selection.
 func TestDetermineIndexType(t *testing.T) {
 	cases := []struct {

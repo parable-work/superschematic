@@ -13,6 +13,19 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Verification refuses an `@index` on a type that gets no table of its
+  own, which the SQL generator left out of the DDL without an error: a
+  base class, such as an abstract `Auditable` that `Tenant` extends, whose
+  fields are copied onto each subclass but whose indexes are not; a
+  `@jsonField` type, which is stored as JSON in its parent's column; a
+  `@trait`; and any other type that is not a DB table. Declare the index
+  on each table that should have it instead. The error names the type and
+  the index, and for a base class the tables that extend it, such as
+  `Auditable: @index(["createdAt"]) is on a base class, which gets no table; declare it on each table that extends Auditable (Tenant)`.
+  Such an index is reported once, not again for its keys. The SQL
+  generator fails on the same indexes, as a backstop. A schema with such
+  an index now fails to load; output for every other schema is unchanged.
+  Patch.
 - `scripts/bump_version.py` versions the Python runtime's own entry in
   `runtime/schema/python/uv.lock` (`superschematic-schema-runtime`), in
   the PEP 440 form its `pyproject.toml` carries: `set` writes it and
