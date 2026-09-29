@@ -415,6 +415,78 @@ func TestLoadServiceCompositeDefaultRejectsAmbiguousStructuralUnionMatch(t *test
 	}
 }
 
+// TestLoadServiceCompositeDefaultLengthsCountCodePoints: a platform default's
+// strings meet a scalar's and a field's minLength and maxLength in Unicode
+// code points, the unit every validator counts (D14, amended). Both bounds
+// are 3 and 4. "caf\u00e9" is four code points in five UTF-8 bytes, four
+// emoji are four code points in sixteen bytes, and "\u00e9\u00e9" is two
+// code points in four bytes.
+func TestLoadServiceCompositeDefaultLengthsCountCodePoints(t *testing.T) {
+	const (
+		ascii    = `"abc"`
+		accented = `"caf\u00e9"`
+		astral   = `"\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"`
+		short    = `"\u00e9\u00e9"`
+		long     = `"caf\u00e9s"`
+	)
+	tests := []struct {
+		name      string
+		code      string
+		label     string
+		wantError string
+	}{
+		{name: "scalar maxLength counts an accented letter once", code: accented, label: ascii},
+		{name: "scalar maxLength counts an astral character once", code: astral, label: ascii},
+		{name: "scalar maxLength refuses one code point over", code: long, label: ascii, wantError: "LengthDefaults.code must contain at most 4 characters"},
+		{name: "scalar minLength refuses two code points in four bytes", code: short, label: ascii, wantError: "LengthDefaults.code must contain at least 3 characters"},
+		{name: "field maxLength counts an accented letter once", code: ascii, label: accented},
+		{name: "field maxLength counts an astral character once", code: ascii, label: astral},
+		{name: "field maxLength refuses one code point over", code: ascii, label: long, wantError: "LengthDefaults.label must contain at most 4 characters"},
+		{name: "field minLength refuses two code points in four bytes", code: ascii, label: short, wantError: "LengthDefaults.label must contain at least 3 characters"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeLengthDefaultService(t, tt.code, tt.label)
+			_, err := LoadService(dir)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("LoadService: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("LoadService accepted a default outside its length bounds, want %q", tt.wantError)
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("error %q does not contain %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func writeLengthDefaultService(t *testing.T, code, label string) string {
+	t.Helper()
+	return writeService(t, map[string]string{
+		"schema.config.json": minimalConfig,
+		"src/lengths.fixture.schema.json": `{
+			"scalars": {
+				"Acme.Code": {"name": "Acme.Code", "languagePrimitive": "string", "minLength": 3, "maxLength": 4}
+			},
+			"types": {
+				"LengthDefaults": {
+					"name": "LengthDefaults",
+					"role": "EmbeddedStruct",
+					"fields": [
+						{"name": "code", "typeRef": {"name": "Acme.Code"}, "required": true},
+						{"name": "label", "typeRef": {"name": "string"}, "required": true, "validateMinLength": 3, "validateMaxLength": 4}
+					]
+				}
+			}
+		}`,
+		"src/length-defaults.platform-default.json": `{"type": "LengthDefaults", "value": {"code": ` + code + `, "label": ` + label + `}}`,
+	})
+}
+
 func writeCompositeDefaultService(t *testing.T, defaultJSON string) string {
 	t.Helper()
 	return writeService(t, map[string]string{

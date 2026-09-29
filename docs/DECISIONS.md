@@ -850,6 +850,11 @@ The parity matrix has vectors with astral and multi-byte BMP characters
 for a field's lengths, a scalar's lengths, and list and list-of-lists
 elements.
 
+The loader counts code points too when it checks a composite default (a
+`*.platform-default.json` file) against a scalar's or a field's
+`minLength` and `maxLength`, so a default loads exactly when the
+validators accept it; it had counted UTF-8 bytes.
+
 A `pattern` on astral characters first stayed different. Go's `regexp`
 and Python's `re` match code points. The generated TypeScript validator,
 the TypeScript runtime, the TypeScript SDK and the TypeScript API server's

@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -198,10 +199,12 @@ func validateCompositeScalar(scalar *ir.ScalarDef, value any, path string) error
 		if !ok {
 			return fmt.Errorf("%s must be a string", path)
 		}
-		if scalar.MinLength > 0 && len(text) < scalar.MinLength {
+		// Lengths count code points, as every validator does (D14, amended).
+		length := utf8.RuneCountInString(text)
+		if scalar.MinLength > 0 && length < scalar.MinLength {
 			return fmt.Errorf("%s must contain at least %d characters", path, scalar.MinLength)
 		}
-		if scalar.MaxLength > 0 && len(text) > scalar.MaxLength {
+		if scalar.MaxLength > 0 && length > scalar.MaxLength {
 			return fmt.Errorf("%s must contain at most %d characters", path, scalar.MaxLength)
 		}
 		if scalar.Pattern != "" {
@@ -414,10 +417,11 @@ func validateCompositeFieldConstraints(field *ir.FieldDef, value any, path strin
 		}
 	}
 	if text, ok := value.(string); ok {
-		if field.ValidateMinLength != nil && len(text) < *field.ValidateMinLength {
+		length := utf8.RuneCountInString(text)
+		if field.ValidateMinLength != nil && length < *field.ValidateMinLength {
 			return fmt.Errorf("%s must contain at least %d characters", path, *field.ValidateMinLength)
 		}
-		if field.ValidateMaxLength != nil && len(text) > *field.ValidateMaxLength {
+		if field.ValidateMaxLength != nil && length > *field.ValidateMaxLength {
 			return fmt.Errorf("%s must contain at most %d characters", path, *field.ValidateMaxLength)
 		}
 		if field.ValidatePattern != "" {
