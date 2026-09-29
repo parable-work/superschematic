@@ -71,6 +71,13 @@ of a generated artifact is always listed here with the bump it requires.
   directory when the schema declares no graph. It removes each
   `versiongraph/*.json` no graph of the schema writes, keeps every other
   file, and removes the directory only when that leaves it empty. Patch.
+- `runtime/schema/python/uv.lock` carries the repository version for
+  `superschematic-schema-runtime`, and `scripts/bump_version.py` writes it
+  (in PEP 440 form, as in `pyproject.toml`) and fails `check` when it
+  disagrees. The lock said `0.1.0` against `0.0.0` in `pyproject.toml`, so
+  `uv sync`, and with it `make setup`, rewrote the lock on every fresh
+  checkout, and `bump_version.py set` would have left it at the previous
+  version on each release. Patch.
 
 ### Added
 

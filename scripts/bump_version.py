@@ -34,7 +34,9 @@ Version sites (relative to the repository root):
                                       version
   runtime/schema/python/pyproject.toml
                                       [project] version, in PEP 440 form
-  runtime/http/rust/Cargo.toml        [package] version
+  runtime/schema/python/uv.lock       the superschematic-schema-runtime
+                                      package, in PEP 440 form
+  runtime/http/rust/Cargo.toml       [package] version
   runtime/http/rust/Cargo.lock        the superschematic-http-runtime package
   runtime/versiongraph/rust/Cargo.toml
                                       [package] version
@@ -182,6 +184,15 @@ def sites():
         (
             ROOT / "runtime" / "schema" / "python" / "pyproject.toml",
             [(r'(\[project\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1)],
+            "pep440",
+        )
+    )
+    # uv records the editable project's own version in the lock, so a lock
+    # left behind is one `uv sync` rewrites on every fresh checkout.
+    out.append(
+        (
+            ROOT / "runtime" / "schema" / "python" / "uv.lock",
+            [(r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1)],
             "pep440",
         )
     )
