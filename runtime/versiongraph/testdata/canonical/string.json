@@ -43,6 +43,20 @@
       "canonical": "\"Mixed Case\""
     },
     {
+      "name": "inet as Postgres renders it",
+      "class": "string",
+      "sql": "'2001:DB8::0001/128'::inet",
+      "postgres": "\"2001:db8::1\"",
+      "canonical": "\"2001:db8::1\""
+    },
+    {
+      "name": "inet keeps a network's prefix length",
+      "class": "string",
+      "sql": "'10.1.2.3/8'::inet",
+      "postgres": "\"10.1.2.3/8\"",
+      "canonical": "\"10.1.2.3/8\""
+    },
+    {
       "name": "null",
       "class": "string",
       "sql": "NULL::text",

@@ -103,6 +103,13 @@
       "sql": "'2026-09-01 10:00:00'::timestamp",
       "postgres": "\"2026-09-01T10:00:00\"",
       "error": "a timestamp without a time zone names no instant"
+    },
+    {
+      "name": "refuses an offset of a day",
+      "class": "dateTime",
+      "sql": "'\"2026-09-01T10:00:00+24:00\"'::jsonb",
+      "postgres": "\"2026-09-01T10:00:00+24:00\"",
+      "error": "an offset is less than a day"
     }
   ]
 }

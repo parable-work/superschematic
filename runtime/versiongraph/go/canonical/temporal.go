@@ -65,7 +65,8 @@ func uuidRule(value any) (string, error) {
 // RFC3339Nano of the UTC time. It reads the form Postgres renders, whose
 // offset follows the session's time zone and may carry seconds
 // (+00:17:30), and any RFC 3339 time with an offset. A year outside
-// 0000-9999, BC, infinity and a time without an offset are refused.
+// 0000-9999, BC, infinity, a time without an offset and an offset of a
+// day or more are refused.
 func dateTimeRule(value any) (string, error) {
 	s, ok := value.(string)
 	if !ok {
