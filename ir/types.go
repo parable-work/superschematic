@@ -410,16 +410,6 @@ type FieldDef struct {
 	// to clients (@secret).
 	Secret bool `json:"secret,omitempty" yaml:"secret,omitempty"`
 
-	// Exclude hides an overlay field from the serving layer
-	// (x-exclude): promote does not plan the column and the query catalog
-	// never exposes it; ingestion still collects it into bronze.
-	// Top-level only; nested exclude is rejected at write.
-	Exclude bool `json:"exclude,omitempty" yaml:"exclude,omitempty"`
-
-	// SemanticRole carries the existing x-semantic-role column annotation used
-	// by quality rules (business_key, event_time, metadata_timestamp, etc.).
-	SemanticRole string `json:"semanticRole,omitempty" yaml:"semanticRole,omitempty"`
-
 	// TemporalFormat declares the wire encoding of a Temporal.DateTime field
 	// whose source sends a bare epoch count instead of ISO text
 	// (@temporalFormat / x-temporal-format). Values are the epoch units unix,

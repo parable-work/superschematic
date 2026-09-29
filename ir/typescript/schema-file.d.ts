@@ -115,7 +115,6 @@ export interface FieldDef {
   description?: string;
   docs?: OperationDocs;
   encrypted?: boolean;
-  exclude?: boolean;
   extensions?: Extensions;
   filterable?: boolean;
   hasMany?: boolean;
@@ -148,7 +147,6 @@ export interface FieldDef {
   restPath?: string;
   searchField?: boolean;
   secret?: boolean;
-  semanticRole?: string;
   sourceMustProject?: boolean;
   temporalFormat?: string;
   title?: string;
