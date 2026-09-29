@@ -1127,8 +1127,8 @@ tests assert. A distribution
 that wrote the removed keys registers one decorator per directive and
 moves each value into its slot: a flag a field set to `true` becomes
 `"extensions": {"<extension>": {"<name>": true}}`.
-`scripts/scrub-check.sh` fails on any `transform*` identifier outside
-`CHANGELOG.md`, so none comes back into the core.
+`scripts/scrub-check.sh` fails on any `transform*` identifier, so none
+comes back into the core.
 
 The removal is reversible until the first release.
 
