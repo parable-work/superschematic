@@ -1,6 +1,6 @@
 {
   "name": "merge_carries_a_delete",
-  "description": "A change set deletes an entity and merges back: the target writes the delete as its own row, the merge commit's patch is a DELETE, and the commit materializes without the entity.",
+  "description": "A change set deletes an entity and merges back: the target writes the delete as its own row, the merge commit's patch is a DELETE, and the commit materializes without the entity. A second change set that deleted the same entity then merges cleanly and writes nothing.",
   "steps": [
     {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
@@ -17,6 +17,9 @@
     {"op": "rows", "ref": "d", "kind": "ingredient", "expect": {"rows": [{"entity_key": "Wash", "deleted_on_ref": true, "quantity": "1 egg wash"}]}},
     {"op": "commit", "ref": "d", "as": "dCommit"},
     {"op": "patches", "commit": "dCommit", "expect": {"patches": [{"kind": "ingredient", "entityKey": "Wash", "operation": "DELETE", "entityVersion": 1}]}},
+    {"op": "branch", "from": "main", "name": "no wash either", "as": "e"},
+    {"op": "save", "ref": "e", "edits": {"ingredient": {"delete": ["Wash"]}}},
+    {"op": "commit", "ref": "e"},
     {"op": "merge", "source": "d", "target": "main", "as": "merged", "expect": {"commit": {"parent": "c1"}}},
     {"op": "compose", "ref": "main", "expect": {"contentHashOf": "merged", "tree": {
       "ingredient": [{"entity_key": "Flour"}],
@@ -34,6 +37,11 @@
     {"op": "diff", "from": "c1", "to": "merged", "expect": {"changes": [
       {"kind": "ingredient", "entityKey": "Wash", "operation": "DELETE"}
     ]}},
-    {"op": "merge", "source": "d", "target": "main", "expect": {"commit": null, "ref": {"head": "merged"}}}
+    {"op": "merge", "source": "d", "target": "main", "expect": {"commit": null, "ref": {"head": "merged"}}},
+    {"op": "merge", "source": "e", "target": "main", "expect": {"commit": null, "ref": {"head": "merged"}}},
+    {"op": "rows", "ref": "main", "kind": "ingredient", "expect": {"rows": [
+      {"entity_key": "Flour", "deleted_on_ref": false},
+      {"entity_key": "Wash", "deleted_on_ref": true, "_version": 2}
+    ]}}
   ]
 }

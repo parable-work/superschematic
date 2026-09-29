@@ -467,6 +467,7 @@ func (r *graphRuntime) row(kind string, values map[string]any) (json.RawMessage,
 	if err != nil {
 		return nil, fmt.Errorf("version graph: encode a %s row: %w", kind, err)
 	}
+	// The engine's contract is canonical rows, so this stays though the adapter normalizes on write.
 	row, err := canonical.Row(r.columns[kind], raw)
 	if err != nil {
 		return nil, fmt.Errorf("version graph: a %s row: %w", kind, err)

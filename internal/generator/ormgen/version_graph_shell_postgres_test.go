@@ -225,6 +225,12 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if mix.EntityKey == nil || bake.EntityKey == nil || *mix.EntityKey == *bake.EntityKey {
 		t.Fatalf("new steps need generated entity keys of their own: %v, %v", mix.EntityKey, bake.EntityKey)
 	}
+	// An optional field left at its zero value is null, as CreateOne
+	// leaves it, rather than the zero value.
+	var scratchIsNull bool
+	if err := pool.QueryRow(ctx, "SELECT scratch IS NULL FROM step WHERE id = $1", mix.Id.ToUUID()).Scan(&scratchIsNull); err != nil || !scratchIsNull {
+		t.Fatalf("a step saved without scratch: scratch IS NULL is %t (%v), want true", scratchIsNull, err)
+	}
 	saved, err = g.Save(ctx, mainID, saved.Ref.Version, RecipeEdits{Ingredient: GraphEdits[types.Ingredient]{Upsert: []*types.Ingredient{
 		{StepKey: *mix.EntityKey, Quantity: "200g flour", Substitutes: types.GenericJSON(` + "`" + `{"type": "object"}` + "`" + `)},
 		{StepKey: *bake.EntityKey, Quantity: "1 egg wash", Substitutes: types.GenericJSON(` + "`" + `{"type": "object"}` + "`" + `)},

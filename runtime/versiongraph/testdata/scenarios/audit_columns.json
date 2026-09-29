@@ -1,0 +1,14 @@
+{
+  "name": "audit_columns",
+  "description": "A ref's row saved again by another actor keeps who created it and names who wrote it last.",
+  "steps": [
+    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "branch", "from": "main", "name": "mix", "as": "d"},
+    {"op": "save", "ref": "d", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}},
+      "expect": {"saved": {"step": [{"entity_key": "Mix", "_version": 1, "created_by": "Cook", "updated_by": "Cook"}]}}},
+    {"op": "save", "ref": "d", "actor": "Editor", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix well", "timings": {}}]}},
+      "expect": {"saved": {"step": [{"entity_key": "Mix", "instruction": "Mix well", "_version": 2, "created_by": "Cook", "updated_by": "Editor"}]}}},
+    {"op": "rows", "ref": "d", "kind": "step", "expect": {"rows": [{"entity_key": "Mix", "_version": 2, "created_by": "Cook", "updated_by": "Editor"}]}}
+  ]
+}
