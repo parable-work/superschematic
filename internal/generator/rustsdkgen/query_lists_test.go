@@ -143,10 +143,11 @@ func TestWriteSDKGoldenQueryLists(t *testing.T) {
 
 // TestQueryListsSDKCrateBuildsAndRuns generates the Rust types crate and
 // the Rust SDK crate of query-lists-api into a temp tree laid out as a
-// build writes it, and runs cargo test on the SDK crate with
-// queryListsSDKTest: a list is sent as one comma-separated value, an empty
-// one is left out, and a required empty list or an item the value cannot
-// carry fails before any request. CARGO_TARGET_DIR is honored when set.
+// build writes it, checks the SDK crate with cargo clippy and runs cargo
+// test on it with queryListsSDKTest: a list is sent as one comma-separated
+// value, an empty one is left out, and a required empty list or an item the
+// value cannot carry fails before any request. CARGO_TARGET_DIR is honored
+// when set.
 func TestQueryListsSDKCrateBuildsAndRuns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
@@ -180,12 +181,7 @@ superscalar = { path = "`+filepath.ToSlash(paths.ScalarRust)+`" }
 	crate := strings.ReplaceAll(sdkOutput.CrateName, "-", "_")
 	writeFile(t, filepath.Join(sdkDir, "tests", "query_lists.rs"), strings.ReplaceAll(queryListsSDKTest, "SDK_CRATE", crate))
 
-	cmd := exec.Command(cargoPath, "test", "--quiet")
-	cmd.Dir = sdkDir
-	cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+cargoTargetDir(t))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("cargo test on the generated SDK crate: %v\n%s", err, out)
-	}
+	cargoClippyAndTest(t, cargoPath, sdkDir)
 }
 
 // queryListsSDKTest is tests/query_lists.rs of the generated SDK crate,

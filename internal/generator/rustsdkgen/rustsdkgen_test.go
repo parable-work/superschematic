@@ -318,6 +318,52 @@ func TestArrayQueryParamsValidateEachItem(t *testing.T) {
 	}
 }
 
+// TestBodyListMinOfOneChecksIsEmpty: a listMin of 1 on a body list
+// argument refuses an empty list with is_empty(), as clippy::len_zero asks,
+// and a larger listMin compares the length.
+func TestBodyListMinOfOneChecksIsEmpty(t *testing.T) {
+	endpoint := apigen.EndpointInfo{
+		Name:       "saveItems",
+		Namespace:  "items",
+		Path:       "/api/items",
+		Method:     "PUT",
+		OutputType: "string",
+		ScalarArgs: []apigen.Param{
+			{Name: "tags", Type: "string", IsArray: true, Required: true, ValidateListMin: intPtr(1)},
+			{Name: "links", Type: "string", IsArray: true, ValidateListMin: intPtr(1)},
+			{Name: "scores", Type: "number", IsArray: true, ValidateListMin: intPtr(2)},
+		},
+	}
+	apiOutput := &apigen.APIOutput{SchemaName: "items-api", Endpoints: []apigen.EndpointInfo{endpoint}}
+	clock := codegen.DefaultClock()
+	sdkOutput, err := Generate(apiOutput, "", "", clock)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	outDir := t.TempDir()
+	if err := WriteSDKWithTools(sdkOutput, nil, outDir, t.TempDir(), clock); err != nil {
+		t.Fatalf("WriteSDKWithTools: %v", err)
+	}
+	source, err := os.ReadFile(filepath.Join(outDir, "src", "namespaces", "items.rs"))
+	if err != nil {
+		t.Fatalf("read namespace: %v", err)
+	}
+	generated := string(source)
+	for want, count := range map[string]int{
+		"if input.tags.is_empty() {":                                            1,
+		`return Err(SDKError::config("tags must contain at least 1 items"));`:   1,
+		"if values.is_empty() {":                                                1,
+		`return Err(SDKError::config("links must contain at least 1 items"));`:  1,
+		"if values.len() < 2 {":                                                 1,
+		`return Err(SDKError::config("scores must contain at least 2 items"));`: 1,
+		"len() < 1": 0,
+	} {
+		if got := strings.Count(generated, want); got != count {
+			t.Errorf("namespace has %d of %q, want %d", got, want, count)
+		}
+	}
+}
+
 func TestWriteSDKGolden(t *testing.T) {
 	apiOutput := loadFixtureAPI(t)
 	clock := codegen.DefaultClock()
