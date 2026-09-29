@@ -8,17 +8,20 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/rustgen"
+	"github.com/parable-work/superschematic/internal/generator/sdkgen/sdktest"
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
 // TestNestedArraysSDKCrateBuildsAndRuns generates the Rust types crate and
-// the Rust SDK crate of fixture-nested-arrays-api, with grid.paint added,
-// into a temp tree laid out as a build writes it, and runs cargo test on
-// the SDK crate with nestedArraysSDKTest: Vec<Vec<T>> arguments and
-// responses cross a local HTTP server as nested JSON arrays, and an input
-// type with lists of lists passes the SDK's schema validation. The types
-// crate resolves superscalar from the checkout scripts/superscalar-dep.sh
-// stands up. CARGO_TARGET_DIR is honored when set.
+// the Rust SDK crate of fixture-nested-arrays-api, with grid.paint and
+// grid.placeOrder added, into a temp tree laid out as a build writes it,
+// and runs cargo test on the SDK crate with nestedArraysSDKTest:
+// Vec<Vec<T>> arguments and responses cross a local HTTP server as nested
+// JSON arrays, an input type with lists of lists passes the SDK's schema
+// validation, and an input that breaks a list bound or a nested object's
+// rule is refused before the request. The types crate resolves superscalar
+// from the checkout scripts/superscalar-dep.sh stands up. CARGO_TARGET_DIR
+// is honored when set.
 func TestNestedArraysSDKCrateBuildsAndRuns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
@@ -28,7 +31,7 @@ func TestNestedArraysSDKCrateBuildsAndRuns(t *testing.T) {
 		t.Skip("cargo not available; skipping the Rust SDK build")
 	}
 	paths := testpaths.Local(t)
-	schema, apiOutput := loadNestedArraysAPI(t, true)
+	schema, apiOutput := loadNestedArraysAPI(t, sdktest.AddPaintOperation, sdktest.AddPlaceOrderOperation)
 
 	root := t.TempDir()
 	typesDir := filepath.Join(root, "types", "rust", nestedArraysService)
@@ -227,6 +230,38 @@ async fn lists_of_lists_cross_the_wire() {
         body,
         json!({"labels": [["a"], []], "shades": [["light"]], "polygons": [[], [{"x": 5.0, "y": 6.0}]], "weights": [[0.5], []]})
     );
+}
+
+#[tokio::test]
+async fn input_rules_are_checked_before_the_request() {
+    let view = json!({"id": GRID_ID, "labels": [], "shades": [], "polygons": []});
+    let (base_url, requests) = serve(vec![view]);
+    let sdk = FixtureNestedArraysApiSdk::new(ClientConfig::with_base_url(base_url, None, None)).unwrap();
+    let line = |product_id: &str, quantity: f64| types::OrderLine { product_id: product_id.to_string(), quantity };
+    let order = |lines: Vec<types::OrderLine>, postal_code: &str| types::PlaceOrderInput {
+        lines,
+        ship_to: types::ShippingAddress { postal_code: postal_code.to_string() },
+        gift_codes: None,
+        extras: None,
+    };
+
+    // Each refused input names the rule's path; none reaches the server,
+    // whose one answer is for the valid order below.
+    for (input, want) in [
+        (order(vec![], "12345"), "input.lines: must contain at least 1 items"),
+        (order((0..4).map(|_| line("sku-1", 1.0)).collect(), "12345"), "input.lines: must contain at most 3 items"),
+        (order(vec![line("ab", 0.0)], "12345"), "input.lines[0].quantity: must be at least 1"),
+        (order(vec![line("ab", 1.0)], "12345"), "input.lines[0].productId: must be at least 3 characters"),
+        (order(vec![line("sku-1", 1.0)], "abc"), "input.shipTo.postalCode: invalid format"),
+    ] {
+        let err = sdk.grid.place_order(input, None).await.unwrap_err().to_string();
+        assert!(err.contains(want), "{err} does not contain {want}");
+    }
+
+    sdk.grid.place_order(order(vec![line("sku-1", 2.0)], "12345"), None).await.unwrap();
+    let (method, path, body) = requests.recv().unwrap();
+    assert_eq!((method.as_str(), path.as_str()), ("POST", "/api/orders"));
+    assert_eq!(body["lines"], json!([{"productId": "sku-1", "quantity": 2.0}]));
 }
 
 #[test]

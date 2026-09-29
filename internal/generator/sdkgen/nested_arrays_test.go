@@ -15,11 +15,9 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
-	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/sdkgen/sdktest"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/loader"
-	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -135,40 +133,13 @@ func TestNestedArraysSDKCompilesAndRuns(t *testing.T) {
 	if err != nil {
 		requireOrSkipTSTooling(t, fmt.Sprintf("bun not available: %v", err))
 	}
-	paths := testpaths.Local(t)
 	tempRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("resolve temp dir: %v", err)
 	}
 
 	schema, apiOutput, parseable := loadNestedArraysAPI(t, true)
-	tsOutput, err := tsgen.Generate(schema, tsgen.Options{SchemaName: "fixture-nested-arrays-api", Clock: nestedArraysClock})
-	if err != nil {
-		t.Fatalf("tsgen.Generate: %v", err)
-	}
-	// The types package sits under a Bun workspace root, as a build lays
-	// it out, and installs once at that root.
-	typesRoot := filepath.Join(tempRoot, "types", "typescript")
-	typesDir := filepath.Join(typesRoot, "fixture-nested-arrays-api")
-	if err := tsgen.SetScalarLibSpec(tsOutput, paths, typesDir); err != nil {
-		t.Fatalf("set superscalar spec: %v", err)
-	}
-	if err := tsgen.WriteTypes(tsOutput, typesDir); err != nil {
-		t.Fatalf("write types: %v", err)
-	}
-	if err := tsgen.WriteWorkspaceRoot(typesRoot, naming.Naming{}); err != nil {
-		t.Fatalf("write workspace root: %v", err)
-	}
-	install := exec.Command(bunPath, "install")
-	install.Dir = typesRoot
-	if out, err := install.CombinedOutput(); err != nil {
-		requireOrSkipTSTooling(t, fmt.Sprintf("bun install failed for the types package (likely offline): %v\n%s", err, out))
-	}
-	build := exec.Command(bunPath, "x", "tsc")
-	build.Dir = typesDir
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("types package does not type-check: %v\n%s", err, out)
-	}
+	typesDir := writeTypesPackage(t, bunPath, schema, "fixture-nested-arrays-api", tempRoot)
 
 	sdkOutput, err := Generate(apiOutput, parseable, nestedArraysClock)
 	if err != nil {

@@ -99,8 +99,8 @@ the rule it broke:
 <Snippet file="go/types_test.go" symbol="ExampleShippingAddress_Validate" />
 
 The generated servers check every request against them and answer 400,
-and the Go and TypeScript SDKs check an input before they send it. The
-database does not: constraints are not part of the DDL.
+and every generated SDK checks an input before it sends it. The database
+does not: constraints are not part of the DDL.
 
 ## Enums
 

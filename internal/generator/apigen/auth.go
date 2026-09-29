@@ -71,7 +71,9 @@ type AuthModel struct {
 // leaves no blank line behind. Imports are sorted by gofmt afterwards, so an
 // import snippet only has to land in the right group. It must not repeat an
 // import the core template writes: under --skip-format nothing removes the
-// duplicate, and the file does not compile.
+// duplicate, and the file does not compile. routes.go imports the generated
+// types module only when a core handler uses it (RoutesNeedTypes), so a
+// routes snippet does not reference types.
 var AuthSnippets = []string{
 	// context.tmpl
 	"contextImports", // imports the auth context shims need, in the runtime import group

@@ -80,7 +80,13 @@ type {{.ScalarInputStructName}} struct {
 {{- if .HasQueryParams}}
 type {{.QueryStructName}} struct {
 	{{- range .QueryParams}}
-	{{- if .Pointer}}
+	{{- if .IsArray}}
+	{{- if not .Required}}
+	{{.GoName}} {{.GoType}} `json:"{{.Name}},omitzero"`
+	{{- else}}
+	{{.GoName}} {{.GoType}} `json:"{{.Name}}"`
+	{{- end}}
+	{{- else if .Pointer}}
 	{{.GoName}} *{{.GoType}} `json:"{{.Name}},omitempty"`
 	{{- else}}
 	{{.GoName}} {{.GoType}} `json:"{{.Name}}"`
@@ -134,9 +140,87 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- if .HasQueryParams}}
 	{{- if hasQueryParamValidation .QueryParams}}
 	queryParamValidationErrors := types.NewValidationErrors()
+	{{- range .QueryParams}}
+	{{- if and .IsArray .Required}}
+	if query == nil || len(query.{{.GoName}}) == 0 {
+		queryParamValidationErrors.AddFieldError("{{.Name}}", "required", "required field")
+	}
+	{{- end}}
+	{{- end}}
+	{{- if hasQueryParamValidationWhenSet .QueryParams}}
 	if query != nil {
 		{{- range .QueryParams}}
-		{{- if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern}}
+		{{- if .IsArray}}
+		{{- if .ValidatesWhenSet}}
+		// {{.Name}} is sent as one comma-separated value, and an empty list
+		// is left out. Each item is checked at {{.Name}}[i].
+		{{- end}}
+		{{- if .ChecksListMin}}
+		if n := len(query.{{.GoName}}); n > 0 && n < {{.ValidateListMin}} {
+			queryParamValidationErrors.AddFieldError("{{.Name}}", "listMin", "must contain at least {{.ValidateListMin}} items")
+		}
+		{{- end}}
+		{{- if .ValidateListMax}}
+		if len(query.{{.GoName}}) > {{.ValidateListMax}} {
+			queryParamValidationErrors.AddFieldError("{{.Name}}", "listMax", "must contain at most {{.ValidateListMax}} items")
+		}
+		{{- end}}
+		{{- if .ChecksItems}}
+		for i, item := range query.{{.GoName}} {
+			itemPath := fmt.Sprintf("{{.Name}}[%d]", i)
+			{{- if .ItemIsText}}
+			itemText := fmt.Sprint(item)
+			{{- if .HasItemRules}}
+			if !checkQueryListItem(queryParamValidationErrors, itemPath, itemText) {
+				continue
+			}
+			{{- else}}
+			checkQueryListItem(queryParamValidationErrors, itemPath, itemText)
+			{{- end}}
+			{{- end}}
+			{{- if .HasItemRules}}
+			{{- $next := "if"}}
+			{{- if .ItemIsText}}
+			{{- if .ValidateMinLength}}
+			{{$next}} len([]rune(itemText)) < {{.ValidateMinLength}} {
+				queryParamValidationErrors.AddFieldError(itemPath, "minLength", "must be at least {{.ValidateMinLength}} characters")
+			{{- $next = "} else if"}}
+			{{- end}}
+			{{- if .ValidateMaxLength}}
+			{{$next}} len([]rune(itemText)) > {{.ValidateMaxLength}} {
+				queryParamValidationErrors.AddFieldError(itemPath, "maxLength", "must be at most {{.ValidateMaxLength}} characters")
+			{{- $next = "} else if"}}
+			{{- end}}
+			{{- if .ValidatePattern}}
+			{{$next}} matched, err := regexp.MatchString("{{escapeGoString .ValidatePattern}}", itemText); err != nil || !matched {
+				queryParamValidationErrors.AddFieldError(itemPath, "pattern", "invalid format")
+			{{- $next = "} else if"}}
+			{{- end}}
+			{{- else}}
+			{{- if .ValidateMin}}
+			{{$next}} item < {{.ValidateMin}} {
+				queryParamValidationErrors.AddFieldError(itemPath, "min", "must be at least {{.ValidateMin}}")
+			{{- $next = "} else if"}}
+			{{- end}}
+			{{- if .ValidateMax}}
+			{{$next}} item > {{.ValidateMax}} {
+				queryParamValidationErrors.AddFieldError(itemPath, "max", "must be at most {{.ValidateMax}}")
+			{{- $next = "} else if"}}
+			{{- end}}
+			{{- end}}
+			{{- if .IsGoPrimitive}}
+			}
+			{{- else if eq $next "if"}}
+			validateListElement(queryParamValidationErrors, itemPath, &item)
+			{{- else}}
+			} else {
+				validateListElement(queryParamValidationErrors, itemPath, &item)
+			}
+			{{- end}}
+			{{- end}}
+		}
+		{{- end}}
+		{{- else if .ValidatesWhenSet}}
 		{{- if .Pointer}}
 		if query.{{.GoName}} != nil {
 			queryParamValue := *query.{{.GoName}}
@@ -207,6 +291,7 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 		{{- end}}
 		{{- end}}
 	}
+	{{- end}}
 	if queryParamValidationErrors.HasErrors() {
 		var zero {{.OutputGoType}}
 		return zero, NewValidationError(queryParamValidationErrors)
@@ -220,7 +305,9 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	if query != nil {
 		queryValues = url.Values{}
 		{{- range .QueryParams}}
-		{{- if .Pointer}}
+		{{- if .IsArray}}
+		runtime.AddQueryList(queryValues, "{{.Name}}", query.{{.GoName}})
+		{{- else if .Pointer}}
 		if query.{{.GoName}} != nil {
 			runtime.AddQueryParam(queryValues, "{{.Name}}", *query.{{.GoName}})
 		}

@@ -57,7 +57,8 @@ export class HttpClient {
 
   /**
    * Serialize query params. Arrays become comma-separated values (e.g. ?tier=a,b)
-   * per the API format conventions; null and undefined values are dropped.
+   * per the API format conventions; null and undefined values are dropped, and
+   * so are empty arrays, since the route refuses a present empty value.
    */
   private serializeParams(params: Record<string, unknown> | undefined): string {
     if (!params) {
@@ -67,7 +68,9 @@ export class HttpClient {
     const searchParams = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
       if (Array.isArray(value)) {
-        searchParams.set(key, value.map((v) => String(v)).join(','));
+        if (value.length > 0) {
+          searchParams.set(key, value.map((v) => String(v)).join(','));
+        }
       } else if (value !== undefined && value !== null) {
         searchParams.append(key, String(value));
       }

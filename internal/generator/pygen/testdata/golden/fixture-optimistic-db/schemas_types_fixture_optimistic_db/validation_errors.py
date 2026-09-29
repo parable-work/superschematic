@@ -111,9 +111,32 @@ class ValidationErrors(Exception):
         """Convert errors to a dictionary format."""
         return self.errors
 
+    def _with_field_names(self, names: Dict[str, str]) -> "ValidationErrors":
+        """
+        Return a copy whose keys lead with names[field] in place of field.
+
+        A key is a field name, optionally followed by an index or a nested
+        path (items[0], address.postal_code); only the leading name changes.
+        """
+        renamed = ValidationErrors()
+        for key, field_errors in self.errors.items():
+            end = len(key)
+            for index, char in enumerate(key):
+                if char in "[.":
+                    end = index
+                    break
+            renamed_key = names.get(key[:end], key[:end]) + key[end:]
+            renamed.errors.setdefault(renamed_key, []).extend(field_errors)
+        return renamed
+
     def __bool__(self) -> bool:
         """Allow using ValidationErrors in boolean context."""
         return self.has_errors()
+
+    def __str__(self) -> str:
+        # Errors are added after construction, so the message Exception
+        # holds from __init__ is stale; format the current errors.
+        return self._format_errors()
 
     def __repr__(self) -> str:
         return f"ValidationErrors({self.errors})"
