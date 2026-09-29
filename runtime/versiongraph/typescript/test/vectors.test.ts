@@ -44,6 +44,7 @@ import {
   type OperationName,
   type ParentEdge,
   type Resolution,
+  type RootTable,
   type Side,
   type Take,
   type TakeResolution,
@@ -51,6 +52,7 @@ import {
   type TreeInput,
   type Unit,
   type ValidateOutput,
+  type ValueClass,
   type ValueResolution,
   type VersionGraph,
 } from "../dist/index.js";
@@ -177,9 +179,47 @@ const errorCode = literal<ErrorCode>("ErrorCode", {
   internal: true,
 });
 
+const valueClass = literal<ValueClass>("ValueClass", {
+  string: true,
+  "string[]": true,
+  "string[][]": true,
+  integer: true,
+  "integer[]": true,
+  "integer[][]": true,
+  number: true,
+  "number[]": true,
+  "number[][]": true,
+  boolean: true,
+  "boolean[]": true,
+  "boolean[][]": true,
+  uuid: true,
+  "uuid[]": true,
+  "uuid[][]": true,
+  dateTime: true,
+  "dateTime[]": true,
+  "dateTime[][]": true,
+  date: true,
+  "date[]": true,
+  "date[][]": true,
+  time: true,
+  "time[]": true,
+  "time[][]": true,
+  duration: true,
+  "duration[]": true,
+  "duration[][]": true,
+  enum: true,
+  "enum[]": true,
+  "enum[][]": true,
+  json: true,
+  "json[]": true,
+  "json[][]": true,
+});
+
 const parentEdge = decoder<ParentEdge>("ParentEdge", { key: req(same), kind: req(same) });
 const kindDescriptor = decoder<KindDescriptor>("KindDescriptor", {
   kind: req(same),
+  table: req(same),
+  historyTable: req(same),
   key: req(same),
   id: req(same),
   ref: req(same),
@@ -191,8 +231,18 @@ const kindDescriptor = decoder<KindDescriptor>("KindDescriptor", {
   singleton: opt(same),
   units: opt(record(unit)),
   excluded: opt(same),
+  columns: req(record(valueClass)),
 });
-const descriptor = decoder<Descriptor>("Descriptor", { graph: opt(same), kinds: req(list(kindDescriptor)) });
+const rootTable = decoder<RootTable>("RootTable", { table: req(same), key: req(same) });
+const descriptor = decoder<Descriptor>("Descriptor", {
+  version: req(same),
+  graph: opt(same),
+  root: req(rootTable),
+  refTable: req(same),
+  commitTable: req(same),
+  patchTable: req(same),
+  kinds: req(list(kindDescriptor)),
+});
 const finding = decoder<Finding>("Finding", {
   code: req(findingCode),
   kind: req(same),

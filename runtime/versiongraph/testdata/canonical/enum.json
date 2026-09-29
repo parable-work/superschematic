@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "name": "member",
+      "class": "enum",
+      "sql": "'again'::text",
+      "postgres": "\"again\"",
+      "canonical": "\"again\""
+    },
+    {
+      "name": "null",
+      "class": "enum",
+      "sql": "NULL::text",
+      "postgres": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "list",
+      "class": "enum[]",
+      "sql": "ARRAY['again', 'never']::text[]",
+      "postgres": "[\"again\", \"never\"]",
+      "canonical": "[\"again\",\"never\"]"
+    },
+    {
+      "name": "refuses a number",
+      "class": "enum",
+      "sql": "1::bigint",
+      "postgres": "1",
+      "error": "an enum value is a string"
+    }
+  ]
+}

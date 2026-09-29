@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "name": "true",
+      "class": "boolean",
+      "sql": "true",
+      "postgres": "true",
+      "canonical": "true"
+    },
+    {
+      "name": "false",
+      "class": "boolean",
+      "sql": "false",
+      "postgres": "false",
+      "canonical": "false"
+    },
+    {
+      "name": "null",
+      "class": "boolean",
+      "sql": "NULL::boolean",
+      "postgres": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "list",
+      "class": "boolean[]",
+      "sql": "ARRAY[true, false]",
+      "postgres": "[true, false]",
+      "canonical": "[true,false]"
+    },
+    {
+      "name": "refuses a string",
+      "class": "boolean",
+      "sql": "'true'::text",
+      "postgres": "\"true\"",
+      "error": "a boolean is a JSON boolean"
+    }
+  ]
+}

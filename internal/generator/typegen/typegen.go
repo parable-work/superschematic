@@ -421,7 +421,11 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		return nil, err
 	}
 
-	for _, graph := range graphdesc.Graphs(schema) {
+	graphs, err := graphdesc.Graphs(schema)
+	if err != nil {
+		return nil, err
+	}
+	for _, graph := range graphs {
 		descriptor, err := graph.Descriptor.JSON()
 		if err != nil {
 			return nil, err

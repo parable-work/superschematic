@@ -205,7 +205,13 @@ mod tests {
         }
     }
 
-    const DESCRIPTOR: &str = r#"{"kinds":[{"kind":"step","key":"entity_key","id":"id","ref":"ref","tombstone":"deleted_on_ref","version":"_version"}]}"#;
+    const DESCRIPTOR: &str = concat!(
+        r#"{"version":2,"root":{"table":"recipe","key":"id"},"#,
+        r#""refTable":"recipe_ref","commitTable":"recipe_commit","patchTable":"recipe_patch","#,
+        r#""kinds":[{"kind":"step","table":"step","historyTable":"step_history","#,
+        r#""key":"entity_key","id":"id","ref":"ref","tombstone":"deleted_on_ref","version":"_version","#,
+        r#""columns":{"id":"uuid","entity_key":"uuid","ref":"uuid","deleted_on_ref":"boolean","_version":"integer","title":"string"}}]}"#
+    );
 
     #[test]
     fn every_export_returns_its_document() {

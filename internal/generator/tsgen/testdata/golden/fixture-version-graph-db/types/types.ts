@@ -5,11 +5,16 @@ import type {
   GenericInt64,
   GenericJSON,
   IdentityUUID,
+  IdentityUserID,
+  TemporalDate,
   TemporalDateTime,
+  TemporalDuration,
+  TemporalTime,
 } from './scalars';
 import type {
   RecipeEntityKind,
   RecipePatchOperation,
+  Verdict,
 } from './enums';
 
 export interface HistoryRecord<T> {
@@ -218,6 +223,52 @@ export const StepDefaults: Partial<Step> = {
  */
 export function makeStep(overrides?: Partial<Step>): Step {
   return { ...StepDefaults, ...(overrides || {}) } as Step;
+}
+
+/**
+ * Tasting - A tasting of the recipe. Its columns hold a value of every class a
+descriptor names.
+ */
+export interface Tasting {
+  id?: string | null;
+  recipe: Recipe;
+  taster: string;
+  salty: boolean;
+  score: number;
+  servings: number;
+  tastedOn: string;
+  tastedAt: JSDate;
+  servedAt: string;
+  rested: string;
+  verdict: Verdict;
+  remarks: GenericJSON;
+  tags: string[];
+  helpers: string[];
+  bites: number[][];
+  /** The entity's logical identity, shared by its rows on every ref. */
+  entityKey?: string | null;
+  /** The ref this row overrides the entity on. */
+  ref: RecipeRef;
+  /** True when the row deletes the entity on its ref. */
+  deletedOnRef: boolean;
+  _version: number;
+}
+
+/**
+ * TastingDefaults holds @default values declared in the schema. Defaults
+ * are typed as Partial<Tasting> so they can be merged into incoming
+ * payloads or used to bootstrap a new instance.
+ */
+export const TastingDefaults: Partial<Tasting> = {
+  deletedOnRef: false,
+};
+
+/**
+ * makeTasting returns a Tasting initialised with @default values from
+ * the schema. Caller-provided overrides win over the declared defaults.
+ */
+export function makeTasting(overrides?: Partial<Tasting>): Tasting {
+  return { ...TastingDefaults, ...(overrides || {}) } as Tasting;
 }
 
 /**

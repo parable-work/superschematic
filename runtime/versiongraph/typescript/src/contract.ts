@@ -13,6 +13,27 @@
 /** How a content column merges. */
 export type Unit = "atomic" | "keyed" | "jsonSchema";
 
+/** The class of one value: what the schema runtime's JSON for a field's type distinguishes. */
+export type ElementClass =
+  | "string"
+  | "integer"
+  | "number"
+  | "boolean"
+  | "uuid"
+  | "dateTime"
+  | "date"
+  | "time"
+  | "duration"
+  | "enum"
+  | "json";
+
+/**
+ * A column's value class: an element class, a list of one (`[]`) or a list
+ * of lists (`[][]`). A storage adapter normalizes the column by it
+ * (runtime/versiongraph/README.md, "Canonical rows").
+ */
+export type ValueClass = ElementClass | `${ElementClass}[]` | `${ElementClass}[][]`;
+
 /** A kind's containment edge. */
 export interface ParentEdge {
   /** The column holding the parent row's entity key (a string, or null for none). */
@@ -25,6 +46,10 @@ export interface ParentEdge {
 export interface KindDescriptor {
   /** The kind's name: the tree member that holds its rows. Unique. */
   kind: string;
+  /** The table that holds the kind's rows. */
+  table: string;
+  /** The table that holds the kind's history images. */
+  historyTable: string;
   /** The entity key column: the logical identity rows are matched on. */
   key: string;
   /** The row id column. */
@@ -46,18 +71,34 @@ export interface KindDescriptor {
   units?: Record<string, Unit>;
   /** Columns that are not content. */
   excluded?: string[];
+  /** Every column of the kind's table, with its value class. */
+  columns: Record<string, ValueClass>;
+}
+
+/** The graph root's table and its key column. */
+export interface RootTable {
+  table: string;
+  key: string;
 }
 
 /** The graph descriptor the ORM generator writes as versiongraph/<name>.json. */
 export interface Descriptor {
+  /** The descriptor format; the core reads version 2 and refuses any other. */
+  version: 2;
   /** The graph's name; the core does not read it. */
   graph?: string;
+  root: RootTable;
+  /** The tables of the graph's refs, commits and patches. */
+  refTable: string;
+  commitTable: string;
+  patchTable: string;
   kinds: KindDescriptor[];
 }
 
 /**
- * A row as Postgres `to_jsonb(row)` renders it, keyed by column name. Values
- * are whatever the configured JSON parser gives (see `InitOptions.parse`).
+ * A row keyed by column name: a canonical row once a storage adapter has
+ * normalized it. Values are whatever the configured JSON parser gives (see
+ * `InitOptions.parse`).
  */
 export type Row = Record<string, unknown>;
 

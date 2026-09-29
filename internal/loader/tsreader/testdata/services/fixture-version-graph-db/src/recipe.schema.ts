@@ -90,3 +90,33 @@ export abstract class Utensil {
   recipe: Relation<Recipe>;
   name: string;
 }
+
+// How a tasting went.
+export enum Verdict {
+  Again = "again",
+  Tweak = "tweak",
+  Never = "never"
+}
+
+// A tasting of the recipe. Its columns hold a value of every class a
+// descriptor names.
+@versioned
+@graphMember({ graph: Recipe })
+export abstract class Tasting {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  recipe: Relation<Recipe>;
+  taster: Identity.UserID;
+  salty: boolean;
+  score: number;
+  servings: Generic.Int64;
+  tastedOn: Temporal.Date;
+  tastedAt: Temporal.DateTime;
+  servedAt: Temporal.Time;
+  rested: Temporal.Duration;
+  verdict: Verdict;
+  remarks: Generic.JSON;
+  tags: string[];
+  helpers: Identity.UUID[];
+  bites: Generic.Int64[][];
+}

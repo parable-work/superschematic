@@ -23,16 +23,34 @@
       ]
     },
     "descriptor": {
+      "commitTable": "recipe_commit",
       "graph": "recipe",
       "kinds": [
         {
           "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "created_by": "uuid",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "id": "uuid",
+            "inputs": "json",
+            "parent_step_key": "uuid",
+            "position": "integer",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "timings": "json",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
           "excluded": [
             "created_at",
             "created_by",
             "updated_at",
             "recipe_id"
           ],
+          "historyTable": "step_history",
           "id": "id",
           "key": "entity_key",
           "kind": "step",
@@ -42,6 +60,7 @@
             "kind": "step"
           },
           "ref": "ref",
+          "table": "step",
           "tombstone": "deleted_on_ref",
           "units": {
             "inputs": "jsonSchema",
@@ -51,12 +70,29 @@
         },
         {
           "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "created_by": "uuid",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "id": "uuid",
+            "name": "string",
+            "position": "integer",
+            "quantity": "string",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "step_key": "uuid",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
           "excluded": [
             "created_at",
             "created_by",
             "updated_at",
             "recipe_id"
           ],
+          "historyTable": "ingredient_history",
           "id": "id",
           "key": "entity_key",
           "kind": "ingredient",
@@ -66,26 +102,48 @@
             "kind": "step"
           },
           "ref": "ref",
+          "table": "ingredient",
           "tombstone": "deleted_on_ref",
           "version": "_version"
         },
         {
           "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "created_by": "uuid",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "id": "uuid",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
           "excluded": [
             "created_at",
             "created_by",
             "updated_at",
             "recipe_id"
           ],
+          "historyTable": "cover_history",
           "id": "id",
           "key": "entity_key",
           "kind": "cover",
           "ref": "ref",
           "singleton": true,
+          "table": "cover",
           "tombstone": "deleted_on_ref",
           "version": "_version"
         }
-      ]
+      ],
+      "patchTable": "recipe_patch",
+      "refTable": "recipe_ref",
+      "root": {
+        "key": "id",
+        "table": "recipe"
+      },
+      "version": 2
     },
     "ours": {
       "ingredient": [

@@ -122,6 +122,31 @@ CREATE TABLE step (
 
 COMMENT ON TABLE step IS 'One step of a recipe, ordered by position; updatedBy names its row''s writer.';
 
+CREATE TABLE tasting (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  recipe_id UUID NOT NULL,
+  taster UUID NOT NULL,
+  salty BOOLEAN NOT NULL,
+  score DOUBLE PRECISION NOT NULL,
+  servings BIGINT NOT NULL,
+  tasted_on DATE DEFAULT CURRENT_DATE NOT NULL,
+  tasted_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  served_at TIME DEFAULT CURRENT_TIME NOT NULL,
+  rested INTERVAL NOT NULL,
+  verdict TEXT NOT NULL,
+  remarks JSONB NOT NULL,
+  tags TEXT[] DEFAULT '{}' NOT NULL,
+  helpers UUID[] DEFAULT '{}' NOT NULL,
+  bites JSONB NOT NULL,
+  entity_key UUID DEFAULT gen_random_uuid() NOT NULL,
+  ref_id UUID NOT NULL,
+  deleted_on_ref BOOLEAN NOT NULL,
+  _version BIGINT DEFAULT 1 NOT NULL
+);
+
+COMMENT ON TABLE tasting IS 'A tasting of the recipe. Its columns hold a value of every class a
+descriptor names.';
+
 CREATE TABLE utensil (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   recipe_id UUID NOT NULL,
@@ -214,6 +239,20 @@ CREATE INDEX idx_step_history_id_recorded ON step_history (id, recorded_at);
 CREATE INDEX idx_step_history_recorded ON step_history (recorded_at);
 
 COMMENT ON TABLE step_history IS 'Version history for step';
+
+CREATE TABLE tasting_history (
+  history_id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  id UUID NOT NULL,
+  _version BIGINT NOT NULL,
+  operation TEXT NOT NULL,
+  data JSONB NOT NULL,
+  recorded_at TIMESTAMPTZ DEFAULT clock_timestamp() NOT NULL
+);
+
+CREATE UNIQUE INDEX uq_tasting_history_id_version ON tasting_history (id, _version);
+CREATE INDEX idx_tasting_history_id_recorded ON tasting_history (id, recorded_at);
+
+COMMENT ON TABLE tasting_history IS 'Version history for tasting';
 
 CREATE TABLE utensil_history (
   history_id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -327,6 +366,18 @@ ALTER TABLE step
   REFERENCES recipe_ref(id)
   ON DELETE RESTRICT;
 
+ALTER TABLE tasting
+  ADD CONSTRAINT fk_tasting_recipe_id
+  FOREIGN KEY (recipe_id)
+  REFERENCES recipe(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE tasting
+  ADD CONSTRAINT fk_tasting_ref_id
+  FOREIGN KEY (ref_id)
+  REFERENCES recipe_ref(id)
+  ON DELETE RESTRICT;
+
 ALTER TABLE utensil
   ADD CONSTRAINT fk_utensil_recipe_id
   FOREIGN KEY (recipe_id)
@@ -356,6 +407,8 @@ CREATE INDEX idx_recipe_patch_entity_version ON recipe_patch USING BTREE (entity
 CREATE UNIQUE INDEX uq_recipe_ref_root_name ON recipe_ref USING BTREE (root_id, "name") WHERE deleted_at IS NULL;
 
 CREATE UNIQUE INDEX uq_step_entity_ref ON step USING BTREE (entity_key, ref_id);
+
+CREATE UNIQUE INDEX uq_tasting_entity_ref ON tasting USING BTREE (entity_key, ref_id);
 
 CREATE UNIQUE INDEX uq_utensil_entity_ref ON utensil USING BTREE (entity_key, ref_id);
 
@@ -660,6 +713,49 @@ BEGIN
   RETURN deleted_count;
 END;
 $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION tasting_capture_history() RETURNS trigger AS $$
+BEGIN
+  IF (TG_WHEN = 'BEFORE') THEN
+    -- BEFORE UPDATE: the stored row takes the next version.
+    NEW._version := OLD._version + 1;
+    RETURN NEW;
+  END IF;
+  IF (TG_OP = 'DELETE') THEN
+    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
+    -- the unique history index holds and the latest history row for a deleted key
+    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
+    -- version.
+    INSERT INTO tasting_history (id, _version, operation, data)
+    VALUES (
+      OLD.id,
+      OLD._version + 1,
+      'DELETE',
+      to_jsonb(OLD) || jsonb_build_object(
+        '_version', OLD._version + 1
+      )
+    );
+    RETURN OLD;
+  END IF;
+  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
+  -- CONFLICT DO UPDATE records the one UPDATE it made.
+  INSERT INTO tasting_history (id, _version, operation, data)
+  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_tasting_bump_version
+  BEFORE UPDATE ON tasting
+  FOR EACH ROW EXECUTE FUNCTION tasting_capture_history();
+
+CREATE TRIGGER trg_tasting_capture_history_write
+  AFTER INSERT OR UPDATE ON tasting
+  FOR EACH ROW EXECUTE FUNCTION tasting_capture_history();
+
+CREATE TRIGGER trg_tasting_capture_history_delete
+  AFTER DELETE ON tasting
+  FOR EACH ROW EXECUTE FUNCTION tasting_capture_history();
 
 CREATE OR REPLACE FUNCTION utensil_capture_history() RETURNS trigger AS $$
 BEGIN

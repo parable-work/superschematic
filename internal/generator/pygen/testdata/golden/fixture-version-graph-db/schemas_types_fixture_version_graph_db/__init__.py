@@ -32,12 +32,17 @@ from .scalars import (
     GenericInt64,
     GenericJSON,
     IdentityUUID,
-    TemporalDateTime
+    IdentityUserID,
+    TemporalDate,
+    TemporalDateTime,
+    TemporalDuration,
+    TemporalTime
 )
 
 from .enums import (
     RecipeEntityKind,
-    RecipePatchOperation
+    RecipePatchOperation,
+    Verdict
 )
 
 from .types import (
@@ -50,6 +55,7 @@ from .types import (
     RecipePatch,
     RecipeRef,
     Step,
+    Tasting,
     Utensil
 )
 
@@ -63,11 +69,16 @@ __all__ = [
     "GenericInt64",
     "GenericJSON",
     "IdentityUUID",
+    "IdentityUserID",
+    "TemporalDate",
     "TemporalDateTime",
+    "TemporalDuration",
+    "TemporalTime",
 
     # Enums
     "RecipeEntityKind",
     "RecipePatchOperation",
+    "Verdict",
 
     # Types
     "Cover",
@@ -79,6 +90,7 @@ __all__ = [
     "RecipePatch",
     "RecipeRef",
     "Step",
+    "Tasting",
     "Utensil",
 
 ]

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // HistoryRecord wraps one captured historical value and its version metadata.
@@ -181,6 +182,190 @@ func mapFromYAMLValue(data []byte) (map[string]any, error) {
 	return result, nil
 }
 
+// jsonListField is a list field as rejectNullListElements reads it: its JSON
+// key, and its depth, 1 for a list and 2 for a list of lists.
+type jsonListField struct {
+	name  string
+	depth int
+}
+
+// jsonNull is the JSON null token.
+var jsonNull = []byte("null")
+
+// rejectNullListElements refuses a null element in a list field of data, a
+// typeName object json.Unmarshal has already decoded. A list element is
+// never null, but encoding/json decodes one to the element type's zero
+// value, which Validate cannot tell from a real one. A null inner list of a
+// list of lists is not an element: it decodes to a nil list, which Validate
+// reports. A key names a field as encoding/json matches it, exactly or else
+// without regard to case, and a repeated key is checked at every occurrence.
+// A payload without a null token is not scanned.
+func rejectNullListElements(typeName string, data []byte, fields []jsonListField) error {
+	if !bytes.Contains(data, jsonNull) {
+		return nil
+	}
+	i := skipJSONSpace(data, 0)
+	if i >= len(data) || data[i] != '{' {
+		return nil
+	}
+	i++
+	for {
+		i = skipJSONSpace(data, i)
+		if i >= len(data) || data[i] != '"' {
+			return nil
+		}
+		keyEnd := skipJSONString(data, i)
+		field, isList := matchJSONListField(data[i:keyEnd], fields)
+		i = skipJSONSpace(data, keyEnd)
+		if i >= len(data) || data[i] != ':' {
+			return nil
+		}
+		i = skipJSONSpace(data, i+1)
+		if !isList {
+			i = skipJSONValue(data, i)
+		} else {
+			var at [2]int
+			var found bool
+			if i, at, found = findJSONNullElement(data, i, field.depth); found {
+				if field.depth > 1 {
+					return fmt.Errorf("decode %s: %s[%d][%d]: null element", typeName, field.name, at[0], at[1])
+				}
+				return fmt.Errorf("decode %s: %s[%d]: null element", typeName, field.name, at[0])
+			}
+		}
+		i = skipJSONSpace(data, i)
+		if i >= len(data) || data[i] != ',' {
+			return nil
+		}
+		i++
+	}
+}
+
+// matchJSONListField returns the list field an object key, quoted as in the
+// payload, names.
+func matchJSONListField(quoted []byte, fields []jsonListField) (jsonListField, bool) {
+	if len(quoted) < 2 {
+		return jsonListField{}, false
+	}
+	key := quoted[1 : len(quoted)-1]
+	if bytes.IndexByte(key, '\\') >= 0 {
+		var unquoted string
+		if err := json.Unmarshal(quoted, &unquoted); err != nil {
+			return jsonListField{}, false
+		}
+		key = []byte(unquoted)
+	}
+	for _, field := range fields {
+		if string(key) == field.name {
+			return field, true
+		}
+	}
+	for _, field := range fields {
+		if strings.EqualFold(string(key), field.name) {
+			return field, true
+		}
+	}
+	return jsonListField{}, false
+}
+
+// findJSONNullElement reads the value at data[i] as a list of depth levels
+// and returns the index just past it and the position of its first null
+// element, if it has one. A value that is not a list, such as a null list or
+// a null inner list, has no elements.
+func findJSONNullElement(data []byte, i, depth int) (end int, at [2]int, found bool) {
+	if i >= len(data) || data[i] != '[' {
+		return skipJSONValue(data, i), at, false
+	}
+	i++
+	for n := 0; ; n++ {
+		i = skipJSONSpace(data, i)
+		if i >= len(data) {
+			return i, at, false
+		}
+		if data[i] == ']' {
+			return i + 1, at, false
+		}
+		switch {
+		case depth > 1:
+			var inner [2]int
+			if i, inner, found = findJSONNullElement(data, i, depth-1); found {
+				return i, [2]int{n, inner[0]}, true
+			}
+		case data[i] == 'n':
+			return i, [2]int{n}, true
+		default:
+			i = skipJSONValue(data, i)
+		}
+		i = skipJSONSpace(data, i)
+		if i < len(data) && data[i] == ',' {
+			i++
+		}
+	}
+}
+
+// skipJSONSpace returns the index of the first non-space byte at or after i.
+func skipJSONSpace(data []byte, i int) int {
+	for i < len(data) {
+		switch data[i] {
+		case ' ', '\t', '\n', '\r':
+			i++
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+// skipJSONString returns the index just past the string that opens at
+// data[i].
+func skipJSONString(data []byte, i int) int {
+	for i++; i < len(data); i++ {
+		switch data[i] {
+		case '\\':
+			i++
+		case '"':
+			return i + 1
+		}
+	}
+	return len(data)
+}
+
+// skipJSONValue returns the index just past the JSON value at data[i].
+func skipJSONValue(data []byte, i int) int {
+	if i >= len(data) {
+		return len(data)
+	}
+	switch data[i] {
+	case '"':
+		return skipJSONString(data, i)
+	case '{', '[':
+		depth := 0
+		for i < len(data) {
+			switch data[i] {
+			case '"':
+				i = skipJSONString(data, i)
+				continue
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+				if depth == 0 {
+					return i + 1
+				}
+			}
+			i++
+		}
+		return len(data)
+	}
+	for i++; i < len(data); i++ {
+		switch data[i] {
+		case ',', ']', '}', ' ', '\t', '\n', '\r':
+			return i
+		}
+	}
+	return len(data)
+}
+
 // validateGenericInt64Value validates one Generic.Int64 value and reports a
 // failure once. A missing required value is "required". A value that breaks
 // the scalar's own length, pattern or range is reported by that rule's name,
@@ -224,6 +409,105 @@ func validateIdentityUUIDValue(value IdentityUUID, required bool) (bool, []Valid
 	}
 	var ruleErrs []ValidationError
 	if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateIdentityUserIDValue validates one Identity.UserID value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateIdentityUserIDValue(value IdentityUserID, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if matched, err := regexp.MatchString("^[0-9A-Za-z]{1,22}$", value.String()); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateTemporalDateValue validates one Temporal.Date value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateTemporalDateValue(value TemporalDate, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if utf8.RuneCountInString(string(value)) > 40 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 40 characters"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateTemporalDurationValue validates one Temporal.Duration value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateTemporalDurationValue(value TemporalDuration, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if utf8.RuneCountInString(value.String()) > 32 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 32 characters"})
+	}
+	if matched, err := regexp.MatchString("^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$", value.String()); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateTemporalTimeValue validates one Temporal.Time value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateTemporalTimeValue(value TemporalTime, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if matched, err := regexp.MatchString("^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$", string(value)); err != nil || !matched {
 		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
 	}
 	if len(ruleErrs) > 0 {
@@ -2750,6 +3034,470 @@ func StepFromYAML(data []byte) (*Step, error) {
 // StepFromYAMLNonStrict builds Step from YAML using lenient decoding.
 func StepFromYAMLNonStrict(data []byte) (*Step, error) {
 	decoded := &Step{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// Tasting - A tasting of the recipe. Its columns hold a value of every class a
+// descriptor names.
+type Tasting struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Recipe Recipe `json:"recipe"`
+
+	Taster IdentityUserID `json:"taster"`
+
+	Salty bool `json:"salty"`
+
+	Score float64 `json:"score"`
+
+	Servings GenericInt64 `json:"servings"`
+
+	TastedOn TemporalDate `json:"tastedOn"`
+
+	TastedAt TemporalDateTime `json:"tastedAt"`
+
+	ServedAt TemporalTime `json:"servedAt"`
+
+	Rested TemporalDuration `json:"rested"`
+
+	Verdict Verdict `json:"verdict"`
+
+	Remarks GenericJSON `json:"remarks"`
+
+	Tags []string `json:"tags"`
+
+	Helpers []IdentityUUID `json:"helpers"`
+
+	Bites [][]GenericInt64 `json:"bites"`
+
+	EntityKey *IdentityUUID `json:"entityKey,omitempty"`
+
+	Ref RecipeRef `json:"ref"`
+
+	DeletedOnRef bool `json:"deletedOnRef"`
+
+	Version int64 `json:"_version"`
+}
+
+// NewTasting returns a Tasting with @default values from the schema applied.
+// Fields without a declared default are left at their Go zero value.
+func NewTasting() *Tasting {
+	return &Tasting{
+		DeletedOnRef: false,
+	}
+}
+
+// applyDefaults seeds the declared @default values on the receiver. Existing
+// non-zero / wrapper-set fields are preserved so this is safe to call before
+// json.Unmarshal: keys present in the payload overwrite the defaults, while
+// keys absent from the payload retain them.
+func (t *Tasting) applyDefaults() {
+	if t == nil {
+		return
+	}
+	var zeroDeletedOnRef bool
+	if t.DeletedOnRef == zeroDeletedOnRef {
+		t.DeletedOnRef = false
+	}
+
+}
+
+// MaskSecrets returns a copy of Tasting with secret fields cleared.
+func (t *Tasting) MaskSecrets() *Tasting {
+	if t == nil {
+		return nil
+	}
+
+	masked := &Tasting{}
+
+	masked.Id = t.Id
+
+	maskedValueRecipe := t.Recipe.MaskSecrets()
+	if maskedValueRecipe != nil {
+		masked.Recipe = *maskedValueRecipe
+	}
+
+	masked.Taster = t.Taster
+
+	masked.Salty = t.Salty
+
+	masked.Score = t.Score
+
+	masked.Servings = t.Servings
+
+	masked.TastedOn = t.TastedOn
+
+	masked.TastedAt = t.TastedAt
+
+	masked.ServedAt = t.ServedAt
+
+	masked.Rested = t.Rested
+
+	masked.Verdict = t.Verdict
+
+	masked.Remarks = t.Remarks
+
+	if t.Tags != nil {
+		masked.Tags = make([]string, len(t.Tags))
+
+		copy(masked.Tags, t.Tags)
+
+	}
+
+	if t.Helpers != nil {
+		masked.Helpers = make([]IdentityUUID, len(t.Helpers))
+
+		copy(masked.Helpers, t.Helpers)
+
+	}
+
+	if src := t.Bites; src != nil {
+		dst := make([][]GenericInt64, len(src))
+		for i, inner := range src {
+			if inner == nil {
+				continue
+			}
+			dst[i] = make([]GenericInt64, len(inner))
+			copy(dst[i], inner)
+		}
+		masked.Bites = dst
+	}
+
+	masked.EntityKey = t.EntityKey
+
+	maskedValueRef := t.Ref.MaskSecrets()
+	if maskedValueRef != nil {
+		masked.Ref = *maskedValueRef
+	}
+
+	masked.DeletedOnRef = t.DeletedOnRef
+
+	masked.Version = t.Version
+
+	return masked
+}
+
+// Validate validates all fields in Tasting
+func (t *Tasting) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate recipe (required nested type)
+
+	if fieldErrs := t.Recipe.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("recipe", fieldErrs)
+	}
+
+	// Validate taster (required)
+
+	if valid, fieldErrs := validateIdentityUserIDValue(t.Taster, true); !valid {
+		errors.SetFieldErrors("taster", fieldErrs)
+	}
+
+	// Validate servings (required)
+
+	if valid, fieldErrs := validateGenericInt64Value(t.Servings, true); !valid {
+		errors.SetFieldErrors("servings", fieldErrs)
+	}
+
+	// Validate tastedOn (required)
+
+	if valid, fieldErrs := validateTemporalDateValue(t.TastedOn, true); !valid {
+		errors.SetFieldErrors("tastedOn", fieldErrs)
+	}
+
+	// Validate tastedAt (required)
+
+	if valid, fieldErrs := t.TastedAt.ValidateRequired(); !valid {
+		errors.SetFieldErrors("tastedAt", fieldErrs)
+	}
+
+	// Validate servedAt (required)
+
+	if valid, fieldErrs := validateTemporalTimeValue(t.ServedAt, true); !valid {
+		errors.SetFieldErrors("servedAt", fieldErrs)
+	}
+
+	// Validate rested (required)
+
+	if valid, fieldErrs := validateTemporalDurationValue(t.Rested, true); !valid {
+		errors.SetFieldErrors("rested", fieldErrs)
+	}
+
+	// Validate verdict (required)
+
+	if valid, fieldErrs := t.Verdict.ValidateRequired(); !valid {
+		errors.SetFieldErrors("verdict", fieldErrs)
+	}
+
+	// Validate remarks (required): any JSON value but null.
+	if jsonValueMissing(t.Remarks) {
+		errors.AddFieldError("remarks", "required", "required field")
+	}
+
+	// Validate helpers (required)
+
+	if t.Helpers == nil {
+		errors.AddFieldError("helpers", "required", "required field")
+	} else {
+		for i, item := range t.Helpers {
+			if valid, itemErrs := validateIdentityUUIDValue(item, true); !valid {
+				fieldKey := fmt.Sprintf("helpers[%d]", i)
+				errors.SetFieldErrors(fieldKey, itemErrs)
+			}
+		}
+	}
+
+	// Validate bites (list of lists; an inner list is never null)
+	if t.Bites == nil {
+		errors.AddFieldError("bites", "required", "required field")
+	} else {
+		value := t.Bites
+		for i, inner := range value {
+			if inner == nil {
+				errors.AddFieldError(fmt.Sprintf("bites[%d]", i), "required", "required field")
+				continue
+			}
+			for j, item := range inner {
+				if valid, itemErrs := validateGenericInt64Value(item, true); !valid {
+					errors.SetFieldErrors(fmt.Sprintf("bites[%d][%d]", i, j), itemErrs)
+				}
+			}
+		}
+	}
+
+	// Validate entityKey (optional)
+
+	// Validate optional pointer field
+	if t.EntityKey != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.EntityKey, false); !valid {
+			errors.SetFieldErrors("entityKey", fieldErrs)
+		}
+	}
+
+	// Validate ref (required nested type)
+
+	if fieldErrs := t.Ref.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("ref", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals Tasting to JSON
+func (t *Tasting) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias Tasting
+	return json.Marshal((*Alias)(t))
+}
+
+// listFieldsOfTasting are the list fields of Tasting; UnmarshalJSON
+// refuses a null element in them.
+var listFieldsOfTasting = []jsonListField{
+	{name: "tags", depth: 1},
+	{name: "helpers", depth: 1},
+	{name: "bites", depth: 2},
+}
+
+// UnmarshalJSON unmarshals Tasting from JSON with validation
+func (t *Tasting) UnmarshalJSON(data []byte) error {
+	// Apply @default values first; standard json decoding preserves these
+	// for any keys absent from the payload while overwriting them when
+	// a value is provided explicitly.
+	t.applyDefaults()
+	type Alias Tasting
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if err := rejectNullListElements("Tasting", data, listFieldsOfTasting); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts Tasting into a map representation.
+func (t *Tasting) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert Tasting to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert Tasting to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes Tasting from a map using lenient decoding.
+func (t *Tasting) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode Tasting from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode Tasting from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes Tasting from a map and rejects unknown fields.
+func (t *Tasting) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Tasting from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode Tasting from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes Tasting from JSON and rejects unknown fields.
+func (t *Tasting) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Tasting from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Tasting from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Tasting from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes Tasting from JSON using lenient decoding.
+func (t *Tasting) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Tasting from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Tasting from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Tasting from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes Tasting from YAML and rejects unknown fields.
+func (t *Tasting) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode Tasting from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode Tasting from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode Tasting from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes Tasting from YAML using lenient decoding.
+func (t *Tasting) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode Tasting from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode Tasting from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode Tasting from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// TastingFromMap builds Tasting from a map using lenient decoding.
+func TastingFromMap(value map[string]any) (*Tasting, error) {
+	decoded := &Tasting{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TastingFromMapStrict builds Tasting from a map and rejects unknown fields.
+func TastingFromMapStrict(value map[string]any) (*Tasting, error) {
+	decoded := &Tasting{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TastingFromJSON builds Tasting from JSON and rejects unknown fields.
+func TastingFromJSON(data []byte) (*Tasting, error) {
+	decoded := &Tasting{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TastingFromJSONNonStrict builds Tasting from JSON using lenient decoding.
+func TastingFromJSONNonStrict(data []byte) (*Tasting, error) {
+	decoded := &Tasting{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TastingFromYAML builds Tasting from YAML and rejects unknown fields.
+func TastingFromYAML(data []byte) (*Tasting, error) {
+	decoded := &Tasting{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TastingFromYAMLNonStrict builds Tasting from YAML using lenient decoding.
+func TastingFromYAMLNonStrict(data []byte) (*Tasting, error) {
+	decoded := &Tasting{}
 	if err := decoded.FromYAMLNonStrict(data); err != nil {
 		return nil, err
 	}

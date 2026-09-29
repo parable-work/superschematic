@@ -1,0 +1,102 @@
+{
+  "cases": [
+    {
+      "name": "time",
+      "class": "time",
+      "sql": "'10:00:00'::time",
+      "postgres": "\"10:00:00\"",
+      "canonical": "\"10:00:00\""
+    },
+    {
+      "name": "a fraction as Postgres renders it",
+      "class": "time",
+      "sql": "'10:00:00.500'::time",
+      "postgres": "\"10:00:00.5\"",
+      "canonical": "\"10:00:00.5\""
+    },
+    {
+      "name": "microseconds",
+      "class": "time",
+      "sql": "'23:59:59.999999'::time",
+      "postgres": "\"23:59:59.999999\"",
+      "canonical": "\"23:59:59.999999\""
+    },
+    {
+      "name": "null",
+      "class": "time",
+      "sql": "NULL::time",
+      "postgres": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "list",
+      "class": "time[]",
+      "sql": "ARRAY['08:00', '20:15:30']::time[]",
+      "postgres": "[\"08:00:00\", \"20:15:30\"]",
+      "canonical": "[\"08:00:00\",\"20:15:30\"]"
+    },
+    {
+      "name": "refuses 24:00:00",
+      "class": "time",
+      "sql": "'24:00:00'::time",
+      "postgres": "\"24:00:00\"",
+      "error": "the scalar refuses hour 24"
+    },
+    {
+      "name": "a stored fraction loses its trailing zeros",
+      "class": "time",
+      "sql": "'\"10:00:00.500\"'::jsonb",
+      "postgres": "\"10:00:00.500\"",
+      "canonical": "\"10:00:00.5\""
+    },
+    {
+      "name": "hours and minutes gain seconds",
+      "class": "time",
+      "sql": "'\"10:00\"'::jsonb",
+      "postgres": "\"10:00\"",
+      "canonical": "\"10:00:00\""
+    },
+    {
+      "name": "a 12-hour clock after noon",
+      "class": "time",
+      "sql": "'\"2:30 pm\"'::jsonb",
+      "postgres": "\"2:30 pm\"",
+      "canonical": "\"14:30:00\""
+    },
+    {
+      "name": "12 pm is noon",
+      "class": "time",
+      "sql": "'\"12:30PM\"'::jsonb",
+      "postgres": "\"12:30PM\"",
+      "canonical": "\"12:30:00\""
+    },
+    {
+      "name": "12 am is midnight",
+      "class": "time",
+      "sql": "'\"12:05:09 am\"'::jsonb",
+      "postgres": "\"12:05:09 am\"",
+      "canonical": "\"00:05:09\""
+    },
+    {
+      "name": "list of lists in the forms the scalar accepts",
+      "class": "time[][]",
+      "sql": "'[[\"10:00:00.500\", \"10:00\"], [\"9:15 AM\"]]'::jsonb",
+      "postgres": "[[\"10:00:00.500\", \"10:00\"], [\"9:15 AM\"]]",
+      "canonical": "[[\"10:00:00.5\",\"10:00:00\"],[\"09:15:00\"]]"
+    },
+    {
+      "name": "refuses a 12-hour clock past 12",
+      "class": "time",
+      "sql": "'\"13:00 pm\"'::jsonb",
+      "postgres": "\"13:00 pm\"",
+      "error": "a 12-hour clock has no hour 13"
+    },
+    {
+      "name": "refuses a single-digit hour on a 24-hour clock",
+      "class": "time",
+      "sql": "'\"9:15\"'::jsonb",
+      "postgres": "\"9:15\"",
+      "error": "the scalar's 24-hour form has two-digit hours"
+    }
+  ]
+}

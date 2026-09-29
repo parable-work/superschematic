@@ -17,10 +17,20 @@ import (
 // how each column merges and which columns are not content. The types
 // module carries the same document as versiongraph/recipe.json.
 const RecipeGraphDescriptor = `{
+  "version": 2,
   "graph": "recipe",
+  "root": {
+    "table": "recipe",
+    "key": "id"
+  },
+  "refTable": "recipe_ref",
+  "commitTable": "recipe_commit",
+  "patchTable": "recipe_patch",
   "kinds": [
     {
       "kind": "cover",
+      "table": "cover",
+      "historyTable": "cover_history",
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
@@ -29,10 +39,21 @@ const RecipeGraphDescriptor = `{
       "singleton": true,
       "excluded": [
         "recipe_id"
-      ]
+      ],
+      "columns": {
+        "_version": "integer",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "id": "uuid",
+        "photo_url": "string",
+        "recipe_id": "uuid",
+        "ref_id": "uuid"
+      }
     },
     {
       "kind": "ingredient",
+      "table": "ingredient",
+      "historyTable": "ingredient_history",
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
@@ -47,10 +68,23 @@ const RecipeGraphDescriptor = `{
       },
       "excluded": [
         "recipe_id"
-      ]
+      ],
+      "columns": {
+        "_version": "integer",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "id": "uuid",
+        "quantity": "string",
+        "recipe_id": "uuid",
+        "ref_id": "uuid",
+        "step_key": "uuid",
+        "substitutes": "json"
+      }
     },
     {
       "kind": "note",
+      "table": "note",
+      "historyTable": "note_history",
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
@@ -62,10 +96,22 @@ const RecipeGraphDescriptor = `{
       },
       "excluded": [
         "recipe_id"
-      ]
+      ],
+      "columns": {
+        "_version": "integer",
+        "body": "string",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "id": "uuid",
+        "recipe_id": "uuid",
+        "ref_id": "uuid",
+        "reply_to": "uuid"
+      }
     },
     {
       "kind": "step",
+      "table": "step",
+      "historyTable": "step_history",
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
@@ -82,10 +128,28 @@ const RecipeGraphDescriptor = `{
         "created_at",
         "created_by",
         "updated_at"
-      ]
+      ],
+      "columns": {
+        "_version": "integer",
+        "created_at": "dateTime",
+        "created_by": "uuid",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "id": "uuid",
+        "instruction": "string",
+        "position": "integer",
+        "recipe_id": "uuid",
+        "ref_id": "uuid",
+        "scratch": "string",
+        "timings": "json",
+        "updated_at": "dateTime",
+        "updated_by": "uuid"
+      }
     },
     {
-      "kind": "utensil",
+      "kind": "tasting",
+      "table": "tasting",
+      "historyTable": "tasting_history",
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
@@ -93,7 +157,50 @@ const RecipeGraphDescriptor = `{
       "version": "_version",
       "excluded": [
         "recipe_id"
-      ]
+      ],
+      "columns": {
+        "_version": "integer",
+        "bites": "integer[][]",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "helpers": "uuid[]",
+        "id": "uuid",
+        "recipe_id": "uuid",
+        "ref_id": "uuid",
+        "remarks": "json",
+        "rested": "duration",
+        "salty": "boolean",
+        "score": "number",
+        "served_at": "time",
+        "servings": "integer",
+        "tags": "string[]",
+        "tasted_at": "dateTime",
+        "tasted_on": "date",
+        "taster": "uuid",
+        "verdict": "enum"
+      }
+    },
+    {
+      "kind": "utensil",
+      "table": "utensil",
+      "historyTable": "utensil_history",
+      "key": "entity_key",
+      "id": "id",
+      "ref": "ref_id",
+      "tombstone": "deleted_on_ref",
+      "version": "_version",
+      "excluded": [
+        "recipe_id"
+      ],
+      "columns": {
+        "_version": "integer",
+        "deleted_on_ref": "boolean",
+        "entity_key": "uuid",
+        "id": "uuid",
+        "name": "string",
+        "recipe_id": "uuid",
+        "ref_id": "uuid"
+      }
     }
   ]
 }`
@@ -164,6 +271,17 @@ var recipeGraphSpec = &graphSpec{
 			},
 		},
 		{
+			name:     "tasting",
+			idColumn: "id",
+			ownRows:  `SELECT to_jsonb(t) FROM tasting AS t WHERE t.ref_id = $1::uuid`,
+			slot:     `SELECT t.id::text FROM tasting AS t WHERE t.entity_key = $1::uuid AND t.ref_id = $2::uuid`,
+			images:   `SELECT h.data FROM tasting_history AS h JOIN unnest($1::text[]::uuid[], $2::bigint[]) AS p(id, version) ON h.id = p.id AND h._version = p.version`,
+			upsert:   `INSERT INTO tasting AS t (recipe_id, taster, salty, score, servings, tasted_on, tasted_at, served_at, rested, verdict, remarks, tags, helpers, bites, entity_key, ref_id, deleted_on_ref) SELECT r.recipe_id, r.taster, r.salty, r.score, r.servings, r.tasted_on, r.tasted_at, r.served_at, r.rested, r.verdict, r.remarks, r.tags, r.helpers, r.bites, r.entity_key, r.ref_id, r.deleted_on_ref FROM jsonb_populate_record(NULL::tasting, $1::jsonb || jsonb_build_object('ref_id', $2::text, 'recipe_id', $3::text, 'deleted_on_ref', $4::boolean, 'created_at', now(), 'created_by', $5::text, 'updated_at', now(), 'updated_by', $5::text)) AS r ON CONFLICT (entity_key, ref_id) DO UPDATE SET taster = EXCLUDED.taster, salty = EXCLUDED.salty, score = EXCLUDED.score, servings = EXCLUDED.servings, tasted_on = EXCLUDED.tasted_on, tasted_at = EXCLUDED.tasted_at, served_at = EXCLUDED.served_at, rested = EXCLUDED.rested, verdict = EXCLUDED.verdict, remarks = EXCLUDED.remarks, tags = EXCLUDED.tags, helpers = EXCLUDED.helpers, bites = EXCLUDED.bites, deleted_on_ref = EXCLUDED.deleted_on_ref RETURNING to_jsonb(t)`,
+			unset: func(ctx context.Context, tx pgx.Tx, id types.IdentityUUID) error {
+				return (&TastingRepository{tx: tx}).DeleteOne(ctx, id)
+			},
+		},
+		{
 			name:     "utensil",
 			idColumn: "id",
 			ownRows:  `SELECT to_jsonb(t) FROM utensil AS t WHERE t.ref_id = $1::uuid`,
@@ -208,6 +326,7 @@ type RecipeTree struct {
 	Ingredient []*types.Ingredient
 	Note       []*types.Note
 	Step       []*types.Step
+	Tasting    []*types.Tasting
 	Utensil    []*types.Utensil
 
 	// ContentHash is the core's hash of the tree's content columns.
@@ -224,6 +343,7 @@ type RecipeEdits struct {
 	Ingredient GraphEdits[types.Ingredient]
 	Note       GraphEdits[types.Note]
 	Step       GraphEdits[types.Step]
+	Tasting    GraphEdits[types.Tasting]
 	Utensil    GraphEdits[types.Utensil]
 }
 
@@ -361,6 +481,13 @@ func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version 
 			}
 			result.Saved.Step = append(result.Saved.Step, row)
 		}
+		for _, input := range edits.Tasting.Upsert {
+			row, err := g.upsertTasting(ctx, tx, r, input)
+			if err != nil {
+				return err
+			}
+			result.Saved.Tasting = append(result.Saved.Tasting, row)
+		}
 		for _, input := range edits.Utensil.Upsert {
 			row, err := g.upsertUtensil(ctx, tx, r, input)
 			if err != nil {
@@ -368,7 +495,7 @@ func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version 
 			}
 			result.Saved.Utensil = append(result.Saved.Utensil, row)
 		}
-		if len(edits.Cover.Delete) > 0 || len(edits.Ingredient.Delete) > 0 || len(edits.Note.Delete) > 0 || len(edits.Step.Delete) > 0 || len(edits.Utensil.Delete) > 0 {
+		if len(edits.Cover.Delete) > 0 || len(edits.Ingredient.Delete) > 0 || len(edits.Note.Delete) > 0 || len(edits.Step.Delete) > 0 || len(edits.Tasting.Delete) > 0 || len(edits.Utensil.Delete) > 0 {
 			composed, _, _, err := g.engine.compose(ctx, tx, r)
 			if err != nil {
 				return err
@@ -397,6 +524,11 @@ func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version 
 					return err
 				}
 			}
+			for _, key := range edits.Tasting.Delete {
+				if err := g.engine.deleteEntity(ctx, tx, r, byKey, "tasting", uuidText(key)); err != nil {
+					return err
+				}
+			}
 			for _, key := range edits.Utensil.Delete {
 				if err := g.engine.deleteEntity(ctx, tx, r, byKey, "utensil", uuidText(key)); err != nil {
 					return err
@@ -420,6 +552,11 @@ func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version 
 		}
 		for _, key := range edits.Step.Unset {
 			if err := g.engine.unsetEntity(ctx, tx, r, "step", key); err != nil {
+				return err
+			}
+		}
+		for _, key := range edits.Tasting.Unset {
+			if err := g.engine.unsetEntity(ctx, tx, r, "tasting", key); err != nil {
 				return err
 			}
 		}
@@ -739,6 +876,13 @@ func (g *RecipeGraph) tree(tree graphTree, findings []versiongraph.Finding) (*Re
 		}
 		result.Step = append(result.Step, row)
 	}
+	for _, raw := range tree["tasting"] {
+		row, err := decodeTastingHistoryData(raw)
+		if err != nil {
+			return nil, err
+		}
+		result.Tasting = append(result.Tasting, row)
+	}
 	for _, raw := range tree["utensil"] {
 		row, err := decodeUtensilHistoryData(raw)
 		if err != nil {
@@ -917,6 +1061,48 @@ func (g *RecipeGraph) upsertStep(ctx context.Context, tx pgx.Tx, ref graphRef, i
 				return nil, err
 			}
 			return repository.UpdateOne(ctx, rowID, NewStepSnapshotUpdate(&row))
+		}
+	}
+	return repository.CreateOne(ctx, &row)
+}
+
+// upsertTasting writes input as the ref's row of its entity: an update of
+// the ref's existing row, or a new row. A new entity gets its key from the
+// database. The row's id, root, ref and deletedOnRef are the shell's.
+func (g *RecipeGraph) upsertTasting(ctx context.Context, tx pgx.Tx, ref graphRef, input *types.Tasting) (*types.Tasting, error) {
+	if input == nil {
+		return nil, fmt.Errorf("version graph: a nil tasting upsert")
+	}
+	rootID, err := parseUUIDText(ref.root)
+	if err != nil {
+		return nil, err
+	}
+	refID, err := parseUUIDText(ref.id)
+	if err != nil {
+		return nil, err
+	}
+	row := *input
+	row.Id = nil
+	row.Recipe = types.Recipe{Id: &rootID}
+	row.Ref = types.RecipeRef{Id: &refID}
+	// deleted_on_ref has no SQL DEFAULT: the shell always writes it.
+	row.DeletedOnRef = false
+	repository := &TastingRepository{tx: tx, txDB: g.db}
+	if row.EntityKey != nil {
+		kind, err := g.engine.spec.kind("tasting")
+		if err != nil {
+			return nil, err
+		}
+		id, err := g.engine.slot(ctx, tx, kind, ref.id, uuidText(*row.EntityKey))
+		if err != nil {
+			return nil, err
+		}
+		if id != "" {
+			rowID, err := parseUUIDText(id)
+			if err != nil {
+				return nil, err
+			}
+			return repository.UpdateOne(ctx, rowID, NewTastingSnapshotUpdate(&row))
 		}
 	}
 	return repository.CreateOne(ctx, &row)

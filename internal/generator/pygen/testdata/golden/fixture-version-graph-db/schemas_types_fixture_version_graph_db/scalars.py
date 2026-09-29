@@ -25,7 +25,13 @@ try:
 
         parse_identity_uuid,
 
+        parse_identity_user_id,
+
         parse_temporal_date_time,
+
+        normalize_temporal_duration,
+        validate_temporal_duration,
+        parse_temporal_duration,
 
     )
     _SCALAR_MODULE_AVAILABLE = True
@@ -63,6 +69,21 @@ def _custom_parse_identity_uuid(v: Any) -> Any:
         raise ValueError(str(e))
     return parsed
 
+def _custom_parse_identity_user_id(v: Any) -> Any:
+    """Custom parse wrapper for Identity.UserID.
+
+    The scalar library native hooks are string-in/string-out, so non-string
+    inputs are stringified before the call and numeric targets are
+    converted back afterwards.
+    """
+    if not _SCALAR_MODULE_AVAILABLE or v is None:
+        return v
+    try:
+        parsed = parse_identity_user_id(v if isinstance(v, str) else str(v))
+    except Exception as e:
+        raise ValueError(str(e))
+    return parsed
+
 def _custom_parse_temporal_date_time(v: Any) -> Any:
     """Custom parse wrapper for Temporal.DateTime.
 
@@ -77,6 +98,49 @@ def _custom_parse_temporal_date_time(v: Any) -> Any:
     except Exception as e:
         raise ValueError(str(e))
     return parsed
+
+def _custom_parse_temporal_duration(v: Any) -> Any:
+    """Custom parse wrapper for Temporal.Duration.
+
+    The scalar library native hooks are string-in/string-out, so non-string
+    inputs are stringified before the call and numeric targets are
+    converted back afterwards.
+    """
+    if not _SCALAR_MODULE_AVAILABLE or v is None:
+        return v
+    try:
+        parsed = parse_temporal_duration(v if isinstance(v, str) else str(v))
+    except Exception as e:
+        raise ValueError(str(e))
+    return parsed
+
+def _custom_normalize_temporal_duration(v: Any) -> Any:
+    """Custom normalize wrapper for Temporal.Duration.
+
+    The scalar library native hooks are string-in/string-out, so non-string
+    inputs are stringified before the call and numeric targets are
+    converted back afterwards.
+    """
+    if not _SCALAR_MODULE_AVAILABLE or v is None:
+        return v
+    try:
+        normalized = normalize_temporal_duration(v if isinstance(v, str) else str(v))
+    except Exception as e:
+        raise ValueError(str(e))
+    return normalized
+
+def _custom_validate_temporal_duration(v: Any) -> Any:
+    """Custom validation wrapper for Temporal.Duration.
+
+    Wraps the scalar library validator that returns list[ValidationError]
+    to the Pydantic-compatible pattern that raises ValueError.
+    """
+    if not _SCALAR_MODULE_AVAILABLE:
+        return v
+    errors = validate_temporal_duration(str(v))
+    if errors:
+        raise ValueError("; ".join([e.message for e in errors]))
+    return v
 
 # Generic.Int64 - Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
 
@@ -176,6 +240,50 @@ IdentityUUID = Annotated[
     AfterValidator(_validate_identity_uuid_pattern),
 ]
 
+# Identity.UserID - UUID v4 string as base62
+_IdentityUserID_pattern = re.compile(r"^[0-9A-Za-z]{1,22}$")
+
+def _validate_identity_user_id_pattern(v: Any) -> Any:
+    """Validate Identity.UserID against its pattern."""
+    if v is None:
+        return v
+    s = str(v)
+    if not _IdentityUserID_pattern.match(s):
+        raise ValueError("invalid format for Identity.UserID")
+    return v
+
+# Standard scalar type
+IdentityUserID = Annotated[
+    str,
+    Field(
+        description="UUID v4 string as base62",
+        pattern=r"^[0-9A-Za-z]{1,22}$",
+    ),
+    BeforeValidator(_custom_parse_identity_user_id),
+    AfterValidator(_validate_identity_user_id_pattern),
+]
+
+# Temporal.Date - Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).
+
+def _validate_temporal_date_length(v: Any) -> Any:
+    """Validate Temporal.Date length constraints."""
+    if v is None:
+        return v
+    s = str(v)
+    if len(s) > 40:
+        raise ValueError("must be at most 40 characters")
+    return v
+
+# Standard scalar type
+TemporalDate = Annotated[
+    str,
+    Field(
+        description="Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).",
+        max_length=40,
+    ),
+    AfterValidator(_validate_temporal_date_length),
+]
+
 # Temporal.DateTime - ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
 
 # DateTime uses Python datetime objects
@@ -202,4 +310,41 @@ TemporalDateTime = Annotated[
     ),
     PlainValidator(_parse_datetime),
     PlainSerializer(_serialize_datetime, return_type=str, when_used="json"),
+]
+
+# Temporal.Duration - Duration for timeouts and intervals
+
+# Standard scalar type
+TemporalDuration = Annotated[
+    str,
+    Field(
+        description="Duration for timeouts and intervals",
+        max_length=32,
+        pattern=r"^(\d+(\.\d+)?(ns|us|µs|ms|s|m|h))+$",
+    ),
+    BeforeValidator(_custom_parse_temporal_duration),
+    BeforeValidator(_custom_normalize_temporal_duration),
+    AfterValidator(_custom_validate_temporal_duration),
+]
+
+# Temporal.Time - Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.
+_TemporalTime_pattern = re.compile(r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\s?[AaPp][Mm])$")
+
+def _validate_temporal_time_pattern(v: Any) -> Any:
+    """Validate Temporal.Time against its pattern."""
+    if v is None:
+        return v
+    s = str(v)
+    if not _TemporalTime_pattern.match(s):
+        raise ValueError("invalid format for Temporal.Time")
+    return v
+
+# Standard scalar type
+TemporalTime = Annotated[
+    str,
+    Field(
+        description="Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.",
+        pattern=r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\s?[AaPp][Mm])$",
+    ),
+    AfterValidator(_validate_temporal_time_pattern),
 ]

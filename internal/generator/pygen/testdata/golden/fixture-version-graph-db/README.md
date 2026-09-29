@@ -51,13 +51,18 @@ This package includes custom scalar types with built-in validation:
 - `GenericInt64` (canonical: `Generic.Int64`): Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
 - `GenericJSON` (canonical: `Generic.JSON`): Any valid JSON value: object, array, primitive, or null
 - `IdentityUUID` (canonical: `Identity.UUID`): UUID v4 with automatic base62 encoding for client-facing APIs
+- `IdentityUserID` (canonical: `Identity.UserID`): UUID v4 string as base62
+- `TemporalDate` (canonical: `Temporal.Date`): Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).
 - `TemporalDateTime` (canonical: `Temporal.DateTime`): ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
+- `TemporalDuration` (canonical: `Temporal.Duration`): Duration for timeouts and intervals
+- `TemporalTime` (canonical: `Temporal.Time`): Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.
 
 
 ## Enums
 
 - `RecipeEntityKind`
 - `RecipePatchOperation`
+- `Verdict`
 
 ---
 

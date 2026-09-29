@@ -164,6 +164,27 @@ type StepRepositoryInterface interface {
 	DeleteMany(ctx context.Context, filter *StepFilter) (int, error)
 }
 
+// TastingRepositoryInterface defines the contract for Tasting data access.
+type TastingRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *TastingGetOptions) (*types.Tasting, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Tasting, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.Tasting, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Tasting, error)
+	ListAsOfByRecipeID(ctx context.Context, recipeID types.IdentityUUID, ts time.Time, opts *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error)
+	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error)
+	FindOne(ctx context.Context, filter *TastingFilter, opts *TastingFindOptions) (*types.Tasting, error)
+	FindMany(ctx context.Context, filter *TastingFilter, opts *TastingFindOptions) ([]*types.Tasting, int, error)
+	CreateOne(ctx context.Context, input *types.Tasting) (*types.Tasting, error)
+	CreateMany(ctx context.Context, inputs []*types.Tasting) ([]*types.Tasting, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *TastingUpdate) (*types.Tasting, error)
+	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *TastingUpdate) (*types.Tasting, error)
+	UpdateMany(ctx context.Context, filter *TastingFilter, update *TastingUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
+	DeleteMany(ctx context.Context, filter *TastingFilter) (int, error)
+}
+
 // UtensilRepositoryInterface defines the contract for Utensil data access.
 type UtensilRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *UtensilGetOptions) (*types.Utensil, error)
@@ -198,6 +219,7 @@ type DatabaseInterface interface {
 	GetRecipePatchRepository() RecipePatchRepositoryInterface
 	GetRecipeRefRepository() RecipeRefRepositoryInterface
 	GetStepRepository() StepRepositoryInterface
+	GetTastingRepository() TastingRepositoryInterface
 	GetUtensilRepository() UtensilRepositoryInterface
 }
 
@@ -212,6 +234,7 @@ type TxInterface interface {
 	GetRecipePatchRepository() RecipePatchRepositoryInterface
 	GetRecipeRefRepository() RecipeRefRepositoryInterface
 	GetStepRepository() StepRepositoryInterface
+	GetTastingRepository() TastingRepositoryInterface
 	GetUtensilRepository() UtensilRepositoryInterface
 }
 
@@ -226,6 +249,7 @@ type NoOpDatabase struct {
 	RecipePatch  *NoOpRecipePatchRepository
 	RecipeRef    *NoOpRecipeRefRepository
 	Step         *NoOpStepRepository
+	Tasting      *NoOpTastingRepository
 	Utensil      *NoOpUtensilRepository
 }
 
@@ -239,6 +263,7 @@ type NoOpTx struct {
 	RecipePatch  *NoOpRecipePatchRepository
 	RecipeRef    *NoOpRecipeRefRepository
 	Step         *NoOpStepRepository
+	Tasting      *NoOpTastingRepository
 	Utensil      *NoOpUtensilRepository
 }
 
@@ -262,6 +287,8 @@ func NewNoOpDatabase() *NoOpDatabase {
 	tx.RecipeRef = db.RecipeRef
 	db.Step = &NoOpStepRepository{}
 	tx.Step = db.Step
+	db.Tasting = &NoOpTastingRepository{}
+	tx.Tasting = db.Tasting
 	db.Utensil = &NoOpUtensilRepository{}
 	tx.Utensil = db.Utensil
 	return db
@@ -885,6 +912,88 @@ func (r *NoOpStepRepository) DeleteMany(_ context.Context, _ *StepFilter) (int, 
 	return 0, nil
 }
 
+func (db *NoOpDatabase) GetTastingRepository() TastingRepositoryInterface {
+	return db.Tasting
+}
+
+func (tx *NoOpTx) GetTastingRepository() TastingRepositoryInterface {
+	return tx.Tasting
+}
+
+// NoOpTastingRepository provides deterministic no-op repository behavior.
+type NoOpTastingRepository struct{}
+
+func (r *NoOpTastingRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *TastingGetOptions) (*types.Tasting, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpTastingRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Tasting, error) {
+	return map[types.IdentityUUID]*types.Tasting{}, nil
+}
+
+func (r *NoOpTastingRepository) GetVersion(_ context.Context, _ types.IdentityUUID, _ int64) (*types.Tasting, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpTastingRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error) {
+	return []types.HistoryRecord[*types.Tasting]{}, nil
+}
+
+func (r *NoOpTastingRepository) GetAsOf(_ context.Context, _ types.IdentityUUID, _ time.Time) (*types.Tasting, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpTastingRepository) ListAsOfByRecipeID(_ context.Context, _ types.IdentityUUID, _ time.Time, _ *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error) {
+	return []types.HistoryRecord[*types.Tasting]{}, nil
+}
+
+func (r *NoOpTastingRepository) ListAsOfByRefID(_ context.Context, _ types.IdentityUUID, _ time.Time, _ *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error) {
+	return []types.HistoryRecord[*types.Tasting]{}, nil
+}
+
+func (r *NoOpTastingRepository) FindOne(_ context.Context, _ *TastingFilter, _ *TastingFindOptions) (*types.Tasting, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpTastingRepository) FindMany(_ context.Context, _ *TastingFilter, _ *TastingFindOptions) ([]*types.Tasting, int, error) {
+	return []*types.Tasting{}, 0, nil
+}
+
+func (r *NoOpTastingRepository) CreateOne(_ context.Context, input *types.Tasting) (*types.Tasting, error) {
+	return input, nil
+}
+
+func (r *NoOpTastingRepository) CreateMany(_ context.Context, inputs []*types.Tasting) ([]*types.Tasting, error) {
+	if inputs == nil {
+		return []*types.Tasting{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpTastingRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *TastingUpdate) (*types.Tasting, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpTastingRepository) UpdateOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64, _ *TastingUpdate) (*types.Tasting, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpTastingRepository) UpdateMany(_ context.Context, _ *TastingFilter, _ *TastingUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpTastingRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpTastingRepository) DeleteOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64) error {
+	return nil
+}
+
+func (r *NoOpTastingRepository) DeleteMany(_ context.Context, _ *TastingFilter) (int, error) {
+	return 0, nil
+}
+
 func (db *NoOpDatabase) GetUtensilRepository() UtensilRepositoryInterface {
 	return db.Utensil
 }
@@ -988,6 +1097,8 @@ var (
 	_ RecipeRefRepositoryInterface    = (*NoOpRecipeRefRepository)(nil)
 	_ StepRepositoryInterface         = (*StepRepository)(nil)
 	_ StepRepositoryInterface         = (*NoOpStepRepository)(nil)
+	_ TastingRepositoryInterface      = (*TastingRepository)(nil)
+	_ TastingRepositoryInterface      = (*NoOpTastingRepository)(nil)
 	_ UtensilRepositoryInterface      = (*UtensilRepository)(nil)
 	_ UtensilRepositoryInterface      = (*NoOpUtensilRepository)(nil)
 )

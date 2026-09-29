@@ -1,0 +1,53 @@
+{
+  "cases": [
+    {
+      "name": "date",
+      "class": "date",
+      "sql": "'2026-09-01'::date",
+      "postgres": "\"2026-09-01\"",
+      "canonical": "\"2026-09-01\""
+    },
+    {
+      "name": "leap day",
+      "class": "date",
+      "sql": "'2024-02-29'::date",
+      "postgres": "\"2024-02-29\"",
+      "canonical": "\"2024-02-29\""
+    },
+    {
+      "name": "null",
+      "class": "date",
+      "sql": "NULL::date",
+      "postgres": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "list",
+      "class": "date[]",
+      "sql": "ARRAY['2026-09-01', '2026-12-31']::date[]",
+      "postgres": "[\"2026-09-01\", \"2026-12-31\"]",
+      "canonical": "[\"2026-09-01\",\"2026-12-31\"]"
+    },
+    {
+      "name": "refuses infinity",
+      "class": "date",
+      "sql": "'infinity'::date",
+      "postgres": "\"infinity\"",
+      "error": "infinity is not a date"
+    },
+    {
+      "name": "refuses BC",
+      "class": "date",
+      "sql": "'0044-03-15 BC'::date",
+      "postgres": "\"0044-03-15 BC\"",
+      "error": "BC is not a date the schema runtime holds"
+    },
+    {
+      "name": "refuses a day that does not exist",
+      "class": "date",
+      "sql": "'\"2026-02-30\"'::jsonb",
+      "postgres": "\"2026-02-30\"",
+      "error": "February has no 30th"
+    }
+  ]
+}
