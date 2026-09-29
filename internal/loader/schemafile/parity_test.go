@@ -125,6 +125,11 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"union file", "core", `{"kind": "Union", "name": "Shape", "types": ["Circle", "Square"]}`},
 	{"scalar file", "core", `{"kind": "Scalar", "name": "Local.Code", "languagePrimitive": "string", "minimum": -9223372036854775808, "maximum": 9223372036854775807}`},
 	{"operation set file", "core", `{"kind": "OperationSet", "name": "Ops", "operations": [], "encrypted": true}`},
+	{"an encrypted operation argument", "core", `{"kind": "OperationSet", "name": "CardOps", "operations": [
+		{"name": "storeCard", "typeRef": {"name": "Card"}, "httpMethod": "POST", "arguments": [
+			{"name": "number", "typeRef": {"name": "String"}, "required": true, "encrypted": true}]}]}`},
+	{"a non-boolean encrypted argument flag", "core", `{"kind": "OperationSet", "name": "CardOps", "operations": [
+		{"name": "storeCard", "typeRef": {"name": "Card"}, "arguments": [{"name": "number", "typeRef": {"name": "String"}, "encrypted": "yes"}]}]}`},
 
 	// The invocation policy.
 	{"visible tool without a policy gets the default", "core", `{"kind": "OperationSet", "name": "Ops", "operations": [

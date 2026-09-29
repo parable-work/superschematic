@@ -1,0 +1,5 @@
+# Test-local to apigen, so no other generator's goldens read it. The SDK
+# generator tests load it too.
+name: encrypted-argument-api
+kind: API
+outputs: {}

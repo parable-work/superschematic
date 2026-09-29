@@ -1298,11 +1298,12 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, *SchemaErro
 	w.recordReference(info)
 
 	arg := &ir.ArgumentDef{
-		Name:     strings.TrimPrefix(p.Name().Text(), "_"),
-		TypeRef:  info.ref,
-		Required: !info.nullable && param.QuestionToken == nil,
-		Default:  info.defaultValue,
-		IsQuery:  info.queryParam,
+		Name:      strings.TrimPrefix(p.Name().Text(), "_"),
+		TypeRef:   info.ref,
+		Required:  !info.nullable && param.QuestionToken == nil,
+		Default:   info.defaultValue,
+		IsQuery:   info.queryParam,
+		Encrypted: info.encrypted,
 	}
 	if info.validate != nil {
 		fd := &ir.FieldDef{}

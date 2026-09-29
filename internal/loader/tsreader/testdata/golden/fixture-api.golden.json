@@ -275,7 +275,8 @@
               "typeRef": {
                 "name": "string"
               },
-              "required": true
+              "required": true,
+              "encrypted": true
             }
           ],
           "requireOwnership": true,

@@ -243,9 +243,10 @@ Two kinds of operation must be `@manualRouteRegistration`, and the build
 fails with the operation named when one is not:
 
 - An encrypted operation: one in an `Encrypted` operation set, one declared
-  `@encrypted`, or one whose result is an `EncryptedField<T>`. The Go
-  server decrypts such a body with its `PayloadDecryptor` before it parses
-  it. The TypeScript router has no decryption step and would hand the
+  `@encrypted`, or one whose result or an argument is an
+  `EncryptedField<T>` ([Encrypted payloads](/superschematic/guides/api-routes/#encrypted-payloads)).
+  The Go server decrypts such a body with its `PayloadDecryptor` before it
+  parses it. The TypeScript router has no decryption step and would hand the
   ciphertext to the body parser, so the service's handler decrypts the
   payload and decodes it.
 - An operation that uploads files. The router has no multipart adapter.

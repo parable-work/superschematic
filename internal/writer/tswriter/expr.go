@@ -200,6 +200,9 @@ func (e *emitter) argumentTypeExpr(arg *ir.ArgumentDef, owner string) string {
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Validate"), expr, cfg)
 	}
 	expr += arraySuffix(arg.TypeRef)
+	if arg.Encrypted {
+		expr = fmt.Sprintf("%s<%s>", e.use("EncryptedField"), expr)
+	}
 	if !arg.Required {
 		expr = fmt.Sprintf("%s<%s>", e.use("Nullable"), expr)
 	}
