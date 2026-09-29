@@ -7,7 +7,10 @@ sidebar:
 
 The CLI is a Go binary. Generated Go types, ORM, API and SDK are ordinary
 Go modules whose paths come from `go_module_root` in
-[superschematic.toml](/superschematic/reference/naming/).
+[superschematic.toml](/superschematic/reference/naming/). The ORM, the API
+server and the SDK import the schema's Go types, so a DB schema (which
+always gets the ORM) needs `outputs.types.go`, and so do a Go API server
+and a Go SDK. The build refuses the config without it.
 
 ## Requirements
 
@@ -163,7 +166,9 @@ checks membership.
 ## Serve a generated API
 
 An API schema with a Go API output writes the module
-`example.com/schemas/api/<name>`. `RegisterRoutes` mounts its routes on a
+`example.com/schemas/api/<name>`. It needs `outputs.types.go` too: the
+routes decode requests into the schema's Go types and the handler
+interfaces take and return them. `RegisterRoutes` mounts its routes on a
 chi router and calls your implementations.
 
 An operation with an input type reads it from the JSON body. An operation

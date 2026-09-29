@@ -150,6 +150,10 @@ outputs: {
 }
 ```
 
+The server needs `outputs.types` for TypeScript, as above: the router
+validates requests with the types package's decoders, a peer dependency,
+and the build refuses the config without it.
+
 The build writes `schemas/dist/api/<name>` as `@schemas/<name>-api`:
 `interfaces.ts` has one `<Namespace>Implementation` interface per operation
 namespace, and `router.ts` has `buildRouter(implementations, options)`, which

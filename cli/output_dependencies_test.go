@@ -115,3 +115,58 @@ outputs:
 	assert.Equal(t, "schema config for shop-orders: outputs.sdk.rust needs outputs.types.rust: the Rust SDK depends on the Rust types crate and its methods take and return its types", err.Error())
 	assert.NoDirExists(t, filepath.Join(outDir, "types", "go", "shop-common"), "nothing is built")
 }
+
+// A DB schema without Go types fails discovery, before any service is
+// built: the DB kind always generates the Go ORM, which imports them.
+func TestBuildAllCommand_RefusesADBSchemaWithoutGoTypes(t *testing.T) {
+	servicesRoot := prepareDependencyTypesRoot(t)
+	config := `name: shop-db
+kind: DB
+outputs:
+  types:
+    typescript: { enabled: true }
+`
+	require.NoError(t, os.WriteFile(filepath.Join(servicesRoot, "shop-db", "schema.config.yaml"), []byte(config), 0o644))
+	outDir := t.TempDir()
+	root := New(Config{})
+	root.SetOut(new(bytes.Buffer))
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"build-all", servicesRoot, "--out", outDir})
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Equal(t, "schema config for shop-db: kind DB needs outputs.types.go: the Go ORM, which the DB kind always generates, imports the Go types", err.Error())
+	assert.NoDirExists(t, filepath.Join(outDir, "types", "go", "shop-common"), "nothing is built")
+}
+
+// An API server whose language has no types output fails a single build
+// before anything is written.
+func TestBuildCommand_RefusesAnAPIWithoutItsTypes(t *testing.T) {
+	servicesRoot := prepareDependencyTypesRoot(t)
+	config := `name: shop-orders
+kind: API
+dependencies:
+  - name: shop-common
+    kind: General
+  - name: shop-db
+    kind: DB
+  - name: shop-ids
+    kind: General
+outputs:
+  types:
+    go: { enabled: true }
+    typescript: { enabled: true }
+  api: { enabled: true, language: RUST }
+`
+	require.NoError(t, os.WriteFile(filepath.Join(servicesRoot, "shop-orders", "schema.config.yaml"), []byte(config), 0o644))
+	outDir := t.TempDir()
+	root := New(Config{})
+	root.SetOut(new(bytes.Buffer))
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"build", filepath.Join(servicesRoot, "shop-orders"), "--out", outDir})
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Equal(t, "schema config for shop-orders: outputs.api with language RUST needs outputs.types.rust: the Rust API server's crate depends on the Rust types crate", err.Error())
+	assert.NoDirExists(t, filepath.Join(outDir, "types", "go", "shop-orders"), "nothing is written")
+}

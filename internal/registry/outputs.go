@@ -54,6 +54,15 @@ var sdkTypesUse = map[string]string{
 	LangRust:       "the Rust SDK depends on the Rust types crate and its methods take and return its types",
 }
 
+// apiTypes gives, for each API server language, the target language of the
+// types package the server imports and what it does with it, for the error
+// that refuses an API whose types are not enabled.
+var apiTypes = map[string]struct{ lang, use string }{
+	APILanguageGo:         {LangGo, "the Go API server decodes requests into the Go types and its handler interfaces take and return them"},
+	APILanguageRust:       {LangRust, "the Rust API server's crate depends on the Rust types crate"},
+	APILanguageTypeScript: {LangTypeScript, "the TypeScript API server validates requests with the TypeScript types and its handler interfaces take and return them"},
+}
+
 // TargetOutputConfig is a per-language enable switch.
 type TargetOutputConfig struct {
 	Enabled bool `json:"enabled"`
@@ -120,8 +129,10 @@ type Outputs struct {
 
 // ParseOutputs decodes the raw outputs block from schema.config into its
 // typed form, rejecting keys no registered generator claims, sections that
-// fail their generator's OutputSchema, unknown target languages, and an SDK
-// whose language has no types output (the SDK imports that package).
+// fail their generator's OutputSchema, unknown target languages, and an API
+// server or SDK whose language has no types output (each imports that
+// package). The Go ORM's need for the Go types depends on the kind, so
+// generator.Run and generator.ExpectedOutputDirs check it.
 func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 	if raw == nil {
 		return &Outputs{}, nil
@@ -160,9 +171,17 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 			return nil, fmt.Errorf("outputs.sdk has unknown target language %q", lang)
 		}
 	}
-	// Each SDK imports the types package of its language, which only
-	// outputs.types generates.
+	// The API server and each SDK import the types package of their
+	// language, which only outputs.types generates. The API language is
+	// read after its default; an unsupported one is left to the API
+	// generator, which names the supported ones.
+	outputs.applyAPIDefaults()
 	var missingTypes []error
+	if outputs.APIEnabled() {
+		if need, ok := apiTypes[outputs.API.Language]; ok && !outputs.TypesEnabled(need.lang) {
+			missingTypes = append(missingTypes, fmt.Errorf("outputs.api with language %s needs outputs.types.%s: %s", outputs.API.Language, need.lang, need.use))
+		}
+	}
 	for _, lang := range outputs.EnabledSDKLanguages() {
 		if !outputs.TypesEnabled(lang) {
 			missingTypes = append(missingTypes, fmt.Errorf("outputs.sdk.%s needs outputs.types.%s: %s", lang, lang, sdkTypesUse[lang]))
@@ -183,8 +202,6 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 			return nil, fmt.Errorf("outputs.sql: %w", err)
 		}
 	}
-
-	outputs.applyAPIDefaults()
 
 	return outputs, nil
 }

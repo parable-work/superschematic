@@ -32,7 +32,9 @@ handlers and say who the caller is.
 <Snippet file="schemas/services/shop-storefront/schema.config.ts" />
 
 `language: "TYPESCRIPT"` generates the router package instead of a Go
-module. `service({ name: "shop-common", kind: SchemaKind.General })` is
+module. The router validates requests with the TypeScript types, so
+`types` lists TypeScript.
+`service({ name: "shop-common", kind: SchemaKind.General })` is
 the handle `shop-common`'s build wrote to its `src/service.generated.ts`.
 
 ## Build

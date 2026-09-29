@@ -27,6 +27,36 @@ of a generated artifact is always listed here with the bump it requires.
   so `build-all` fails at discovery, before any service is built. The
   `@superschematic/schema-config` doc comment on `SdkOutputConfig` states
   the rule. Output for every config that builds is unchanged. Patch.
+- An enabled `outputs.api` needs `outputs.types` in the server's language:
+  `go` for `GO` (the default), `rust` for `RUST`, `typescript` for
+  `TYPESCRIPT`. The Go server's `go.mod` required, and its routes,
+  interfaces, errors, response and constants files imported, a Go types
+  module the build did not write; the Rust server's crate path-depended on a missing
+  types crate; and the TypeScript router imported its types and
+  validators from a types package that was not generated. None of them
+  compiled. `ParseOutputs` now refuses the config beside the SDK rule,
+  such as `outputs.api with language GO needs outputs.types.go: the Go API
+  server decodes requests into the Go types and its handler interfaces
+  take and return them`, so `build-all` fails at discovery. An
+  unsupported `language` is still the API generator's error. The
+  `@superschematic/schema-config` doc comment on `ApiOutputConfig` states
+  the rule. Output for every config that builds is unchanged. Patch.
+- A DB schema needs `outputs.types.go`: the DB kind always generates the
+  Go ORM, whose `go.mod` requires and replaces, and whose files import,
+  the schema's Go types module, which the build wrote only when
+  `outputs.types.go` asked for it. A Go API server whose `authDb` is such
+  a schema imports its ORM and failed with it. `generator.Run` refuses
+  the config before its generators run, with `kind DB needs
+  outputs.types.go: the Go ORM, which the DB kind always generates,
+  imports the Go types`; `generator.ExpectedOutputDirs` refuses it too,
+  so `build-all` and `build --with-deps` fail at discovery. The check
+  needs the kind, so it is not in `ParseOutputs`; it follows the kind's
+  pipeline, so an extension kind that runs the core `orm` generator needs
+  the Go types as well. The `@superschematic/schema-config` doc comment on
+  `TypesOutputConfig` states the rule. Output for every config that
+  builds is unchanged. Patch, except that a DB schema built without Go
+  types for its SQL alone, whose DDL was usable though its ORM was not,
+  now fails until it enables `outputs.types.go`: Major for that case only.
 - `build-all` and `build --with-deps` refuse a service whose types in a
   language import the types of a dependency that does not generate that
   language: the dependencies it takes an enum, a union or an object type

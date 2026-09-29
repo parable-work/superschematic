@@ -45,10 +45,20 @@ behavior.
 A generated package that imports a package the build does not generate
 fails the build:
 
-- Every `outputs.sdk` language needs the same `outputs.types` language,
-  since the SDK imports the service's types package. The config fails to
-  load, before anything is built:
-  `outputs.sdk.typescript needs outputs.types.typescript: the TypeScript SDK decodes responses and validates inputs with the TypeScript types`.
+- The API server and every `outputs.sdk` language need the same
+  `outputs.types` language, since each imports the service's types
+  package in its language. `outputs.api` needs `outputs.types.go` with
+  `language: GO` (the default), `outputs.types.rust` with `RUST` and
+  `outputs.types.typescript` with `TYPESCRIPT`. The config fails to load,
+  before anything is built:
+  `outputs.api with language GO needs outputs.types.go: the Go API server decodes requests into the Go types and its handler interfaces take and return them`,
+  or `outputs.sdk.typescript needs outputs.types.typescript: the TypeScript SDK decodes responses and validates inputs with the TypeScript types`.
+- A DB schema needs `outputs.types.go`: the kind always generates the Go
+  ORM, which imports the Go types. The build fails before its generators
+  run, and `--with-deps` and `build-all` fail at discovery:
+  `kind DB needs outputs.types.go: the Go ORM, which the DB kind always generates, imports the Go types`.
+  An API server that names the DB as its `authDb` imports its ORM, so the
+  rule covers it too.
 - A type library imports the types of each dependency it takes an enum, a
   union or an object type from (an imported scalar is regenerated locally),
   so that dependency must enable the same `outputs.types` languages.
@@ -88,7 +98,9 @@ superschematic build --with-deps ./schemas/services/shop-api
 
 Discover every schema service under `<services-root>` and build them in
 one process, in dependency order. A service's `authDb` counts as a
-dependency for ordering. A service whose type library imports a
+dependency for ordering. A service whose API server, SDK or DB kind needs
+a types language its config does not enable fails discovery, before any
+service is built. A service whose type library imports a
 dependency that does not generate types in that language fails, as with
 `build --with-deps` (see [`build`](#build-service-dir)). Once every service's output is in place,
 whether this run built it, restored it from the cache or found it up to

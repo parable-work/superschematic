@@ -5,7 +5,8 @@ export default defineConfig({
   kind: SchemaKind.API,
   outputs: {
     types: {
-      [TargetLanguage.TypeScript]: { enabled: true }
+      [TargetLanguage.TypeScript]: { enabled: true },
+      [TargetLanguage.Go]: { enabled: true }
     },
     api: { enabled: true },
     sdk: {

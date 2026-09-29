@@ -32,6 +32,7 @@ dependencies:
   - { name: base, kind: DB }
 outputs:
   types:
+    go: { enabled: true }
     typescript: { enabled: true }
   api: { enabled: true }
   sdk:
@@ -61,6 +62,7 @@ outputs:
 		filepath.Join(outputRoot, "types", "go", "base"),
 	}, services[0].OutputDirs)
 	assert.Equal(t, []string{
+		filepath.Join(outputRoot, "types", "go", "leaf"),
 		filepath.Join(outputRoot, "types", "typescript", "leaf"),
 		filepath.Join(outputRoot, "api", "leaf"),
 		filepath.Join(outputRoot, "sdk", "typescript", "leaf"),

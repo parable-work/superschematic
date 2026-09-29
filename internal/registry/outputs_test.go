@@ -173,3 +173,65 @@ func TestParseOutputsRefusesAnSDKWithoutItsTypes(t *testing.T) {
 		t.Errorf("EnabledSDKLanguages = %v", got)
 	}
 }
+
+// The API server imports the types package of its language, so an API
+// whose language has no types output would name a package the build never
+// writes. The language is read after its default (GO), and the error says
+// what the server uses the types for.
+func TestParseOutputsRefusesAnAPIWithoutItsTypes(t *testing.T) {
+	enabled := map[string]any{"enabled": true}
+	for _, tc := range []struct {
+		api   map[string]any
+		types map[string]any
+		want  string
+	}{
+		{
+			api:  map[string]any{"enabled": true},
+			want: "outputs.api with language GO needs outputs.types.go: the Go API server decodes requests into the Go types and its handler interfaces take and return them",
+		},
+		{
+			api:   map[string]any{"enabled": true, "language": "RUST"},
+			types: map[string]any{"go": enabled},
+			want:  "outputs.api with language RUST needs outputs.types.rust: the Rust API server's crate depends on the Rust types crate",
+		},
+		{
+			api:   map[string]any{"enabled": true, "language": "TYPESCRIPT"},
+			types: map[string]any{"go": enabled, "typescript": map[string]any{"enabled": false}},
+			want:  "outputs.api with language TYPESCRIPT needs outputs.types.typescript: the TypeScript API server validates requests with the TypeScript types and its handler interfaces take and return them",
+		},
+	} {
+		raw := map[string]any{"api": tc.api}
+		if tc.types != nil {
+			raw["types"] = tc.types
+		}
+		_, err := ParseOutputs(raw, coreOutputRegistry(t))
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("api %v, types %v: error = %v, want %q", tc.api, tc.types, err, tc.want)
+		}
+	}
+
+	// The API and SDK refusals are reported together, the API first.
+	_, err := ParseOutputs(map[string]any{
+		"api": map[string]any{"enabled": true, "language": "RUST"},
+		"sdk": map[string]any{"rust": enabled},
+	}, coreOutputRegistry(t))
+	if err == nil || !strings.HasPrefix(err.Error(), "outputs.api with language RUST needs outputs.types.rust") ||
+		!strings.Contains(err.Error(), "\noutputs.sdk.rust needs outputs.types.rust") {
+		t.Fatalf("an API and an SDK without their types: %v", err)
+	}
+
+	for _, raw := range []map[string]any{
+		// Each language with its types.
+		{"api": map[string]any{"enabled": true}, "types": map[string]any{"go": enabled}},
+		{"api": map[string]any{"enabled": true, "language": "RUST"}, "types": map[string]any{"rust": enabled}},
+		{"api": map[string]any{"enabled": true, "language": "TYPESCRIPT"}, "types": map[string]any{"typescript": enabled}},
+		// A disabled API imports nothing.
+		{"api": map[string]any{"enabled": false, "language": "RUST"}},
+		// An unsupported language is the API generator's error to report.
+		{"api": map[string]any{"enabled": true, "language": "PYTHON"}},
+	} {
+		if _, err := ParseOutputs(raw, coreOutputRegistry(t)); err != nil {
+			t.Errorf("%v: %v", raw, err)
+		}
+	}
+}
