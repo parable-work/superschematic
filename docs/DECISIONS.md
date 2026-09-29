@@ -1354,3 +1354,28 @@ encrypted. The Rust server has no decryption step and does not refuse an
 encrypted operation of any form; that gap predates this entry.
 
 The rule is reversible until the first release.
+
+### D20, amended: the envelope carries the body itself, and a route that cannot decrypt it is refused
+
+Three gaps in how an encrypted operation travels, each older than D20:
+
+- The Go and Rust SDKs wrapped the request body before they encrypted it,
+  so the envelope opened to `{"input": <body>}`. The Go server's payload
+  decryptor hands the plaintext to the argument decoder unchanged, so every
+  argument was missing: a required scalar argument answered 400, and an
+  input type decoded empty. The TypeScript and Python SDKs encrypted the
+  body itself.
+- The Rust server neither decrypted an encrypted operation nor refused it.
+  It handed the envelope to the implementation as the body.
+- An operation in an `Encrypted` set, declared `@encrypted` or returning an
+  `EncryptedField<T>` could be a `GET` or `DELETE`. The Go router mounted
+  the payload decryptor on it, but no SDK encrypts a request without a
+  body, so the decryptor found no envelope and answered 400.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every SDK encrypts the JSON an unencrypted request would send. One test sends Go SDK calls through the generated Go server and the runtime's payload decryptor, with a key the test generates, and checks the arguments the implementation receives. Another opens the Rust SDK's envelopes and compares each plaintext with the body. | Teaching the Go server to unwrap `input`. The plaintext would then depend on which SDK sent it, while the TypeScript and Python SDKs, the documented envelope and the decryptor already agree on the body itself. |
+| The Rust server's generator refuses an encrypted operation that is not `@manualRouteRegistration` and names the operation and the fix, as the TypeScript server's generator does (D15). The Rust router mounts every operation and hands its implementation the body as JSON, so a manual operation's implementation receives the envelope and decrypts it. | A decryption step in the Rust runtime, the counterpart of the Go runtime's `PayloadDecryptor` seam. Nothing needs it yet, and it can replace the refusal later. |
+| The loader's verify pass refuses an encrypted `GET` or `DELETE` operation, as it already refuses an `EncryptedField<T>` argument of one. apigen refuses the same once it resolves the method, which also catches an operation without a method that its set's name makes a `GET`. | Skipping decryption for a method without a body. That keeps the router working, but it drops the encryption the schema declares without a word, and no fixture or example declares such an operation. |
+
+The rules are reversible until the first release.

@@ -116,22 +116,26 @@ export class CardMutations {
 The Go server takes an encrypted operation's whole request body as one
 envelope, `{ "algorithm", "payload", "keyId" }` plus `encryptedKey` and
 `iv` for the hybrid algorithm, where `payload` is the body's JSON,
-encrypted. It opens the envelope with its `Config.PayloadDecryptor` before
-it decodes any argument, and answers 400 to a plain JSON body. The
-generated SDKs send the envelope, encrypted with the public key from their
-encryption config or the call's options (`publicEncryptionKey`). Every
-argument in the body travels encrypted, not only the one declared
-`EncryptedField<T>`; `storeCard`'s path parameter `customerId` does not.
+encrypted: the same JSON an unencrypted request would send, with nothing
+wrapped around it. It opens the envelope with its `Config.PayloadDecryptor`
+before it decodes any argument, and answers 400 to a plain JSON body. The
+generated SDKs in all four languages send the envelope, encrypted with the
+public key from their encryption config or the call's options
+(`publicEncryptionKey`). Every argument in the body travels encrypted, not
+only the one declared `EncryptedField<T>`; `storeCard`'s path parameter
+`customerId` does not.
 
 The envelope is the body of a `POST`, `PUT` or `PATCH` request. The build
-refuses an `EncryptedField<T>` argument that would travel outside it: a
-path or query parameter, or any argument of a `GET` or `DELETE`
-operation. On a field of an object type, `EncryptedField<T>` is recorded in
-the IR and changes no generated code: an input type with such a field
-does not make its operation encrypted. The TypeScript server has no
-decryption step, so it refuses an encrypted operation that is not
-`@manualRouteRegistration`
-([TypeScript](/superschematic/install/typescript/#serve-a-generated-api)).
+refuses an encrypted operation whose method is `GET` or `DELETE`, declared
+or its set's default, since that request has no body to encrypt. It also
+refuses an `EncryptedField<T>` argument that would travel outside the
+envelope: a path or query parameter. On a field of an object type,
+`EncryptedField<T>` is recorded in the IR and changes no generated code: an
+input type with such a field does not make its operation encrypted. The
+TypeScript and Rust servers have no decryption step, so they refuse an
+encrypted operation that is not `@manualRouteRegistration`
+([TypeScript](/superschematic/install/typescript/#serve-a-generated-api),
+[Rust](/superschematic/install/rust/#serve-a-generated-api)).
 
 ## Traffic controls
 

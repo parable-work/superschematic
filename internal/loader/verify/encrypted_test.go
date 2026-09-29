@@ -4,6 +4,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -90,5 +92,93 @@ func TestPlainArgumentsAreNotChecked(t *testing.T) {
 	})
 	if msgs := encryptedArgumentErrors(schema); len(msgs) != 0 {
 		t.Errorf("errors = %v, want none", msgs)
+	}
+}
+
+// encryptedOperationSchema is an API schema with one operation, readCard,
+// in the operation set CardOperations; edit shapes both per case.
+func encryptedOperationSchema(edit func(set *ir.OperationSet, op *ir.FieldDef)) *ir.Schema {
+	op := &ir.FieldDef{
+		Name:       "readCard",
+		TypeRef:    ir.TypeRef{Name: "boolean"},
+		HTTPMethod: "POST",
+		RestPath:   "cards/{id}",
+		Arguments:  []*ir.ArgumentDef{{Name: "id", TypeRef: ir.TypeRef{Name: "string"}, Required: true}},
+	}
+	set := &ir.OperationSet{Name: "CardOperations", Operations: []*ir.FieldDef{op}}
+	edit(set, op)
+	schema := ir.NewSchema("cards", ir.SchemaKindAPI)
+	schema.OperationSets = []*ir.OperationSet{set}
+	return schema
+}
+
+// encryptedOperationErrors runs the whole verify pass, so each case also
+// shows that Run carries the check.
+func encryptedOperationErrors(schema *ir.Schema) []string {
+	r := Run(schema, Input{Registry: registry.New(naming.Naming{})})
+	msgs := make([]string, 0, len(r.Errors))
+	for _, d := range r.Errors {
+		msgs = append(msgs, d.Msg)
+	}
+	return msgs
+}
+
+// TestEncryptedGetAndDeleteOperationsAreRefused: an Encrypted set, an
+// @encrypted operation or an EncryptedField<T> result makes a GET or DELETE
+// operation encrypted, but neither request has a body. The SDKs would send
+// it unencrypted and the Go server's payload decryptor would answer 400.
+func TestEncryptedGetAndDeleteOperationsAreRefused(t *testing.T) {
+	const bySet = "its operation set is Encrypted"
+	const byOp = "the operation is @encrypted or returns an EncryptedField<T>"
+	const fix = " request has no body to encrypt; declare POST, PUT or PATCH, or drop the encryption"
+	for _, tc := range []struct {
+		name                      string
+		setEncrypted, opEncrypted bool
+		method, want              string
+	}{
+		{"Encrypted set, GET", true, false, "GET", "CardOperations.readCard: " + bySet + ", but a GET" + fix},
+		{"Encrypted set, DELETE", true, false, "DELETE", "CardOperations.readCard: " + bySet + ", but a DELETE" + fix},
+		{"encrypted operation, GET", false, true, "GET", "CardOperations.readCard: " + byOp + ", but a GET" + fix},
+		{"encrypted operation, delete", false, true, "delete", "CardOperations.readCard: " + byOp + ", but a DELETE" + fix},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msgs := encryptedOperationErrors(encryptedOperationSchema(func(set *ir.OperationSet, op *ir.FieldDef) {
+				set.Encrypted = tc.setEncrypted
+				op.Encrypted = tc.opEncrypted
+				op.HTTPMethod = tc.method
+			}))
+			if !slices.Equal(msgs, []string{tc.want}) {
+				t.Errorf("errors = %q, want %q", msgs, tc.want)
+			}
+		})
+	}
+}
+
+// TestEncryptedBodyOperationsAreAccepted: a POST, PUT or PATCH operation
+// carries its envelope in the body. An operation without a method takes
+// its set's default at generation, where apigen checks it.
+func TestEncryptedBodyOperationsAreAccepted(t *testing.T) {
+	for _, method := range []string{"POST", "PUT", "PATCH", ""} {
+		for _, setEncrypted := range []bool{true, false} {
+			schema := encryptedOperationSchema(func(set *ir.OperationSet, op *ir.FieldDef) {
+				set.Encrypted = setEncrypted
+				op.Encrypted = !setEncrypted
+				op.HTTPMethod = method
+			})
+			if msgs := encryptedOperationErrors(schema); len(msgs) != 0 {
+				t.Errorf("%q (set Encrypted %t): %v", method, setEncrypted, msgs)
+			}
+		}
+	}
+}
+
+// TestPlainGetOperationsAreNotChecked: a GET or DELETE operation that
+// nothing encrypts passes.
+func TestPlainGetOperationsAreNotChecked(t *testing.T) {
+	for _, method := range []string{"GET", "DELETE"} {
+		schema := encryptedOperationSchema(func(_ *ir.OperationSet, op *ir.FieldDef) { op.HTTPMethod = method })
+		if msgs := encryptedOperationErrors(schema); len(msgs) != 0 {
+			t.Errorf("%s: %v", method, msgs)
+		}
 	}
 }

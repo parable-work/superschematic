@@ -52,3 +52,22 @@ func checkEncryptedArguments(namespace string, op *ir.FieldDef, method string, p
 	}
 	return nil
 }
+
+// checkEncryptedMethod refuses an operation its set (Encrypted), @encrypted
+// or an EncryptedField<T> result makes encrypted when its method, declared
+// or its set's default, is not POST, PUT or PATCH. Such a request has no
+// body: the SDKs send it unencrypted, and the router's payload decryptor
+// would find no envelope to open. The loader's verify pass refuses a
+// declared GET or DELETE; this also catches an operation without a method
+// that its set's name makes a GET. checkEncryptedArguments covers an
+// operation encrypted by an argument.
+func checkEncryptedMethod(namespace string, set *ir.OperationSet, op *ir.FieldDef, method string) error {
+	if !set.Encrypted && !op.Encrypted {
+		return nil
+	}
+	switch method {
+	case "POST", "PUT", "PATCH":
+		return nil
+	}
+	return fmt.Errorf("apigen: operation %s.%s is encrypted (an Encrypted operation set, @encrypted, or an EncryptedField<T> result), but a %s request has no body to encrypt; declare POST, PUT or PATCH, or drop the encryption", namespace, op.Name, method)
+}
