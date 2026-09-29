@@ -68,9 +68,14 @@ class FeedItem(BaseModel):
     # Free-form details by name, such as origin or harvest.
     attributes: Dict[str, str] = Field(..., alias="attributes", serialization_alias="attributes")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -260,9 +265,14 @@ class Price(BaseModel):
 
     currency: Currency = Field(..., alias="currency", serialization_alias="currency")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -283,6 +293,11 @@ class Price(BaseModel):
         # Validate currency
         if self.currency is None:
             errors.add_field_error("currency", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "amount_cents": "amountCents",
+            })
 
         return errors
 
