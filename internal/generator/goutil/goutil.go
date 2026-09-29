@@ -1,6 +1,7 @@
 package goutil
 
 import (
+	"sort"
 	"strings"
 	"text/template"
 
@@ -61,6 +62,28 @@ func GoPrivateIdentifier(value string) string {
 	}
 
 	return strings.ToLower(publicName[:1]) + publicName[1:]
+}
+
+// UniqueModules returns the module paths in lists, sorted, without
+// duplicates, empty entries or any of exclude: the generated modules a
+// go.mod requires or replaces.
+func UniqueModules(exclude []string, lists ...[]string) []string {
+	seen := map[string]bool{"": true}
+	for _, modulePath := range exclude {
+		seen[modulePath] = true
+	}
+	var modules []string
+	for _, list := range lists {
+		for _, modulePath := range list {
+			if seen[modulePath] {
+				continue
+			}
+			seen[modulePath] = true
+			modules = append(modules, modulePath)
+		}
+	}
+	sort.Strings(modules)
+	return modules
 }
 
 // TemplateFuncs returns shared Go template functions merged with optional extras.

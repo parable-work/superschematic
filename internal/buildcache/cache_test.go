@@ -122,6 +122,45 @@ func TestComputeInputHashesPropagatesDependencyChanges(t *testing.T) {
 	assert.Equal(t, before["other"], after["other"])
 }
 
+// TestComputeInputHashesFollowAuthDBDependencies changes a dependency of an
+// API's authDb that the API does not declare: the API go.mod requires the Go
+// types modules the authDb's ORM reaches, so its key must change too.
+func TestComputeInputHashesFollowAuthDBDependencies(t *testing.T) {
+	repo := t.TempDir()
+	writeFile(t, filepath.Join(repo, "schemas", "package.json"), "{}")
+	writeFile(t, filepath.Join(repo, "schemas", "bun.lock"), "")
+
+	commonDir := filepath.Join(repo, "schemas", "services", "common")
+	dbDir := filepath.Join(repo, "schemas", "services", "db")
+	apiDir := filepath.Join(repo, "schemas", "services", "api")
+	writeFile(t, filepath.Join(commonDir, "src", "common.schema.ts"), "export type Address = {}")
+	writeFile(t, filepath.Join(dbDir, "src", "db.schema.ts"), "export class Order {}")
+	writeFile(t, filepath.Join(apiDir, "src", "api.schema.ts"), "export class Status {}")
+
+	services := []buildplan.Service{
+		{Name: "common", Dir: commonDir, Config: &schemaconfig.SchemaConfig{Name: "common", Kind: ir.SchemaKindGeneral}},
+		{
+			Name: "db",
+			Dir:  dbDir,
+			Config: &schemaconfig.SchemaConfig{
+				Name:         "db",
+				Kind:         ir.SchemaKindDB,
+				Dependencies: []schemaconfig.ServiceDependency{{Name: "common", Kind: ir.SchemaKindGeneral}},
+			},
+		},
+		{Name: "api", Dir: apiDir, Config: &schemaconfig.SchemaConfig{Name: "api", Kind: ir.SchemaKindAPI, Public: true, AuthDB: "db"}},
+	}
+
+	before, err := ComputeInputHashes(services, repo, naming.Naming{})
+	require.NoError(t, err)
+	writeFile(t, filepath.Join(commonDir, "src", "common.schema.ts"), "export type Address = { city: string }")
+	after, err := ComputeInputHashes(services, repo, naming.Naming{})
+	require.NoError(t, err)
+
+	assert.NotEqual(t, before["db"], after["db"])
+	assert.NotEqual(t, before["api"], after["api"])
+}
+
 func TestAuthoringImportsInvalidateInputHash(t *testing.T) {
 	repo := t.TempDir()
 	writeFile(t, filepath.Join(repo, "vendor", "scalars", "permissions.yml"), "{}")

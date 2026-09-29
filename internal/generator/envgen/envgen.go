@@ -8,6 +8,7 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -34,6 +35,11 @@ type ConfigOutput struct {
 	ModulePath string
 	// TypesModule is the Go module path for the types package.
 	TypesModule string
+	// IndirectModules are the Go types modules TypesModule imports,
+	// directly or through one another, sorted; the dispatch layer sets them
+	// before WriteConfigModule, whose go.mod requires them as indirect and
+	// replaces them.
+	IndirectModules []string
 	// Fields are the environment variable fields to generate.
 	Fields []ConfigField
 	// Enums are enum types used by the config fields.
@@ -500,6 +506,7 @@ func generateFile(templateName, outputPath string, data any) error {
 // templateFuncs returns template functions.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
+		"base":              path.Base,
 		"title":             codegen.TitleCase,
 		"toSnakeCase":       codegen.ToSnakeCase,
 		"toEnvGoName":       toEnvGoName,
