@@ -173,7 +173,7 @@ impl {{.Namespace.StructName}} {
 {{- end}}
 {{- end}}
 {{- if .PathArgs}}
-        let path = format!("{{.PathFormat}}", {{join .PathArgs ", "}});
+        let path = &format!("{{.PathFormat}}", {{join .PathArgs ", "}});
 {{- else}}
         let path = "{{.PathFormat}}";
 {{- end}}
@@ -189,7 +189,7 @@ impl {{.Namespace.StructName}} {
 {{- if .IsArray}}
 {{- if .Required}}
 {{- if .ValidateListMin}}
-        if input.{{.RustName}}.len() < {{.ValidateListMin}} {
+        if {{if .ListMinIsOne}}input.{{.RustName}}.is_empty(){{else}}input.{{.RustName}}.len() < {{.ValidateListMin}}{{end}} {
             return Err(SDKError::config("{{.Name}} must contain at least {{.ValidateListMin}} items"));
         }
 {{- end}}
@@ -201,7 +201,7 @@ impl {{.Namespace.StructName}} {
 {{- else}}
         if let Some(values) = &input.{{.RustName}} {
 {{- if .ValidateListMin}}
-            if values.len() < {{.ValidateListMin}} {
+            if {{if .ListMinIsOne}}values.is_empty(){{else}}values.len() < {{.ValidateListMin}}{{end}} {
                 return Err(SDKError::config("{{.Name}} must contain at least {{.ValidateListMin}} items"));
             }
 {{- end}}
@@ -312,12 +312,12 @@ impl {{.Namespace.StructName}} {
         let body = Some(serde_json::to_value(encrypted)?);
 
         self.client
-            .request_json("{{.HTTPMethod}}", &path, &query_params, body, request_options)
+            .request_json("{{.HTTPMethod}}", path, &query_params, body, request_options)
             .await
 {{- else if .HasInput}}
         let body = Some(input_value);
         self.client
-            .request_json("{{.HTTPMethod}}", &path, &query_params, body, options)
+            .request_json("{{.HTTPMethod}}", path, &query_params, body, options)
             .await
 {{- else if and .HasScalarArgs (eq .HTTPMethod "GET")}}
         // GET endpoint: scalar args go as query parameters, not request body.
@@ -348,16 +348,16 @@ impl {{.Namespace.StructName}} {
 {{- end}}
 {{- end}}
         self.client
-            .request_json("{{.HTTPMethod}}", &path, &query_params, None, options)
+            .request_json("{{.HTTPMethod}}", path, &query_params, None, options)
             .await
 {{- else if .HasScalarArgs}}
         let body = Some(serde_json::to_value(input)?);
         self.client
-            .request_json("{{.HTTPMethod}}", &path, &query_params, body, options)
+            .request_json("{{.HTTPMethod}}", path, &query_params, body, options)
             .await
 {{- else}}
         self.client
-            .request_json("{{.HTTPMethod}}", &path, &query_params, None, options)
+            .request_json("{{.HTTPMethod}}", path, &query_params, None, options)
             .await
 {{- end}}
 {{- end}}
@@ -438,7 +438,7 @@ impl {{.Namespace.StructName}} {
 {{- end}}
 {{- end}}
 {{- if .PathArgs}}
-        let path = format!("{{.PathFormat}}", {{join .PathArgs ", "}});
+        let path = &format!("{{.PathFormat}}", {{join .PathArgs ", "}});
 {{- else}}
         let path = "{{.PathFormat}}";
 {{- end}}
@@ -457,7 +457,7 @@ impl {{.Namespace.StructName}} {
 {{- end}}
 
         self.client
-            .request_multipart("{{.HTTPMethod}}", &path, &query_params, body, options)
+            .request_multipart("{{.HTTPMethod}}", path, &query_params, body, options)
             .await
     }
 {{- end}}

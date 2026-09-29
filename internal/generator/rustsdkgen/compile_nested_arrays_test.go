@@ -15,7 +15,8 @@ import (
 // TestNestedArraysSDKCrateBuildsAndRuns generates the Rust types crate and
 // the Rust SDK crate of fixture-nested-arrays-api, with grid.paint and
 // grid.placeOrder added, into a temp tree laid out as a build writes it,
-// and runs cargo test on the SDK crate with nestedArraysSDKTest:
+// checks the SDK crate with cargo clippy (cargoClippyAndTest) and runs
+// cargo test on it with nestedArraysSDKTest:
 // Vec<Vec<T>> arguments and responses cross a local HTTP server as nested
 // JSON arrays, an input type with lists of lists passes the SDK's schema
 // validation, and an input that breaks a list bound or a nested object's
@@ -58,11 +59,25 @@ superscalar = { path = "`+filepath.ToSlash(paths.ScalarRust)+`" }
 	crate := strings.ReplaceAll(sdkOutput.CrateName, "-", "_")
 	writeFile(t, filepath.Join(sdkDir, "tests", "nested_arrays.rs"), strings.ReplaceAll(nestedArraysSDKTest, "SDK_CRATE", crate))
 
-	cmd := exec.Command(cargoPath, "test", "--quiet")
-	cmd.Dir = sdkDir
-	cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+cargoTargetDir(t))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("cargo test on the generated SDK crate: %v\n%s", err, out)
+	cargoClippyAndTest(t, cargoPath, sdkDir)
+}
+
+// cargoClippyAndTest runs cargo clippy on every target of the generated
+// crate in dir with warnings denied, as a consumer's CI would, and then
+// cargo test. Both share one target directory.
+func cargoClippyAndTest(t *testing.T, cargoPath, dir string) {
+	t.Helper()
+	targetDir := cargoTargetDir(t)
+	for _, args := range [][]string{
+		{"clippy", "--quiet", "--all-targets", "--", "-D", "warnings"},
+		{"test", "--quiet"},
+	} {
+		cmd := exec.Command(cargoPath, args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+targetDir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("cargo %s on the generated SDK crate: %v\n%s", args[0], err, out)
+		}
 	}
 }
 
@@ -176,7 +191,7 @@ async fn lists_of_lists_cross_the_wire() {
 
     let stored = sdk
         .grid
-        .replace_labels(id.clone(), ReplaceLabelsInput { labels: strings(&[&["a", "b"], &[]]) }, None)
+        .replace_labels(id, ReplaceLabelsInput { labels: strings(&[&["a", "b"], &[]]) }, None)
         .await
         .unwrap();
     let (method, path, body) = requests.recv().unwrap();
@@ -188,7 +203,7 @@ async fn lists_of_lists_cross_the_wire() {
 
     let labels = sdk
         .grid
-        .grid_labels(id.clone(), Some(&GridLabelsQueryParams { limit: Some(2.0) }), None)
+        .grid_labels(id, Some(&GridLabelsQueryParams { limit: Some(2.0) }), None)
         .await
         .unwrap();
     let (method, path, _) = requests.recv().unwrap();
@@ -199,7 +214,7 @@ async fn lists_of_lists_cross_the_wire() {
     let polygons = sdk
         .grid
         .paint(
-            id.clone(),
+            id,
             PaintInput {
                 shades: vec![vec![types::Shade::Dark], vec![]],
                 polygons: Some(vec![vec![types::Point { x: 3.0, y: 4.0 }]]),

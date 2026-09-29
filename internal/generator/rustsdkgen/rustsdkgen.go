@@ -197,6 +197,12 @@ func (arg ScalarArg) NeedsRegex() bool {
 	return !arg.IsArray && arg.ValidatePattern != ""
 }
 
+// ListMinIsOne reports whether listMin only refuses an empty list, which
+// the namespace template checks with is_empty() (clippy::len_zero).
+func (arg ScalarArg) ListMinIsOne() bool {
+	return arg.ValidateListMin != nil && *arg.ValidateListMin == 1
+}
+
 // NeedsGeneratedValidation reports whether the namespace template emits scalar validation for this arg.
 func (arg ScalarArg) NeedsGeneratedValidation() bool {
 	if arg.IsArray {
