@@ -93,7 +93,7 @@ var AuthSnippets = []string{
 	"routesSetupPre",            // RegisterRoutes setup before LoggerMiddleware (public APIs)
 	"routesSetup",               // RegisterRoutes setup after DatabaseMiddleware (public APIs)
 	"routesProtectedMiddleware", // middlewares after cfg.AuthMiddleware on the protected group
-	"routePermissions",          // per-endpoint permission middleware; data is the EndpointInfo
+	"routePermissions",          // per-endpoint permission middleware, after the rate and body limits and before the decryptor and timeout; data is the EndpointInfo
 	// module.tmpl
 	"moduleRequires", // extra require lines
 	"moduleReplaces", // extra replace lines

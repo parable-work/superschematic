@@ -1106,7 +1106,10 @@ The `api` generator takes the provider `auth_provider` selects
   through `authSnippet`. `apigen.AuthSnippets` lists the eighteen snippets
   (imports, context shims, store adapters, config fields, route setup, the
   per-route permission middleware, `go.mod` lines). A provider defines every
-  one, empty when it adds nothing. The generator checks the set when it
+  one, empty when it adds nothing. The per-route permission middleware runs
+  after the route's rate and body limits and before its payload decryptor
+  and timeout, so it reads the caller from the request context, never from
+  the body. The generator checks the set when it
   parses the templates, before it writes a file, and
   `registry.AuthSnippetFunc(provider)` runs the same check in a provider's
   own test;
