@@ -9,7 +9,7 @@ from enum import Enum
 {{- end}}
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilterableEndpoints}} FilterSpec,{{end}} SyncHTTPClient
+from ..client import EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilterableEndpoints}} FilterSpec,{{end}} SyncHTTPClient{{if .Namespace.HasPathParams}}, path_segment{{end}}
 from ..errors import ValidationError
 
 _BUILTIN_VALIDATION_TYPES: dict[str, Any] = {

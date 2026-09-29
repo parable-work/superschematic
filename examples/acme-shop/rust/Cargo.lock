@@ -34,6 +34,7 @@ dependencies = [
  "acme-shop-orders-types",
  "aes-gcm",
  "base64 0.22.1",
+ "percent-encoding",
  "rand",
  "regex",
  "reqwest",

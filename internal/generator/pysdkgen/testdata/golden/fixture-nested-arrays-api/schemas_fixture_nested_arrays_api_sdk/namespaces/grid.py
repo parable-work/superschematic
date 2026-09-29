@@ -6,7 +6,7 @@ import importlib
 import re
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import EncryptedRequestOptions, FilePart, SyncHTTPClient
+from ..client import EncryptedRequestOptions, FilePart, SyncHTTPClient, path_segment
 from ..errors import ValidationError
 
 _BUILTIN_VALIDATION_TYPES: dict[str, Any] = {
@@ -340,7 +340,7 @@ class GridNamespace:
         if field_errors:
             raise ValidationError({field_name: field_errors})
     def get_grid(self, id: str, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> GridView:
-        path = f"/api/grids/{id}"
+        path = f"/api/grids/{path_segment(id)}"
         query_params: dict[str, Any] | None = None
         response = self._client.request(
             method="GET",
@@ -353,7 +353,7 @@ class GridNamespace:
         )
         return self._coerce_response(response, "GridView", False)
     def grid_labels(self, id: str, limit: float | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> list[list[str]]:
-        path = f"/api/grids/{id}/labels"
+        path = f"/api/grids/{path_segment(id)}/labels"
         query_params: dict[str, Any] | None = {}
         if limit is not None:
             query_params["limit"] = limit
@@ -370,7 +370,7 @@ class GridNamespace:
         )
         return self._coerce_response(response, "", True)
     def replace_labels(self, id: str, labels: list[list[str]], timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> GridView:
-        path = f"/api/grids/{id}/labels"
+        path = f"/api/grids/{path_segment(id)}/labels"
         query_params: dict[str, Any] | None = None
         payload: dict[str, Any] = {}
         if labels is None:

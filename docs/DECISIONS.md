@@ -1471,3 +1471,28 @@ none of the schema's parsing, defaults or secret handling.
 | The loader reads no `.env` file. The process that starts the service fills the environment. | Loading `.env` as the Go loader does through `godotenv`, which would add a dependency to every types package |
 
 The rule is reversible until the first release.
+
+## D23. An SDK encodes each path parameter once, as one segment
+
+The TypeScript, Go, Rust and Python SDKs put a path parameter's value into
+the path as it was. The TypeScript SDK's `new URL` and the Rust SDK's
+`Url::set_path` encode a space and non-ASCII text but leave `%` and `/` as
+they are, and `new URL` cuts the path at `?` and `#`. The Go SDK's
+`http.NewRequest` refuses `100%` as a malformed URL, and `/`, `?` and `#`
+split the value. The Python SDK encoded nothing: a space raised
+`InvalidURL`, non-ASCII text `UnicodeEncodeError`, and `?` and `#` broke
+the URL. A server decodes a path parameter exactly once (D15, amended),
+so `x%41y` reached the implementation as `xAy`, `a/b` reached another
+route or none, and `%` could not be sent at all.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each SDK formats a path parameter value as before (a template literal, `fmt.Sprint`, `Display`, `str`), then writes it percent-encoded once, as one path segment: TypeScript with `encodeURIComponent`, Go with `url.PathEscape` (`pathSegment` in `namespaces/common.go`), Rust with the `percent-encoding` crate and the bytes `encodeURIComponent` leaves as they are (`runtime::path_segment`), Python with `urllib.parse.quote(value, safe="")` (`path_segment` in `client.py`). A scoped namespace's scope value is encoded the same way. | Encoding the path once it is built, which cannot tell a `/` in a value from the one between segments; leaving the encoding to each URL library, which is the behavior above |
+| The SDKs need not write the same bytes. Go's `url.PathEscape` leaves `$&+:=@` as they are, and Go and Python escape `!'()*`, which `encodeURIComponent` leaves. Every server decodes either form to the same value. | An encoder of each SDK's own that writes `encodeURIComponent`'s bytes, which no server needs |
+| One test per SDK sends `%`, `a%25b`, `100%`, `x%41y`, `a/b`, `a b`, a non-ASCII value, `a?b`, `a#b` and `a+b` as the label of `grid.cell` (`sdktest.AddCellOperation`, `GET grids/{id}/cells/{label}`), checks the segment on the wire, and checks that a server that decodes it once receives the label. | Checking only the generated source |
+
+A value of `.` or `..` still cannot be sent through the TypeScript or Rust
+SDK: the WHATWG URL parser both build on removes a dot segment, encoded
+(`%2E`) or not. The Go and Python SDKs send it as it is.
+
+The rule is reversible until the first release.
