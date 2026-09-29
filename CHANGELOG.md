@@ -13,41 +13,14 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
-- Every generated Go module's `go.mod` requires and replaces each generated
-  types module it reaches, not only the ones it imports. Go takes no
-  `replace` from a dependency's `go.mod`, so with `[paths]` set, a public
-  API whose `authDb` takes a type from a General service (`api` -> `orm/db`
-  -> `types/go/db` -> `types/go/common`) had no replace for
-  `types/go/common`, and `go mod tidy` in the API module failed fetching it
-  (`unrecognized import path ... 404 Not Found`). A types module two hops
-  from another had the same gap, and so did the ORM built on it; the Go SDK,
-  which copies the types modules' replace lines, lacked only the require
-  lines. The generators now walk each schema's imports through its
-  dependencies and keep the ones its Go types module imports a module for
-  (an enum, union or object type; a scalar imports none). A types module
-  requires the modules it reaches only through another one as `// indirect`.
-  The ORM, the Go SDK and the standalone env-config module require every
-  module their types module reaches as `// indirect`, and the Go API server
-  requires those of its own types module, the `authDb`'s types module and
-  those that one reaches. Each of them replaces every such module with its
-  directory under `types/go/`. The API `go.mod` writes its types-module
-  replace lines as one sorted list, so a public API's replace of the
-  `authDb` types module now comes before the ORM's. `.deps.json` is
-  unchanged: build-all skips `// indirect` requires when it reads a
-  `go.mod`, and `Closure` walks the rest. build-all's cache key for a
-  service with an `authDb` now covers the `authDb`'s dependencies, since the
-  API `go.mod` names the modules they produce. Output for a service whose Go
-  modules reach no generated module past the ones they import is unchanged,
-  apart from the new require line in a public API's `go.mod`. Patch.
-- build-all's dependency graph (`dist/.deps.json`) records the requirements
-  of a generated Go SDK. The Go SDK's `go.mod` writes each one as a
-  single-line `require <module> v0.0.0`, and build-all read only the lines
-  of a `require ( ... )` block, so it recorded none for an SDK. The edge
-  build-all adds from an SDK to the types package of its schema hid the
-  gap, except for a schema whose name ends in `-types`: its Go SDK had no
-  dependencies, and `Closure` from it left out its types module. build-all
-  now reads both forms and still skips `// indirect` requirements.
-  `.deps.json` is unchanged for every other Go SDK. Patch.
+- `scripts/bump_version.py` versions the Python runtime's own entry in
+  `runtime/schema/python/uv.lock` (`superschematic-schema-runtime`), in
+  the PEP 440 form its `pyproject.toml` carries: `set` writes it and
+  `check` fails when it disagrees with `versions.env`. The committed
+  lockfile said `0.1.0` while every other site said `0.0.0`, so `uv sync`
+  (and `make setup`) rewrote it and left the tree dirty; it now says
+  `0.0.0`. The script has tests, which CI's scrub job and
+  `make versions` run. Patch (release tooling only).
 - The generated TypeScript validator checks a scalar field's own rules.
   For a field typed with a scalar it ran the scalar's validator and the
   list bounds only, and dropped the field's `minLength`, `maxLength`,
