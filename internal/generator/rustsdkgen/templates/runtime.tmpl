@@ -97,6 +97,26 @@ pub fn filters_to_query_params(filters: &std::collections::HashMap<String, Filte
     params
 }
 {{- end }}
+{{- if .ChecksQueryListItems}}
+
+/// Checks `text`, item `index` of the list query parameter `name`, which is
+/// sent as one comma-separated value (?name=a,b). The route splits that
+/// value on commas, trims each item and refuses an empty one, so an item
+/// that is empty or blank, or holds a comma or surrounding space, cannot be
+/// sent as it is.
+pub fn check_query_list_item(name: &str, index: usize, text: &str) -> Result<(), SDKError> {
+    if text.trim().is_empty() {
+        return Err(SDKError::config(format!("{}[{}] is required", name, index)));
+    }
+    if text.contains(',') || text.trim() != text {
+        return Err(SDKError::config(format!(
+            "{}[{}] must not contain a comma or surrounding space",
+            name, index
+        )));
+    }
+    Ok(())
+}
+{{- end}}
 
 #[derive(Debug, Clone)]
 pub struct UploadFile {

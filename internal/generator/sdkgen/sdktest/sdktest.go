@@ -1,12 +1,31 @@
-// Package sdktest holds schema edits the SDK generator tests and the
-// generated API server test share.
+// Package sdktest holds schemas and schema edits the SDK generator tests
+// and the generated API server test share.
 package sdktest
 
 import (
 	"fmt"
+	"path/filepath"
+	"runtime"
 
+	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
 )
+
+// QueryListsService is the name of the schema LoadQueryListsService loads.
+const QueryListsService = "query-lists-api"
+
+// LoadQueryListsService loads query-lists-api from this package's testdata:
+// one GET operation whose list query parameters (QueryParam<T[]>) are of an
+// enum, a UUID scalar, an integer scalar, strings with rules and booleans,
+// beside a scalar query parameter. It is local to the SDK generator tests,
+// so no other generator's goldens read it.
+func LoadQueryListsService() (*ir.Schema, error) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return nil, fmt.Errorf("locate package sdktest")
+	}
+	return loader.LoadService(filepath.Join(filepath.Dir(file), "testdata", QueryListsService))
+}
 
 // AddPaintOperation adds grid.paint to the loaded fixture-nested-arrays-api
 // schema: a PUT whose body arguments are a required list of lists of the
