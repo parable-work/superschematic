@@ -15,12 +15,14 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/graphdesc"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	ir "github.com/parable-work/superschematic/ir"
@@ -255,6 +257,11 @@ type ModuleOutput struct {
 	HasInt64ScalarParsers    bool
 	HasJSONScalarParsers     bool
 
+	// IndirectModuleDependencies are the Go types modules this module
+	// reaches only through the modules it imports (Options.ModuleClosure
+	// without ModuleDependencies), required as indirect.
+	IndirectModuleDependencies []string
+
 	// Naming supplies the scalar and schema-ir module paths the templates
 	// import and require.
 	Naming               naming.Naming
@@ -300,6 +307,12 @@ type Options struct {
 	// DependencyModules maps dependency service names to their generated Go
 	// module paths.
 	DependencyModules map[string]string
+
+	// ModuleClosure lists the Go types modules this module imports,
+	// directly or through one another (the dispatch layer walks the
+	// dependency schemas for it). go.mod requires and replaces each: Go
+	// takes neither from a dependency's go.mod.
+	ModuleClosure []string
 
 	// Naming supplies the scalar and schema-ir module paths go.mod requires.
 	// Empty fields fall back to naming.Default().
@@ -354,11 +367,12 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	output.ImportedUnions = imported.unions
 	output.Imports = imported.imports
 	output.ModuleDependencies = imported.moduleDependencies(opts.ModulePath)
+	output.IndirectModuleDependencies = goutil.UniqueModules(append([]string{opts.ModulePath}, output.ModuleDependencies...), opts.ModuleClosure)
 	// Go does not inherit replace directives from a dependency's go.mod.
-	// Replace every declared schema dependency, including one this module
-	// reaches only through another generated types module.
+	// Replace every declared schema dependency and every module this one
+	// reaches through another generated types module.
 	output.ModuleDependencyReplaces = moduleDependencyReplaces(
-		allDependencyModulePaths(opts.ModulePath, output.ModuleDependencies, opts.DependencyModules),
+		allDependencyModulePaths(opts.ModulePath, slices.Concat(output.ModuleDependencies, output.IndirectModuleDependencies), opts.DependencyModules),
 	)
 
 	output.Enums = convertEnums(codegen.ExtractEnums(schema))

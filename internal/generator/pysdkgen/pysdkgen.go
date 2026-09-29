@@ -195,7 +195,7 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		SDKClassName: toPythonClassName(apiOutput.SchemaName) + "SDK",
 		Author:       names.PackageAuthor,
 		Namespaces:   nil,
-		HasAuth:      apiOutput.IsPublic && apiOutput.HasAuth,
+		HasAuth:      apiOutput.HasAuth,
 		Timestamp:    clock.RFC3339(),
 		Version:      "1.0.0",
 	}

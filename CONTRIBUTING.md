@@ -214,11 +214,10 @@ A release is three steps, each started by a person. For the first release,
    ```
 
    It runs `bump_version.py set 0.1.0-alpha.1`, which writes the version into
-   `versions.env`, every package manifest and lockfile, the Go `require`
-   lines, and cuts the `Unreleased` section of `CHANGELOG.md` into a dated
-   `[0.1.0-alpha.1]` section, then opens `release/v0.1.0-alpha.1`. Review the
-   changelog. The pull request is opened with the workflow token, which does
-   not start CI: close and reopen it once so `ci-pass` runs, then merge it.
+   `versions.env`, every package manifest and lockfile and the Go `require`
+   lines, then opens `release/v0.1.0-alpha.1`. The pull request is opened
+   with the workflow token, which does not start CI: close and reopen it once
+   so `ci-pass` runs, then merge it.
    (Without the workflow: `python3 scripts/bump_version.py set 0.1.0-alpha.1`
    on a branch and open the pull request yourself.)
 2. Cut the tag: on a clean checkout of `main` at that merge, run
@@ -240,7 +239,8 @@ A release is three steps, each started by a person. For the first release,
    a runner of that os/arch, linked against the superscalar archive built
    from the pinned checkout), refuses a set not built from the tag's commit,
    writes `SHA256SUMS`, packs the npm tarballs and the PyPI sdist and wheel,
-   creates the GitHub release with build provenance and an SBOM, and, when
+   creates the GitHub release with build provenance, an SBOM and notes
+   generated from the pull requests merged since the previous tag, and, when
    `RELEASE_PUBLISH_ENABLED` is `true`, publishes to npm, PyPI and
    crates.io. Do not create any of the tags by hand.
 
@@ -284,10 +284,7 @@ that must exist and be owned by the publisher before the variable is set. The
 exact registrations are written at the top of each publish job in
 `release.yml`.
 
-### The changelog
+### No changelog before the first release
 
-Every change to the IR, to a key of `superschematic.toml`, to a public Go
-package (`registry`, `loader`, `cli`, `ir`, `runtime/*`), to an authoring
-package's exported API or to the shape of a generated artifact ships with a
-`CHANGELOG.md` entry under `Unreleased` that names the bump it requires.
-`release-pr` refuses to cut a release whose `Unreleased` section is empty.
+The repository keeps no `CHANGELOG.md` until the first release. The GitHub
+release notes are generated from the merged pull requests.
