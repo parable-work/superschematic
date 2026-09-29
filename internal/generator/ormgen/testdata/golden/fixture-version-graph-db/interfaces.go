@@ -141,6 +141,41 @@ type RecipeRefRepositoryInterface interface {
 	HardDeleteOne(ctx context.Context, id types.IdentityUUID) error
 }
 
+// RecipeReleaseRepositoryInterface defines the contract for RecipeRelease data access.
+type RecipeReleaseRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeReleaseGetOptions) (*types.RecipeRelease, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeRelease, error)
+	GetVersion(ctx context.Context, id types.IdentityUUID, version int64) (*types.RecipeRelease, error)
+	ListVersions(ctx context.Context, id types.IdentityUUID, opts *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error)
+	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.RecipeRelease, error)
+	ListAsOfByRootID(ctx context.Context, rootID types.IdentityUUID, ts time.Time, opts *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error)
+	ListAsOfByCommitID(ctx context.Context, commitID types.IdentityUUID, ts time.Time, opts *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error)
+	FindOne(ctx context.Context, filter *RecipeReleaseFilter, opts *RecipeReleaseFindOptions) (*types.RecipeRelease, error)
+	FindMany(ctx context.Context, filter *RecipeReleaseFilter, opts *RecipeReleaseFindOptions) ([]*types.RecipeRelease, int, error)
+	CreateOne(ctx context.Context, input *types.RecipeRelease) (*types.RecipeRelease, error)
+	CreateMany(ctx context.Context, inputs []*types.RecipeRelease) ([]*types.RecipeRelease, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeReleaseUpdate) (*types.RecipeRelease, error)
+	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *RecipeReleaseUpdate) (*types.RecipeRelease, error)
+	UpdateMany(ctx context.Context, filter *RecipeReleaseFilter, update *RecipeReleaseUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64) error
+	DeleteMany(ctx context.Context, filter *RecipeReleaseFilter) (int, error)
+}
+
+// RecipeSnapshotEntryRepositoryInterface defines the contract for RecipeSnapshotEntry data access.
+type RecipeSnapshotEntryRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RecipeSnapshotEntryGetOptions) (*types.RecipeSnapshotEntry, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeSnapshotEntry, error)
+	FindOne(ctx context.Context, filter *RecipeSnapshotEntryFilter, opts *RecipeSnapshotEntryFindOptions) (*types.RecipeSnapshotEntry, error)
+	FindMany(ctx context.Context, filter *RecipeSnapshotEntryFilter, opts *RecipeSnapshotEntryFindOptions) ([]*types.RecipeSnapshotEntry, int, error)
+	CreateOne(ctx context.Context, input *types.RecipeSnapshotEntry) (*types.RecipeSnapshotEntry, error)
+	CreateMany(ctx context.Context, inputs []*types.RecipeSnapshotEntry) ([]*types.RecipeSnapshotEntry, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeSnapshotEntryUpdate) (*types.RecipeSnapshotEntry, error)
+	UpdateMany(ctx context.Context, filter *RecipeSnapshotEntryFilter, update *RecipeSnapshotEntryUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *RecipeSnapshotEntryFilter) (int, error)
+}
+
 // StepRepositoryInterface defines the contract for Step data access.
 type StepRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *StepGetOptions) (*types.Step, error)
@@ -218,6 +253,8 @@ type DatabaseInterface interface {
 	GetRecipeCommitRepository() RecipeCommitRepositoryInterface
 	GetRecipePatchRepository() RecipePatchRepositoryInterface
 	GetRecipeRefRepository() RecipeRefRepositoryInterface
+	GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface
+	GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRepositoryInterface
 	GetStepRepository() StepRepositoryInterface
 	GetTastingRepository() TastingRepositoryInterface
 	GetUtensilRepository() UtensilRepositoryInterface
@@ -233,6 +270,8 @@ type TxInterface interface {
 	GetRecipeCommitRepository() RecipeCommitRepositoryInterface
 	GetRecipePatchRepository() RecipePatchRepositoryInterface
 	GetRecipeRefRepository() RecipeRefRepositoryInterface
+	GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface
+	GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRepositoryInterface
 	GetStepRepository() StepRepositoryInterface
 	GetTastingRepository() TastingRepositoryInterface
 	GetUtensilRepository() UtensilRepositoryInterface
@@ -240,31 +279,35 @@ type TxInterface interface {
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
 type NoOpDatabase struct {
-	tx           *NoOpTx
-	Cover        *NoOpCoverRepository
-	Ingredient   *NoOpIngredientRepository
-	Note         *NoOpNoteRepository
-	Recipe       *NoOpRecipeRepository
-	RecipeCommit *NoOpRecipeCommitRepository
-	RecipePatch  *NoOpRecipePatchRepository
-	RecipeRef    *NoOpRecipeRefRepository
-	Step         *NoOpStepRepository
-	Tasting      *NoOpTastingRepository
-	Utensil      *NoOpUtensilRepository
+	tx                  *NoOpTx
+	Cover               *NoOpCoverRepository
+	Ingredient          *NoOpIngredientRepository
+	Note                *NoOpNoteRepository
+	Recipe              *NoOpRecipeRepository
+	RecipeCommit        *NoOpRecipeCommitRepository
+	RecipePatch         *NoOpRecipePatchRepository
+	RecipeRef           *NoOpRecipeRefRepository
+	RecipeRelease       *NoOpRecipeReleaseRepository
+	RecipeSnapshotEntry *NoOpRecipeSnapshotEntryRepository
+	Step                *NoOpStepRepository
+	Tasting             *NoOpTastingRepository
+	Utensil             *NoOpUtensilRepository
 }
 
 // NoOpTx provides deterministic no-op transaction repository access.
 type NoOpTx struct {
-	Cover        *NoOpCoverRepository
-	Ingredient   *NoOpIngredientRepository
-	Note         *NoOpNoteRepository
-	Recipe       *NoOpRecipeRepository
-	RecipeCommit *NoOpRecipeCommitRepository
-	RecipePatch  *NoOpRecipePatchRepository
-	RecipeRef    *NoOpRecipeRefRepository
-	Step         *NoOpStepRepository
-	Tasting      *NoOpTastingRepository
-	Utensil      *NoOpUtensilRepository
+	Cover               *NoOpCoverRepository
+	Ingredient          *NoOpIngredientRepository
+	Note                *NoOpNoteRepository
+	Recipe              *NoOpRecipeRepository
+	RecipeCommit        *NoOpRecipeCommitRepository
+	RecipePatch         *NoOpRecipePatchRepository
+	RecipeRef           *NoOpRecipeRefRepository
+	RecipeRelease       *NoOpRecipeReleaseRepository
+	RecipeSnapshotEntry *NoOpRecipeSnapshotEntryRepository
+	Step                *NoOpStepRepository
+	Tasting             *NoOpTastingRepository
+	Utensil             *NoOpUtensilRepository
 }
 
 // NewNoOpDatabase creates a no-op database with no-op repositories.
@@ -285,6 +328,10 @@ func NewNoOpDatabase() *NoOpDatabase {
 	tx.RecipePatch = db.RecipePatch
 	db.RecipeRef = &NoOpRecipeRefRepository{}
 	tx.RecipeRef = db.RecipeRef
+	db.RecipeRelease = &NoOpRecipeReleaseRepository{}
+	tx.RecipeRelease = db.RecipeRelease
+	db.RecipeSnapshotEntry = &NoOpRecipeSnapshotEntryRepository{}
+	tx.RecipeSnapshotEntry = db.RecipeSnapshotEntry
 	db.Step = &NoOpStepRepository{}
 	tx.Step = db.Step
 	db.Tasting = &NoOpTastingRepository{}
@@ -822,6 +869,142 @@ func (r *NoOpRecipeRefRepository) HardDeleteOne(_ context.Context, _ types.Ident
 	return nil
 }
 
+func (db *NoOpDatabase) GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface {
+	return db.RecipeRelease
+}
+
+func (tx *NoOpTx) GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface {
+	return tx.RecipeRelease
+}
+
+// NoOpRecipeReleaseRepository provides deterministic no-op repository behavior.
+type NoOpRecipeReleaseRepository struct{}
+
+func (r *NoOpRecipeReleaseRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *RecipeReleaseGetOptions) (*types.RecipeRelease, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRecipeReleaseRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeRelease, error) {
+	return map[types.IdentityUUID]*types.RecipeRelease{}, nil
+}
+
+func (r *NoOpRecipeReleaseRepository) GetVersion(_ context.Context, _ types.IdentityUUID, _ int64) (*types.RecipeRelease, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRecipeReleaseRepository) ListVersions(_ context.Context, _ types.IdentityUUID, _ *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error) {
+	return []types.HistoryRecord[*types.RecipeRelease]{}, nil
+}
+
+func (r *NoOpRecipeReleaseRepository) GetAsOf(_ context.Context, _ types.IdentityUUID, _ time.Time) (*types.RecipeRelease, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRecipeReleaseRepository) ListAsOfByRootID(_ context.Context, _ types.IdentityUUID, _ time.Time, _ *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error) {
+	return []types.HistoryRecord[*types.RecipeRelease]{}, nil
+}
+
+func (r *NoOpRecipeReleaseRepository) ListAsOfByCommitID(_ context.Context, _ types.IdentityUUID, _ time.Time, _ *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error) {
+	return []types.HistoryRecord[*types.RecipeRelease]{}, nil
+}
+
+func (r *NoOpRecipeReleaseRepository) FindOne(_ context.Context, _ *RecipeReleaseFilter, _ *RecipeReleaseFindOptions) (*types.RecipeRelease, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRecipeReleaseRepository) FindMany(_ context.Context, _ *RecipeReleaseFilter, _ *RecipeReleaseFindOptions) ([]*types.RecipeRelease, int, error) {
+	return []*types.RecipeRelease{}, 0, nil
+}
+
+func (r *NoOpRecipeReleaseRepository) CreateOne(_ context.Context, input *types.RecipeRelease) (*types.RecipeRelease, error) {
+	return input, nil
+}
+
+func (r *NoOpRecipeReleaseRepository) CreateMany(_ context.Context, inputs []*types.RecipeRelease) ([]*types.RecipeRelease, error) {
+	if inputs == nil {
+		return []*types.RecipeRelease{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpRecipeReleaseRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipeReleaseUpdate) (*types.RecipeRelease, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRecipeReleaseRepository) UpdateOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64, _ *RecipeReleaseUpdate) (*types.RecipeRelease, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRecipeReleaseRepository) UpdateMany(_ context.Context, _ *RecipeReleaseFilter, _ *RecipeReleaseUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpRecipeReleaseRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpRecipeReleaseRepository) DeleteOneIfVersion(_ context.Context, _ types.IdentityUUID, _ int64) error {
+	return nil
+}
+
+func (r *NoOpRecipeReleaseRepository) DeleteMany(_ context.Context, _ *RecipeReleaseFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRepositoryInterface {
+	return db.RecipeSnapshotEntry
+}
+
+func (tx *NoOpTx) GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRepositoryInterface {
+	return tx.RecipeSnapshotEntry
+}
+
+// NoOpRecipeSnapshotEntryRepository provides deterministic no-op repository behavior.
+type NoOpRecipeSnapshotEntryRepository struct{}
+
+func (r *NoOpRecipeSnapshotEntryRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *RecipeSnapshotEntryGetOptions) (*types.RecipeSnapshotEntry, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeSnapshotEntry, error) {
+	return map[types.IdentityUUID]*types.RecipeSnapshotEntry{}, nil
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) FindOne(_ context.Context, _ *RecipeSnapshotEntryFilter, _ *RecipeSnapshotEntryFindOptions) (*types.RecipeSnapshotEntry, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) FindMany(_ context.Context, _ *RecipeSnapshotEntryFilter, _ *RecipeSnapshotEntryFindOptions) ([]*types.RecipeSnapshotEntry, int, error) {
+	return []*types.RecipeSnapshotEntry{}, 0, nil
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) CreateOne(_ context.Context, input *types.RecipeSnapshotEntry) (*types.RecipeSnapshotEntry, error) {
+	return input, nil
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) CreateMany(_ context.Context, inputs []*types.RecipeSnapshotEntry) ([]*types.RecipeSnapshotEntry, error) {
+	if inputs == nil {
+		return []*types.RecipeSnapshotEntry{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RecipeSnapshotEntryUpdate) (*types.RecipeSnapshotEntry, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) UpdateMany(_ context.Context, _ *RecipeSnapshotEntryFilter, _ *RecipeSnapshotEntryUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) DeleteMany(_ context.Context, _ *RecipeSnapshotEntryFilter) (int, error) {
+	return 0, nil
+}
+
 func (db *NoOpDatabase) GetStepRepository() StepRepositoryInterface {
 	return db.Step
 }
@@ -1077,28 +1260,32 @@ func (r *NoOpUtensilRepository) DeleteMany(_ context.Context, _ *UtensilFilter) 
 }
 
 var (
-	_ DatabaseInterface               = (*Database)(nil)
-	_ DatabaseInterface               = (*NoOpDatabase)(nil)
-	_ TxInterface                     = (*Tx)(nil)
-	_ TxInterface                     = (*NoOpTx)(nil)
-	_ CoverRepositoryInterface        = (*CoverRepository)(nil)
-	_ CoverRepositoryInterface        = (*NoOpCoverRepository)(nil)
-	_ IngredientRepositoryInterface   = (*IngredientRepository)(nil)
-	_ IngredientRepositoryInterface   = (*NoOpIngredientRepository)(nil)
-	_ NoteRepositoryInterface         = (*NoteRepository)(nil)
-	_ NoteRepositoryInterface         = (*NoOpNoteRepository)(nil)
-	_ RecipeRepositoryInterface       = (*RecipeRepository)(nil)
-	_ RecipeRepositoryInterface       = (*NoOpRecipeRepository)(nil)
-	_ RecipeCommitRepositoryInterface = (*RecipeCommitRepository)(nil)
-	_ RecipeCommitRepositoryInterface = (*NoOpRecipeCommitRepository)(nil)
-	_ RecipePatchRepositoryInterface  = (*RecipePatchRepository)(nil)
-	_ RecipePatchRepositoryInterface  = (*NoOpRecipePatchRepository)(nil)
-	_ RecipeRefRepositoryInterface    = (*RecipeRefRepository)(nil)
-	_ RecipeRefRepositoryInterface    = (*NoOpRecipeRefRepository)(nil)
-	_ StepRepositoryInterface         = (*StepRepository)(nil)
-	_ StepRepositoryInterface         = (*NoOpStepRepository)(nil)
-	_ TastingRepositoryInterface      = (*TastingRepository)(nil)
-	_ TastingRepositoryInterface      = (*NoOpTastingRepository)(nil)
-	_ UtensilRepositoryInterface      = (*UtensilRepository)(nil)
-	_ UtensilRepositoryInterface      = (*NoOpUtensilRepository)(nil)
+	_ DatabaseInterface                      = (*Database)(nil)
+	_ DatabaseInterface                      = (*NoOpDatabase)(nil)
+	_ TxInterface                            = (*Tx)(nil)
+	_ TxInterface                            = (*NoOpTx)(nil)
+	_ CoverRepositoryInterface               = (*CoverRepository)(nil)
+	_ CoverRepositoryInterface               = (*NoOpCoverRepository)(nil)
+	_ IngredientRepositoryInterface          = (*IngredientRepository)(nil)
+	_ IngredientRepositoryInterface          = (*NoOpIngredientRepository)(nil)
+	_ NoteRepositoryInterface                = (*NoteRepository)(nil)
+	_ NoteRepositoryInterface                = (*NoOpNoteRepository)(nil)
+	_ RecipeRepositoryInterface              = (*RecipeRepository)(nil)
+	_ RecipeRepositoryInterface              = (*NoOpRecipeRepository)(nil)
+	_ RecipeCommitRepositoryInterface        = (*RecipeCommitRepository)(nil)
+	_ RecipeCommitRepositoryInterface        = (*NoOpRecipeCommitRepository)(nil)
+	_ RecipePatchRepositoryInterface         = (*RecipePatchRepository)(nil)
+	_ RecipePatchRepositoryInterface         = (*NoOpRecipePatchRepository)(nil)
+	_ RecipeRefRepositoryInterface           = (*RecipeRefRepository)(nil)
+	_ RecipeRefRepositoryInterface           = (*NoOpRecipeRefRepository)(nil)
+	_ RecipeReleaseRepositoryInterface       = (*RecipeReleaseRepository)(nil)
+	_ RecipeReleaseRepositoryInterface       = (*NoOpRecipeReleaseRepository)(nil)
+	_ RecipeSnapshotEntryRepositoryInterface = (*RecipeSnapshotEntryRepository)(nil)
+	_ RecipeSnapshotEntryRepositoryInterface = (*NoOpRecipeSnapshotEntryRepository)(nil)
+	_ StepRepositoryInterface                = (*StepRepository)(nil)
+	_ StepRepositoryInterface                = (*NoOpStepRepository)(nil)
+	_ TastingRepositoryInterface             = (*TastingRepository)(nil)
+	_ TastingRepositoryInterface             = (*NoOpTastingRepository)(nil)
+	_ UtensilRepositoryInterface             = (*UtensilRepository)(nil)
+	_ UtensilRepositoryInterface             = (*NoOpUtensilRepository)(nil)
 )

@@ -4,13 +4,16 @@
 // columns and every column's value class, and it returns every row as a
 // canonical row through package canonical.
 //
-// The graph's own tables have the columns the loader gives them (D17): a
-// ref's root_id, parent_ref_id, base_commit_id, head_commit_id, name,
+// The graph's own tables have the columns the loader gives them (D17, D19):
+// a ref's root_id, parent_ref_id, base_commit_id, head_commit_id, name,
 // sealed_at, audit and soft-delete columns and _version; a commit's root_id,
 // ref_id, parent_commit_id, message, schema_epoch, content_hash, sequence,
 // created_at and created_by; a patch's commit_id, entity_kind, entity_key,
-// entity_id, entity_version and operation. A history table keys its images
-// on the kind's id and version columns and holds each in data.
+// entity_id, entity_version and operation; a snapshot entry's commit_id,
+// entity_kind, entity_key, entity_id and entity_version; and a release
+// pointer's root_id, commit_id, audit columns and _version. A history table
+// keys its images on the kind's id and version columns and holds each in
+// data.
 //
 // The adapter reaches Postgres through Client; Pgx binds pgx.
 package postgres
@@ -23,6 +26,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/canonical"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/storage"
@@ -56,6 +60,7 @@ type Adapter struct {
 	sweepKey     string
 
 	refTable, commitTable, patchTable string
+	releaseTable, snapshotTable       string
 	rootTable, rootKey                string
 
 	kinds map[string]*kind
@@ -83,10 +88,12 @@ type descriptor struct {
 		Table string `json:"table"`
 		Key   string `json:"key"`
 	} `json:"root"`
-	RefTable    string `json:"refTable"`
-	CommitTable string `json:"commitTable"`
-	PatchTable  string `json:"patchTable"`
-	Kinds       []struct {
+	RefTable      string `json:"refTable"`
+	CommitTable   string `json:"commitTable"`
+	PatchTable    string `json:"patchTable"`
+	ReleaseTable  string `json:"releaseTable"`
+	SnapshotTable string `json:"snapshotTable"`
+	Kinds         []struct {
 		Kind         string            `json:"kind"`
 		Table        string            `json:"table"`
 		HistoryTable string            `json:"historyTable"`
@@ -111,20 +118,22 @@ func New(raw json.RawMessage, opts Options) (*Adapter, error) {
 	if d.Version != 2 {
 		return nil, fmt.Errorf("postgres: descriptor version %d; this adapter reads version 2", d.Version)
 	}
-	for member, value := range map[string]string{"root table": d.Root.Table, "root key": d.Root.Key, "refTable": d.RefTable, "commitTable": d.CommitTable, "patchTable": d.PatchTable} {
+	for member, value := range map[string]string{"root table": d.Root.Table, "root key": d.Root.Key, "refTable": d.RefTable, "commitTable": d.CommitTable, "patchTable": d.PatchTable, "releaseTable": d.ReleaseTable, "snapshotTable": d.SnapshotTable} {
 		if value == "" {
 			return nil, fmt.Errorf("postgres: the descriptor's %s is empty", member)
 		}
 	}
 	a := &Adapter{
-		actorSetting: opts.HistoryActorSetting,
-		sweepKey:     "superschematic.versiongraph.sweep:" + d.RefTable,
-		refTable:     quote(d.RefTable),
-		commitTable:  quote(d.CommitTable),
-		patchTable:   quote(d.PatchTable),
-		rootTable:    quote(d.Root.Table),
-		rootKey:      quote(d.Root.Key),
-		kinds:        map[string]*kind{},
+		actorSetting:  opts.HistoryActorSetting,
+		sweepKey:      "superschematic.versiongraph.sweep:" + d.RefTable,
+		refTable:      quote(d.RefTable),
+		commitTable:   quote(d.CommitTable),
+		patchTable:    quote(d.PatchTable),
+		releaseTable:  quote(d.ReleaseTable),
+		snapshotTable: quote(d.SnapshotTable),
+		rootTable:     quote(d.Root.Table),
+		rootKey:       quote(d.Root.Key),
+		kinds:         map[string]*kind{},
 	}
 	if a.actorSetting == "" {
 		a.actorSetting = DefaultHistoryActorSetting
@@ -285,14 +294,15 @@ func (t *tx) readRef(ctx context.Context, id, lock string) (storage.Ref, error) 
 }
 
 func (t *tx) UpdateRef(ctx context.Context, update storage.RefUpdate) (storage.Ref, error) {
-	args, err := uuidArgs(update.ID, update.Head, update.Actor)
+	args, err := uuidArgs(update.ID, update.Head, update.Actor, update.Base)
 	if err != nil {
 		return storage.Ref{}, err
 	}
 	sql := `UPDATE ` + t.a.refTable + ` SET head_commit_id = COALESCE(NULLIF($3, '')::uuid, head_commit_id), ` +
+		`base_commit_id = COALESCE(NULLIF($6, '')::uuid, base_commit_id), ` +
 		`sealed_at = CASE WHEN $4::boolean THEN now() ELSE sealed_at END, updated_at = now(), updated_by = $5::uuid ` +
 		`WHERE id = $1::uuid AND _version = $2 RETURNING ` + refColumns
-	ref, found, err := t.scanRef(ctx, sql, args[0], update.Version, args[1], update.Seal, args[2])
+	ref, found, err := t.scanRef(ctx, sql, args[0], update.Version, args[1], update.Seal, args[2], args[3])
 	if err != nil {
 		return storage.Ref{}, fmt.Errorf("postgres: update ref: %w", err)
 	}
@@ -514,21 +524,29 @@ func (t *tx) Images(ctx context.Context, kindName string, pins []storage.Pin) ([
 	return rows, nil
 }
 
-// commitColumns reads a commit; commitScan scans them.
+// commitColumns reads a commit, followed by whether it has a snapshot;
+// commitScan scans them.
 const commitColumns = `id::text, root_id::text, ref_id::text, COALESCE(parent_commit_id::text, ''), COALESCE(message, ''), ` +
 	`schema_epoch, content_hash, COALESCE("sequence"::text, ''), to_jsonb(created_at)::text, created_by::text`
+
+// hasSnapshot is the SQL that tells whether the commit whose id is idSQL
+// has a snapshot.
+func (t *tx) hasSnapshot(idSQL string) string {
+	return `EXISTS (SELECT 1 FROM ` + t.a.snapshotTable + ` AS s WHERE s.commit_id = ` + idSQL + `)`
+}
 
 type commitScan struct {
 	id, root, ref, parent, message, hash, sequence, createdAt, createdBy string
 	epoch                                                                int64
+	snapshot                                                             bool
 }
 
 func (c *commitScan) dest() []any {
-	return []any{&c.id, &c.root, &c.ref, &c.parent, &c.message, &c.epoch, &c.hash, &c.sequence, &c.createdAt, &c.createdBy}
+	return []any{&c.id, &c.root, &c.ref, &c.parent, &c.message, &c.epoch, &c.hash, &c.sequence, &c.createdAt, &c.createdBy, &c.snapshot}
 }
 
 func (c *commitScan) commit() (storage.Commit, error) {
-	out := storage.Commit{Message: c.message, SchemaEpoch: c.epoch, ContentHash: c.hash}
+	out := storage.Commit{Message: c.message, SchemaEpoch: c.epoch, ContentHash: c.hash, Snapshot: c.snapshot}
 	var err error
 	for _, pair := range []struct {
 		dst *string
@@ -578,7 +596,7 @@ func (t *tx) ReadCommit(ctx context.Context, id string) (storage.Commit, error) 
 	if err != nil {
 		return storage.Commit{}, err
 	}
-	commits, err := t.commits(ctx, `SELECT `+commitColumns+` FROM `+t.a.commitTable+` WHERE id = $1::uuid`, text)
+	commits, err := t.commits(ctx, `SELECT `+commitColumns+`, `+t.hasSnapshot("c.id")+` FROM `+t.a.commitTable+` AS c WHERE id = $1::uuid`, text)
 	if err != nil {
 		return storage.Commit{}, fmt.Errorf("postgres: read commit: %w", err)
 	}
@@ -598,7 +616,7 @@ func (t *tx) InsertCommit(ctx context.Context, commit storage.NewCommit) (storag
 		sequence = *commit.Sequence
 	}
 	sql := `INSERT INTO ` + t.a.commitTable + ` (root_id, ref_id, parent_commit_id, message, schema_epoch, content_hash, "sequence", created_by) ` +
-		`VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, NULLIF($4, ''), $5, $6, $7::bigint, $8::uuid) RETURNING ` + commitColumns
+		`VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, NULLIF($4, ''), $5, $6, $7::bigint, $8::uuid) RETURNING ` + commitColumns + `, false`
 	commits, err := t.commits(ctx, sql, args[0], args[1], args[2], commit.Message, commit.SchemaEpoch, commit.ContentHash, sequence, args[3])
 	if err != nil {
 		return storage.Commit{}, fmt.Errorf("postgres: write commit: %w", err)
@@ -644,11 +662,13 @@ func (t *tx) Walk(ctx context.Context, commit string, limit int) ([]storage.Comm
 	if err != nil {
 		return nil, err
 	}
+	// The walk carries each commit's snapshot flag, and goes no further
+	// than the first commit that has one.
 	sql := `WITH RECURSIVE chain AS (` +
-		`SELECT c.*, 1 AS depth FROM ` + t.a.commitTable + ` AS c WHERE c.id = $1::uuid ` +
-		`UNION ALL SELECT c.*, chain.depth + 1 FROM ` + t.a.commitTable + ` AS c ` +
-		`JOIN chain ON c.id = chain.parent_commit_id WHERE chain.depth < $2` +
-		`) SELECT ` + commitColumns + ` FROM chain ORDER BY depth`
+		`SELECT c.*, 1 AS depth, ` + t.hasSnapshot("c.id") + ` AS snapshotted FROM ` + t.a.commitTable + ` AS c WHERE c.id = $1::uuid ` +
+		`UNION ALL SELECT c.*, chain.depth + 1, ` + t.hasSnapshot("c.id") + ` FROM ` + t.a.commitTable + ` AS c ` +
+		`JOIN chain ON c.id = chain.parent_commit_id WHERE chain.depth < $2 AND NOT chain.snapshotted` +
+		`) SELECT ` + commitColumns + `, snapshotted FROM chain ORDER BY depth`
 	commits, err := t.commits(ctx, sql, text, int64(limit))
 	if err != nil {
 		return nil, fmt.Errorf("postgres: walk commits: %w", err)
@@ -665,7 +685,7 @@ func (t *tx) RefCommits(ctx context.Context, ref, head string, limit int) ([]sto
 		`SELECT c.*, 1 AS depth FROM ` + t.a.commitTable + ` AS c WHERE c.id = $1::uuid AND c.ref_id = $2::uuid ` +
 		`UNION ALL SELECT c.*, chain.depth + 1 FROM ` + t.a.commitTable + ` AS c ` +
 		`JOIN chain ON c.id = chain.parent_commit_id WHERE c.ref_id = $2::uuid AND chain.depth < $3` +
-		`) SELECT ` + commitColumns + ` FROM chain ORDER BY depth`
+		`) SELECT ` + commitColumns + `, ` + t.hasSnapshot("chain.id") + ` FROM chain ORDER BY depth`
 	commits, err := t.commits(ctx, sql, args[0], args[1], int64(limit))
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list commits: %w", err)
@@ -736,8 +756,16 @@ func (t *tx) Prune(ctx context.Context, kindName string, retentionDays, batchSiz
 	if !exists {
 		return 0, nil
 	}
+	// The prune function's retention_days defaults to the kind's declared
+	// retention, which a retentionDays of 0 keeps.
 	var deleted int64
-	if _, err := t.queryRow(ctx, `SELECT `+function+`($1::integer, NULLIF($2, 0)::integer)`, []any{int64(retentionDays), int64(batchSize)}, &deleted); err != nil {
+	sql := `SELECT ` + function + `(max_rows => NULLIF($2, 0)::integer, retention_days => $1::integer)`
+	args := []any{int64(retentionDays), int64(batchSize)}
+	if retentionDays == 0 {
+		sql = `SELECT ` + function + `(max_rows => NULLIF($1, 0)::integer)`
+		args = args[1:]
+	}
+	if _, err := t.queryRow(ctx, sql, args, &deleted); err != nil {
 		return 0, fmt.Errorf("postgres: prune %s history: %w", k.name, err)
 	}
 	return deleted, nil
@@ -749,4 +777,208 @@ func (t *tx) SweepLock(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("postgres: take the sweep lock: %w", err)
 	}
 	return locked, nil
+}
+
+func (t *tx) Snapshot(ctx context.Context, commit string) ([]storage.SnapshotEntry, error) {
+	text, err := uuidText(commit)
+	if err != nil {
+		return nil, err
+	}
+	var out []storage.SnapshotEntry
+	sql := `SELECT entity_kind, entity_key::text, entity_id::text, entity_version FROM ` + t.a.snapshotTable + ` WHERE commit_id = $1::uuid`
+	err = t.conn.Query(ctx, sql, []any{text}, func(scan func(dest ...any) error) error {
+		var e storage.SnapshotEntry
+		if err := scan(&e.Kind, &e.EntityKey, &e.EntityID, &e.EntityVersion); err != nil {
+			return err
+		}
+		var err error
+		for _, id := range []*string{&e.EntityKey, &e.EntityID} {
+			if *id, err = canonicalUUID(*id); err != nil {
+				return err
+			}
+		}
+		out = append(out, e)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("postgres: read the snapshot: %w", err)
+	}
+	return out, nil
+}
+
+func (t *tx) InsertSnapshot(ctx context.Context, commit string, entries []storage.SnapshotEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	type row struct {
+		Kind    string `json:"kind"`
+		Key     string `json:"key"`
+		ID      string `json:"id"`
+		Version int64  `json:"version"`
+	}
+	rows := make([]row, len(entries))
+	for i, e := range entries {
+		args, err := uuidArgs(e.EntityKey, e.EntityID)
+		if err != nil {
+			return err
+		}
+		rows[i] = row{Kind: e.Kind, Key: args[0].(string), ID: args[1].(string), Version: e.EntityVersion}
+	}
+	payload, err := json.Marshal(rows)
+	if err != nil {
+		return err
+	}
+	commitText, err := uuidText(commit)
+	if err != nil {
+		return err
+	}
+	sql := `INSERT INTO ` + t.a.snapshotTable + ` (commit_id, entity_kind, entity_key, entity_id, entity_version) ` +
+		`SELECT $1::uuid, e.kind, e.key::uuid, e.id::uuid, e.version ` +
+		`FROM jsonb_to_recordset($2::jsonb) AS e(kind text, key text, id text, version bigint)`
+	if _, err := t.conn.Exec(ctx, sql, commitText, string(payload)); err != nil {
+		return fmt.Errorf("postgres: write the snapshot: %w", err)
+	}
+	return nil
+}
+
+func (t *tx) Commits(ctx context.Context) ([]storage.CommitNode, error) {
+	var out []storage.CommitNode
+	sql := `SELECT c.id::text, COALESCE(c.parent_commit_id::text, ''), c."sequence" IS NOT NULL, ` + t.hasSnapshot("c.id") + `, ` +
+		`EXISTS (SELECT 1 FROM ` + t.a.releaseTable + ` AS r WHERE r.commit_id = c.id) FROM ` + t.a.commitTable + ` AS c`
+	err := t.conn.Query(ctx, sql, nil, func(scan func(dest ...any) error) error {
+		var n storage.CommitNode
+		if err := scan(&n.ID, &n.Parent, &n.Tagged, &n.Snapshot, &n.Released); err != nil {
+			return err
+		}
+		var err error
+		for _, id := range []*string{&n.ID, &n.Parent} {
+			if *id, err = optionalCanonicalUUID(*id); err != nil {
+				return err
+			}
+		}
+		out = append(out, n)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("postgres: read the commits: %w", err)
+	}
+	return out, nil
+}
+
+// releaseColumns reads a release pointer.
+const releaseColumns = `id::text, root_id::text, commit_id::text, _version`
+
+func (t *tx) scanRelease(ctx context.Context, sql string, args ...any) (storage.Release, bool, error) {
+	var out storage.Release
+	found, err := t.queryRow(ctx, sql, args, &out.ID, &out.Root, &out.Commit, &out.Version)
+	if err != nil || !found {
+		return storage.Release{}, found, err
+	}
+	for _, id := range []*string{&out.ID, &out.Root, &out.Commit} {
+		if *id, err = canonicalUUID(*id); err != nil {
+			return storage.Release{}, false, err
+		}
+	}
+	return out, true, nil
+}
+
+func (t *tx) ReadRelease(ctx context.Context, root string) (storage.Release, error) {
+	text, err := uuidText(root)
+	if err != nil {
+		return storage.Release{}, err
+	}
+	release, found, err := t.scanRelease(ctx, `SELECT `+releaseColumns+` FROM `+t.a.releaseTable+` WHERE root_id = $1::uuid`, text)
+	if err != nil {
+		return storage.Release{}, fmt.Errorf("postgres: read the release: %w", err)
+	}
+	if !found {
+		return storage.Release{}, storage.ErrNotFound
+	}
+	return release, nil
+}
+
+func (t *tx) WriteRelease(ctx context.Context, write storage.ReleaseWrite) (storage.Release, error) {
+	args, err := uuidArgs(write.Root, write.Commit, write.Actor)
+	if err != nil {
+		return storage.Release{}, err
+	}
+	var sql string
+	var params []any
+	if write.Version == 0 {
+		// A root's first pointer. Another writer's first pointer takes the
+		// root's slot, as a move at a stale version would.
+		sql = `INSERT INTO ` + t.a.releaseTable + ` (root_id, commit_id, created_by, updated_by) ` +
+			`VALUES ($1::uuid, $2::uuid, $3::uuid, $3::uuid) ON CONFLICT (root_id) DO NOTHING RETURNING ` + releaseColumns
+		params = args
+	} else {
+		sql = `UPDATE ` + t.a.releaseTable + ` SET commit_id = $2::uuid, updated_at = now(), updated_by = $3::uuid ` +
+			`WHERE root_id = $1::uuid AND _version = $4 RETURNING ` + releaseColumns
+		params = append(args, write.Version)
+	}
+	release, found, err := t.scanRelease(ctx, sql, params...)
+	if err != nil {
+		return storage.Release{}, fmt.Errorf("postgres: write the release: %w", err)
+	}
+	if !found {
+		return storage.Release{}, storage.ErrVersionConflict
+	}
+	return release, nil
+}
+
+// micros is a duration in whole microseconds, as a statement multiplies
+// an interval of one microsecond by it.
+func micros(d time.Duration) int64 {
+	return d.Microseconds()
+}
+
+func (t *tx) DiscardedRefs(ctx context.Context, grace time.Duration) ([]storage.Ref, error) {
+	return t.refs(ctx, `SELECT `+refColumns+` FROM `+t.a.refTable+
+		` WHERE deleted_at IS NOT NULL AND deleted_at < now() - $1::bigint * interval '1 microsecond' ORDER BY deleted_at, id`, micros(grace))
+}
+
+func (t *tx) IdleDrafts(ctx context.Context, idle time.Duration) ([]storage.Ref, error) {
+	return t.refs(ctx, `SELECT `+refColumns+` FROM `+t.a.refTable+
+		` WHERE deleted_at IS NULL AND parent_ref_id IS NOT NULL AND updated_at < now() - $1::bigint * interval '1 microsecond' ORDER BY updated_at, id`, micros(idle))
+}
+
+// refs runs a statement that returns refColumns.
+func (t *tx) refs(ctx context.Context, sql string, args ...any) ([]storage.Ref, error) {
+	var out []storage.Ref
+	err := t.conn.Query(ctx, sql, args, func(scan func(dest ...any) error) error {
+		var r refScan
+		if err := scan(r.dest()...); err != nil {
+			return err
+		}
+		ref, err := r.ref()
+		if err != nil {
+			return err
+		}
+		out = append(out, ref)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("postgres: read refs: %w", err)
+	}
+	return out, nil
+}
+
+func (t *tx) RemoveRefRows(ctx context.Context, kindName, ref, actor string) (int64, error) {
+	k, err := t.kind(kindName)
+	if err != nil {
+		return 0, err
+	}
+	args, err := uuidArgs(ref, actor)
+	if err != nil {
+		return 0, err
+	}
+	sql := `WITH history_actor AS MATERIALIZED (SELECT set_config($1, $2, true) AS _history_actor) ` +
+		`DELETE FROM ` + quote(k.table) + ` USING history_actor WHERE ` + quote(k.ref) + ` = $3::uuid`
+	n, err := t.conn.Exec(ctx, sql, t.a.actorSetting, args[1], args[0])
+	if err != nil {
+		return 0, fmt.Errorf("postgres: remove the %s rows of a ref: %w", k.name, err)
+	}
+	if _, err := t.conn.Exec(ctx, `SELECT set_config($1, '', true)`, t.a.actorSetting); err != nil {
+		return 0, fmt.Errorf("postgres: clear the history actor: %w", err)
+	}
+	return n, nil
 }

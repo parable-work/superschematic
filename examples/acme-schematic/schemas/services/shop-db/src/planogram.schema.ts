@@ -3,8 +3,9 @@ import { AutoGenerate, Relation, conflictUnit, graphMember, key, versionGraph, v
 
 // A shop's shelf plan: which products face out on which bay. The plan is a
 // version graph: a shop edits a change set of the published plan and merges
-// it back. The loader adds PlanogramRef, PlanogramCommit, PlanogramPatch and
-// their enums; the ORM adds db.PlanogramGraph().
+// it back. The loader adds PlanogramRef, PlanogramCommit, PlanogramPatch,
+// PlanogramRelease, PlanogramSnapshotEntry and their enums; the ORM adds
+// db.PlanogramGraph().
 @versionGraph()
 export abstract class Planogram {
   @key

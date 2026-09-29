@@ -6,6 +6,8 @@ export * from './recipe';
 export * from './recipecommit';
 export * from './recipepatch';
 export * from './reciperef';
+export * from './reciperelease';
+export * from './recipesnapshotentry';
 export * from './step';
 export * from './tasting';
 export * from './utensil';

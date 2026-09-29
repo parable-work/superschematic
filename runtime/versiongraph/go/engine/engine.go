@@ -14,6 +14,14 @@
 // an actor, recorded in the audit columns, and every write through a ref
 // takes the ref's expected version and fails with ErrVersionConflict when
 // the ref has moved on.
+//
+// A primary line (a ref with no parent) takes writes only from Merge: work
+// happens on a change set, which Rebase catches up with its parent's head
+// and Merge brings back. A root's release pointer names one tagged commit,
+// which Release moves and Released reads. A commit is snapshotted, its full
+// pin set stored, when it is tagged, released, or Options.SnapshotEvery
+// commits past the nearest snapshot on its chain, and Materialize stops at
+// the nearest snapshot. Sweep and RunSweeper are the graph's maintenance.
 package engine
 
 import (
@@ -21,6 +29,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 
 	versiongraph "github.com/parable-work/superschematic/runtime/versiongraph/go"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/canonical"
@@ -31,6 +40,11 @@ import (
 // commit's parents, before it stops with ErrWalkCeiling.
 const DefaultWalkCeiling = 4096
 
+// DefaultSnapshotEvery is how many commits past the nearest snapshot on its
+// chain a commit is snapshotted at, unless Options.SnapshotEvery says
+// otherwise.
+const DefaultSnapshotEvery = 64
+
 // Options configure an Engine.
 type Options struct {
 	// SchemaEpoch is the graph's schema epoch: every commit records it, and
@@ -38,16 +52,20 @@ type Options struct {
 	SchemaEpoch int64
 	// WalkCeiling bounds a commit walk; 0 is DefaultWalkCeiling.
 	WalkCeiling int
+	// SnapshotEvery is the graph's snapshot interval
+	// (@versionGraph({ snapshotEvery })); 0 is DefaultSnapshotEvery.
+	SnapshotEvery int
 }
 
 // Engine runs one graph's operations.
 type Engine struct {
-	descriptor  json.RawMessage
-	kinds       []kindRoles
-	byName      map[string]*kindRoles
-	storage     storage.Storage
-	schemaEpoch int64
-	walkCeiling int
+	descriptor    json.RawMessage
+	kinds         []kindRoles
+	byName        map[string]*kindRoles
+	storage       storage.Storage
+	schemaEpoch   int64
+	walkCeiling   int
+	snapshotEvery int
 }
 
 // kindRoles are the columns of a kind's rows the engine reads.
@@ -72,18 +90,22 @@ func New(descriptor json.RawMessage, s storage.Storage, opts Options) (*Engine, 
 		return nil, fmt.Errorf("engine: read the descriptor: %w", err)
 	}
 	e := &Engine{
-		descriptor:  append(json.RawMessage(nil), descriptor...),
-		kinds:       d.Kinds,
-		byName:      make(map[string]*kindRoles, len(d.Kinds)),
-		storage:     s,
-		schemaEpoch: opts.SchemaEpoch,
-		walkCeiling: opts.WalkCeiling,
+		descriptor:    append(json.RawMessage(nil), descriptor...),
+		kinds:         d.Kinds,
+		byName:        make(map[string]*kindRoles, len(d.Kinds)),
+		storage:       s,
+		schemaEpoch:   opts.SchemaEpoch,
+		walkCeiling:   opts.WalkCeiling,
+		snapshotEvery: opts.SnapshotEvery,
 	}
 	for i := range e.kinds {
 		e.byName[e.kinds[i].Name] = &e.kinds[i]
 	}
 	if e.walkCeiling <= 0 {
 		e.walkCeiling = DefaultWalkCeiling
+	}
+	if e.snapshotEvery <= 0 {
+		e.snapshotEvery = DefaultSnapshotEvery
 	}
 	return e, nil
 }
@@ -171,9 +193,9 @@ type CommitResult struct {
 	Commit *storage.Commit
 }
 
-// MergeResult is the target of a merge and the commit written. When
-// Conflicts is not empty nothing was written and Ref is the target as it
-// was.
+// MergeResult is the target of a merge, or the change set a rebase moved,
+// and the commit written. When Conflicts is not empty nothing was written
+// and Ref is the ref as it was.
 type MergeResult struct {
 	Ref       storage.Ref
 	Commit    *storage.Commit
@@ -187,6 +209,13 @@ type TreeResult struct {
 	Tree        Tree
 	ContentHash string
 	Findings    []versiongraph.Finding
+}
+
+// ReleasedResult is a root's release pointer and the tree of the commit it
+// names.
+type ReleasedResult struct {
+	Release storage.Release
+	TreeResult
 }
 
 // id normalizes a UUID argument to its canonical form.
@@ -275,7 +304,8 @@ func (e *Engine) Branch(ctx context.Context, actor, fromRef, name string) (stora
 	return ref, err
 }
 
-// Save applies edits to a ref at version. It refuses a sealed ref.
+// Save applies edits to a change set at version. It refuses a sealed ref,
+// and a primary line with ErrPrimaryMergeOnly.
 func (e *Engine) Save(ctx context.Context, actor, ref string, version int64, edits Edits) (*SaveResult, error) {
 	actor, err := actorID(actor)
 	if err != nil {
@@ -291,7 +321,7 @@ func (e *Engine) Save(ctx context.Context, actor, ref string, version int64, edi
 	}
 	result := &SaveResult{Saved: Tree{}}
 	err = e.transact(ctx, func(ctx context.Context, tx storage.Tx) error {
-		r, err := e.readRef(ctx, tx, ref, &version, true)
+		r, err := e.readDraft(ctx, tx, ref, version)
 		if err != nil {
 			return err
 		}
@@ -349,16 +379,17 @@ func (e *Engine) Save(ctx context.Context, actor, ref string, version int64, edi
 	return result, nil
 }
 
-// Commit composes a ref at version, diffs it against its last commit (or
-// its base), writes a commit with a patch per changed entity and moves the
-// ref's head. It returns ErrNothingToCommit when nothing changed, and an
-// *InvalidTreeError when the composed tree breaks the graph's rules.
+// Commit composes a change set at version, diffs it against its last
+// commit (or its base), writes a commit with a patch per changed entity and
+// moves the ref's head. It returns ErrNothingToCommit when nothing changed,
+// an *InvalidTreeError when the composed tree breaks the graph's rules, and
+// ErrPrimaryMergeOnly for a primary line, whose commits Merge writes.
 func (e *Engine) Commit(ctx context.Context, actor, ref string, version int64, opts CommitOptions) (*CommitResult, error) {
 	return e.commitRef(ctx, actor, ref, version, opts, false, false)
 }
 
-// Seal commits a ref at version when it has changes, and seals it: the ref
-// then refuses writes.
+// Seal commits a change set at version when it has changes, and seals it:
+// the ref then refuses writes. A primary line is ErrPrimaryMergeOnly.
 func (e *Engine) Seal(ctx context.Context, actor, ref string, version int64) (*CommitResult, error) {
 	return e.commitRef(ctx, actor, ref, version, CommitOptions{}, true, true)
 }
@@ -373,7 +404,7 @@ func (e *Engine) commitRef(ctx context.Context, actor, ref string, version int64
 	}
 	result := &CommitResult{}
 	err = e.transact(ctx, func(ctx context.Context, tx storage.Tx) error {
-		r, err := e.readRef(ctx, tx, ref, &version, true)
+		r, err := e.readDraft(ctx, tx, ref, version)
 		if err != nil {
 			return err
 		}
@@ -388,9 +419,10 @@ func (e *Engine) commitRef(ctx context.Context, actor, ref string, version int64
 
 // Merge merges source's head into target at targetVersion, against
 // source's base. Without conflicts it writes the result onto target and
-// commits it. With conflicts left after resolutions it returns them and
-// writes nothing.
-func (e *Engine) Merge(ctx context.Context, actor, source, target string, targetVersion int64, resolutions []versiongraph.Resolution) (*MergeResult, error) {
+// commits it in the same transaction, with opts' message and tag. With
+// conflicts left after resolutions it returns them and writes nothing.
+// Merge is the only write a primary line takes.
+func (e *Engine) Merge(ctx context.Context, actor, source, target string, targetVersion int64, resolutions []versiongraph.Resolution, opts CommitOptions) (*MergeResult, error) {
 	actor, err := actorID(actor)
 	if err != nil {
 		return nil, err
@@ -422,7 +454,7 @@ func (e *Engine) Merge(ctx context.Context, actor, source, target string, target
 			result.Ref, result.Conflicts = t, conflicts
 			return nil
 		}
-		result.Ref, result.Commit, err = e.commitAndMove(ctx, tx, t, CommitOptions{}, true, false, actor)
+		result.Ref, result.Commit, err = e.commitAndMove(ctx, tx, t, opts, true, false, actor)
 		return err
 	})
 	if err != nil {
@@ -431,8 +463,92 @@ func (e *Engine) Merge(ctx context.Context, actor, source, target string, target
 	return result, nil
 }
 
-// Revert writes the rows that make a ref at version compose to the tree of
-// toCommit, and commits them. History is never rewritten.
+// Rebase moves a change set at version onto its parent's head. It merges
+// the parent's head into the change set, with the change set's base as the
+// merge base and its composed tree, uncommitted work included, as ours.
+// With conflicts left after resolutions it returns them and writes nothing.
+// Otherwise it writes the change set's rows so it composes to the merged
+// tree over the parent's head, makes that head its base, and commits on it
+// with its previous head (or, with none, its new base) as the parent, so
+// its History keeps its commits. A primary line has no parent to rebase
+// onto: ErrNoParent.
+func (e *Engine) Rebase(ctx context.Context, actor, draft string, version int64, resolutions []versiongraph.Resolution) (*MergeResult, error) {
+	actor, err := actorID(actor)
+	if err != nil {
+		return nil, err
+	}
+	if err := ids(&draft); err != nil {
+		return nil, err
+	}
+	result := &MergeResult{}
+	err = e.transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+		d, err := e.readRef(ctx, tx, draft, &version, true)
+		if err != nil {
+			return err
+		}
+		if d.Parent == "" {
+			return ErrNoParent
+		}
+		parent, err := e.readRef(ctx, tx, d.Parent, nil, false)
+		if err != nil {
+			return err
+		}
+		if parent.Head == d.Base {
+			// Already on the parent's head: nothing to merge.
+			result.Ref, err = tx.UpdateRef(ctx, storage.RefUpdate{ID: d.ID, Version: d.Version, Actor: actor})
+			return err
+		}
+		base, err := e.materialize(ctx, tx, d.Base)
+		if err != nil {
+			return err
+		}
+		theirs, err := e.materialize(ctx, tx, parent.Head)
+		if err != nil {
+			return err
+		}
+		ours, _, own, err := e.compose(ctx, tx, d)
+		if err != nil {
+			return err
+		}
+		merged, conflicts, err := e.coreMerge(base, ours, theirs, resolutions)
+		if err != nil {
+			return err
+		}
+		if len(conflicts) > 0 {
+			result.Ref, result.Conflicts = d, conflicts
+			return nil
+		}
+		moved := d
+		moved.Base = parent.Head
+		if err := e.overlay(ctx, tx, moved, theirs, merged, ours, own, actor); err != nil {
+			return err
+		}
+		var written *storage.Commit
+		commit, err := e.commit(ctx, tx, moved, CommitOptions{}, actor)
+		switch {
+		case err == nil:
+			written = &commit
+		case errors.Is(err, ErrNothingToCommit):
+		default:
+			return err
+		}
+		update := storage.RefUpdate{ID: d.ID, Version: d.Version, Base: parent.Head, Actor: actor}
+		if written != nil {
+			update.Head = written.ID
+		}
+		result.Commit = written
+		result.Ref, err = tx.UpdateRef(ctx, update)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// Revert writes the rows that make a change set at version compose to the
+// tree of toCommit, and commits them. History is never rewritten. A primary
+// line is ErrPrimaryMergeOnly: revert a change set of it and merge that.
 func (e *Engine) Revert(ctx context.Context, actor, ref string, version int64, toCommit string) (*CommitResult, error) {
 	actor, err := actorID(actor)
 	if err != nil {
@@ -443,7 +559,7 @@ func (e *Engine) Revert(ctx context.Context, actor, ref string, version int64, t
 	}
 	result := &CommitResult{}
 	err = e.transact(ctx, func(ctx context.Context, tx storage.Tx) error {
-		r, err := e.readRef(ctx, tx, ref, &version, true)
+		r, err := e.readDraft(ctx, tx, ref, version)
 		if err != nil {
 			return err
 		}
@@ -468,6 +584,69 @@ func (e *Engine) Revert(ctx context.Context, actor, ref string, version int64, t
 		return nil, err
 	}
 	return result, nil
+}
+
+// Release points root's release at commit, a tagged commit of root, fenced
+// by the pointer's version: 0 for the root's first release. It snapshots
+// the commit and writes no member rows, so a rollback is a Release to an
+// earlier tagged commit, and the pointer's history is the release log. An
+// untagged commit is ErrNotTagged; another root's is ErrRootMismatch.
+func (e *Engine) Release(ctx context.Context, actor, root, commit string, version int64) (storage.Release, error) {
+	actor, err := actorID(actor)
+	if err != nil {
+		return storage.Release{}, err
+	}
+	if err := ids(&root, &commit); err != nil {
+		return storage.Release{}, err
+	}
+	var release storage.Release
+	err = e.transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+		c, err := tx.ReadCommit(ctx, commit)
+		if err != nil {
+			return err
+		}
+		if c.Root != root {
+			return ErrRootMismatch
+		}
+		if c.Sequence == nil {
+			return ErrNotTagged
+		}
+		if _, err := e.ensureSnapshot(ctx, tx, c); err != nil {
+			return err
+		}
+		release, err = tx.WriteRelease(ctx, storage.ReleaseWrite{Root: root, Commit: c.ID, Version: version, Actor: actor})
+		return err
+	})
+	return release, err
+}
+
+// Released reads root's release pointer and the tree of the commit it
+// names. A root that has never been released is ErrNotFound.
+func (e *Engine) Released(ctx context.Context, root string) (*ReleasedResult, error) {
+	if err := ids(&root); err != nil {
+		return nil, err
+	}
+	var result *ReleasedResult
+	err := e.transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+		release, err := tx.ReadRelease(ctx, root)
+		if err != nil {
+			return err
+		}
+		tree, err := e.materialize(ctx, tx, release.Commit)
+		if err != nil {
+			return err
+		}
+		if tree, err = e.order(tree); err != nil {
+			return err
+		}
+		read, err := e.treeResult(tree, nil)
+		if err != nil {
+			return err
+		}
+		result = &ReleasedResult{Release: release, TreeResult: *read}
+		return nil
+	})
+	return result, err
 }
 
 // Materialize reads a commit's tree by walking its parents: each entity's
@@ -594,6 +773,19 @@ func (e *Engine) readRef(ctx context.Context, tx storage.Tx, id string, expected
 	return ref, nil
 }
 
+// readDraft reads a ref to write through at version: a live, unsealed
+// change set. A primary line takes writes only from Merge.
+func (e *Engine) readDraft(ctx context.Context, tx storage.Tx, id string, version int64) (storage.Ref, error) {
+	ref, err := e.readRef(ctx, tx, id, &version, true)
+	if err != nil {
+		return ref, err
+	}
+	if ref.Parent == "" {
+		return ref, ErrPrimaryMergeOnly
+	}
+	return ref, nil
+}
+
 // row is what the engine reads of one row.
 type row struct {
 	key       string
@@ -660,39 +852,67 @@ func (e *Engine) ownRows(ctx context.Context, tx storage.Tx, ref string) (Tree, 
 	return tree, nil
 }
 
-// materialize reads a commit's tree: it walks the commit's parents, takes
-// each entity's nearest patch, drops the deletes and reads the row versions
-// the rest name from history. An empty commit is the empty tree.
-func (e *Engine) materialize(ctx context.Context, tx storage.Tx, commit string) (Tree, error) {
-	tree := Tree{}
+// entity names one entity of a tree.
+type entity struct{ kind, key string }
+
+// pinSet is a commit's tree as the row versions it holds, by entity.
+type pinSet map[entity]storage.SnapshotEntry
+
+// resolve reads the pin set of a commit's tree: it walks the commit's
+// parents to the nearest snapshot, takes that snapshot's pins, and lays
+// each nearer commit's patches over them, the nearest winning and a DELETE
+// removing the entity. It also returns the commit's distance from the
+// nearest snapshot on its chain: 0 for a snapshotted commit, else how many
+// commits separate them, the snapshot excluded, counting a chain with no
+// snapshot from before its first commit. An empty commit is the empty set
+// at distance 0.
+func (e *Engine) resolve(ctx context.Context, tx storage.Tx, commit string) (pinSet, int, error) {
+	pins := pinSet{}
 	if commit == "" {
-		return tree, nil
+		return pins, 0, nil
 	}
 	chain, err := tx.Walk(ctx, commit, e.walkCeiling)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if len(chain) == 0 {
-		return nil, ErrNotFound
+		return nil, 0, ErrNotFound
 	}
-	depth := make(map[string]int, len(chain))
-	chainIDs := make([]string, len(chain))
-	for i, c := range chain {
+	for _, c := range chain {
 		if c.SchemaEpoch > e.schemaEpoch {
-			return nil, fmt.Errorf("%w: commit %s has epoch %d, this graph %d", ErrSchemaEpoch, c.ID, c.SchemaEpoch, e.schemaEpoch)
+			return nil, 0, fmt.Errorf("%w: commit %s has epoch %d, this graph %d", ErrSchemaEpoch, c.ID, c.SchemaEpoch, e.schemaEpoch)
 		}
+	}
+	last := chain[len(chain)-1]
+	distance := len(chain)
+	patched := chain
+	switch {
+	case last.Snapshot:
+		entries, err := tx.Snapshot(ctx, last.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+		for _, entry := range entries {
+			pins[entity{entry.Kind, entry.EntityKey}] = entry
+		}
+		distance = len(chain) - 1
+		patched = chain[:len(chain)-1]
+	case last.Parent != "":
+		return nil, 0, fmt.Errorf("%w: %d commits", ErrWalkCeiling, e.walkCeiling)
+	}
+	if len(patched) == 0 {
+		return pins, distance, nil
+	}
+	depth := make(map[string]int, len(patched))
+	patchedIDs := make([]string, len(patched))
+	for i, c := range patched {
 		depth[c.ID] = i
-		chainIDs[i] = c.ID
+		patchedIDs[i] = c.ID
 	}
-	if chain[len(chain)-1].Parent != "" {
-		return nil, fmt.Errorf("%w: %d commits", ErrWalkCeiling, e.walkCeiling)
-	}
-
-	patches, err := tx.Patches(ctx, chainIDs)
+	patches, err := tx.Patches(ctx, patchedIDs)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	type entity struct{ kind, key string }
 	nearest := map[entity]storage.Patch{}
 	for _, p := range patches {
 		at := entity{p.Kind, p.EntityKey}
@@ -700,15 +920,47 @@ func (e *Engine) materialize(ctx context.Context, tx storage.Tx, commit string) 
 			nearest[at] = p
 		}
 	}
-	pins := map[string][]storage.Pin{}
-	for _, p := range nearest {
+	pins.apply(nearest)
+	return pins, distance, nil
+}
+
+// apply lays patches over the pin set: a DELETE removes its entity, and
+// any other patch pins its row version.
+func (s pinSet) apply(patches map[entity]storage.Patch) {
+	for at, p := range patches {
 		if p.Operation == "DELETE" {
+			delete(s, at)
 			continue
 		}
-		pins[p.Kind] = append(pins[p.Kind], storage.Pin{ID: p.EntityID, Version: p.EntityVersion})
+		s[at] = storage.SnapshotEntry{Kind: p.Kind, EntityKey: p.EntityKey, EntityID: p.EntityID, EntityVersion: p.EntityVersion}
 	}
+}
+
+// entries lists the pin set as a snapshot's entries, ordered by kind and
+// entity key.
+func (s pinSet) entries() []storage.SnapshotEntry {
+	out := make([]storage.SnapshotEntry, 0, len(s))
+	for _, entry := range s {
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind < out[j].Kind
+		}
+		return out[i].EntityKey < out[j].EntityKey
+	})
+	return out
+}
+
+// images reads the history image of every row version a pin set holds.
+func (e *Engine) images(ctx context.Context, tx storage.Tx, pins pinSet) (Tree, error) {
+	byKind := map[string][]storage.Pin{}
+	for _, entry := range pins {
+		byKind[entry.Kind] = append(byKind[entry.Kind], storage.Pin{ID: entry.EntityID, Version: entry.EntityVersion})
+	}
+	tree := Tree{}
 	for _, k := range e.kinds {
-		want := pins[k.Name]
+		want := byKind[k.Name]
 		if len(want) == 0 {
 			continue
 		}
@@ -724,6 +976,44 @@ func (e *Engine) materialize(ctx context.Context, tx storage.Tx, commit string) 
 		}
 	}
 	return tree, nil
+}
+
+// materialize reads a commit's tree: the row versions its pin set holds,
+// read from history. An empty commit is the empty tree.
+func (e *Engine) materialize(ctx context.Context, tx storage.Tx, commit string) (Tree, error) {
+	tree, _, _, err := e.materializePins(ctx, tx, commit)
+	return tree, err
+}
+
+// materializePins is materialize, with the commit's pin set and its
+// distance from the nearest snapshot (see resolve).
+func (e *Engine) materializePins(ctx context.Context, tx storage.Tx, commit string) (Tree, pinSet, int, error) {
+	pins, distance, err := e.resolve(ctx, tx, commit)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	tree, err := e.images(ctx, tx, pins)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	return tree, pins, distance, nil
+}
+
+// ensureSnapshot snapshots a commit that has no snapshot yet. It reports
+// whether it wrote one: a commit whose tree is empty has no entries to
+// write.
+func (e *Engine) ensureSnapshot(ctx context.Context, tx storage.Tx, commit storage.Commit) (bool, error) {
+	if commit.Snapshot {
+		return false, nil
+	}
+	pins, _, err := e.resolve(ctx, tx, commit.ID)
+	if err != nil {
+		return false, err
+	}
+	if len(pins) == 0 {
+		return false, nil
+	}
+	return true, tx.InsertSnapshot(ctx, commit.ID, pins.entries())
 }
 
 // compose is core.compose(materialize(ref.base) or empty, the ref's own
@@ -848,7 +1138,7 @@ func (e *Engine) commit(ctx context.Context, tx storage.Tx, ref storage.Ref, opt
 	if parent == "" {
 		parent = ref.Base
 	}
-	previous, err := e.materialize(ctx, tx, parent)
+	previous, pins, distance, err := e.materializePins(ctx, tx, parent)
 	if err != nil {
 		return storage.Commit{}, err
 	}
@@ -868,6 +1158,7 @@ func (e *Engine) commit(ctx context.Context, tx storage.Tx, ref storage.Ref, opt
 		return storage.Commit{}, err
 	}
 	patches := make([]storage.Patch, 0, len(changes))
+	nearest := make(map[entity]storage.Patch, len(changes))
 	for _, change := range changes {
 		kind, err := e.kind(change.Kind)
 		if err != nil {
@@ -889,7 +1180,9 @@ func (e *Engine) commit(ctx context.Context, tx storage.Tx, ref storage.Ref, opt
 		if err != nil {
 			return storage.Commit{}, err
 		}
-		patches = append(patches, storage.Patch{Kind: change.Kind, EntityKey: change.EntityKey, EntityID: r.id, EntityVersion: r.version, Operation: change.Operation})
+		patch := storage.Patch{Kind: change.Kind, EntityKey: change.EntityKey, EntityID: r.id, EntityVersion: r.version, Operation: change.Operation}
+		patches = append(patches, patch)
+		nearest[entity{patch.Kind, patch.EntityKey}] = patch
 	}
 	hash, err := e.contentHash(composed)
 	if err != nil {
@@ -912,6 +1205,18 @@ func (e *Engine) commit(ctx context.Context, tx storage.Tx, ref storage.Ref, opt
 	}
 	if err := tx.InsertPatches(ctx, written.ID, patches); err != nil {
 		return storage.Commit{}, err
+	}
+	// A tagged commit is snapshotted, and so is one snapshotEvery commits
+	// past the nearest snapshot on its chain: its parent's pins with its
+	// own patches laid over them.
+	if opts.Tag || distance+1 >= e.snapshotEvery {
+		pins.apply(nearest)
+		if len(pins) > 0 {
+			if err := tx.InsertSnapshot(ctx, written.ID, pins.entries()); err != nil {
+				return storage.Commit{}, err
+			}
+			written.Snapshot = true
+		}
 	}
 	return written, nil
 }
@@ -958,23 +1263,7 @@ func (e *Engine) merge(ctx context.Context, tx storage.Tx, source, target storag
 	if err != nil {
 		return nil, err
 	}
-	resolutions = append([]versiongraph.Resolution(nil), resolutions...)
-	for i := range resolutions {
-		if resolutions[i].EntityKey, err = id("resolution entity key", resolutions[i].EntityKey); err != nil {
-			return nil, err
-		}
-	}
-	request := versiongraph.MergeRequest{Descriptor: e.descriptor, Resolutions: resolutions}
-	if request.Base, err = base.json(); err != nil {
-		return nil, err
-	}
-	if request.Ours, err = ours.json(); err != nil {
-		return nil, err
-	}
-	if request.Theirs, err = theirs.json(); err != nil {
-		return nil, err
-	}
-	result, err := versiongraph.Merge(request)
+	result, err := e.coreMergeResult(base, ours, theirs, resolutions)
 	if err != nil {
 		return nil, err
 	}
@@ -1015,6 +1304,115 @@ func (e *Engine) merge(ctx context.Context, tx storage.Tx, source, target storag
 		}
 	}
 	return nil, nil
+}
+
+// coreMergeResult runs the core's three-way merge of three trees, with the
+// resolutions' entity keys in their canonical form.
+func (e *Engine) coreMergeResult(base, ours, theirs Tree, resolutions []versiongraph.Resolution) (*versiongraph.MergeResult, error) {
+	resolutions = append([]versiongraph.Resolution(nil), resolutions...)
+	var err error
+	for i := range resolutions {
+		if resolutions[i].EntityKey, err = id("resolution entity key", resolutions[i].EntityKey); err != nil {
+			return nil, err
+		}
+	}
+	request := versiongraph.MergeRequest{Descriptor: e.descriptor, Resolutions: resolutions}
+	if request.Base, err = base.json(); err != nil {
+		return nil, err
+	}
+	if request.Ours, err = ours.json(); err != nil {
+		return nil, err
+	}
+	if request.Theirs, err = theirs.json(); err != nil {
+		return nil, err
+	}
+	return versiongraph.Merge(request)
+}
+
+// coreMerge is coreMergeResult's merged tree, or its conflicts.
+func (e *Engine) coreMerge(base, ours, theirs Tree, resolutions []versiongraph.Resolution) (Tree, []versiongraph.Conflict, error) {
+	result, err := e.coreMergeResult(base, ours, theirs, resolutions)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(result.Conflicts) > 0 {
+		return nil, result.Conflicts, nil
+	}
+	merged, err := decodeTree(result.Merged)
+	return merged, nil, err
+}
+
+// overlay writes a ref's own rows so that, over the tree of its base
+// (base), it composes to want. current is what the ref composes to now and
+// own its rows. Each entity want holds differently from base gets the ref's
+// row of it (a tombstone where want lacks it) unless the ref's row already
+// gives it; every other row the ref holds is removed, so the entity reads
+// through the base.
+func (e *Engine) overlay(ctx context.Context, tx storage.Tx, ref storage.Ref, base, want, current, own Tree, actor string) error {
+	changes, err := e.diff(base, want)
+	if err != nil {
+		return err
+	}
+	moved, err := e.diff(current, want)
+	if err != nil {
+		return err
+	}
+	differs := make(map[entity]bool, len(moved))
+	for _, change := range moved {
+		differs[entity{change.Kind, change.EntityKey}] = true
+	}
+	ownByKey, err := e.index(own)
+	if err != nil {
+		return err
+	}
+	baseByKey, err := e.index(base)
+	if err != nil {
+		return err
+	}
+	kept := make(map[entity]bool, len(changes))
+	for _, change := range changes {
+		at := entity{change.Kind, change.EntityKey}
+		kept[at] = true
+		kind, err := e.kind(change.Kind)
+		if err != nil {
+			return err
+		}
+		ownRow, hasOwn := ownByKey[change.Kind][change.EntityKey]
+		tombstone := false
+		if hasOwn {
+			r, err := e.readRow(kind, ownRow)
+			if err != nil {
+				return err
+			}
+			tombstone = r.tombstone
+		}
+		if change.Operation == "DELETE" {
+			if hasOwn && tombstone {
+				continue
+			}
+			if err := e.deleteEntity(ctx, tx, ref, baseByKey, change.Kind, change.EntityKey, actor); err != nil {
+				return err
+			}
+			continue
+		}
+		if hasOwn && !tombstone && !differs[at] {
+			continue
+		}
+		if _, err := e.writeRow(ctx, tx, change.Kind, ref, change.Row, false, actor); err != nil {
+			return err
+		}
+	}
+	for _, k := range e.kinds {
+		for key := range ownByKey[k.Name] {
+			if kept[entity{k.Name, key}] {
+				continue
+			}
+			if _, err := tx.RemoveRow(ctx, k.Name, ref.ID, key, actor); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // revert writes the rows that make the ref compose to tree: each entity

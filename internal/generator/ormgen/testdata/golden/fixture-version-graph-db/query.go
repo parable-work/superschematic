@@ -1114,6 +1114,260 @@ type RecipeRefHistoryOptions struct {
 	Offset int
 }
 
+// RecipeReleaseFields specifies which RecipeRelease fields to select
+type RecipeReleaseFields struct {
+	Id        bool
+	CreatedAt bool
+	CreatedBy bool
+	UpdatedAt bool
+	UpdatedBy bool
+	Version   bool
+	// Root selects the root_id foreign key field
+	Root bool
+	// RootNested selects fields for the related Recipe
+	RootNested RecipeFields
+	// Commit selects the commit_id foreign key field
+	Commit bool
+	// CommitNested selects fields for the related RecipeCommit
+	CommitNested RecipeCommitFields
+}
+
+// ToStringSlice converts RecipeReleaseFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f RecipeReleaseFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Root {
+		fields = append(fields, "root_id")
+	}
+	if f.Commit {
+		fields = append(fields, "commit_id")
+	}
+	if f.CreatedAt {
+		fields = append(fields, "created_at")
+	}
+	if f.CreatedBy {
+		fields = append(fields, "created_by")
+	}
+	if f.UpdatedAt {
+		fields = append(fields, "updated_at")
+	}
+	if f.UpdatedBy {
+		fields = append(fields, "updated_by")
+	}
+	if f.Version {
+		fields = append(fields, "_version")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f RecipeReleaseFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.RootNested.IsZero() {
+		return false
+	}
+	if !f.CommitNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a RecipeReleaseFields with all fields selected
+func (RecipeReleaseFields) All() RecipeReleaseFields {
+	return RecipeReleaseFields{
+		Id:        true,
+		CreatedAt: true,
+		CreatedBy: true,
+		UpdatedAt: true,
+		UpdatedBy: true,
+		Version:   true,
+		Root:      true,
+		Commit:    true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (RecipeReleaseFields) Minimal() RecipeReleaseFields {
+	return RecipeReleaseFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (RecipeReleaseFields) WithoutAudit() RecipeReleaseFields {
+	return RecipeReleaseFields{
+		Id:      true,
+		Version: true,
+	}
+}
+
+// RecipeReleaseOrderByField represents a field that can be used for ordering
+type RecipeReleaseOrderByField string
+
+const (
+	RecipeReleaseOrderById        RecipeReleaseOrderByField = "id"
+	RecipeReleaseOrderByCreatedAt RecipeReleaseOrderByField = "created_at"
+	RecipeReleaseOrderByCreatedBy RecipeReleaseOrderByField = "created_by"
+	RecipeReleaseOrderByUpdatedAt RecipeReleaseOrderByField = "updated_at"
+	RecipeReleaseOrderByUpdatedBy RecipeReleaseOrderByField = "updated_by"
+	RecipeReleaseOrderByVersion   RecipeReleaseOrderByField = "_version"
+)
+
+// RecipeReleaseOrderBy specifies ordering for RecipeRelease queries
+type RecipeReleaseOrderBy struct {
+	Field RecipeReleaseOrderByField
+	Desc  bool
+}
+
+// RecipeReleaseGetOptions contains options for RecipeRelease GetOne operations
+type RecipeReleaseGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields RecipeReleaseFields
+}
+
+// RecipeReleaseFindOptions contains options for RecipeRelease Find operations
+type RecipeReleaseFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields RecipeReleaseFields
+	// OrderBy specifies sorting order
+	OrderBy []RecipeReleaseOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// RecipeReleaseHistoryOptions contains options for RecipeRelease version history reads.
+type RecipeReleaseHistoryOptions struct {
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+}
+
+// RecipeSnapshotEntryFields specifies which RecipeSnapshotEntry fields to select
+type RecipeSnapshotEntryFields struct {
+	Id            bool
+	EntityKind    bool
+	EntityKey     bool
+	EntityId      bool
+	EntityVersion bool
+	// Commit selects the commit_id foreign key field
+	Commit bool
+	// CommitNested selects fields for the related RecipeCommit
+	CommitNested RecipeCommitFields
+}
+
+// ToStringSlice converts RecipeSnapshotEntryFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f RecipeSnapshotEntryFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Commit {
+		fields = append(fields, "commit_id")
+	}
+	if f.EntityKind {
+		fields = append(fields, "entity_kind")
+	}
+	if f.EntityKey {
+		fields = append(fields, "entity_key")
+	}
+	if f.EntityId {
+		fields = append(fields, "entity_id")
+	}
+	if f.EntityVersion {
+		fields = append(fields, "entity_version")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f RecipeSnapshotEntryFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.CommitNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a RecipeSnapshotEntryFields with all fields selected
+func (RecipeSnapshotEntryFields) All() RecipeSnapshotEntryFields {
+	return RecipeSnapshotEntryFields{
+		Id:            true,
+		EntityKind:    true,
+		EntityKey:     true,
+		EntityId:      true,
+		EntityVersion: true,
+		Commit:        true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (RecipeSnapshotEntryFields) Minimal() RecipeSnapshotEntryFields {
+	return RecipeSnapshotEntryFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (RecipeSnapshotEntryFields) WithoutAudit() RecipeSnapshotEntryFields {
+	return RecipeSnapshotEntryFields{
+		Id:            true,
+		EntityKind:    true,
+		EntityKey:     true,
+		EntityId:      true,
+		EntityVersion: true,
+	}
+}
+
+// RecipeSnapshotEntryOrderByField represents a field that can be used for ordering
+type RecipeSnapshotEntryOrderByField string
+
+const (
+	RecipeSnapshotEntryOrderById            RecipeSnapshotEntryOrderByField = "id"
+	RecipeSnapshotEntryOrderByEntityKind    RecipeSnapshotEntryOrderByField = "entity_kind"
+	RecipeSnapshotEntryOrderByEntityKey     RecipeSnapshotEntryOrderByField = "entity_key"
+	RecipeSnapshotEntryOrderByEntityId      RecipeSnapshotEntryOrderByField = "entity_id"
+	RecipeSnapshotEntryOrderByEntityVersion RecipeSnapshotEntryOrderByField = "entity_version"
+)
+
+// RecipeSnapshotEntryOrderBy specifies ordering for RecipeSnapshotEntry queries
+type RecipeSnapshotEntryOrderBy struct {
+	Field RecipeSnapshotEntryOrderByField
+	Desc  bool
+}
+
+// RecipeSnapshotEntryGetOptions contains options for RecipeSnapshotEntry GetOne operations
+type RecipeSnapshotEntryGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields RecipeSnapshotEntryFields
+}
+
+// RecipeSnapshotEntryFindOptions contains options for RecipeSnapshotEntry Find operations
+type RecipeSnapshotEntryFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields RecipeSnapshotEntryFields
+	// OrderBy specifies sorting order
+	OrderBy []RecipeSnapshotEntryOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
 // StepFields specifies which Step fields to select
 type StepFields struct {
 	Id           bool
@@ -2461,6 +2715,9 @@ type RecipeFilter struct {
 	// ReferencedByRecipeRefRoot filters on the presence or absence of a
 	// RecipeRef whose root points at this row.
 	ReferencedByRecipeRefRoot *ReferencedByFilter
+	// ReferencedByRecipeReleaseRoot filters on the presence or absence of a
+	// RecipeRelease whose root points at this row.
+	ReferencedByRecipeReleaseRoot *ReferencedByFilter
 	// ReferencedByStepRecipe filters on the presence or absence of a
 	// Step whose recipe points at this row.
 	ReferencedByStepRecipe *ReferencedByFilter
@@ -2639,6 +2896,14 @@ func (f *RecipeFilter) buildWhereClause(args *[]interface{}, paramOffset int) st
 			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
 		}
 	}
+	if f.ReferencedByRecipeReleaseRoot != nil {
+		probe := `SELECT 1 FROM recipe_release WHERE recipe_release.root_id = recipe.id`
+		if f.ReferencedByRecipeReleaseRoot.Exists {
+			conditions = append(conditions, `EXISTS (`+probe+`)`)
+		} else {
+			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+		}
+	}
 	if f.ReferencedByStepRecipe != nil {
 		probe := `SELECT 1 FROM step WHERE step.recipe_id = recipe.id`
 		if f.ReferencedByStepRecipe.Exists {
@@ -2697,6 +2962,12 @@ type RecipeCommitFilter struct {
 	// ReferencedByRecipeRefHeadCommit filters on the presence or absence of a
 	// RecipeRef whose headCommit points at this row.
 	ReferencedByRecipeRefHeadCommit *ReferencedByFilter
+	// ReferencedByRecipeReleaseCommit filters on the presence or absence of a
+	// RecipeRelease whose commit points at this row.
+	ReferencedByRecipeReleaseCommit *ReferencedByFilter
+	// ReferencedByRecipeSnapshotEntryCommit filters on the presence or absence of a
+	// RecipeSnapshotEntry whose commit points at this row.
+	ReferencedByRecipeSnapshotEntryCommit *ReferencedByFilter
 }
 
 // RecipeCommitUpdate provides fields that can be updated
@@ -3068,6 +3339,22 @@ func (f *RecipeCommitFilter) buildWhereClause(args *[]interface{}, paramOffset i
 			probe += ` AND recipe_ref.deleted_at IS NULL`
 		}
 		if f.ReferencedByRecipeRefHeadCommit.Exists {
+			conditions = append(conditions, `EXISTS (`+probe+`)`)
+		} else {
+			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+		}
+	}
+	if f.ReferencedByRecipeReleaseCommit != nil {
+		probe := `SELECT 1 FROM recipe_release WHERE recipe_release.commit_id = recipe_commit.id`
+		if f.ReferencedByRecipeReleaseCommit.Exists {
+			conditions = append(conditions, `EXISTS (`+probe+`)`)
+		} else {
+			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+		}
+	}
+	if f.ReferencedByRecipeSnapshotEntryCommit != nil {
+		probe := `SELECT 1 FROM recipe_snapshot_entry WHERE recipe_snapshot_entry.commit_id = recipe_commit.id`
+		if f.ReferencedByRecipeSnapshotEntryCommit.Exists {
 			conditions = append(conditions, `EXISTS (`+probe+`)`)
 		} else {
 			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
@@ -3828,6 +4115,485 @@ func (f *RecipeRefFilter) buildWhereClause(args *[]interface{}, paramOffset int)
 			conditions = append(conditions, `EXISTS (`+probe+`)`)
 		} else {
 			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+		}
+	}
+
+	if len(conditions) == 0 {
+		return ""
+	}
+
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// RecipeReleaseFilter provides filtering for RecipeRelease queries
+type RecipeReleaseFilter struct {
+	Id        *UUIDFilter
+	CreatedAt *DateTimeFilter
+	UpdatedAt *DateTimeFilter
+	Version   *Int64Filter
+	// RootID allows filtering by foreign key
+	RootID *UUIDFilter
+	// CommitID allows filtering by foreign key
+	CommitID *UUIDFilter
+}
+
+// RecipeReleaseUpdate provides fields that can be updated
+type RecipeReleaseUpdate struct {
+	// RootID allows updating the foreign key for root
+	RootID *types.IdentityUUID
+	// CommitID allows updating the foreign key for commit
+	CommitID *types.IdentityUUID
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewRecipeReleaseSnapshotUpdate maps every mutable field from a complete
+// RecipeRelease value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewRecipeReleaseSnapshotUpdate(input *types.RecipeRelease) *RecipeReleaseUpdate {
+	update := &RecipeReleaseUpdate{}
+	if input == nil {
+		return update
+	}
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *RecipeReleaseUpdate) ApplyTo(row *types.RecipeRelease) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.RootID != nil {
+		row.Root.Id = u.RootID
+	}
+	if u.CommitID != nil {
+		row.Commit.Id = u.CommitID
+	}
+	if u.UpdatedBy != nil {
+		row.UpdatedBy = *u.UpdatedBy
+	}
+}
+
+// buildWhereClause builds a WHERE clause from a RecipeReleaseFilter
+func (f *RecipeReleaseFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	if f == nil {
+		return ""
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `recipe_release.id IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_release.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.CreatedAt != nil {
+		if f.CreatedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.created_at = $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Eq)
+		}
+		if f.CreatedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.created_at > $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gt)
+		}
+		if f.CreatedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.created_at >= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gte)
+		}
+		if f.CreatedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.created_at < $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lt)
+		}
+		if f.CreatedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.created_at <= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lte)
+		}
+		if f.CreatedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.created_at >= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.created_at <= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.End)
+		}
+		if f.CreatedAt.IsNull != nil {
+			if *f.CreatedAt.IsNull {
+				conditions = append(conditions, `recipe_release.created_at IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_release.created_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UpdatedAt != nil {
+		if f.UpdatedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.updated_at = $%d`, paramNum))
+			*args = append(*args, *f.UpdatedAt.Eq)
+		}
+		if f.UpdatedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.updated_at > $%d`, paramNum))
+			*args = append(*args, *f.UpdatedAt.Gt)
+		}
+		if f.UpdatedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.updated_at >= $%d`, paramNum))
+			*args = append(*args, *f.UpdatedAt.Gte)
+		}
+		if f.UpdatedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.updated_at < $%d`, paramNum))
+			*args = append(*args, *f.UpdatedAt.Lt)
+		}
+		if f.UpdatedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.updated_at <= $%d`, paramNum))
+			*args = append(*args, *f.UpdatedAt.Lte)
+		}
+		if f.UpdatedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.updated_at >= $%d`, paramNum))
+			*args = append(*args, f.UpdatedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.updated_at <= $%d`, paramNum))
+			*args = append(*args, f.UpdatedAt.Between.End)
+		}
+		if f.UpdatedAt.IsNull != nil {
+			if *f.UpdatedAt.IsNull {
+				conditions = append(conditions, `recipe_release.updated_at IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_release.updated_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.Version != nil {
+		if f.Version.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release._version = $%d`, paramNum))
+			*args = append(*args, *f.Version.Eq)
+		}
+		if f.Version.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release._version > $%d`, paramNum))
+			*args = append(*args, *f.Version.Gt)
+		}
+		if f.Version.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release._version >= $%d`, paramNum))
+			*args = append(*args, *f.Version.Gte)
+		}
+		if f.Version.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release._version < $%d`, paramNum))
+			*args = append(*args, *f.Version.Lt)
+		}
+		if f.Version.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release._version <= $%d`, paramNum))
+			*args = append(*args, *f.Version.Lte)
+		}
+		if f.Version.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release._version >= $%d`, paramNum))
+			*args = append(*args, f.Version.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release._version <= $%d`, paramNum))
+			*args = append(*args, f.Version.Between.Max)
+		}
+	}
+	if f.RootID != nil {
+		if f.RootID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.root_id = $%d`, paramNum))
+			*args = append(*args, f.RootID.Eq.ToUUID())
+		}
+		if len(f.RootID.In) > 0 {
+			placeholders := make([]string, len(f.RootID.In))
+			for i, id := range f.RootID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.root_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.RootID.IsNull != nil {
+			if *f.RootID.IsNull {
+				conditions = append(conditions, `recipe_release.root_id IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_release.root_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.CommitID != nil {
+		if f.CommitID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.commit_id = $%d`, paramNum))
+			*args = append(*args, f.CommitID.Eq.ToUUID())
+		}
+		if len(f.CommitID.In) > 0 {
+			placeholders := make([]string, len(f.CommitID.In))
+			for i, id := range f.CommitID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_release.commit_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.CommitID.IsNull != nil {
+			if *f.CommitID.IsNull {
+				conditions = append(conditions, `recipe_release.commit_id IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_release.commit_id IS NOT NULL`)
+			}
+		}
+	}
+
+	if len(conditions) == 0 {
+		return ""
+	}
+
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// RecipeSnapshotEntryFilter provides filtering for RecipeSnapshotEntry queries
+type RecipeSnapshotEntryFilter struct {
+	Id            *UUIDFilter
+	EntityKind    *StringFilter
+	EntityKey     *UUIDFilter
+	EntityId      *UUIDFilter
+	EntityVersion *Int64Filter
+	// CommitID allows filtering by foreign key
+	CommitID *UUIDFilter
+}
+
+// RecipeSnapshotEntryUpdate provides fields that can be updated
+type RecipeSnapshotEntryUpdate struct {
+	EntityKind    *types.RecipeEntityKind
+	EntityKey     *types.IdentityUUID
+	EntityId      *types.IdentityUUID
+	EntityVersion *types.GenericInt64
+	// CommitID allows updating the foreign key for commit
+	CommitID *types.IdentityUUID
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewRecipeSnapshotEntrySnapshotUpdate maps every mutable field from a complete
+// RecipeSnapshotEntry value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewRecipeSnapshotEntrySnapshotUpdate(input *types.RecipeSnapshotEntry) *RecipeSnapshotEntryUpdate {
+	update := &RecipeSnapshotEntryUpdate{}
+	if input == nil {
+		return update
+	}
+	update.EntityKind = &input.EntityKind
+	update.EntityKey = &input.EntityKey
+	update.EntityId = &input.EntityId
+	update.EntityVersion = &input.EntityVersion
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *RecipeSnapshotEntryUpdate) ApplyTo(row *types.RecipeSnapshotEntry) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.EntityKind != nil {
+		row.EntityKind = *u.EntityKind
+	}
+	if u.EntityKey != nil {
+		row.EntityKey = *u.EntityKey
+	}
+	if u.EntityId != nil {
+		row.EntityId = *u.EntityId
+	}
+	if u.EntityVersion != nil {
+		row.EntityVersion = *u.EntityVersion
+	}
+	if u.CommitID != nil {
+		row.Commit.Id = u.CommitID
+	}
+}
+
+// buildWhereClause builds a WHERE clause from a RecipeSnapshotEntryFilter
+func (f *RecipeSnapshotEntryFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	if f == nil {
+		return ""
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `recipe_snapshot_entry.id IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_snapshot_entry.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.EntityKind != nil {
+		if f.EntityKind.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_kind = $%d`, paramNum))
+			*args = append(*args, *f.EntityKind.Eq)
+		}
+		if len(f.EntityKind.In) > 0 {
+			placeholders := make([]string, len(f.EntityKind.In))
+			for i, value := range f.EntityKind.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_kind IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.EntityKind.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_kind ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.EntityKind.ILike+"%")
+		}
+	}
+	if f.EntityKey != nil {
+		if f.EntityKey.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_key = $%d`, paramNum))
+			*args = append(*args, f.EntityKey.Eq.ToUUID())
+		}
+		if len(f.EntityKey.In) > 0 {
+			placeholders := make([]string, len(f.EntityKey.In))
+			for i, id := range f.EntityKey.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_key IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.EntityKey.IsNull != nil {
+			if *f.EntityKey.IsNull {
+				conditions = append(conditions, `recipe_snapshot_entry.entity_key IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_snapshot_entry.entity_key IS NOT NULL`)
+			}
+		}
+	}
+	if f.EntityId != nil {
+		if f.EntityId.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_id = $%d`, paramNum))
+			*args = append(*args, f.EntityId.Eq.ToUUID())
+		}
+		if len(f.EntityId.In) > 0 {
+			placeholders := make([]string, len(f.EntityId.In))
+			for i, id := range f.EntityId.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.EntityId.IsNull != nil {
+			if *f.EntityId.IsNull {
+				conditions = append(conditions, `recipe_snapshot_entry.entity_id IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_snapshot_entry.entity_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.EntityVersion != nil {
+		if f.EntityVersion.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_version = $%d`, paramNum))
+			*args = append(*args, *f.EntityVersion.Eq)
+		}
+		if f.EntityVersion.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_version > $%d`, paramNum))
+			*args = append(*args, *f.EntityVersion.Gt)
+		}
+		if f.EntityVersion.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_version >= $%d`, paramNum))
+			*args = append(*args, *f.EntityVersion.Gte)
+		}
+		if f.EntityVersion.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_version < $%d`, paramNum))
+			*args = append(*args, *f.EntityVersion.Lt)
+		}
+		if f.EntityVersion.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_version <= $%d`, paramNum))
+			*args = append(*args, *f.EntityVersion.Lte)
+		}
+		if f.EntityVersion.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_version >= $%d`, paramNum))
+			*args = append(*args, f.EntityVersion.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.entity_version <= $%d`, paramNum))
+			*args = append(*args, f.EntityVersion.Between.Max)
+		}
+	}
+	if f.CommitID != nil {
+		if f.CommitID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.commit_id = $%d`, paramNum))
+			*args = append(*args, f.CommitID.Eq.ToUUID())
+		}
+		if len(f.CommitID.In) > 0 {
+			placeholders := make([]string, len(f.CommitID.In))
+			for i, id := range f.CommitID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.commit_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.CommitID.IsNull != nil {
+			if *f.CommitID.IsNull {
+				conditions = append(conditions, `recipe_snapshot_entry.commit_id IS NULL`)
+			} else {
+				conditions = append(conditions, `recipe_snapshot_entry.commit_id IS NOT NULL`)
+			}
 		}
 	}
 

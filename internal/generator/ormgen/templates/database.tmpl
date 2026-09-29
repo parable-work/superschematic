@@ -12,6 +12,7 @@ import (
 {{- if .VersionGraphs }}
 	"reflect"
 	"sync"
+	"time"
 {{- end }}
 
 	"github.com/jackc/pgx/v5"
@@ -286,7 +287,45 @@ var (
 	// ErrNameTaken is returned when the root already has a live ref of the
 	// name.
 	ErrNameTaken = engine.ErrNameTaken
+	// ErrNoActor is returned by a sweep with no actor to write as.
+	ErrNoActor = engine.ErrNoActor
+	// ErrPrimaryMergeOnly is returned by a Save, Commit, Seal or Revert on
+	// a primary line, which takes writes only from Merge.
+	ErrPrimaryMergeOnly = engine.ErrPrimaryMergeOnly
+	// ErrNotTagged is returned by a Release of a commit that is not tagged.
+	ErrNotTagged = engine.ErrNotTagged
+	// ErrNoParent is returned by a Rebase of a primary line, which has no
+	// parent to rebase onto.
+	ErrNoParent = engine.ErrNoParent
 )
+
+// DefaultDiscardGrace is how long after a ref is discarded a sweep keeps
+// its member rows, unless GraphSweepOptions.DiscardGrace says otherwise.
+const DefaultDiscardGrace = engine.DefaultDiscardGrace
+
+// GraphSweepOptions configure a graph's maintenance pass (Sweep and
+// RunSweeper). Actor is who the pass writes as. DiscardGrace is how long
+// after a ref is discarded its member rows are kept (0 is
+// DefaultDiscardGrace); a positive AbandonAfter discards every change set
+// with no write for that long; PruneBatch caps how many history images of
+// each kind a pass prunes (0 is no cap).
+type GraphSweepOptions struct {
+	Actor        {{ .UUIDGoType }}
+	DiscardGrace time.Duration
+	AbandonAfter time.Duration
+	PruneBatch   int
+}
+
+func (o GraphSweepOptions) engine() engine.SweepOptions {
+	opts := engine.SweepOptions{DiscardGrace: o.DiscardGrace, AbandonAfter: o.AbandonAfter, PruneBatch: o.PruneBatch}
+	if !reflect.ValueOf(o.Actor).IsZero() {
+		opts.Actor = uuidText(o.Actor)
+	}
+	return opts
+}
+
+// GraphSweepReport is what one maintenance pass did.
+type GraphSweepReport = engine.SweepReport
 
 // InvalidTreeError lists what the core's validate found wrong with a tree.
 // It wraps ErrInvalidTree.
@@ -308,8 +347,9 @@ type GraphEdits[T any] struct {
 // graphRuntime is one graph's engine and Postgres adapter, built once from
 // its descriptor, and each kind's column classes.
 type graphRuntime struct {
-	descriptor  string
-	schemaEpoch int64
+	descriptor    string
+	schemaEpoch   int64
+	snapshotEvery int64
 
 	once    sync.Once
 	adapter *postgres.Adapter
@@ -324,7 +364,7 @@ func (r *graphRuntime) load() error {
 		if r.adapter, r.err = postgres.New(descriptor, postgres.Options{HistoryActorSetting: "{{ .Naming.HistoryActorSetting }}"}); r.err != nil {
 			return
 		}
-		if r.engine, r.err = engine.New(descriptor, nil, engine.Options{SchemaEpoch: r.schemaEpoch}); r.err != nil {
+		if r.engine, r.err = engine.New(descriptor, nil, engine.Options{SchemaEpoch: r.schemaEpoch, SnapshotEvery: int(r.snapshotEvery)}); r.err != nil {
 			return
 		}
 		var d struct {
@@ -389,6 +429,17 @@ func runGraph(ctx context.Context, db *Database, runtime *graphRuntime, walkCeil
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	return nil
+}
+
+// sweepGraph runs fn with the graph's engine over the ORM's pool, at
+// walkCeiling, in a transaction of its own per pass. A sweep writes as its
+// configured actor rather than the context user.
+func sweepGraph(db *Database, runtime *graphRuntime, walkCeiling int, fn func(e *engine.Engine) error) error {
+	if err := runtime.load(); err != nil {
+		return err
+	}
+	e := runtime.engine.WithStorage(runtime.adapter.Storage(postgres.Pgx(db.pool))).WithWalkCeiling(walkCeiling)
+	return graphError(fn(e))
 }
 
 // graphError wraps the engine's ErrVersionConflict and ErrNotFound with the

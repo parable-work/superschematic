@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"time"
 
 	types "example.com/schemas/types/go/fixture-version-graph-db"
 	"github.com/jackc/pgx/v5"
@@ -29,32 +30,36 @@ const (
 
 // Database represents the ORM database connection
 type Database struct {
-	pool         *pgxpool.Pool
-	Cover        *CoverRepository
-	Ingredient   *IngredientRepository
-	Note         *NoteRepository
-	Recipe       *RecipeRepository
-	RecipeCommit *RecipeCommitRepository
-	RecipePatch  *RecipePatchRepository
-	RecipeRef    *RecipeRefRepository
-	Step         *StepRepository
-	Tasting      *TastingRepository
-	Utensil      *UtensilRepository
+	pool                *pgxpool.Pool
+	Cover               *CoverRepository
+	Ingredient          *IngredientRepository
+	Note                *NoteRepository
+	Recipe              *RecipeRepository
+	RecipeCommit        *RecipeCommitRepository
+	RecipePatch         *RecipePatchRepository
+	RecipeRef           *RecipeRefRepository
+	RecipeRelease       *RecipeReleaseRepository
+	RecipeSnapshotEntry *RecipeSnapshotEntryRepository
+	Step                *StepRepository
+	Tasting             *TastingRepository
+	Utensil             *UtensilRepository
 }
 
 // Tx represents a database transaction with repositories
 type Tx struct {
-	tx           pgx.Tx
-	Cover        *CoverRepository
-	Ingredient   *IngredientRepository
-	Note         *NoteRepository
-	Recipe       *RecipeRepository
-	RecipeCommit *RecipeCommitRepository
-	RecipePatch  *RecipePatchRepository
-	RecipeRef    *RecipeRefRepository
-	Step         *StepRepository
-	Tasting      *TastingRepository
-	Utensil      *UtensilRepository
+	tx                  pgx.Tx
+	Cover               *CoverRepository
+	Ingredient          *IngredientRepository
+	Note                *NoteRepository
+	Recipe              *RecipeRepository
+	RecipeCommit        *RecipeCommitRepository
+	RecipePatch         *RecipePatchRepository
+	RecipeRef           *RecipeRefRepository
+	RecipeRelease       *RecipeReleaseRepository
+	RecipeSnapshotEntry *RecipeSnapshotEntryRepository
+	Step                *StepRepository
+	Tasting             *TastingRepository
+	Utensil             *UtensilRepository
 }
 
 // Config holds database configuration
@@ -90,6 +95,8 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 	db.RecipeCommit = &RecipeCommitRepository{db: db}
 	db.RecipePatch = &RecipePatchRepository{db: db}
 	db.RecipeRef = &RecipeRefRepository{db: db}
+	db.RecipeRelease = &RecipeReleaseRepository{db: db}
+	db.RecipeSnapshotEntry = &RecipeSnapshotEntryRepository{db: db}
 	db.Step = &StepRepository{db: db}
 	db.Tasting = &TastingRepository{db: db}
 	db.Utensil = &UtensilRepository{db: db}
@@ -119,6 +126,8 @@ func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
 	db.RecipeCommit = &RecipeCommitRepository{db: db}
 	db.RecipePatch = &RecipePatchRepository{db: db}
 	db.RecipeRef = &RecipeRefRepository{db: db}
+	db.RecipeRelease = &RecipeReleaseRepository{db: db}
+	db.RecipeSnapshotEntry = &RecipeSnapshotEntryRepository{db: db}
 	db.Step = &StepRepository{db: db}
 	db.Tasting = &TastingRepository{db: db}
 	db.Utensil = &UtensilRepository{db: db}
@@ -164,6 +173,16 @@ func (db *Database) GetRecipePatchRepository() RecipePatchRepositoryInterface {
 // GetRecipeRefRepository returns the RecipeRef repository interface.
 func (db *Database) GetRecipeRefRepository() RecipeRefRepositoryInterface {
 	return db.RecipeRef
+}
+
+// GetRecipeReleaseRepository returns the RecipeRelease repository interface.
+func (db *Database) GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface {
+	return db.RecipeRelease
+}
+
+// GetRecipeSnapshotEntryRepository returns the RecipeSnapshotEntry repository interface.
+func (db *Database) GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRepositoryInterface {
+	return db.RecipeSnapshotEntry
 }
 
 // GetStepRepository returns the Step repository interface.
@@ -216,6 +235,16 @@ func (tx *Tx) GetRecipeRefRepository() RecipeRefRepositoryInterface {
 	return tx.RecipeRef
 }
 
+// GetRecipeReleaseRepository returns the RecipeRelease transaction repository interface.
+func (tx *Tx) GetRecipeReleaseRepository() RecipeReleaseRepositoryInterface {
+	return tx.RecipeRelease
+}
+
+// GetRecipeSnapshotEntryRepository returns the RecipeSnapshotEntry transaction repository interface.
+func (tx *Tx) GetRecipeSnapshotEntryRepository() RecipeSnapshotEntryRepositoryInterface {
+	return tx.RecipeSnapshotEntry
+}
+
 // GetStepRepository returns the Step transaction repository interface.
 func (tx *Tx) GetStepRepository() StepRepositoryInterface {
 	return tx.Step
@@ -248,6 +277,8 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 	txWrapper.RecipeCommit = &RecipeCommitRepository{tx: tx, txDB: db}
 	txWrapper.RecipePatch = &RecipePatchRepository{tx: tx, txDB: db}
 	txWrapper.RecipeRef = &RecipeRefRepository{tx: tx, txDB: db}
+	txWrapper.RecipeRelease = &RecipeReleaseRepository{tx: tx, txDB: db}
+	txWrapper.RecipeSnapshotEntry = &RecipeSnapshotEntryRepository{tx: tx, txDB: db}
 	txWrapper.Step = &StepRepository{tx: tx, txDB: db}
 	txWrapper.Tasting = &TastingRepository{tx: tx, txDB: db}
 	txWrapper.Utensil = &UtensilRepository{tx: tx, txDB: db}
@@ -394,7 +425,45 @@ var (
 	// ErrNameTaken is returned when the root already has a live ref of the
 	// name.
 	ErrNameTaken = engine.ErrNameTaken
+	// ErrNoActor is returned by a sweep with no actor to write as.
+	ErrNoActor = engine.ErrNoActor
+	// ErrPrimaryMergeOnly is returned by a Save, Commit, Seal or Revert on
+	// a primary line, which takes writes only from Merge.
+	ErrPrimaryMergeOnly = engine.ErrPrimaryMergeOnly
+	// ErrNotTagged is returned by a Release of a commit that is not tagged.
+	ErrNotTagged = engine.ErrNotTagged
+	// ErrNoParent is returned by a Rebase of a primary line, which has no
+	// parent to rebase onto.
+	ErrNoParent = engine.ErrNoParent
 )
+
+// DefaultDiscardGrace is how long after a ref is discarded a sweep keeps
+// its member rows, unless GraphSweepOptions.DiscardGrace says otherwise.
+const DefaultDiscardGrace = engine.DefaultDiscardGrace
+
+// GraphSweepOptions configure a graph's maintenance pass (Sweep and
+// RunSweeper). Actor is who the pass writes as. DiscardGrace is how long
+// after a ref is discarded its member rows are kept (0 is
+// DefaultDiscardGrace); a positive AbandonAfter discards every change set
+// with no write for that long; PruneBatch caps how many history images of
+// each kind a pass prunes (0 is no cap).
+type GraphSweepOptions struct {
+	Actor        types.IdentityUUID
+	DiscardGrace time.Duration
+	AbandonAfter time.Duration
+	PruneBatch   int
+}
+
+func (o GraphSweepOptions) engine() engine.SweepOptions {
+	opts := engine.SweepOptions{DiscardGrace: o.DiscardGrace, AbandonAfter: o.AbandonAfter, PruneBatch: o.PruneBatch}
+	if !reflect.ValueOf(o.Actor).IsZero() {
+		opts.Actor = uuidText(o.Actor)
+	}
+	return opts
+}
+
+// GraphSweepReport is what one maintenance pass did.
+type GraphSweepReport = engine.SweepReport
 
 // InvalidTreeError lists what the core's validate found wrong with a tree.
 // It wraps ErrInvalidTree.
@@ -416,8 +485,9 @@ type GraphEdits[T any] struct {
 // graphRuntime is one graph's engine and Postgres adapter, built once from
 // its descriptor, and each kind's column classes.
 type graphRuntime struct {
-	descriptor  string
-	schemaEpoch int64
+	descriptor    string
+	schemaEpoch   int64
+	snapshotEvery int64
 
 	once    sync.Once
 	adapter *postgres.Adapter
@@ -432,7 +502,7 @@ func (r *graphRuntime) load() error {
 		if r.adapter, r.err = postgres.New(descriptor, postgres.Options{HistoryActorSetting: "superschematic.history_actor_id"}); r.err != nil {
 			return
 		}
-		if r.engine, r.err = engine.New(descriptor, nil, engine.Options{SchemaEpoch: r.schemaEpoch}); r.err != nil {
+		if r.engine, r.err = engine.New(descriptor, nil, engine.Options{SchemaEpoch: r.schemaEpoch, SnapshotEvery: int(r.snapshotEvery)}); r.err != nil {
 			return
 		}
 		var d struct {
@@ -497,6 +567,17 @@ func runGraph(ctx context.Context, db *Database, runtime *graphRuntime, walkCeil
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	return nil
+}
+
+// sweepGraph runs fn with the graph's engine over the ORM's pool, at
+// walkCeiling, in a transaction of its own per pass. A sweep writes as its
+// configured actor rather than the context user.
+func sweepGraph(db *Database, runtime *graphRuntime, walkCeiling int, fn func(e *engine.Engine) error) error {
+	if err := runtime.load(); err != nil {
+		return err
+	}
+	e := runtime.engine.WithStorage(runtime.adapter.Storage(postgres.Pgx(db.pool))).WithWalkCeiling(walkCeiling)
+	return graphError(fn(e))
 }
 
 // graphError wraps the engine's ErrVersionConflict and ErrNotFound with the

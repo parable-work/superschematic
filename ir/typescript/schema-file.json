@@ -1707,6 +1707,9 @@
         "schemaEpoch": {
           "default": 0,
           "type": "integer"
+        },
+        "snapshotEvery": {
+          "type": "integer"
         }
       },
       "type": "object"

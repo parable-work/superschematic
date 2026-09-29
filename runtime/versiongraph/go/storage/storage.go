@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Errors an adapter returns. The engine passes them through.
@@ -45,8 +46,7 @@ type Storage interface {
 }
 
 // Tx is one transaction's view of a graph. Its methods are the operations
-// the engine builds every graph operation from. Snapshots, the release
-// pointer and discarded refs' rows (D19) are later additions to it.
+// the engine builds every graph operation from.
 type Tx interface {
 	// CreateRef writes a ref and returns it.
 	CreateRef(ctx context.Context, ref NewRef) (Ref, error)
@@ -56,9 +56,9 @@ type Tx interface {
 	// LockRef reads a ref as ReadRef does and locks it until the
 	// transaction ends.
 	LockRef(ctx context.Context, id string) (Ref, error)
-	// UpdateRef moves a ref's head, seals it, or only bumps its version,
-	// fenced by the version it expects. It returns the ref as written, or
-	// ErrVersionConflict.
+	// UpdateRef moves a ref's head or base, seals it, or only bumps its
+	// version, fenced by the version it expects. It returns the ref as
+	// written, or ErrVersionConflict.
 	UpdateRef(ctx context.Context, update RefUpdate) (Ref, error)
 	// DiscardRef soft-deletes a live ref at the version it expects, or
 	// returns ErrVersionConflict.
@@ -85,7 +85,8 @@ type Tx interface {
 	// InsertPatches writes a commit's patches.
 	InsertPatches(ctx context.Context, commit string, patches []Patch) error
 	// Walk reads a commit and its parents, nearest first, at most limit
-	// of them. A commit that does not exist reads as no commits.
+	// of them, and stops after the first that has a snapshot. A commit
+	// that does not exist reads as no commits.
 	Walk(ctx context.Context, commit string, limit int) ([]Commit, error)
 	// RefCommits reads head and the parents of it that ref wrote, nearest
 	// first, at most limit of them.
@@ -96,10 +97,39 @@ type Tx interface {
 	// transaction ends, and returns the root's next published sequence.
 	NextSequence(ctx context.Context, root string) (int64, error)
 
+	// Snapshot reads a commit's snapshot: its full pin set, in no
+	// particular order. A commit without one reads as no entries.
+	Snapshot(ctx context.Context, commit string) ([]SnapshotEntry, error)
+	// InsertSnapshot writes a commit's snapshot.
+	InsertSnapshot(ctx context.Context, commit string, entries []SnapshotEntry) error
+	// Commits reads every commit of the graph, in no particular order, with
+	// whether each is tagged, snapshotted and released.
+	Commits(ctx context.Context) ([]CommitNode, error)
+
+	// ReadRelease reads a root's release pointer, or returns ErrNotFound
+	// when the root has none.
+	ReadRelease(ctx context.Context, root string) (Release, error)
+	// WriteRelease points a root's release at a commit, fenced by the
+	// pointer's version: version 0 writes the root's first pointer, and
+	// any other moves the pointer at that version. A pointer at another
+	// version, or one that already exists when version is 0, is
+	// ErrVersionConflict. It returns the pointer as written.
+	WriteRelease(ctx context.Context, write ReleaseWrite) (Release, error)
+
 	// Prune deletes the history images of one kind older than
-	// retentionDays, keeping every image a commit pins, at most batchSize
-	// of them (0 for no limit). It returns how many it deleted.
+	// retentionDays (0 for the kind's declared retention), keeping every
+	// image a patch or a snapshot pins, at most batchSize of them (0 for no
+	// limit). It returns how many it deleted.
 	Prune(ctx context.Context, kind string, retentionDays, batchSize int) (int64, error)
+	// DiscardedRefs reads the refs discarded longer ago than grace.
+	DiscardedRefs(ctx context.Context, grace time.Duration) ([]Ref, error)
+	// IdleDrafts reads the live change sets whose last write is older than
+	// idle.
+	IdleDrafts(ctx context.Context, idle time.Duration) ([]Ref, error)
+	// RemoveRefRows hard-deletes every row a ref holds of one kind,
+	// recording actor as each delete's actor in history. It returns how
+	// many it deleted.
+	RemoveRefRows(ctx context.Context, kind, ref, actor string) (int64, error)
 	// SweepLock takes the graph's sweep lock until the transaction ends. It
 	// reports false, without waiting, when another transaction holds it.
 	SweepLock(ctx context.Context) (bool, error)
@@ -129,12 +159,14 @@ type NewRef struct {
 	Actor  string
 }
 
-// RefUpdate changes a ref at Version: it moves the head to Head (unless it
-// is ""), seals the ref when Seal is set, and bumps its version in any case.
+// RefUpdate changes a ref at Version: it moves the head to Head and the
+// base to Base (each unless it is ""), seals the ref when Seal is set, and
+// bumps its version in any case.
 type RefUpdate struct {
 	ID      string
 	Version int64
 	Head    string
+	Base    string
 	Seal    bool
 	Actor   string
 }
@@ -173,6 +205,8 @@ type Commit struct {
 	// CreatedAt is the commit's time as a canonical dateTime.
 	CreatedAt string
 	CreatedBy string
+	// Snapshot is true when the commit has a snapshot.
+	Snapshot bool
 }
 
 // NewCommit is a commit to write.
@@ -196,4 +230,42 @@ type Patch struct {
 	EntityID      string
 	EntityVersion int64
 	Operation     string
+}
+
+// SnapshotEntry pins one entity of a snapshotted commit's tree to the row
+// version the tree holds.
+type SnapshotEntry struct {
+	Kind          string
+	EntityKey     string
+	EntityID      string
+	EntityVersion int64
+}
+
+// CommitNode is one commit of the graph as a sweep reads it: its parent
+// ("" for none), and whether it is tagged, has a snapshot, and is a root's
+// released commit.
+type CommitNode struct {
+	ID       string
+	Parent   string
+	Tagged   bool
+	Snapshot bool
+	Released bool
+}
+
+// Release is a root's release pointer: the commit it names, fenced by its
+// version.
+type Release struct {
+	ID      string
+	Root    string
+	Commit  string
+	Version int64
+}
+
+// ReleaseWrite points a root's release at Commit, fenced by Version (0 for
+// the root's first pointer).
+type ReleaseWrite struct {
+	Root    string
+	Commit  string
+	Version int64
+	Actor   string
 }

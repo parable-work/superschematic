@@ -13,13 +13,15 @@ import (
 // versionGraphShellTest and versionGraphFacadeTest. The first runs the
 // facade against the Postgres at
 // SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL through a whole lifecycle: a
-// primary line, a tagged commit, two change sets merged back (one cleanly,
-// one with a conflict settled by a resolution), a parent deleted with its
-// children, a revert, pruned history, an unset override, a merge that
-// carries a delete, a member with a plain UUID key, a revert that deletes,
-// two taggers made to wait on the root's lock together, and the fence, the
-// seal, a missing history row, the walk ceiling and the schema epoch
-// refusing what they refuse.
+// primary line written only through merges, a tagged merge, two change sets
+// merged back (one cleanly, one with a conflict settled by a resolution), a
+// parent deleted with its children, a revert, pruned history, an unset
+// override, a merge that carries a delete, a member with a plain UUID key, a
+// revert that deletes, two taggers made to wait on the root's lock
+// together, and the fence, the seal, a missing history row, the walk
+// ceiling and the schema epoch refusing what they refuse. The second saves
+// every value class through the facade; the third releases, rolls back,
+// rebases and sweeps through it.
 func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -34,8 +36,11 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ormDir, "graph_facade_test.go"), []byte(versionGraphFacadeTest), 0o644); err != nil {
 		t.Fatalf("write graph facade test: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(ormDir, "graph_release_test.go"), []byte(versionGraphReleaseTest), 0o644); err != nil {
+		t.Fatalf("write graph release test: %v", err)
+	}
 	out := runVersionGraphModule(t, ormDir)
-	for _, test := range []string{"TestVersionGraphShellOnPostgres", "TestVersionGraphFacadeKeepsEveryClass"} {
+	for _, test := range []string{"TestVersionGraphShellOnPostgres", "TestVersionGraphFacadeKeepsEveryClass", "TestVersionGraphFacadeReleasesRebasesAndSweeps"} {
 		if !strings.Contains(out, "--- PASS: "+test) {
 			t.Fatalf("the generated ORM module did not run %s", test)
 		}
@@ -76,6 +81,10 @@ func TestVersionGraphFacadeKeepsEveryClass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePrimary: %v", err)
 	}
+	draft, err := g.Branch(ctx, *main.Id, "tastings")
+	if err != nil {
+		t.Fatalf("Branch: %v", err)
+	}
 	parse := func(err error) {
 		t.Helper()
 		if err != nil {
@@ -106,11 +115,11 @@ func TestVersionGraphFacadeKeepsEveryClass(t *testing.T) {
 	want := *input
 	want.TastedAt, want.ServedAt = utc, canonicalTime
 
-	saved, err := g.Save(ctx, *main.Id, main.Version, RecipeEdits{Tasting: GraphEdits[types.Tasting]{Upsert: []*types.Tasting{input}}})
+	saved, err := g.Save(ctx, *draft.Id, draft.Version, RecipeEdits{Tasting: GraphEdits[types.Tasting]{Upsert: []*types.Tasting{input}}})
 	if err != nil {
 		t.Fatalf("save a tasting: %v", err)
 	}
-	committed, err := g.Commit(ctx, *main.Id, saved.Ref.Version, RecipeCommitOptions{})
+	committed, err := g.Commit(ctx, *draft.Id, saved.Ref.Version, RecipeCommitOptions{})
 	if err != nil {
 		t.Fatalf("commit the tasting: %v", err)
 	}
@@ -161,6 +170,242 @@ func facadeFields(t *testing.T, tasting *types.Tasting) map[string]json.RawMessa
 }
 `
 
+// versionGraphReleaseTest drives the operations D19 adds through the typed
+// facade: a merge's message and tag, the release pointer and a rollback that
+// writes no member rows, Released, a clean and a conflicting Rebase, and a
+// Sweep and a RunSweeper pass that write as their configured actor.
+const versionGraphReleaseTest = `package orm
+
+import (
+	"context"
+	"errors"
+	"os"
+	"testing"
+	"time"
+
+	versiongraph "github.com/parable-work/superschematic/runtime/versiongraph/go"
+	types "example.com/schemas/types/go/fixture-version-graph-db"
+)
+
+func TestVersionGraphFacadeReleasesRebasesAndSweeps(t *testing.T) {
+	dsn := os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the version graph facade against Postgres")
+	}
+	db, pool := openShellDatabase(t, dsn)
+	cook := mustShellUUID(t, "5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90")
+	janitor := mustShellUUID(t, "3c9a7e21-6b4d-4f8a-9e2c-5d1b7a3f6e08")
+	ctx := WithUserID(context.Background(), cook)
+	g := db.RecipeGraph()
+	recipe, err := db.Recipe.CreateOne(ctx, &types.Recipe{Title: "Bread"})
+	if err != nil {
+		t.Fatalf("create recipe: %v", err)
+	}
+	main, err := g.CreatePrimary(ctx, *recipe.Id, "main")
+	if err != nil {
+		t.Fatalf("CreatePrimary: %v", err)
+	}
+	mainID := *main.Id
+	step := func(position int64, instruction string) *types.Step {
+		return &types.Step{Position: types.GenericInt64(position), Instruction: instruction, Timings: types.GenericJSON("{}")}
+	}
+
+	// A merge commits with its message and tag.
+	one := landShell(t, ctx, g, mainID, main.Version, "one", RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{step(1, "Mix")}}}, RecipeCommitOptions{Message: "v1", Tag: true})
+	v1 := one.merged.Commit
+	if v1.Sequence == nil || *v1.Sequence != 1 || v1.Message != "v1" {
+		t.Fatalf("the tagged merge = %+v, want sequence 1 and message v1", v1)
+	}
+	mix := one.saved.Saved.Step[0]
+	two := landShell(t, ctx, g, mainID, one.merged.Ref.Version, "two", RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{stepEdit(mix, "Mix well", "{}")}}}, RecipeCommitOptions{Tag: true})
+	v2 := two.merged.Commit
+
+	// The release pointer names a tagged commit, fenced by its version.
+	if _, err := g.Released(ctx, *recipe.Id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Released before any release = %v, want ErrNotFound", err)
+	}
+	release, err := g.Release(ctx, *recipe.Id, *v2.Id, 0)
+	if err != nil {
+		t.Fatalf("Release v2: %v", err)
+	}
+	if *release.Commit.Id != *v2.Id || *release.Root.Id != *recipe.Id || release.Version != 1 {
+		t.Fatalf("release = %+v, want v2 of the recipe at version 1", release)
+	}
+	released, err := g.Released(ctx, *recipe.Id)
+	if err != nil {
+		t.Fatalf("Released: %v", err)
+	}
+	if released.Release.Version != 1 || released.Tree.ContentHash != v2.ContentHash || len(released.Tree.Step) != 1 || released.Tree.Step[0].Instruction != "Mix well" {
+		t.Fatalf("released = %+v with steps %+v, want v2's tree", released.Release, released.Tree.Step)
+	}
+
+	// A rollback moves the pointer and writes no member rows.
+	rowState := func() (count, versions int64) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, "SELECT count(*), COALESCE(sum(_version), 0) FROM step").Scan(&count, &versions); err != nil {
+			t.Fatalf("read the step rows: %v", err)
+		}
+		return count, versions
+	}
+	beforeCount, beforeVersions := rowState()
+	rollback, err := g.Release(ctx, *recipe.Id, *v1.Id, release.Version)
+	if err != nil {
+		t.Fatalf("roll back to v1: %v", err)
+	}
+	if afterCount, afterVersions := rowState(); rollback.Version != 2 || afterCount != beforeCount || afterVersions != beforeVersions {
+		t.Fatalf("rollback = %+v; step rows went from (%d, %d) to (%d, %d), want no member writes", rollback, beforeCount, beforeVersions, afterCount, afterVersions)
+	}
+	released, err = g.Released(ctx, *recipe.Id)
+	if err != nil {
+		t.Fatalf("Released: %v", err)
+	}
+	if released.Tree.ContentHash != v1.ContentHash {
+		t.Fatal("after the rollback Released reads another tree than v1's")
+	}
+	if _, err := g.Release(ctx, *recipe.Id, *v2.Id, release.Version); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("Release at a stale version = %v, want ErrVersionConflict", err)
+	}
+	three := landShell(t, ctx, g, mainID, two.merged.Ref.Version, "three", RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{step(2, "Rest")}}}, RecipeCommitOptions{})
+	if _, err := g.Release(ctx, *recipe.Id, *three.merged.Commit.Id, rollback.Version); !errors.Is(err, ErrNotTagged) {
+		t.Fatalf("Release of an untagged commit = %v, want ErrNotTagged", err)
+	}
+
+	// A rebase moves a change set onto its parent's head and commits after
+	// its previous head.
+	a, err := g.Branch(ctx, mainID, "knead")
+	if err != nil {
+		t.Fatalf("Branch a: %v", err)
+	}
+	aSaved, err := g.Save(ctx, *a.Id, a.Version, RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{stepEdit(mix, "Mix and knead", "{}")}}})
+	if err != nil {
+		t.Fatalf("save a: %v", err)
+	}
+	aCommit, err := g.Commit(ctx, *a.Id, aSaved.Ref.Version, RecipeCommitOptions{})
+	if err != nil {
+		t.Fatalf("commit a: %v", err)
+	}
+	four := landShell(t, ctx, g, mainID, three.merged.Ref.Version, "four", RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{step(3, "Bake")}}}, RecipeCommitOptions{})
+	rebased, err := g.Rebase(ctx, *a.Id, aCommit.Ref.Version, nil)
+	if err != nil {
+		t.Fatalf("Rebase a: %v", err)
+	}
+	if len(rebased.Conflicts) != 0 || rebased.Commit == nil || *rebased.Commit.ParentCommit.Id != *aCommit.Commit.Id ||
+		rebased.Ref.BaseCommit == nil || *rebased.Ref.BaseCommit.Id != *four.merged.Commit.Id || *rebased.Ref.HeadCommit.Id != *rebased.Commit.Id {
+		t.Fatalf("rebase = %+v, want a commit after a's head and four's merge as a's base", rebased)
+	}
+	aTree, err := g.Compose(ctx, *a.Id)
+	if err != nil {
+		t.Fatalf("Compose a: %v", err)
+	}
+	assertShellTree(t, "a rebased", aTree, []string{"Mix and knead", "Rest", "Bake"}, nil)
+	if _, err := g.Rebase(ctx, mainID, four.merged.Ref.Version, nil); !errors.Is(err, ErrNoParent) {
+		t.Fatalf("Rebase of the primary line = %v, want ErrNoParent", err)
+	}
+
+	// A conflicting rebase returns typed conflicts and writes nothing. A
+	// resolution that keeps the change set's side settles it: the base moves,
+	// and with the tree its head already holds there is nothing to commit.
+	c, err := g.Branch(ctx, mainID, "by hand")
+	if err != nil {
+		t.Fatalf("Branch c: %v", err)
+	}
+	cSaved, err := g.Save(ctx, *c.Id, c.Version, RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{stepEdit(mix, "Mix by hand", "{}")}}})
+	if err != nil {
+		t.Fatalf("save c: %v", err)
+	}
+	cCommit, err := g.Commit(ctx, *c.Id, cSaved.Ref.Version, RecipeCommitOptions{})
+	if err != nil {
+		t.Fatalf("commit c: %v", err)
+	}
+	five := landShell(t, ctx, g, mainID, four.merged.Ref.Version, "five", RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{stepEdit(mix, "Mix fast", "{}")}}}, RecipeCommitOptions{})
+	// Main's commits are snapshotted at the graph's interval: three is one
+	// past the tagged two, and five, three past it, is snapshotted.
+	snapshotEntries := func(commit types.IdentityUUID) int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM recipe_snapshot_entry WHERE commit_id = $1", commit.ToUUID()).Scan(&n); err != nil {
+			t.Fatalf("count snapshot entries: %v", err)
+		}
+		return n
+	}
+	if RecipeGraphSnapshotEvery != 3 || snapshotEntries(*three.merged.Commit.Id) != 0 || snapshotEntries(*five.merged.Commit.Id) == 0 {
+		t.Fatalf("snapshot entries of three %d and five %d at interval %d, want none and some at 3",
+			snapshotEntries(*three.merged.Commit.Id), snapshotEntries(*five.merged.Commit.Id), RecipeGraphSnapshotEvery)
+	}
+	conflicted, err := g.Rebase(ctx, *c.Id, cCommit.Ref.Version, nil)
+	if err != nil {
+		t.Fatalf("Rebase c: %v", err)
+	}
+	if len(conflicted.Conflicts) != 1 || conflicted.Commit != nil || conflicted.Ref.Version != cCommit.Ref.Version ||
+		conflicted.Conflicts[0].Kind != types.RecipeEntityKind_Step || conflicted.Conflicts[0].EntityKey != *mix.EntityKey || conflicted.Conflicts[0].Path != "/instruction" {
+		t.Fatalf("conflicting rebase = %+v, want the mixing step's instruction and no write", conflicted)
+	}
+	settled, err := g.Rebase(ctx, *c.Id, cCommit.Ref.Version, []RecipeResolution{{
+		Kind: types.RecipeEntityKind_Step, EntityKey: *mix.EntityKey, Path: "/instruction", Take: versiongraph.TakeOurs,
+	}})
+	if err != nil {
+		t.Fatalf("Rebase c with a resolution: %v", err)
+	}
+	cTree, err := g.Compose(ctx, *c.Id)
+	if err != nil {
+		t.Fatalf("Compose c: %v", err)
+	}
+	if len(settled.Conflicts) != 0 || settled.Commit != nil || *settled.Ref.BaseCommit.Id != *five.merged.Commit.Id || *settled.Ref.HeadCommit.Id != *cCommit.Commit.Id {
+		t.Fatalf("settled rebase = %+v, want five's merge as c's base and c's head kept", settled)
+	}
+	assertShellTree(t, "c rebased", cTree, []string{"Mix by hand", "Rest", "Bake"}, nil)
+
+	// A sweep writes as its configured actor: the rows it collects from a
+	// discarded change set record it.
+	if _, err := g.Sweep(ctx, GraphSweepOptions{}); !errors.Is(err, ErrNoActor) {
+		t.Fatalf("Sweep with no actor = %v, want ErrNoActor", err)
+	}
+	x, err := g.Branch(ctx, mainID, "dropped")
+	if err != nil {
+		t.Fatalf("Branch x: %v", err)
+	}
+	xSaved, err := g.Save(ctx, *x.Id, x.Version, RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{step(9, "Garnish")}}})
+	if err != nil {
+		t.Fatalf("save x: %v", err)
+	}
+	if err := g.Discard(ctx, *x.Id, xSaved.Ref.Version); err != nil {
+		t.Fatalf("Discard x: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE recipe_ref SET deleted_at = now() - interval '8 days' WHERE id = $1", x.Id.ToUUID()); err != nil {
+		t.Fatalf("age the discard: %v", err)
+	}
+	report, err := g.Sweep(context.Background(), GraphSweepOptions{Actor: janitor})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if report.Skipped || report.CollectedRefs != 1 || report.CollectedRows["step"] != 1 {
+		t.Fatalf("sweep report = %+v, want x's one step row collected", report)
+	}
+	var operation, actor string
+	if err := pool.QueryRow(ctx, "SELECT operation, data->>'updated_by' FROM step_history WHERE id = $1 ORDER BY _version DESC LIMIT 1", xSaved.Saved.Step[0].Id.ToUUID()).Scan(&operation, &actor); err != nil {
+		t.Fatalf("read the collected row's history: %v", err)
+	}
+	if operation != "DELETE" || actor != janitor.ToUUID().String() {
+		t.Fatalf("the collected row's last history row = (%s, %s), want (DELETE, %s)", operation, actor, janitor.ToUUID())
+	}
+
+	// The sweeper runs a pass at once and stops with its context.
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	passes := 0
+	err = g.RunSweeper(runCtx, time.Hour, GraphSweepOptions{Actor: janitor}, func(report *GraphSweepReport, err error) {
+		passes++
+		if err != nil || report == nil || report.Skipped {
+			t.Errorf("sweeper pass = %+v, %v; want a pass that swept", report, err)
+		}
+		cancel()
+	})
+	if !errors.Is(err, context.Canceled) || passes != 1 {
+		t.Fatalf("RunSweeper = %v after %d passes, want context.Canceled after one", err, passes)
+	}
+}
+`
+
 const versionGraphShellTest = `package orm
 
 import (
@@ -202,7 +447,8 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 		t.Fatalf("CreatePrimary without a user = %v, want ErrNoUserInContext", err)
 	}
 
-	// A primary line holds its steps and ingredients as its own rows.
+	// A primary line takes writes only from a merge: a first change set's
+	// steps and ingredients land on it as a tagged merge.
 	main, err := g.CreatePrimary(ctx, *recipe.Id, "main")
 	if err != nil {
 		t.Fatalf("CreatePrimary: %v", err)
@@ -211,21 +457,28 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if main.ParentRef != nil || main.HeadCommit != nil {
 		t.Fatalf("a primary line has no parent and no head: %+v", main)
 	}
-	saved, err := g.Save(ctx, mainID, main.Version, RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{
+	if _, err := g.Save(ctx, mainID, main.Version, RecipeEdits{}); !errors.Is(err, ErrPrimaryMergeOnly) {
+		t.Fatalf("Save on the primary line = %v, want ErrPrimaryMergeOnly", err)
+	}
+	draft, err := g.Branch(ctx, mainID, "first draft")
+	if err != nil {
+		t.Fatalf("Branch the first draft: %v", err)
+	}
+	saved, err := g.Save(ctx, *draft.Id, draft.Version, RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{
 		{Position: 1, Instruction: "Mix", Timings: types.GenericJSON(` + "`" + `{"knead": 10, "rest": 30}` + "`" + `)},
 		{Position: 2, Instruction: "Bake", Timings: types.GenericJSON(` + "`" + `{"oven": 40}` + "`" + `)},
 	}}})
 	if err != nil {
 		t.Fatalf("save steps: %v", err)
 	}
-	if saved.Ref.Version != main.Version+1 {
-		t.Fatalf("Save moved the ref to version %d, want %d", saved.Ref.Version, main.Version+1)
+	if saved.Ref.Version != draft.Version+1 {
+		t.Fatalf("Save moved the ref to version %d, want %d", saved.Ref.Version, draft.Version+1)
 	}
 	mix, bake := saved.Saved.Step[0], saved.Saved.Step[1]
 	if mix.EntityKey == nil || bake.EntityKey == nil || *mix.EntityKey == *bake.EntityKey {
 		t.Fatalf("new steps need generated entity keys of their own: %v, %v", mix.EntityKey, bake.EntityKey)
 	}
-	saved, err = g.Save(ctx, mainID, saved.Ref.Version, RecipeEdits{Ingredient: GraphEdits[types.Ingredient]{Upsert: []*types.Ingredient{
+	saved, err = g.Save(ctx, *draft.Id, saved.Ref.Version, RecipeEdits{Ingredient: GraphEdits[types.Ingredient]{Upsert: []*types.Ingredient{
 		{StepKey: *mix.EntityKey, Quantity: "200g flour", Substitutes: types.GenericJSON(` + "`" + `{"type": "object"}` + "`" + `)},
 		{StepKey: *bake.EntityKey, Quantity: "1 egg wash", Substitutes: types.GenericJSON(` + "`" + `{"type": "object"}` + "`" + `)},
 	}}})
@@ -233,21 +486,29 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 		t.Fatalf("save ingredients: %v", err)
 	}
 	flour, wash := saved.Saved.Ingredient[0], saved.Saved.Ingredient[1]
-
-	// A tagged commit is published version 1.
-	first, err := g.Commit(ctx, mainID, saved.Ref.Version, RecipeCommitOptions{Message: "first", Tag: true})
+	draftCommit, err := g.Commit(ctx, *draft.Id, saved.Ref.Version, RecipeCommitOptions{Message: "first draft"})
 	if err != nil {
-		t.Fatalf("Commit: %v", err)
+		t.Fatalf("Commit the first draft: %v", err)
+	}
+	if _, err := g.Commit(ctx, *draft.Id, draftCommit.Ref.Version, RecipeCommitOptions{}); !errors.Is(err, ErrNothingToCommit) {
+		t.Fatalf("a second commit with no change = %v, want ErrNothingToCommit", err)
+	}
+
+	// A tagged merge is published version 1.
+	first, err := g.Merge(ctx, *draft.Id, mainID, main.Version, nil, RecipeCommitOptions{Message: "first", Tag: true})
+	if err != nil {
+		t.Fatalf("Merge the first draft: %v", err)
 	}
 	c1 := first.Commit
-	if c1.Sequence == nil || *c1.Sequence != 1 || c1.SchemaEpoch != RecipeGraphSchemaEpoch || c1.Message != "first" || c1.ParentCommit != nil {
-		t.Fatalf("first commit = %+v, want sequence 1 at epoch %d with no parent", c1, RecipeGraphSchemaEpoch)
+	if c1 == nil || c1.Sequence == nil || *c1.Sequence != 1 || c1.SchemaEpoch != RecipeGraphSchemaEpoch || c1.Message != "first" ||
+		c1.ParentCommit != nil || c1.ContentHash != draftCommit.Commit.ContentHash {
+		t.Fatalf("first merge commit = %+v, want sequence 1 at epoch %d with no parent and the draft's content", c1, RecipeGraphSchemaEpoch)
 	}
 	if first.Ref.HeadCommit == nil || *first.Ref.HeadCommit.Id != *c1.Id {
 		t.Fatalf("the ref's head is %+v, want the commit", first.Ref.HeadCommit)
 	}
-	if _, err := g.Commit(ctx, mainID, first.Ref.Version, RecipeCommitOptions{}); !errors.Is(err, ErrNothingToCommit) {
-		t.Fatalf("a second commit with no change = %v, want ErrNothingToCommit", err)
+	if _, err := g.Commit(ctx, mainID, first.Ref.Version, RecipeCommitOptions{}); !errors.Is(err, ErrPrimaryMergeOnly) {
+		t.Fatalf("Commit on the primary line = %v, want ErrPrimaryMergeOnly", err)
 	}
 	tree1, err := g.Materialize(ctx, *c1.Id)
 	if err != nil {
@@ -312,7 +573,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	}
 
 	// The first merge is clean.
-	mergedA, err := g.Merge(ctx, *a.Id, mainID, first.Ref.Version, nil)
+	mergedA, err := g.Merge(ctx, *a.Id, mainID, first.Ref.Version, nil, RecipeCommitOptions{})
 	if err != nil {
 		t.Fatalf("Merge a: %v", err)
 	}
@@ -327,7 +588,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	assertShellJSON(t, "timings after a", mainTree.Step[0].Timings, ` + "`" + `{"knead": 12, "rest": 30}` + "`" + `)
 
 	// The second conflicts on the flour and writes nothing.
-	conflicted, err := g.Merge(ctx, *b.Id, mainID, mergedA.Ref.Version, nil)
+	conflicted, err := g.Merge(ctx, *b.Id, mainID, mergedA.Ref.Version, nil, RecipeCommitOptions{})
 	if err != nil {
 		t.Fatalf("Merge b: %v", err)
 	}
@@ -355,7 +616,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	// A resolution settles it, and the timings keep both keys' edits.
 	mergedB, err := g.Merge(ctx, *b.Id, mainID, mergedA.Ref.Version, []RecipeResolution{{
 		Kind: types.RecipeEntityKind_Ingredient, EntityKey: *flour.EntityKey, Path: "/quantity", Take: versiongraph.TakeTheirs,
-	}})
+	}}, RecipeCommitOptions{})
 	if err != nil {
 		t.Fatalf("Merge b with a resolution: %v", err)
 	}
@@ -378,51 +639,67 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	}
 
 	// Deleting a parent removes its children from compose and materialize.
-	deleted, err := g.Save(ctx, mainID, mergedB.Ref.Version, RecipeEdits{Step: GraphEdits[types.Step]{Delete: []types.IdentityUUID{*bake.EntityKey}}})
+	nb, err := g.Branch(ctx, mainID, "no baking")
+	if err != nil {
+		t.Fatalf("Branch no baking: %v", err)
+	}
+	deleted, err := g.Save(ctx, *nb.Id, nb.Version, RecipeEdits{Step: GraphEdits[types.Step]{Delete: []types.IdentityUUID{*bake.EntityKey}}})
 	if err != nil {
 		t.Fatalf("delete bake: %v", err)
+	}
+	nbTree, err := g.Compose(ctx, *nb.Id)
+	if err != nil {
+		t.Fatalf("Compose no baking: %v", err)
+	}
+	assertShellTree(t, "change set without bake", nbTree, []string{"Mix"}, []string{"300g flour"})
+	nbCommit, err := g.Commit(ctx, *nb.Id, deleted.Ref.Version, RecipeCommitOptions{Message: "no baking"})
+	if err != nil {
+		t.Fatalf("commit the delete: %v", err)
+	}
+	// The step's DELETE pins the change set's tombstone; the egg wash's,
+	// removed with its step, pins its last committed row, main's.
+	pins := shellPatches(t, pool, *nbCommit.Commit.Id)
+	bakeID, bakeVersion := shellRow(t, pool, "step", *bake.EntityKey, *nb.Id)
+	washID, washVersion := shellRow(t, pool, "ingredient", *wash.EntityKey, mainID)
+	if got := pins["step"]; len(pins) != 2 || got != [3]any{"DELETE", bakeID, bakeVersion} {
+		t.Fatalf("step patch = %v, want a DELETE pinned to bake's tombstone on the change set", got)
+	}
+	if got := pins["ingredient"]; got != [3]any{"DELETE", washID, washVersion} {
+		t.Fatalf("ingredient patch = %v, want a DELETE pinned to main's egg wash row", got)
+	}
+	noBake, err := g.Merge(ctx, *nb.Id, mainID, mergedB.Ref.Version, nil, RecipeCommitOptions{Message: "no baking"})
+	if err != nil {
+		t.Fatalf("Merge no baking: %v", err)
+	}
+	if noBake.Commit == nil || noBake.Commit.Message != "no baking" || noBake.Commit.ContentHash != nbCommit.Commit.ContentHash {
+		t.Fatalf("merge of no baking = %+v, want a commit with its message and the change set's content", noBake.Commit)
 	}
 	mainTree, err = g.Compose(ctx, mainID)
 	if err != nil {
 		t.Fatalf("Compose main: %v", err)
 	}
 	assertShellTree(t, "main without bake", mainTree, []string{"Mix"}, []string{"300g flour"})
-	noBake, err := g.Commit(ctx, mainID, deleted.Ref.Version, RecipeCommitOptions{Message: "no baking"})
-	if err != nil {
-		t.Fatalf("commit the delete: %v", err)
-	}
 	noBakeTree, err := g.Materialize(ctx, *noBake.Commit.Id)
 	if err != nil {
 		t.Fatalf("Materialize the delete: %v", err)
 	}
 	assertShellTree(t, "commit without bake", noBakeTree, []string{"Mix"}, []string{"300g flour"})
-	// The step's DELETE pins its tombstone; the egg wash's, removed with
-	// its step, pins its last committed row.
-	pins := map[string][3]any{}
-	rows, err := pool.Query(ctx, "SELECT entity_kind, operation, entity_id::text, entity_version FROM recipe_patch WHERE commit_id = $1", noBake.Commit.Id.ToUUID())
-	if err != nil {
-		t.Fatalf("read patches: %v", err)
-	}
-	for rows.Next() {
-		var kind, operation, id string
-		var version int64
-		if err := rows.Scan(&kind, &operation, &id, &version); err != nil {
-			t.Fatalf("scan patch: %v", err)
-		}
-		pins[kind] = [3]any{operation, id, version}
-	}
-	rows.Close()
-	if got := pins["step"]; len(pins) != 2 || got[0] != "DELETE" || got[1] != bake.Id.ToUUID().String() || got[2].(int64) <= bake.Version {
-		t.Fatalf("step patch = %v, want a DELETE pinned to bake's tombstone version", got)
-	}
-	if got := pins["ingredient"]; got[0] != "DELETE" || got[1] != wash.Id.ToUUID().String() || got[2].(int64) != wash.Version {
-		t.Fatalf("ingredient patch = %v, want a DELETE pinned to the egg wash's last committed row", got)
-	}
 
-	// Reverting to published version 1 composes and hashes as it did.
-	reverted, err := g.Revert(ctx, mainID, noBake.Ref.Version, *c1.Id)
+	// Reverting to published version 1, on a change set merged back,
+	// composes and hashes as it did.
+	if _, err := g.Revert(ctx, mainID, noBake.Ref.Version, *c1.Id); !errors.Is(err, ErrPrimaryMergeOnly) {
+		t.Fatalf("Revert on the primary line = %v, want ErrPrimaryMergeOnly", err)
+	}
+	back, err := g.Branch(ctx, mainID, "back to the first")
 	if err != nil {
+		t.Fatalf("Branch back: %v", err)
+	}
+	if _, err := g.Revert(ctx, *back.Id, back.Version, *c1.Id); err != nil {
 		t.Fatalf("Revert: %v", err)
+	}
+	reverted, err := g.Merge(ctx, *back.Id, mainID, noBake.Ref.Version, nil, RecipeCommitOptions{})
+	if err != nil {
+		t.Fatalf("Merge the revert: %v", err)
 	}
 	if reverted.Commit == nil || reverted.Commit.ContentHash != c1.ContentHash {
 		t.Fatalf("revert commit = %+v, want the content hash of commit 1", reverted.Commit)
@@ -449,12 +726,15 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	// Pruning with a retention every row is past keeps the rows commits
 	// pin, so every commit still materializes to the hash it recorded. An
 	// edit that no commit took is pruned.
-	churn, err := g.Save(ctx, mainID, reverted.Ref.Version, RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{stepEdit(mix, "Mix well", ` + "`" + `{"knead": 10, "rest": 30}` + "`" + `)}}})
+	churnRef, err := g.Branch(ctx, mainID, "churn")
+	if err != nil {
+		t.Fatalf("Branch churn: %v", err)
+	}
+	churn, err := g.Save(ctx, *churnRef.Id, churnRef.Version, RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{stepEdit(mix, "Mix well", ` + "`" + `{"knead": 10, "rest": 30}` + "`" + `)}}})
 	if err != nil {
 		t.Fatalf("save churn: %v", err)
 	}
-	churn, err = g.Save(ctx, mainID, churn.Ref.Version, RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{stepEdit(mix, "Mix gently", ` + "`" + `{"knead": 10, "rest": 30}` + "`" + `)}}})
-	if err != nil {
+	if _, err := g.Save(ctx, *churnRef.Id, churn.Ref.Version, RecipeEdits{Step: GraphEdits[types.Step]{Upsert: []*types.Step{stepEdit(mix, "Mix gently", ` + "`" + `{"knead": 10, "rest": 30}` + "`" + `)}}}); err != nil {
 		t.Fatalf("save churn: %v", err)
 	}
 	for _, table := range []string{"step_history", "ingredient_history"} {
@@ -472,7 +752,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if prunedSteps == 0 {
 		t.Fatal("the prune kept every step version, want the uncommitted edit gone")
 	}
-	for _, ref := range []types.IdentityUUID{mainID, *a.Id, *b.Id} {
+	for _, ref := range []types.IdentityUUID{mainID, *draft.Id, *a.Id, *b.Id, *nb.Id, *back.Id} {
 		commits, err := g.History(ctx, ref)
 		if err != nil {
 			t.Fatalf("History: %v", err)
@@ -515,7 +795,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compose c: %v", err)
 	}
-	// c reads its base commit, not main's uncommitted edits.
+	// c reads its base commit, not the churn change set's uncommitted edits.
 	assertShellTree(t, "c read through", cTree, []string{"Mix", "Bake"}, []string{"200g flour", "1 egg wash"})
 	var operation, actor string
 	if err := pool.QueryRow(ctx, "SELECT operation, data->>'updated_by' FROM step_history WHERE id = $1 ORDER BY _version DESC LIMIT 1", override.Id.ToUUID()).Scan(&operation, &actor); err != nil {
@@ -559,7 +839,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if _, err := g.Commit(ctx, *d.Id, dSaved.Ref.Version, RecipeCommitOptions{Message: "no egg wash"}); err != nil {
 		t.Fatalf("commit d: %v", err)
 	}
-	mergedD, err := g.Merge(ctx, *d.Id, mainID, churn.Ref.Version, nil)
+	mergedD, err := g.Merge(ctx, *d.Id, mainID, reverted.Ref.Version, nil, RecipeCommitOptions{})
 	if err != nil {
 		t.Fatalf("Merge d: %v", err)
 	}
@@ -570,7 +850,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compose main: %v", err)
 	}
-	assertShellTree(t, "main after d", mainTree, []string{"Mix gently", "Bake"}, []string{"200g flour"})
+	assertShellTree(t, "main after d", mainTree, []string{"Mix", "Bake"}, []string{"200g flour"})
 	if !shellTombstone(t, pool, "ingredient", *wash.EntityKey, mainID) {
 		t.Fatal("the merge left main's egg wash row live, want the source's delete on it")
 	}
@@ -581,7 +861,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Materialize merge d: %v", err)
 	}
-	assertShellTree(t, "merge d", mergedDTree, []string{"Mix gently", "Bake"}, []string{"200g flour"})
+	assertShellTree(t, "merge d", mergedDTree, []string{"Mix", "Bake"}, []string{"200g flour"})
 	if mergedDTree.ContentHash != mergedD.Commit.ContentHash {
 		t.Fatalf("merge d materializes to hash %s, recorded %s", mergedDTree.ContentHash, mergedD.Commit.ContentHash)
 	}
@@ -589,7 +869,11 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	// A member whose key is a plain UUID: the shell ignores the caller's id
 	// and mints a row id of its own for each ref's row of the entity.
 	callerID := mustShellUUID(t, "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d")
-	uSaved, err := g.Save(ctx, mainID, mergedD.Ref.Version, RecipeEdits{Utensil: GraphEdits[types.Utensil]{Upsert: []*types.Utensil{{Id: callerID, Name: "whisk"}}}})
+	w, err := g.Branch(ctx, mainID, "a whisk")
+	if err != nil {
+		t.Fatalf("Branch w: %v", err)
+	}
+	uSaved, err := g.Save(ctx, *w.Id, w.Version, RecipeEdits{Utensil: GraphEdits[types.Utensil]{Upsert: []*types.Utensil{{Id: callerID, Name: "whisk"}}}})
 	if err != nil {
 		t.Fatalf("save a utensil: %v", err)
 	}
@@ -597,23 +881,27 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if whisk.Id == callerID || whisk.Id.IsZero() || whisk.EntityKey == nil {
 		t.Fatalf("saved utensil = %+v, want a minted id and entity key", whisk)
 	}
-	withWhisk, err := g.Commit(ctx, mainID, uSaved.Ref.Version, RecipeCommitOptions{Message: "a whisk"})
+	wCommit, err := g.Commit(ctx, *w.Id, uSaved.Ref.Version, RecipeCommitOptions{Message: "a whisk"})
 	if err != nil {
 		t.Fatalf("commit the utensil: %v", err)
+	}
+	withWhisk, err := g.Merge(ctx, *w.Id, mainID, mergedD.Ref.Version, nil, RecipeCommitOptions{})
+	if err != nil {
+		t.Fatalf("Merge w: %v", err)
 	}
 	whiskTree, err := g.Materialize(ctx, *withWhisk.Commit.Id)
 	if err != nil {
 		t.Fatalf("Materialize the utensil: %v", err)
 	}
 	// The egg wash stays gone from main's next commit.
-	assertShellTree(t, "commit with a whisk", whiskTree, []string{"Mix gently", "Bake"}, []string{"200g flour"})
+	assertShellTree(t, "commit with a whisk", whiskTree, []string{"Mix", "Bake"}, []string{"200g flour"})
 	assertShellUtensils(t, "commit with a whisk", whiskTree, "whisk")
 	e, err := g.Branch(ctx, mainID, "balloon whisk")
 	if err != nil {
 		t.Fatalf("Branch e: %v", err)
 	}
-	// The override names main's row id; the change set still gets a row of
-	// its own.
+	// The override names w's row id; the change set still gets a row of its
+	// own.
 	eSaved, err := g.Save(ctx, *e.Id, e.Version, RecipeEdits{Utensil: GraphEdits[types.Utensil]{Upsert: []*types.Utensil{{Id: whisk.Id, EntityKey: whisk.EntityKey, Name: "balloon whisk"}}}})
 	if err != nil {
 		t.Fatalf("save e: %v", err)
@@ -624,7 +912,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if _, err := g.Commit(ctx, *e.Id, eSaved.Ref.Version, RecipeCommitOptions{Message: "balloon whisk"}); err != nil {
 		t.Fatalf("commit e: %v", err)
 	}
-	mergedE, err := g.Merge(ctx, *e.Id, mainID, withWhisk.Ref.Version, nil)
+	mergedE, err := g.Merge(ctx, *e.Id, mainID, withWhisk.Ref.Version, nil, RecipeCommitOptions{})
 	if err != nil {
 		t.Fatalf("Merge e: %v", err)
 	}
@@ -637,10 +925,18 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	}
 	assertShellUtensils(t, "main after e", mainTree, "balloon whisk")
 
-	// Reverting to a tree without the whisk deletes it on main.
-	revertedU, err := g.Revert(ctx, mainID, mergedE.Ref.Version, *mergedD.Commit.Id)
+	// Reverting to a tree without the whisk, and merging that, deletes it
+	// on main.
+	r, err := g.Branch(ctx, mainID, "no whisk")
 	if err != nil {
+		t.Fatalf("Branch r: %v", err)
+	}
+	if _, err := g.Revert(ctx, *r.Id, r.Version, *mergedD.Commit.Id); err != nil {
 		t.Fatalf("Revert past the whisk: %v", err)
+	}
+	revertedU, err := g.Merge(ctx, *r.Id, mainID, mergedE.Ref.Version, nil, RecipeCommitOptions{})
+	if err != nil {
+		t.Fatalf("Merge the revert past the whisk: %v", err)
 	}
 	if revertedU.Commit == nil || revertedU.Commit.ContentHash != mergedD.Commit.ContentHash {
 		t.Fatalf("revert commit = %+v, want the content hash of merge d", revertedU.Commit)
@@ -727,7 +1023,7 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if _, err := pool.Exec(ctx, "DELETE FROM utensil_history WHERE id = $1 AND _version = $2", whisk.Id.ToUUID(), whisk.Version); err != nil {
 		t.Fatalf("remove the whisk's history row: %v", err)
 	}
-	if _, err := g.Materialize(ctx, *withWhisk.Commit.Id); !errors.Is(err, ErrHistoryMissing) {
+	if _, err := g.Materialize(ctx, *wCommit.Commit.Id); !errors.Is(err, ErrHistoryMissing) {
 		t.Fatalf("Materialize over a missing history row = %v, want ErrHistoryMissing", err)
 	}
 
@@ -912,6 +1208,42 @@ func shellTombstone(t *testing.T, pool *pgxpool.Pool, table string, entityKey, r
 	return tombstone
 }
 
+// shellRow reads the id, as hyphenated text, and the version of ref's own
+// row of an entity.
+func shellRow(t *testing.T, pool *pgxpool.Pool, table string, entityKey, ref types.IdentityUUID) (string, int64) {
+	t.Helper()
+	var id string
+	var version int64
+	if err := pool.QueryRow(context.Background(), "SELECT id::text, _version FROM "+table+" WHERE entity_key = $1 AND ref_id = $2", entityKey.ToUUID(), ref.ToUUID()).Scan(&id, &version); err != nil {
+		t.Fatalf("read the %s row of %v on %v: %v", table, entityKey, ref, err)
+	}
+	return id, version
+}
+
+// shellPatches reads a commit's patches by kind: each one's operation, row
+// id as hyphenated text, and row version.
+func shellPatches(t *testing.T, pool *pgxpool.Pool, commit types.IdentityUUID) map[string][3]any {
+	t.Helper()
+	pins := map[string][3]any{}
+	rows, err := pool.Query(context.Background(), "SELECT entity_kind, operation, entity_id::text, entity_version FROM recipe_patch WHERE commit_id = $1", commit.ToUUID())
+	if err != nil {
+		t.Fatalf("read patches: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind, operation, id string
+		var version int64
+		if err := rows.Scan(&kind, &operation, &id, &version); err != nil {
+			t.Fatalf("scan patch: %v", err)
+		}
+		pins[kind] = [3]any{operation, id, version}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read patches: %v", err)
+	}
+	return pins
+}
+
 // shellPatchOperation reads the operation of a commit's one patch of kind.
 func shellPatchOperation(t *testing.T, pool *pgxpool.Pool, commit types.IdentityUUID, kind string) string {
 	t.Helper()
@@ -949,6 +1281,40 @@ func waitForShellWaiters(t *testing.T, pool *pgxpool.Pool, holder int32, want in
 			return n
 		}
 	}
+}
+
+// landedShell is a change set's edits landed on a line: the change set's
+// save and commit, and the merge.
+type landedShell struct {
+	saved     *RecipeSaveResult
+	committed *RecipeCommitResult
+	merged    *RecipeMergeResult
+}
+
+// landShell branches a change set of line, saves edits on it, commits it and
+// merges it back at version with opts, and fails unless the merge commits.
+func landShell(t *testing.T, ctx context.Context, g *RecipeGraph, line types.IdentityUUID, version int64, name string, edits RecipeEdits, opts RecipeCommitOptions) landedShell {
+	t.Helper()
+	draft, err := g.Branch(ctx, line, name)
+	if err != nil {
+		t.Fatalf("Branch %s: %v", name, err)
+	}
+	saved, err := g.Save(ctx, *draft.Id, draft.Version, edits)
+	if err != nil {
+		t.Fatalf("save %s: %v", name, err)
+	}
+	committed, err := g.Commit(ctx, *draft.Id, saved.Ref.Version, RecipeCommitOptions{Message: name})
+	if err != nil {
+		t.Fatalf("commit %s: %v", name, err)
+	}
+	merged, err := g.Merge(ctx, *draft.Id, line, version, nil, opts)
+	if err != nil {
+		t.Fatalf("merge %s: %v", name, err)
+	}
+	if len(merged.Conflicts) != 0 || merged.Commit == nil {
+		t.Fatalf("merge %s = %+v, want a clean merge commit", name, merged)
+	}
+	return landedShell{saved: saved, committed: committed, merged: merged}
 }
 
 func stepEdit(step *types.Step, instruction, timings string) *types.Step {

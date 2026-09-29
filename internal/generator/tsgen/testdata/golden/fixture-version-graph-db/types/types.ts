@@ -186,6 +186,32 @@ export interface RecipeRef {
 }
 
 /**
+ * RecipeRelease - The released commit of one root of the Recipe version graph; its history is the release log.
+ */
+export interface RecipeRelease {
+  id?: string | null;
+  root: Recipe;
+  commit: RecipeCommit;
+  createdAt: JSDate;
+  createdBy: string;
+  updatedAt: JSDate;
+  updatedBy: string;
+  _version: number;
+}
+
+/**
+ * RecipeSnapshotEntry - One entity of a snapshotted commit of the Recipe version graph, pinned to the row version its tree holds.
+ */
+export interface RecipeSnapshotEntry {
+  id?: string | null;
+  commit: RecipeCommit;
+  entityKind: RecipeEntityKind;
+  entityKey: string;
+  entityId: string;
+  entityVersion: number;
+}
+
+/**
  * Step - One step of a recipe, ordered by position; updatedBy names its row's writer.
  */
 export interface Step {

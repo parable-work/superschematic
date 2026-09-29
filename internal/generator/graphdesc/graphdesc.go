@@ -43,7 +43,11 @@ type Descriptor struct {
 	RefTable    string `json:"refTable"`
 	CommitTable string `json:"commitTable"`
 	PatchTable  string `json:"patchTable"`
-	Kinds       []Kind `json:"kinds"`
+	// ReleaseTable holds each root's release pointer, SnapshotTable each
+	// snapshotted commit's pin set.
+	ReleaseTable  string `json:"releaseTable"`
+	SnapshotTable string `json:"snapshotTable"`
+	Kinds         []Kind `json:"kinds"`
 }
 
 // Root names the graph root's table and its key column.
@@ -149,12 +153,14 @@ func Graphs(schema *ir.Schema) ([]Graph, error) {
 		}
 		sort.Slice(members, func(i, j int) bool { return members[i].Name < members[j].Name })
 		g.Descriptor = Descriptor{
-			Version:     Version,
-			Graph:       g.FileName,
-			Root:        Root{Table: codegen.ToSnakeCase(root.Name), Key: keyColumn(schema, root)},
-			RefTable:    codegen.ToSnakeCase(name + "Ref"),
-			CommitTable: codegen.ToSnakeCase(name + "Commit"),
-			PatchTable:  codegen.ToSnakeCase(name + "Patch"),
+			Version:       Version,
+			Graph:         g.FileName,
+			Root:          Root{Table: codegen.ToSnakeCase(root.Name), Key: keyColumn(schema, root)},
+			RefTable:      codegen.ToSnakeCase(name + "Ref"),
+			CommitTable:   codegen.ToSnakeCase(name + "Commit"),
+			PatchTable:    codegen.ToSnakeCase(name + "Patch"),
+			ReleaseTable:  codegen.ToSnakeCase(name + "Release"),
+			SnapshotTable: codegen.ToSnakeCase(name + "SnapshotEntry"),
 		}
 		for _, td := range members {
 			member, kind, err := describe(schema, root, td, sqlTypes)

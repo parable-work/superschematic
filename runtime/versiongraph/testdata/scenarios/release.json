@@ -1,0 +1,53 @@
+{
+  "name": "release",
+  "description": "A root's release pointer names a tagged commit of that root, fenced by its version. Released reads the released tree; a rollback is a Release to an earlier tagged commit, which writes no member rows; an untagged commit, another root's commit and a stale version are refused.",
+  "steps": [
+    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid), ($3::uuid, 'Soup', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}, {"uuid": "Soup"}]},
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "released", "root": "Bread", "expect": {"error": "not_found"}},
+
+    {"op": "branch", "from": "main", "name": "one", "as": "one"},
+    {"op": "save", "ref": "one", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}},
+    {"op": "commit", "ref": "one"},
+    {"op": "merge", "source": "one", "target": "main", "tag": true, "message": "v1", "as": "v1"},
+    {"op": "branch", "from": "main", "name": "two", "as": "two"},
+    {"op": "save", "ref": "two", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix well", "timings": {}}]}}},
+    {"op": "commit", "ref": "two"},
+    {"op": "merge", "source": "two", "target": "main", "tag": true, "message": "v2", "as": "v2"},
+    {"op": "branch", "from": "main", "name": "three", "as": "three"},
+    {"op": "save", "ref": "three", "edits": {"step": {"upsert": [{"entity_key": "Rest", "position": 2, "instruction": "Rest", "timings": {}}]}}},
+    {"op": "commit", "ref": "three"},
+    {"op": "merge", "source": "three", "target": "main", "as": "untagged"},
+
+    {"op": "createPrimary", "root": "Soup", "name": "main", "as": "soup"},
+    {"op": "branch", "from": "soup", "name": "boil", "as": "boil"},
+    {"op": "save", "ref": "boil", "edits": {"step": {"upsert": [{"entity_key": "Boil", "position": 1, "instruction": "Boil", "timings": {}}]}}},
+    {"op": "commit", "ref": "boil", "tag": true, "as": "soup1"},
+
+    {"op": "release", "root": "Bread", "commit": "untagged", "expect": {"error": "not_tagged"}},
+    {"op": "release", "root": "Bread", "commit": "soup1", "expect": {"error": "root_mismatch"}},
+    {"op": "release", "root": "Bread", "commit": "id:Missing", "expect": {"error": "not_found"}},
+    {"op": "release", "root": "Bread", "commit": "v1", "version": 3, "expect": {"error": "version_conflict"}},
+    {"op": "release", "root": "Bread", "commit": "v1", "expect": {"release": {"commit": "v1", "version": 1}}},
+    {"op": "release", "root": "Bread", "commit": "v2", "version": 0, "expect": {"error": "version_conflict"}},
+    {"op": "released", "root": "Bread", "expect": {"release": {"commit": "v1", "version": 1}, "contentHashOf": "v1", "tree": {"step": [{"entity_key": "Mix", "instruction": "Mix"}]}}},
+    {"op": "release", "root": "Bread", "commit": "v2", "expect": {"release": {"commit": "v2", "version": 2}}},
+    {"op": "released", "root": "Bread", "expect": {"release": {"commit": "v2", "version": 2}, "contentHashOf": "v2", "tree": {"step": [{"entity_key": "Mix", "instruction": "Mix well"}]}}},
+
+    {"op": "rows", "ref": "main", "kind": "step", "expect": {"rows": [
+      {"entity_key": "Mix", "instruction": "Mix well", "_version": 2},
+      {"entity_key": "Rest", "instruction": "Rest", "_version": 1}
+    ]}},
+    {"op": "release", "root": "Bread", "commit": "v1", "expect": {"release": {"commit": "v1", "version": 3}}},
+    {"op": "rows", "ref": "main", "kind": "step", "expect": {"rows": [
+      {"entity_key": "Mix", "instruction": "Mix well", "_version": 2},
+      {"entity_key": "Rest", "instruction": "Rest", "_version": 1}
+    ]}},
+    {"op": "compose", "ref": "main", "expect": {"contentHashOf": "untagged"}},
+    {"op": "released", "root": "Bread", "expect": {"release": {"commit": "v1", "version": 3}, "contentHashOf": "v1"}},
+    {"op": "release", "root": "Bread", "commit": "v2", "version": 2, "expect": {"error": "version_conflict"}},
+    {"op": "released", "root": "Soup", "expect": {"error": "not_found"}},
+    {"op": "release", "root": "Soup", "commit": "soup1", "expect": {"release": {"commit": "soup1", "version": 1}}},
+    {"op": "released", "root": "Soup", "expect": {"release": {"commit": "soup1"}, "tree": {"step": [{"entity_key": "Boil"}]}}}
+  ]
+}

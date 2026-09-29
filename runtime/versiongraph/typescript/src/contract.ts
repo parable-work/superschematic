@@ -93,10 +93,15 @@ export interface Descriptor {
   /** The graph's name; the core does not read it. */
   graph?: string;
   root: RootTable;
-  /** The tables of the graph's refs, commits and patches. */
+  /**
+   * The tables of the graph's refs, commits, patches, release pointers and
+   * snapshot entries.
+   */
   refTable: string;
   commitTable: string;
   patchTable: string;
+  releaseTable: string;
+  snapshotTable: string;
   kinds: KindDescriptor[];
 }
 

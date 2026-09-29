@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityUUID, IdentityUserID, TemporalDate, TemporalDateTime, TemporalDuration, TemporalTime, RecipeEntityKind, RecipePatchOperation, Verdict, Cover, Ingredient, Note, Recipe, RecipeCommit, RecipePatch, RecipeRef, Step, Tasting, Utensil,  } from '@schemas/fixture-version-graph-db-types/types';
+import type { GenericInt64, GenericJSON, IdentityUUID, IdentityUserID, TemporalDate, TemporalDateTime, TemporalDuration, TemporalTime, RecipeEntityKind, RecipePatchOperation, Verdict, Cover, Ingredient, Note, Recipe, RecipeCommit, RecipePatch, RecipeRef, RecipeRelease, RecipeSnapshotEntry, Step, Tasting, Utensil,  } from '@schemas/fixture-version-graph-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-version-graph-db-types';
@@ -138,7 +138,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (10)
+### Types (12)
 
 
 - **Cover** - The recipe's cover photo: at most one per ref.
@@ -154,6 +154,10 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - **RecipePatch** - One entity a commit of the Recipe version graph changed, pinned to the row version it sealed.
 
 - **RecipeRef** - A line of the Recipe version graph: a primary line when parentRef is null, else a change set.
+
+- **RecipeRelease** - The released commit of one root of the Recipe version graph; its history is the release log.
+
+- **RecipeSnapshotEntry** - One entity of a snapshotted commit of the Recipe version graph, pinned to the row version its tree holds.
 
 - **Step** - One step of a recipe, ordered by position; updatedBy names its row's writer.
 

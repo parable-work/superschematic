@@ -121,10 +121,12 @@
       ],
       "patchTable": "recipe_patch",
       "refTable": "recipe_ref",
+      "releaseTable": "recipe_release",
       "root": {
         "key": "id",
         "table": "recipe"
       },
+      "snapshotTable": "recipe_snapshot_entry",
       "version": 2
     },
     "from": {

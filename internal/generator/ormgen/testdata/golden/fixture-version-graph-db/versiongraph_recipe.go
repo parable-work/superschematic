@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	types "example.com/schemas/types/go/fixture-version-graph-db"
 	"github.com/jackc/pgx/v5"
@@ -28,6 +29,8 @@ const RecipeGraphDescriptor = `{
   "refTable": "recipe_ref",
   "commitTable": "recipe_commit",
   "patchTable": "recipe_patch",
+  "releaseTable": "recipe_release",
+  "snapshotTable": "recipe_snapshot_entry",
   "kinds": [
     {
       "kind": "cover",
@@ -218,16 +221,28 @@ const RecipeGraphDescriptor = `{
 // ErrSchemaEpoch.
 const RecipeGraphSchemaEpoch = 1
 
-var recipeGraphRuntime = &graphRuntime{descriptor: RecipeGraphDescriptor, schemaEpoch: RecipeGraphSchemaEpoch}
+// RecipeGraphSnapshotEvery is how many commits past the nearest snapshot on
+// its chain a commit of the Recipe graph is snapshotted at, so reading its
+// tree stops there. A tagged or released commit is snapshotted too.
+const RecipeGraphSnapshotEvery = 3
+
+var recipeGraphRuntime = &graphRuntime{
+	descriptor:    RecipeGraphDescriptor,
+	schemaEpoch:   RecipeGraphSchemaEpoch,
+	snapshotEvery: RecipeGraphSnapshotEvery,
+}
 
 // RecipeGraph reads and writes the Recipe version graph through the
 // version-graph engine: refs that hold sparse override rows of each member
 // kind, commits that pin the exact row versions a ref sealed, and merges
-// between refs. It turns typed edits into canonical rows and the rows the
-// engine returns into typed trees. Every method runs in one transaction and
-// needs a user in the context, the actor of its writes. Every write through
-// a ref takes the ref's expected _version and fails with ErrVersionConflict
-// when the ref has moved on.
+// between refs. A primary line takes writes only from Merge; work happens on
+// change sets, which Rebase catches up with their parent. Each root's release
+// pointer names one tagged commit. It turns typed edits into canonical rows
+// and the rows the engine returns into typed trees. Every method but Sweep
+// and RunSweeper runs in one transaction and needs a user in the context,
+// the actor of its writes. Every write through a ref takes the ref's
+// expected _version and fails with ErrVersionConflict when the ref has moved
+// on.
 type RecipeGraph struct {
 	db          *Database
 	walkCeiling int
@@ -299,9 +314,9 @@ type RecipeCommitResult struct {
 	Commit *types.RecipeCommit
 }
 
-// RecipeMergeResult is the target of a merge and the commit written. When
-// Conflicts is not empty nothing was written and Ref is the target as it
-// was.
+// RecipeMergeResult is the target of a merge, or the change set a rebase
+// moved, and the commit written. When Conflicts is not empty nothing was
+// written and Ref is the ref as it was.
 type RecipeMergeResult struct {
 	Ref       *types.RecipeRef
 	Commit    *types.RecipeCommit
@@ -332,6 +347,13 @@ type RecipeResolution struct {
 	Path      string
 	Take      versiongraph.Take
 	Value     json.RawMessage
+}
+
+// RecipeReleased is a root's release pointer and the tree of the commit
+// it names.
+type RecipeReleased struct {
+	Release *types.RecipeRelease
+	Tree    *RecipeTree
 }
 
 // RecipeChange is one entity two commits differ on. Row is the entity's
@@ -371,8 +393,9 @@ func (g *RecipeGraph) Branch(ctx context.Context, fromRef types.IdentityUUID, na
 	return result, err
 }
 
-// Save applies edits to a ref at version: upserts, then deletes, then
-// unsets, kind by kind. It refuses a sealed ref.
+// Save applies edits to a change set at version: upserts, then deletes,
+// then unsets, kind by kind. It refuses a sealed ref, and a primary line
+// with ErrPrimaryMergeOnly.
 func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version int64, edits RecipeEdits) (*RecipeSaveResult, error) {
 	result := &RecipeSaveResult{}
 	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
@@ -413,10 +436,11 @@ func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version 
 	return result, nil
 }
 
-// Commit composes a ref at version, diffs it against its last commit (or
-// its base), writes a commit with a patch per changed entity and moves the
-// ref's head. It returns ErrNothingToCommit when nothing changed, and an
-// *InvalidTreeError when the composed tree breaks the graph's rules.
+// Commit composes a change set at version, diffs it against its last commit
+// (or its base), writes a commit with a patch per changed entity and moves
+// the ref's head. It returns ErrNothingToCommit when nothing changed, an
+// *InvalidTreeError when the composed tree breaks the graph's rules, and
+// ErrPrimaryMergeOnly for a primary line.
 func (g *RecipeGraph) Commit(ctx context.Context, ref types.IdentityUUID, version int64, opts RecipeCommitOptions) (*RecipeCommitResult, error) {
 	result := &RecipeCommitResult{}
 	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
@@ -432,8 +456,8 @@ func (g *RecipeGraph) Commit(ctx context.Context, ref types.IdentityUUID, versio
 	return result, nil
 }
 
-// Seal commits a ref at version when it has changes, and seals it: the ref
-// then refuses writes.
+// Seal commits a change set at version when it has changes, and seals it:
+// the ref then refuses writes. A primary line is ErrPrimaryMergeOnly.
 func (g *RecipeGraph) Seal(ctx context.Context, ref types.IdentityUUID, version int64) (*RecipeCommitResult, error) {
 	result := &RecipeCommitResult{}
 	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
@@ -451,42 +475,17 @@ func (g *RecipeGraph) Seal(ctx context.Context, ref types.IdentityUUID, version 
 
 // Merge merges source's head into target at targetVersion, against
 // source's base. Without conflicts it writes the result onto target and
-// commits it. With conflicts left after resolutions it returns them and
-// writes nothing.
-func (g *RecipeGraph) Merge(ctx context.Context, source, target types.IdentityUUID, targetVersion int64, resolutions []RecipeResolution) (*RecipeMergeResult, error) {
+// commits it in the same transaction, with opts' message and tag. With
+// conflicts left after resolutions it returns them and writes nothing. It is
+// the only write a primary line takes.
+func (g *RecipeGraph) Merge(ctx context.Context, source, target types.IdentityUUID, targetVersion int64, resolutions []RecipeResolution, opts RecipeCommitOptions) (*RecipeMergeResult, error) {
 	result := &RecipeMergeResult{}
 	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
-		coreResolutions := make([]versiongraph.Resolution, 0, len(resolutions))
-		for _, resolution := range resolutions {
-			coreResolutions = append(coreResolutions, versiongraph.Resolution{
-				Kind:      string(resolution.Kind),
-				EntityKey: uuidText(resolution.EntityKey),
-				Path:      resolution.Path,
-				Take:      resolution.Take,
-				Value:     resolution.Value,
-			})
-		}
-		merged, err := e.Merge(ctx, actor, uuidText(source), uuidText(target), targetVersion, coreResolutions)
+		merged, err := e.Merge(ctx, actor, uuidText(source), uuidText(target), targetVersion, g.resolutions(resolutions), engine.CommitOptions{Message: opts.Message, Tag: opts.Tag})
 		if err != nil {
 			return err
 		}
-		for _, conflict := range merged.Conflicts {
-			key, err := parseGraphID(conflict.EntityKey)
-			if err != nil {
-				return err
-			}
-			result.Conflicts = append(result.Conflicts, RecipeConflict{
-				Kind:         types.RecipeEntityKind(conflict.Kind),
-				EntityKey:    key,
-				Path:         conflict.Path,
-				Base:         conflict.Base,
-				Ours:         conflict.Ours,
-				Theirs:       conflict.Theirs,
-				OursAuthor:   conflict.OursAuthor,
-				TheirsAuthor: conflict.TheirsAuthor,
-			})
-		}
-		return g.commitResult(ctx, tx, &engine.CommitResult{Ref: merged.Ref, Commit: merged.Commit}, &result.Ref, &result.Commit)
+		return g.mergeResult(ctx, tx, merged, result)
 	})
 	if err != nil {
 		return nil, err
@@ -494,8 +493,31 @@ func (g *RecipeGraph) Merge(ctx context.Context, source, target types.IdentityUU
 	return result, nil
 }
 
-// Revert writes the rows that make a ref at version compose to the tree of
-// toCommit, and commits them. History is never rewritten.
+// Rebase moves a change set at version onto its parent's head: it merges
+// the parent's head into the change set against the change set's base,
+// with its composed tree, uncommitted work included, as ours. Without
+// conflicts it rewrites the change set's rows over the new base, moves its
+// base and commits on it after its previous head. With conflicts left after
+// resolutions it returns them and writes nothing. A primary line is
+// ErrNoParent.
+func (g *RecipeGraph) Rebase(ctx context.Context, draft types.IdentityUUID, version int64, resolutions []RecipeResolution) (*RecipeMergeResult, error) {
+	result := &RecipeMergeResult{}
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		rebased, err := e.Rebase(ctx, actor, uuidText(draft), version, g.resolutions(resolutions))
+		if err != nil {
+			return err
+		}
+		return g.mergeResult(ctx, tx, rebased, result)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// Revert writes the rows that make a change set at version compose to the
+// tree of toCommit, and commits them. History is never rewritten. A primary
+// line is ErrPrimaryMergeOnly: revert a change set of it and merge that.
 func (g *RecipeGraph) Revert(ctx context.Context, ref types.IdentityUUID, version int64, toCommit types.IdentityUUID) (*RecipeCommitResult, error) {
 	result := &RecipeCommitResult{}
 	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
@@ -511,8 +533,46 @@ func (g *RecipeGraph) Revert(ctx context.Context, ref types.IdentityUUID, versio
 	return result, nil
 }
 
-// Materialize reads a commit's tree by walking its parents: each entity's
-// nearest patch wins, and a DELETE removes it.
+// Release points root's release at commit, a tagged commit of root, fenced
+// by the pointer's version: 0 for the root's first release. It writes no
+// member rows, so a rollback is a Release to an earlier tagged commit, and
+// the pointer's history is the release log. An untagged commit is
+// ErrNotTagged.
+func (g *RecipeGraph) Release(ctx context.Context, root, commit types.IdentityUUID, version int64) (*types.RecipeRelease, error) {
+	var result *types.RecipeRelease
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		release, err := e.Release(ctx, actor, uuidText(root), uuidText(commit), version)
+		if err != nil {
+			return err
+		}
+		result, err = g.release(ctx, tx, release.ID)
+		return err
+	})
+	return result, err
+}
+
+// Released reads root's release pointer and the tree of the commit it
+// names: the released content. A root never released is ErrNotFound.
+func (g *RecipeGraph) Released(ctx context.Context, root types.IdentityUUID) (*RecipeReleased, error) {
+	var result *RecipeReleased
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, _ string) error {
+		released, err := e.Released(ctx, uuidText(root))
+		if err != nil {
+			return err
+		}
+		result = &RecipeReleased{}
+		if result.Tree, err = g.tree(&released.TreeResult); err != nil {
+			return err
+		}
+		result.Release, err = g.release(ctx, tx, released.Release.ID)
+		return err
+	})
+	return result, err
+}
+
+// Materialize reads a commit's tree: the nearest snapshot on its chain with
+// each later commit's patches laid over it, the nearest winning and a DELETE
+// removing the entity.
 func (g *RecipeGraph) Materialize(ctx context.Context, commit types.IdentityUUID) (*RecipeTree, error) {
 	var result *RecipeTree
 	err := g.run(ctx, func(_ pgx.Tx, e *engine.Engine, _ string) error {
@@ -593,12 +653,51 @@ func (g *RecipeGraph) Discard(ctx context.Context, ref types.IdentityUUID, versi
 	})
 }
 
+// Sweep runs one maintenance pass of the graph in a transaction of its own,
+// as opts.Actor, under the graph's sweep lock; while another pass holds the
+// lock it does nothing and reports Skipped. It discards change sets idle
+// past opts.AbandonAfter, deletes the member rows of refs discarded longer
+// ago than opts.DiscardGrace, prunes each kind's history past its retention
+// while keeping every pinned row version, and writes missing snapshots.
+// Nothing calls it unless a service does.
+func (g *RecipeGraph) Sweep(ctx context.Context, opts GraphSweepOptions) (*GraphSweepReport, error) {
+	var report *GraphSweepReport
+	err := sweepGraph(g.db, recipeGraphRuntime, g.walkCeiling, func(e *engine.Engine) error {
+		var err error
+		report, err = e.Sweep(ctx, opts.engine())
+		return err
+	})
+	return report, err
+}
+
+// RunSweeper runs a Sweep pass now and then once every interval until ctx
+// is done, and returns ctx's error. One replica sweeps at a time: a pass
+// that finds the sweep lock held is skipped. onPass, when not nil, receives
+// each pass's report or error; an error does not stop the sweeper.
+func (g *RecipeGraph) RunSweeper(ctx context.Context, interval time.Duration, opts GraphSweepOptions, onPass func(*GraphSweepReport, error)) error {
+	return sweepGraph(g.db, recipeGraphRuntime, g.walkCeiling, func(e *engine.Engine) error {
+		return e.RunSweeper(ctx, interval, opts.engine(), func(report *GraphSweepReport, err error) {
+			if onPass != nil {
+				onPass(report, graphError(err))
+			}
+		})
+	})
+}
+
 func (g *RecipeGraph) ref(ctx context.Context, tx pgx.Tx, id string) (*types.RecipeRef, error) {
 	refID, err := parseGraphID(id)
 	if err != nil {
 		return nil, err
 	}
 	return (&RecipeRefRepository{tx: tx, txDB: g.db}).GetOne(ctx, refID, nil)
+}
+
+func (g *RecipeGraph) release(ctx context.Context, tx pgx.Tx, id string) (*types.RecipeRelease, error) {
+	releaseID, err := parseGraphID(id)
+	if err != nil {
+		return nil, err
+	}
+	return (&RecipeReleaseRepository{tx: tx, txDB: g.db}).GetOne(ctx, releaseID, nil)
 }
 
 func (g *RecipeGraph) commitRow(ctx context.Context, tx pgx.Tx, id string) (*types.RecipeCommit, error) {
@@ -621,6 +720,43 @@ func (g *RecipeGraph) commitResult(ctx context.Context, tx pgx.Tx, result *engin
 	}
 	*commitOut, err = g.commitRow(ctx, tx, result.Commit.ID)
 	return err
+}
+
+// resolutions are typed resolutions as the engine takes them.
+func (g *RecipeGraph) resolutions(resolutions []RecipeResolution) []versiongraph.Resolution {
+	out := make([]versiongraph.Resolution, 0, len(resolutions))
+	for _, resolution := range resolutions {
+		out = append(out, versiongraph.Resolution{
+			Kind:      string(resolution.Kind),
+			EntityKey: uuidText(resolution.EntityKey),
+			Path:      resolution.Path,
+			Take:      resolution.Take,
+			Value:     resolution.Value,
+		})
+	}
+	return out
+}
+
+// mergeResult types a merge's or a rebase's result: its conflicts, its ref
+// and, unless none was written, its commit.
+func (g *RecipeGraph) mergeResult(ctx context.Context, tx pgx.Tx, merged *engine.MergeResult, out *RecipeMergeResult) error {
+	for _, conflict := range merged.Conflicts {
+		key, err := parseGraphID(conflict.EntityKey)
+		if err != nil {
+			return err
+		}
+		out.Conflicts = append(out.Conflicts, RecipeConflict{
+			Kind:         types.RecipeEntityKind(conflict.Kind),
+			EntityKey:    key,
+			Path:         conflict.Path,
+			Base:         conflict.Base,
+			Ours:         conflict.Ours,
+			Theirs:       conflict.Theirs,
+			OursAuthor:   conflict.OursAuthor,
+			TheirsAuthor: conflict.TheirsAuthor,
+		})
+	}
+	return g.commitResult(ctx, tx, &engine.CommitResult{Ref: merged.Ref, Commit: merged.Commit}, &out.Ref, &out.Commit)
 }
 
 // tree types a tree of canonical rows the engine returned.
