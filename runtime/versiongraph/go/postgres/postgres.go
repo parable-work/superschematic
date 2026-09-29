@@ -45,6 +45,11 @@ const (
 	updatedByColumn = "updated_by"
 )
 
+// maxColumns is the most columns a Postgres table can have. No row the
+// adapter writes has more members, and the cap bounds the sizes the
+// adapter allocates from a row.
+const maxColumns = 1600
+
 // Options configure an Adapter.
 type Options struct {
 	// HistoryActorSetting is the setting the history triggers read a hard
@@ -413,6 +418,9 @@ func (t *tx) UpsertRow(ctx context.Context, kindName string, write storage.RowWr
 	}
 	for column, value := range forced {
 		members[column] = value
+	}
+	if len(members) > maxColumns {
+		return nil, fmt.Errorf("postgres: the %s row has %d columns; a Postgres table has at most %d", k.name, len(members), maxColumns)
 	}
 	input := make(map[string]json.RawMessage, len(members))
 	columns := make([]string, 0, len(members)+2)
