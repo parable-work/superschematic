@@ -735,11 +735,6 @@ its canonical form, as through the Go facade.
 - `schemaEpoch` is recorded and checked, but nothing transforms a commit
   from an older epoch.
 - The compiler emits DDL, not migrations.
-- A Rust build in which `serde_json`'s `preserve_order` feature is on
-  computes content hashes the other engines do not, since the core's hash
-  relies on `serde_json`'s sorted maps. superscalar turns the feature on,
-  so a generated Rust types crate hashes a tree with rows differently from
-  Go and TypeScript.
 - Who may commit, seal, merge, tag or release is the application's policy.
   `Sweep` collects discarded drafts and prunes history, but nothing runs it
   unless a service calls it or `RunSweeper`.

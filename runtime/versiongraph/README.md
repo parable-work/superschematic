@@ -492,7 +492,7 @@ them with `vg_dealloc`. `go/include/versiongraph.h` is the header.
 
 ```
 make versiongraph            # static archive for the Go binding (scripts/versiongraph-archive.sh)
-make rust                    # fmt, clippy (native and wasm32) and cargo test
+make rust                    # fmt, clippy (native and wasm32) and cargo test, then cargo test again with serde_json's preserve_order
 make ts                      # among the TypeScript packages: the wasm build, the package, every vector through it
 cd runtime/versiongraph/go && go test ./...
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
@@ -511,6 +511,12 @@ without it. The fixture is the
 compiler's output for `fixture-version-graph-db`, and a compiler test
 (`go test ./internal/generator -run TestVersionGraphScenarioFixtureIsCurrent`)
 fails when the checked-in copy is stale; `-update` rewrites it.
+
+superscalar turns on `serde_json`'s `preserve_order` feature, and Cargo
+unifies it into every crate of a build that uses superscalar, so the core
+and the Rust engine never rely on a `serde_json` map's order: the content
+hash and the canonical rules sort object keys themselves. `make rust` runs
+both crates' tests a second time with the feature on.
 
 The Go binding links `libsuperschematic_versiongraph.a` from
 `go/lib/<goos>_<goarch>`, which `make versiongraph` stages; the Makefile

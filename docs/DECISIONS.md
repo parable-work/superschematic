@@ -1474,9 +1474,7 @@ binding runs one operation at a time on its connection and rolls back a
 transaction that a dropped operation left open; `run_sweeper` stops when a
 shutdown future completes and lets a pass under way finish; and without
 `[paths] versiongraph_rust` the generated manifest names the engine's
-version. The core's content hash relies on `serde_json`'s sorted maps, so
-a Rust build with `preserve_order` on, which superscalar turns on, hashes
-a tree with rows differently; that stays open.
+version.
 The Python engine and facade follow and must pass the same scenarios.
 Each change that lands a piece updates this paragraph.
 

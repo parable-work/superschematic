@@ -98,12 +98,18 @@ ts:
 python:
 	cd runtime/schema/python && uv run pytest -q
 
+# The version-graph crates' tests run again with serde_json's preserve_order
+# on, which superscalar turns on and Cargo unifies into every crate of a
+# build that uses it: a content hash and a canonical row must not depend on
+# the order a serde_json map keeps.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
-		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test
+		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test \
+		&& cargo test --features serde_json/preserve_order
 	cd runtime/versiongraph/rust-engine && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
-		&& cargo clippy --no-default-features -- -D warnings && cargo test
+		&& cargo clippy --no-default-features -- -D warnings && cargo test \
+		&& cargo test --features serde_json/preserve_order
 
 # The version-graph core's static archive, staged where the Go binding links
 # it (runtime/versiongraph/go/lib/<goos>_<goarch>).
