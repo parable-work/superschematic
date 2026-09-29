@@ -962,7 +962,7 @@ the acme example declares one behavior (`acme.<Name>`) with its
 TypeScript implementation and no core edit, asserted by
 `scripts/smoke.sh` (section 10 of `docs/extension-model.md`).
 
-Status: four pieces are built. `internal/tools/schemafiletypes` writes
+Status: five pieces are built. `internal/tools/schemafiletypes` writes
 the data form's TypeScript types and meta-schema into
 `@superschematic/schema-ir` (`./schema-file`, `./schema-file.json`). The
 strict loader is in `@superschematic/schema-runtime`, held to the Go
@@ -987,12 +987,18 @@ readers. Beyond the schema runtime's checks it refuses union and map
 fields, which no runtime validates yet, and object keys a type does not
 declare; beyond the compiler's, a behavior composes on the instance type
 only, a behavior field may not take a type field's JSON key, and an
-operation's `paramsSchema` sets `additionalProperties: false`. Not built:
-the tool that copies a declaration into its npm package, the engine's MCP
-tools and its HTTP route for behavior operations, and the behaviors the
-engine packages ship. Each change that lands a piece updates this
-paragraph, the README layout table and the pages that describe it. The
-names and rules are reversible until the first release.
+operation's `paramsSchema` sets `additionalProperties: false`. The
+binary's `behaviors --out <dir> [--check]` command copies a declaration
+into its npm package; it is a command rather than a tool in the core
+module, since an extension's declarations are registered only in its own
+binary (section 3.16 of `docs/extension-model.md`). acme implements
+`acme.Rating` in `@acme/behaviors` over that copy, and its smoke runs it
+in the engine with no core edit. Not built: the engine's MCP tools and
+its HTTP route for behavior operations, and the behaviors the engine
+packages ship, without which the engine runs no behavior with no
+extension linked. Each change that lands a piece updates this paragraph,
+the README layout table and the pages that describe it. The names and
+rules are reversible until the first release.
 
 ## D17. A version graph over versioned tables, with one merge core
 

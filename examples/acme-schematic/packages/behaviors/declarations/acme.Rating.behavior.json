@@ -1,0 +1,88 @@
+{
+  "name": "acme.Rating",
+  "description": "Shoppers rate a catalog item from one star to the configured maximum.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "maxStars": {
+        "description": "The highest rating a shopper can give.",
+        "maximum": 10,
+        "minimum": 3,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "maxStars"
+    ],
+    "type": "object"
+  },
+  "fields": [
+    {
+      "name": "ratingCount",
+      "description": "How many ratings the item has."
+    },
+    {
+      "name": "ratingAverage",
+      "description": "The mean rating; 0 before the first."
+    }
+  ],
+  "operations": [
+    {
+      "name": "rate",
+      "description": "Records one shopper's rating of the item.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "stars": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stars"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "properties": {
+          "ratingAverage": {
+            "type": "number"
+          },
+          "ratingCount": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ratingCount",
+          "ratingAverage"
+        ],
+        "type": "object"
+      },
+      "writes": true,
+      "invocationPolicy": "always"
+    },
+    {
+      "name": "ratingSummary",
+      "description": "Returns the item's rating count and average.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "resultSchema": {
+        "properties": {
+          "ratingAverage": {
+            "type": "number"
+          },
+          "ratingCount": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ratingCount",
+          "ratingAverage"
+        ],
+        "type": "object"
+      }
+    }
+  ]
+}

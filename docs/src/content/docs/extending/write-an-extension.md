@@ -487,8 +487,12 @@ own table, not in the core's naming keys. See
 
 A behavior is code that adds fields, operations, checks and storage to a
 type when an engine runs the schema. The compiler declares, carries and
-checks behaviors; it runs none. An extension declares one in a JSON file
-beside its Go package, embeds it and registers it:
+checks behaviors; `@superschematic/engine` runs them. An extension ships
+both halves: the declaration, registered with the compiler, and a
+TypeScript implementation of it, registered with an engine.
+
+An extension declares a behavior in a JSON file beside its Go package,
+embeds it and registers it:
 
 ```go
 //go:embed rating.behavior.json
@@ -515,7 +519,12 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
     {
       "name": "rate",
       "description": "Records one shopper's rating of the item.",
-      "paramsSchema": { "type": "object", "required": ["stars"], "properties": { "stars": { "type": "integer", "minimum": 1 } } },
+      "paramsSchema": {
+        "type": "object",
+        "required": ["stars"],
+        "additionalProperties": false,
+        "properties": { "stars": { "type": "integer", "minimum": 1 } }
+      },
       "resultSchema": { "type": "object", "properties": { "ratingCount": { "type": "integer" }, "ratingAverage": { "type": "number" } } },
       "writes": true,
       "invocationPolicy": "always"
@@ -534,8 +543,10 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   that collides with the type's own or another behavior's.
 - `operations` are camelCase and may not be `create`, `get`, `list`,
   `update` or `delete`, which every schema has. `paramsSchema` is an
-  object schema. `invocationPolicy` is a value of the registry's tool
-  invocation policy; left out, the policy's default applies.
+  object schema; the engine also requires `"additionalProperties": false`,
+  so an operation's parameters are exactly the ones it declares.
+  `invocationPolicy` is a value of the registry's tool invocation policy;
+  left out, the policy's default applies.
 
 Assembly fails on a malformed declaration, and `Finalize` on a
 `requires` or `conflicts` name nobody registered or an invocation policy
@@ -590,10 +601,88 @@ generator whose output covers what behaviors add sets
 `shop-ratings-ts` services (`ext/testdata/services`) compose
 `acme.Rating`.
 
+### The implementation
+
+The engine runs a `BehaviorImplementation` that carries the same
+declaration. Copy it into the npm package that implements the behavior
+with your binary's `behaviors` command, and run it with `--check` in CI
+so the copy cannot fall behind:
+
+```sh
+acme-schematic behaviors --extension acme --out packages/behaviors/declarations
+acme-schematic behaviors --extension acme --out packages/behaviors/declarations --check
+```
+
+The implementation gives the engine a function for each point of an
+instance's life, and a handler and a reader for exactly the operations
+and fields the declaration names:
+
+```ts
+import { EngineError, defineBehavior } from "@superschematic/engine";
+import declaration from "../declarations/acme.Rating.behavior.json" with { type: "json" };
+
+export const rating = defineBehavior<{ readonly maxStars: number }>({
+  declaration,
+  configChange: (before, after) =>
+    before && after && after.maxStars >= before.maxStars ? undefined : "maxStars may only rise",
+  migrations: [{
+    version: 1,
+    name: "rating totals",
+    columns: {
+      count: { type: "integer", notNull: true, default: 0 },
+      stars: { type: "integer", notNull: true, default: 0 },
+    },
+  }],
+  operations: {
+    rate(context, params) {
+      const stars = params.stars as number;
+      if (stars > context.config.maxStars) {
+        throw new EngineError("invalid_argument", `a rating is 1 to ${context.config.maxStars} stars`);
+      }
+      const count = Number(context.columns.get().count) + 1;
+      const total = Number(context.columns.get().stars) + stars;
+      context.columns.set({ count, stars: total });
+      return { ratingCount: count, ratingAverage: total / count };
+    },
+    ratingSummary: (context) => ({ /* ... */ }),
+  },
+  fields: {
+    ratingCount: (view) => Number(view.columns.get().count),
+    ratingAverage: (view) => { /* ... */ },
+  },
+});
+```
+
+Every function is synchronous and reaches only the behavior's own
+storage: columns the engine adds to its instances table and names for
+the behavior, and tables of its own through `sql.table(name)`. A guard
+may veto an update, a delete or any behavior's operation on the type, and
+another behavior changes this one's state only by calling its operations,
+so those guards always run. The engine's README ("Behaviors") has the
+whole interface.
+
+A deployment registers the implementation with the engine and passes the
+meta-schema its binary writes, which declares the behavior:
+
+```ts
+import { openEngine } from "@superschematic/engine";
+import { behaviors } from "@acme/behaviors";
+
+const engine = openEngine({ path: "shop.db", policy, metaSchema: acmeJSONSchema, behaviors });
+engine.schemas.define(me, productSchema);   // composes acme.Rating
+engine.schemas.publish(me, "Product");       // creates the rating columns
+engine.instances.invoke(me, "Product", id, "rate", { stars: 4 });
+```
+
+An engine without the implementation refuses a schema that composes the
+behavior. acme's `packages/behaviors` is the whole example, and its smoke
+runs it.
+
 ## A command
 
-`cli.New` returns `build`, `build-all`, `json-schema` and `format`. An
-extension that implements `cli.CommandProvider` contributes more:
+`cli.New` returns `build`, `build-all`, `json-schema`, `format` and
+`behaviors`. An extension that implements `cli.CommandProvider` contributes
+more:
 
 ```go
 func (Extension) Commands() []*cobra.Command {

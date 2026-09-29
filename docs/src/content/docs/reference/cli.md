@@ -18,8 +18,8 @@ set. Extensions that implement `cli.CommandProvider` add subcommands at
 resolves, so the same command tree serves a core-only binary and one that
 carries extensions.
 
-The core binary has four commands: `build`, `build-all`, `json-schema`
-and `format`.
+The core binary has five commands: `build`, `build-all`, `json-schema`,
+`format` and `behaviors`.
 
 ## `build <service-dir>`
 
@@ -243,6 +243,37 @@ and YAML with its extension data. The TypeScript writer cannot render an
 extension's decorators: converting such a file to `ts` fails and names the
 extension slot instead of dropping it. It writes a type's behaviors as
 `@behavior` decorators.
+
+## `behaviors --out <dir>`
+
+Write the declaration of every behavior the binary registers into the npm
+package that implements it for `@superschematic/engine`: one
+`<name>.behavior.json` per behavior, the same declaration the Go package
+embeds and registers. The engine implementation imports that copy, so the
+engine and the compiler read one declaration. Other `*.behavior.json`
+files in the directory are removed.
+
+A copy is canonical rather than the source bytes: the declaration's keys
+in `BehaviorDeclaration`'s order, each JSON Schema's object keys sorted
+with number literals as written, two-space indents and a final newline.
+It changes only when the declaration does.
+
+```
+acme-schematic behaviors --extension acme --out packages/behaviors/declarations
+acme-schematic behaviors --extension acme --out packages/behaviors/declarations --check
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--out` | (required) | the directory the copies go in |
+| `--check` | false | write nothing; fail, naming each file, when a copy differs, is missing, or is no registered behavior's |
+| `--extension` | every behavior | only the behaviors this extension (its `Name()`) registered; fails when it registers none |
+| `--naming` | built-in names | naming config file; this command has no service directory to discover one from |
+
+It is a command of the binary, not a tool in the core module, because an
+extension's declarations are registered only in its own binary: acme's
+copy comes from `acme-schematic`, and its smoke runs `--check`. The core
+binary registers no behavior yet and writes none.
 
 ## Extension commands
 

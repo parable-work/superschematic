@@ -38,7 +38,7 @@ Pages on a release tag once the repository is public.
 | Path | What it is |
 | --- | --- |
 | `cmd/superschematic/` | The binary with no extension linked |
-| `cli/` | `cli.New(Config, ...Extension)`: build, build-all, format, json-schema |
+| `cli/` | `cli.New(Config, ...Extension)`: build, build-all, format, json-schema, behaviors |
 | `registry/`, `loader/`, `schemadeps/` | Public packages an extension imports |
 | `internal/` | Loader, generators, writers, build plan and cache |
 | `ir/` | The schema IR (own Go module; the runtimes import it) |

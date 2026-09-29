@@ -94,10 +94,20 @@
 #      value class) and the ORM its shell (db.PlanogramGraph()), which
 #      compiled with the ORM module in step 17; format writes the
 #      declarations, not the expansion, and the YAML twin expands to the
-#      same types.
+#      same types;
+#  20. acme.Rating runs in @superschematic/engine: the declaration's copy in
+#      @acme/behaviors (packages/behaviors/declarations) is what
+#      `acme-schematic behaviors --check` would write; the package
+#      type-checks against the engine's declarations, and its test, under
+#      Node.js and Bun, opens an engine with acme's implementation and the
+#      acme meta-schema, defines and publishes shop-ratings' Product,
+#      creates one, rates it and reads the rating fields and events, and
+#      shows an engine without the implementation refuses the schema.
 #
 # Step 16 also needs bun and installs hono and the generated types package's
-# dependencies from the npm registry.
+# dependencies from the npm registry. Step 20 needs bun and Node.js 24, builds
+# the schema runtime and the engine, and installs their dependencies from the
+# npm registry.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -506,5 +516,25 @@ printf '{"name": "shop-db", "kind": "DB", "outputs": {}}\n' >"$PLANOGRAM/schema.
 GRAPH_DEFS='[.types, .enums | to_entries[] | select(.key | test("^(Planogram|Bay$|Facing$)")) | .value | del(.owner)]'
 jq -e "$GRAPH_DEFS | length == 8" "$OUT/planogram-ir.json" >/dev/null
 cmp <(jq -S "$GRAPH_DEFS" "$OUT/db-ir.json") <(jq -S "$GRAPH_DEFS" "$OUT/planogram-ir.json")
+
+echo "==> behaviors: acme.Rating runs in the engine"
+BEHAVIORS="$EXAMPLE_DIR/packages/behaviors"
+ENGINE="$REPO_ROOT/runtime/engine/typescript"
+# The implementation's copy of the declaration is the one the binary registers.
+"$OUT/acme-schematic" behaviors --extension acme --out "$BEHAVIORS/declarations" --check
+# Build the schema runtime and the engine, as the typescript CI job does; the
+# engine's build links the schema runtime's dist, and the HTTP runtime's, which
+# step 16 built, into its node_modules.
+(cd "$REPO_ROOT/runtime/schema/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
+(cd "$ENGINE" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
+link_module "$ENGINE" "$BEHAVIORS/node_modules/@superschematic/engine"
+for dep in typescript @types/node; do
+  link_module "$ENGINE/node_modules/$dep" "$BEHAVIORS/node_modules/$dep"
+done
+(cd "$BEHAVIORS" && "$ENGINE/node_modules/.bin/tsc" --noEmit -p tsconfig.json)
+# acme-schema-file.json is the acme binary's json-schema output (step 18): the
+# meta-schema that declares acme.Rating.
+(cd "$BEHAVIORS" && ACME_META_SCHEMA="$OUT/acme-schema-file.json" node --test 'test/*.test.ts')
+(cd "$BEHAVIORS" && ACME_META_SCHEMA="$OUT/acme-schema-file.json" bun test ./test)
 
 echo "acme smoke: ok"
