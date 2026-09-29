@@ -23,7 +23,8 @@
 //     acme's confirm key replaces the core invocation policy (mcp.go);
 //   - a behavior, acme.Rating, declared in rating.behavior.json, that a
 //     type composes with @behavior or in the data forms (behavior.go), its
-//     config typed in @acme/schema;
+//     config typed in @acme/schema and its engine implementation in
+//     @acme/behaviors;
 //   - two subcommands through cli.CommandProvider: describe (command.go) and
 //     fields, which type-checks a declaration file with the loader's
 //     compiler (fields.go).

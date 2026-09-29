@@ -1,6 +1,7 @@
 package envgen_test
 
 import (
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -73,6 +74,54 @@ func TestBuildValuesSchema_EnumMetadata(t *testing.T) {
 	}
 	if env.Default != "development" {
 		t.Fatalf("default = %q, want development", env.Default)
+	}
+}
+
+// TestValuesSchemaMarksSecrets: an env var declared Secret<T> carries
+// "secret": true in values-schema.json, so a deployment can check that its
+// values bind it through a secret reference and deliver it from a secret
+// store; other env vars leave the key out.
+func TestValuesSchemaMarksSecrets(t *testing.T) {
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-general"))
+	if err != nil {
+		t.Fatalf("load fixture-general: %v", err)
+	}
+	output, err := envgen.Generate(schema, "fixture-general")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	outDir := t.TempDir()
+	if err := envgen.WriteConfigModule(output, outDir); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(outDir, "values-schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Extension struct {
+			EnvVars []map[string]any `json:"envVars"`
+		} `json:"x-superschematic"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	secrets := map[string]any{}
+	for _, envVar := range document.Extension.EnvVars {
+		name, _ := envVar["name"].(string)
+		secrets[name] = envVar["secret"]
+	}
+	if len(secrets) != 4 {
+		t.Fatalf("values schema lists %d env vars, want 4: %v", len(secrets), secrets)
+	}
+	for name, secret := range secrets {
+		want := any(nil)
+		if name == "JWT_SECRET" {
+			want = true
+		}
+		if secret != want {
+			t.Errorf("%s secret = %v, want %v", name, secret, want)
+		}
 	}
 }
 

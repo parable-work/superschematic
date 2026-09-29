@@ -112,6 +112,10 @@ type FieldInfo struct {
 	// DefaultLiteral is the Go expression used to initialize the field with
 	// its declared default value. Only populated when HasDefault is true.
 	DefaultLiteral string
+
+	// KeepsZeroValue drops omitempty from an optional bool whose default is
+	// true: an omitted false would decode back as true.
+	KeepsZeroValue bool
 }
 
 // ArrayDepth is 0 for T, 1 for T[] and 2 for T[][].
@@ -181,6 +185,16 @@ type TypePairField struct {
 	IsScalar        bool
 	IsPaired        bool
 	PairedTypeName  string
+
+	// TakesAddress is set when the output field is a pointer to the input
+	// wrapper's value type, such as InputField[bool] to *bool.
+	TakesAddress bool
+
+	// KeepsZeroValue and DefaultLiteral come from the output field: an unset
+	// or null input converts to the declared default, since the output field
+	// serializes its zero value.
+	KeepsZeroValue bool
+	DefaultLiteral string
 }
 
 // TypePair describes a matched input/output type pair for ToType() generation.
@@ -784,6 +798,14 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 		if isUnion && cf.IsMap && !cf.Required {
 			goType = strings.Replace(goType, "]*", "]", 1)
 		}
+		// omitempty drops a false bool. An optional boolean without a declared
+		// default is therefore *bool, so an explicit false reaches the JSON
+		// and a reader that treats absence as unset (Python None, a layered
+		// merge) still sees it. With a default of true the field stays bool
+		// and always serializes; see KeepsZeroValue.
+		if !isInput && codegen.GoOptionalBoolIsPointer(cf.Type, cf.Required, cf.IsArray, cf.IsMap, cf.Default) {
+			goType = "*bool"
+		}
 		if usesWrapper {
 			innerType := goType
 			if cf.IsScalar || (isUnion && !cf.IsArray && !cf.IsMap) {
@@ -825,6 +847,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			field.ScalarRules = scalarRules(field.Validations)
 			field.Validations = withoutScalarRules(field.Validations)
 		}
+		field.KeepsZeroValue = !isInput && goType == "bool" && !cf.Required && field.DefaultLiteral == "true"
 
 		fields[i] = field
 	}
@@ -963,6 +986,12 @@ func buildTypePairs(types []TypeInfo, importedTypes []ImportedTypeInfo) []TypePa
 				IsArrayOfArrays: inputField.IsArrayOfArrays,
 				IsMap:           inputField.IsMap,
 				IsScalar:        inputField.IsScalar,
+			}
+			if inputField.UsesWrapper {
+				inner := strings.TrimSuffix(strings.TrimPrefix(inputField.GoType, "InputField["), "]")
+				pf.TakesAddress = objectField.GoType == "*"+inner
+				pf.KeepsZeroValue = objectField.KeepsZeroValue
+				pf.DefaultLiteral = objectField.DefaultLiteral
 			}
 
 			innerInputType := unwrapGoType(inputField.GoType)

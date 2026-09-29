@@ -126,7 +126,8 @@ func RegisterCore(reg *registry.Registry) error {
 // from outputs.types: Go when the Go types are on, Rust when only the Rust
 // types are, and "" (the values schema alone) when neither is. The Go
 // loader requires, replaces and imports the Go types module, so without
-// that module it could not compile.
+// that module it could not compile. The TypeScript loader is not standalone:
+// generateTSTypes writes it into the TypeScript types package.
 func envLoaderLanguage(outputs *registry.Outputs) string {
 	switch {
 	case outputs.TypesEnabled(LangGo):

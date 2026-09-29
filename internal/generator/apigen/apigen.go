@@ -786,6 +786,9 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	if err := checkEncryptedArguments(namespace, op, method, pathParams, queryParams); err != nil {
 		return nil, err
 	}
+	if err := checkEncryptedMethod(namespace, set, op, method); err != nil {
+		return nil, err
+	}
 
 	if hasInput && len(scalarArgs) > 0 {
 		names := make([]string, len(scalarArgs))

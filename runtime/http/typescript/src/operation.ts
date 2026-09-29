@@ -1,5 +1,5 @@
-import type { Principal } from './auth';
-import type { ParamSpec } from './params';
+import type { Principal } from './auth.js';
+import type { ParamSpec } from './params.js';
 
 /*
 The operation table the generated router carries. One OperationSpec per @rest

@@ -409,6 +409,28 @@ func TestTenantUserOptionalMaps(t *testing.T) {
 		t.Fatalf("SetNull left maps = %v %v %v, want nil", row.Labels, row.AliasesByLocale, row.SettingsByName)
 	}
 }
+
+// An optional boolean keeps an explicit false through a snapshot and
+// ApplyTo; an absent one snapshots as SetNull.
+func TestTenantUserOptionalBool(t *testing.T) {
+	snapshot := NewTenantUserSnapshotUpdate(&types.TenantUser{Suspended: new(false)})
+	if snapshot.SuspendedSetNull || snapshot.Suspended == nil || *snapshot.Suspended {
+		t.Fatalf("snapshot Suspended = %v (SetNull %t), want false", snapshot.Suspended, snapshot.SuspendedSetNull)
+	}
+	var row types.TenantUser
+	snapshot.ApplyTo(&row)
+	if row.Suspended == nil || *row.Suspended {
+		t.Fatalf("ApplyTo Suspended = %v, want false", row.Suspended)
+	}
+	empty := NewTenantUserSnapshotUpdate(&types.TenantUser{})
+	if !empty.SuspendedSetNull {
+		t.Fatal("an absent optional boolean must snapshot as SetNull")
+	}
+	empty.ApplyTo(&row)
+	if row.Suspended != nil {
+		t.Fatalf("SetNull left Suspended = %v, want nil", *row.Suspended)
+	}
+}
 `
 	if err := os.WriteFile(filepath.Join(ormDir, "apply_to_test.go"), []byte(applyToTest), 0o644); err != nil {
 		t.Fatalf("write apply to test: %v", err)
@@ -904,6 +926,9 @@ func findSnapshotUser(t *testing.T, users []types.TenantUser, id types.IdentityU
 	if err := os.WriteFile(filepath.Join(ormDir, "enum_default_test.go"), []byte(enumDefaultTest), 0o644); err != nil {
 		t.Fatalf("write enum default test: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(ormDir, "tx_query_test.go"), []byte(txQueryTest), 0o644); err != nil {
+		t.Fatalf("write tx query test: %v", err)
+	}
 
 	tidy := exec.Command("go", "mod", "tidy")
 	tidy.Dir = ormDir
@@ -1010,13 +1035,72 @@ func TestCreateBindsTheEnumDefaultWhenUnset(t *testing.T) {
 }
 `
 
+// txQueryTest runs in the generated ORM module. TxInterface.Query reads
+// rows inside the open transaction, so it sees a setting the same
+// transaction made; the no-op transaction returns an exhausted result.
+const txQueryTest = `package orm
+
+import (
+	"context"
+	"testing"
+)
+
+func TestNoOpTxQueryReturnsNoRows(t *testing.T) {
+	ctx := context.Background()
+	err := NewNoOpDatabase().Transaction(ctx, func(tx TxInterface) error {
+		rows, err := tx.Query(ctx, "SELECT 1")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		if rows.Next() {
+			t.Fatal("no-op Query returned a row")
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTxQueryReadsInsideTheTransaction(t *testing.T) {
+	db, _ := openStrategyADatabase(t)
+	ctx := context.Background()
+	var names []string
+	err := db.Transaction(ctx, func(tx TxInterface) error {
+		if _, err := tx.Exec(ctx, "SET LOCAL application_name = 'tx-query'"); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, "SELECT current_setting('application_name') UNION ALL SELECT $1::text", "second")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				return err
+			}
+			names = append(names, name)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 2 || names[0] != "tx-query" || names[1] != "second" {
+		t.Fatalf("Query read %q, want [tx-query second]", names)
+	}
+}
+`
+
 // extendFixtureForCompileCoverage mutates the loaded fixture-db IR to
 // exercise template branches the fixture schema does not reach: nullable,
 // list (JSONB and native JSONB[]), list-of-lists and map Generic.JSON
 // columns, a table of closed-union JSON columns
 // (single, nullable, list, map and nullable map), createdBy/updatedBy user
 // audit fields, scalar arrays, optional enums, optional non-audit datetime
-// scalars, and optional maps.
+// scalars, optional maps and an optional boolean.
 // Soft-delete fields (deletedAt/deletedBy) live on the fixture's TenantUser
 // itself. The mutation reuses scalars the fixture already resolves so the
 // generated types module stays compilable.
@@ -1104,6 +1188,9 @@ func extendFixtureForCompileCoverage(schema *ir.Schema) {
 		&ir.FieldDef{Name: "labels", TypeRef: ir.TypeRef{Name: "string", IsMap: true}},
 		&ir.FieldDef{Name: "aliasesByLocale", TypeRef: ir.TypeRef{Name: "string", IsMap: true, IsArray: true}},
 		&ir.FieldDef{Name: "settingsByName", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsMap: true}},
+		// An optional boolean without a default is *bool, so a false value is
+		// stored rather than read as the zero value and cleared.
+		&ir.FieldDef{Name: "suspended", TypeRef: ir.TypeRef{Name: "boolean"}},
 	)
 
 	// A table whose only optional string-typed field is a map.

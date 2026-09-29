@@ -38,15 +38,15 @@ Pages on a release tag once the repository is public.
 | Path | What it is |
 | --- | --- |
 | `cmd/superschematic/` | The binary with no extension linked |
-| `cli/` | `cli.New(Config, ...Extension)`: build, build-all, format, json-schema |
+| `cli/` | `cli.New(Config, ...Extension)`: build, build-all, format, json-schema, behaviors |
 | `registry/`, `loader/`, `schemadeps/` | Public packages an extension imports |
 | `internal/` | Loader, generators, writers, build plan and cache |
 | `ir/` | The schema IR (own Go module; the runtimes import it) |
 | `ir/typescript/` | `@superschematic/schema-ir`: the runtime document's types, and the schema-file data form's types and JSON Schema |
 | `runtime/schema/{go,typescript,python}/` | Schema runtime the generated code links |
-| `runtime/http/{go,rust,typescript}/` | HTTP runtime the generated servers link |
+| `runtime/http/{go,rust,typescript}/` | HTTP runtime the generated servers link; the engine's HTTP API is built on the TypeScript one |
 | `runtime/versiongraph/{rust,go,typescript}/` | Version-graph core: compose, merge, diff, hash and validate trees of versioned rows; a Rust crate with a Go binding (its own Go module) and `@superschematic/versiongraph`, the TypeScript package over its wasm build for the browser, bun and Node. `runtime/versiongraph/README.md` is its JSON contract and `testdata/vectors` its executable form. A generated ORM whose schema declares a graph imports the Go binding |
-| `runtime/engine/typescript/` | `@superschematic/engine`: runs a schema with no generated code (D16); its storage, schema registry, instances, event log and access policy are built |
+| `runtime/engine/typescript/` | `@superschematic/engine`: runs a schema with no generated code (D16); its storage, schema registry, instances, event log, access policy, HTTP API with the event stream (`@superschematic/engine/http`) and behavior plug-in interface are built |
 | `packages/` | `@superschematic/{api,db,schema,schema-config}`: the TypeScript authoring packages |
 | `extensions/` | Example extensions |
 | `superschematic.toml` | The default naming file, written out |

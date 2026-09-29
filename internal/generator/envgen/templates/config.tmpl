@@ -175,6 +175,10 @@ func LoadConfig() (*{{ .TypeName }}, error) {
 	} else {
 		cfg.{{ .GoName }} = {{ primitiveAssign . "val" }}
 	}
+{{- else if .OptionalBool }}
+	if os.Getenv("{{ .Key }}") != "" {
+		cfg.{{ .GoName }} = new({{ loaderExpr . }})
+	}
 {{- else }}
 	cfg.{{ .GoName }} = {{ primitiveAssign . (loaderExpr .) }}
 {{- end }}

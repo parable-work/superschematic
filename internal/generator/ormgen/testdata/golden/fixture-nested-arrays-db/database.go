@@ -138,6 +138,14 @@ func (tx *Tx) Exec(ctx context.Context, sql string, arguments ...any) (pgconn.Co
 	return tx.tx.Exec(ctx, sql, arguments...)
 }
 
+// Query runs a raw read within the open transaction. Prefer generated
+// repository methods when they exist; use this only for reads the ORM does not
+// express, such as a keyset-paged join across tables. The caller closes the
+// returned rows.
+func (tx *Tx) Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error) {
+	return tx.tx.Query(ctx, sql, arguments...)
+}
+
 // WithUserID returns a new context with the user ID set
 func WithUserID(ctx context.Context, userID types.IdentityUUID) context.Context {
 	return context.WithValue(ctx, userContextKey, userID)

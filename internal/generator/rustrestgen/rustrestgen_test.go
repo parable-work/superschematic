@@ -20,6 +20,11 @@ var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
 
+// generateFixtureAPIRust generates fixture-api without its encryption. The
+// Rust server refuses an encrypted operation that is not
+// @manualRouteRegistration (TestFixtureAPIIsRefusedForItsEncryptedMutations),
+// so the golden tests serve fixture-api with its TenantMutations set and
+// updateSecret argument unencrypted, which changes no generated file.
 func generateFixtureAPIRust(t *testing.T) *APIOutput {
 	t.Helper()
 
@@ -27,7 +32,20 @@ func generateFixtureAPIRust(t *testing.T) *APIOutput {
 	if err != nil {
 		t.Fatalf("load fixture-db: %v", err)
 	}
-	return generateRustAPI(t, "fixture-api", true, "fixture-db", dbSchema)
+	return generateRustAPI(t, "fixture-api", true, "fixture-db", dbSchema, withoutEncryption)
+}
+
+// withoutEncryption clears every encryption flag of schema's operation sets.
+func withoutEncryption(schema *ir.Schema) {
+	for _, set := range schema.OperationSets {
+		set.Encrypted = false
+		for _, op := range set.Operations {
+			op.Encrypted = false
+			for _, arg := range op.Arguments {
+				arg.Encrypted = false
+			}
+		}
+	}
 }
 
 // generateMultiwordAPIRust generates the fixture whose operation sets
@@ -38,12 +56,15 @@ func generateMultiwordAPIRust(t *testing.T) *APIOutput {
 	return generateRustAPI(t, "fixture-multiword-api", false, "", nil)
 }
 
-func generateRustAPI(t *testing.T, name string, public bool, upstream string, upstreamIR *ir.Schema) *APIOutput {
+func generateRustAPI(t *testing.T, name string, public bool, upstream string, upstreamIR *ir.Schema, edits ...func(*ir.Schema)) *APIOutput {
 	t.Helper()
 
 	apiSchema, err := loader.LoadService(filepath.Join(fixturesDir, name))
 	if err != nil {
 		t.Fatalf("load %s: %v", name, err)
+	}
+	for _, edit := range edits {
+		edit(apiSchema)
 	}
 
 	outDir := t.TempDir()

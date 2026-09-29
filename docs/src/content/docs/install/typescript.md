@@ -114,6 +114,28 @@ text; any other JSON type is `type`
 ([JSON-valued scalars](/superschematic/reference/json-scalars/)). Type-only imports (no runtime) come from
 `@schemas/catalog-types/types`.
 
+## Load environment variables
+
+A schema with an `@envVars` class gets its loader in the types package,
+under the `./config` export:
+
+```ts
+import { loadShopConfig } from "@schemas/shop-config-types/config";
+
+const config = loadShopConfig();   // reads process.env; pass a map in tests
+config.PORT;                       // a number; the schema default when unset
+config.API_KEY.reveal();           // a Secret<string> field is a SecretValue
+JSON.stringify(config);            // ... "API_KEY":"[secret]" ...
+```
+
+`load<Type>` parses each variable by its schema type: a `number` is an
+integer, a boolean is `true` or `false`, an enum is one of its values, and
+a scalar runs its validators. An unset or empty variable takes the schema
+default, else `null`. The loader throws `EnvConfigError` naming every
+missing or invalid variable, never its value. A `Secret<T>` field prints
+as `[secret]` everywhere except `reveal()`. The loader reads no `.env`
+file ([D22](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d22-a-typescript-env-loader-in-the-typescript-types-package)).
+
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk` for TypeScript writes
@@ -255,6 +277,7 @@ fails with the operation named when one is not:
   payload and decodes it.
 - An operation that uploads files. The router has no multipart adapter.
 
-The generated package and the runtime ship TypeScript sources, so run them
-with Bun, a bundler or a TypeScript loader. `examples/acme-schematic`
+The generated package ships TypeScript sources, so run it with Bun, a
+bundler or a TypeScript loader. The runtime ships compiled JavaScript with
+declarations. `examples/acme-schematic`
 (`shop-storefront` and its `storefront/` app) is a complete example.

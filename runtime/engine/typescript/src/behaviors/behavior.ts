@@ -1,0 +1,244 @@
+/*
+What a behavior implementation is: the code an engine runs for one
+declared behavior (D16). It carries its declaration and gives the engine
+functions for each point of an instance's life. Every function is
+synchronous and runs inside the engine's write transaction, or in a read,
+and gets a context that reaches only what the behavior may touch:
+
+- the instance's own fields (the type's, not any behavior's), deep-frozen;
+- the behavior's own columns on the instance, by the names it declared;
+- SQL on the behavior's own tables, which the engine names;
+- the principal, the schema version and the clock's time for the call;
+- in a write, call(), which runs another behavior's operation on the same
+  instance, that behavior's guards and every other guard first.
+
+There is no handle on the instances table, on another behavior's storage
+or on the storage connection. A status one behavior owns changes at
+another's request only through its operations, so its guards always run.
+*/
+
+import type { Principal } from '../access.js';
+import type { Row, RunResult, SqlValue } from '../storage/driver.js';
+import type { BehaviorDeclaration } from './declaration.js';
+
+/** A JSON object a behavior reads: deep-frozen. */
+export type FrozenJSON = Readonly<Record<string, unknown>>;
+
+/**
+ * A column the behavior adds to the instances table. The engine names it
+ * (`bhv_<key>__<name>`, key per behavior), so two behaviors never collide.
+ */
+export interface ColumnSpec {
+  /** The SQLite type in the instances table, a STRICT table. */
+  readonly type: 'integer' | 'real' | 'text' | 'blob' | 'any';
+  /** NOT NULL; needs a default, which every existing instance takes. */
+  readonly notNull?: boolean;
+  /** The value the column holds until the behavior sets it; null when absent. */
+  readonly default?: string | number | null;
+}
+
+/**
+ * One forward step of the behavior's storage, recorded in the engine's
+ * migration ledger under the behavior's name. A shipped migration is never
+ * edited; a change is a new migration at the end of the list.
+ */
+export interface BehaviorMigration {
+  /** 1, 2, 3, ... in order. */
+  readonly version: number;
+  readonly name: string;
+  /** Columns this step adds to the instances table, by the behavior's own name for each. */
+  readonly columns?: Readonly<Record<string, ColumnSpec>>;
+  /**
+   * DDL and data changes on the behavior's own tables: CREATE TABLE, CREATE
+   * [UNIQUE] INDEX, CREATE VIRTUAL TABLE, ALTER TABLE, DROP TABLE and DROP
+   * INDEX, and the statements a write runs. Every object it creates must be
+   * one of its own tables (sql.table(name)); a trigger, a view or a
+   * temporary object is refused.
+   */
+  up?(sql: SqlWriter): void;
+}
+
+/** The behavior's own columns on one instance. */
+export interface Columns {
+  /** Every column the behavior's migrations add, by its own name for it. */
+  get(): Record<string, SqlValue>;
+}
+
+export interface WritableColumns extends Columns {
+  /** Sets some of the behavior's columns; a name it did not declare is refused. */
+  set(values: Readonly<Record<string, SqlValue>>): void;
+}
+
+/**
+ * SQL on the behavior's own tables. Each call runs one statement. The engine
+ * refuses a statement that names a table or column outside the behavior's
+ * own storage (engine_*, sqlite_*, pragma_* and another behavior's bhv_*
+ * names) and anything but SELECT, VALUES and WITH ... SELECT in a read.
+ */
+export interface SqlReader {
+  /** The SQL name of one of the behavior's tables, by its own name for it (`[a-z][a-z0-9_]*`). */
+  table(name: string): string;
+  get(sql: string, params?: readonly SqlValue[]): Row | undefined;
+  all(sql: string, params?: readonly SqlValue[]): Row[];
+}
+
+export interface SqlWriter extends SqlReader {
+  /** Runs one INSERT, UPDATE, DELETE or REPLACE (or a read). */
+  run(sql: string, params?: readonly SqlValue[]): RunResult;
+}
+
+/** What every behavior function gets: the behavior, its config and the call. */
+export interface BehaviorScope<Config> {
+  /** The behavior's name. */
+  readonly behavior: string;
+  /** The type's config of the behavior: what parseConfig returned, or the JSON config; deep-frozen. */
+  readonly config: Config;
+  readonly namespace: string;
+  readonly schema: string;
+  /** The live schema version the call runs with. */
+  readonly version: number;
+  /** Who the call acts for. */
+  readonly principal: Principal;
+  /** The engine clock's time for the call, in epoch milliseconds: one value for the whole call. */
+  readonly now: number;
+}
+
+/** A read of one instance: a guard's view and a field reader's. */
+export interface InstanceView<Config> extends BehaviorScope<Config> {
+  readonly id: string;
+  /** The instance's own fields, without any behavior's; deep-frozen. */
+  readonly data: FrozenJSON;
+  readonly columns: Columns;
+  readonly sql: SqlReader;
+}
+
+/**
+ * A write to one instance: initialize, afterChange and an operation. In a
+ * read-only operation, set() and run() refuse, and call() reaches only
+ * read-only operations. After a delete, columns hold the values the
+ * instance had, and set() and call() refuse.
+ */
+export interface InstanceContext<Config> extends InstanceView<Config> {
+  readonly columns: WritableColumns;
+  readonly sql: SqlWriter;
+  /**
+   * Calls an operation of a behavior the type composes, on this instance.
+   * The parameters are checked against its paramsSchema, every behavior's
+   * guard runs in list order, then its handler, in a savepoint that rolls
+   * back alone when it throws. Returns its result.
+   */
+  call(behavior: string, operation: string, params?: FrozenJSON): unknown;
+}
+
+/** What a guard is asked to allow. The instance before the change is the view's data. */
+export type GuardRequest =
+  | { readonly kind: 'update'; readonly patch: FrozenJSON; readonly after: FrozenJSON }
+  | { readonly kind: 'delete' }
+  | {
+      readonly kind: 'operation';
+      /** The behavior whose operation it is. */
+      readonly behavior: string;
+      readonly operation: string;
+      /** The parameters, as the operation's handler gets them. */
+      readonly params: FrozenJSON;
+      /** The behavior whose code made the call, for a call(); absent for a caller's. */
+      readonly caller?: string;
+    };
+
+/** What changed, for afterChange. */
+export type InstanceChange =
+  | { readonly kind: 'create' }
+  | { readonly kind: 'update'; readonly patch: FrozenJSON; readonly before: FrozenJSON }
+  | { readonly kind: 'delete' }
+  | { readonly kind: 'operation'; readonly behavior: string; readonly operation: string; readonly params: FrozenJSON };
+
+/** The type a config is given on, for parseConfig. */
+export interface ConfigTarget {
+  readonly schema: string;
+  readonly type: string;
+  /** The JSON keys of the type's own fields. */
+  readonly fields: readonly string[];
+  /** Every behavior the type lists, in order. */
+  readonly behaviors: readonly string[];
+}
+
+/** An operation's handler. Its result is checked against resultSchema. */
+export type OperationHandler<Config> = (context: InstanceContext<Config>, params: FrozenJSON) => unknown;
+
+/** Reads one declared field for an instance: a JSON value, or undefined (or null) for none. */
+export type FieldReader<Config> = (context: InstanceView<Config>) => unknown;
+
+/**
+ * A behavior implementation. Its operations and fields name exactly the
+ * ones its declaration does; registration refuses anything else.
+ */
+export interface BehaviorImplementation<Config = unknown> {
+  /** The declaration the compiler registers, as its JSON file holds it. */
+  readonly declaration: BehaviorDeclaration;
+
+  /**
+   * Checks a config its configSchema accepted, beyond what JSON Schema
+   * says, and returns the value the other functions get as config. Throw
+   * BehaviorConfigError to refuse it; the schema is refused at that
+   * config. Absent, the config is the JSON value ({} when the type gives
+   * none).
+   */
+  parseConfig?(config: unknown, target: ConfigTarget): Config;
+
+  /**
+   * Whether a new version of a schema may change the config: return a
+   * reason to refuse, or undefined to allow. Called for a changed config,
+   * and on a schema with instances for an added behavior (before is
+   * undefined) and a removed one (after is undefined). Absent, only an
+   * identical config is allowed, and the behavior can be neither added to
+   * nor removed from a schema that has instances.
+   */
+  configChange?(before: Config | undefined, after: Config | undefined): string | undefined;
+
+  /** The storage it owns, created when a schema that composes it is published. */
+  readonly migrations?: readonly BehaviorMigration[];
+
+  /** Sets up its state for a new instance, in the create's transaction, in list order. */
+  initialize?(context: InstanceContext<Config>): void;
+
+  /**
+   * May veto an update, a delete or an operation of any behavior on the
+   * type: return a reason. Every behavior's guard runs in list order and
+   * the first veto wins; the change is refused with a BehaviorVetoError
+   * (vetoed).
+   */
+  guard?(context: InstanceView<Config>, request: GuardRequest): string | undefined | void;
+
+  /** A handler per declared operation. */
+  readonly operations?: Readonly<Record<string, OperationHandler<Config>>>;
+
+  /** A reader per declared field. */
+  readonly fields?: Readonly<Record<string, FieldReader<Config>>>;
+
+  /**
+   * Runs after a create (after every initialize), an update, a delete or a
+   * writing operation called by a caller, in the same transaction, in list
+   * order. Operations it calls do not run it again.
+   */
+  afterChange?(context: InstanceContext<Config>, change: InstanceChange): void;
+}
+
+/** defineBehavior types an implementation's config; it returns the implementation unchanged. */
+export function defineBehavior<Config>(implementation: BehaviorImplementation<Config>): BehaviorImplementation<Config> {
+  return implementation;
+}
+
+/**
+ * An implementation of any config type, as the engine registers it. The
+ * config type is the implementation's own business: the engine passes each
+ * function the value its parseConfig returned.
+ */
+export type AnyBehaviorImplementation = BehaviorImplementation<any>;
+
+/** Thrown by parseConfig to refuse a config; the schema is refused with the message. */
+export class BehaviorConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BehaviorConfigError';
+  }
+}

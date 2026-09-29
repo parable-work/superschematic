@@ -448,11 +448,12 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 		Files:    filesMap,
 	}
 	{{- else if .HasEncryptedBody}}
-	payloadToEncrypt := map[string]any{}
+	// The envelope carries the request body itself, the JSON an
+	// unencrypted request would send.
 	{{- if or .HasInput .HasScalarArgs}}
-	payloadToEncrypt = map[string]any{
-		"input": input,
-	}
+	var payloadToEncrypt any = input
+	{{- else}}
+	var payloadToEncrypt any = map[string]any{}
 	{{- end}}
 	var publicEncryptionKey *runtime.PublicEncryptionKey
 	if options != nil {

@@ -20,7 +20,7 @@ The extension adds one of each registration surface:
 | Checks and an OpenAPI hook | policy over the core documentation decorators: acme's `@docs` audiences and `@icon` names only, and the `x-acme-docs` vendor key | `ext/docs.go` |
 | Check, a tool hook and an invocation policy on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden; the SDK tool documents carry acme's vendor keys and icon variant; `confirm` replaces the core's `invocationPolicy` | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Check on a core kind | policy over core projection views: every view in a DB schema binds `acme.shop_id` first | `ext/projection_policy.go` |
-| Behavior | `acme.Rating`, declared in a JSON file; `ext/testdata/services/shop-ratings` composes it on a General data-form type and `shop-ratings-ts` with `@behavior`, typed by acme's `BehaviorConfigs` augmentation | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts` |
+| Behavior | `acme.Rating`, declared in a JSON file; `ext/testdata/services/shop-ratings` composes it on a General data-form type and `shop-ratings-ts` with `@behavior`, typed by acme's `BehaviorConfigs` augmentation; `@acme/behaviors` implements it for the engine, over a copy of the declaration | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `packages/behaviors` | |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
@@ -98,6 +98,10 @@ examples/acme-schematic/
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
   packages/schema/            @acme/schema, the authoring package @shelf, @feedKey and the Acme.Photo brand are imported from, the confirm key's type and acme.Rating's config type
+  packages/behaviors/         @acme/behaviors, acme.Rating's implementation for @superschematic/engine
+    declarations/             acme.Rating.behavior.json, the copy `acme-schematic behaviors` writes
+    src/rating.ts             the implementation; src/index.ts exports every behavior
+    test/rating.test.ts       the engine scenario the smoke runs under Node.js and Bun
   schemas/
     superschematic.toml       naming, auth_provider = "apikey", [package_aliases], [paths], [deps], [extension.acme]
     deps.json                 the committed copy of the dependency graph ([deps] copy)
@@ -685,13 +689,49 @@ its config, and `format` converts the file to YAML and to TypeScript.
 error names the `types` generator. The services sit outside `schemas/` so
 `build-all` does not meet them. The core-only binary refuses the behavior
 by name. The smoke asserts each of these (`TestRatingBehavior` covers the
-load). The TypeScript implementation an engine runs comes with the
-engine.
+load).
+
+What the behavior does when `@superschematic/engine` runs the schema is
+TypeScript: `packages/behaviors` (`@acme/behaviors`) implements it. The
+implementation carries the declaration, copied by the acme binary:
+
+```sh
+acme-schematic behaviors --extension acme --out packages/behaviors/declarations
+```
+
+The command writes one canonical `<name>.behavior.json` per behavior the
+binary registers, and with `--check` fails when a copy is stale, which the
+smoke runs. `src/rating.ts` gives the engine what the declaration names and
+no more: a migration that adds two columns (the number of ratings and
+their sum), a handler for `rate` and `ratingSummary`, and a reader for
+`ratingCount` and `ratingAverage`. A new version may raise `maxStars` and
+may not lower it; a rating above a type's `maxStars` is refused as an
+invalid argument.
+
+```ts
+import { behaviors } from "@acme/behaviors";
+
+const engine = openEngine({ path, policy, metaSchema: acmeJSONSchema, behaviors });
+engine.schemas.define(me, { kind: "General", name: "Product", ...productSchemaJSON });
+engine.schemas.publish(me, "Product");
+engine.instances.create(me, "Product", { sku: "walnut-desk", name: "Walnut desk" }, { id: "p1" });
+engine.instances.invoke(me, "Product", "p1", "rate", { stars: 4 });  // { ratingCount: 1, ratingAverage: 4 }
+engine.instances.get(me, "Product", "p1")?.data;                     // ..., ratingCount: 1, ratingAverage: 4
+```
+
+`metaSchema` is `acme-schematic json-schema`'s output, which declares
+`acme.Rating`. The smoke's last step builds the schema runtime and the
+engine, type-checks the package and runs `test/rating.test.ts` under
+Node.js and Bun: an engine with the implementation publishes
+`shop-ratings`' `Product`, creates one, rates it and reads the rating
+fields and events, and an engine without it refuses the schema. Nothing
+in this is a core edit: the engine runs any implementation a deployment
+registers, and names none.
 
 ## A command
 
 `cli.New` returns the root cobra command with `build`, `build-all`,
-`json-schema` and `format`. An extension that implements
+`json-schema`, `format` and `behaviors`. An extension that implements
 `cli.CommandProvider` contributes more:
 
 ```go

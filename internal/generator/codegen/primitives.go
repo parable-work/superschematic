@@ -37,3 +37,13 @@ func PrimitiveOf(name string) ir.LanguagePrimitive {
 	}
 	return ""
 }
+
+// GoOptionalBoolIsPointer reports whether generated Go types represent a
+// boolean field as *bool: a single, non-required boolean with no declared
+// default. encoding/json's omitempty drops a false bool, so only a pointer
+// keeps an explicit false distinct from an absent value. typegen, ormgen and
+// envgen share this rule so a type, its repository and its env loader agree
+// on the Go type.
+func GoOptionalBoolIsPointer(typeName string, required, isArray, isMap bool, def *string) bool {
+	return typeName == PrimitiveBoolean && !required && !isArray && !isMap && def == nil
+}

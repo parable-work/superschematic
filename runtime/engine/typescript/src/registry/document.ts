@@ -12,7 +12,9 @@ meta-schema. On top of the loader, the engine requires:
 - field types the schema runtime validates: a builtin primitive, a scalar,
   an enum or a type of the document, alone, as a list or a list of lists.
   A union or a map is refused, since the runtime checks neither;
-- no behaviors, until an implementation is registered for one.
+- behaviors the engine has implementations for, composed as the compiler's
+  loader requires (behaviors/composition.ts), which the caller checks
+  through readSchema's compose argument.
 */
 
 import { BUILTIN_SCALARS, SchemaFileError, type LoadedSchemaFile, type SchemaFileLoader } from '@superschematic/schema-runtime';
@@ -49,9 +51,15 @@ const PRIMITIVES = new Set(['string', 'number', 'boolean', 'String', 'ID', 'Int'
 
 /**
  * readSchema loads a schema document from its JSON text and applies the
- * engine's rules. It throws SchemaDocumentError with every issue it finds.
+ * engine's rules, and compose's to its behaviors when it has an instance
+ * type. It throws SchemaDocumentError with every issue it finds.
  */
-export function readSchema(loader: SchemaFileLoader, text: string, source: string): SchemaModel {
+export function readSchema(
+  loader: SchemaFileLoader,
+  text: string,
+  source: string,
+  compose: (model: SchemaModel) => SchemaIssue[]
+): SchemaModel {
   let loaded: LoadedSchemaFile;
   try {
     loaded = loader.load(text, source);
@@ -92,15 +100,6 @@ export function readSchema(loader: SchemaFileLoader, text: string, source: strin
     });
   }
   const types = document.types ?? {};
-  for (const typeName of Object.keys(types).sort()) {
-    (types[typeName].behaviors ?? []).forEach((behavior, index) => {
-      issues.push({
-        path: `${pointer('types', typeName)}/behaviors/${index}`,
-        message: `behavior ${behavior.name} on type ${typeName}: no implementation registered`,
-      });
-    });
-  }
-
   const instanceType = name === undefined ? undefined : instanceTypeOf(document, name);
   if (name !== undefined && instanceType === undefined) {
     const found = Object.keys(types);
@@ -117,6 +116,9 @@ export function readSchema(loader: SchemaFileLoader, text: string, source: strin
           issues.push({ path: `${pointer('types', typeName)}/fields/${index}/typeRef`, message: issue });
         }
       });
+    }
+    if (name !== undefined && SCHEMA_NAME.test(name)) {
+      issues.push(...compose({ name, instanceType, document, canonical }));
     }
   }
 

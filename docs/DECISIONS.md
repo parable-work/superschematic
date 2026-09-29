@@ -608,6 +608,27 @@ routes answer 401 unless the service's own middleware puts a caller on
 the context, which it can now do from the token the SDK sends. An SDK
 given no token sends none, as before.
 
+### D15, amended: the runtime ships compiled output
+
+The runtime shipped its TypeScript sources, and its `exports` pointed at
+`src/*.ts`. Node.js does not strip types from a file under
+`node_modules`, so only a consumer that compiles TypeScript itself (Bun, a
+bundler, a loader) could run it. The engine (D16) ships compiled ESM,
+runs on Node.js, and serves its HTTP API through this runtime. A compiled
+engine module that imported the runtime's sources would not run on
+Node.js, and its declarations would pull those sources into every
+consumer's compile.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The runtime ships compiled ESM with declarations in `dist/`, and `exports` (`.` and `./hono`) points there. It compiles with `NodeNext` resolution, which holds each relative import to the `.js` path Node.js resolves. `bun run build` writes `dist/`; the tests still run the sources under Bun. | Keeping sources, with the engine's HTTP layer reimplementing the envelopes and the auth gate, which would give every refusal two implementations |
+| Everything that resolves the runtime by name builds it first: `make ts`, the CI `typescript` job, release packing, the `tsrestgen` compile gates and the acme scripts. | Committing `dist/`, which drifts from the sources |
+
+The generated router does not change. It imports the runtime by name, and
+a generated package still ships TypeScript sources, since its consumer
+already runs a TypeScript-aware toolchain. That reason holds for the
+generated package, not for a runtime a compiled package imports.
+
 ## D14. A failing scalar value is one error, named by the rule it breaks
 
 A scalar value its scalar rejects is one validation error in every
@@ -850,6 +871,11 @@ The parity matrix has vectors with astral and multi-byte BMP characters
 for a field's lengths, a scalar's lengths, and list and list-of-lists
 elements.
 
+The loader counts code points too when it checks a composite default (a
+`*.platform-default.json` file) against a scalar's or a field's
+`minLength` and `maxLength`, so a default loads exactly when the
+validators accept it; it had counted UTF-8 bytes.
+
 A `pattern` on astral characters first stayed different. Go's `regexp`
 and Python's `re` match code points. The generated TypeScript validator,
 the TypeScript runtime, the TypeScript SDK and the TypeScript API server's
@@ -936,7 +962,7 @@ the acme example declares one behavior (`acme.<Name>`) with its
 TypeScript implementation and no core edit, asserted by
 `scripts/smoke.sh` (section 10 of `docs/extension-model.md`).
 
-Status: four pieces are built. `internal/tools/schemafiletypes` writes
+Status: five pieces are built. `internal/tools/schemafiletypes` writes
 the data form's TypeScript types and meta-schema into
 `@superschematic/schema-ir` (`./schema-file`, `./schema-file.json`). The
 strict loader is in `@superschematic/schema-runtime`, held to the Go
@@ -951,14 +977,28 @@ default (section 5), and the loader needs `JSON.parse` source text access
 (Node.js 21 or later, or Bun). `@superschematic/engine`
 (`runtime/engine/README.md`) has storage on `node:sqlite` and
 `bun:sqlite`, the schema registry with the compatibility rule,
-namespaces, instances, the event log and the access policy. Beyond the
-schema runtime's checks it refuses union and map fields, which no
-runtime validates yet, and object keys a type does not declare, which the
-compatibility rule depends on. Not built: the tool that copies a
-declaration into its npm package, and the engine's HTTP API, event
-stream, MCP tools and behaviors. Each change that lands a piece updates
-this paragraph, the README layout table and the pages that describe it.
-The names and rules are reversible until the first release.
+namespaces, instances, the event log and the access policy; its `./http`
+entry point serves the HTTP API and the event stream on the HTTP runtime
+(D15, amended), with an instance's sequence as its entity tag; and it
+runs behaviors through a plug-in interface (`BehaviorImplementation`),
+checking composition at define and publish, creating a behavior's
+storage at publish, and running its guards, operations, hooks and field
+readers. Beyond the schema runtime's checks it refuses union and map
+fields, which no runtime validates yet, and object keys a type does not
+declare; beyond the compiler's, a behavior composes on the instance type
+only, a behavior field may not take a type field's JSON key, and an
+operation's `paramsSchema` sets `additionalProperties: false`. The
+binary's `behaviors --out <dir> [--check]` command copies a declaration
+into its npm package; it is a command rather than a tool in the core
+module, since an extension's declarations are registered only in its own
+binary (section 3.16 of `docs/extension-model.md`). acme implements
+`acme.Rating` in `@acme/behaviors` over that copy, and its smoke runs it
+in the engine with no core edit. Not built: the engine's MCP tools and
+its HTTP route for behavior operations, and the behaviors the engine
+packages ship, without which the engine runs no behavior with no
+extension linked. Each change that lands a piece updates this paragraph,
+the README layout table and the pages that describe it. The names and
+rules are reversible until the first release.
 
 ## D17. A version graph over versioned tables, with one merge core
 
@@ -1368,5 +1408,69 @@ value in clear JSON, and the TypeScript server could not refuse it.
 reads: an input type with such a field does not make its operation
 encrypted. The Rust server has no decryption step and does not refuse an
 encrypted operation of any form; that gap predates this entry.
+
+The rule is reversible until the first release.
+
+## D21. A nullable Go boolean keeps an explicit `false`
+
+A nullable `boolean` field was a Go `bool` tagged `omitempty`, so
+`encoding/json` left out an explicit `false`. A reader that takes an absent
+key as unset, or as a `true` default, then acted on the wrong value: a
+layered configuration merge let a lower layer's `true` win over the
+`false`, and a Python or TypeScript reader saw `None` or `undefined`. The
+ORM's snapshot update treated `false` as the zero value and cleared the
+column, and the env loader could not tell an unset variable from `false`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A nullable `boolean` without a default is `*bool` in the generated Go output types, tagged `omitempty`: nil is absent, and a set `false` is written. `codegen.GoOptionalBoolIsPointer` is the one rule; typegen, ormgen and envgen call it, so a type, its repository and its env loader agree. | `omitzero` on a plain `bool`, which also leaves `false` out; a wrapper type like the input types' `InputField[T]` on output types, which changes every consumer of every optional field |
+| A nullable `Default<boolean, true>` stays `bool` without `omitempty`, so `false` is always written: an absent value decodes as `true`. The input type's `To<Type>` fills `true` for an unset or null input. | `*bool`, which puts a nil check on a field that always has a value after decoding |
+| A nullable `Default<boolean, false>` keeps `bool` with `omitempty`: leaving out `false` reads back as the default. | Writing it always, which changes the JSON of every such field for no reader |
+| The ORM scans an optional boolean column into the pointer and writes it through the same nil check as an optional enum or scalar. The env loader leaves an unset optional boolean nil. | Keeping `bool` in the ORM, which cannot store `false` apart from NULL |
+| Input types keep `InputField[bool]`; `To<Type>` takes the address of the value. TypeScript, Python and Rust output does not change: each already keeps `false` apart from absent. | |
+
+Optional numbers and strings keep value types with `omitempty`, so a `0`
+or `""` is still left out of the JSON. The same fix would apply to them,
+but it changes far more fields and has not been needed.
+
+The rule is reversible until the first release.
+### D20, amended: the envelope carries the body itself, and a route that cannot decrypt it is refused
+
+Three gaps in how an encrypted operation travels, each older than D20:
+
+- The Go and Rust SDKs wrapped the request body before they encrypted it,
+  so the envelope opened to `{"input": <body>}`. The Go server's payload
+  decryptor hands the plaintext to the argument decoder unchanged, so every
+  argument was missing: a required scalar argument answered 400, and an
+  input type decoded empty. The TypeScript and Python SDKs encrypted the
+  body itself.
+- The Rust server neither decrypted an encrypted operation nor refused it.
+  It handed the envelope to the implementation as the body.
+- An operation in an `Encrypted` set, declared `@encrypted` or returning an
+  `EncryptedField<T>` could be a `GET` or `DELETE`. The Go router mounted
+  the payload decryptor on it, but no SDK encrypts a request without a
+  body, so the decryptor found no envelope and answered 400.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every SDK encrypts the JSON an unencrypted request would send. One test sends Go SDK calls through the generated Go server and the runtime's payload decryptor, with a key the test generates, and checks the arguments the implementation receives. Another opens the Rust SDK's envelopes and compares each plaintext with the body. | Teaching the Go server to unwrap `input`. The plaintext would then depend on which SDK sent it, while the TypeScript and Python SDKs, the documented envelope and the decryptor already agree on the body itself. |
+| The Rust server's generator refuses an encrypted operation that is not `@manualRouteRegistration` and names the operation and the fix, as the TypeScript server's generator does (D15). The Rust router mounts every operation and hands its implementation the body as JSON, so a manual operation's implementation receives the envelope and decrypts it. | A decryption step in the Rust runtime, the counterpart of the Go runtime's `PayloadDecryptor` seam. Nothing needs it yet, and it can replace the refusal later. |
+| The loader's verify pass refuses an encrypted `GET` or `DELETE` operation, as it already refuses an `EncryptedField<T>` argument of one. apigen refuses the same once it resolves the method, which also catches an operation without a method that its set's name makes a `GET`. | Skipping decryption for a method without a body. That keeps the router working, but it drops the encryption the schema declares without a word, and no fixture or example declares such an operation. |
+
+The rules are reversible until the first release.
+
+## D22. A TypeScript env loader in the TypeScript types package
+
+An `@envVars` class got a loader in Go or Rust and none in TypeScript, so a
+TypeScript service read its variables from `process.env` itself. It got
+none of the schema's parsing, defaults or secret handling.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| envgen writes `config.ts` into the schema's TypeScript types package whenever `outputs.types.typescript` is on, and `package.json` exports it as `./config`. It imports the package's own types and validators. The standalone Go or Rust loader in `api/<name>` is unchanged, so a schema with Go and TypeScript types gets both. | A standalone package in `api/<name>` beside `values-schema.json`, which would need its own manifest and a dependency on the types package; adding TypeScript to `envLoaderLanguage`, which would leave a TypeScript service without a loader whenever the Go or Rust types are also on |
+| `load<Type>(env = process.env)` parses each variable by its schema type. A `number` is an integer, as in the Go and Rust loaders. A Float scalar is a number. A boolean is `true` or `false`, as in the Rust loader. An enum must be one of its declared values, and a scalar runs the generated validators. An unset or empty variable is absent: the schema default applies, else `null`, and a required variable without a default is a problem. | `Number()` and truthy-string coercion, which accept `80x` as `NaN` and `yes` as `true`; the Go loader's fallback to the default when a defaulted value does not parse, which hides a typo |
+| The loader throws `EnvConfigError` naming every missing or invalid variable at once. No message carries a value. | Throwing at the first problem, which makes a deploy fix one variable per restart |
+| It returns a frozen `Loaded<Type>`. A defaulted field is non-null, and each `Secret<T>` field is a `SecretValue`. `JSON.stringify`, `util.inspect`, `console.log` and string conversion print `[secret]`; only `reveal()` returns the value. | Plain strings masked at log time by the generated mask helpers, which works only where a caller remembers to mask |
+| The loader reads no `.env` file. The process that starts the service fills the environment. | Loading `.env` as the Go loader does through `godotenv`, which would add a dependency to every types package |
 
 The rule is reversible until the first release.

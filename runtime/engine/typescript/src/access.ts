@@ -3,14 +3,15 @@ Who may do what is the deployment's access policy (D16). Every engine
 entry point takes the principal it acts for and asks the policy before it
 reads or writes: `read` for a schema or its instances and events, `write`
 to create, update or delete an instance, `define` for a draft, `publish`
-for a new version. The engine has no roles and no default policy;
-`allowAll` is explicit, for tests and local use.
+for a new version. A behavior operation asks `write` when its declaration
+says it writes and `read` otherwise, and names the operation. The engine
+has no roles and no default policy; `allowAll` is explicit, for tests and
+local use.
 
 Principal has the shape of the HTTP runtime's (@superschematic/http-runtime),
-so a principal its Authenticator returns is passed on as it is. The engine
-does not import that package: its entry point is TypeScript source, which
-the engine's compiled declarations would pull into every consumer's
-compile, and it brings Hono as a peer dependency.
+so a principal its Authenticator returns can be passed on as it is. This
+entry point does not import that package, which brings Hono as a peer
+dependency; only the engine's ./http entry point does (http/app.ts).
 */
 
 import { EngineError } from './errors.js';
@@ -34,6 +35,8 @@ export interface AccessRequest {
   readonly namespace: string;
   /** The schema name the call is about. */
   readonly schema: string;
+  /** For a behavior operation, its name; absent for every other call. */
+  readonly operation?: string;
 }
 
 /** Answers true to allow. It runs synchronously, before the engine's transaction. */
@@ -63,8 +66,10 @@ export class Access {
   }
 
   /** allows asks the policy; only a literal true allows. */
-  allows(principal: Principal, action: Action, namespace: string, schema: string): boolean {
-    const answer: unknown = this.policy({ principal, action, namespace, schema });
+  allows(principal: Principal, action: Action, namespace: string, schema: string, operation?: string): boolean {
+    const answer: unknown = this.policy(
+      operation === undefined ? { principal, action, namespace, schema } : { principal, action, namespace, schema, operation }
+    );
     if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
       throw new TypeError('an access policy is synchronous: it returned a promise');
     }
@@ -72,9 +77,10 @@ export class Access {
   }
 
   /** require throws forbidden unless the policy allows the action. */
-  require(principal: Principal, action: Action, namespace: string, schema: string): void {
-    if (!this.allows(principal, action, namespace, schema)) {
-      throw new EngineError('forbidden', `${principal.subject} may not ${action} ${schema} in namespace ${namespace}`);
+  require(principal: Principal, action: Action, namespace: string, schema: string, operation?: string): void {
+    if (!this.allows(principal, action, namespace, schema, operation)) {
+      const what = operation === undefined ? `${action} ${schema}` : `call ${operation} (${action}) on ${schema}`;
+      throw new EngineError('forbidden', `${principal.subject} may not ${what} in namespace ${namespace}`);
     }
   }
 }
