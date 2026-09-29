@@ -58,7 +58,7 @@ func rustType(field ConfigField) string {
 		return "String"
 	}
 
-	switch rustPrimitiveType(field) {
+	switch loaderPrimitive(field) {
 	case "Int":
 		return "i64"
 	case "Float":
@@ -70,7 +70,10 @@ func rustType(field ConfigField) string {
 	}
 }
 
-func rustPrimitiveType(field ConfigField) string {
+// loaderPrimitive is the primitive a loader parses a non-enum field's text
+// as: "Int", "Float", "Boolean" or "String". The Rust and TypeScript loaders
+// share it, so both read a value the same way.
+func loaderPrimitive(field ConfigField) string {
 	if field.IsScalar {
 		switch field.ScalarKind {
 		case "Float":
@@ -102,7 +105,7 @@ func rustLoaderExpr(field ConfigField) string {
 		return fmt.Sprintf("enum_or_default(%s, &%s, %s)?", keyLiteral, allowed, defaultLiteral)
 	}
 
-	switch rustPrimitiveType(field) {
+	switch loaderPrimitive(field) {
 	case "Int":
 		if field.Required && !field.HasDefault {
 			return fmt.Sprintf("require_i64(%s)?", keyLiteral)
@@ -163,7 +166,7 @@ func formatRustStrings(values []string) string {
 
 func usesRustInt(fields []ConfigField) bool {
 	for _, field := range fields {
-		if !field.IsEnum && rustPrimitiveType(field) == "Int" {
+		if !field.IsEnum && loaderPrimitive(field) == "Int" {
 			return true
 		}
 	}
@@ -172,7 +175,7 @@ func usesRustInt(fields []ConfigField) bool {
 
 func usesRustBool(fields []ConfigField) bool {
 	for _, field := range fields {
-		if !field.IsEnum && rustPrimitiveType(field) == "Boolean" {
+		if !field.IsEnum && loaderPrimitive(field) == "Boolean" {
 			return true
 		}
 	}
@@ -181,7 +184,7 @@ func usesRustBool(fields []ConfigField) bool {
 
 func usesRustFloat(fields []ConfigField) bool {
 	for _, field := range fields {
-		if !field.IsEnum && rustPrimitiveType(field) == "Float" {
+		if !field.IsEnum && loaderPrimitive(field) == "Float" {
 			return true
 		}
 	}

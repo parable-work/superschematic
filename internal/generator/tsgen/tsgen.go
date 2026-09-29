@@ -182,6 +182,11 @@ type ModuleOutput struct {
 	Timestamp           string
 	HasVersionedTypes   bool
 
+	// HasEnvConfig is true when the schema declares an @envVars class. envgen
+	// then writes the env loader, config.ts, into the package, and
+	// package.json exports it as "./config".
+	HasEnvConfig bool
+
 	// ScalarLibSpec is the package.json dependency spec for the TypeScript
 	// superscalar runtime package, computed relative to the output directory
 	// via SetScalarLibSpec.
@@ -279,6 +284,11 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		SchemaName:  opts.SchemaName,
 		Naming:      opts.Naming,
 		Timestamp:   opts.Clock.RFC3339(),
+	}
+	for _, typeDef := range schema.Types {
+		if typeDef.EnvVars {
+			output.HasEnvConfig = true
+		}
 	}
 
 	extraction := codegen.ExtractionConfig{

@@ -80,7 +80,9 @@ needs them in its language: the ORM needs Go, the API server the
 language it is written in, and each SDK its own. A General schema whose
 class carries `@envVars` also gets a loader for those environment
 variables: in Go when `types` lists Go, in Rust when it lists Rust but not
-Go. With neither, it gets only their `values-schema.json`. Every generated
+Go, and in TypeScript, inside the TypeScript types package, whenever
+`types` lists TypeScript. With none of the three, it gets only their
+`values-schema.json`. Every generated
 package is self-contained: it imports the runtimes under `runtime/` and
 superscalar, never the compiler.
 

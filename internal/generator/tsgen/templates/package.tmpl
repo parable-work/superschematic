@@ -33,7 +33,11 @@
     "./validators/types/*": {
       "types": "./validators/types/*.ts",
       "import": "./validators/types/*.ts"
-    }
+    }{{if .HasEnvConfig}},
+    "./config": {
+      "types": "./config.ts",
+      "import": "./config.ts"
+    }{{end}}
   },
   "scripts": {
     "build": "tsc",

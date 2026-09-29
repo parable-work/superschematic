@@ -75,8 +75,11 @@ A General schema whose class carries `@envVars` gets the class's
 `values-schema.json` in `api/<name>`, and an environment loader next to it
 in the language `outputs.types` picks: Go when `go` is on, Rust when only
 `rust` is. The Go loader imports the Go types, so with neither on the build
-writes no loader, rather than a Go module that cannot compile, and logs
-`- env-config: values-schema.json only, no loader; enable outputs.types.go for the Go loader, which imports the Go types, or outputs.types.rust for the Rust one`.
+writes no loader there, rather than a Go module that cannot compile. When
+`typescript` is on, the TypeScript types package gets the TypeScript
+loader, `config.ts`, exported as `<types package>/config`, whichever
+standalone loader the build writes. With none of the three the build logs
+`- env-config: values-schema.json only, no loader; enable outputs.types.go for the Go loader, which imports the Go types, outputs.types.rust for the Rust one, or outputs.types.typescript for the TypeScript one`.
 
 `--with-deps` also builds every service the target transitively depends
 on (declared `dependencies` plus `authDb`), dependencies first. The

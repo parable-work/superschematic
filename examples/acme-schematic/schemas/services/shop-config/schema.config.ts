@@ -2,7 +2,8 @@ import { defineConfig, SchemaKind, TargetLanguage } from "@acme/schema-config";
 
 // A General schema: plain types and an @envVars contract, no tables and no
 // routes. Types come out in TypeScript, Python and Go; the core envConfig
-// generator writes a Go loader for the ShopConfig class over the Go types.
+// generator writes a Go loader for the ShopConfig class over the Go types,
+// and the TypeScript types package gets config.ts, its TypeScript loader.
 export default defineConfig({
   name: "shop-config",
   kind: SchemaKind.General,

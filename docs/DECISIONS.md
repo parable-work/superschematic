@@ -1437,3 +1437,19 @@ Three gaps in how an encrypted operation travels, each older than D20:
 | The loader's verify pass refuses an encrypted `GET` or `DELETE` operation, as it already refuses an `EncryptedField<T>` argument of one. apigen refuses the same once it resolves the method, which also catches an operation without a method that its set's name makes a `GET`. | Skipping decryption for a method without a body. That keeps the router working, but it drops the encryption the schema declares without a word, and no fixture or example declares such an operation. |
 
 The rules are reversible until the first release.
+
+## D22. A TypeScript env loader in the TypeScript types package
+
+An `@envVars` class got a loader in Go or Rust and none in TypeScript, so a
+TypeScript service read its variables from `process.env` itself. It got
+none of the schema's parsing, defaults or secret handling.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| envgen writes `config.ts` into the schema's TypeScript types package whenever `outputs.types.typescript` is on, and `package.json` exports it as `./config`. It imports the package's own types and validators. The standalone Go or Rust loader in `api/<name>` is unchanged, so a schema with Go and TypeScript types gets both. | A standalone package in `api/<name>` beside `values-schema.json`, which would need its own manifest and a dependency on the types package; adding TypeScript to `envLoaderLanguage`, which would leave a TypeScript service without a loader whenever the Go or Rust types are also on |
+| `load<Type>(env = process.env)` parses each variable by its schema type. A `number` is an integer, as in the Go and Rust loaders. A Float scalar is a number. A boolean is `true` or `false`, as in the Rust loader. An enum must be one of its declared values, and a scalar runs the generated validators. An unset or empty variable is absent: the schema default applies, else `null`, and a required variable without a default is a problem. | `Number()` and truthy-string coercion, which accept `80x` as `NaN` and `yes` as `true`; the Go loader's fallback to the default when a defaulted value does not parse, which hides a typo |
+| The loader throws `EnvConfigError` naming every missing or invalid variable at once. No message carries a value. | Throwing at the first problem, which makes a deploy fix one variable per restart |
+| It returns a frozen `Loaded<Type>`. A defaulted field is non-null, and each `Secret<T>` field is a `SecretValue`. `JSON.stringify`, `util.inspect`, `console.log` and string conversion print `[secret]`; only `reveal()` returns the value. | Plain strings masked at log time by the generated mask helpers, which works only where a caller remembers to mask |
+| The loader reads no `.env` file. The process that starts the service fills the environment. | Loading `.env` as the Go loader does through `godotenv`, which would add a dependency to every types package |
+
+The rule is reversible until the first release.

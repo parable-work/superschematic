@@ -1014,7 +1014,9 @@ program.
    an `@envVars` class in the language `outputs.types` picks: Go when
    `go` is on, Rust when only `rust` is. The Go loader imports the Go
    types, so with neither on it writes the class's `values-schema.json`
-   alone and logs that it wrote no loader.
+   alone. The TypeScript types generator writes the class's TypeScript
+   loader, `config.ts`, into the types package whenever `typescript` is
+   on (D22). A run with none of the three logs that it wrote no loader.
 6. Run the document generators: for every registered `DocumentSpec` with a
    `Generate` whose name is present in `Schema.Documents`, in name order.
    They run whatever the kind's pipeline and the `outputs` switches say. A
