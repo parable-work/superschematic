@@ -13,6 +13,7 @@ import (
 // and masking treat dependency-owned enums correctly.
 func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 	enumLookup := buildEnumLookup(output)
+	holdsModels := buildModelFieldLookup(output)
 	return template.FuncMap{
 		"snakeCase":          codegen.ToSnakeCase,
 		"pythonFieldName":    toPythonFieldName,
@@ -35,6 +36,18 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 		"structuredJSONListValue":   structuredJSONListValue,
 		"isList":                    isList,
 		"nullEntryCheck":            nullEntryCheck,
+		"wireNameRenames":           wireNameRenames,
+		"holdsModels":               holdsModels,
+		"anyFieldHoldsModels": func(types []codegen.TypeInfo) bool {
+			for _, typeInfo := range types {
+				for _, field := range typeInfo.Fields {
+					if holdsModels(field) {
+						return true
+					}
+				}
+			}
+			return false
+		},
 		"pythonFieldDefault": func(field codegen.FieldInfo) string {
 			// The store writes _version; a value without it reads as 0,
 			// as Go decodes it.
@@ -78,6 +91,34 @@ func buildEnumLookup(output *ModuleOutput) codegen.EnumLookup {
 	}
 }
 
+// buildModelFieldLookup reports whether a field's values are generated
+// models: its base type is a local type, an imported type that is not an
+// enum, or a union (whose members are models), at any list or map depth.
+// validate_all adds the errors of each model such a field holds under the
+// field's path, as the Go and TypeScript validators nest theirs.
+func buildModelFieldLookup(output *ModuleOutput) func(codegen.FieldInfo) bool {
+	models := make(map[string]struct{}, len(output.Types)+len(output.ImportedTypes))
+	for _, typeInfo := range output.Types {
+		models[typeInfo.Name] = struct{}{}
+	}
+	importedEnums := make(map[string]struct{}, len(output.ImportedEnumNames))
+	for _, name := range output.ImportedEnumNames {
+		importedEnums[name] = struct{}{}
+	}
+	for _, imported := range output.ImportedTypes {
+		if _, isEnum := importedEnums[imported.Name]; !isEnum {
+			models[imported.Name] = struct{}{}
+		}
+	}
+	return func(field codegen.FieldInfo) bool {
+		if field.IsScalar {
+			return false
+		}
+		_, ok := models[field.Type]
+		return ok || field.IsUnion
+	}
+}
+
 // hasNonRequiredValidations reports whether the field carries validation
 // rules beyond the implicit "required" rule.
 func hasNonRequiredValidations(field codegen.FieldInfo) bool {
@@ -87,6 +128,27 @@ func hasNonRequiredValidations(field codegen.FieldInfo) bool {
 		}
 	}
 	return false
+}
+
+// wireNameRename maps the snake_case name validate_all keys a field's errors
+// by to the field's wire name.
+type wireNameRename struct {
+	Key  string
+	Name string
+}
+
+// wireNameRenames lists the fields whose snake_case error key differs from
+// their wire name, in field order. validate_all(by_alias=True) renames
+// these keys, so its errors are keyed as the Go and TypeScript validators
+// key them.
+func wireNameRenames(fields []codegen.FieldInfo) []wireNameRename {
+	var renames []wireNameRename
+	for _, field := range fields {
+		if key := codegen.ToSnakeCase(field.Name); key != field.Name {
+			renames = append(renames, wireNameRename{Key: key, Name: field.Name})
+		}
+	}
+	return renames
 }
 
 // isList reports whether the field is a list (T[] or T[][]) and not a map.

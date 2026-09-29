@@ -1,0 +1,5 @@
+# Test-local to the TypeScript and Rust SDK generators (sdktest), so no
+# other generator's goldens read it.
+name: query-lists-api
+kind: API
+outputs: {}

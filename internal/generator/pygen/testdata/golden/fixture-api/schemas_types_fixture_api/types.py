@@ -67,9 +67,18 @@ class TenantView(BaseModel):
 
     internal_debug_label: str = Field(..., alias="internalDebugLabel", serialization_alias="internalDebugLabel")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -102,6 +111,12 @@ class TenantView(BaseModel):
         # Validate internalDebugLabel
         if self.internal_debug_label is None:
             errors.add_field_error("internal_debug_label", "required", "required field")
+
+        if by_alias:
+            return errors._with_field_names({
+                "user_count": "userCount",
+                "internal_debug_label": "internalDebugLabel",
+            })
 
         return errors
 
@@ -242,9 +257,18 @@ class CreateTenantInput(BaseModel):
 
     slug: IdentitySlug = Field(..., alias="slug", serialization_alias="slug")
 
-    def validate_all(self) -> ValidationErrors:
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
 
         Returns:
             ValidationErrors object containing any validation errors.

@@ -89,6 +89,41 @@ func TestRoutesImportTimeOnlyForMountedTimedDirectives(t *testing.T) {
 	buildFixtureAPI(t, sessionauth.Provider{}, moveTimedDirectivesToManualRoutes)
 }
 
+// statusAPI is a schema local to apigen's testdata: one GET operation
+// without arguments that returns an object.
+const statusAPI = "status-api"
+
+func loadStatusAPI(t *testing.T) *ir.Schema {
+	t.Helper()
+	schema, err := loader.LoadService(filepath.Join("testdata", "services", statusAPI))
+	if err != nil {
+		t.Fatalf("load %s: %v", statusAPI, err)
+	}
+	return schema
+}
+
+// TestRoutesImportTypesOnlyWhenAHandlerUsesThem compiles the API module of
+// status-api, whose one handler parses no parameter, validates no value and
+// decodes no body. Those are what routes.go uses the generated types module
+// for, so it must not import it here.
+func TestRoutesImportTypesOnlyWhenAHandlerUsesThem(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	runGoAPIModule(t, writeGoAPIModule(t, loadStatusAPI(t), statusAPI))
+}
+
+// TestPublicRoutesImportTypesOnlyWhenAHandlerUsesThem is the same check on
+// a public API: fixture-api, with fixture-db as its authDb, left with
+// status-api's type and operation alone.
+func TestPublicRoutesImportTypesOnlyWhenAHandlerUsesThem(t *testing.T) {
+	status := loadStatusAPI(t)
+	buildFixtureAPI(t, sessionauth.Provider{}, func(schema *ir.Schema) {
+		schema.Types["Status"] = status.Types["Status"]
+		schema.OperationSets = status.OperationSets
+	})
+}
+
 // moveTimedDirectivesToManualRoutes leaves @bodyLimit as the only directive
 // on the routes RegisterRoutes mounts and gives the @manualRouteRegistration
 // operations @rateLimit and @timeout.
