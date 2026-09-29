@@ -1,0 +1,4 @@
+# Test-local to pysdkgen, so no other generator's goldens read it.
+name: scalar-params-api
+kind: API
+outputs: {}

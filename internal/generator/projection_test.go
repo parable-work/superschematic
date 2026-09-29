@@ -71,7 +71,10 @@ func TestRunPlacesProjectionMigrationsFromOutputsSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := t.TempDir()
-	cfg.Outputs = map[string]any{"sql": map[string]any{"migrationsDir": "db/migrations", "viewOwner": "app_view_owner"}}
+	cfg.Outputs = map[string]any{
+		"types": map[string]any{"go": map[string]any{"enabled": true}},
+		"sql":   map[string]any{"migrationsDir": "db/migrations", "viewOwner": "app_view_owner"},
+	}
 	out := t.TempDir()
 	if _, err := Run(schema, cfg, Options{OutputRoot: out, ServicePath: service, Naming: naming.Default()}); err != nil {
 		t.Fatal(err)

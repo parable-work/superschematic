@@ -17,9 +17,11 @@ func goModulePrefix() string {
 	return naming.Active().GoModulePrefix()
 }
 
-// goRequireRE matches require lines for modules under the Go module root.
+// goRequireRE matches a requirement of a module under the Go module root,
+// in either go.mod form: a single-line `require <module> v...` or a
+// `<module> v...` line inside a `require ( ... )` block.
 func goRequireRE() *regexp.Regexp {
-	return regexp.MustCompile(`(?m)^\s*((?:` + regexp.QuoteMeta(goModulePrefix()) + `[^\s]+))\s+v`)
+	return regexp.MustCompile(`(?m)^\s*(?:require\s+)?(` + regexp.QuoteMeta(goModulePrefix()) + `\S+)\s+v`)
 }
 
 // pyDepNameRE matches pyproject dependency entries for generated Python

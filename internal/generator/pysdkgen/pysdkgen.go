@@ -71,6 +71,10 @@ type NamespaceInfo struct {
 	// helper of the namespace class.
 	HasListOfListsArgs        bool
 	HasListOfListsModelOutput bool
+	// HasQueryLists gates the _validate_query_list, _query_list_value and
+	// _query_list_item helpers of the namespace class, and their Enum
+	// import, for a list query parameter.
+	HasQueryLists bool
 }
 
 // EndpointInfo represents a single API endpoint for the Python SDK.
@@ -118,8 +122,15 @@ type PathParam struct {
 type QueryParam struct {
 	Name     string
 	PyName   string
-	PyType   string
+	PyType   string // Full type including the list[] wrapper when IsArray is true
 	Required bool
+
+	// IsArray marks a list parameter (QueryParam<T[]>), typed list[T] and
+	// sent as one comma-separated value, the form the Go route reads; an
+	// empty list is left out. PyElementType is T, as which each item is
+	// validated at name[i].
+	IsArray       bool
+	PyElementType string
 
 	ValidateMin       *float64
 	ValidateMax       *float64
@@ -195,7 +206,7 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		SDKClassName: toPythonClassName(apiOutput.SchemaName) + "SDK",
 		Author:       names.PackageAuthor,
 		Namespaces:   nil,
-		HasAuth:      apiOutput.IsPublic && apiOutput.HasAuth,
+		HasAuth:      apiOutput.HasAuth,
 		Timestamp:    clock.RFC3339(),
 		Version:      "1.0.0",
 	}
@@ -230,7 +241,7 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 			}
 			namespace.ScopeParamName = toPythonIdentifier(namespace.scopeParamOriginal)
 			if namespace.ScopeParamType == "" {
-				namespace.ScopeParamType = mapIRTypeToPython(findPathParamType(endpoint.PathParams, namespace.scopeParamOriginal))
+				namespace.ScopeParamType = pythonParamType(findPathParam(endpoint.PathParams, namespace.scopeParamOriginal))
 			}
 			if namespace.ScopeParamType == "" {
 				namespace.ScopeParamType = "str"
@@ -254,6 +265,11 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		for _, arg := range converted.ScalarArgs {
 			if arg.IsArrayOfArrays {
 				namespace.HasListOfListsArgs = true
+			}
+		}
+		for _, param := range converted.QueryParams {
+			if param.IsArray {
+				namespace.HasQueryLists = true
 			}
 		}
 		if converted.OutputIsArrayOfArrays && converted.OutputModelName != "" {
@@ -294,19 +310,11 @@ func collectNamespaceImports(target map[string]struct{}, endpoint apigen.Endpoin
 	if endpoint.OutputType != "" && shouldImportIRType(endpoint.OutputType) {
 		target[endpoint.OutputType] = struct{}{}
 	}
-	for _, param := range endpoint.PathParams {
-		if shouldImportIRType(param.Type) {
-			target[param.Type] = struct{}{}
-		}
-	}
-	for _, param := range endpoint.QueryParams {
-		if shouldImportIRType(param.Type) {
-			target[param.Type] = struct{}{}
-		}
-	}
-	for _, arg := range endpoint.ScalarArgs {
-		if shouldImportIRType(arg.Type) {
-			target[arg.Type] = struct{}{}
+	for _, params := range [][]apigen.Param{endpoint.PathParams, endpoint.QueryParams, endpoint.ScalarArgs} {
+		for _, param := range params {
+			if param.Type != "" && !isPythonBuiltinType(pythonParamType(param)) {
+				target[param.Type] = struct{}{}
+			}
 		}
 	}
 }
@@ -320,17 +328,25 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		pathParams = append(pathParams, PathParam{
 			Name:   param.Name,
 			PyName: toPythonIdentifier(param.Name),
-			PyType: mapIRTypeToPython(param.Type),
+			PyType: pythonParamType(param),
 		})
 	}
 
 	queryParams := make([]QueryParam, 0, len(endpoint.QueryParams))
 	for _, param := range endpoint.QueryParams {
+		pyElementType := ""
+		pyType := pythonParamType(param)
+		if param.IsArray {
+			pyElementType = pyType
+			pyType = pythonListType(pyType, 1)
+		}
 		queryParams = append(queryParams, QueryParam{
 			Name:              param.Name,
 			PyName:            toPythonIdentifier(param.Name),
-			PyType:            mapIRTypeToPython(param.Type),
+			PyType:            pyType,
 			Required:          param.Required,
+			IsArray:           param.IsArray,
+			PyElementType:     pyElementType,
 			ValidateMin:       param.ValidateMin,
 			ValidateMax:       param.ValidateMax,
 			ValidateMinLength: param.ValidateMinLength,
@@ -344,7 +360,7 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 	scalarArgs := make([]ScalarArg, 0, len(endpoint.ScalarArgs))
 	for _, arg := range endpoint.ScalarArgs {
 		pyElementType := ""
-		pyType := mapIRTypeToPython(arg.Type)
+		pyType := pythonParamType(arg)
 		if arg.IsArray {
 			pyElementType = pyType
 			pyType = pythonListType(pyType, arg.ArrayDepth())
@@ -563,6 +579,32 @@ func resolvePythonSDKPackageName(configuredPackageName, schemaName string, names
 	return names.PythonSDKModule(strings.ReplaceAll(schemaName, "-", "_"))
 }
 
+// pythonParamType maps a path parameter, query parameter or scalar
+// argument (the element type of a list one) to its Python type from
+// apigen's parse flags, which follow the scalar's schema definition, so
+// the SDK sends the value the Go route parses: a scalar the route parses
+// as an integer is int, as a float float, as a boolean bool, and a UUID,
+// date-time or string one str. An enum, an object type, a string-backed
+// scalar and a Param without flags map by name (mapIRTypeToPython).
+func pythonParamType(param apigen.Param) string {
+	switch {
+	case param.IsInt:
+		return "int"
+	case param.IsFloat:
+		return "float"
+	case param.IsBool:
+		return "bool"
+	case param.IsString, param.IsUUID, param.IsDateTime:
+		return "str"
+	default:
+		return mapIRTypeToPython(param.Type)
+	}
+}
+
+// mapIRTypeToPython maps a schema type name to a Python type by name
+// alone: a builtin to its Python type, a scalar to the type its name
+// suggests (codegen.GuessScalarTraits), and an enum or object type to
+// itself. A parameter maps through pythonParamType instead.
 func mapIRTypeToPython(typeName string) string {
 	switch typeName {
 	case codegen.PrimitiveString:
@@ -617,24 +659,28 @@ func outputModelName(typeName string) string {
 }
 
 func shouldImportIRType(typeName string) bool {
-	if typeName == "" {
-		return false
-	}
-	switch mapIRTypeToPython(typeName) {
+	return typeName != "" && !isPythonBuiltinType(mapIRTypeToPython(typeName))
+}
+
+// isPythonBuiltinType reports whether pyType is a Python builtin, which the
+// SDK does not import from the types package.
+func isPythonBuiltinType(pyType string) bool {
+	switch pyType {
 	case "str", "int", "float", "bool":
-		return false
-	default:
 		return true
+	default:
+		return false
 	}
 }
 
-func findPathParamType(pathParams []apigen.PathParam, name string) string {
+// findPathParam returns the path parameter named name, or the zero Param.
+func findPathParam(pathParams []apigen.PathParam, name string) apigen.PathParam {
 	for _, pathParam := range pathParams {
 		if pathParam.Name == name {
-			return pathParam.Type
+			return pathParam
 		}
 	}
-	return ""
+	return apigen.PathParam{}
 }
 
 func isBodyMethod(method string) bool {

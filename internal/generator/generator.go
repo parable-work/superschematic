@@ -90,6 +90,9 @@ func Run(schema *ir.Schema, cfg *schemaconfig.SchemaConfig, opts Options) (*Resu
 	if !ok {
 		return nil, fmt.Errorf("generator: unknown schema kind %q", schema.Kind)
 	}
+	if err := refuseORMWithoutGoTypes(kind.Name, outputs, reg); err != nil {
+		return nil, fmt.Errorf("schema config for %s: %w", cfg.Name, err)
+	}
 
 	r, _ := newRun(schema, cfg, outputs, opts, reg)
 

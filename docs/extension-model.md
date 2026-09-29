@@ -977,6 +977,9 @@ program.
 
 1. Parse the config's `outputs` block against the registry (section 7.2).
 2. Resolve `schema.Kind` in the registry; an unknown kind is an error.
+   A kind whose pipeline runs the core `orm` generator (the DB kind, or
+   an extension kind that lists it) needs `outputs.types.go`, since the
+   Go ORM imports the Go types; without it the run fails here.
 3. Take `reg.Pipeline(kind)`: the kind's `Pipeline` in order, then every
    other generator whose `Kinds` lists the kind, in registration order.
 4. Call each generator's `Enabled`. Collect the `Dirs` of the enabled ones
@@ -990,7 +993,11 @@ program.
    scalars. `Options.DependencyConfig` supplies their configs;
    `build-all` and `build --with-deps` set it, and without it (a single
    `build`) the run logs the dependencies it did not check.
-5. Run the enabled generators in order.
+5. Run the enabled generators in order. `envConfig` writes the loader of
+   an `@envVars` class in the language `outputs.types` picks: Go when
+   `go` is on, Rust when only `rust` is. The Go loader imports the Go
+   types, so with neither on it writes the class's `values-schema.json`
+   alone and logs that it wrote no loader.
 6. Run the document generators: for every registered `DocumentSpec` with a
    `Generate` whose name is present in `Schema.Documents`, in name order.
    They run whatever the kind's pipeline and the `outputs` switches say. A
@@ -1006,10 +1013,13 @@ its `OutputKey`. The error lists the core keys in registration order
 (`types`, `sql`, `api`, `sdk`), then the extension keys sorted. It
 validates each section against the `OutputSchema` of the generator that
 claims its key, decodes the core sections into typed fields, checks their
-target languages, rejects an `outputs.sdk` language whose `outputs.types`
-language is off (the SDK imports that types package), rejects an unknown
-key in `outputs.sql`, fills the API defaults, and keeps every section raw
-in `Outputs.Raw`. An extension
+target languages, fills the API defaults, rejects an enabled `outputs.api`
+and an `outputs.sdk` language whose `outputs.types` language is off (each
+imports that types package; `GO`, `RUST` and `TYPESCRIPT` servers need
+`go`, `rust` and `typescript`), rejects an unknown key in `outputs.sql`,
+and keeps every section raw in `Outputs.Raw`. It does not know the kind,
+so the ORM's need for the Go types is checked by `Run` (section 7.1) and
+`generator.ExpectedOutputDirs` instead. An extension
 generator reads its own section with `registry.DecodeOutput(outputs, key,
 &v)`, usually in `Enabled`; the section has already passed its
 `OutputSchema`.
@@ -1021,10 +1031,13 @@ command's registry (`buildplan.DiscoverWith`), so an extension kind in a
 sibling config is known at discovery. Each service's expected output
 directories come from the `Dirs` of its present documents and of the
 enabled generators in its pipeline; the `--cache` layer stores and restores
-those. Services build in dependency order, each with the discovered schema
-set as the document loaders' `Catalog`. The dependency graph is written
-next, and its `[deps] copy` when the naming file sets one. The hooks run
-last, whether or not any service was built (section 3.8).
+those. `generator.ExpectedOutputDirs` refuses the configs `Run` refuses
+before its pipeline (section 7.1, steps 1 and 2), so such a service fails
+discovery and nothing is built. Services build in dependency order, each
+with the discovered schema set as the document loaders' `Catalog`. The
+dependency graph is written next, and its `[deps] copy` when the naming
+file sets one. The hooks run last, whether or not any service was built
+(section 3.8).
 
 ### 7.4 Build cache key
 

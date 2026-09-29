@@ -8,6 +8,7 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -34,6 +35,18 @@ type ConfigOutput struct {
 	ModulePath string
 	// TypesModule is the Go module path for the types package.
 	TypesModule string
+	// IndirectModules are the Go types modules TypesModule imports,
+	// directly or through one another, sorted; the dispatch layer sets them
+	// before WriteConfigModule, whose go.mod requires them as indirect and
+	// replaces them.
+	IndirectModules []string
+	// Naming supplies the scalar library and schema IR module paths the
+	// standalone module's go.mod replaces.
+	Naming naming.Naming
+	// ScalarLibReplacePath and SchemaIRReplacePath are the go.mod replace
+	// targets computed by SetReplacePaths. Empty values omit the directive.
+	ScalarLibReplacePath string
+	SchemaIRReplacePath  string
 	// Fields are the environment variable fields to generate.
 	Fields []ConfigField
 	// Enums are enum types used by the config fields.
@@ -153,6 +166,7 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 		TypeName:    envVarsType.Name,
 		ModulePath:  names.GoAPIModule(schemaName),
 		TypesModule: names.GoTypesModule(schemaName),
+		Naming:      names,
 		Fields:      []ConfigField{},
 		Enums:       []codegen.EnumInfo{},
 	}
@@ -478,6 +492,22 @@ func WriteConfig(output *ConfigOutput, outputDir string) error {
 	return nil
 }
 
+// SetReplacePaths sets the go.mod replace directive paths for the scalar
+// library and the schema IR, which the types module requires, relative to
+// the output directory of the standalone module. Go reads replace directives
+// only from the main module, so the types module's own do not apply here.
+// An unset path emits no directive.
+func SetReplacePaths(output *ConfigOutput, paths naming.LocalPaths, outputDir string) error {
+	var err error
+	if output.ScalarLibReplacePath, err = naming.RelPath(outputDir, paths.ScalarGo); err != nil {
+		return fmt.Errorf("scalar library replace path: %w", err)
+	}
+	if output.SchemaIRReplacePath, err = naming.RelPath(outputDir, paths.SchemaIR); err != nil {
+		return fmt.Errorf("schema-ir replace path: %w", err)
+	}
+	return nil
+}
+
 // WriteConfigModule writes a standalone generated environment config module.
 func WriteConfigModule(output *ConfigOutput, outputDir string) error {
 	if err := WriteConfig(output, outputDir); err != nil {
@@ -500,6 +530,7 @@ func generateFile(templateName, outputPath string, data any) error {
 // templateFuncs returns template functions.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
+		"base":              path.Base,
 		"title":             codegen.TitleCase,
 		"toSnakeCase":       codegen.ToSnakeCase,
 		"toEnvGoName":       toEnvGoName,

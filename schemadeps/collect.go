@@ -247,8 +247,17 @@ func parseGoMod(content string) (module string, requires []string) {
 			break
 		}
 	}
-	for _, m := range goRequireRE().FindAllStringSubmatch(content, -1) {
-		requires = append(requires, m[1])
+	re := goRequireRE()
+	for _, line := range strings.Split(content, "\n") {
+		// An indirect requirement is a generated module reached through
+		// another one, which the go.mod names so a local build resolves it.
+		// The graph keeps direct edges; Closure walks the rest.
+		if strings.HasSuffix(strings.TrimSpace(line), "// indirect") {
+			continue
+		}
+		if m := re.FindStringSubmatch(line); m != nil {
+			requires = append(requires, m[1])
+		}
 	}
 	return module, requires
 }

@@ -36,8 +36,11 @@ type SDKOutput struct {
 	InputSchemasJSON       string
 	HasAuth                bool
 	HasFilterableEndpoints bool
-	Timestamp              string
-	Version                string
+	// ChecksQueryListItems reports whether a list query parameter's items
+	// are sent as text; src/runtime.rs then carries check_query_list_item.
+	ChecksQueryListItems bool
+	Timestamp            string
+	Version              string
 }
 
 // NamespaceInfo represents a namespace with its endpoints.
@@ -105,11 +108,18 @@ type PathQueryBinding struct {
 
 // QueryParam represents a query string parameter.
 type QueryParam struct {
-	Name              string
-	RustName          string
-	RustType          string
-	Required          bool
-	IsArray           bool
+	Name     string
+	RustName string
+	RustType string
+	Required bool
+	// IsArray marks a list parameter (QueryParam<T[]>), sent as one
+	// comma-separated value (?name=a,b). An empty list is left out, the
+	// route refusing a present empty value, and a required one is refused.
+	IsArray bool
+	// ItemIsText marks a list whose items are not numbers or booleans, so
+	// one may be empty or hold a comma or surrounding space, which the
+	// comma-separated value cannot carry.
+	ItemIsText        bool
 	ValidateMin       *float64
 	ValidateMax       *float64
 	ValidateMinLength *int
@@ -117,6 +127,28 @@ type QueryParam struct {
 	ValidateListMin   *int
 	ValidateListMax   *int
 	ValidatePattern   string
+}
+
+// ChecksItems reports whether the SDK checks each item of a list parameter
+// before the request: that the comma-separated value carries a text item
+// as it is, and the argument's rules, which the route checks per item.
+func (p QueryParam) ChecksItems() bool {
+	return p.IsArray && (p.ItemIsText ||
+		p.ValidateMin != nil ||
+		p.ValidateMax != nil ||
+		p.ValidateMinLength != nil ||
+		p.ValidateMaxLength != nil ||
+		p.ValidatePattern != "")
+}
+
+// ChecksListMin reports whether listMin bounds a value the SDK sends. A
+// list is sent only with at least one item, so a minimum of one bounds
+// nothing.
+func (p QueryParam) ChecksListMin() bool {
+	if p.ValidateListMin == nil {
+		return false
+	}
+	return !p.IsArray || *p.ValidateListMin > 1
 }
 
 // ScalarArg represents a scalar input argument for an endpoint.
@@ -211,7 +243,7 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 		TypesCrate:       typesCrate,
 		TypesCrateModule: rustutil.CrateNameToModulePath(typesCrate),
 		SDKStructName:    toRustTypeName(apiOutput.SchemaName) + "Sdk",
-		HasAuth:          apiOutput.IsPublic && apiOutput.HasAuth,
+		HasAuth:          apiOutput.HasAuth,
 		Timestamp:        clock.RFC3339(),
 		Version:          "1.0.0",
 	}
@@ -240,7 +272,13 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 			ns.ScopeFieldName = toRustFieldName(endpoint.ScopeParamName)
 		}
 
-		ns.Endpoints = append(ns.Endpoints, convertEndpoint(endpoint, ns.IsScopedNS, ns.ScopeParamName))
+		converted := convertEndpoint(endpoint, ns.IsScopedNS, ns.ScopeParamName)
+		for _, param := range converted.QueryParams {
+			if param.ItemIsText {
+				output.ChecksQueryListItems = true
+			}
+		}
+		ns.Endpoints = append(ns.Endpoints, converted)
 	}
 
 	namespaces := make([]NamespaceInfo, 0, len(namespaceMap))
@@ -440,6 +478,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			RustType:          rustType,
 			Required:          param.Required,
 			IsArray:           param.IsArray,
+			ItemIsText:        param.IsArray && sendsText(param),
 			ValidateMin:       param.ValidateMin,
 			ValidateMax:       param.ValidateMax,
 			ValidateMinLength: param.ValidateMinLength,
@@ -757,6 +796,14 @@ func generateFile(templateName, outputPath string, data interface{}, customFuncs
 	return codegen.GenerateFile(
 		codegen.NewFileConfig(templatesFS, templateName, outputPath, data, funcs),
 	)
+}
+
+// sendsText reports whether a parameter's value is text on the wire: not a
+// number or a boolean, whose text never is empty or holds a comma or
+// surrounding space.
+func sendsText(param apigen.Param) bool {
+	return !param.IsInt && !param.IsFloat && !param.IsBool &&
+		param.Type != codegen.PrimitiveNumber && param.Type != codegen.PrimitiveBoolean
 }
 
 // runtimeListMinimum drops a zero list minimum: a Rust collection length is

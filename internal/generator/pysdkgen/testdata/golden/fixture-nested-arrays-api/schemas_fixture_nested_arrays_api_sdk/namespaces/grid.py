@@ -156,18 +156,48 @@ class GridNamespace:
             return input_data
 
         if isinstance(input_data, input_type):
-            return input_data
+            validated = input_data
+        else:
+            model_validate = getattr(input_type, "model_validate", None)
+            if not callable(model_validate):
+                return input_data
 
-        model_validate = getattr(input_type, "model_validate", None)
-        if not callable(model_validate):
-            return input_data
+            try:
+                validated = model_validate(input_data, strict=False)
+            except Exception as err:
+                raise ValidationError(
+                    self._build_validation_errors(err, default_field="input_data"),
+                ) from err
 
+        # pydantic checks types and presence; the schema's rules (listMin,
+        # minLength, min, pattern, ...) are validate_all's, run here before
+        # the request as the Go and TypeScript SDKs run theirs. validate_all
+        # checks every model the input holds as well, keyed by wire name
+        # under the path that reaches it (lines[0].quantity).
+        validate_all = getattr(validated, "validate_all", None)
+        if not callable(validate_all):
+            return validated
         try:
-            return model_validate(input_data, strict=False)
-        except Exception as err:
+            found = validate_all(by_alias=True)
+        except TypeError:
+            # A types package generated before by_alias keys its errors by
+            # snake_case name and checks the input's own fields only.
+            found = validate_all()
+        found_errors = getattr(found, "errors", None)
+        if isinstance(found_errors, dict) and found_errors:
             raise ValidationError(
-                self._build_validation_errors(err, default_field="input_data"),
-            ) from err
+                {
+                    str(key): [
+                        {
+                            "validator": str(field_error.get("validator", "invalid")),
+                            "message": str(field_error.get("message", "invalid value")),
+                        }
+                        for field_error in field_errors
+                    ]
+                    for key, field_errors in found_errors.items()
+                },
+            )
+        return validated
 
     def _coerce_response(self, raw: Any, output_type_name: str, is_array: bool) -> Any:
         """Coerce raw JSON-decoded responses into typed Pydantic models.

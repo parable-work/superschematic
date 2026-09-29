@@ -25,6 +25,7 @@ require (
 	github.com/parable-work/superschematic/runtime/http/go v0.0.0-00010101000000-000000000000
 	github.com/parable-work/superscalar/go v1.0.0
 	go.uber.org/zap v1.28.0
+	example.com/schemas/types/go/fixture-db v0.0.0-00010101000000-000000000000 // indirect
 )
 
 // Local module paths for development.
@@ -34,5 +35,5 @@ replace github.com/parable-work/superschematic/runtime/http/go => ../../../../ru
 replace github.com/parable-work/superschematic/runtime/schema/go => ../../../../runtime/schema/go
 replace github.com/parable-work/superschematic/ir => ../../../../ir
 replace github.com/parable-work/superscalar/go => ../../../../third_party/superscalar/go
-replace example.com/schemas/orm/fixture-db => ../../orm/fixture-db
 replace example.com/schemas/types/go/fixture-db => ../../types/go/fixture-db
+replace example.com/schemas/orm/fixture-db => ../../orm/fixture-db

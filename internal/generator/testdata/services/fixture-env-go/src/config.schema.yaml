@@ -1,0 +1,35 @@
+# The loader reads a scalar and an enum through the types module, which
+# requires the scalar library and the schema IR.
+scalars:
+  Network.Url:
+    name: Network.Url
+    languagePrimitive: string
+enums:
+  Environment:
+    name: Environment
+    values:
+      - name: Development
+        serializedAs: development
+      - name: Production
+        serializedAs: production
+types:
+  Config:
+    name: Config
+    role: EmbeddedStruct
+    envVars: true
+    fields:
+      - name: DATABASE_URL
+        typeRef: { name: Network.Url }
+        required: true
+      - name: API_KEY
+        typeRef: { name: string }
+        required: true
+        secret: true
+      - name: PORT
+        typeRef: { name: number }
+        required: true
+        default: "8080"
+      - name: ENVIRONMENT
+        typeRef: { name: Environment }
+        required: true
+        default: development
