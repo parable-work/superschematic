@@ -236,11 +236,12 @@ export class SchemaCatalog {
       }
       return;
     }
-    const other = this.storage.get('SELECT namespace FROM engine_schemas WHERE name = ? AND namespace <> ? LIMIT 1', [name, shared]);
-    if (other) {
+    // The message does not name the namespace that holds the name, so a
+    // caller in the shared namespace learns nothing about another one.
+    if (this.storage.get('SELECT 1 AS held FROM engine_schemas WHERE name = ? AND namespace <> ? LIMIT 1', [name, shared])) {
       throw new EngineError(
         'name_taken',
-        `schema ${name} is defined in namespace ${String(other.namespace)}, which looks names up in the shared namespace ${shared}; use another name`
+        `schema ${name} is defined in a namespace that looks names up in the shared namespace ${shared}; use another name`
       );
     }
   }

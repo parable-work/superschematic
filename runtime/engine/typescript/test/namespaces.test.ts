@@ -86,12 +86,13 @@ for (const driver of drivers) {
         assert.equal(engine.schemas.draft(alice, 'Note', { namespace: 'east' })?.namespace, 'common');
       });
 
-      test('the shared namespace cannot define a name another namespace holds', () => {
+      test('the shared namespace cannot define a name another namespace holds, and is not told which', () => {
         const engine = openTestEngine(options);
         engine.schemas.define(alice, noteDocument, { namespace: 'west' });
         const error = thrown(() => engine.schemas.define(alice, noteDocument, { namespace: 'common' }), EngineError);
         assert.equal(error.code, 'name_taken');
-        assert.match(error.message, /schema Note is defined in namespace west, which looks names up in the shared namespace common/);
+        assert.match(error.message, /schema Note is defined in a namespace that looks names up in the shared namespace common/);
+        assert.doesNotMatch(error.message, /west/);
       });
 
       test('the default namespace also looks names up in the shared one', () => {

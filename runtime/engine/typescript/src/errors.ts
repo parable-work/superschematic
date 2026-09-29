@@ -19,7 +19,9 @@ export type EngineErrorCode =
   /** The instance, or an update's result, does not validate against the live version. */
   | 'invalid_instance'
   /** An instance with the id already exists. */
-  | 'conflict';
+  | 'conflict'
+  /** An update or delete named the instance's sequence, and the instance is no longer at it. */
+  | 'seq_mismatch';
 
 export class EngineError extends Error {
   readonly code: EngineErrorCode;

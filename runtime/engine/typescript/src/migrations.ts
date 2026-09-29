@@ -12,7 +12,9 @@ engine_instances holds instances by namespace, schema and id, with their
 fields as JSON. position orders them by creation and is never reused, so a
 list cursor stays valid across deletes. engine_events is the event log;
 cursor orders it globally and seq orders one instance's events, and
-triggers refuse an update or a delete of an event.
+triggers refuse an update or a delete of an event. engine_events_publish
+indexes the publish events alone, which every namespace that looks names
+up in a shared namespace reads from it.
 */
 
 import type { MigrationSet } from './storage/migrations.js';
@@ -93,6 +95,15 @@ CREATE TRIGGER engine_events_no_update BEFORE UPDATE ON engine_events
 BEGIN SELECT RAISE(ABORT, 'engine_events is append-only'); END;
 CREATE TRIGGER engine_events_no_delete BEFORE DELETE ON engine_events
 BEGIN SELECT RAISE(ABORT, 'engine_events is append-only'); END;
+`);
+      },
+    },
+    {
+      version: 3,
+      name: 'publish events by namespace',
+      up(storage) {
+        storage.exec(`
+CREATE INDEX engine_events_publish ON engine_events (namespace, cursor) WHERE kind = 'publish';
 `);
       },
     },

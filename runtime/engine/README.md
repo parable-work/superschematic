@@ -6,8 +6,9 @@ schema-file document, versions it per namespace, and keeps it, its
 instances and an event log in one SQLite file.
 
 Built: the storage layer and its migrations, the schema registry with its
-compatibility rule, instances, the event log and the access policy. Not
-built yet: the HTTP API, the event stream, the MCP tools and behaviors.
+compatibility rule, instances, the event log, the access policy, and the
+HTTP API with the event stream (`@superschematic/engine/http`). Not built
+yet: the MCP tools and behaviors.
 
 ```ts
 import { allowAll, openEngine } from '@superschematic/engine';
@@ -33,7 +34,9 @@ does not strip types from files under `node_modules`. It runs on Node.js
 `@superschematic/schema-runtime`, `@superschematic/schema-ir` and
 `superscalar` next to it in `node_modules`; until they are published, a
 consumer declares all three itself (D3), and this package's own build and
-tests get them from `typescript/scripts/link-local-deps.mjs`.
+tests get them from `typescript/scripts/link-local-deps.mjs`. The
+`./http` entry point also needs `hono` and `@superschematic/http-runtime`,
+its optional peer dependencies; the main entry point imports neither.
 
 ## Storage
 
@@ -50,14 +53,16 @@ Opening a file sets a busy timeout (`busyTimeoutMs`, default 5000),
 write-ahead logging and foreign keys. A write runs in a transaction that
 starts with `BEGIN IMMEDIATE`; a transaction inside another is a
 savepoint that rolls back alone. A transaction is synchronous: a function
-that returns a promise rolls it back.
+that returns a promise rolls it back. `afterCommit(work)` queues work for
+after the outermost commit, dropped if the transaction or savepoint that
+queued it rolls back; the event log announces its events this way.
 
 One process writes the file. SQLite queues writers from several
 processes on the busy timeout, but the engine keeps per-process state
 (the validator cache, and the behaviors' state to come) that nothing
 coordinates across processes.
 
-The engine's tables, as its two migrations leave them:
+The engine's tables, as its three migrations leave them:
 
 ```sql
 -- Every schema document by namespace, name and version. Version 0 is the
@@ -115,6 +120,8 @@ CREATE UNIQUE INDEX engine_events_instance ON engine_events (namespace, schema, 
   WHERE instance_id IS NOT NULL;
 CREATE INDEX engine_events_namespace ON engine_events (namespace, cursor);
 CREATE INDEX engine_events_schema ON engine_events (namespace, schema, cursor);
+-- The publish events alone, which a namespace reads from its shared namespace.
+CREATE INDEX engine_events_publish ON engine_events (namespace, cursor) WHERE kind = 'publish';
 
 -- The migration ledger, one row per applied migration of each owner.
 CREATE TABLE engine_migrations (
@@ -231,6 +238,11 @@ holds instances in the namespace that creates them.
   there. The result is validated against the live version; a patch that
   changes nothing writes nothing.
 - `delete` removes the instance and returns whether there was one.
+- `update` and `delete` take `expectedSeq`, the sequence the caller last
+  read. Inside the write transaction the engine refuses the call
+  (`seq_mismatch`) unless the instance is still at it; an instance that
+  does not exist is still `not_found` for `update` and `false` for
+  `delete`. This is optimistic concurrency, the HTTP API's `If-Match`.
 
 Every operation on a schema with no live version is `not_found`. A row
 records the schema version it was last written with; the compatibility
@@ -257,6 +269,20 @@ default and at most 500 scanned per page. Read on from `next`. Without a
 schema filter, events of schemas the principal may not read are skipped,
 so a page can hold fewer events than its limit while `more` is true.
 
+A namespace that looks names up in a shared namespace also reads the
+shared namespace's publish events, which change the schemas it reaches;
+they keep the shared namespace as their `namespace`. Its own instance
+events and the shared publishes are two indexed range reads merged by
+cursor.
+
+`engine.events.watch({ committed, closed })` registers a watcher and
+returns the function that removes it. After each commit, the engine
+calls `committed(cursor)` once for each event the commit appended, and it
+calls `closed()` once when it closes. The notice is in-process,
+which is complete because one process writes the file: every event passes
+through it. A watcher reads the log as its own principal from its own
+cursor; the notice tells it only that the log grew.
+
 There is no retention yet: the log grows until a later change adds a
 policy for it.
 
@@ -274,11 +300,9 @@ rule the deployment has, through the HTTP runtime's `PermissionMatcher`
 for example.
 
 `Principal` has the shape of the HTTP runtime's (`subject`,
-`permissions`, `claims`), so a principal its `Authenticator` returns is
-passed on as it is. The engine does not import that package: its entry
-point is TypeScript source, which the engine's compiled declarations
-would pull into every consumer's compile, and it brings Hono as a peer
-dependency.
+`permissions`, `claims`), so a principal its `Authenticator` returns can
+be passed on as it is. The main entry point does not import the HTTP
+runtime, which brings Hono; the `./http` entry point does.
 
 ## Errors
 
@@ -286,8 +310,10 @@ Every refusal is an `EngineError` with a `code` a server maps to a
 status: `invalid_schema` (`SchemaDocumentError`, with its issues),
 `incompatible_change` (`IncompatibleChangeError`, with its changes),
 `invalid_instance` (`InstanceValidationError`, with its issues),
-`name_taken`, `not_found`, `conflict`, `forbidden`, `unknown_namespace`
-and `invalid_argument`.
+`name_taken`, `not_found`, `conflict`, `forbidden`, `unknown_namespace`,
+`invalid_argument` and `seq_mismatch`. A message names only what the call
+named: `name_taken` in the shared namespace does not say which namespace
+holds the name.
 
 ## Namespaces
 
@@ -301,10 +327,155 @@ cannot define a name the shared namespace holds, and the shared namespace
 cannot define a name another namespace holds, so what a namespace reaches
 never changes under it.
 
+## HTTP
+
+`@superschematic/engine/http` serves an engine over HTTP (D16).
+`engineApp(engine, options)` returns a Hono app with a fixed set of routes
+that carry the namespace and the schema name as path parameters and
+resolve them per request, so publishing a version mounts nothing. Every
+route goes through `@superschematic/http-runtime` (D15): the request id,
+the rate limit, the timeout, the body limit, the authentication gate, the
+`{data, meta: {requestId}}` envelope and RFC 9457 problem documents.
+
+```ts
+import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
+import { openEngine } from '@superschematic/engine';
+import { engineApp } from '@superschematic/engine/http';
+
+const engine = openEngine({ path: 'shop.db', policy });
+const app = new Hono();
+app.route('/api', engineApp(engine, {
+  authenticate: async ctx => callerFor(ctx.bearerToken),   // the deployment's Authenticator
+  rateLimitPerMinute: 600,
+  timeoutSeconds: 10,
+}));
+serve({ fetch: app.fetch, port: 8080 });
+```
+
+The options are the HTTP runtime's router options (`authenticate`,
+`permissionMatcher`, `onError`, `bodyLimitBytes`, `rateLimit`), with
+`rateLimitPerMinute` and `timeoutSeconds` for every route and `stream:
+{ pageSize, heartbeatMs }`. The deployment's `onError` sees what the
+engine does not raise.
+
+### Routes
+
+| Method | Path | Engine call | Success |
+| --- | --- | --- | --- |
+| GET | `/namespaces/{namespace}/schemas` | `schemas.list` | 200, the names the namespace reaches |
+| POST | `/namespaces/{namespace}/schemas` | `schemas.define`, body: the document | 200, the draft |
+| GET | `/namespaces/{namespace}/schemas/{name}` | `schemas.live` | 200, the live version |
+| GET | `/namespaces/{namespace}/schemas/{name}/draft` | `schemas.draft` | 200, the draft |
+| GET | `/namespaces/{namespace}/schemas/{name}/versions/{version}` | `schemas.version` | 200, that version |
+| POST | `/namespaces/{namespace}/schemas/{name}/publish` | `schemas.publish` | 200, `{namespace, name, version, published}` |
+| GET | `/namespaces/{namespace}/schemas/{name}/instances?limit=&cursor=` | `instances.list` | 200, `{items, next}` |
+| POST | `/namespaces/{namespace}/schemas/{name}/instances` | `instances.create`, body `{"id"?, "data"}` | 201, the instance, `ETag`, `Location` |
+| GET | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.get` | 200, the instance, `ETag` |
+| PATCH | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.update`, body: a merge patch; `If-Match` | 200, the instance, `ETag` |
+| DELETE | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.delete`; `If-Match` | 200, `null` |
+| GET | `/namespaces/{namespace}/events?after=&limit=&schema=&instanceId=` | `events.read` | 200, `{events, next, more}`; with `Accept: text/event-stream`, the stream |
+
+A schema version is the stored record without its canonical text, which
+`hash` identifies. An instance is the stored record (`namespace`,
+`schema`, `id`, `schemaNamespace`, `version`, `seq`, `data`, and who
+created and last updated it, and when). A request body is
+`application/json`, and an update's `application/merge-patch+json` (RFC
+7386); another media type is 415, with `Accept-Patch` on PATCH. Behavior
+operations get their route with the behaviors.
+
+### Statuses
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 400 | `invalid_argument` | a page size, cursor, instance id, schema name or version the engine refuses |
+| 400 | `bad_request` | a parameter or body the runtime cannot decode, a create body that is not `{id?, data}`, a path that is not valid percent-encoding |
+| 401 | `unauthorized` | the `Authenticator` returned no caller, or one without a subject |
+| 403 | `forbidden` | the access policy refused |
+| 404 | `not_found` | no such version, draft or instance in the namespace, or no such route |
+| 404 | `unknown_namespace` | the namespace is not configured |
+| 409 | `conflict` | an instance with the id exists |
+| 409 | `name_taken` | the name is defined on the other side of the shared lookup |
+| 409 | `incompatible_change` | the version breaks the compatibility rule; `details.changes` |
+| 412 | `seq_mismatch` | `If-Match` names a sequence the instance is no longer at |
+| 413 | `payload_too_large` | the body exceeds `bodyLimitBytes` |
+| 415 | `unsupported_media_type` | the body is not of the route's media type |
+| 422 | `invalid_schema` | the document is refused; `details.issues` |
+| 422 | `invalid_instance` | the instance, or an update's result, is refused; `details.issues` |
+| 429 | `too_many_requests` | the rate limit; `Retry-After` |
+| 500 | `internal_error` | anything else the deployment's `onError` does not map; the failure stays off the wire |
+| 504 | `gateway_timeout` | the timeout elapsed |
+
+`engineProblem` and `ENGINE_ERROR_STATUS` hold the engine's rows. `type`
+is `about:blank`, as the HTTP runtime writes it for every problem; `code`
+names the problem. A detail names only what the request named, so an
+instance id that exists only in another namespace answers as one that
+exists nowhere. The namespaces a deployment configures are not secret: an
+unknown namespace is 404, and a configured one the policy refuses is 403.
+
+### Authentication and access
+
+The runtime's gate requires a caller on every route: the deployment's
+`Authenticator` returns a principal, or none (401). The engine acts as
+that principal, which already has the engine's `Principal` shape, and
+asks its access policy (403). The routes name no permissions, so
+`permissionMatcher` matters only where the policy calls it.
+
+### Concurrency
+
+An instance's `seq` is its entity tag (`ETag: "3"`). PATCH and DELETE pass
+the sequence `If-Match` names to `update` and `delete` as `expectedSeq`,
+which the engine checks inside the write transaction, so a lost update
+answers 412 and writes nothing. `*` asks only that the instance exist; a
+weak tag never matches. An instance that does not exist is 404 whatever
+`If-Match` says: RFC 9110 evaluates a precondition only where the request
+would otherwise succeed.
+
+### The event stream
+
+`GET /namespaces/{namespace}/events` with `Accept: text/event-stream`
+answers server-sent events:
+
+```
+: open
+
+id: 41
+data: {"cursor":41,"kind":"create","namespace":"default","schema":"Order","instanceId":"o1","seq":1,"version":1,"actor":"alice","at":1790000000000,"change":{"title":"Desk"}}
+
+: keepalive
+```
+
+- Each event is one message with no `event:` field, so
+  `EventSource.onmessage` receives every one: `id:` is its cursor and
+  `data:` the event as `events.read` returns it.
+- The stream starts after `Last-Event-ID`, which a reconnecting
+  `EventSource` sends, else after `after`, else at the start of the log.
+  `schema` and `instanceId` filter as on the JSON route; `limit` applies
+  to the JSON route only.
+- It replays in pages of `stream.pageSize` (100) and reads the next page
+  only when the server has sent the previous one, so a slow client holds
+  one page and replay never loads the backlog. Caught up, it waits for the
+  engine's notice of a commit (`events.watch`) and reads on from its
+  cursor.
+- While it waits it sends a comment every `stream.heartbeatMs` (5000),
+  under the 10 seconds after which `Bun.serve` closes a quiet connection.
+- A namespace's stream, like its JSON page, carries the shared
+  namespace's publish events, which change the schemas it reaches.
+- It reads as its principal: `read` on each event's schema in the
+  namespace, and events of schemas it may not read are skipped (with
+  `schema`, `read` on that schema, or 403). The first page is read before
+  the response, so a refusal is a problem document. A later refusal, a
+  policy change say, ends the stream; the client reconnects and gets the
+  problem.
+- It ends when the client disconnects, which removes its watcher, and
+  when the engine closes. `timeoutSeconds` covers the first page, not the
+  stream.
+
 ## Development
 
 ```
 cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build
+cd runtime/http/typescript && bun install --frozen-lockfile && bun run build
 cd runtime/engine/typescript
 bun install --frozen-lockfile
 bun run typecheck
@@ -314,4 +485,6 @@ bun run test        # build, then test:node (node --test) and test:bun (bun test
 The tests are TypeScript that Node.js runs with type stripping and Bun
 runs as is; they import the built package from `dist/` and open real
 SQLite files in temporary directories. On Bun most cases run against both
-adapters.
+adapters. `test/http.test.ts` drives the routes through Hono's
+`app.request`; `test/stream.test.ts` reads the event stream from a
+listening server, `@hono/node-server` on Node.js and `Bun.serve` on Bun.

@@ -3,8 +3,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { EngineError, IncompatibleChangeError, InstanceValidationError, type Engine, type EngineOptions, type Principal } from '../dist/index.js';
-import { alice, cleanup, clone, drivers, openTestEngine, orderDocument, schemaDocument, thrown } from './helpers.ts';
+import { EngineError, IncompatibleChangeError, InstanceValidationError, allowAll, openEngine, type Engine, type EngineOptions, type Principal } from '../dist/index.js';
+import { alice, cleanup, clone, drivers, freshPath, openTestEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -219,6 +219,48 @@ for (const driver of drivers) {
       assert.equal(engine.instances.get(alice, 'Order', 'o1'), undefined);
       assert.equal(engine.instances.delete(alice, 'Order', 'o1'), false);
       assert.equal(eventCount(engine), 3);
+    });
+
+    test('update and delete with an expected sequence write only while the instance is at it', () => {
+      const engine = withOrders({ driver });
+      engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
+      assert.equal(engine.instances.update(alice, 'Order', 'o1', { title: 'Lamp' }, { expectedSeq: 1 }).seq, 2);
+
+      const stale = thrown(() => engine.instances.update(alice, 'Order', 'o1', { title: 'Chair' }, { expectedSeq: 1 }), EngineError);
+      assert.equal(stale.code, 'seq_mismatch');
+      assert.match(stale.message, /Order o1 is no longer at sequence 1/);
+      // A precondition is checked before the patch: an invalid patch at a
+      // stale sequence is still seq_mismatch.
+      assert.equal(thrown(() => engine.instances.update(alice, 'Order', 'o1', { title: null }, { expectedSeq: 1 }), EngineError).code, 'seq_mismatch');
+      assert.equal(thrown(() => engine.instances.delete(alice, 'Order', 'o1', { expectedSeq: 1 }), EngineError).code, 'seq_mismatch');
+      // 0 matches no instance: sequences start at 1.
+      assert.equal(thrown(() => engine.instances.delete(alice, 'Order', 'o1', { expectedSeq: 0 }), EngineError).code, 'seq_mismatch');
+      assert.deepEqual([engine.instances.get(alice, 'Order', 'o1')?.data, eventCount(engine)], [{ title: 'Lamp' }, 3]);
+
+      // A patch that changes nothing still needs the sequence.
+      assert.equal(engine.instances.update(alice, 'Order', 'o1', { title: 'Lamp' }, { expectedSeq: 2 }).seq, 2);
+      assert.equal(engine.instances.delete(alice, 'Order', 'o1', { expectedSeq: 2 }), true);
+      // A missing instance is not_found for an update and false for a delete, whatever the sequence.
+      assert.equal(thrown(() => engine.instances.update(alice, 'Order', 'o1', { title: 'Desk' }, { expectedSeq: 3 }), EngineError).code, 'not_found');
+      assert.equal(engine.instances.delete(alice, 'Order', 'o1', { expectedSeq: 3 }), false);
+      for (const expectedSeq of [-1, 1.5, Number.NaN]) {
+        assert.equal(thrown(() => engine.instances.update(alice, 'Order', 'o1', {}, { expectedSeq }), EngineError).code, 'invalid_argument');
+        assert.equal(thrown(() => engine.instances.delete(alice, 'Order', 'o1', { expectedSeq }), EngineError).code, 'invalid_argument');
+      }
+    });
+
+    test('an expected sequence is checked against the file inside the write, not against what the caller read', () => {
+      const path = freshPath();
+      const first = track(openEngine({ path, driver, policy: allowAll }));
+      publish(first, orderDocument());
+      first.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
+      const read = first.instances.get(alice, 'Order', 'o1');
+      // A second connection writes between the read and the update.
+      const second = track(openEngine({ path, driver, policy: allowAll }));
+      second.instances.update(bob, 'Order', 'o1', { title: 'Lamp' });
+      const error = thrown(() => first.instances.update(alice, 'Order', 'o1', { title: 'Chair' }, { expectedSeq: read?.seq }), EngineError);
+      assert.equal(error.code, 'seq_mismatch');
+      assert.deepEqual(first.instances.get(alice, 'Order', 'o1')?.data, { title: 'Lamp' });
     });
 
     test('an id created again after a delete continues its sequence', () => {

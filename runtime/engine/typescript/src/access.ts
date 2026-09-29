@@ -7,10 +7,9 @@ for a new version. The engine has no roles and no default policy;
 `allowAll` is explicit, for tests and local use.
 
 Principal has the shape of the HTTP runtime's (@superschematic/http-runtime),
-so a principal its Authenticator returns is passed on as it is. The engine
-does not import that package: its entry point is TypeScript source, which
-the engine's compiled declarations would pull into every consumer's
-compile, and it brings Hono as a peer dependency.
+so a principal its Authenticator returns can be passed on as it is. This
+entry point does not import that package, which brings Hono as a peer
+dependency; only the engine's ./http entry point does (http/app.ts).
 */
 
 import { EngineError } from './errors.js';

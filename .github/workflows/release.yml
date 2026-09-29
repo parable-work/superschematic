@@ -314,7 +314,7 @@ jobs:
         # compiled dist; the version-graph package ships its compiled dist
         # and the core's wasm module; the schema IR ships its declarations
         # and the schema-file JSON Schema. The engine builds after the schema
-        # runtime, whose dist/ its link script copies. npm pack writes
+        # and http runtimes, whose dist/ its link script copies. npm pack writes
         # superschematic-<name>-<version>.tgz for a scoped
         # @superschematic/<name>.
         run: |

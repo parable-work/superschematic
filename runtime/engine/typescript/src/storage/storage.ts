@@ -9,7 +9,10 @@ it rolls back alone and leaves the outer one running.
 
 A transaction is synchronous. Behavior code runs inside the write
 transaction and cannot await (D16), so a function that returns a promise
-rolls the transaction back and throws.
+rolls the transaction back and throws. Work that must wait for the commit,
+such as announcing the events a write appended, is queued with afterCommit:
+it runs once the outermost transaction commits, and is dropped with the
+transaction or savepoint that queued it when that one rolls back.
 
 One process writes the file. SQLite serializes writers from several
 processes, but the engine keeps per-process state, and nothing here
@@ -29,6 +32,7 @@ export const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 
 export class Storage {
   private depth = 0;
+  private committed: Array<() => void> = [];
 
   private constructor(
     /** The database file. */
@@ -90,6 +94,7 @@ export class Storage {
    */
   transaction<T>(fn: () => T): T {
     const savepoint = `engine_savepoint_${this.depth}`;
+    const queued = this.committed.length;
     this.driver.exec(this.depth === 0 ? 'BEGIN IMMEDIATE' : `SAVEPOINT ${savepoint}`);
     this.depth += 1;
     let result: T;
@@ -103,6 +108,7 @@ export class Storage {
       }
     } catch (error) {
       this.depth -= 1;
+      this.committed.length = queued;
       this.rollback(savepoint);
       throw error;
     }
@@ -114,10 +120,31 @@ export class Storage {
     try {
       this.driver.exec('COMMIT');
     } catch (error) {
+      this.committed.length = queued;
       this.rollback(savepoint);
       throw error;
     }
+    for (const work of this.committed.splice(0)) {
+      try {
+        work();
+      } catch {
+        // The transaction has committed; what waited for it cannot undo
+        // that, and its failure is not the writer's.
+      }
+    }
     return result;
+  }
+
+  /**
+   * afterCommit queues work to run once the outermost transaction commits.
+   * It is dropped when the transaction or savepoint that queued it rolls
+   * back. It needs an open transaction.
+   */
+  afterCommit(work: () => void): void {
+    if (this.depth === 0) {
+      throw new Error('afterCommit needs an open transaction');
+    }
+    this.committed.push(work);
   }
 
   close(): void {

@@ -980,9 +980,12 @@ default (section 5), and the loader needs `JSON.parse` source text access
 namespaces, instances, the event log and the access policy. Beyond the
 schema runtime's checks it refuses union and map fields, which no
 runtime validates yet, and object keys a type does not declare, which the
-compatibility rule depends on. Not built: the tool that copies a
-declaration into its npm package, and the engine's HTTP API, event
-stream, MCP tools and behaviors. Each change that lands a piece updates
+compatibility rule depends on. Its `./http` entry point serves the HTTP
+API and the event stream on the HTTP runtime, which ships compiled output
+for it (D15, amended); an instance's sequence is its entity tag, and a
+namespace's stream also carries the shared namespace's publish events.
+Not built: the tool that copies a declaration into its npm package, and
+the engine's MCP tools and behaviors. Each change that lands a piece updates
 this paragraph, the README layout table and the pages that describe it.
 The names and rules are reversible until the first release.
 

@@ -77,6 +77,46 @@ const seeds: Record<number, Seed> = {
       );
     },
   },
+  // Version 2 added actors, instances and the event log; version 3 indexed
+  // the publish events alone.
+  2: {
+    write(storage) {
+      const order = canonical(orderDocument());
+      storage.run(
+        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, published_at, defined_by, published_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 1, order.text, order.hash, 100, 200, 'alice', 'alice']
+      );
+      storage.run(
+        `INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change)
+         VALUES ('publish', 'default', 'Order', NULL, NULL, 1, 'alice', 200, ?)`,
+        [order.text]
+      );
+      storage.run(
+        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
+         VALUES ('default', 'Order', 'o1', 'default', 1, 1, '{"title":"Desk"}', 300, 'alice', 300, 'alice')`
+      );
+      storage.run(
+        `INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change)
+         VALUES ('create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}')`
+      );
+    },
+    check(engine) {
+      assert.deepEqual(
+        engine.events.read(alice).events.map((event) => [event.kind, event.cursor]),
+        [
+          ['publish', 1],
+          ['create', 2],
+        ]
+      );
+      const updated = engine.instances.update(alice, 'Order', 'o1', { title: 'Lamp' }, { expectedSeq: 1 });
+      assert.deepEqual([updated.seq, updated.data], [2, { title: 'Lamp' }]);
+      assert.deepEqual(
+        engine.events.read(alice, { after: 2 }).events.map((event) => [event.kind, event.seq]),
+        [['update', 2]]
+      );
+    },
+  },
 };
 
 const latest = engineMigrations.migrations.length;

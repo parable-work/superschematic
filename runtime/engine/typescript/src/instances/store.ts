@@ -57,6 +57,20 @@ export interface CreateOptions extends InstanceTarget {
   id?: string;
 }
 
+export interface UpdateOptions extends InstanceTarget {
+  /**
+   * The sequence the caller last read. The update is refused with
+   * seq_mismatch unless the instance is still at it, checked inside the
+   * write transaction.
+   */
+  expectedSeq?: number;
+}
+
+export interface DeleteOptions extends InstanceTarget {
+  /** As UpdateOptions.expectedSeq. */
+  expectedSeq?: number;
+}
+
 export interface ListOptions extends InstanceTarget {
   /** At most this many instances, 50 by default and at most 500. */
   limit?: number;
@@ -148,10 +162,12 @@ export class InstanceStore {
   /**
    * update applies a JSON merge patch to an instance and validates the
    * result against the live version. A patch that changes nothing writes
-   * nothing.
+   * nothing. With expectedSeq, the instance must still be at that
+   * sequence.
    */
-  update(principal: Principal, schema: string, id: string, patch: unknown, options: InstanceTarget = {}): InstanceRecord {
+  update(principal: Principal, schema: string, id: string, patch: unknown, options: UpdateOptions = {}): InstanceRecord {
     const namespace = this.target(principal, 'write', schema, options);
+    checkExpectedSeq(options.expectedSeq);
     if (!isPlainObject(patch)) {
       throw new EngineError('invalid_argument', 'a merge patch of an instance is a JSON object');
     }
@@ -159,6 +175,7 @@ export class InstanceStore {
     return this.storage.transaction(() => {
       const record = this.live(namespace, schema);
       const row = this.existing(namespace, schema, id);
+      matchSeq(row, options.expectedSeq);
       const current = JSON.parse(String(row.data)) as Record<string, unknown>;
       const merged = mergePatch(current, patch);
       this.validate(namespace, record, merged);
@@ -187,9 +204,14 @@ export class InstanceStore {
     });
   }
 
-  /** delete removes an instance and appends its delete event; false when there is none. */
-  delete(principal: Principal, schema: string, id: string, options: InstanceTarget = {}): boolean {
+  /**
+   * delete removes an instance and appends its delete event; false when
+   * there is none. With expectedSeq, the instance must still be at that
+   * sequence.
+   */
+  delete(principal: Principal, schema: string, id: string, options: DeleteOptions = {}): boolean {
     const namespace = this.target(principal, 'write', schema, options);
+    checkExpectedSeq(options.expectedSeq);
     const now = this.clock();
     return this.storage.transaction(() => {
       this.live(namespace, schema);
@@ -197,6 +219,7 @@ export class InstanceStore {
       if (!row) {
         return false;
       }
+      matchSeq(row, options.expectedSeq);
       this.storage.run('DELETE FROM engine_instances WHERE namespace = ? AND schema = ? AND id = ?', [namespace, schema, id]);
       appendEvent(this.storage, {
         kind: 'delete',
@@ -256,6 +279,20 @@ export class InstanceStore {
 /** defaultIds makes random UUIDs. */
 export function defaultIds(): string {
   return randomUUID();
+}
+
+function checkExpectedSeq(expectedSeq: number | undefined): void {
+  if (expectedSeq !== undefined && (!Number.isSafeInteger(expectedSeq) || expectedSeq < 0)) {
+    throw new EngineError('invalid_argument', `an expected sequence is a non-negative integer, got ${String(expectedSeq)}`);
+  }
+}
+
+// An instance's sequence starts at 1, so an expected sequence of 0 matches
+// no instance.
+function matchSeq(row: Row, expectedSeq: number | undefined): void {
+  if (expectedSeq !== undefined && Number(row.seq) !== expectedSeq) {
+    throw new EngineError('seq_mismatch', `${String(row.schema)} ${String(row.id)} is no longer at sequence ${expectedSeq}`);
+  }
 }
 
 function checkId(id: string): void {

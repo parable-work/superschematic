@@ -76,7 +76,9 @@ export class Engine {
     );
   }
 
+  /** close ends the engine's event watchers, then closes its file. */
   close(): void {
+    this.events.close();
     this.storage.close();
   }
 }
