@@ -1,0 +1,81 @@
+# Path, query and GET arguments typed with number scalars whose names give
+# no hint of their type (Ordering.Rank, an integer, and
+# Generic.Probability, a float), next to one whose name does, a UUID and an
+# enum, alone and in a list, and body arguments of the same scalars.
+# pysdkgen's scalar parameter tests load it.
+name: scalar-params-api
+kind: API
+scalars:
+  Ordering.Rank:
+    name: Ordering.Rank
+    languagePrimitive: number
+  Generic.Probability:
+    name: Generic.Probability
+    languagePrimitive: number
+  Generic.Int64:
+    name: Generic.Int64
+    languagePrimitive: number
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+enums:
+  # The shade of an item.
+  Shade:
+    name: Shade
+    values:
+      - name: Light
+        serializedAs: light
+      - name: Dark
+        serializedAs: dark
+operationSets:
+  - name: ShelfQueries
+    operations:
+      # List a shelf's items at a rank; the lists travel in the query string.
+      - name: rankedItems
+        typeRef: { name: string, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "shelves/{shelf}/ranks/{rank}"
+        arguments:
+          - name: shelf
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: rank
+            typeRef: { name: Ordering.Rank }
+            required: true
+          - name: minScore
+            typeRef: { name: Generic.Probability }
+            isQuery: true
+          - name: limit
+            typeRef: { name: Generic.Int64 }
+            isQuery: true
+          - name: shade
+            typeRef: { name: Shade }
+            isQuery: true
+          - name: ranks
+            typeRef: { name: Ordering.Rank, isArray: true }
+          - name: scores
+            typeRef: { name: Generic.Probability, isArray: true }
+          - name: shades
+            typeRef: { name: Shade, isArray: true }
+          - name: maxScore
+            typeRef: { name: Generic.Probability }
+  - name: ShelfMutations
+    operations:
+      # Rank a shelf's item; returns the item's labels.
+      - name: rankItem
+        typeRef: { name: string, isArray: true }
+        required: true
+        httpMethod: PUT
+        restPath: "shelves/{shelf}/items"
+        arguments:
+          - name: shelf
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: rank
+            typeRef: { name: Ordering.Rank }
+            required: true
+          - name: score
+            typeRef: { name: Generic.Probability }
+          - name: ranks
+            typeRef: { name: Ordering.Rank, isArray: true }

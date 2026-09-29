@@ -13,6 +13,22 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Python SDK: a path parameter, query parameter or scalar argument typed
+  with a number or boolean scalar takes its Python type from the scalar's
+  definition, as the Go route that parses it does: `Ordering.Rank`,
+  `File.SizeBytes`, `Finance.Money` and `Temporal.Seconds` (and the other
+  `Temporal` counts) are `int`, `Generic.Probability` is `float`, and an
+  extension's boolean scalar is `bool`, alone, as the element of a list and
+  as a scoped namespace's constructor parameter. The SDK guessed the type
+  from the scalar's name, so only a name ending in `Int`, `Int32`, `Int64`
+  or `Integer` was `int` and every other scalar was `str`: the Go route
+  parsed an `Ordering.Rank` path parameter with `strconv.ParseInt` while
+  the SDK typed it `str`, and a body argument of such a scalar passed the
+  SDK's validation only as a string, which the route refused. An enum keeps
+  its own type, and a response's type hint is unchanged. Behavior change:
+  the SDK validates such a scalar argument, and each element of such a list
+  argument, as the number or boolean, so a value passed as a string fails
+  before the request. Minor.
 - `scripts/bump_version.py` versions the Python runtime's own entry in
   `runtime/schema/python/uv.lock` (`superschematic-schema-runtime`), in
   the PEP 440 form its `pyproject.toml` carries: `set` writes it and
