@@ -846,28 +846,6 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Changed
 
-- Python SDK: a list query parameter (`QueryParam<T[]>`) is a `list[T]`
-  argument, typed as a list GET argument is: `list[TenantListStatus]` for
-  an enum list, `list[str]` for a UUID or other string scalar, and
-  `list[int]`, `list[float]`, `list[bool]` or `list[str]` otherwise. It
-  was one value (`str` for a UUID list, the enum for an enum list), and a
-  list passed anyway went out as Python's text for it (`?ids=['a', 'b']`),
-  which the route refuses. The list is sent as one comma-separated value
-  (`?statuses=active,suspended`), an enum item by its serialized value
-  and a bool as `true` or `false`, and an empty list is left out, since
-  the route refuses a present empty value. Before the request, a required
-  list with no item is `required`, a value that is not a list or tuple is
-  `type`, and `listMin` and `listMax` bound a non-empty list, each at the
-  argument's Python name as for a scalar query parameter. Each item is
-  checked at `name[i]`: the route splits the value on commas and trims
-  each item, so an empty text item is `required` and one with a comma or
-  surrounding space is `pattern`; then the argument's `min`, `max`,
-  `minLength`, `maxLength` and `pattern`, then its validation as the
-  element type (a member of the enum, an `int` for `list[int]`). The
-  list's failures are raised in one `ValidationError`. Code that passed
-  one value, such as items it joined itself, now passes the list: a
-  string is refused as `type`. A scalar query parameter, and an SDK
-  without a list query parameter, are unchanged. Minor.
 - Go ORM: a `Generic.JSON[]` or `Generic.JSON[][]` column refuses a null
   element, as every other list column and every other implementation do
   (D12, amended): `GetOne`, `FindOne`, `FindMany`, `GetManyByIDs`, the
