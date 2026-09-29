@@ -32,6 +32,11 @@ pub struct FixtureFilter {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub values: Option<Vec<String>>,
+    /// Scalars with rules of their own, checked after the scalar's.
+    #[serde(rename = "minCents")]
+    pub min_cents: GenericInt64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Vec<IdentityName>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

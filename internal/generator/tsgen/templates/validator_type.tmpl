@@ -379,8 +379,7 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
   {{else if .IsMap}}
   if (value.{{.TSName}} !== null && value.{{.TSName}} !== undefined && typeof value.{{.TSName}} === 'object' && !Array.isArray(value.{{.TSName}})) {
     const fieldValue = value.{{.TSName}};
-    {{range .Validations}}
-    {{if and (ne .Validator "required") (or (not $field.IsScalar) (eq .Validator "listMin") (eq .Validator "listMax")) (ruleApplies $field .Validator)}}
+    {{range fieldRules $field}}
     {{if eq .Validator "listMin"}}
     if (Object.keys(fieldValue).length < {{.Value}}) {
       addFieldError(errors, "{{$field.TSName}}", "listMin", "{{escapeString .Message}}");
@@ -481,15 +480,13 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     {{end}}
     {{end}}
     {{end}}
-    {{end}}
   }{{if .Required}} else {
     addFieldError(errors, "{{$field.TSName}}", "required", "required field");
   }{{end}}
   {{else if .Required}}
   {
     const fieldValue = value.{{.TSName}};
-    {{range .Validations}}
-    {{if and (ne .Validator "required") (or (not $field.IsScalar) (eq .Validator "listMin") (eq .Validator "listMax")) (ruleApplies $field .Validator)}}
+    {{range fieldRules $field}}
     {{if eq .Validator "listMin"}}
     if (Array.isArray(fieldValue) && fieldValue.length < {{.Value}}) {
       addFieldError(errors, "{{$field.TSName}}", "listMin", "{{escapeString .Message}}");
@@ -570,13 +567,11 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     {{end}}
     {{end}}
     {{end}}
-    {{end}}
   }
   {{else if .IsArray}}
   if (Array.isArray(value.{{.TSName}})) {
     const fieldValue = value.{{.TSName}};
-    {{range .Validations}}
-    {{if and (ne .Validator "required") (or (not $field.IsScalar) (eq .Validator "listMin") (eq .Validator "listMax")) (ruleApplies $field .Validator)}}
+    {{range fieldRules $field}}
     {{if eq .Validator "listMin"}}
     if (fieldValue.length < {{.Value}}) {
       addFieldError(errors, "{{$field.TSName}}", "listMin", "{{escapeString .Message}}");
@@ -617,13 +612,11 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     });
     {{end}}
     {{end}}
-    {{end}}
   }
   {{else}}
   if (value.{{.TSName}} !== null && value.{{.TSName}} !== undefined) {
     const fieldValue = value.{{.TSName}};
-    {{range .Validations}}
-    {{if and (ne .Validator "required") (or (not $field.IsScalar) (eq .Validator "listMin") (eq .Validator "listMax")) (ruleApplies $field .Validator)}}
+    {{range fieldRules $field}}
     {{if eq .Validator "minLength"}}
     if (typeof fieldValue === "string" && [...fieldValue].length < {{.Value}}) {
       addFieldError(errors, "{{$field.TSName}}", "minLength", "{{escapeString .Message}}");
@@ -644,7 +637,6 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     if (isFiniteNumber(fieldValue) && fieldValue > {{.Value}}) {
       addFieldError(errors, "{{$field.TSName}}", "max", "{{escapeString .Message}}");
     }
-    {{end}}
     {{end}}
     {{end}}
   }

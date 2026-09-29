@@ -340,6 +340,60 @@ func skipJSONValue(data []byte, i int) int {
 	return len(data)
 }
 
+// validateGenericInt64Value validates one Generic.Int64 value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateGenericInt64Value(value GenericInt64, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if float64(value) < -9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "min", Message: "must be at least -9007199254740991"})
+	}
+	if float64(value) > 9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 9007199254740991"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateIdentityNameValue validates one Identity.Name value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateIdentityNameValue(value IdentityName, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if utf8.RuneCountInString(string(value)) > 80 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "maxLength", Message: "must be at most 80 characters"})
+	}
+	if utf8.RuneCountInString(string(value)) < 2 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "minLength", Message: "must be at least 2 characters"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
 // validateNetworkUrlValue validates one Network.Url value and reports a
 // failure once. A missing required value is "required". A value that breaks
 // the scalar's own length, pattern or range is reported by that rule's name,
@@ -653,6 +707,10 @@ type FixtureFilter struct {
 	Kind string `json:"kind"`
 
 	Values []string `json:"values,omitzero"`
+
+	MinCents GenericInt64 `json:"minCents"`
+
+	Labels []IdentityName `json:"labels,omitzero"`
 }
 
 // MaskSecrets returns a copy of FixtureFilter with secret fields cleared.
@@ -669,6 +727,15 @@ func (t *FixtureFilter) MaskSecrets() *FixtureFilter {
 		masked.Values = make([]string, len(t.Values))
 
 		copy(masked.Values, t.Values)
+
+	}
+
+	masked.MinCents = t.MinCents
+
+	if t.Labels != nil {
+		masked.Labels = make([]IdentityName, len(t.Labels))
+
+		copy(masked.Labels, t.Labels)
 
 	}
 
@@ -708,6 +775,44 @@ func (t *FixtureFilter) Validate() ValidationErrors {
 
 	}
 
+	// Validate minCents (required)
+
+	if valid, fieldErrs := validateGenericInt64Value(t.MinCents, true); !valid {
+		errors.SetFieldErrors("minCents", fieldErrs)
+	}
+
+	{
+		value := t.MinCents
+
+		if float64(value) < 0 {
+			errors.AddFieldError("minCents", "min", "must be at least 0")
+		}
+
+	}
+
+	// Validate labels (optional)
+
+	if t.Labels != nil {
+		for i, item := range t.Labels {
+			if valid, itemErrs := validateIdentityNameValue(item, false); !valid {
+				fieldKey := fmt.Sprintf("labels[%d]", i)
+				errors.SetFieldErrors(fieldKey, itemErrs)
+			}
+		}
+	}
+
+	if t.Labels != nil {
+		value := t.Labels
+
+		for i, item := range value {
+			if utf8.RuneCountInString(string(item)) > 16 {
+				fieldKey := fmt.Sprintf("labels[%d]", i)
+				errors.AddFieldError(fieldKey, "maxLength", "must be at most 16 characters")
+			}
+		}
+
+	}
+
 	return errors
 }
 
@@ -724,6 +829,7 @@ func (t *FixtureFilter) MarshalJSON() ([]byte, error) {
 // refuses a null element in them.
 var listFieldsOfFixtureFilter = []jsonListField{
 	{name: "values", depth: 1},
+	{name: "labels", depth: 1},
 }
 
 // UnmarshalJSON unmarshals FixtureFilter from JSON with validation
