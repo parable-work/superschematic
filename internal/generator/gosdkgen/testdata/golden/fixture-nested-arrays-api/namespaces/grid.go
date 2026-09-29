@@ -34,7 +34,7 @@ func (n *GridNamespace) GetGrid(
 	ctx context.Context,
 	Id string,
 ) (types.GridView, error) {
-	path := fmt.Sprintf("/api/grids/%v", Id)
+	path := fmt.Sprintf("/api/grids/%v", pathSegment(Id))
 
 	var requestBody any
 	var out types.GridView
@@ -62,7 +62,7 @@ func (n *GridNamespace) GridLabels(
 	Id string,
 	query *GridGridLabelsQueryParams,
 ) ([][]string, error) {
-	path := fmt.Sprintf("/api/grids/%v/labels", Id)
+	path := fmt.Sprintf("/api/grids/%v/labels", pathSegment(Id))
 	var queryValues url.Values
 	if query != nil {
 		queryValues = url.Values{}
@@ -97,7 +97,7 @@ func (n *GridNamespace) ReplaceLabels(
 	Id string,
 	input GridReplaceLabelsInput,
 ) (types.GridView, error) {
-	path := fmt.Sprintf("/api/grids/%v/labels", Id)
+	path := fmt.Sprintf("/api/grids/%v/labels", pathSegment(Id))
 	validationErrors := types.NewValidationErrors()
 	// labels is an array of arrays: an inner list is never nil, reported
 	// at labels[i]; an empty one is valid.

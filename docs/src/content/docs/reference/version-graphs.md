@@ -384,7 +384,8 @@ another pass holds it, the pass does nothing and reports `Skipped`.
 Otherwise, in order, it:
 
 1. discards every live change set with no write for `AbandonAfter`, when
-   that is set (it is off by default);
+   that is set (it is off by default), and leaves one that a write reaches
+   after the pass read it, since it is no longer idle;
 2. hard-deletes the member rows of refs discarded longer ago than
    `DiscardGrace` (default seven days), recording the actor in history; the
    refs and their commits stay as the audit trail, and their commits still
@@ -429,7 +430,7 @@ A ref or commit that does not exist, or a discarded ref, is `ErrNotFound`.
 | `Branch(ctx, fromRef, name)` | Creates a change set of `fromRef` whose base is `fromRef`'s head commit. |
 | `Save(ctx, ref, version, RecipeEdits)` | On a change set, applies each kind's `GraphEdits[T]`: `Upsert` writes each row as the ref's override of its entity, found by `EntityKey` (a row without one is a new entity, whose key the database generates). Every ref holds its own row of an entity, so the row's id is never the caller's: Save ignores it and the table's default generates it, whether the `@key` is `AutoGenerate<Identity.UUID>` or a plain `Identity.UUID`. `Delete` writes a row that deletes the entity on the ref; `Unset` removes the ref's own row, so the ref reads the entity through its base again. A sealed ref refuses it with `ErrRefSealed`, a primary line with `ErrPrimaryMergeOnly`. |
 | `Commit(ctx, ref, version, RecipeCommitOptions)` | Composes a change set, checks the tree with `validate`, diffs it against the ref's last commit (or its base), and writes a commit with one patch per changed entity pinning the winning row's `(id, _version)`. Moves the ref's head. `Message` is stored; `Tag` takes the root's next `sequence`, which makes the commit a published version. `ErrNothingToCommit` when nothing changed; an `*InvalidTreeError` (`ErrInvalidTree`) lists what `validate` found; `ErrPrimaryMergeOnly` on a primary line. |
-| `Seal(ctx, ref, version)` | Commits a change set when it has changes and sets `sealedAt`. The ref then refuses writes. |
+| `Seal(ctx, ref, version)` | Commits a change set when it has changes and sets `sealedAt`. The ref then refuses writes. `ErrPrimaryMergeOnly` on a primary line. |
 | `Merge(ctx, source, target, targetVersion, resolutions, RecipeCommitOptions)` | Merges the source's head commit into the target against the source's base. Without conflicts it writes the result onto the target and commits in the same transaction, with the options' message and tag. It is the only write a primary line takes. With conflicts left after `resolutions` it returns them as `[]RecipeConflict` (kind, entity key, unit path, the base, ours and theirs values, and each side's author) and writes nothing. A `RecipeResolution` takes a side (`versiongraph.Take`) or gives a value for one conflict's path. |
 | `Rebase(ctx, draft, version, resolutions)` | Catches a change set up with its parent's head ([Rebase](#rebase)), returning a `RecipeMergeResult`: the moved change set and its commit, or the conflicts, with nothing written. `ErrNoParent` on a primary line. |
 | `Revert(ctx, ref, version, toCommit)` | Writes the rows that make a change set compose to `toCommit`'s tree, and commits. History is never rewritten. `ErrPrimaryMergeOnly` on a primary line. |

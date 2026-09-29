@@ -629,6 +629,24 @@ a generated package still ships TypeScript sources, since its consumer
 already runs a TypeScript-aware toolchain. That reason holds for the
 generated package, not for a runtime a compiled package imports.
 
+### D15, amended: a path parameter is decoded exactly once
+
+Each server hands the implementation a path parameter percent-decoded
+exactly once, however the client encoded it, and answers 400 to a path
+whose escapes do not decode. Before, the TypeScript runtime decoded Hono's
+already decoded capture a second time: `/items/%25` (the id `%`) threw a
+URIError and answered 500, and `/items/x%2541y` reached the implementation
+as `xAy`, not `x%41y`. The Go routes read chi's capture, which is still
+encoded when chi matched the route against `r.URL.RawPath` (a client that
+wrote `%41` for `A`, a `%2F` inside a segment, or lowercase hex), so
+`/items/%41` reached the implementation as `%41`. The Rust router, on
+axum's `Path`, already decoded once.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A path with an escape that is not two hex digits, or whose escapes do not decode to UTF-8, answers 400 in every server. The TypeScript runtime checks the request path when the route captured a parameter; the Go routes read each capture through `routing.PathParam` (net/http already refuses a bad escape); the Rust router checks the path with `path_is_percent_encoded`, and answers bytes that are not UTF-8 in the error envelope too, not with axum's bare 400. | Passing the text Hono and axum could not decode on to the implementation, where `%ZZ` and `%25ZZ` would arrive as the same value |
+| `routing.PathParam` decodes a capture when `r.URL.RawPath` is set, which is when chi matched against the raw path, and not otherwise. | Clearing `RawPath` before routing, which would split a value holding `%2F` into two segments |
+
 ## D14. A failing scalar value is one error, named by the rule it breaks
 
 A scalar value its scalar rejects is one validation error in every
@@ -986,12 +1004,14 @@ storage at publish, and running its guards, operations, hooks and field
 readers. Beyond the schema runtime's checks it refuses union and map
 fields, which no runtime validates yet, and object keys a type does not
 declare; beyond the compiler's, a behavior composes on the instance type
-only, a behavior field may not take a type field's JSON key, and an
-operation's `paramsSchema` sets `additionalProperties: false`. The
-binary's `behaviors --out <dir> [--check]` command copies a declaration
-into its npm package; it is a command rather than a tool in the core
-module, since an extension's declarations are registered only in its own
-binary (section 3.16 of `docs/extension-model.md`). acme implements
+only. Both refuse an operation whose `paramsSchema` does not set
+`additionalProperties: false`, the compiler when the declaration
+registers, and a behavior field that takes a type field's JSON key, the
+compiler when the schema loads. The binary's `behaviors --out <dir>
+[--check]` command copies a declaration into its npm package; it is a
+command rather than a tool in the core module, since an extension's
+declarations are registered only in its own binary (section 3.16 of
+`docs/extension-model.md`). acme implements
 `acme.Rating` in `@acme/behaviors` over that copy, and its smoke runs it
 in the engine with no core edit. Not built: the engine's MCP tools and
 its HTTP route for behavior operations, and the behaviors the engine
@@ -1409,8 +1429,9 @@ verification, not the data form's JSON Schema, rejects a `snapshotEvery`
 that is not positive, since that schema's subset has no numeric bounds; a
 sweep runs in one transaction, keeps discarded refs' rows for seven days
 unless told otherwise, reads a change set's last write from its
-`updatedAt`, may discard sealed change sets as abandoned but never a primary
-line, and reports nonzero counts only; pruning uses each kind's declared
+`updatedAt` and leaves one written after it read it, may discard sealed
+change sets as abandoned but never a primary line, and reports nonzero
+counts only; pruning uses each kind's declared
 retention; and the facade's sweep writes as `GraphSweepOptions.Actor`, not
 the context user.
 The TypeScript, Rust and Python engines and facades follow and must pass
@@ -1498,5 +1519,30 @@ none of the schema's parsing, defaults or secret handling.
 | The loader throws `EnvConfigError` naming every missing or invalid variable at once. No message carries a value. | Throwing at the first problem, which makes a deploy fix one variable per restart |
 | It returns a frozen `Loaded<Type>`. A defaulted field is non-null, and each `Secret<T>` field is a `SecretValue`. `JSON.stringify`, `util.inspect`, `console.log` and string conversion print `[secret]`; only `reveal()` returns the value. | Plain strings masked at log time by the generated mask helpers, which works only where a caller remembers to mask |
 | The loader reads no `.env` file. The process that starts the service fills the environment. | Loading `.env` as the Go loader does through `godotenv`, which would add a dependency to every types package |
+
+The rule is reversible until the first release.
+
+## D23. An SDK encodes each path parameter once, as one segment
+
+The TypeScript, Go, Rust and Python SDKs put a path parameter's value into
+the path as it was. The TypeScript SDK's `new URL` and the Rust SDK's
+`Url::set_path` encode a space and non-ASCII text but leave `%` and `/` as
+they are, and `new URL` cuts the path at `?` and `#`. The Go SDK's
+`http.NewRequest` refuses `100%` as a malformed URL, and `/`, `?` and `#`
+split the value. The Python SDK encoded nothing: a space raised
+`InvalidURL`, non-ASCII text `UnicodeEncodeError`, and `?` and `#` broke
+the URL. A server decodes a path parameter exactly once (D15, amended),
+so `x%41y` reached the implementation as `xAy`, `a/b` reached another
+route or none, and `%` could not be sent at all.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each SDK formats a path parameter value as before (a template literal, `fmt.Sprint`, `Display`, `str`), then writes it percent-encoded once, as one path segment: TypeScript with `encodeURIComponent`, Go with `url.PathEscape` (`pathSegment` in `namespaces/common.go`), Rust with the `percent-encoding` crate and the bytes `encodeURIComponent` leaves as they are (`runtime::path_segment`), Python with `urllib.parse.quote(value, safe="")` (`path_segment` in `client.py`). A scoped namespace's scope value is encoded the same way. | Encoding the path once it is built, which cannot tell a `/` in a value from the one between segments; leaving the encoding to each URL library, which is the behavior above |
+| The SDKs need not write the same bytes. Go's `url.PathEscape` leaves `$&+:=@` as they are, and Go and Python escape `!'()*`, which `encodeURIComponent` leaves. Every server decodes either form to the same value. | An encoder of each SDK's own that writes `encodeURIComponent`'s bytes, which no server needs |
+| One test per SDK sends `%`, `a%25b`, `100%`, `x%41y`, `a/b`, `a b`, a non-ASCII value, `a?b`, `a#b` and `a+b` as the label of `grid.cell` (`sdktest.AddCellOperation`, `GET grids/{id}/cells/{label}`), checks the segment on the wire, and checks that a server that decodes it once receives the label. | Checking only the generated source |
+
+A value of `.` or `..` still cannot be sent through the TypeScript or Rust
+SDK: the WHATWG URL parser both build on removes a dot segment, encoded
+(`%2E`) or not. The Go and Python SDKs send it as it is.
 
 The rule is reversible until the first release.

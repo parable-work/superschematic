@@ -1283,13 +1283,13 @@ func (e *Engine) merge(ctx context.Context, tx storage.Tx, source, target storag
 		return nil, err
 	}
 	for _, outcome := range result.Entities {
+		// A result equal to ours is ours' side, a delete on both sides
+		// included, so a delete from another side deletes a live entity of
+		// ours.
 		if outcome.Side == "ours" {
 			continue
 		}
 		if outcome.Deleted {
-			if _, live := oursByKey[outcome.Kind][outcome.EntityKey]; !live {
-				continue
-			}
 			if err := e.deleteEntity(ctx, tx, target, oursByKey, outcome.Kind, outcome.EntityKey, actor); err != nil {
 				return nil, err
 			}

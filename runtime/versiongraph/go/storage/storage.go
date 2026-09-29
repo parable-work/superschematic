@@ -61,7 +61,7 @@ type Tx interface {
 	// written, or ErrVersionConflict.
 	UpdateRef(ctx context.Context, update RefUpdate) (Ref, error)
 	// DiscardRef soft-deletes a live ref at the version it expects, or
-	// returns ErrVersionConflict.
+	// returns ErrVersionConflict and leaves the transaction usable.
 	DiscardRef(ctx context.Context, id string, version int64, actor string) error
 
 	// Rows reads every row a ref holds of one kind, tombstones included,
@@ -103,7 +103,7 @@ type Tx interface {
 	// InsertSnapshot writes a commit's snapshot.
 	InsertSnapshot(ctx context.Context, commit string, entries []SnapshotEntry) error
 	// Commits reads every commit of the graph, in no particular order, with
-	// whether each is tagged, snapshotted and released.
+	// whether each is tagged and snapshotted.
 	Commits(ctx context.Context) ([]CommitNode, error)
 
 	// ReadRelease reads a root's release pointer, or returns ErrNotFound
@@ -242,14 +242,12 @@ type SnapshotEntry struct {
 }
 
 // CommitNode is one commit of the graph as a sweep reads it: its parent
-// ("" for none), and whether it is tagged, has a snapshot, and is a root's
-// released commit.
+// ("" for none), and whether it is tagged and has a snapshot.
 type CommitNode struct {
 	ID       string
 	Parent   string
 	Tagged   bool
 	Snapshot bool
-	Released bool
 }
 
 // Release is a root's release pointer: the commit it names, fenced by its

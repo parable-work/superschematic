@@ -49,12 +49,12 @@ type SweepReport struct {
 // Sweep runs one maintenance pass in one transaction, under the graph's
 // sweep lock; when another pass holds it, Sweep does nothing and reports
 // Skipped. In order, the pass discards the change sets idle past
-// AbandonAfter; deletes the member rows of refs discarded longer ago than
-// DiscardGrace, keeping their ref rows and commits as the audit trail;
-// prunes each kind's history past its declared retention, keeping every
-// row version a patch or a snapshot pins; and writes each snapshot the
-// graph's rules call for and it lacks. Nothing calls Sweep unless a service
-// does.
+// AbandonAfter, leaving one a write reaches after the pass read it;
+// deletes the member rows of refs discarded longer ago than DiscardGrace,
+// keeping their ref rows and commits as the audit trail; prunes each
+// kind's history past its declared retention, keeping every row version a
+// patch or a snapshot pins; and writes each snapshot the graph's rules
+// call for and it lacks. Nothing calls Sweep unless a service does.
 func (e *Engine) Sweep(ctx context.Context, opts SweepOptions) (*SweepReport, error) {
 	actor, err := actorID(opts.Actor)
 	if err != nil {
@@ -81,7 +81,13 @@ func (e *Engine) Sweep(ctx context.Context, opts SweepOptions) (*SweepReport, er
 				return err
 			}
 			for _, ref := range idle {
-				if err := tx.DiscardRef(ctx, ref.ID, ref.Version, actor); err != nil {
+				// A write that reached the ref after IdleDrafts read it moved
+				// its version, so the ref is no longer idle: leave it.
+				err := tx.DiscardRef(ctx, ref.ID, ref.Version, actor)
+				if errors.Is(err, storage.ErrVersionConflict) {
+					continue
+				}
+				if err != nil {
 					return err
 				}
 				report.Abandoned++
@@ -126,10 +132,11 @@ func (e *Engine) Sweep(ctx context.Context, opts SweepOptions) (*SweepReport, er
 }
 
 // backfill writes every snapshot the graph's rules call for and it lacks:
-// of a tagged or released commit, and of a commit snapshotEvery commits past
-// the nearest snapshot on its chain. It visits each commit after its
-// parent, so every walk it takes stops at a snapshot at most snapshotEvery
-// commits away. It returns how many snapshots it wrote.
+// of a tagged commit (Release takes only tagged ones, so this covers a
+// released commit), and of a commit snapshotEvery commits past the nearest
+// snapshot on its chain. It visits each commit after its parent, so every
+// walk it takes stops at a snapshot at most snapshotEvery commits away. It
+// returns how many snapshots it wrote.
 func (e *Engine) backfill(ctx context.Context, tx storage.Tx) (int, error) {
 	nodes, err := tx.Commits(ctx)
 	if err != nil {
@@ -162,7 +169,7 @@ func (e *Engine) backfill(ctx context.Context, tx storage.Tx) (int, error) {
 				continue
 			}
 			d := distance[n.Parent] + 1
-			if n.Tagged || n.Released || d >= e.snapshotEvery {
+			if n.Tagged || d >= e.snapshotEvery {
 				took, err := e.ensureSnapshot(ctx, tx, storage.Commit{ID: n.ID})
 				if err != nil {
 					return 0, err

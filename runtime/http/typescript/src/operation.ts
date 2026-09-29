@@ -63,7 +63,7 @@ export interface RequestContext {
   readonly signal: AbortSignal;
   /** The client IP as the Go runtime reports it (X-Forwarded-For, X-Real-IP, then the socket); absent when unknown. */
   readonly clientIp?: string;
-  /** Raw path captures by wire name. */
+  /** Path captures by wire name, each percent-decoded once. */
   readonly pathParams: Readonly<Record<string, string>>;
   readonly query: URLSearchParams;
   /** The authenticated caller, null on public and unauthenticated routes. */

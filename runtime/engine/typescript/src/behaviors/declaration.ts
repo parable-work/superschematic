@@ -3,17 +3,18 @@ A behavior's declaration: the JSON document the compiler registers
 (registry.BehaviorSpec, section 3.16 of docs/extension-model.md) and an
 implementation carries, so the engine and the compiler read one file. The
 engine checks the shape again when an implementation registers, since the
-file it is given need not be the one a binary embedded, and adds two rules
-of its own:
+file it is given need not be the one a binary embedded. An operation's
+paramsSchema sets `additionalProperties: false`, so its parameters are
+exactly the ones it declares: a guard and the handler read the same
+validated object, and no key they do not both know can reach one of them.
+The compiler's registry refuses the same declarations, with the same
+wording.
 
-- a name is `<extension>.<Name>` with an extension name of a letter, then
-  letters, digits, `_` and `-`, or a bare `<Name>` for a core behavior. The
-  compiler takes any extension name without a dot; the engine keys a
-  behavior's migrations by its name, and the ledger takes these;
-- an operation's paramsSchema sets `additionalProperties: false`, so its
-  parameters are exactly the ones it declares. A guard and the handler
-  read the same validated object, and no key they do not both know can
-  reach one of them.
+The engine adds one rule of its own: a name is `<extension>.<Name>` with
+an extension name of a letter, then letters, digits, `_` and `-`, or a
+bare `<Name>` for a core behavior. The compiler takes any extension name
+without a dot; the engine keys a behavior's migrations by its name, and
+the ledger takes these.
 */
 
 import { isPlainObject } from '../instances/patch.js';

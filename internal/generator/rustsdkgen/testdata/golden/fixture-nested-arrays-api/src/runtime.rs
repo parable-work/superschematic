@@ -2,6 +2,7 @@ use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use regex::Regex;
@@ -15,6 +16,27 @@ use std::sync::OnceLock;
 use std::sync::Arc;
 
 use crate::errors::SDKError;
+
+/// The bytes JavaScript's encodeURIComponent writes as they are: ASCII
+/// letters and digits and `-_.!~*'()`. Every other byte is percent-encoded.
+const PATH_SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'!')
+    .remove(b'~')
+    .remove(b'*')
+    .remove(b'\'')
+    .remove(b'(')
+    .remove(b')');
+
+/// Writes a path parameter value as one path segment, percent-encoded once
+/// as encodeURIComponent writes it. Every server decodes a path parameter
+/// exactly once, so a value holding %, /, ? or # reaches the implementation
+/// as it was passed; `Url::set_path` would leave % and / as they are.
+pub fn path_segment(value: &impl std::fmt::Display) -> String {
+    utf8_percent_encode(&value.to_string(), PATH_SEGMENT).to_string()
+}
 
 #[derive(Debug, Clone)]
 pub struct UploadFile {

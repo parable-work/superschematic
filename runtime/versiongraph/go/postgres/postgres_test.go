@@ -29,20 +29,41 @@ func readDescriptor(t *testing.T) json.RawMessage {
 	return descriptor
 }
 
-// TestNewNeedsEveryKindsRootColumn: the adapter writes each row's root, so
-// a descriptor that does not name a kind's root column is refused.
-func TestNewNeedsEveryKindsRootColumn(t *testing.T) {
-	var descriptor map[string]any
-	if err := json.Unmarshal(readDescriptor(t), &descriptor); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := postgres.New(mustJSON(t, descriptor), postgres.Options{}); err != nil {
-		t.Fatalf("the fixture's descriptor: %v", err)
-	}
-	delete(descriptor["kinds"].([]any)[0].(map[string]any), "root")
-	_, err := postgres.New(mustJSON(t, descriptor), postgres.Options{})
-	if err == nil || !strings.Contains(err.Error(), "has no root") {
-		t.Fatalf("a kind without a root column: %v, want it refused", err)
+// TestNew: the adapter takes the fixture's descriptor and refuses one that
+// leaves out what it builds statements from: a graph table, a kind's root
+// column, or a role column the kind's columns do not declare.
+func TestNew(t *testing.T) {
+	kind := func(d map[string]any) map[string]any { return d["kinds"].([]any)[0].(map[string]any) }
+	for _, c := range []struct {
+		name   string
+		edit   func(d map[string]any)
+		refuse string
+	}{
+		{"the fixture's descriptor", func(map[string]any) {}, ""},
+		{"an empty refTable", func(d map[string]any) { d["refTable"] = "" }, "refTable is empty"},
+		{"an empty commitTable", func(d map[string]any) { d["commitTable"] = "" }, "commitTable is empty"},
+		{"an empty patchTable", func(d map[string]any) { d["patchTable"] = "" }, "patchTable is empty"},
+		{"an empty releaseTable", func(d map[string]any) { d["releaseTable"] = "" }, "releaseTable is empty"},
+		{"an empty snapshotTable", func(d map[string]any) { d["snapshotTable"] = "" }, "snapshotTable is empty"},
+		{"a kind without a root column", func(d map[string]any) { delete(kind(d), "root") }, "has no root"},
+		{"a role column missing from the kind's columns", func(d map[string]any) {
+			delete(kind(d)["columns"].(map[string]any), "_version")
+		}, `version column "_version" is not in its columns`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var descriptor map[string]any
+			if err := json.Unmarshal(readDescriptor(t), &descriptor); err != nil {
+				t.Fatal(err)
+			}
+			c.edit(descriptor)
+			_, err := postgres.New(mustJSON(t, descriptor), postgres.Options{})
+			switch {
+			case c.refuse == "" && err != nil:
+				t.Fatalf("refused: %v", err)
+			case c.refuse != "" && (err == nil || !strings.Contains(err.Error(), c.refuse)):
+				t.Fatalf("New = %v, want it refused with %q", err, c.refuse)
+			}
+		})
 	}
 }
 

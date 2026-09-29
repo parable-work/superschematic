@@ -189,7 +189,7 @@ export class TenantNamespace {
   ): Promise<TenantView> {
     // Make GET request
     const result = await this.client.get<TenantView>(
-      `/api/tenants/${id}`,
+      `/api/tenants/${encodeURIComponent(id)}`,
       { signal, params }
     );
     return parseTenantViewFromJSON(result);
@@ -237,7 +237,7 @@ export class TenantNamespace {
     );
     // Make PATCH request
     const result = await this.client.patch<TenantView>(
-      `/api/tenants/${id}`,
+      `/api/tenants/${encodeURIComponent(id)}`,
       requestPayload,
       {signal: options?.signal }
     );
