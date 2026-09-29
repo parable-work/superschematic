@@ -843,11 +843,11 @@ func (t *tx) InsertSnapshot(ctx context.Context, commit string, entries []storag
 
 func (t *tx) Commits(ctx context.Context) ([]storage.CommitNode, error) {
 	var out []storage.CommitNode
-	sql := `SELECT c.id::text, COALESCE(c.parent_commit_id::text, ''), c."sequence" IS NOT NULL, ` + t.hasSnapshot("c.id") + `, ` +
-		`EXISTS (SELECT 1 FROM ` + t.a.releaseTable + ` AS r WHERE r.commit_id = c.id) FROM ` + t.a.commitTable + ` AS c`
+	sql := `SELECT c.id::text, COALESCE(c.parent_commit_id::text, ''), c."sequence" IS NOT NULL, ` + t.hasSnapshot("c.id") + ` ` +
+		`FROM ` + t.a.commitTable + ` AS c`
 	err := t.conn.Query(ctx, sql, nil, func(scan func(dest ...any) error) error {
 		var n storage.CommitNode
-		if err := scan(&n.ID, &n.Parent, &n.Tagged, &n.Snapshot, &n.Released); err != nil {
+		if err := scan(&n.ID, &n.Parent, &n.Tagged, &n.Snapshot); err != nil {
 			return err
 		}
 		var err error

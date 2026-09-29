@@ -43,6 +43,8 @@ func TestNew(t *testing.T) {
 		{"an empty refTable", func(d map[string]any) { d["refTable"] = "" }, "refTable is empty"},
 		{"an empty commitTable", func(d map[string]any) { d["commitTable"] = "" }, "commitTable is empty"},
 		{"an empty patchTable", func(d map[string]any) { d["patchTable"] = "" }, "patchTable is empty"},
+		{"an empty releaseTable", func(d map[string]any) { d["releaseTable"] = "" }, "releaseTable is empty"},
+		{"an empty snapshotTable", func(d map[string]any) { d["snapshotTable"] = "" }, "snapshotTable is empty"},
 		{"a kind without a root column", func(d map[string]any) { delete(kind(d), "root") }, "has no root"},
 		{"a role column missing from the kind's columns", func(d map[string]any) {
 			delete(kind(d)["columns"].(map[string]any), "_version")

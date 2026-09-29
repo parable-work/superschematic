@@ -1409,8 +1409,9 @@ verification, not the data form's JSON Schema, rejects a `snapshotEvery`
 that is not positive, since that schema's subset has no numeric bounds; a
 sweep runs in one transaction, keeps discarded refs' rows for seven days
 unless told otherwise, reads a change set's last write from its
-`updatedAt`, may discard sealed change sets as abandoned but never a primary
-line, and reports nonzero counts only; pruning uses each kind's declared
+`updatedAt` and leaves one written after it read it, may discard sealed
+change sets as abandoned but never a primary line, and reports nonzero
+counts only; pruning uses each kind's declared
 retention; and the facade's sweep writes as `GraphSweepOptions.Actor`, not
 the context user.
 The TypeScript, Rust and Python engines and facades follow and must pass
