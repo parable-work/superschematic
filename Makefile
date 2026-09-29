@@ -30,7 +30,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check ts python rust \
-        versiongraph docs cli-smoke scrub clean
+        versiongraph docs cli-smoke scrub versions clean
 
 all: build test lint
 
@@ -127,7 +127,13 @@ cli-smoke: $(BIN)
 scrub:
 	scripts/scrub-check.sh
 
-test: go-test catalog-check schema-file-types-check ts python rust cli-smoke
+# Every version site agrees with versions.env, and bump_version.py, which
+# writes them, passes its tests. CI runs both in the scrub job.
+versions:
+	python3 scripts/bump_version.py check
+	python3 -m unittest discover -s scripts -p 'test_*.py'
+
+test: go-test catalog-check schema-file-types-check ts python rust cli-smoke versions
 
 lint: go-vet go-fmt-check go-lint scrub
 
