@@ -3,9 +3,8 @@
 
   python3 -m unittest discover -s scripts -p 'test_*.py'
 
-Each test copies every version site into a temporary directory, writes its
-own CHANGELOG.md there and points the script at it, so the checkout is
-never written and the tests do not depend on the checkout's changelog.
+Each test copies every version site into a temporary directory and points
+the script at it, so the checkout is never written.
 
 Python 3.9+, standard library only.
 """
@@ -29,18 +28,6 @@ PYPROJECT = Path("runtime", "schema", "python", "pyproject.toml")
 # packages at the same version (superscalar is 0.1.0), which must not move.
 UV_LOCK_ENTRY = re.compile(r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")([^"]+)(")')
 
-CHANGELOG = """# Changelog
-
-## [Unreleased]
-
-### Fixed
-
-- A fix. Patch.
-
-[Unreleased]: {url}/commits/main
-""".format(url=bump_version.REPO_URL)
-
-
 class BumpVersionTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -50,11 +37,9 @@ class BumpVersionTest(unittest.TestCase):
         for rel in rels | {UV_LOCK}:
             (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(bump_version.ROOT / rel, self.root / rel)
-        (self.root / "CHANGELOG.md").write_text(CHANGELOG, encoding="utf-8")
-        for name, value in (("ROOT", self.root), ("CHANGELOG", self.root / "CHANGELOG.md")):
-            patcher = mock.patch.object(bump_version, name, value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(bump_version, "ROOT", self.root)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def read(self, rel: Path) -> str:
         return (self.root / rel).read_text(encoding="utf-8")
@@ -80,7 +65,7 @@ class BumpVersionTest(unittest.TestCase):
     def test_set_writes_the_uv_lock_in_pep440_form(self):
         before = self.read(UV_LOCK).splitlines()
         with contextlib.redirect_stdout(io.StringIO()):
-            status = bump_version.main(["set", "1.2.3-beta.4", "--date", "2026-01-02"])
+            status = bump_version.main(["set", "1.2.3-beta.4"])
         self.assertEqual(status, 0)
         self.assertEqual(self.lock_version(), "1.2.3b4")
         self.assertIn('\nversion = "1.2.3b4"\n', self.read(PYPROJECT))
