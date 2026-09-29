@@ -1,0 +1,64 @@
+---
+// Quotes a file of examples/acme-shop, read when the site builds, so the code
+// on a page is the code that example builds and tests
+// (examples/acme-shop/scripts/check.sh). See src/lib/snippet.ts for how a
+// page picks the part it quotes.
+//
+// Files under testdata/generated/ are committed copies of the build's output; the
+// title shows them where a reader's own build writes them, under
+// schemas/dist/. Files under testdata/generated/logs/ are the output of the
+// commands the pages show, and carry no title.
+import { Code } from '@astrojs/starlight/components';
+import { extract } from '../lib/snippet';
+
+const files = import.meta.glob(
+  [
+    '../../../examples/acme-shop/**/*.{ts,go,sql,toml,json,mod,sh,txt,py,rs}',
+    '!../../../examples/acme-shop/**/node_modules/**',
+    '!../../../examples/acme-shop/schemas/dist/**',
+    '!../../../examples/acme-shop/rust/target/**',
+  ],
+  { query: '?raw', import: 'default', eager: true }
+) as Record<string, string>;
+
+const languages: Record<string, string> = {
+  ts: 'ts',
+  go: 'go',
+  sql: 'sql',
+  toml: 'toml',
+  json: 'json',
+  mod: 'go',
+  sh: 'sh',
+  txt: 'text',
+  py: 'python',
+  rs: 'rust',
+};
+
+interface Props {
+  /** Path under examples/acme-shop. */
+  file: string;
+  symbol?: string | string[];
+  from?: string;
+  to?: string;
+  lang?: string;
+  /** Replaces the title, which defaults to the file's path in a reader's project. */
+  title?: string;
+  /** Line numbers or text to highlight, passed to the code block. */
+  mark?: string | string[];
+}
+
+const { file, symbol, from, to, lang, title, mark } = Astro.props;
+const source = files[`../../../examples/acme-shop/${file}`];
+if (source === undefined) {
+  throw new Error(`Snippet: examples/acme-shop/${file} does not exist`);
+}
+const code = extract(source, { file, symbol, from, to });
+const extension = file.split('.').pop() ?? '';
+const logs = 'testdata/generated/logs/';
+const generated = 'testdata/generated/';
+const shown =
+  title ??
+  (file.startsWith(logs) ? undefined : file.startsWith(generated) ? `schemas/dist/${file.slice(generated.length)}` : file);
+---
+
+<Code code={code} lang={lang ?? languages[extension] ?? 'text'} title={shown} mark={mark} />

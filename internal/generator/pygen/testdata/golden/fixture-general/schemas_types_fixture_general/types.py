@@ -15,6 +15,8 @@ import re
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError as PydanticValidationError
 
 from .scalars import (
+    GenericInt64,
+    IdentityName,
     NetworkUrl
 )
 
@@ -63,14 +65,9 @@ class FixtureConfig(BaseModel):
 
     environment: FixtureEnvironment = Field(default="development", alias="ENVIRONMENT", serialization_alias="ENVIRONMENT")
 
-    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+    def validate_all(self) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
-
-        Args:
-            by_alias: Key errors by the fields' wire names, as the Go and
-                TypeScript validators and the SDK do, instead of their
-                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -99,14 +96,6 @@ class FixtureConfig(BaseModel):
         # Validate ENVIRONMENT
         if self.environment is None:
             errors.add_field_error("environment", "required", "required field")
-
-        if by_alias:
-            return errors._with_field_names({
-                "database_url": "DATABASE_URL",
-                "jwt_secret": "JWT_SECRET",
-                "port": "PORT",
-                "environment": "ENVIRONMENT",
-            })
 
         return errors
 
@@ -250,14 +239,14 @@ class FixtureFilter(BaseModel):
 
     values: Optional[List[str]] = Field(default=None, alias="values", serialization_alias="values")
 
-    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+    # Scalars with rules of their own, checked after the scalar's.
+    min_cents: GenericInt64 = Field(..., alias="minCents", serialization_alias="minCents")
+
+    labels: Optional[List[IdentityName]] = Field(default=None, alias="labels", serialization_alias="labels")
+
+    def validate_all(self) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
-
-        Args:
-            by_alias: Key errors by the fields' wire names, as the Go and
-                TypeScript validators and the SDK do, instead of their
-                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -295,6 +284,46 @@ class FixtureFilter(BaseModel):
                 errors.add_field_error("values", "listMax", "must contain at most 10 items")
             if isinstance(self.values, list) and len(self.values) < 1:
                 errors.add_field_error("values", "listMin", "must contain at least 1 items")
+
+        # Validate minCents
+        if self.min_cents is None:
+            errors.add_field_error("min_cents", "required", "required field")
+        else:
+
+            if float(self.min_cents) < -9007199254740991:
+                errors.add_field_error("min_cents", "min", "must be at least -9007199254740991")
+            if float(self.min_cents) > 9007199254740991:
+                errors.add_field_error("min_cents", "max", "must be at most 9007199254740991")
+            if float(self.min_cents) < 0:
+                errors.add_field_error("min_cents", "min", "must be at least 0")
+
+        # Validate labels
+        if self.labels is not None:
+
+            if isinstance(self.labels, list):
+                for index, item in enumerate(self.labels):
+                    if item is None:
+                        errors.add_field_error(f"labels[{index}]", "required", "required field")
+            if isinstance(self.labels, list):
+                for index, item in enumerate(self.labels):
+                    if item is not None and len(str(item)) > 80:
+                        errors.add_field_error(f"labels[{index}]", "maxLength", "must be at most 80 characters")
+            if isinstance(self.labels, list):
+                for index, item in enumerate(self.labels):
+                    if item is not None and len(str(item)) < 2:
+                        errors.add_field_error(f"labels[{index}]", "minLength", "must be at least 2 characters")
+            if isinstance(self.labels, list):
+                for index, item in enumerate(self.labels):
+                    if item is not None and len(str(item)) > 16:
+                        errors.add_field_error(f"labels[{index}]", "maxLength", "must be at most 16 characters")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "labels" or key.startswith("labels[") for key in errors.errors):
+                try:
+                    TypeAdapter(List[IdentityName]).validate_python(self.labels)
+                except PydanticValidationError as e:
+                    errors.add_field_error("labels", "invalid", str(e))
 
         return errors
 
@@ -435,14 +464,9 @@ class RetryPolicy(BaseModel):
 
     backoff_seconds: Optional[float] = Field(default=None, alias="backoffSeconds", serialization_alias="backoffSeconds")
 
-    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+    def validate_all(self) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
-
-        Args:
-            by_alias: Key errors by the fields' wire names, as the Go and
-                TypeScript validators and the SDK do, instead of their
-                snake_case names.
 
         Returns:
             ValidationErrors object containing any validation errors.
@@ -460,12 +484,6 @@ class RetryPolicy(BaseModel):
                 TypeAdapter(float).validate_python(self.backoff_seconds)
             except PydanticValidationError as e:
                 errors.add_field_error("backoff_seconds", "invalid", str(e))
-
-        if by_alias:
-            return errors._with_field_names({
-                "max_attempts": "maxAttempts",
-                "backoff_seconds": "backoffSeconds",
-            })
 
         return errors
 

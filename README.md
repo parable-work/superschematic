@@ -79,7 +79,10 @@ bin/superschematic build path/to/schemas/services/my-service
 ```
 
 `superschematic build <service-dir>` reads `<schemas-root>/superschematic.toml`
-for names and writes to `<schemas-root>/dist`. `examples/acme-schematic` is a
+for names and writes to `<schemas-root>/dist`. `examples/acme-shop` is the
+docs site's tutorial project: four services built with the core binary,
+and a Go and a TypeScript app that serve and call what they generate;
+`examples/acme-shop/scripts/check.sh` builds and tests it. `examples/acme-schematic` is a
 complete downstream example: a schemas root with one service per kind and an
 extension that adds a kind, a decorator, a document, a generator, an auth
 provider and a command without editing the core. Its README walks through

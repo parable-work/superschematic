@@ -1,0 +1,207 @@
+---
+title: Getting started
+description: Build the CLI, compile one schema, and use the Go and TypeScript types it generates.
+sidebar:
+  order: 2
+---
+
+import { FileTree, LinkCard, TabItem, Tabs } from '@astrojs/starlight/components';
+import Snippet from '../../../components/Snippet.astro';
+
+This page takes one small schema from source to working code. The acme
+shop shows prices to shoppers in more than one currency, so it declares a
+`Price` type once, and superschematic generates packages in Go,
+TypeScript, Python and Rust that decode and validate it the same way.
+
+The schema is the `shop-common` service of `examples/acme-shop`, the
+project the [first project](/superschematic/first-project/) tutorial
+builds out. Every file on this page is quoted from that directory, and
+`examples/acme-shop/scripts/check.sh` builds and tests it on every pull
+request. You can follow along there or copy the files into a project of
+your own.
+
+## Build the CLI
+
+Set up the checkout as [Prerequisites](/superschematic/start/prerequisites/)
+describes, then build the binary and put it on your `PATH`:
+
+```sh
+make build
+export PATH="$PWD/bin:$PATH"
+superschematic --help
+```
+
+The core binary has four commands: `build`, `build-all`, `format` and
+`json-schema`. The [CLI reference](/superschematic/reference/cli/) lists
+their flags.
+
+## Lay out a schemas root
+
+superschematic reads a schemas root: a naming file, a TypeScript
+configuration and one directory per service.
+
+<FileTree>
+- schemas/
+  - superschematic.toml names and coordinates of the generated packages
+  - tsconfig.base.json where schema files find their imports
+  - services/
+    - shop-common/
+      - schema.config.ts the service's kind and outputs
+      - package.json
+      - tsconfig.json
+      - src/
+        - index.ts
+        - price.schema.ts the types
+</FileTree>
+
+## Write the schema
+
+<Snippet file="schemas/services/shop-common/src/price.schema.ts" />
+
+- An abstract class declares an object type and an `enum` an enum. The
+  classes are abstract because nothing runs them: the compiler reads their
+  declarations.
+- `Generic.Int64` is a scalar from
+  [superscalar](https://github.com/parable-work/superscalar). It is
+  `GenericInt64`, an `int64`, in Go and `number` in TypeScript. superscalar
+  has about forty scalars (email addresses, UUIDs, slugs, date-times) that
+  parse and validate the same way in every language.
+- The comment above `Price` becomes its documentation in every generated
+  language.
+
+## Configure the service
+
+<Snippet file="schemas/services/shop-common/schema.config.ts" />
+
+`kind` says what the schema describes. A `General` schema holds plain
+types; the other core kinds are `DB` (tables) and `API` (routes).
+`outputs.types` lists the languages to generate types in: Go, TypeScript,
+Python or Rust.
+
+The two `tsconfig` files let the compiler resolve the schema's imports.
+`tsconfig.base.json` at the schemas root maps the authoring packages and
+superscalar to their sources, since none of them is published yet:
+
+<Snippet file="schemas/tsconfig.base.json" from='"paths"' to="}" />
+
+## Name the generated packages
+
+`superschematic.toml` gives every generated package its coordinates. The
+acme shop publishes Go modules under `example.com/acme` and npm packages
+under the `@acme` scope:
+
+<Snippet file="schemas/superschematic.toml" from="go_module_root" to="package_author" />
+
+A key left out keeps its default, so the file can start empty. The
+`[paths]` table below these keys points the generated packages' path
+dependencies at your checkout until the runtimes are published. The
+[naming reference](/superschematic/reference/naming/) lists every key.
+
+## Build
+
+From the directory that holds `schemas/`:
+
+```sh
+superschematic build schemas/services/shop-common
+```
+
+<Snippet file="testdata/generated/logs/build-shop-common.txt" />
+
+Output goes to `schemas/dist`. The first build also writes
+`src/service.generated.ts` and exports it from `src/index.ts`: a handle
+other services import when they depend on this one. Commit both; later
+builds report the sentinel up to date.
+
+<FileTree>
+- schemas/dist/types/
+  - go/shop-common/ the Go module example.com/acme/types/go/shop-common
+    - go.mod
+    - types.go
+    - enums.go
+    - scalars.go
+  - typescript/
+    - package.json a Bun workspace of every generated types package
+    - shop-common/ the npm package @acme/shop-common-types
+      - types/
+      - validators/
+      - index.ts
+  - python/shop-common/ the Python package acme_types_shop_common
+  - rust/shop-common/ the crate acme-shop-common-types
+</FileTree>
+
+Each package declares the same type:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    <Snippet file="testdata/generated/types/go/shop-common/types.go" symbol="Price" />
+    Next to the struct are `Validate`, `PriceFromJSON`, `PriceFromYAML`, the
+    `NonStrict` variants that accept unknown keys, and JSON and YAML
+    marshalling.
+  </TabItem>
+  <TabItem label="TypeScript">
+    <Snippet file="testdata/generated/types/typescript/shop-common/types/types.ts" symbol="Price" />
+    The package also exports `validatePrice`, `parsePriceJson`,
+    `parsePriceYaml` and the `NonStrict` variants that accept unknown keys.
+  </TabItem>
+  <TabItem label="Python">
+    <Snippet file="testdata/generated/types/python/shop-common/acme_types_shop_common/types.py" from="class Price(BaseModel):" to="currency: Currency = Field" />
+    A pydantic model, with `validate_all`, `from_json`, `from_yaml`, the
+    `_non_strict` variants and `to_json`.
+  </TabItem>
+  <TabItem label="Rust">
+    <Snippet file="testdata/generated/types/rust/shop-common/src/types.rs" symbol="Price" />
+    A serde struct, with the JSON names as renames.
+  </TabItem>
+</Tabs>
+
+## Use the types
+
+Decoding checks every field: a value of the wrong JSON type fails, and so
+does a currency outside the enum.
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    <Snippet file="go/price_test.go" symbol={['ExamplePriceFromJSON', 'ExamplePrice_Validate', 'ExamplePriceFromJSON_wrongType']} />
+    The generated module is an ordinary Go module. Until you publish it,
+    require it and point a `replace` line at the build output, as
+    `examples/acme-shop/go/go.mod` does:
+
+    <Snippet file="go/go.mod" from="example.com/acme/types/go/shop-common =>" />
+
+    Building it links superscalar through cgo, so export the flags
+    [Prerequisites](/superschematic/start/prerequisites/#compile-generated-go-code)
+    describes first.
+  </TabItem>
+  <TabItem label="TypeScript">
+    <Snippet file="typescript/price.test.ts" />
+    `schemas/dist/types/typescript` is a Bun workspace. Run `bun install`
+    there after each build; a service that consumes the package adds that
+    directory to its own workspace. The
+    [TypeScript page](/superschematic/install/typescript/) covers the
+    install in more detail.
+  </TabItem>
+  <TabItem label="Python">
+    <Snippet file="python/types_test.py" symbol="test_a_price_decodes" />
+    Put `schemas/dist/types/python/shop-common` on `PYTHONPATH`, or install
+    it with pip from that directory. It needs pydantic 2 and the
+    `superscalar` package.
+  </TabItem>
+  <TabItem label="Rust">
+    <Snippet file="rust/src/types_test.rs" symbol="a_price_decodes" />
+    Depend on the crate by path, as `examples/acme-shop/rust/Cargo.toml`
+    does.
+  </TabItem>
+</Tabs>
+
+## Next
+
+<LinkCard
+  title="How it works"
+  description="Kinds, outputs, the naming file and the IR: the model behind the build you just ran."
+  href="/superschematic/start/how-it-works/"
+/>
+<LinkCard
+  title="Your first project"
+  description="Grow the acme shop into a database, a Go API and a TypeScript API."
+  href="/superschematic/first-project/"
+/>
