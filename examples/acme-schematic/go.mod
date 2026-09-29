@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/microsoft/typescript-go v0.0.0
-	github.com/parable-work/superscalar/go v0.0.0-20260928025218-f1440d957085
+	github.com/parable-work/superscalar/go v0.0.0-20260928143325-10cf493f485e
 	github.com/parable-work/superschematic v0.0.0
 	github.com/parable-work/superschematic/ir v0.0.0
 	github.com/spf13/cobra v1.10.2
