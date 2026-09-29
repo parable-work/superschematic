@@ -13,6 +13,30 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- `scripts/bump_version.py` versions the Python runtime's own entry in
+  `runtime/schema/python/uv.lock` (`superschematic-schema-runtime`), in
+  the PEP 440 form its `pyproject.toml` carries: `set` writes it and
+  `check` fails when it disagrees with `versions.env`. The committed
+  lockfile said `0.1.0` while every other site said `0.0.0`, so `uv sync`
+  (and `make setup`) rewrote it and left the tree dirty; it now says
+  `0.0.0`. The script has tests, which CI's scrub job and
+  `make versions` run. Patch (release tooling only).
+- The generated TypeScript validator checks a scalar field's own rules.
+  For a field typed with a scalar it ran the scalar's validator and the
+  list bounds only, and dropped the field's `minLength`, `maxLength`,
+  `pattern`, `min` and `max`: `Validate<Generic.Int64, { min: 0 }>`
+  accepted `-1`, which the Go and Python validators and the three schema
+  runtimes report as `min`. The rules now follow the scalar's validation
+  on a single value, every `T[]` element, every innermost `T[][]` element
+  and every map value, with the rule names and messages the Go types use.
+  A rule checks only a value of its own JSON type, so a mistyped value is
+  still the scalar's one `type` error. A package whose only range rules
+  are on scalar fields now writes `validators/primitives.ts` for
+  `isFiniteNumber`. The parity matrix gains `ScalarRuleMatrix` (D14). The
+  Go and Python types already checked these rules, and the Rust types
+  have no validator; their generators are unchanged. Behavior change: a
+  generated TypeScript validator refuses a value its field's rules reject,
+  which it accepted. Minor.
 - Verification refuses an `@index` of a DB table that the SQL generator
   cannot build: one with a key that resolves to no column of the table, or
   one with no keys. The SQL generator left such an index out of the DDL
