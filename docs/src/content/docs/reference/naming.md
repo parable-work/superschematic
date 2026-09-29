@@ -300,7 +300,9 @@ Default: unset (no extra files)
 
 Repo-relative files hashed into every `build-all` cache key alongside the
 schema tree, the tool digest and the workspace lockfile: files generation
-reads that live outside the schema tree.
+reads that live outside the schema tree. The repository root is the
+parent of the schemas root. An absolute entry is an error that names it,
+such as `cache.inputs[0]`.
 
 ## `[paths]`
 
@@ -376,11 +378,11 @@ Default: unset (the graph is written only to `<output-root>/.deps.json`)
 
 Repo-relative path that `build-all` also writes the dependency graph of
 the generated packages to, byte for byte. The repository root is the
-parent of the schemas root, as for `[paths]`. The output root is usually
-ignored by version control; a copy outside it can be committed, so CI or
-a pin tool reads the graph without building. `--deps-copy` overrides it.
-The key is not part of the build cache key: moving the copy rebuilds
-nothing.
+parent of the schemas root, as for `[paths]`. An absolute value is an
+error. The output root is usually ignored by version control; a copy
+outside it can be committed, so CI or a pin tool reads the graph without
+building. `--deps-copy` overrides it and may be absolute. The key is not
+part of the build cache key: moving the copy rebuilds nothing.
 
 ## `[extension.<name>]`
 

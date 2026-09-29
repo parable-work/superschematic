@@ -216,6 +216,44 @@ func TestParseReadsDepsTable(t *testing.T) {
 	}
 }
 
+// TestParseRejectsAbsoluteDepsAndCachePaths: DepsCopyPath and the build
+// cache join [deps] copy and each [cache] inputs entry under the repository
+// root, so an absolute value would write the graph to <root>/<value>, or
+// hash a missing file that no edit invalidates.
+func TestParseRejectsAbsoluteDepsAndCachePaths(t *testing.T) {
+	for _, value := range []string{"/Users/me/deps.json", t.TempDir()} {
+		for _, tc := range []struct{ file, key string }{
+			{"[deps]\ncopy = '" + value + "'\n", "deps.copy"},
+			{"[cache]\ninputs = ['" + value + "']\n", "cache.inputs[0]"},
+			{"[cache]\ninputs = ['docs/extra.yml', '" + value + "']\n", "cache.inputs[1]"},
+		} {
+			_, err := Parse([]byte(tc.file), "superschematic.toml")
+			if err == nil {
+				t.Errorf("%s = %q: Parse accepted an absolute path", tc.key, value)
+				continue
+			}
+			for _, want := range []string{"superschematic.toml", tc.key + " ", "relative to the parent of the schemas root"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%s = %q: err = %v, want it to contain %q", tc.key, value, err, want)
+				}
+			}
+		}
+	}
+}
+
+// TestParseAcceptsAbsoluteCacheRoot: [cache] root is not repo-relative, so
+// the check on inputs must not reach it.
+func TestParseAcceptsAbsoluteCacheRoot(t *testing.T) {
+	root := t.TempDir()
+	n, err := Parse([]byte("[cache]\nroot = '"+root+"'\ninputs = ['docs/extra.yml']\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if n.Cache.Root != root {
+		t.Fatalf("Cache.Root = %q, want %q", n.Cache.Root, root)
+	}
+}
+
 func TestParseRejectsUnknownTopLevelTable(t *testing.T) {
 	_, err := Parse([]byte("[extensions.acme]\nk = \"v\"\n"), "test.toml")
 	if err == nil {

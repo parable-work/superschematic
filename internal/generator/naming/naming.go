@@ -167,7 +167,9 @@ type DepsConfig struct {
 	// the schemas root, as for [paths]) that build-all also writes the
 	// graph to, byte for byte. The output root is usually ignored by
 	// version control; a copy outside it can be committed, so a tool reads
-	// the graph without building. The --deps-copy flag overrides it.
+	// the graph without building. The --deps-copy flag overrides it. Parse
+	// refuses an absolute value, which DepsCopyPath would join under the
+	// root.
 	Copy string `toml:"copy"`
 }
 
@@ -177,6 +179,14 @@ func (n Naming) DepsCopyPath(repoRoot string) string {
 		return ""
 	}
 	return filepath.Join(repoRoot, filepath.FromSlash(n.Deps.Copy))
+}
+
+// checkRelative returns an error when copy is an absolute path.
+func (d DepsConfig) checkRelative() error {
+	if isAbsPath(d.Copy) {
+		return fmt.Errorf("deps.copy %q is an absolute path: [deps] copy is relative to the parent of the schemas root", d.Copy)
+	}
+	return nil
 }
 
 // PathsConfig is the [paths] table of superschematic.toml: where the
@@ -280,8 +290,28 @@ type CacheConfig struct {
 	// Inputs are repo-relative files hashed into every build-all cache key
 	// alongside the schema tree, the tool tree and the workspace lockfile:
 	// files generation reads that live outside the schema tree, so a change
-	// to them cannot reuse an entry built before it.
+	// to them cannot reuse an entry built before it. Parse refuses an
+	// absolute entry, which the cache would join under the root and hash as
+	// a missing file.
 	Inputs []string `toml:"inputs"`
+}
+
+// checkRelative returns an error naming the first inputs entry that is an
+// absolute path. Root is not checked: it may be absolute.
+func (c CacheConfig) checkRelative() error {
+	for i, input := range c.Inputs {
+		if isAbsPath(input) {
+			return fmt.Errorf("cache.inputs[%d] %q is an absolute path: [cache] inputs are relative to the parent of the schemas root", i, input)
+		}
+	}
+	return nil
+}
+
+// isAbsPath reports whether a repo-relative value is an absolute path. A
+// leading slash counts on every platform, so a value written on macOS or
+// Linux fails the same way on Windows.
+func isAbsPath(value string) bool {
+	return strings.HasPrefix(value, "/") || filepath.IsAbs(value)
 }
 
 // ExtensionConfig returns the [extension.<name>] table from the loaded file
@@ -596,6 +626,12 @@ func Parse(data []byte, name string) (Naming, error) {
 	}
 	if n.ScalarJSDocTag != "" && !jsdocTagRE.MatchString(n.ScalarJSDocTag) {
 		return Naming{}, fmt.Errorf("naming: %s: scalar_jsdoc_tag %q is not a JSDoc tag name: use letters, digits and _, not starting with a digit, without the @", name, n.ScalarJSDocTag)
+	}
+	if err := n.Deps.checkRelative(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if err := n.Cache.checkRelative(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	n = n.OrDefault()
 	if !historyActorSettingRE.MatchString(n.HistoryActorSetting) {
