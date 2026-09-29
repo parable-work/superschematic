@@ -10,7 +10,6 @@ import (
 	"fmt"
 	gohttp "net/http"
 	"strconv"
-	"strings"
 
 	types "example.com/schemas/types/go/body-args-api"
 	"github.com/go-chi/chi/v5"
@@ -127,7 +126,7 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/posts/search",
 			Handler: createTagSearchPostsHandler(cfg.Implementations.Tag),
 		},
-		// Find posts by label; the labels travel in the query string.
+		// Find posts by label, rank, code and page, all in the query string.
 		{
 			Method:  "GET",
 			Path:    "/posts/tags",
@@ -235,6 +234,7 @@ func createTagSearchPostsHandler(impl TagImplementation) gohttp.HandlerFunc {
 	// List arguments in the query string: the JSON type of each item, then
 	// its rules in the order they are checked (the scalar type's own, then
 	// the argument's).
+	queryListTagsArg := bodyargs.NewArg("tags", bodyargs.String, bodyargs.ListMax(2), bodyargs.MinLength(2))
 	queryListScoresArg := bodyargs.NewArg("scores", bodyargs.Number, bodyargs.Min(0), bodyargs.Max(10))
 	queryListRanksArg := bodyargs.NewArg("ranks", bodyargs.Integer, bodyargs.ListMax(3), bodyargs.Min(1), bodyargs.Max(9007199254740991))
 	queryListFlagsArg := bodyargs.NewArg("flags", bodyargs.Boolean)
@@ -243,51 +243,19 @@ func createTagSearchPostsHandler(impl TagImplementation) gohttp.HandlerFunc {
 	queryListCodesArg := bodyargs.NewArg("codes", bodyargs.String, bodyargs.ListMin(2), bodyargs.ListMax(4), bodyargs.MinLength(2), bodyargs.MaxLength(4), bodyargs.Pattern(`^[a-z]+$`))
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract query parameters
-		// An array uses the form/explode=false wire format: ?tags=a,b.
-		// A nil slice means the optional parameter was absent; a present empty value is invalid.
+
+		// tags travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at tags[i]; no item is an
+		// absent list.
 		var Tags []string
-		TagsValues, TagsPresent, err := parseArrayQueryParam(r, "tags")
-		if err != nil {
-			RespondError(w, r, gohttp.StatusBadRequest, err.Error())
-			return
-		}
-		if TagsPresent {
-			Tags = make([]string, 0, len(TagsValues))
-			for _, rawValue := range TagsValues {
-				elem := rawValue
-				if len([]rune(rawValue)) < 2 {
-					validationErrors := types.NewValidationErrors()
-					validationErrors.SetFieldErrors("tags", []types.ValidationError{{Validator: "minLength", Message: "each item must be at least 2 characters"}})
-					RespondValidationErrors(w, r, validationErrors)
-					return
-				}
-				if validator, ok := interface{}(elem).(interface {
-					ValidateRequired() (bool, []types.ValidationError)
-				}); ok {
-					if valid, fieldErrs := validator.ValidateRequired(); !valid {
-						validationErrors := types.NewValidationErrors()
-						validationErrors.SetFieldErrors("tags", fieldErrs)
-						RespondValidationErrors(w, r, validationErrors)
-						return
-					}
-				} else if validator, ok := interface{}(elem).(interface {
-					Validate() (bool, []types.ValidationError)
-				}); ok {
-					if valid, fieldErrs := validator.Validate(); !valid {
-						validationErrors := types.NewValidationErrors()
-						validationErrors.SetFieldErrors("tags", fieldErrs)
-						RespondValidationErrors(w, r, validationErrors)
-						return
-					}
-				}
-				Tags = append(Tags, elem)
+		{
+			listErrors := types.NewValidationErrors()
+			Tags = bodyargs.QueryList[string](listErrors, r.URL.Query(), queryListTagsArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
 			}
-		}
-		if TagsPresent && len(Tags) > 2 {
-			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("tags", []types.ValidationError{{Validator: "listMax", Message: "must contain at most 2 items"}})
-			RespondValidationErrors(w, r, validationErrors)
-			return
 		}
 		// Parse scalar arguments from query string (GET endpoint)
 
@@ -463,13 +431,45 @@ func createTagSearchPostsHandler(impl TagImplementation) gohttp.HandlerFunc {
 
 // createTagFindTagsHandler creates a handler for GET /api/posts/tags
 //
-// Find posts by label; the labels travel in the query string.
+// Find posts by label, rank, code and page, all in the query string.
 func createTagFindTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 	// List arguments in the query string: the JSON type of each item, then
 	// its rules in the order they are checked (the scalar type's own, then
 	// the argument's).
+	queryListCodesArg := bodyargs.NewArg("codes", bodyargs.String, bodyargs.MinLength(2), bodyargs.Pattern(`^[a-z]+$`))
+	queryListPagesArg := bodyargs.NewArg("pages", bodyargs.Integer, bodyargs.Min(1), bodyargs.Max(9007199254740991))
 	queryListLabelsArg := bodyargs.NewArg("labels", bodyargs.String, bodyargs.Required())
+	queryListRanksArg := bodyargs.NewArg("ranks", bodyargs.Integer, bodyargs.Min(1), bodyargs.Max(9007199254740991))
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract query parameters
+
+		// codes travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at codes[i]; no item is an
+		// absent list.
+		var Codes []string
+		{
+			listErrors := types.NewValidationErrors()
+			Codes = bodyargs.QueryList[string](listErrors, r.URL.Query(), queryListCodesArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
+			}
+		}
+
+		// pages travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at pages[i]; no item is an
+		// absent list.
+		var Pages []int64
+		{
+			listErrors := types.NewValidationErrors()
+			Pages = bodyargs.QueryList[int64](listErrors, r.URL.Query(), queryListPagesArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
+			}
+		}
 		// Parse scalar arguments from query string (GET endpoint)
 
 		// labels travels in the query string as repeated keys,
@@ -486,6 +486,20 @@ func createTagFindTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 			}
 		}
 
+		// ranks travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at ranks[i]; no item is an
+		// absent list.
+		var Ranks []int64
+		{
+			listErrors := types.NewValidationErrors()
+			Ranks = bodyargs.QueryList[int64](listErrors, r.URL.Query(), queryListRanksArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
+			}
+		}
+
 		// Ensure request context is still valid before entering implementation logic.
 		if err := CheckContext(r.Context()); err != nil {
 			logger := LoggerFromContext(r.Context())
@@ -494,7 +508,7 @@ func createTagFindTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.FindTags(r.Context(), Labels)
+		result, err := impl.FindTags(r.Context(), Codes, Pages, Labels, Ranks)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -769,32 +783,6 @@ func createTagSaveTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 // =============================================================================
 // These functions parse query parameters from the URL and convert them to Go types.
 // They handle missing values gracefully by returning defaults or nil for pointer types.
-
-// parseArrayQueryParam parses an array query parameter in the OpenAPI
-// form/explode=false representation (?name=a,b). It also accepts repeated
-// keys (?name=a&name=b); each value is still split on commas. present
-// distinguishes an omitted optional parameter (nil slice) from input.
-func parseArrayQueryParam(r *gohttp.Request, name string) (values []string, present bool, err error) {
-	rawValues, present := r.URL.Query()[name]
-	if !present {
-		return nil, false, nil
-	}
-
-	values = make([]string, 0)
-	for _, rawValue := range rawValues {
-		for _, candidate := range strings.Split(rawValue, ",") {
-			candidate = strings.TrimSpace(candidate)
-			if candidate == "" {
-				return nil, true, fmt.Errorf("%s cannot contain empty values", name)
-			}
-			values = append(values, candidate)
-		}
-	}
-	if len(values) == 0 {
-		return nil, true, fmt.Errorf("%s cannot be empty", name)
-	}
-	return values, true, nil
-}
 
 // parseIntQueryParam parses an integer query parameter with a default value.
 // Returns the default if the parameter is missing or cannot be parsed.

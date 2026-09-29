@@ -228,6 +228,91 @@ func TestOpenAPIBodyArgumentsCarryTheirConstraints(t *testing.T) {
 	want("linksByLocale value items", object(localeLinks["items"]), "pattern", "^https://")
 }
 
+// TestOpenAPIQueryParametersCarryTheirConstraints: openapi.json describes a
+// query parameter, an argument of a GET operation or a @query parameter, as
+// it describes a body argument: the scalar's own constraints (Ordering.Rank's
+// minimum, Identity.UUID's pattern) and the argument's bounds on each value,
+// the list bounds as minItems and maxItems. A query parameter is present or
+// absent, never null, so its schema is not nullable.
+func TestOpenAPIQueryParametersCarryTheirConstraints(t *testing.T) {
+	output, err := apigen.Generate(loadBodyArgsAPI(t), apigen.Options{
+		Provider:   sessionauth.Provider{},
+		SchemaName: bodyArgsAPI,
+		Clock:      goModuleClock,
+	})
+	if err != nil {
+		t.Fatalf("apigen.Generate: %v", err)
+	}
+	var spec struct {
+		Paths map[string]map[string]struct {
+			Parameters []struct {
+				Name   string         `json:"name"`
+				In     string         `json:"in"`
+				Schema map[string]any `json:"schema"`
+			} `json:"parameters"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal([]byte(output.OpenAPISpecRaw), &spec); err != nil {
+		t.Fatal(err)
+	}
+	param := func(path, name string) map[string]any {
+		t.Helper()
+		for _, p := range spec.Paths[path]["get"].Parameters {
+			if p.Name == name && p.In == "query" {
+				return p.Schema
+			}
+		}
+		t.Fatalf("GET %s has no query parameter %s", path, name)
+		return nil
+	}
+	items := func(name string, schema map[string]any) map[string]any {
+		t.Helper()
+		m, ok := schema["items"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s has no items: %v", name, schema)
+		}
+		return m
+	}
+	want := func(name string, got map[string]any, key string, value any) {
+		t.Helper()
+		if !reflect.DeepEqual(got[key], value) {
+			t.Errorf("%s %s = %v, want %v; schema %v", name, key, got[key], value, got)
+		}
+	}
+	absent := func(name string, got map[string]any, keys ...string) {
+		t.Helper()
+		for _, key := range keys {
+			if _, ok := got[key]; ok {
+				t.Errorf("%s has %s: %v", name, key, got)
+			}
+		}
+	}
+
+	const search, find = "/api/posts/search", "/api/posts/tags"
+	// Arguments of a GET operation.
+	page := param(search, "page")
+	want("page", page, "minimum", 1.0)
+	absent("page", page, "nullable")
+	ranks := param(search, "ranks")
+	want("ranks", ranks, "maxItems", 3.0)
+	absent("ranks", ranks, "minimum", "nullable")
+	want("ranks items", items("ranks", ranks), "minimum", 1.0)
+	author := param(search, "author")
+	if pattern, _ := author["pattern"].(string); pattern == "" {
+		t.Errorf("author has no pattern: %v", author)
+	}
+	want("caption", param(search, "caption"), "maxLength", 5.0)
+	absent("caption", param(search, "caption"), "nullable")
+	// @query parameters.
+	pages := param(find, "pages")
+	absent("pages", pages, "minimum", "nullable")
+	want("pages items", items("pages", pages), "minimum", 1.0)
+	codes := items("codes", param(find, "codes"))
+	want("codes items", codes, "minLength", 2.0)
+	want("codes items", codes, "pattern", "^[a-z]+$")
+	want("tags", param(search, "tags"), "maxItems", 2.0)
+}
+
 // TestMapArgumentOutsideTheBodyIsRefused: a map cannot travel in the query
 // string or the path, so a GET operation's map argument, a map query
 // parameter and a map path parameter fail the build with the argument

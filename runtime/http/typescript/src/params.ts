@@ -19,7 +19,9 @@ Identity.UUID returns the library's canonical form, Temporal.DateTime is RFC
 float, boolean, string, enum.
 
 Path and query parameters arrive as strings: decodeParam reads them, and a
-query list accepts repeated keys and comma-separated values. Every body
+query list accepts repeated keys and comma-separated values; each of its
+items is read as its kind's JSON value and checked as a body list element,
+at name[i], as the Go router's bodyargs.QueryList does. Every body
 parameter arrives as a JSON value, so decodeJsonParam reads it as one: a
 number is not accepted for a string nor a string for a number, a list is a
 JSON array whose elements are never split or dropped, a map is a JSON
@@ -252,7 +254,7 @@ export function decodeParam(location: ParamLocation, spec: ParamSpec, raw: reado
     }
     if (spec.listMin !== undefined && items.length < spec.listMin) refuse(location, spec, `expected at least ${spec.listMin} values`);
     if (spec.listMax !== undefined && items.length > spec.listMax) refuse(location, spec, `expected at most ${spec.listMax} values`);
-    return items.map(item => decodeScalar(location, spec, item));
+    return items.map((item, i) => decodeQueryListItem(location, spec, `${spec.name}[${i}]`, item));
   }
   const first = values[0];
   if (first === undefined || (first === '' && spec.kind !== 'string')) {
@@ -260,6 +262,43 @@ export function decodeParam(location: ParamLocation, spec: ParamSpec, raw: reado
     return undefined;
   }
   return decodeScalar(location, spec, first);
+}
+
+/** A JSON number, as JSON writes one: no sign but a leading minus, no leading zero, no hex, NaN or Infinity. */
+const JSON_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
+
+/** The boolean spellings Go's strconv.ParseBool accepts. */
+const QUERY_BOOLEANS: ReadonlyMap<string, boolean> = new Map([
+  ...['1', 't', 'T', 'TRUE', 'true', 'True'].map((text): [string, boolean] => [text, true]),
+  ...['0', 'f', 'F', 'FALSE', 'false', 'False'].map((text): [string, boolean] => [text, false]),
+]);
+
+/**
+ * One item of a query list, checked at `path` (name[i]) as a body list
+ * element is, the rules of the Go router's bodyargs.QueryList: a number or
+ * integer item must be a finite JSON number and a boolean item a spelling
+ * strconv.ParseBool accepts (`type` otherwise); any other item is its text,
+ * a JSON string. The value then passes the checks of its kind: the scalar's
+ * rules, then the argument's.
+ */
+function decodeQueryListItem(location: ParamLocation, spec: ParamSpec, path: string, item: string): unknown {
+  switch (spec.kind) {
+    case 'integer':
+    case 'number': {
+      const value = Number(item);
+      if (!JSON_NUMBER.test(item) || !Number.isFinite(value)) {
+        refuseAt(location, spec, path, 'type', spec.kind === 'integer' ? 'expected an integer' : 'expected a number');
+      }
+      return decodeJsonValue(location, spec, value, path);
+    }
+    case 'boolean': {
+      const value = QUERY_BOOLEANS.get(item);
+      if (value === undefined) refuseAt(location, spec, path, 'type', 'expected a boolean');
+      return value;
+    }
+    default:
+      return decodeJsonValue(location, spec, item, path);
+  }
 }
 
 /**

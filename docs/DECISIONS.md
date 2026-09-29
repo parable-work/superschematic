@@ -468,6 +468,15 @@ answered a missing required list with a plain 400 message; and checked
 an element only against the argument's pattern and its type's
 `Validate`, which a number does not have.
 
+A list query parameter (`QueryParam<T[]>`), on any method, is read by
+`bodyargs.QueryList` with the same rules. Before, the route split it with
+a helper of its own: it refused an empty item (`?codes=a,,b`) and an empty
+value with a plain 400 message, answered a missing required list with a
+plain message, reported an element's failure at `name` with messages of
+its own (`each item must be at least 2 characters`, `pages must contain
+valid integers`), and left a scalar's rules to its Go type's `Validate`,
+which `Ordering.Rank`, an `int64`, does not have.
+
 The TypeScript API server decodes every body argument from its JSON value
 with these rules, for a scalar, enum, object or `Generic.JSON` type, alone,
 as `T[]` and as `T[][]`. Before, a list of a scalar or enum went through
@@ -478,8 +487,14 @@ required list. Now a value of the wrong JSON type is `type`, a null element
 is `required` at `name[i]` or `name[i][j]`, `[]` satisfies a required list,
 and `listMin` and `listMax` bound the outer list. A scalar's own lengths,
 pattern and range apply to each value, and a failure is named by the rule
-it breaks (D14). A list in the query string is still read from repeated
-keys and comma-separated values. A map argument (`Record<string, T>`,
+it breaks (D14). A list in the query string, a `GET` argument or a query
+parameter, is still read from repeated keys and comma-separated values,
+and each item follows `bodyargs.QueryList`: it is read as its kind's JSON
+value (a number or an integer is a JSON number, a boolean a spelling
+`strconv.ParseBool` accepts; `type` otherwise) and checked as a list
+element at `name[i]`. Before, an item's failure was reported at `name`,
+`Number()` read a number item (`0x10` was 16), and a boolean item was
+`true`, `false`, `1` or `0` in any case. A map argument (`Record<string, T>`,
 `Record<string, T[]>`) follows the Go routes' map rules: a JSON object
 (`type` otherwise) whose values are checked as list elements at
 `name[key]`, a list value's elements at `name[key][i]`, and no list
