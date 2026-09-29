@@ -223,6 +223,7 @@ const kindDescriptor = decoder<KindDescriptor>("KindDescriptor", {
   key: req(same),
   id: req(same),
   ref: req(same),
+  root: opt(same),
   tombstone: req(same),
   version: req(same),
   author: opt(same),

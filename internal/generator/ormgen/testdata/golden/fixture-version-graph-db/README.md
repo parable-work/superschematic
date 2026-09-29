@@ -21,7 +21,6 @@ Generated at: 2026-01-02T03:04:05Z
 - `repository_step.go` -- Step repository
 - `repository_tasting.go` -- Tasting repository
 - `repository_utensil.go` -- Utensil repository
-- `versiongraph.go` -- the machinery the version graph shells share
 - `versiongraph_recipe.go` -- the Recipe version graph: `db.RecipeGraph()`
 
 ## Usage
@@ -51,11 +50,13 @@ replacement from a complete value.
 
 ## Version graphs
 
-A version graph's shell (`db.<Name>Graph()`) creates refs, saves edits on
+A version graph's facade (`db.<Name>Graph()`) creates refs, saves edits on
 them, commits, seals, merges, reverts, and reads a commit's or a ref's tree.
-It hands rows to the version-graph core through its Go binding,
-`github.com/parable-work/superschematic/runtime/versiongraph/go`, which links the core's static archive
-through cgo. Build the archive from a superschematic checkout with
+It turns typed edits into canonical rows and runs each operation on the
+version-graph engine, `github.com/parable-work/superschematic/runtime/versiongraph/go/engine`, over its
+Postgres adapter in a transaction of the ORM's pool. The engine drives the
+version-graph core through its Go binding, which links the core's static
+archive through cgo. Build the archive from a superschematic checkout with
 `scripts/versiongraph-archive.sh` and put the directory it prints in
 `CGO_LDFLAGS` as `-L<dir>`; a `replace` directive to that checkout finds it
 without the flag.

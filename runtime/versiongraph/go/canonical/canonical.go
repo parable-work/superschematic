@@ -155,6 +155,16 @@ func PostgresRow(columns map[string]string, row json.RawMessage) (json.RawMessag
 	return json.RawMessage(buf.Bytes()), nil
 }
 
+// Row returns the canonical row of a row whose values are the schema
+// runtime's JSON for each column's field type, as a typed value
+// serializes: what a typed facade hands the engine. The rules read the
+// schema runtime's forms as they read Postgres's (a base62 UUID, a
+// date-time with any offset, an "HH:MM" time, a duration string), so it is
+// PostgresRow by another name.
+func Row(columns map[string]string, row json.RawMessage) (json.RawMessage, error) {
+	return PostgresRow(columns, row)
+}
+
 // apply runs an element rule over a value, a list or a list of lists. A
 // null value is null; a null element is refused, since a list element is
 // never null (D12).

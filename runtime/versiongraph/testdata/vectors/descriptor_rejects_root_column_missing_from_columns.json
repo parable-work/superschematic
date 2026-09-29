@@ -1,5 +1,5 @@
 {
-  "name": "descriptor_rejects_unknown_member",
+  "name": "descriptor_rejects_root_column_missing_from_columns",
   "op": "validate",
   "input": {
     "descriptor": {
@@ -40,6 +40,7 @@
             "kind": "step"
           },
           "ref": "ref",
+          "root": "recipe_id",
           "table": "step",
           "tombstone": "deleted_on_ref",
           "units": {
@@ -80,13 +81,13 @@
             "kind": "step"
           },
           "ref": "ref",
+          "root": "root_id",
           "table": "ingredient",
           "tombstone": "deleted_on_ref",
           "version": "_version"
         },
         {
           "author": "updated_by",
-          "cascade": true,
           "columns": {
             "_version": "integer",
             "created_at": "dateTime",
@@ -110,6 +111,7 @@
           "key": "entity_key",
           "kind": "cover",
           "ref": "ref",
+          "root": "recipe_id",
           "singleton": true,
           "table": "cover",
           "tombstone": "deleted_on_ref",
@@ -129,7 +131,7 @@
   "expect": {
     "error": {
       "code": "invalid_descriptor",
-      "message": "descriptor: unknown field `cascade`, expected one of `kind`, `table`, `historyTable`, `key`, `id`, `ref`, `root`, `tombstone`, `version`, `author`, `parent`, `order`, `singleton`, `units`, `excluded`, `columns`"
+      "message": "descriptor: kind \"ingredient\" root column \"root_id\" is not in its columns"
     }
   }
 }

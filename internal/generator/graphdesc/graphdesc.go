@@ -6,7 +6,7 @@
 // runtime/versiongraph/README.md is its contract.
 //
 // The ORM generator writes a graph's descriptor as a constant beside its
-// generated shell, and the Go types generator writes it as
+// generated facade, and the Go types generator writes it as
 // versiongraph/<name>.json beside the types, so a browser or another
 // runtime drives the core with the same descriptor. Both read it from here.
 package graphdesc
@@ -54,20 +54,23 @@ type Root struct {
 
 // Kind describes one member kind's rows.
 type Kind struct {
-	Kind         string            `json:"kind"`
-	Table        string            `json:"table"`
-	HistoryTable string            `json:"historyTable"`
-	Key          string            `json:"key"`
-	ID           string            `json:"id"`
-	Ref          string            `json:"ref"`
-	Tombstone    string            `json:"tombstone"`
-	Version      string            `json:"version"`
-	Author       string            `json:"author,omitempty"`
-	Parent       *Parent           `json:"parent,omitempty"`
-	Order        string            `json:"order,omitempty"`
-	Singleton    bool              `json:"singleton,omitempty"`
-	Units        map[string]string `json:"units,omitempty"`
-	Excluded     []string          `json:"excluded,omitempty"`
+	Kind         string `json:"kind"`
+	Table        string `json:"table"`
+	HistoryTable string `json:"historyTable"`
+	Key          string `json:"key"`
+	ID           string `json:"id"`
+	Ref          string `json:"ref"`
+	// Root is the column holding the graph root's key, which a storage
+	// adapter writes on every row.
+	Root      string            `json:"root"`
+	Tombstone string            `json:"tombstone"`
+	Version   string            `json:"version"`
+	Author    string            `json:"author,omitempty"`
+	Parent    *Parent           `json:"parent,omitempty"`
+	Order     string            `json:"order,omitempty"`
+	Singleton bool              `json:"singleton,omitempty"`
+	Units     map[string]string `json:"units,omitempty"`
+	Excluded  []string          `json:"excluded,omitempty"`
 	// Columns gives every column of the kind's table its value class.
 	Columns map[string]string `json:"columns"`
 }
@@ -95,7 +98,7 @@ type Graph struct {
 	Descriptor Descriptor
 }
 
-// Member is one member type and the columns the generated shell writes
+// Member is one member type and the columns the generated facade writes
 // through besides its own content.
 type Member struct {
 	Type *ir.TypeDef
@@ -214,6 +217,7 @@ func describe(schema *ir.Schema, root, td *ir.TypeDef, sqlTypes map[string]strin
 		case fd.TypeRef.Name == root.Name:
 			// The graph's own column: every row of the graph names its root.
 			member.RootColumn = column
+			kind.Root = column
 			kind.Excluded = append(kind.Excluded, column)
 		case isAudit(fd.Name):
 			if column != kind.Author {

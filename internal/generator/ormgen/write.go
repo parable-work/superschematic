@@ -23,7 +23,7 @@ type RepositoryOutput struct {
 }
 
 // VersionGraphOutput wraps one version graph with module-level metadata for
-// the version graph shell template.
+// the version graph facade template.
 type VersionGraphOutput struct {
 	VersionGraph
 	TypesModule string
@@ -100,14 +100,6 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 		})
 	}
 
-	if len(output.VersionGraphs) > 0 {
-		repositoryTasks = append(repositoryTasks, func() error {
-			if err := generateFile(generator, "versiongraph.tmpl", filepath.Join(outputDir, "versiongraph.go"), output); err != nil {
-				return fmt.Errorf("failed to write versiongraph.go: %w", err)
-			}
-			return nil
-		})
-	}
 	for _, graph := range output.VersionGraphs {
 		graph := graph
 		repositoryTasks = append(repositoryTasks, func() error {
@@ -132,13 +124,11 @@ func versionGraphFileName(graph VersionGraph) string {
 	return "versiongraph_" + graph.FileName + ".go"
 }
 
-// cleanStaleVersionGraphFiles removes versiongraph.go and the
-// versiongraph_*.go shells of graphs the schema no longer declares.
+// cleanStaleVersionGraphFiles removes the versiongraph_*.go facades of
+// graphs the schema no longer declares, and the versiongraph.go an earlier
+// generator wrote the shared engine into.
 func cleanStaleVersionGraphFiles(outputDir string, graphs []VersionGraph) error {
-	expected := make(map[string]struct{}, len(graphs)+1)
-	if len(graphs) > 0 {
-		expected["versiongraph.go"] = struct{}{}
-	}
+	expected := make(map[string]struct{}, len(graphs))
 	for _, graph := range graphs {
 		expected[versionGraphFileName(graph)] = struct{}{}
 	}

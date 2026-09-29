@@ -48,6 +48,10 @@ struct KindDescriptor {
     id: String,
     #[serde(rename = "ref")]
     ref_column: String,
+    /// The column holding the graph root's key, for a storage adapter,
+    /// which writes it on every row.
+    #[serde(default)]
+    root: Option<String>,
     tombstone: String,
     version: String,
     #[serde(default)]
@@ -200,6 +204,7 @@ pub struct Kind {
     pub key: String,
     pub id: String,
     pub ref_column: String,
+    pub root: Option<String>,
     pub tombstone: String,
     pub version: String,
     pub author: Option<String>,
@@ -224,6 +229,7 @@ impl Kind {
             || column == self.ref_column
             || column == self.tombstone
             || column == self.version
+            || self.root.as_deref() == Some(column)
             || self.author.as_deref() == Some(column)
     }
 
@@ -340,6 +346,7 @@ fn check_kind(raw: KindDescriptor, index: &HashMap<String, usize>) -> Result<Kin
     for (role, column) in roles
         .iter()
         .map(|(r, c)| (*r, c.as_str()))
+        .chain(raw.root.as_deref().map(|c| ("root", c)))
         .chain(raw.author.as_deref().map(|c| ("author", c)))
     {
         if column.is_empty() {
@@ -368,6 +375,7 @@ fn check_kind(raw: KindDescriptor, index: &HashMap<String, usize>) -> Result<Kin
     let named = roles
         .iter()
         .map(|(role, column)| (*role, column.as_str()))
+        .chain(raw.root.as_deref().map(|c| ("root", c)))
         .chain(raw.author.as_deref().map(|c| ("author", c)))
         .chain(raw.parent.as_ref().map(|p| ("parent key", p.key.as_str())))
         .chain(raw.order.as_deref().map(|c| ("order", c)))
@@ -401,6 +409,7 @@ fn check_kind(raw: KindDescriptor, index: &HashMap<String, usize>) -> Result<Kin
         key: raw.key,
         id: raw.id,
         ref_column: raw.ref_column,
+        root: raw.root,
         tombstone: raw.tombstone,
         version: raw.version,
         author: raw.author,

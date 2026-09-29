@@ -97,9 +97,10 @@ type ORMOutput struct {
 	// directory. Empty omits the directive.
 	SchemaIRReplacePath string
 
-	// VersionGraphs are the schema's version graphs (D17). Each gets a
-	// versiongraph_<name>.go shell, and any gets versiongraph.go and a
-	// requirement on the version-graph core's Go binding.
+	// VersionGraphs are the schema's version graphs (D17, D19). Each gets a
+	// versiongraph_<name>.go facade over the version-graph engine, and any
+	// gets the declarations the facades share in database.go and a
+	// requirement on the version-graph runtime's Go module.
 	VersionGraphs []VersionGraph
 
 	// VersionGraphReplacePath is the go.mod replace target for the

@@ -56,6 +56,11 @@ export interface KindDescriptor {
   id: string;
   /** The column naming the ref the row was written on. */
   ref: string;
+  /**
+   * The column holding the graph root's key, which a storage adapter writes
+   * on every row. The core does not read it.
+   */
+  root?: string;
   /** A boolean column; true marks the row as the entity's delete. */
   tombstone: string;
   /** The row version column. */

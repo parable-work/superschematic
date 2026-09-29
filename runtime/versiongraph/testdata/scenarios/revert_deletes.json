@@ -1,0 +1,31 @@
+{
+  "name": "revert_deletes",
+  "description": "A utensil keyed by a plain UUID is added, overridden on a change set and merged; a revert to a tree without it writes the row that deletes it on the line.",
+  "steps": [
+    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "save", "ref": "main", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}},
+    {"op": "commit", "ref": "main", "as": "before"},
+    {"op": "save", "ref": "main", "edits": {"utensil": {"upsert": [{"id": "Caller", "entity_key": "Whisk", "name": "whisk"}]}},
+      "expect": {"saved": {"utensil": [{"entity_key": "Whisk", "name": "whisk"}]}}},
+    {"op": "commit", "ref": "main", "as": "withWhisk"},
+    {"op": "materialize", "commit": "withWhisk", "expect": {"tree": {
+      "step": [{"entity_key": "Mix"}],
+      "utensil": [{"entity_key": "Whisk", "name": "whisk"}]
+    }}},
+    {"op": "branch", "from": "main", "name": "balloon whisk", "as": "e"},
+    {"op": "save", "ref": "e", "edits": {"utensil": {"upsert": [{"entity_key": "Whisk", "name": "balloon whisk"}]}}},
+    {"op": "commit", "ref": "e"},
+    {"op": "merge", "source": "e", "target": "main", "as": "mergedE"},
+    {"op": "compose", "ref": "main", "expect": {"tree": {
+      "step": [{"entity_key": "Mix"}],
+      "utensil": [{"entity_key": "Whisk", "name": "balloon whisk"}]
+    }}},
+    {"op": "revert", "ref": "main", "toCommit": "before", "as": "reverted", "expect": {"commit": {"parent": "mergedE", "contentHashOf": "before"}}},
+    {"op": "compose", "ref": "main", "expect": {"contentHashOf": "before", "tree": {"step": [{"entity_key": "Mix"}]}}},
+    {"op": "rows", "ref": "main", "kind": "utensil", "expect": {"rows": [{"entity_key": "Whisk", "deleted_on_ref": true, "name": "balloon whisk"}]}},
+    {"op": "patches", "commit": "reverted", "expect": {"patches": [{"kind": "utensil", "entityKey": "Whisk", "operation": "DELETE", "entityVersion": 3}]}},
+    {"op": "revert", "ref": "main", "toCommit": "withWhisk", "as": "back", "expect": {"commit": {"contentHashOf": "withWhisk"}}},
+    {"op": "rows", "ref": "main", "kind": "utensil", "expect": {"rows": [{"entity_key": "Whisk", "deleted_on_ref": false, "name": "whisk"}]}}
+  ]
+}

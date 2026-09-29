@@ -1,0 +1,21 @@
+{
+  "name": "tags",
+  "description": "Tagged commits take a root's sequences in order, across its refs; each root counts its own, and an untagged commit takes none.",
+  "steps": [
+    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid), ($3::uuid, 'Soup', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}, {"uuid": "Soup"}]},
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "save", "ref": "main", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}},
+    {"op": "commit", "ref": "main", "tag": true, "message": "v1", "expect": {"commit": {"sequence": 1, "message": "v1"}}},
+    {"op": "branch", "from": "main", "name": "fold", "as": "fold"},
+    {"op": "branch", "from": "main", "name": "shape", "as": "shape"},
+    {"op": "save", "ref": "fold", "edits": {"step": {"upsert": [{"entity_key": "Fold", "position": 3, "instruction": "Fold", "timings": {}}]}}},
+    {"op": "save", "ref": "shape", "edits": {"step": {"upsert": [{"entity_key": "Shape", "position": 4, "instruction": "Shape", "timings": {}}]}}},
+    {"op": "commit", "ref": "shape", "expect": {"commit": {"sequence": null, "message": ""}}},
+    {"op": "save", "ref": "shape", "edits": {"step": {"upsert": [{"entity_key": "Shape", "position": 4, "instruction": "Shape well", "timings": {}}]}}},
+    {"op": "commit", "ref": "shape", "tag": true, "expect": {"commit": {"sequence": 2}}},
+    {"op": "commit", "ref": "fold", "tag": true, "expect": {"commit": {"sequence": 3}}},
+    {"op": "createPrimary", "root": "Soup", "name": "main", "as": "soup"},
+    {"op": "save", "ref": "soup", "edits": {"step": {"upsert": [{"entity_key": "Boil", "position": 1, "instruction": "Boil", "timings": {}}]}}},
+    {"op": "commit", "ref": "soup", "tag": true, "expect": {"commit": {"sequence": 1}}}
+  ]
+}

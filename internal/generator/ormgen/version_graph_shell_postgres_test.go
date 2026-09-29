@@ -8,9 +8,10 @@ import (
 )
 
 // TestVersionGraphShellOnPostgres generates fixture-version-graph-db, whose
-// ORM carries the Recipe graph's shell (versiongraph_recipe.go), then
-// builds, vets and tests the ORM module with versionGraphShellTest. That
-// test runs the shell against the Postgres at
+// ORM carries the Recipe graph's facade over the version-graph engine
+// (versiongraph_recipe.go), then builds, vets and tests the ORM module with
+// versionGraphShellTest and versionGraphFacadeTest. The first runs the
+// facade against the Postgres at
 // SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL through a whole lifecycle: a
 // primary line, a tagged commit, two change sets merged back (one cleanly,
 // one with a conflict settled by a resolution), a parent deleted with its
@@ -30,11 +31,135 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ormDir, "graph_shell_test.go"), []byte(versionGraphShellTest), 0o644); err != nil {
 		t.Fatalf("write graph shell test: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(ormDir, "graph_facade_test.go"), []byte(versionGraphFacadeTest), 0o644); err != nil {
+		t.Fatalf("write graph facade test: %v", err)
+	}
 	out := runVersionGraphModule(t, ormDir)
-	if !strings.Contains(out, "--- PASS: TestVersionGraphShellOnPostgres") {
-		t.Fatal("the generated ORM module did not run TestVersionGraphShellOnPostgres")
+	for _, test := range []string{"TestVersionGraphShellOnPostgres", "TestVersionGraphFacadeKeepsEveryClass"} {
+		if !strings.Contains(out, "--- PASS: "+test) {
+			t.Fatalf("the generated ORM module did not run %s", test)
+		}
 	}
 }
+
+// versionGraphFacadeTest saves a typed Tasting, whose columns hold a value
+// of every class a descriptor names, through the facade, commits it and
+// reads it back from the save and from the commit. Each field comes back
+// as the typed value of its canonical form: the same value, and a time of
+// day and an instant in the forms the canonical row gives them.
+const versionGraphFacadeTest = `package orm
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"reflect"
+	"testing"
+
+	types "example.com/schemas/types/go/fixture-version-graph-db"
+)
+
+func TestVersionGraphFacadeKeepsEveryClass(t *testing.T) {
+	dsn := os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the version graph facade against Postgres")
+	}
+	db, _ := openShellDatabase(t, dsn)
+	ctx := WithUserID(context.Background(), mustShellUUID(t, "5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90"))
+	g := db.RecipeGraph()
+	recipe, err := db.Recipe.CreateOne(ctx, &types.Recipe{Title: "Bread"})
+	if err != nil {
+		t.Fatalf("create recipe: %v", err)
+	}
+	main, err := g.CreatePrimary(ctx, *recipe.Id, "main")
+	if err != nil {
+		t.Fatalf("CreatePrimary: %v", err)
+	}
+	parse := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	taster, err := types.ParseIdentityUserID("0e7d4b1a-3c2f-4a6e-8b9d-1f2e3d4c5b6a")
+	parse(err)
+	tastedOn, err := types.ParseTemporalDate("2026-09-01")
+	parse(err)
+	tastedAt, err := types.ParseTemporalDateTime("2026-09-01T12:30:00.25+02:00")
+	parse(err)
+	utc, err := types.ParseTemporalDateTime("2026-09-01T10:30:00.25Z")
+	parse(err)
+	servedAt, err := types.ParseTemporalTime("18:30")
+	parse(err)
+	canonicalTime, err := types.ParseTemporalTime("18:30:00")
+	parse(err)
+	rested, err := types.ParseTemporalDuration("1.5ms")
+	parse(err)
+	input := &types.Tasting{
+		Taster: taster, Salty: true, Score: 4.5, Servings: 9007199254740993,
+		TastedOn: tastedOn, TastedAt: tastedAt, ServedAt: servedAt, Rested: rested,
+		Verdict: types.Verdict_Tweak, Remarks: types.GenericJSON(` + "`" + `{"crumb": "open", "crust": [1, 2.5]}` + "`" + `),
+		Tags: []string{"sour", "a \"quoted\" tag"}, Helpers: []types.IdentityUUID{mustShellUUID(t, "5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90")},
+		Bites: [][]types.GenericInt64{{1, 2}, {3}},
+	}
+	want := *input
+	want.TastedAt, want.ServedAt = utc, canonicalTime
+
+	saved, err := g.Save(ctx, *main.Id, main.Version, RecipeEdits{Tasting: GraphEdits[types.Tasting]{Upsert: []*types.Tasting{input}}})
+	if err != nil {
+		t.Fatalf("save a tasting: %v", err)
+	}
+	committed, err := g.Commit(ctx, *main.Id, saved.Ref.Version, RecipeCommitOptions{})
+	if err != nil {
+		t.Fatalf("commit the tasting: %v", err)
+	}
+	tree, err := g.Materialize(ctx, *committed.Commit.Id)
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	if len(saved.Saved.Tasting) != 1 || len(tree.Tasting) != 1 {
+		t.Fatalf("saved %d and materialized %d tastings, want one each", len(saved.Saved.Tasting), len(tree.Tasting))
+	}
+	fields := []string{"taster", "salty", "score", "servings", "tastedOn", "tastedAt", "servedAt", "rested", "verdict", "remarks", "tags", "helpers", "bites"}
+	for what, got := range map[string]*types.Tasting{"saved": saved.Saved.Tasting[0], "materialized": tree.Tasting[0]} {
+		gotJSON, wantJSON := facadeFields(t, got), facadeFields(t, &want)
+		for _, field := range fields {
+			if !reflect.DeepEqual(facadeValue(t, gotJSON[field]), facadeValue(t, wantJSON[field])) {
+				t.Errorf("%s tasting %s = %s, want %s", what, field, gotJSON[field], wantJSON[field])
+			}
+		}
+		if got.Recipe.Id == nil || *got.Recipe.Id != *recipe.Id || got.EntityKey == nil {
+			t.Errorf("%s tasting has recipe %v and entity key %v, want the root and a generated key", what, got.Recipe.Id, got.EntityKey)
+		}
+	}
+}
+
+// facadeValue decodes a JSON value, keeping each number's text.
+func facadeValue(t *testing.T, raw json.RawMessage) any {
+	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		t.Fatalf("decode %s: %v", raw, err)
+	}
+	return value
+}
+
+func facadeFields(t *testing.T, tasting *types.Tasting) map[string]json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(tasting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	return fields
+}
+`
 
 const versionGraphShellTest = `package orm
 

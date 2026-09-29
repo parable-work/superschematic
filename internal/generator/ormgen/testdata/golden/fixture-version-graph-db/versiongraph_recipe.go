@@ -10,12 +10,14 @@ import (
 	types "example.com/schemas/types/go/fixture-version-graph-db"
 	"github.com/jackc/pgx/v5"
 	versiongraph "github.com/parable-work/superschematic/runtime/versiongraph/go"
+	"github.com/parable-work/superschematic/runtime/versiongraph/go/engine"
 )
 
-// RecipeGraphDescriptor is the descriptor of the Recipe version graph: which
-// column of each kind's rows plays which role in the version-graph core,
-// how each column merges and which columns are not content. The types
-// module carries the same document as versiongraph/recipe.json.
+// RecipeGraphDescriptor is the descriptor of the Recipe version graph: its
+// tables, which column of each kind's rows plays which role, how each
+// column merges, which columns are not content and each column's value
+// class. The types module carries the same document as
+// versiongraph/recipe.json.
 const RecipeGraphDescriptor = `{
   "version": 2,
   "graph": "recipe",
@@ -34,6 +36,7 @@ const RecipeGraphDescriptor = `{
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
+      "root": "recipe_id",
       "tombstone": "deleted_on_ref",
       "version": "_version",
       "singleton": true,
@@ -57,6 +60,7 @@ const RecipeGraphDescriptor = `{
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
+      "root": "recipe_id",
       "tombstone": "deleted_on_ref",
       "version": "_version",
       "parent": {
@@ -88,6 +92,7 @@ const RecipeGraphDescriptor = `{
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
+      "root": "recipe_id",
       "tombstone": "deleted_on_ref",
       "version": "_version",
       "parent": {
@@ -115,6 +120,7 @@ const RecipeGraphDescriptor = `{
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
+      "root": "recipe_id",
       "tombstone": "deleted_on_ref",
       "version": "_version",
       "author": "updated_by",
@@ -153,6 +159,7 @@ const RecipeGraphDescriptor = `{
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
+      "root": "recipe_id",
       "tombstone": "deleted_on_ref",
       "version": "_version",
       "excluded": [
@@ -187,6 +194,7 @@ const RecipeGraphDescriptor = `{
       "key": "entity_key",
       "id": "id",
       "ref": "ref_id",
+      "root": "recipe_id",
       "tombstone": "deleted_on_ref",
       "version": "_version",
       "excluded": [
@@ -210,113 +218,36 @@ const RecipeGraphDescriptor = `{
 // ErrSchemaEpoch.
 const RecipeGraphSchemaEpoch = 1
 
-var recipeGraphSpec = &graphSpec{
-	descriptor:    json.RawMessage(RecipeGraphDescriptor),
-	schemaEpoch:   RecipeGraphSchemaEpoch,
-	insertRef:     `INSERT INTO recipe_ref (root_id, parent_ref_id, base_commit_id, "name", created_by, updated_by) VALUES ($1::uuid, NULLIF($2, '')::uuid, NULLIF($3, '')::uuid, $4, $5, $5) RETURNING id::text`,
-	readRef:       `SELECT root_id::text, COALESCE(parent_ref_id::text, ''), COALESCE(base_commit_id::text, ''), COALESCE(head_commit_id::text, ''), sealed_at IS NOT NULL, deleted_at IS NOT NULL, _version FROM recipe_ref WHERE id = $1::uuid`,
-	lockRef:       `SELECT root_id::text, COALESCE(parent_ref_id::text, ''), COALESCE(base_commit_id::text, ''), COALESCE(head_commit_id::text, ''), sealed_at IS NOT NULL, deleted_at IS NOT NULL, _version FROM recipe_ref WHERE id = $1::uuid FOR UPDATE`,
-	touchRef:      `UPDATE recipe_ref SET head_commit_id = COALESCE(NULLIF($3, '')::uuid, head_commit_id), sealed_at = CASE WHEN $4::boolean THEN now() ELSE sealed_at END, updated_at = now(), updated_by = $5 WHERE id = $1::uuid AND _version = $2 RETURNING _version`,
-	lockRoot:      `SELECT 1 FROM recipe WHERE id = $1::uuid FOR NO KEY UPDATE`,
-	nextSequence:  `SELECT COALESCE(MAX("sequence"), 0) + 1 FROM recipe_commit WHERE root_id = $1::uuid`,
-	insertCommit:  `INSERT INTO recipe_commit (root_id, ref_id, parent_commit_id, message, schema_epoch, content_hash, "sequence", created_by) VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, $4, $5, $6, $7, $8) RETURNING id::text`,
-	insertPatches: `INSERT INTO recipe_patch (commit_id, entity_kind, entity_key, entity_id, entity_version, operation) SELECT $1::uuid, p.kind, p.key::uuid, p.id::uuid, p.version, p.op FROM jsonb_to_recordset($2::jsonb) AS p(kind text, key text, id text, version bigint, op text)`,
-	walk:          `WITH RECURSIVE chain AS (SELECT id, parent_commit_id, schema_epoch, 1 AS depth FROM recipe_commit WHERE id = $1::uuid UNION ALL SELECT c.id, c.parent_commit_id, c.schema_epoch, chain.depth + 1 FROM recipe_commit AS c JOIN chain ON c.id = chain.parent_commit_id WHERE chain.depth < $2) SELECT id::text, COALESCE(parent_commit_id::text, ''), schema_epoch FROM chain ORDER BY depth`,
-	patches:       `SELECT DISTINCT ON (p.entity_kind, p.entity_key) p.entity_kind, p.entity_id::text, p.entity_version, p.operation FROM recipe_patch AS p JOIN unnest($1::text[]::uuid[]) WITH ORDINALITY AS c(id, depth) ON p.commit_id = c.id ORDER BY p.entity_kind, p.entity_key, c.depth`,
-	commitRoot:    `SELECT root_id::text FROM recipe_commit WHERE id = $1::uuid`,
-	refCommits:    `WITH RECURSIVE chain AS (SELECT id, parent_commit_id, 1 AS depth FROM recipe_commit WHERE id = $1::uuid AND ref_id = $2::uuid UNION ALL SELECT c.id, c.parent_commit_id, chain.depth + 1 FROM recipe_commit AS c JOIN chain ON c.id = chain.parent_commit_id WHERE c.ref_id = $2::uuid AND chain.depth < $3) SELECT id::text FROM chain ORDER BY depth`,
-	kinds: []graphKind{
-		{
-			name:     "cover",
-			idColumn: "id",
-			ownRows:  `SELECT to_jsonb(t) FROM cover AS t WHERE t.ref_id = $1::uuid`,
-			slot:     `SELECT t.id::text FROM cover AS t WHERE t.entity_key = $1::uuid AND t.ref_id = $2::uuid`,
-			images:   `SELECT h.data FROM cover_history AS h JOIN unnest($1::text[]::uuid[], $2::bigint[]) AS p(id, version) ON h.id = p.id AND h._version = p.version`,
-			upsert:   `INSERT INTO cover AS t (recipe_id, photo_url, entity_key, ref_id, deleted_on_ref) SELECT r.recipe_id, r.photo_url, r.entity_key, r.ref_id, r.deleted_on_ref FROM jsonb_populate_record(NULL::cover, $1::jsonb || jsonb_build_object('ref_id', $2::text, 'recipe_id', $3::text, 'deleted_on_ref', $4::boolean, 'created_at', now(), 'created_by', $5::text, 'updated_at', now(), 'updated_by', $5::text)) AS r ON CONFLICT (entity_key, ref_id) DO UPDATE SET photo_url = EXCLUDED.photo_url, deleted_on_ref = EXCLUDED.deleted_on_ref RETURNING to_jsonb(t)`,
-			unset: func(ctx context.Context, tx pgx.Tx, id types.IdentityUUID) error {
-				return (&CoverRepository{tx: tx}).DeleteOne(ctx, id)
-			},
-		},
-		{
-			name:     "ingredient",
-			idColumn: "id",
-			ownRows:  `SELECT to_jsonb(t) FROM ingredient AS t WHERE t.ref_id = $1::uuid`,
-			slot:     `SELECT t.id::text FROM ingredient AS t WHERE t.entity_key = $1::uuid AND t.ref_id = $2::uuid`,
-			images:   `SELECT h.data FROM ingredient_history AS h JOIN unnest($1::text[]::uuid[], $2::bigint[]) AS p(id, version) ON h.id = p.id AND h._version = p.version`,
-			upsert:   `INSERT INTO ingredient AS t (recipe_id, step_key, quantity, substitutes, entity_key, ref_id, deleted_on_ref) SELECT r.recipe_id, r.step_key, r.quantity, r.substitutes, r.entity_key, r.ref_id, r.deleted_on_ref FROM jsonb_populate_record(NULL::ingredient, $1::jsonb || jsonb_build_object('ref_id', $2::text, 'recipe_id', $3::text, 'deleted_on_ref', $4::boolean, 'created_at', now(), 'created_by', $5::text, 'updated_at', now(), 'updated_by', $5::text)) AS r ON CONFLICT (entity_key, ref_id) DO UPDATE SET step_key = EXCLUDED.step_key, quantity = EXCLUDED.quantity, substitutes = EXCLUDED.substitutes, deleted_on_ref = EXCLUDED.deleted_on_ref RETURNING to_jsonb(t)`,
-			unset: func(ctx context.Context, tx pgx.Tx, id types.IdentityUUID) error {
-				return (&IngredientRepository{tx: tx}).DeleteOne(ctx, id)
-			},
-		},
-		{
-			name:     "note",
-			idColumn: "id",
-			ownRows:  `SELECT to_jsonb(t) FROM note AS t WHERE t.ref_id = $1::uuid`,
-			slot:     `SELECT t.id::text FROM note AS t WHERE t.entity_key = $1::uuid AND t.ref_id = $2::uuid`,
-			images:   `SELECT h.data FROM note_history AS h JOIN unnest($1::text[]::uuid[], $2::bigint[]) AS p(id, version) ON h.id = p.id AND h._version = p.version`,
-			upsert:   `INSERT INTO note AS t (recipe_id, reply_to, body, entity_key, ref_id, deleted_on_ref) SELECT r.recipe_id, r.reply_to, r.body, r.entity_key, r.ref_id, r.deleted_on_ref FROM jsonb_populate_record(NULL::note, $1::jsonb || jsonb_build_object('ref_id', $2::text, 'recipe_id', $3::text, 'deleted_on_ref', $4::boolean, 'created_at', now(), 'created_by', $5::text, 'updated_at', now(), 'updated_by', $5::text)) AS r ON CONFLICT (entity_key, ref_id) DO UPDATE SET reply_to = EXCLUDED.reply_to, body = EXCLUDED.body, deleted_on_ref = EXCLUDED.deleted_on_ref RETURNING to_jsonb(t)`,
-			unset: func(ctx context.Context, tx pgx.Tx, id types.IdentityUUID) error {
-				return (&NoteRepository{tx: tx}).DeleteOne(ctx, id)
-			},
-		},
-		{
-			name:     "step",
-			idColumn: "id",
-			ownRows:  `SELECT to_jsonb(t) FROM step AS t WHERE t.ref_id = $1::uuid`,
-			slot:     `SELECT t.id::text FROM step AS t WHERE t.entity_key = $1::uuid AND t.ref_id = $2::uuid`,
-			images:   `SELECT h.data FROM step_history AS h JOIN unnest($1::text[]::uuid[], $2::bigint[]) AS p(id, version) ON h.id = p.id AND h._version = p.version`,
-			upsert:   `INSERT INTO step AS t (recipe_id, position, instruction, timings, scratch, created_at, created_by, updated_at, updated_by, entity_key, ref_id, deleted_on_ref) SELECT r.recipe_id, r.position, r.instruction, r.timings, r.scratch, r.created_at, r.created_by, r.updated_at, r.updated_by, r.entity_key, r.ref_id, r.deleted_on_ref FROM jsonb_populate_record(NULL::step, $1::jsonb || jsonb_build_object('ref_id', $2::text, 'recipe_id', $3::text, 'deleted_on_ref', $4::boolean, 'created_at', now(), 'created_by', $5::text, 'updated_at', now(), 'updated_by', $5::text)) AS r ON CONFLICT (entity_key, ref_id) DO UPDATE SET position = EXCLUDED.position, instruction = EXCLUDED.instruction, timings = EXCLUDED.timings, scratch = EXCLUDED.scratch, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by, deleted_on_ref = EXCLUDED.deleted_on_ref RETURNING to_jsonb(t)`,
-			unset: func(ctx context.Context, tx pgx.Tx, id types.IdentityUUID) error {
-				return (&StepRepository{tx: tx}).DeleteOne(ctx, id)
-			},
-		},
-		{
-			name:     "tasting",
-			idColumn: "id",
-			ownRows:  `SELECT to_jsonb(t) FROM tasting AS t WHERE t.ref_id = $1::uuid`,
-			slot:     `SELECT t.id::text FROM tasting AS t WHERE t.entity_key = $1::uuid AND t.ref_id = $2::uuid`,
-			images:   `SELECT h.data FROM tasting_history AS h JOIN unnest($1::text[]::uuid[], $2::bigint[]) AS p(id, version) ON h.id = p.id AND h._version = p.version`,
-			upsert:   `INSERT INTO tasting AS t (recipe_id, taster, salty, score, servings, tasted_on, tasted_at, served_at, rested, verdict, remarks, tags, helpers, bites, entity_key, ref_id, deleted_on_ref) SELECT r.recipe_id, r.taster, r.salty, r.score, r.servings, r.tasted_on, r.tasted_at, r.served_at, r.rested, r.verdict, r.remarks, r.tags, r.helpers, r.bites, r.entity_key, r.ref_id, r.deleted_on_ref FROM jsonb_populate_record(NULL::tasting, $1::jsonb || jsonb_build_object('ref_id', $2::text, 'recipe_id', $3::text, 'deleted_on_ref', $4::boolean, 'created_at', now(), 'created_by', $5::text, 'updated_at', now(), 'updated_by', $5::text)) AS r ON CONFLICT (entity_key, ref_id) DO UPDATE SET taster = EXCLUDED.taster, salty = EXCLUDED.salty, score = EXCLUDED.score, servings = EXCLUDED.servings, tasted_on = EXCLUDED.tasted_on, tasted_at = EXCLUDED.tasted_at, served_at = EXCLUDED.served_at, rested = EXCLUDED.rested, verdict = EXCLUDED.verdict, remarks = EXCLUDED.remarks, tags = EXCLUDED.tags, helpers = EXCLUDED.helpers, bites = EXCLUDED.bites, deleted_on_ref = EXCLUDED.deleted_on_ref RETURNING to_jsonb(t)`,
-			unset: func(ctx context.Context, tx pgx.Tx, id types.IdentityUUID) error {
-				return (&TastingRepository{tx: tx}).DeleteOne(ctx, id)
-			},
-		},
-		{
-			name:     "utensil",
-			idColumn: "id",
-			ownRows:  `SELECT to_jsonb(t) FROM utensil AS t WHERE t.ref_id = $1::uuid`,
-			slot:     `SELECT t.id::text FROM utensil AS t WHERE t.entity_key = $1::uuid AND t.ref_id = $2::uuid`,
-			images:   `SELECT h.data FROM utensil_history AS h JOIN unnest($1::text[]::uuid[], $2::bigint[]) AS p(id, version) ON h.id = p.id AND h._version = p.version`,
-			upsert:   `INSERT INTO utensil AS t (recipe_id, "name", entity_key, ref_id, deleted_on_ref) SELECT r.recipe_id, r."name", r.entity_key, r.ref_id, r.deleted_on_ref FROM jsonb_populate_record(NULL::utensil, $1::jsonb || jsonb_build_object('ref_id', $2::text, 'recipe_id', $3::text, 'deleted_on_ref', $4::boolean, 'created_at', now(), 'created_by', $5::text, 'updated_at', now(), 'updated_by', $5::text)) AS r ON CONFLICT (entity_key, ref_id) DO UPDATE SET "name" = EXCLUDED."name", deleted_on_ref = EXCLUDED.deleted_on_ref RETURNING to_jsonb(t)`,
-			unset: func(ctx context.Context, tx pgx.Tx, id types.IdentityUUID) error {
-				return (&UtensilRepository{tx: tx}).DeleteOne(ctx, id)
-			},
-		},
-	},
-}
+var recipeGraphRuntime = &graphRuntime{descriptor: RecipeGraphDescriptor, schemaEpoch: RecipeGraphSchemaEpoch}
 
-// RecipeGraph reads and writes the Recipe version graph: refs
-// that hold sparse override rows of each member kind, commits that pin the
-// exact row versions a ref sealed, and merges between refs. Every method
-// runs in one transaction and needs a user in the context. Every write
-// through a ref takes the ref's expected _version and fails with
-// ErrVersionConflict when the ref has moved on.
+// RecipeGraph reads and writes the Recipe version graph through the
+// version-graph engine: refs that hold sparse override rows of each member
+// kind, commits that pin the exact row versions a ref sealed, and merges
+// between refs. It turns typed edits into canonical rows and the rows the
+// engine returns into typed trees. Every method runs in one transaction and
+// needs a user in the context, the actor of its writes. Every write through
+// a ref takes the ref's expected _version and fails with ErrVersionConflict
+// when the ref has moved on.
 type RecipeGraph struct {
-	db     *Database
-	engine graphEngine
+	db          *Database
+	walkCeiling int
 }
 
 // RecipeGraph returns the Recipe version graph of db.
 func (db *Database) RecipeGraph() *RecipeGraph {
-	return &RecipeGraph{db: db, engine: graphEngine{spec: recipeGraphSpec, walkCeiling: DefaultWalkCeiling}}
+	return &RecipeGraph{db: db, walkCeiling: DefaultWalkCeiling}
 }
 
 // WithWalkCeiling returns a copy of g that reads a commit's tree by walking
 // at most n commits, and fails with ErrWalkCeiling past them.
 func (g *RecipeGraph) WithWalkCeiling(n int) *RecipeGraph {
 	copied := *g
-	copied.engine.walkCeiling = n
+	copied.walkCeiling = n
 	return &copied
+}
+
+func (g *RecipeGraph) run(ctx context.Context, fn func(tx pgx.Tx, e *engine.Engine, actor string) error) error {
+	return runGraph(ctx, g.db, recipeGraphRuntime, g.walkCeiling, fn)
 }
 
 // RecipeTree is a tree of the Recipe graph: the live rows of each kind,
@@ -379,8 +310,8 @@ type RecipeMergeResult struct {
 
 // RecipeConflict is one unit both sides of a merge changed differently, or
 // an edit against a delete (Path ""). Base, Ours and Theirs are the unit's
-// values as JSON, nil where the unit is absent; the authors are each side's
-// author column.
+// canonical values as JSON, nil where the unit is absent; the authors are
+// each side's author column.
 type RecipeConflict struct {
 	Kind         types.RecipeEntityKind
 	EntityKey    types.IdentityUUID
@@ -404,7 +335,7 @@ type RecipeResolution struct {
 }
 
 // RecipeChange is one entity two commits differ on. Row is the entity's
-// row in the later tree, absent for a DELETE.
+// canonical row in the later tree, absent for a DELETE.
 type RecipeChange struct {
 	Kind      types.RecipeEntityKind
 	EntityKey types.IdentityUUID
@@ -415,12 +346,12 @@ type RecipeChange struct {
 // CreatePrimary creates a primary line of root: a ref with no parent.
 func (g *RecipeGraph) CreatePrimary(ctx context.Context, root types.IdentityUUID, name string) (*types.RecipeRef, error) {
 	var result *types.RecipeRef
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		id, err := g.engine.createRef(ctx, tx, uuidText(root), "", "", name)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		ref, err := e.CreatePrimary(ctx, actor, uuidText(root), name)
 		if err != nil {
 			return err
 		}
-		result, err = g.ref(ctx, tx, id)
+		result, err = g.ref(ctx, tx, ref.ID)
 		return err
 	})
 	return result, err
@@ -429,16 +360,12 @@ func (g *RecipeGraph) CreatePrimary(ctx context.Context, root types.IdentityUUID
 // Branch creates a change set of fromRef whose base is fromRef's head.
 func (g *RecipeGraph) Branch(ctx context.Context, fromRef types.IdentityUUID, name string) (*types.RecipeRef, error) {
 	var result *types.RecipeRef
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		from, err := g.engine.readRef(ctx, tx, uuidText(fromRef), nil, false)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		ref, err := e.Branch(ctx, actor, uuidText(fromRef), name)
 		if err != nil {
 			return err
 		}
-		id, err := g.engine.createRef(ctx, tx, from.root, from.id, from.head, name)
-		if err != nil {
-			return err
-		}
-		result, err = g.ref(ctx, tx, id)
+		result, err = g.ref(ctx, tx, ref.ID)
 		return err
 	})
 	return result, err
@@ -448,127 +375,36 @@ func (g *RecipeGraph) Branch(ctx context.Context, fromRef types.IdentityUUID, na
 // unsets, kind by kind. It refuses a sealed ref.
 func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version int64, edits RecipeEdits) (*RecipeSaveResult, error) {
 	result := &RecipeSaveResult{}
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		r, err := g.engine.readRef(ctx, tx, uuidText(ref), &version, true)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		canonicalEdits := engine.Edits{}
+		if err := recipeCoverEdits(canonicalEdits, edits.Cover); err != nil {
+			return err
+		}
+		if err := recipeIngredientEdits(canonicalEdits, edits.Ingredient); err != nil {
+			return err
+		}
+		if err := recipeNoteEdits(canonicalEdits, edits.Note); err != nil {
+			return err
+		}
+		if err := recipeStepEdits(canonicalEdits, edits.Step); err != nil {
+			return err
+		}
+		if err := recipeTastingEdits(canonicalEdits, edits.Tasting); err != nil {
+			return err
+		}
+		if err := recipeUtensilEdits(canonicalEdits, edits.Utensil); err != nil {
+			return err
+		}
+		saved, err := e.Save(ctx, actor, uuidText(ref), version, canonicalEdits)
 		if err != nil {
 			return err
 		}
-		for _, input := range edits.Cover.Upsert {
-			row, err := g.upsertCover(ctx, tx, r, input)
-			if err != nil {
-				return err
-			}
-			result.Saved.Cover = append(result.Saved.Cover, row)
-		}
-		for _, input := range edits.Ingredient.Upsert {
-			row, err := g.upsertIngredient(ctx, tx, r, input)
-			if err != nil {
-				return err
-			}
-			result.Saved.Ingredient = append(result.Saved.Ingredient, row)
-		}
-		for _, input := range edits.Note.Upsert {
-			row, err := g.upsertNote(ctx, tx, r, input)
-			if err != nil {
-				return err
-			}
-			result.Saved.Note = append(result.Saved.Note, row)
-		}
-		for _, input := range edits.Step.Upsert {
-			row, err := g.upsertStep(ctx, tx, r, input)
-			if err != nil {
-				return err
-			}
-			result.Saved.Step = append(result.Saved.Step, row)
-		}
-		for _, input := range edits.Tasting.Upsert {
-			row, err := g.upsertTasting(ctx, tx, r, input)
-			if err != nil {
-				return err
-			}
-			result.Saved.Tasting = append(result.Saved.Tasting, row)
-		}
-		for _, input := range edits.Utensil.Upsert {
-			row, err := g.upsertUtensil(ctx, tx, r, input)
-			if err != nil {
-				return err
-			}
-			result.Saved.Utensil = append(result.Saved.Utensil, row)
-		}
-		if len(edits.Cover.Delete) > 0 || len(edits.Ingredient.Delete) > 0 || len(edits.Note.Delete) > 0 || len(edits.Step.Delete) > 0 || len(edits.Tasting.Delete) > 0 || len(edits.Utensil.Delete) > 0 {
-			composed, _, _, err := g.engine.compose(ctx, tx, r)
-			if err != nil {
-				return err
-			}
-			byKey, err := g.engine.spec.index(composed)
-			if err != nil {
-				return err
-			}
-			for _, key := range edits.Cover.Delete {
-				if err := g.engine.deleteEntity(ctx, tx, r, byKey, "cover", uuidText(key)); err != nil {
-					return err
-				}
-			}
-			for _, key := range edits.Ingredient.Delete {
-				if err := g.engine.deleteEntity(ctx, tx, r, byKey, "ingredient", uuidText(key)); err != nil {
-					return err
-				}
-			}
-			for _, key := range edits.Note.Delete {
-				if err := g.engine.deleteEntity(ctx, tx, r, byKey, "note", uuidText(key)); err != nil {
-					return err
-				}
-			}
-			for _, key := range edits.Step.Delete {
-				if err := g.engine.deleteEntity(ctx, tx, r, byKey, "step", uuidText(key)); err != nil {
-					return err
-				}
-			}
-			for _, key := range edits.Tasting.Delete {
-				if err := g.engine.deleteEntity(ctx, tx, r, byKey, "tasting", uuidText(key)); err != nil {
-					return err
-				}
-			}
-			for _, key := range edits.Utensil.Delete {
-				if err := g.engine.deleteEntity(ctx, tx, r, byKey, "utensil", uuidText(key)); err != nil {
-					return err
-				}
-			}
-		}
-		for _, key := range edits.Cover.Unset {
-			if err := g.engine.unsetEntity(ctx, tx, r, "cover", key); err != nil {
-				return err
-			}
-		}
-		for _, key := range edits.Ingredient.Unset {
-			if err := g.engine.unsetEntity(ctx, tx, r, "ingredient", key); err != nil {
-				return err
-			}
-		}
-		for _, key := range edits.Note.Unset {
-			if err := g.engine.unsetEntity(ctx, tx, r, "note", key); err != nil {
-				return err
-			}
-		}
-		for _, key := range edits.Step.Unset {
-			if err := g.engine.unsetEntity(ctx, tx, r, "step", key); err != nil {
-				return err
-			}
-		}
-		for _, key := range edits.Tasting.Unset {
-			if err := g.engine.unsetEntity(ctx, tx, r, "tasting", key); err != nil {
-				return err
-			}
-		}
-		for _, key := range edits.Utensil.Unset {
-			if err := g.engine.unsetEntity(ctx, tx, r, "utensil", key); err != nil {
-				return err
-			}
-		}
-		if err := g.engine.touchRef(ctx, tx, r, "", false); err != nil {
+		tree, err := g.tree(&engine.TreeResult{Tree: saved.Saved})
+		if err != nil {
 			return err
 		}
-		result.Ref, err = g.ref(ctx, tx, r.id)
+		result.Saved = *tree
+		result.Ref, err = g.ref(ctx, tx, saved.Ref.ID)
 		return err
 	})
 	if err != nil {
@@ -582,27 +418,30 @@ func (g *RecipeGraph) Save(ctx context.Context, ref types.IdentityUUID, version 
 // ref's head. It returns ErrNothingToCommit when nothing changed, and an
 // *InvalidTreeError when the composed tree breaks the graph's rules.
 func (g *RecipeGraph) Commit(ctx context.Context, ref types.IdentityUUID, version int64, opts RecipeCommitOptions) (*RecipeCommitResult, error) {
-	return g.commit(ctx, ref, version, graphCommitOptions{message: opts.Message, tag: opts.Tag}, false, false)
+	result := &RecipeCommitResult{}
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		committed, err := e.Commit(ctx, actor, uuidText(ref), version, engine.CommitOptions{Message: opts.Message, Tag: opts.Tag})
+		if err != nil {
+			return err
+		}
+		return g.commitResult(ctx, tx, committed, &result.Ref, &result.Commit)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // Seal commits a ref at version when it has changes, and seals it: the ref
 // then refuses writes.
 func (g *RecipeGraph) Seal(ctx context.Context, ref types.IdentityUUID, version int64) (*RecipeCommitResult, error) {
-	return g.commit(ctx, ref, version, graphCommitOptions{}, true, true)
-}
-
-func (g *RecipeGraph) commit(ctx context.Context, ref types.IdentityUUID, version int64, opts graphCommitOptions, allowEmpty, seal bool) (*RecipeCommitResult, error) {
 	result := &RecipeCommitResult{}
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		r, err := g.engine.readRef(ctx, tx, uuidText(ref), &version, true)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		sealed, err := e.Seal(ctx, actor, uuidText(ref), version)
 		if err != nil {
 			return err
 		}
-		commit, err := g.engine.commitAndMove(ctx, tx, r, opts, allowEmpty, seal)
-		if err != nil {
-			return err
-		}
-		return g.commitResult(ctx, tx, r.id, commit, &result.Ref, &result.Commit)
+		return g.commitResult(ctx, tx, sealed, &result.Ref, &result.Commit)
 	})
 	if err != nil {
 		return nil, err
@@ -616,21 +455,7 @@ func (g *RecipeGraph) commit(ctx context.Context, ref types.IdentityUUID, versio
 // writes nothing.
 func (g *RecipeGraph) Merge(ctx context.Context, source, target types.IdentityUUID, targetVersion int64, resolutions []RecipeResolution) (*RecipeMergeResult, error) {
 	result := &RecipeMergeResult{}
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		t, err := g.engine.readRef(ctx, tx, uuidText(target), &targetVersion, true)
-		if err != nil {
-			return err
-		}
-		s, err := g.engine.readRef(ctx, tx, uuidText(source), nil, false)
-		if err != nil {
-			return err
-		}
-		if s.root != t.root {
-			return ErrRootMismatch
-		}
-		if s.id == t.id {
-			return fmt.Errorf("version graph: a ref cannot be merged into itself")
-		}
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
 		coreResolutions := make([]versiongraph.Resolution, 0, len(resolutions))
 		for _, resolution := range resolutions {
 			coreResolutions = append(coreResolutions, versiongraph.Resolution{
@@ -641,35 +466,27 @@ func (g *RecipeGraph) Merge(ctx context.Context, source, target types.IdentityUU
 				Value:     resolution.Value,
 			})
 		}
-		conflicts, err := g.engine.merge(ctx, tx, s, t, coreResolutions)
+		merged, err := e.Merge(ctx, actor, uuidText(source), uuidText(target), targetVersion, coreResolutions)
 		if err != nil {
 			return err
 		}
-		if len(conflicts) > 0 {
-			for _, conflict := range conflicts {
-				key, err := parseUUIDText(conflict.EntityKey)
-				if err != nil {
-					return err
-				}
-				result.Conflicts = append(result.Conflicts, RecipeConflict{
-					Kind:         types.RecipeEntityKind(conflict.Kind),
-					EntityKey:    key,
-					Path:         conflict.Path,
-					Base:         conflict.Base,
-					Ours:         conflict.Ours,
-					Theirs:       conflict.Theirs,
-					OursAuthor:   conflict.OursAuthor,
-					TheirsAuthor: conflict.TheirsAuthor,
-				})
+		for _, conflict := range merged.Conflicts {
+			key, err := parseGraphID(conflict.EntityKey)
+			if err != nil {
+				return err
 			}
-			result.Ref, err = g.ref(ctx, tx, t.id)
-			return err
+			result.Conflicts = append(result.Conflicts, RecipeConflict{
+				Kind:         types.RecipeEntityKind(conflict.Kind),
+				EntityKey:    key,
+				Path:         conflict.Path,
+				Base:         conflict.Base,
+				Ours:         conflict.Ours,
+				Theirs:       conflict.Theirs,
+				OursAuthor:   conflict.OursAuthor,
+				TheirsAuthor: conflict.TheirsAuthor,
+			})
 		}
-		commit, err := g.engine.commitAndMove(ctx, tx, t, graphCommitOptions{}, true, false)
-		if err != nil {
-			return err
-		}
-		return g.commitResult(ctx, tx, t.id, commit, &result.Ref, &result.Commit)
+		return g.commitResult(ctx, tx, &engine.CommitResult{Ref: merged.Ref, Commit: merged.Commit}, &result.Ref, &result.Commit)
 	})
 	if err != nil {
 		return nil, err
@@ -681,30 +498,12 @@ func (g *RecipeGraph) Merge(ctx context.Context, source, target types.IdentityUU
 // toCommit, and commits them. History is never rewritten.
 func (g *RecipeGraph) Revert(ctx context.Context, ref types.IdentityUUID, version int64, toCommit types.IdentityUUID) (*RecipeCommitResult, error) {
 	result := &RecipeCommitResult{}
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		r, err := g.engine.readRef(ctx, tx, uuidText(ref), &version, true)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, actor string) error {
+		reverted, err := e.Revert(ctx, actor, uuidText(ref), version, uuidText(toCommit))
 		if err != nil {
 			return err
 		}
-		root, err := g.engine.commitRoot(ctx, tx, uuidText(toCommit))
-		if err != nil {
-			return err
-		}
-		if root != r.root {
-			return ErrRootMismatch
-		}
-		tree, err := g.engine.materialize(ctx, tx, uuidText(toCommit))
-		if err != nil {
-			return err
-		}
-		if err := g.engine.revert(ctx, tx, r, tree); err != nil {
-			return err
-		}
-		commit, err := g.engine.commitAndMove(ctx, tx, r, graphCommitOptions{}, true, false)
-		if err != nil {
-			return err
-		}
-		return g.commitResult(ctx, tx, r.id, commit, &result.Ref, &result.Commit)
+		return g.commitResult(ctx, tx, reverted, &result.Ref, &result.Commit)
 	})
 	if err != nil {
 		return nil, err
@@ -716,15 +515,12 @@ func (g *RecipeGraph) Revert(ctx context.Context, ref types.IdentityUUID, versio
 // nearest patch wins, and a DELETE removes it.
 func (g *RecipeGraph) Materialize(ctx context.Context, commit types.IdentityUUID) (*RecipeTree, error) {
 	var result *RecipeTree
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		tree, err := g.engine.materialize(ctx, tx, uuidText(commit))
+	err := g.run(ctx, func(_ pgx.Tx, e *engine.Engine, _ string) error {
+		tree, err := e.Materialize(ctx, uuidText(commit))
 		if err != nil {
 			return err
 		}
-		if tree, err = g.engine.order(tree); err != nil {
-			return err
-		}
-		result, err = g.tree(tree, nil)
+		result, err = g.tree(tree)
 		return err
 	})
 	return result, err
@@ -734,16 +530,12 @@ func (g *RecipeGraph) Materialize(ctx context.Context, commit types.IdentityUUID
 // rows laid over it.
 func (g *RecipeGraph) Compose(ctx context.Context, ref types.IdentityUUID) (*RecipeTree, error) {
 	var result *RecipeTree
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		r, err := g.engine.readRef(ctx, tx, uuidText(ref), nil, false)
+	err := g.run(ctx, func(_ pgx.Tx, e *engine.Engine, _ string) error {
+		tree, err := e.Compose(ctx, uuidText(ref))
 		if err != nil {
 			return err
 		}
-		tree, findings, _, err := g.engine.compose(ctx, tx, r)
-		if err != nil {
-			return err
-		}
-		result, err = g.tree(tree, findings)
+		result, err = g.tree(tree)
 		return err
 	})
 	return result, err
@@ -752,21 +544,13 @@ func (g *RecipeGraph) Compose(ctx context.Context, ref types.IdentityUUID) (*Rec
 // Diff lists the entities the trees of two commits differ on.
 func (g *RecipeGraph) Diff(ctx context.Context, from, to types.IdentityUUID) ([]RecipeChange, error) {
 	var result []RecipeChange
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		fromTree, err := g.engine.materialize(ctx, tx, uuidText(from))
-		if err != nil {
-			return err
-		}
-		toTree, err := g.engine.materialize(ctx, tx, uuidText(to))
-		if err != nil {
-			return err
-		}
-		changes, err := g.engine.diff(fromTree, toTree)
+	err := g.run(ctx, func(_ pgx.Tx, e *engine.Engine, _ string) error {
+		changes, err := e.Diff(ctx, uuidText(from), uuidText(to))
 		if err != nil {
 			return err
 		}
 		for _, change := range changes {
-			key, err := parseUUIDText(change.EntityKey)
+			key, err := parseGraphID(change.EntityKey)
 			if err != nil {
 				return err
 			}
@@ -785,17 +569,13 @@ func (g *RecipeGraph) Diff(ctx context.Context, from, to types.IdentityUUID) ([]
 // History lists the commits a ref wrote, newest first.
 func (g *RecipeGraph) History(ctx context.Context, ref types.IdentityUUID) ([]*types.RecipeCommit, error) {
 	var result []*types.RecipeCommit
-	err := runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		r, err := g.engine.readRef(ctx, tx, uuidText(ref), nil, false)
+	err := g.run(ctx, func(tx pgx.Tx, e *engine.Engine, _ string) error {
+		commits, err := e.History(ctx, uuidText(ref))
 		if err != nil {
 			return err
 		}
-		ids, err := g.engine.refCommits(ctx, tx, r)
-		if err != nil {
-			return err
-		}
-		for _, id := range ids {
-			commit, err := g.commitRow(ctx, tx, id)
+		for _, c := range commits {
+			commit, err := g.commitRow(ctx, tx, c.ID)
 			if err != nil {
 				return err
 			}
@@ -808,16 +588,13 @@ func (g *RecipeGraph) History(ctx context.Context, ref types.IdentityUUID) ([]*t
 
 // Discard soft-deletes a ref at version, which frees its name.
 func (g *RecipeGraph) Discard(ctx context.Context, ref types.IdentityUUID, version int64) error {
-	return runGraph(ctx, g.db, func(tx pgx.Tx) error {
-		if _, err := g.engine.readRef(ctx, tx, uuidText(ref), &version, false); err != nil {
-			return err
-		}
-		return (&RecipeRefRepository{tx: tx, txDB: g.db}).DeleteOneIfVersion(ctx, ref, version)
+	return g.run(ctx, func(_ pgx.Tx, e *engine.Engine, actor string) error {
+		return e.Discard(ctx, actor, uuidText(ref), version)
 	})
 }
 
 func (g *RecipeGraph) ref(ctx context.Context, tx pgx.Tx, id string) (*types.RecipeRef, error) {
-	refID, err := parseUUIDText(id)
+	refID, err := parseGraphID(id)
 	if err != nil {
 		return nil, err
 	}
@@ -825,329 +602,317 @@ func (g *RecipeGraph) ref(ctx context.Context, tx pgx.Tx, id string) (*types.Rec
 }
 
 func (g *RecipeGraph) commitRow(ctx context.Context, tx pgx.Tx, id string) (*types.RecipeCommit, error) {
-	commitID, err := parseUUIDText(id)
+	commitID, err := parseGraphID(id)
 	if err != nil {
 		return nil, err
 	}
 	return (&RecipeCommitRepository{tx: tx, txDB: g.db}).GetOne(ctx, commitID, nil)
 }
 
-// commitResult reads a ref and, unless commit is "", a commit.
-func (g *RecipeGraph) commitResult(ctx context.Context, tx pgx.Tx, ref, commit string, refOut **types.RecipeRef, commitOut **types.RecipeCommit) error {
+// commitResult reads the typed ref and, unless none was written, the typed
+// commit of an engine result, in the operation's transaction.
+func (g *RecipeGraph) commitResult(ctx context.Context, tx pgx.Tx, result *engine.CommitResult, refOut **types.RecipeRef, commitOut **types.RecipeCommit) error {
 	var err error
-	if *refOut, err = g.ref(ctx, tx, ref); err != nil {
+	if *refOut, err = g.ref(ctx, tx, result.Ref.ID); err != nil {
 		return err
 	}
-	if commit == "" {
+	if result.Commit == nil {
 		return nil
 	}
-	*commitOut, err = g.commitRow(ctx, tx, commit)
+	*commitOut, err = g.commitRow(ctx, tx, result.Commit.ID)
 	return err
 }
 
-// tree types a tree the core returned, and hashes it.
-func (g *RecipeGraph) tree(tree graphTree, findings []versiongraph.Finding) (*RecipeTree, error) {
-	result := &RecipeTree{Findings: findings}
-	for _, raw := range tree["cover"] {
+// tree types a tree of canonical rows the engine returned.
+func (g *RecipeGraph) tree(tree *engine.TreeResult) (*RecipeTree, error) {
+	result := &RecipeTree{ContentHash: tree.ContentHash, Findings: tree.Findings}
+	for _, raw := range tree.Tree["cover"] {
 		row, err := decodeCoverHistoryData(raw)
 		if err != nil {
 			return nil, err
 		}
 		result.Cover = append(result.Cover, row)
 	}
-	for _, raw := range tree["ingredient"] {
+	for _, raw := range tree.Tree["ingredient"] {
 		row, err := decodeIngredientHistoryData(raw)
 		if err != nil {
 			return nil, err
 		}
 		result.Ingredient = append(result.Ingredient, row)
 	}
-	for _, raw := range tree["note"] {
+	for _, raw := range tree.Tree["note"] {
 		row, err := decodeNoteHistoryData(raw)
 		if err != nil {
 			return nil, err
 		}
 		result.Note = append(result.Note, row)
 	}
-	for _, raw := range tree["step"] {
+	for _, raw := range tree.Tree["step"] {
 		row, err := decodeStepHistoryData(raw)
 		if err != nil {
 			return nil, err
 		}
 		result.Step = append(result.Step, row)
 	}
-	for _, raw := range tree["tasting"] {
+	for _, raw := range tree.Tree["tasting"] {
 		row, err := decodeTastingHistoryData(raw)
 		if err != nil {
 			return nil, err
 		}
 		result.Tasting = append(result.Tasting, row)
 	}
-	for _, raw := range tree["utensil"] {
+	for _, raw := range tree.Tree["utensil"] {
 		row, err := decodeUtensilHistoryData(raw)
 		if err != nil {
 			return nil, err
 		}
 		result.Utensil = append(result.Utensil, row)
 	}
-	hash, err := g.engine.contentHash(tree)
-	if err != nil {
-		return nil, err
-	}
-	result.ContentHash = hash
 	return result, nil
 }
 
-// upsertCover writes input as the ref's row of its entity: an update of
-// the ref's existing row, or a new row. A new entity gets its key from the
-// database. The row's id, root, ref and deletedOnRef are the shell's.
-func (g *RecipeGraph) upsertCover(ctx context.Context, tx pgx.Tx, ref graphRef, input *types.Cover) (*types.Cover, error) {
-	if input == nil {
+// recipeCoverEdits adds the typed cover edits of a Save to
+// its canonical edits.
+func recipeCoverEdits(out engine.Edits, edits GraphEdits[types.Cover]) error {
+	if len(edits.Upsert) == 0 && len(edits.Delete) == 0 && len(edits.Unset) == 0 {
+		return nil
+	}
+	var kind engine.KindEdits
+	for _, input := range edits.Upsert {
+		row, err := recipeCoverRow(input)
+		if err != nil {
+			return err
+		}
+		kind.Upsert = append(kind.Upsert, row)
+	}
+	for _, key := range edits.Delete {
+		kind.Delete = append(kind.Delete, uuidText(key))
+	}
+	for _, key := range edits.Unset {
+		kind.Unset = append(kind.Unset, uuidText(key))
+	}
+	out["cover"] = kind
+	return nil
+}
+
+// recipeCoverRow is the canonical row of a typed cover,
+// whose every column holds the schema runtime's JSON of its field. The
+// engine writes the id, root, ref, tombstone, version and audit columns,
+// and a nil EntityKey makes a new entity.
+func recipeCoverRow(v *types.Cover) (json.RawMessage, error) {
+	if v == nil {
 		return nil, fmt.Errorf("version graph: a nil cover upsert")
 	}
-	rootID, err := parseUUIDText(ref.root)
-	if err != nil {
-		return nil, err
-	}
-	refID, err := parseUUIDText(ref.id)
-	if err != nil {
-		return nil, err
-	}
-	row := *input
-	row.Id = nil
-	row.Recipe = types.Recipe{Id: &rootID}
-	row.Ref = types.RecipeRef{Id: &refID}
-	// deleted_on_ref has no SQL DEFAULT: the shell always writes it.
-	row.DeletedOnRef = false
-	repository := &CoverRepository{tx: tx, txDB: g.db}
-	if row.EntityKey != nil {
-		kind, err := g.engine.spec.kind("cover")
-		if err != nil {
-			return nil, err
-		}
-		id, err := g.engine.slot(ctx, tx, kind, ref.id, uuidText(*row.EntityKey))
-		if err != nil {
-			return nil, err
-		}
-		if id != "" {
-			rowID, err := parseUUIDText(id)
-			if err != nil {
-				return nil, err
-			}
-			return repository.UpdateOne(ctx, rowID, NewCoverSnapshotUpdate(&row))
-		}
-	}
-	return repository.CreateOne(ctx, &row)
+	values := map[string]any{}
+	values["photo_url"] = v.PhotoUrl
+	values["entity_key"] = graphOptional(v.EntityKey)
+	return recipeGraphRuntime.row("cover", values)
 }
 
-// upsertIngredient writes input as the ref's row of its entity: an update of
-// the ref's existing row, or a new row. A new entity gets its key from the
-// database. The row's id, root, ref and deletedOnRef are the shell's.
-func (g *RecipeGraph) upsertIngredient(ctx context.Context, tx pgx.Tx, ref graphRef, input *types.Ingredient) (*types.Ingredient, error) {
-	if input == nil {
+// recipeIngredientEdits adds the typed ingredient edits of a Save to
+// its canonical edits.
+func recipeIngredientEdits(out engine.Edits, edits GraphEdits[types.Ingredient]) error {
+	if len(edits.Upsert) == 0 && len(edits.Delete) == 0 && len(edits.Unset) == 0 {
+		return nil
+	}
+	var kind engine.KindEdits
+	for _, input := range edits.Upsert {
+		row, err := recipeIngredientRow(input)
+		if err != nil {
+			return err
+		}
+		kind.Upsert = append(kind.Upsert, row)
+	}
+	for _, key := range edits.Delete {
+		kind.Delete = append(kind.Delete, uuidText(key))
+	}
+	for _, key := range edits.Unset {
+		kind.Unset = append(kind.Unset, uuidText(key))
+	}
+	out["ingredient"] = kind
+	return nil
+}
+
+// recipeIngredientRow is the canonical row of a typed ingredient,
+// whose every column holds the schema runtime's JSON of its field. The
+// engine writes the id, root, ref, tombstone, version and audit columns,
+// and a nil EntityKey makes a new entity.
+func recipeIngredientRow(v *types.Ingredient) (json.RawMessage, error) {
+	if v == nil {
 		return nil, fmt.Errorf("version graph: a nil ingredient upsert")
 	}
-	rootID, err := parseUUIDText(ref.root)
-	if err != nil {
-		return nil, err
-	}
-	refID, err := parseUUIDText(ref.id)
-	if err != nil {
-		return nil, err
-	}
-	row := *input
-	row.Id = nil
-	row.Recipe = types.Recipe{Id: &rootID}
-	row.Ref = types.RecipeRef{Id: &refID}
-	// deleted_on_ref has no SQL DEFAULT: the shell always writes it.
-	row.DeletedOnRef = false
-	repository := &IngredientRepository{tx: tx, txDB: g.db}
-	if row.EntityKey != nil {
-		kind, err := g.engine.spec.kind("ingredient")
-		if err != nil {
-			return nil, err
-		}
-		id, err := g.engine.slot(ctx, tx, kind, ref.id, uuidText(*row.EntityKey))
-		if err != nil {
-			return nil, err
-		}
-		if id != "" {
-			rowID, err := parseUUIDText(id)
-			if err != nil {
-				return nil, err
-			}
-			return repository.UpdateOne(ctx, rowID, NewIngredientSnapshotUpdate(&row))
-		}
-	}
-	return repository.CreateOne(ctx, &row)
+	values := map[string]any{}
+	values["step_key"] = v.StepKey
+	values["quantity"] = v.Quantity
+	values["substitutes"] = v.Substitutes
+	values["entity_key"] = graphOptional(v.EntityKey)
+	return recipeGraphRuntime.row("ingredient", values)
 }
 
-// upsertNote writes input as the ref's row of its entity: an update of
-// the ref's existing row, or a new row. A new entity gets its key from the
-// database. The row's id, root, ref and deletedOnRef are the shell's.
-func (g *RecipeGraph) upsertNote(ctx context.Context, tx pgx.Tx, ref graphRef, input *types.Note) (*types.Note, error) {
-	if input == nil {
+// recipeNoteEdits adds the typed note edits of a Save to
+// its canonical edits.
+func recipeNoteEdits(out engine.Edits, edits GraphEdits[types.Note]) error {
+	if len(edits.Upsert) == 0 && len(edits.Delete) == 0 && len(edits.Unset) == 0 {
+		return nil
+	}
+	var kind engine.KindEdits
+	for _, input := range edits.Upsert {
+		row, err := recipeNoteRow(input)
+		if err != nil {
+			return err
+		}
+		kind.Upsert = append(kind.Upsert, row)
+	}
+	for _, key := range edits.Delete {
+		kind.Delete = append(kind.Delete, uuidText(key))
+	}
+	for _, key := range edits.Unset {
+		kind.Unset = append(kind.Unset, uuidText(key))
+	}
+	out["note"] = kind
+	return nil
+}
+
+// recipeNoteRow is the canonical row of a typed note,
+// whose every column holds the schema runtime's JSON of its field. The
+// engine writes the id, root, ref, tombstone, version and audit columns,
+// and a nil EntityKey makes a new entity.
+func recipeNoteRow(v *types.Note) (json.RawMessage, error) {
+	if v == nil {
 		return nil, fmt.Errorf("version graph: a nil note upsert")
 	}
-	rootID, err := parseUUIDText(ref.root)
-	if err != nil {
-		return nil, err
-	}
-	refID, err := parseUUIDText(ref.id)
-	if err != nil {
-		return nil, err
-	}
-	row := *input
-	row.Id = nil
-	row.Recipe = types.Recipe{Id: &rootID}
-	row.Ref = types.RecipeRef{Id: &refID}
-	// deleted_on_ref has no SQL DEFAULT: the shell always writes it.
-	row.DeletedOnRef = false
-	repository := &NoteRepository{tx: tx, txDB: g.db}
-	if row.EntityKey != nil {
-		kind, err := g.engine.spec.kind("note")
-		if err != nil {
-			return nil, err
-		}
-		id, err := g.engine.slot(ctx, tx, kind, ref.id, uuidText(*row.EntityKey))
-		if err != nil {
-			return nil, err
-		}
-		if id != "" {
-			rowID, err := parseUUIDText(id)
-			if err != nil {
-				return nil, err
-			}
-			return repository.UpdateOne(ctx, rowID, NewNoteSnapshotUpdate(&row))
-		}
-	}
-	return repository.CreateOne(ctx, &row)
+	values := map[string]any{}
+	values["reply_to"] = graphOptional(v.ReplyTo)
+	values["body"] = v.Body
+	values["entity_key"] = graphOptional(v.EntityKey)
+	return recipeGraphRuntime.row("note", values)
 }
 
-// upsertStep writes input as the ref's row of its entity: an update of
-// the ref's existing row, or a new row. A new entity gets its key from the
-// database. The row's id, root, ref and deletedOnRef are the shell's.
-func (g *RecipeGraph) upsertStep(ctx context.Context, tx pgx.Tx, ref graphRef, input *types.Step) (*types.Step, error) {
-	if input == nil {
+// recipeStepEdits adds the typed step edits of a Save to
+// its canonical edits.
+func recipeStepEdits(out engine.Edits, edits GraphEdits[types.Step]) error {
+	if len(edits.Upsert) == 0 && len(edits.Delete) == 0 && len(edits.Unset) == 0 {
+		return nil
+	}
+	var kind engine.KindEdits
+	for _, input := range edits.Upsert {
+		row, err := recipeStepRow(input)
+		if err != nil {
+			return err
+		}
+		kind.Upsert = append(kind.Upsert, row)
+	}
+	for _, key := range edits.Delete {
+		kind.Delete = append(kind.Delete, uuidText(key))
+	}
+	for _, key := range edits.Unset {
+		kind.Unset = append(kind.Unset, uuidText(key))
+	}
+	out["step"] = kind
+	return nil
+}
+
+// recipeStepRow is the canonical row of a typed step,
+// whose every column holds the schema runtime's JSON of its field. The
+// engine writes the id, root, ref, tombstone, version and audit columns,
+// and a nil EntityKey makes a new entity.
+func recipeStepRow(v *types.Step) (json.RawMessage, error) {
+	if v == nil {
 		return nil, fmt.Errorf("version graph: a nil step upsert")
 	}
-	rootID, err := parseUUIDText(ref.root)
-	if err != nil {
-		return nil, err
-	}
-	refID, err := parseUUIDText(ref.id)
-	if err != nil {
-		return nil, err
-	}
-	row := *input
-	row.Id = nil
-	row.Recipe = types.Recipe{Id: &rootID}
-	row.Ref = types.RecipeRef{Id: &refID}
-	// deleted_on_ref has no SQL DEFAULT: the shell always writes it.
-	row.DeletedOnRef = false
-	repository := &StepRepository{tx: tx, txDB: g.db}
-	if row.EntityKey != nil {
-		kind, err := g.engine.spec.kind("step")
-		if err != nil {
-			return nil, err
-		}
-		id, err := g.engine.slot(ctx, tx, kind, ref.id, uuidText(*row.EntityKey))
-		if err != nil {
-			return nil, err
-		}
-		if id != "" {
-			rowID, err := parseUUIDText(id)
-			if err != nil {
-				return nil, err
-			}
-			return repository.UpdateOne(ctx, rowID, NewStepSnapshotUpdate(&row))
-		}
-	}
-	return repository.CreateOne(ctx, &row)
+	values := map[string]any{}
+	values["position"] = v.Position
+	values["instruction"] = v.Instruction
+	values["timings"] = v.Timings
+	values["scratch"] = graphOptional(v.Scratch)
+	values["entity_key"] = graphOptional(v.EntityKey)
+	return recipeGraphRuntime.row("step", values)
 }
 
-// upsertTasting writes input as the ref's row of its entity: an update of
-// the ref's existing row, or a new row. A new entity gets its key from the
-// database. The row's id, root, ref and deletedOnRef are the shell's.
-func (g *RecipeGraph) upsertTasting(ctx context.Context, tx pgx.Tx, ref graphRef, input *types.Tasting) (*types.Tasting, error) {
-	if input == nil {
+// recipeTastingEdits adds the typed tasting edits of a Save to
+// its canonical edits.
+func recipeTastingEdits(out engine.Edits, edits GraphEdits[types.Tasting]) error {
+	if len(edits.Upsert) == 0 && len(edits.Delete) == 0 && len(edits.Unset) == 0 {
+		return nil
+	}
+	var kind engine.KindEdits
+	for _, input := range edits.Upsert {
+		row, err := recipeTastingRow(input)
+		if err != nil {
+			return err
+		}
+		kind.Upsert = append(kind.Upsert, row)
+	}
+	for _, key := range edits.Delete {
+		kind.Delete = append(kind.Delete, uuidText(key))
+	}
+	for _, key := range edits.Unset {
+		kind.Unset = append(kind.Unset, uuidText(key))
+	}
+	out["tasting"] = kind
+	return nil
+}
+
+// recipeTastingRow is the canonical row of a typed tasting,
+// whose every column holds the schema runtime's JSON of its field. The
+// engine writes the id, root, ref, tombstone, version and audit columns,
+// and a nil EntityKey makes a new entity.
+func recipeTastingRow(v *types.Tasting) (json.RawMessage, error) {
+	if v == nil {
 		return nil, fmt.Errorf("version graph: a nil tasting upsert")
 	}
-	rootID, err := parseUUIDText(ref.root)
-	if err != nil {
-		return nil, err
-	}
-	refID, err := parseUUIDText(ref.id)
-	if err != nil {
-		return nil, err
-	}
-	row := *input
-	row.Id = nil
-	row.Recipe = types.Recipe{Id: &rootID}
-	row.Ref = types.RecipeRef{Id: &refID}
-	// deleted_on_ref has no SQL DEFAULT: the shell always writes it.
-	row.DeletedOnRef = false
-	repository := &TastingRepository{tx: tx, txDB: g.db}
-	if row.EntityKey != nil {
-		kind, err := g.engine.spec.kind("tasting")
-		if err != nil {
-			return nil, err
-		}
-		id, err := g.engine.slot(ctx, tx, kind, ref.id, uuidText(*row.EntityKey))
-		if err != nil {
-			return nil, err
-		}
-		if id != "" {
-			rowID, err := parseUUIDText(id)
-			if err != nil {
-				return nil, err
-			}
-			return repository.UpdateOne(ctx, rowID, NewTastingSnapshotUpdate(&row))
-		}
-	}
-	return repository.CreateOne(ctx, &row)
+	values := map[string]any{}
+	values["taster"] = v.Taster
+	values["salty"] = v.Salty
+	values["score"] = v.Score
+	values["servings"] = v.Servings
+	values["tasted_on"] = v.TastedOn
+	values["tasted_at"] = v.TastedAt
+	values["served_at"] = v.ServedAt
+	values["rested"] = v.Rested
+	values["verdict"] = v.Verdict
+	values["remarks"] = v.Remarks
+	values["tags"] = v.Tags
+	values["helpers"] = v.Helpers
+	values["bites"] = v.Bites
+	values["entity_key"] = graphOptional(v.EntityKey)
+	return recipeGraphRuntime.row("tasting", values)
 }
 
-// upsertUtensil writes input as the ref's row of its entity: an update of
-// the ref's existing row, or a new row. A new entity gets its key from the
-// database. The row's id, root, ref and deletedOnRef are the shell's.
-func (g *RecipeGraph) upsertUtensil(ctx context.Context, tx pgx.Tx, ref graphRef, input *types.Utensil) (*types.Utensil, error) {
-	if input == nil {
+// recipeUtensilEdits adds the typed utensil edits of a Save to
+// its canonical edits.
+func recipeUtensilEdits(out engine.Edits, edits GraphEdits[types.Utensil]) error {
+	if len(edits.Upsert) == 0 && len(edits.Delete) == 0 && len(edits.Unset) == 0 {
+		return nil
+	}
+	var kind engine.KindEdits
+	for _, input := range edits.Upsert {
+		row, err := recipeUtensilRow(input)
+		if err != nil {
+			return err
+		}
+		kind.Upsert = append(kind.Upsert, row)
+	}
+	for _, key := range edits.Delete {
+		kind.Delete = append(kind.Delete, uuidText(key))
+	}
+	for _, key := range edits.Unset {
+		kind.Unset = append(kind.Unset, uuidText(key))
+	}
+	out["utensil"] = kind
+	return nil
+}
+
+// recipeUtensilRow is the canonical row of a typed utensil,
+// whose every column holds the schema runtime's JSON of its field. The
+// engine writes the id, root, ref, tombstone, version and audit columns,
+// and a nil EntityKey makes a new entity.
+func recipeUtensilRow(v *types.Utensil) (json.RawMessage, error) {
+	if v == nil {
 		return nil, fmt.Errorf("version graph: a nil utensil upsert")
 	}
-	rootID, err := parseUUIDText(ref.root)
-	if err != nil {
-		return nil, err
-	}
-	refID, err := parseUUIDText(ref.id)
-	if err != nil {
-		return nil, err
-	}
-	row := *input
-	// Every ref holds its own row of an entity, so the caller's id is
-	// ignored: a zero key leaves the id to the table's default.
-	row.Id = types.Utensil{}.Id
-	row.Recipe = types.Recipe{Id: &rootID}
-	row.Ref = types.RecipeRef{Id: &refID}
-	// deleted_on_ref has no SQL DEFAULT: the shell always writes it.
-	row.DeletedOnRef = false
-	repository := &UtensilRepository{tx: tx, txDB: g.db}
-	if row.EntityKey != nil {
-		kind, err := g.engine.spec.kind("utensil")
-		if err != nil {
-			return nil, err
-		}
-		id, err := g.engine.slot(ctx, tx, kind, ref.id, uuidText(*row.EntityKey))
-		if err != nil {
-			return nil, err
-		}
-		if id != "" {
-			rowID, err := parseUUIDText(id)
-			if err != nil {
-				return nil, err
-			}
-			return repository.UpdateOne(ctx, rowID, NewUtensilSnapshotUpdate(&row))
-		}
-	}
-	return repository.CreateOne(ctx, &row)
+	values := map[string]any{}
+	values["name"] = v.Name
+	values["entity_key"] = graphOptional(v.EntityKey)
+	return recipeGraphRuntime.row("utensil", values)
 }

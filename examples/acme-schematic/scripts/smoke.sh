@@ -91,7 +91,7 @@
 #      expands in the IR into PlanogramRef, PlanogramCommit, PlanogramPatch,
 #      their enums and each member's graph fields; the types module writes
 #      its descriptor (version 2: the graph's tables and every column's
-#      value class) and the ORM its shell (db.PlanogramGraph()), which
+#      value class) and the ORM its facade (db.PlanogramGraph()), which
 #      compiled with the ORM module in step 17; format writes the
 #      declarations, not the expansion, and the YAML twin expands to the
 #      same types.
@@ -483,7 +483,7 @@ jq -e '.kinds[1].columns == {"_version": "integer", "bay_key": "uuid", "deleted_
 jq -e '.kinds[0].units == {"shelf_heights": "keyed"} and .kinds[0].excluded == ["planogram_id", "created_at", "updated_at"]' \
   "$DESCRIPTOR" >/dev/null
 jq -e '.kinds[1].parent == {"key": "bay_key", "kind": "bay"} and .kinds[1].order == "position"' "$DESCRIPTOR" >/dev/null
-# The shell and the tables it writes through; go_module_compiles built and
+# The facade and the tables it writes through; go_module_compiles built and
 # vetted the ORM module with it in the arrays-of-arrays step.
 grep -q '^func (db \*Database) PlanogramGraph() \*PlanogramGraph {$' "$DIST/orm/shop-db/versiongraph_planogram.go"
 grep -q $'^\tversiongraph "github.com/parable-work/superschematic/runtime/versiongraph/go"$' \

@@ -30,7 +30,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check ts python rust \
-        versiongraph docs cli-smoke scrub versions clean
+        versiongraph versiongraph-scenarios docs cli-smoke scrub versions clean
 
 all: build test lint
 
@@ -107,6 +107,14 @@ rust:
 # it (runtime/versiongraph/go/lib/<goos>_<goarch>).
 versiongraph:
 	scripts/versiongraph-archive.sh >/dev/null
+
+# Every version-graph scenario (runtime/versiongraph/testdata/scenarios)
+# through the Go engine and its Postgres adapter, against the Postgres that
+# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
+versiongraph-scenarios: versiongraph
+	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
+		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
+	cd runtime/versiongraph/go && go test -count=1 -v -run '^TestScenarios$$' ./engine/
 
 # Starlight site. CI runs this as the docs job (D9); release.yml deploys it.
 docs:

@@ -1,6 +1,6 @@
 ---
 title: Version graphs
-description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the generated Go shell, how a consumer links the core, and the core from TypeScript.
+description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter, the generated Go facade, how a consumer links the core, and the core from TypeScript.
 sidebar:
   order: 8
 ---
@@ -11,9 +11,11 @@ and versions the tree as a whole. The tree's rows live in
 line of work: a primary line, or a change set branched from another ref.
 Each ref holds only the rows it overrides. A commit records the exact row
 versions a ref sealed. One core composes, merges, diffs, hashes and
-validates trees, and the generated Go shell drives it against Postgres.
+validates trees. The Go engine runs every graph operation on the core over
+a storage adapter, and a generated Go facade gives each graph typed methods
+over the engine.
 
-The design and the alternatives not taken are D17 in
+The design and the alternatives not taken are D17 and D19 in
 [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md).
 
 ## Declare a graph
@@ -196,7 +198,9 @@ other file there.
 The descriptor is version 2, and the core refuses any other. Besides each
 kind's roles, it names the graph's tables and gives every column of each
 kind's table a value class, which a storage adapter reads to build its
-statements and to normalize the rows it reads:
+statements and to normalize the rows it reads. `root` names the column
+that holds the root's key, which the adapter writes on every row; the core
+does not read it:
 
 ```json
 {
@@ -211,7 +215,7 @@ statements and to normalize the rows it reads:
       "kind": "ingredient",
       "table": "ingredient",
       "historyTable": "ingredient_history",
-      "key": "entity_key", "id": "id", "ref": "ref_id",
+      "key": "entity_key", "id": "id", "ref": "ref_id", "root": "recipe_id",
       "tombstone": "deleted_on_ref", "version": "_version",
       "parent": { "key": "step_key", "kind": "step" },
       "excluded": ["recipe_id"],
@@ -225,7 +229,7 @@ statements and to normalize the rows it reads:
       "kind": "step",
       "table": "step",
       "historyTable": "step_history",
-      "key": "entity_key", "id": "id", "ref": "ref_id",
+      "key": "entity_key", "id": "id", "ref": "ref_id", "root": "recipe_id",
       "tombstone": "deleted_on_ref", "version": "_version",
       "author": "updated_by",
       "order": "position",
@@ -275,16 +279,60 @@ the field and its SQL type: `Geo.Location`, stored as `POINT`, and
 vectors in `runtime/versiongraph/testdata/canonical`, is in
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#canonical-rows).
 The Go package `github.com/parable-work/superschematic/runtime/versiongraph/go/canonical`
-implements the Postgres rules. The generated shell still hands the core
-`to_jsonb` rows until its engine moves into the runtime (D19).
+implements the Postgres rules, and the Postgres adapter normalizes every
+row it reads with it.
 
-## The generated shell
+## The engine and its Postgres adapter
+
+The Go engine (package `engine` in `runtime/versiongraph/go`) implements
+every graph operation once: create a primary line, branch, save, commit,
+seal, merge, revert, materialize, compose, diff, history and discard, with
+the walk ceiling, the schema-epoch check and the named errors. It reads and
+writes canonical rows only, takes every id as a UUID in its canonical form
+(base62) or hyphenated, and takes an actor for every write.
+
+It reaches storage only through the interface in package `storage`: read
+and lock refs, read a ref's rows, upsert and remove a member row, read
+history images by `(id, _version)`, read and write commits and patches,
+take the next sequence under a root lock, walk commits, prune and take the
+sweep lock. It asks the adapter for one transaction per operation.
+
+Package `postgres` is the Postgres adapter. It builds its statements at run
+time from the descriptor, reads live rows with `to_jsonb` and history
+images from their `data` column, and returns each as a canonical row. It
+writes a canonical row through `jsonb_populate_record`, turning a UUID into
+the hyphenated form and a duration into interval text, and writes the ref,
+the root, the tombstone and the audit columns itself. It reaches Postgres
+through a small `Client` interface (a transaction, and a query and an exec
+inside it); `postgres.Pgx` binds a pgx connection, pool or open
+transaction, where it runs in a savepoint. `postgres.Options` names the
+history actor setting, the schema's
+[`history_actor_setting`](/superschematic/reference/naming/#history_actor_setting).
+
+```go
+adapter, err := postgres.New(descriptor, postgres.Options{})
+eng, err := engine.New(descriptor, adapter.Storage(postgres.Pgx(pool)), engine.Options{SchemaEpoch: 1})
+ref, err := eng.CreatePrimary(ctx, actor, root, "main")
+```
+
+`engine.ErrorCode(err)` names an error with a code every language's engine
+shares (`version_conflict`, `ref_sealed`, and the core's codes). The
+scenarios in `runtime/versiongraph/testdata/scenarios` run sequences of
+operations over canonical rows, with the expected trees, content hashes,
+conflicts and errors, against the fixture in
+`runtime/versiongraph/testdata/fixture`; the Go engine runs every one
+against Postgres. Their format is in
+[runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#scenarios).
+
+## The generated facade
 
 When a DB schema declares a graph, the Go ORM generator writes
-`versiongraph_<name>.go` beside the repositories, and a shared
-`versiongraph.go`. `db.RecipeGraph()` returns a typed `RecipeGraph`. Every
-method runs in one transaction and needs a user in the context
-(`WithUserID`). Every write through a ref takes the ref's expected
+`versiongraph_<name>.go` beside the repositories, and puts the declarations
+every graph's facade shares (`GraphEdits`, the named errors,
+`DefaultWalkCeiling`) in `database.go`. `db.RecipeGraph()` returns a typed
+`RecipeGraph`, which runs each operation on the engine and its Postgres
+adapter. Every method runs in one transaction of the ORM's pool and needs a
+user in the context (`WithUserID`), the actor of its writes. Every write through a ref takes the ref's expected
 `_version` and fails with `ErrVersionConflict` when the ref has moved on.
 A ref or commit that does not exist, or a discarded ref, is `ErrNotFound`.
 
@@ -304,10 +352,11 @@ A ref or commit that does not exist, or a discarded ref, is `ErrNotFound`.
 | `Discard(ctx, ref, version)` | Soft-deletes the ref, which frees its name. |
 
 A tree comes back as `RecipeTree`: a slice of typed rows per kind, the
-content hash and any compose findings. Rows reach the core as `to_jsonb`
-of live rows and as history images of committed ones, and return through
-`jsonb_populate_record`, so no language's own JSON form of a row takes
-part in a hash or a merge.
+content hash and any compose findings. The facade turns a typed edit into a
+canonical row from each field's JSON, and a canonical row back into a typed
+value, so a field comes back in its canonical form: an instant in UTC, a
+time of day as `HH:MM:SS`. A conflict's values and a change's row are
+canonical JSON.
 
 `Materialize` stops with `ErrWalkCeiling` after `DefaultWalkCeiling`
 (4096) commits; `g.WithWalkCeiling(n)` returns a graph with another
@@ -315,12 +364,15 @@ ceiling. It refuses a commit whose `schemaEpoch` is newer than the one the
 ORM was generated with (`RecipeGraphSchemaEpoch`) with `ErrSchemaEpoch`.
 The other named errors are `ErrEntityNotFound` (deleting or unsetting an
 entity the ref does not hold), `ErrHistoryMissing` (a row version a commit
-names is gone from history) and `ErrRootMismatch` (two refs, or a ref and a
-commit, of different roots).
+names is gone from history), `ErrRootMismatch` (two refs, or a ref and a
+commit, of different roots), `ErrMergeIntoItself` and `ErrNameTaken` (the
+root already has a live ref of that name). They are the engine's errors;
+the engine's `ErrVersionConflict` and `ErrNotFound` also match the ORM's.
 
 ## Link the core
 
-An ORM whose schema declares a graph imports the Go binding, the module
+An ORM whose schema declares a graph imports the version-graph runtime's
+Go module (the binding, `engine`, `postgres` and `canonical`), the module
 the naming key
 [`versiongraph_go_module`](/superschematic/reference/naming/#versiongraph_go_module)
 names (default `github.com/parable-work/superschematic/runtime/versiongraph/go`).
