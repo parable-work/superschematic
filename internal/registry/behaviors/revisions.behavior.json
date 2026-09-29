@@ -1,0 +1,199 @@
+{
+  "name": "Revisions",
+  "description": "Immutable revisions of the instance's own fields: one when it is created and one each time they change, numbered 1, 2, 3, .... With review in its config, a caller can propose a change as a merge patch, and a caller who holds the review permission approves it, which applies the patch as an update, or rejects it. Deleting the instance deletes its revisions and proposals.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "review": {
+        "description": "Turns on the review step: propose, approve, reject and listProposals.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["permission"],
+        "properties": {
+          "permission": { "description": "The permission a caller needs to approve or reject a proposal.", "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "fields": [
+    { "name": "revision", "description": "The number of the instance's latest revision." }
+  ],
+  "operations": [
+    {
+      "name": "listRevisions",
+      "description": "Lists the instance's revisions, oldest first, one page at a time.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": { "description": "At most this many revisions; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 500 },
+          "cursor": { "description": "The next of the previous page.", "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["revision", "data", "createdBy", "createdAt"],
+              "properties": {
+                "revision": { "description": "Its number: 1, 2, 3, ...", "type": "integer" },
+                "data": { "description": "The instance's own fields as the change left them.", "type": "object" },
+                "createdBy": { "description": "The subject of the caller whose change it records.", "type": "string" },
+                "createdAt": { "description": "When, in epoch milliseconds.", "type": "integer" },
+                "proposal": { "description": "The proposal whose approval made it.", "type": "integer" }
+              }
+            }
+          },
+          "next": { "description": "The cursor of the next page; null after the last.", "type": ["string", "null"] }
+        }
+      }
+    },
+    {
+      "name": "propose",
+      "description": "Proposes a change to the instance's own fields as a JSON merge patch, for a reviewer to approve or reject. The patch must change the instance and leave it valid; nothing changes until a reviewer approves it.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["patch"],
+        "properties": {
+          "patch": { "description": "A JSON merge patch (RFC 7386) of the instance's own fields.", "type": "object", "minProperties": 1 },
+          "note": { "description": "Why, for the reviewer.", "type": "string", "maxLength": 10000 }
+        }
+      },
+      "resultSchema": {
+        "description": "The proposal.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "patch", "state", "createdBy", "createdAt"],
+        "properties": {
+          "id": { "description": "The proposal's number on the instance: 1, 2, 3, ...", "type": "integer" },
+          "patch": { "type": "object" },
+          "note": { "type": "string" },
+          "base": { "description": "The instance's revision when it was proposed.", "type": "integer" },
+          "state": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+          "createdBy": { "type": "string" },
+          "createdAt": { "type": "integer" },
+          "reviewedBy": { "type": "string" },
+          "reviewedAt": { "type": "integer" },
+          "reason": { "type": "string" },
+          "revision": { "type": "integer" }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "approve",
+      "description": "Approves a pending proposal: applies its patch to the instance as an update, whose checks run, and records the revision it makes. Needs the review permission.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["proposal"],
+        "properties": {
+          "proposal": { "description": "The id of the pending proposal.", "type": "integer", "minimum": 1 }
+        }
+      },
+      "resultSchema": {
+        "description": "The proposal, approved.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "patch", "state", "createdBy", "createdAt"],
+        "properties": {
+          "id": { "type": "integer" },
+          "patch": { "type": "object" },
+          "note": { "type": "string" },
+          "base": { "type": "integer" },
+          "state": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+          "createdBy": { "type": "string" },
+          "createdAt": { "type": "integer" },
+          "reviewedBy": { "type": "string" },
+          "reviewedAt": { "type": "integer" },
+          "reason": { "type": "string" },
+          "revision": { "description": "The instance's revision after the approval.", "type": "integer" }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "reject",
+      "description": "Rejects a pending proposal; the instance does not change. Needs the review permission.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["proposal"],
+        "properties": {
+          "proposal": { "description": "The id of the pending proposal.", "type": "integer", "minimum": 1 },
+          "reason": { "description": "Why, for the proposer.", "type": "string", "maxLength": 10000 }
+        }
+      },
+      "resultSchema": {
+        "description": "The proposal, rejected.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "patch", "state", "createdBy", "createdAt"],
+        "properties": {
+          "id": { "type": "integer" },
+          "patch": { "type": "object" },
+          "note": { "type": "string" },
+          "base": { "type": "integer" },
+          "state": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+          "createdBy": { "type": "string" },
+          "createdAt": { "type": "integer" },
+          "reviewedBy": { "type": "string" },
+          "reviewedAt": { "type": "integer" },
+          "reason": { "type": "string" },
+          "revision": { "type": "integer" }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "listProposals",
+      "description": "Lists the instance's proposals, oldest first, one page at a time; with state, only those in it.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "state": { "description": "Only proposals in this state.", "type": "string", "enum": ["pending", "approved", "rejected"] },
+          "limit": { "description": "At most this many proposals; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 500 },
+          "cursor": { "description": "The next of the previous page.", "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "patch", "state", "createdBy", "createdAt"],
+              "properties": {
+                "id": { "type": "integer" },
+                "patch": { "type": "object" },
+                "note": { "type": "string" },
+                "base": { "type": "integer" },
+                "state": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+                "createdBy": { "type": "string" },
+                "createdAt": { "type": "integer" },
+                "reviewedBy": { "type": "string" },
+                "reviewedAt": { "type": "integer" },
+                "reason": { "type": "string" },
+                "revision": { "type": "integer" }
+              }
+            }
+          },
+          "next": { "description": "The cursor of the next page; null after the last.", "type": ["string", "null"] }
+        }
+      }
+    }
+  ]
+}

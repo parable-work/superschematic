@@ -2,12 +2,13 @@ name: ci
 
 # Gates for the superschematic repository: DCO sign-off, the four Go modules
 # (build, vet, test with the database tests against a Postgres container,
-# gofmt, golangci-lint, scalar catalog and schema-file types drift, CLI smoke
-# over the fixture corpus), the acme example extension (smoke plus the
-# no-core-edits check), the TypeScript authoring packages, schema runtime,
-# http runtime and engine, the Python schema runtime, the Rust http runtime,
-# the version-graph core (crate, Go binding, and the TypeScript package over
-# its wasm build), the Starlight docs build, and the extraction scrub.
+# gofmt, golangci-lint, scalar catalog, schema-file types and core behavior
+# declarations drift, CLI smoke over the fixture corpus), the acme example
+# extension (smoke plus the no-core-edits check), the TypeScript authoring
+# packages, schema runtime, http runtime and engine, the Python schema
+# runtime, the Rust http runtime, the version-graph core (crate, Go binding,
+# and the TypeScript package over its wasm build), the Starlight docs build,
+# and the extraction scrub.
 # `ci-pass` is the single aggregating job the branch ruleset requires; every
 # other job must be listed in its `needs`. The docs job on pull requests is a
 # recorded deviation from superscalar (D9); superscalar only builds docs in
@@ -230,6 +231,13 @@ jobs:
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           go run ./internal/tools/schemafiletypes -check
+
+      - name: Core behavior declarations drift (the engine's copies match the core registry)
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: |
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+          make behaviors-check
 
       - name: CLI smoke (no extension builds DB, API and General fixtures)
         env:

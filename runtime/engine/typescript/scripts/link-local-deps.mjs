@@ -5,8 +5,11 @@
 // own copy of this script (runtime/schema/typescript/scripts/link-local-deps.mjs):
 // they are unpublished, and bun resolves a `file:` spec nested inside an
 // installed package relative to the consumer. A consumer declares them, and
-// superscalar, itself. @superschematic/http-runtime is an optional peer
-// dependency, which bun does not install.
+// superscalar, itself. @superschematic/http-runtime is unpublished too: the
+// main entry point imports its framework-free entry point for the default
+// permission matcher, and ./http its Hono adapter. It is an optional peer
+// dependency only so bun does not look for it in the registry; a consumer
+// declares it as it declares the other two.
 //
 // schema-ir is a symlink. The schema runtime is a copy of its built
 // package (package.json and dist/, so run bun run build in

@@ -1,0 +1,71 @@
+{
+  "name": "Comments",
+  "description": "Comments on the instance, each a reply to another or not. A caller who may write the instance adds one; a caller who may read it lists them. Deleting the instance deletes its comments.",
+  "fields": [
+    { "name": "commentCount", "description": "How many comments the instance has." }
+  ],
+  "operations": [
+    {
+      "name": "comment",
+      "description": "Adds a comment to the instance, or a reply to one of its comments.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["body"],
+        "properties": {
+          "body": { "description": "The comment's text.", "type": "string", "minLength": 1, "maxLength": 10000, "pattern": "\\S" },
+          "replyTo": { "description": "The id of the instance's comment this one replies to.", "type": "integer", "minimum": 1 }
+        }
+      },
+      "resultSchema": {
+        "description": "The comment.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "body", "createdBy", "createdAt"],
+        "properties": {
+          "id": { "description": "The comment's number on the instance: 1, 2, 3, ...", "type": "integer" },
+          "replyTo": { "description": "The id of the comment it replies to.", "type": "integer" },
+          "body": { "type": "string" },
+          "createdBy": { "description": "The subject of the caller who added it.", "type": "string" },
+          "createdAt": { "description": "When, in epoch milliseconds.", "type": "integer" }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "listComments",
+      "description": "Lists the instance's comments, oldest first, one page at a time.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": { "description": "At most this many comments; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 500 },
+          "cursor": { "description": "The next of the previous page.", "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "body", "createdBy", "createdAt"],
+              "properties": {
+                "id": { "type": "integer" },
+                "replyTo": { "type": "integer" },
+                "body": { "type": "string" },
+                "createdBy": { "type": "string" },
+                "createdAt": { "type": "integer" }
+              }
+            }
+          },
+          "next": { "description": "The cursor of the next page; null after the last.", "type": ["string", "null"] }
+        }
+      }
+    }
+  ]
+}

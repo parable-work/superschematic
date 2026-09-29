@@ -297,6 +297,14 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"an empty behavior list is dropped", "extended", `{"name": "Item", "role": "DBTable", "behaviors": []}`},
 	{"an empty behavior list under the core", "core", `{"name": "Item", "role": "DBTable", "behaviors": []}`},
 	{"a behavior under the core", "core", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Audited"}]}`},
+	// The core's own behaviors, which the core registry declares.
+	{"the core's behaviors under the core", "core", `{"name": "Document", "role": "EmbeddedStruct", "behaviors": [
+		{"name": "Workflow", "config": {"transitions": [{"to": "done", "from": "open", "permission": "documents.close"}], "states": ["open", "done"]}},
+		{"name": "Comments", "config": {}}, {"name": "Revisions", "config": {"review": {"permission": "documents.review"}}}]}`},
+	{"a core behavior config its schema rejects", "core", `{"name": "Document", "role": "EmbeddedStruct", "behaviors": [
+		{"name": "Workflow", "config": {"states": [], "transitions": []}}]}`},
+	{"a missing required core behavior config", "core", `{"name": "Document", "role": "EmbeddedStruct", "behaviors": [{"name": "Workflow"}]}`},
+	{"a config for a core behavior that takes none", "core", `{"name": "Document", "role": "EmbeddedStruct", "behaviors": [{"name": "Comments", "config": {"threads": true}}]}`},
 	{"an unregistered behavior", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Ghost"}]}`},
 	{"an unregistered behavior in a document", "extended", `{"types": {"Item": {"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Ghost"}]}}}`},
 	{"a behavior config its schema rejects", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Stock", "config": {"aisles": 0}}]}`},

@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/engine",
   "version": "0.0.0",
-  "description": "An engine that runs a schema with no generated code: it takes schema-file documents as data, versions them, and stores their instances in one SQLite file. Runs on Node.js 24 and Bun. Needs @superschematic/schema-runtime, @superschematic/schema-ir and superscalar next to it in node_modules; see scripts/link-local-deps.mjs. The ./http subpath serves an engine over HTTP on @superschematic/http-runtime and Hono, and the ./mcp subpath serves its MCP tools there too on @modelcontextprotocol/server, its optional peer dependencies.",
+  "description": "An engine that runs a schema with no generated code: it takes schema-file documents as data, versions them, and stores their instances in one SQLite file. Runs on Node.js 24 and Bun. Needs @superschematic/schema-runtime, @superschematic/schema-ir, @superschematic/http-runtime and superscalar next to it in node_modules; see scripts/link-local-deps.mjs. The main entry point imports the HTTP runtime's framework-free entry point for its default permission matcher; the ./http subpath serves an engine over HTTP on the HTTP runtime and Hono, and the ./mcp subpath serves its MCP tools there too on @modelcontextprotocol/server. Hono and the MCP SDK are optional peer dependencies.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -987,8 +987,8 @@ strict loader is in `@superschematic/schema-runtime`, held to the Go
 reader by `runtime/schema/testdata/schema_file_parity.json`
 (`runtime/schema/README.md`). Behavior declarations and the `@behavior`
 decorator are in the compiler (section 3.16 of `docs/extension-model.md`);
-the core declares no behavior yet, acme declares `acme.Rating`, and every
-generator refuses a type that declares one. To match the Go reader's
+the core declares `Workflow`, `Comments` and `Revisions`, acme declares
+`acme.Rating`, and every generator refuses a type that declares one. To match the Go reader's
 canonical bytes, which drop a value its decoder cannot tell from an
 absent key, the meta-schema gives each such property that value as its
 default (section 5), and the loader needs `JSON.parse` source text access

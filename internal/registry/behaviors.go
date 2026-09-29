@@ -21,7 +21,7 @@ import (
 // BehaviorDeclaration. See docs/extension-model.md section 3.16.
 type BehaviorSpec struct {
 	// Extension is the registering extension's Name(); "" for core. A core
-	// behavior has a bare name ("StateMachine"), an extension's is
+	// behavior has a bare name ("Workflow"), an extension's is
 	// "<extension>.<Name>".
 	Extension string
 	// Declaration is the behavior's JSON declaration.

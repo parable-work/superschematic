@@ -70,7 +70,7 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 	finalizeWithCoreGenerators(t, reg)
 
-	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Pinned", "acme.Flag", "acme.Rating"}) {
+	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Comments", "Pinned", "Revisions", "Workflow", "acme.Flag", "acme.Rating"}) {
 		t.Fatalf("BehaviorNames() = %v", got)
 	}
 	rating, ok := reg.Behavior("acme.Rating")
@@ -167,7 +167,7 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("err = %v, want %q", err, test.want)
 			}
-			if names := reg.BehaviorNames(); len(names) != 0 {
+			if names := reg.BehaviorNames(); !slices.Equal(names, coreBehaviorNames) {
 				t.Fatalf("a refused declaration registered %v", names)
 			}
 		})
@@ -205,7 +205,7 @@ func TestRegisterBehaviorRefusesOpenParams(t *testing.T) {
 		if err == nil || err.Error() != want {
 			t.Errorf("%s: err = %v, want %q", params, err, want)
 		}
-		if names := reg.BehaviorNames(); len(names) != 0 {
+		if names := reg.BehaviorNames(); !slices.Equal(names, coreBehaviorNames) {
 			t.Errorf("%s: a refused declaration registered %v", params, names)
 		}
 	}
@@ -257,7 +257,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 		want  string
 	}{
 		{"requires unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Rating"}})},
-			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: acme.Review)`},
+			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Comments, Revisions, Workflow, acme.Review)`},
 		{"conflicts unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"conflicts": []string{"acme.Hidden"}})},
 			`behavior acme.Review conflicts "acme.Hidden", which is not a registered behavior`},
 		{"requires itself", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Review"}})},

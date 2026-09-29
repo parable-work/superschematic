@@ -52,7 +52,7 @@ func TestDefinitionForComposesBehaviors(t *testing.T) {
 	}
 	compact, _ := json.Marshal(def)
 	for _, want := range []string{
-		`"name":{"enum":["acme.Flag","acme.Rating"],"type":"string"}`,
+		`"name":{"enum":["Comments","Revisions","Workflow","acme.Flag","acme.Rating"],"type":"string"}`,
 		`{"if":{"properties":{"name":{"const":"acme.Flag"}}},"then":{"properties":{"config":{"additionalProperties":false,"type":"object"}}}}`,
 		`{"if":{"properties":{"name":{"const":"acme.Rating"}}},"then":{"properties":{"config":{"additionalProperties":false,"properties":{"maxStars":{"maximum":10,"minimum":3,"type":"integer"}},"required":["maxStars"],"type":"object"}},"required":["config"]}}`,
 	} {
@@ -80,9 +80,23 @@ func TestDefinitionForComposesBehaviors(t *testing.T) {
 			t.Errorf("%s: err = %v, want ok = %v", test.behaviors, err, test.ok)
 		}
 	}
-	err = validateAgainstDef(core(), typeWithBehaviors(`[{"name": "acme.Flag"}]`), "TypeDef", "product.schema.json")
-	if err == nil {
-		t.Error("the core schema accepted a behavior entry with no behavior registered")
+	// The core's own schema admits the core's behaviors, each config held
+	// to its declaration, and no extension's.
+	for _, test := range []struct {
+		behaviors string
+		ok        bool
+	}{
+		{`[{"name": "Workflow", "config": {"states": ["open", "done"], "transitions": [{"from": "open", "to": "done"}]}}, {"name": "Comments"}, {"name": "Revisions"}]`, true},
+		{`[{"name": "Revisions", "config": {"review": {"permission": "documents.review"}}}]`, true},
+		{`[{"name": "Workflow"}]`, false},
+		{`[{"name": "Workflow", "config": {"states": [], "transitions": []}}]`, false},
+		{`[{"name": "Comments", "config": {"maxLength": 10}}]`, false},
+		{`[{"name": "acme.Flag"}]`, false},
+	} {
+		err := validateAgainstDef(core(), typeWithBehaviors(test.behaviors), "TypeDef", "product.schema.json")
+		if (err == nil) != test.ok {
+			t.Errorf("core %s: err = %v, want ok = %v", test.behaviors, err, test.ok)
+		}
 	}
 }
 
@@ -104,8 +118,8 @@ func TestDecodeBehaviors(t *testing.T) {
 		behaviors string
 		want      string
 	}{
-		{reg, `[{"name": "acme.Ghost"}]`, `product.schema.json: behavior "acme.Ghost" on type "Product" is not a registered behavior (registered: acme.Flag, acme.Rating)`},
-		{core(), `[{"name": "acme.Flag"}]`, `product.schema.json: behavior "acme.Flag" on type "Product" is not a registered behavior (none are registered)`},
+		{reg, `[{"name": "acme.Ghost"}]`, `product.schema.json: behavior "acme.Ghost" on type "Product" is not a registered behavior (registered: Comments, Revisions, Workflow, acme.Flag, acme.Rating)`},
+		{core(), `[{"name": "acme.Flag"}]`, `product.schema.json: behavior "acme.Flag" on type "Product" is not a registered behavior (registered: Comments, Revisions, Workflow)`},
 		{reg, `[{"name": "acme.Rating", "config": {"maxStars": 12}}]`, `product.schema.json: type "Product": behavior acme.Rating config: `},
 		{reg, `[{"name": "acme.Rating"}]`, `product.schema.json: type "Product": behavior acme.Rating config: `},
 		{reg, `[{"name": "acme.Flag", "config": {"on": true}}]`, `product.schema.json: type "Product": behavior acme.Flag takes no config`},

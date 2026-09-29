@@ -660,8 +660,12 @@ storage: columns the engine adds to its instances table and names for
 the behavior, and tables of its own through `sql.table(name)`. A guard
 may veto an update, a delete or any behavior's operation on the type, and
 another behavior changes this one's state only by calling its operations,
-so those guards always run. The engine's README ("Behaviors") has the
-whole interface.
+so those guards always run. Where a config names a permission, the
+behavior asks `can(permission)`, which the permission matcher the
+deployment gives the engine answers. An operation can change the
+instance's own fields with `update(patch)`, which runs the checks and
+guards of an update. The engine's README ("Behaviors") has the whole
+interface.
 
 A deployment registers the implementation with the engine and passes the
 meta-schema its binary writes, which declares the behavior, and the tool

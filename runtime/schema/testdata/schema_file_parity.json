@@ -759,21 +759,49 @@
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Audited\"}]}",
       "accept": false,
-      "error": "a behavior under the core: behavior \"acme.Audited\" on type \"Item\" is not a registered behavior (none are registered)"
+      "error": "a behavior under the core: behavior \"acme.Audited\" on type \"Item\" is not a registered behavior (registered: Comments, Revisions, Workflow)"
+    },
+    {
+      "name": "the core's behaviors under the core",
+      "registry": "core",
+      "input": "{\"name\": \"Document\", \"role\": \"EmbeddedStruct\", \"behaviors\": [\n\t\t{\"name\": \"Workflow\", \"config\": {\"transitions\": [{\"to\": \"done\", \"from\": \"open\", \"permission\": \"documents.close\"}], \"states\": [\"open\", \"done\"]}},\n\t\t{\"name\": \"Comments\", \"config\": {}}, {\"name\": \"Revisions\", \"config\": {\"review\": {\"permission\": \"documents.review\"}}}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Document\":{\"behaviors\":[{\"config\":{\"states\":[\"open\",\"done\"],\"transitions\":[{\"from\":\"open\",\"permission\":\"documents.close\",\"to\":\"done\"}]},\"name\":\"Workflow\"},{\"name\":\"Comments\"},{\"config\":{\"review\":{\"permission\":\"documents.review\"}},\"name\":\"Revisions\"}],\"name\":\"Document\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "a core behavior config its schema rejects",
+      "registry": "core",
+      "input": "{\"name\": \"Document\", \"role\": \"EmbeddedStruct\", \"behaviors\": [\n\t\t{\"name\": \"Workflow\", \"config\": {\"states\": [], \"transitions\": []}}]}",
+      "accept": false,
+      "error": "a core behavior config its schema rejects: type \"Document\": behavior Workflow config: jsonschema validation failed with 'superschematic://behaviors/Workflow/config.json#'\n- at '/states': minItems: got 0, want 1"
+    },
+    {
+      "name": "a missing required core behavior config",
+      "registry": "core",
+      "input": "{\"name\": \"Document\", \"role\": \"EmbeddedStruct\", \"behaviors\": [{\"name\": \"Workflow\"}]}",
+      "accept": false,
+      "error": "a missing required core behavior config: type \"Document\": behavior Workflow config: jsonschema validation failed with 'superschematic://behaviors/Workflow/config.json#'\n- at '': missing properties 'states', 'transitions'"
+    },
+    {
+      "name": "a config for a core behavior that takes none",
+      "registry": "core",
+      "input": "{\"name\": \"Document\", \"role\": \"EmbeddedStruct\", \"behaviors\": [{\"name\": \"Comments\", \"config\": {\"threads\": true}}]}",
+      "accept": false,
+      "error": "a config for a core behavior that takes none: type \"Document\": behavior Comments takes no config"
     },
     {
       "name": "an unregistered behavior",
       "registry": "extended",
       "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Ghost\"}]}",
       "accept": false,
-      "error": "an unregistered behavior: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: acme.Audited, acme.Stock)"
+      "error": "an unregistered behavior: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: Comments, Revisions, Workflow, acme.Audited, acme.Stock)"
     },
     {
       "name": "an unregistered behavior in a document",
       "registry": "extended",
       "input": "{\"types\": {\"Item\": {\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Ghost\"}]}}}",
       "accept": false,
-      "error": "an unregistered behavior in a document: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: acme.Audited, acme.Stock)"
+      "error": "an unregistered behavior in a document: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: Comments, Revisions, Workflow, acme.Audited, acme.Stock)"
     },
     {
       "name": "a behavior config its schema rejects",
@@ -836,7 +864,7 @@
       "registry": "extended",
       "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"config\": {\"aisles\": 1}}]}",
       "accept": false,
-      "error": "a behavior entry without its name: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0': validation failed\n  - at '/behaviors/0': missing property 'name'\n  - at '/behaviors/0': 'allOf' failed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed"
+      "error": "a behavior entry without its name: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0': validation failed\n  - at '/behaviors/0': missing property 'name'\n  - at '/behaviors/0': 'allOf' failed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'states', 'transitions'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed"
     },
     {
       "name": "a behavior name that is not a string",

@@ -1,8 +1,9 @@
 /**
  * The config each behavior takes, keyed by the behavior's registered name.
- * The core declares no behavior, so the interface is empty. An extension's
- * authoring package adds its behaviors by module augmentation, as it adds
- * an invocation policy key to MCPToolOptions:
+ * It lists the behaviors the core declares (internal/registry/behaviors in
+ * the superschematic repository), which @superschematic/engine implements.
+ * An extension's authoring package adds its behaviors by module
+ * augmentation, as it adds an invocation policy key to MCPToolOptions:
  *
  *     declare module "@superschematic/schema" {
  *       interface BehaviorConfigs {
@@ -14,11 +15,46 @@
  * augmentation when it includes the file that declares it: through an
  * import of the authoring package, or a tsconfig.json include entry.
  *
- * The registry, not tsc, decides which behaviors a build accepts. A name
- * no augmentation in the program declares does not type-check, and a
- * declared name the binary does not register fails the load.
+ * The registry, not tsc, decides which behaviors a build accepts: it holds
+ * each config to the behavior's declared config schema. A name no
+ * augmentation in the program declares does not type-check, and a declared
+ * name the binary does not register fails the load.
  */
-export interface BehaviorConfigs {}
+export interface BehaviorConfigs {
+  /** A state machine on the instance's status. */
+  Workflow: WorkflowConfig;
+  /** Comments on the instance; it takes no config. */
+  Comments: undefined;
+  /** Immutable revisions of the instance's own fields, with an optional review step. */
+  Revisions: RevisionsConfig;
+}
+
+/** Workflow's config. */
+export interface WorkflowConfig {
+  /** Every state an instance can be in: a letter, then letters, digits, `_` and `-`. */
+  readonly states: readonly string[];
+  /** The state a new instance starts in; the first of states when absent. */
+  readonly initial?: string;
+  /** The moves the status may make. A state that no transition leaves is terminal. */
+  readonly transitions: readonly WorkflowTransition[];
+}
+
+/** One move a Workflow's status may make. */
+export interface WorkflowTransition {
+  readonly from: string;
+  readonly to: string;
+  /** The permission a caller needs to make it; absent, any caller who may write the instance can. */
+  readonly permission?: string;
+}
+
+/** Revisions' config. */
+export interface RevisionsConfig {
+  /** Turns on the review step: propose, approve, reject and listProposals. */
+  readonly review?: {
+    /** The permission a caller needs to approve or reject a proposal. */
+    readonly permission: string;
+  };
+}
 
 /** A name @behavior takes: a key of BehaviorConfigs. */
 export type BehaviorName = keyof BehaviorConfigs;

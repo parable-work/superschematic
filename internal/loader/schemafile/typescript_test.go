@@ -101,11 +101,25 @@ func TestTypeScriptDeclarationsRefuseWhatTheyCannotExpress(t *testing.T) {
 			},
 			want: `$defs/BehaviorRef/properties/config: unsupported JSON Schema keyword "type"`,
 		},
-		"a behavior list the core does not limit": {
+		"a behavior list limited while the core has behaviors": {
 			edit: func(root map[string]any) {
-				delete(defProperties(root, "TypeDef")["behaviors"].(map[string]any), "maxItems")
+				defProperties(root, "TypeDef")["behaviors"].(map[string]any)["maxItems"] = 0
 			},
 			want: "$defs/TypeDef/properties/behaviors: expected a list of BehaviorRef, with maxItems 0 when the registry has no behavior",
+		},
+		"a behavior's config branch missing": {
+			edit: func(root map[string]any) {
+				ref := root["$defs"].(map[string]any)["BehaviorRef"].(map[string]any)
+				ref["allOf"] = ref["allOf"].([]any)[1:]
+			},
+			want: "$defs/BehaviorRef/allOf: expected one branch per registered behavior [Comments Revisions Workflow]",
+		},
+		"a config branch for another behavior": {
+			edit: func(root map[string]any) {
+				branch := root["$defs"].(map[string]any)["BehaviorRef"].(map[string]any)["allOf"].([]any)[0].(map[string]any)
+				branch["if"].(map[string]any)["properties"].(map[string]any)["name"].(map[string]any)["const"] = "acme.Stock"
+			},
+			want: "$defs/BehaviorRef/allOf/0: expected the branch that holds the config of behavior Comments",
 		},
 		"no behavior config": {
 			edit: func(root map[string]any) {

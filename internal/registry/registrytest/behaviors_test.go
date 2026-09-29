@@ -74,9 +74,9 @@ func TestAcmeBehaviorsInTheDataForms(t *testing.T) {
 	n.AuthProvider = sessionauth.Name
 	core := generator.CoreRegistry(n)
 	for dir, want := range map[string]string{
-		"testdata/stock-json": `src/item.schema.json: behavior "acme.Stock" on type "Item" is not a registered behavior (none are registered)`,
-		"testdata/stock-yaml": `src/item.schema.yaml: behavior "acme.Stock" on type "Item" is not a registered behavior (none are registered)`,
-		"testdata/stock":      `src/item.schema.ts:4:11: type Item: behavior "acme.Stock" is not a registered behavior (none are registered)`,
+		"testdata/stock-json": `src/item.schema.json: behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Comments, Revisions, Workflow)`,
+		"testdata/stock-yaml": `src/item.schema.yaml: behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Comments, Revisions, Workflow)`,
+		"testdata/stock":      `src/item.schema.ts:4:11: type Item: behavior "acme.Stock" is not a registered behavior (registered: Comments, Revisions, Workflow)`,
 	} {
 		_, err := loader.LoadService(dir, loader.WithRegistry(core))
 		if err == nil || !strings.Contains(err.Error(), want) {

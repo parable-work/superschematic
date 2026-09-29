@@ -670,7 +670,7 @@ shape is `BehaviorDeclaration`:
 
 | Key | Meaning |
 | --- | --- |
-| `name` | bare (`StateMachine`) for a core behavior, `<extension>.<Name>` for an extension's |
+| `name` | bare (`Workflow`) for a core behavior, `<extension>.<Name>` for an extension's |
 | `description` | what the behavior adds |
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
@@ -771,8 +771,28 @@ alike; document generators, which render their documents, are not asked.
 No core generator sets the flag. `build --emit-ir`, `format` and
 `json-schema` run no generator and accept the schema.
 
-The core registers no behavior. acme declares `acme.Rating` and types its
-config in `packages/schema/src/behaviors.ts` (section 10);
+The core declares the behaviors `@superschematic/engine` implements
+(D16), one file each in `internal/registry/behaviors/`, which `New`
+registers with no extension: `Workflow`, `Comments` and `Revisions`.
+Every binary therefore accepts a schema that composes them, the
+schema-file JSON Schema lists them, and `BehaviorConfigs` in
+`@superschematic/schema` types their configs. None names an invocation
+policy, since a distribution's policy need not have the core's values;
+each operation takes the policy's default. Every `paramsSchema` sets
+`additionalProperties: false`. A config a declaration's `configSchema`
+accepts can still fail in the engine, whose implementation checks what
+JSON Schema cannot (a Workflow transition that names a state the config
+does not list, say); `runtime/engine/README.md`, "Core behaviors", has
+each one's config, fields and operations.
+
+| Behavior | Config | Fields | Operations |
+| --- | --- | --- | --- |
+| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`); required | `status` | `transition` |
+| `Comments` | none | `commentCount` | `comment`, `listComments` |
+| `Revisions` | `review` (`permission`), optional | `revision` | `listRevisions`, `propose`, `approve`, `reject`, `listProposals` |
+
+acme declares `acme.Rating` and types its config in
+`packages/schema/src/behaviors.ts` (section 10);
 `internal/registry/registrytest` declares two, `acme.Stock` and
 `acme.Audited`, which requires it, with a TypeScript fixture and its JSON
 and YAML twins.
@@ -787,7 +807,11 @@ has no behavior. It is a command of the binary rather than a tool in the
 core module, as `internal/tools/scalarcatalog` is, because an extension's
 declarations are registered only in its own binary: acme's copy comes
 from `acme-schematic behaviors --extension acme`, which acme's smoke runs
-with `--check` (section 10). The copy is canonical, not the source bytes:
+with `--check` (section 10). The engine's copy of the core's comes from
+the core binary: `make behaviors` writes
+`runtime/engine/typescript/src/behaviors/core/declarations`, and `make
+behaviors-check`, part of `make test` and CI's go job, fails on a stale
+copy. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
 Schema's object keys sorted, two-space indents and a final newline, so
 it changes only when the declaration does.
@@ -883,9 +907,10 @@ Schema, which `schemafile.DefinitionFor(reg)` builds per registry:
    per behavior holds its `config` to its `configSchema`, the way a
    decorator's value is its `Args`. A behavior without a config schema
    takes the empty closed object, and a config schema that rejects `{}`
-   makes `config` required (section 3.16). With no behavior registered,
-   `behaviors` takes no entry (`maxItems: 0`) and `name` has no enum,
-   since ajv refuses an empty one.
+   makes `config` required (section 3.16). The core registers three, so
+   every registry has some; a registry with none (a test's) gives
+   `behaviors` no entry (`maxItems: 0`) and `name` no enum, since ajv
+   refuses an empty one.
 7. Give every property the Go encoder omits at one value that value as its
    default: an `omitempty` string, bool or number that is not a pointer
    (`""`, `false`, `0`) and an `omitempty` slice or map (`[]`, `{}`). A
@@ -896,7 +921,7 @@ Schema, which `schemafile.DefinitionFor(reg)` builds per registry:
    (`@superschematic/schema-runtime`'s strict loader does).
 
 With only the core registered, `extensions` and `documents` admit no key
-and `behaviors` admits no entry.
+and `behaviors` admits the core's three.
 The compiled definition is cached per registry, keyed by a weak pointer and
 the extension list. `superschematic json-schema` prints it for the binary's
 registry; `--naming` selects the naming file, since the command has no
@@ -1222,7 +1247,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | none (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions` (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |

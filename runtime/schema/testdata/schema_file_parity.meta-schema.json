@@ -68,6 +68,125 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Comments"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Revisions"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "review": {
+                    "additionalProperties": false,
+                    "description": "Turns on the review step: propose, approve, reject and listProposals.",
+                    "properties": {
+                      "permission": {
+                        "description": "The permission a caller needs to approve or reject a proposal.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "permission"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Workflow"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "initial": {
+                    "description": "The state a new instance starts in; the first of states when absent.",
+                    "type": "string"
+                  },
+                  "states": {
+                    "description": "Every state an instance can be in.",
+                    "items": {
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "transitions": {
+                    "description": "The moves the status may make. A state that no transition leaves is terminal.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "from": {
+                          "description": "The state the instance is in.",
+                          "type": "string"
+                        },
+                        "permission": {
+                          "description": "The permission a caller needs to make this transition. Absent, any caller who may write the instance can.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "to": {
+                          "description": "The state it moves to.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "to"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "states",
+                  "transitions"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "acme.Audited"
               }
             }
@@ -120,6 +239,9 @@
         },
         "name": {
           "enum": [
+            "Comments",
+            "Revisions",
+            "Workflow",
             "acme.Audited",
             "acme.Stock"
           ],

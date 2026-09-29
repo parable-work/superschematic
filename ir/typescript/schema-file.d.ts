@@ -433,7 +433,8 @@ export interface TraitRef {
 export interface TypeDef {
   /**
    * The behaviors the type composes, in the order their checks run. A registry
-   * admits the behaviors it registers; the core registers none.
+   * admits the behaviors it registers: the core's, which the engine
+   * implements, and its extensions'.
    */
   behaviors?: BehaviorRef[];
   comment?: string;

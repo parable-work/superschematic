@@ -6,6 +6,7 @@ registry, instance store and event log, each of which asks that policy on
 every call, and the tool catalog, which reads and calls through them.
 */
 
+import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
 import { SchemaFileLoader } from '@superschematic/schema-runtime';
 
 import { Access, type AccessPolicy } from './access.js';
@@ -54,6 +55,15 @@ export interface EngineOptions extends StorageOptions {
    * "Tools").
    */
   tools?: ToolOptions;
+  /**
+   * Decides whether a principal holds a permission a behavior's config
+   * names (a behavior's can()). The default is the HTTP runtime's
+   * hasAnyPermission: dotted paths, where a granted permission covers
+   * itself and every permission nested under it, and no root permission.
+   * A deployment with its own vocabulary passes the matcher it gives the
+   * HTTP runtime.
+   */
+  permissionMatcher?: PermissionMatcher;
 }
 
 export class Engine {
@@ -90,6 +100,10 @@ export class Engine {
     const tools = resolveToolOptions(options.tools);
     const loader = new SchemaFileLoader({ metaSchema: options.metaSchema });
     const clock = options.clock ?? Date.now;
+    const permissionMatcher = options.permissionMatcher ?? hasAnyPermission;
+    if (typeof permissionMatcher !== 'function') {
+      throw new TypeError('permissionMatcher is a function (held, required) => boolean');
+    }
     const storage = Storage.open(options.path, options);
     const behaviors = new BehaviorRegistry(storage, clock, tools.invocationPolicy);
     try {
@@ -103,7 +117,7 @@ export class Engine {
     }
     const catalog = new SchemaCatalog(storage, namespaces, loader, behaviors, clock);
     const schemas = new SchemaRegistry(catalog, namespaces, access);
-    const instances = new InstanceStore(storage, namespaces, catalog, access, options.ids ?? defaultIds, clock);
+    const instances = new InstanceStore(storage, namespaces, catalog, access, options.ids ?? defaultIds, clock, permissionMatcher);
     return new Engine(
       storage,
       namespaces,

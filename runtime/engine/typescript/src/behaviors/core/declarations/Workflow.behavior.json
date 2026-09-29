@@ -1,0 +1,101 @@
+{
+  "name": "Workflow",
+  "description": "A state machine on the instance: a status that starts in the initial state and changes only through transition, along a transition the config lists. A transition may name a permission the caller must hold. A state that no transition leaves is terminal.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "initial": {
+        "description": "The state a new instance starts in; the first of states when absent.",
+        "type": "string"
+      },
+      "states": {
+        "description": "Every state an instance can be in.",
+        "items": {
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array",
+        "uniqueItems": true
+      },
+      "transitions": {
+        "description": "The moves the status may make. A state that no transition leaves is terminal.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "description": "The state the instance is in.",
+              "type": "string"
+            },
+            "permission": {
+              "description": "The permission a caller needs to make this transition. Absent, any caller who may write the instance can.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "to": {
+              "description": "The state it moves to.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "states",
+      "transitions"
+    ],
+    "type": "object"
+  },
+  "fields": [
+    {
+      "name": "status",
+      "description": "The state the instance is in."
+    }
+  ],
+  "operations": [
+    {
+      "name": "transition",
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "to": {
+            "description": "The state to move to.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "description": "The state the instance was in.",
+            "type": "string"
+          },
+          "to": {
+            "description": "The state it is in now.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    }
+  ]
+}

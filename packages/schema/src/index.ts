@@ -21,7 +21,7 @@ export type {
   ValidateConfig,
 } from "./wrappers";
 export { behavior } from "./behavior";
-export type { BehaviorConfigArg, BehaviorConfigs, BehaviorName } from "./behavior";
+export type { BehaviorConfigArg, BehaviorConfigs, BehaviorName, RevisionsConfig, WorkflowConfig, WorkflowTransition } from "./behavior";
 export { trait } from "./trait";
 export type { Trait, TraitConfig, TraitOptions } from "./trait";
 export { schemaOf } from "./schema-ref";

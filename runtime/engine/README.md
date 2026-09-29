@@ -33,14 +33,15 @@ engine.close();
 The package ships compiled ESM with declarations (`dist/`), since Node.js
 does not strip types from files under `node_modules`. It runs on Node.js
 24 and on Bun, and its tests run under both. It needs
-`@superschematic/schema-runtime`, `@superschematic/schema-ir` and
-`superscalar` next to it in `node_modules`; until they are published, a
-consumer declares all three itself (D3), and this package's own build and
-tests get them from `typescript/scripts/link-local-deps.mjs`. The
-`./http` entry point also needs `hono` and `@superschematic/http-runtime`,
-its optional peer dependencies, and the `./mcp` entry point those and
-`@modelcontextprotocol/server`; the main entry point imports none of
-them.
+`@superschematic/schema-runtime`, `@superschematic/schema-ir`,
+`@superschematic/http-runtime` and `superscalar` next to it in
+`node_modules`; until they are published, a consumer declares all four
+itself (D3), and this package's own build and tests get them from
+`typescript/scripts/link-local-deps.mjs`. The main entry point imports the
+HTTP runtime's framework-free entry point, for the default permission
+matcher, and not Hono; the `./http` entry point also needs `hono`, an
+optional peer dependency, and the `./mcp` entry point `hono` and
+`@modelcontextprotocol/server`, another.
 
 ## Storage
 
@@ -287,7 +288,9 @@ actor (the principal's subject), time and change: the instance for a
 create, its behaviors' fields included; for an update, the merge patch,
 with any change the behaviors' fields took merged in; for an operation,
 `{ behavior, operation, params, patch }`, where `patch` is the merge patch
-of the behaviors' fields; nothing for a delete; and the schema document
+of the instance's own fields the operation changed (an operation's
+`update()`, under "Contexts") and of its behaviors' fields; nothing for a
+delete; and the schema document
 for a publish. Applying each change in order to the create's instance
 gives the instance as a read returns it. The
 cursor orders the whole log; an instance's sequence runs 1, 2, 3, ...
@@ -331,7 +334,11 @@ Only `true` allows, and anything else is `forbidden`. It runs synchronously. The
 policy: `allowAll` is explicit, for tests and local use. The engine has
 no roles; a policy can hold the principal's `permissions` to whatever
 rule the deployment has, through the HTTP runtime's `PermissionMatcher`
-for example.
+for example. A behavior's own checks, a transition only a reviewer may
+make say, ask the `permissionMatcher` option (a `PermissionMatcher`, the
+HTTP runtime's `hasAnyPermission` by default) through `can()` ("Contexts"
+under "Behaviors"); a deployment passes the matcher it gives the HTTP
+runtime, so one rule answers both.
 
 `Principal` has the shape of the HTTP runtime's (`subject`,
 `permissions`, `claims`), so a principal its `Authenticator` returns can
@@ -398,8 +405,8 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 ```
 
 `metaSchema` is the `json-schema` output of the deployment's binary, which
-lists the behaviors it declares; the core's lists none, so its loader
-refuses every behavior.
+lists the behaviors it declares; the core's lists the core's own
+(`Workflow`, `Comments` and `Revisions`), so its loader refuses any other.
 
 ### The implementation
 
@@ -414,10 +421,10 @@ function is synchronous (D16): one that returns a promise is a
 | `configChange(before, after)` | whether a new version may change the config, add the behavior (`before` undefined) or remove it (`after` undefined) on a schema with instances: a reason refuses. Absent, only an identical config, and no adding or removing while there are instances |
 | `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table and an `up(sql)` for its own tables |
 | `initialize(context)` | sets up its state for a new instance |
-| `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes |
-| `operations` | a handler per declared operation: `(context, params) => result` |
+| `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does |
+| `operations` | a handler per declared operation: `(context, params) => result`, with an `OperationContext` |
 | `fields` | a reader per declared field: `(view) => value` |
-| `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction |
+| `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them |
 
 Registration (`openEngine({ behaviors })` or `engine.behaviors.register`)
 refuses, naming every problem, an implementation whose `operations` or
@@ -440,6 +447,12 @@ a field reader's) has:
 
 - `behavior`, `config`, `namespace`, `schema`, `version`, `id`;
 - `principal`, and `now`, the clock's time, read once for the whole call;
+- `can(permission)`: whether the principal holds a permission, as the
+  engine's `permissionMatcher` answers for its permissions. The default is
+  the HTTP runtime's `hasAnyPermission`: dotted paths, a granted
+  permission covering itself and everything nested under it, no root
+  permission. Where a behavior limits who may do something, its config
+  names the permission and `can` decides (D16); the engine has no roles;
 - `data`: the instance's own fields, deep-frozen, without any behavior's;
 - `columns.get()`: its own columns on the instance, by its own names;
 - `sql`: `get` and `all` on its own tables, reads only, with
@@ -453,6 +466,23 @@ had and `set` and `call` refuse. There is no handle on the instances
 table, the event log, another behavior's storage or the connection: a
 status one behavior owns changes at another's request only through its
 operations, whose guards run.
+
+An operation's context (`OperationContext`) adds two more, so a
+behavior that changes the instance on a caller's behalf, approving a
+proposed change say, runs the checks an update runs:
+
+- `update(patch)` applies a JSON merge patch to the instance's own fields
+  and returns them after it. A behavior's field in the patch is refused
+  (`InstanceValidationError`, rule `readOnly`), so is a result the live
+  version refuses, and then every guard is asked with `{ kind: 'update',
+  patch, after, caller }`. A patch that changes nothing writes nothing.
+  The access policy is not asked again, and no event is appended: the
+  operation's event carries the change in its `patch`, and `afterChange`
+  gets `before`. A read-only operation's `update` refuses, and a called
+  operation's update rolls back with its savepoint. `data` reads the
+  fields as the operation's updates leave them.
+- `validateUpdate(patch)` returns the issues `update(patch)` would refuse
+  the patch for, without writing or asking a guard.
 
 ### Storage
 
@@ -525,8 +555,9 @@ other value must be JSON. A field is read-only to `create` and `update`
 each config and declaration.
 
 A writing operation appends an `operation` event, `{ behavior,
-operation, params, patch }`, with the merge patch of the behaviors'
-fields; a read-only one appends none. A create's event carries the
+operation, params, patch }`, with the merge patch of the own fields its
+`update()` changed and of the behaviors' fields; a read-only one appends
+none. A create's event carries the
 behaviors' fields, and an update's merges in any change they took, so
 the log replays to the instance a read returns.
 

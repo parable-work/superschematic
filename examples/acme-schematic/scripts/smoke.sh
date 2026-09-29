@@ -16,8 +16,8 @@
 #   1. the acme module builds, vets and passes its tests;
 #   2. `describe` lists the Catalog kind, the document, the apikey provider
 #      the checks (the icon and audience checks, the @mcp check on API and
-#      the projection check on DB), acme's tool invocation policy and its
-#      behavior;
+#      the projection check on DB), acme's tool invocation policy, and its
+#      behavior after the core's;
 #   3. build-all over the schemas root builds all five services, whose
 #      schema.config.ts files import the config package under acme's own
 #      name ([package_aliases] "@acme/schema-config"), and the sentinels it
@@ -82,7 +82,8 @@
 #      shop-ratings service (ext/testdata), whose data-form type composes
 #      it, and of its TypeScript twin, which writes @behavior with the
 #      config acme's authoring package types; json-schema limits behavior
-#      names to it and format converts the file to YAML and to TypeScript;
+#      names to the core's and it, and format converts the file to YAML and
+#      to TypeScript;
 #      build refuses the service, naming the types generator, which does
 #      not render behaviors; the core-only binary refuses the behavior by
 #      name;
@@ -150,7 +151,7 @@ grep -q '^documents: catalog.config (catalog.config.yaml)$' "$OUT/describe.txt"
 grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.txt"
 grep -q '^checks: acmeIcons (every kind), acmeDocsAudience (every kind), acmeToolsClassified (API), acmeProjectionScope (DB)$' "$OUT/describe.txt"
 grep -q '^tool invocation policy: confirm (never, always; default never)$' "$OUT/describe.txt"
-grep -q '^behaviors: acme.Rating$' "$OUT/describe.txt"
+grep -q '^behaviors: Comments, Revisions, Workflow, acme.Rating$' "$OUT/describe.txt"
 
 echo "==> build-all over the schemas root, every config importing the aliased config package"
 rm -rf "$DIST"
@@ -448,7 +449,7 @@ jq -e '.types.Product.behaviors == [{"name": "acme.Rating", "config": {"maxStars
 "$OUT/acme-schematic" build "$RATINGS-ts" --emit-ir --out "$OUT/ratings-dist" >"$OUT/ratings-ts-ir.json"
 jq -e '.types.Product.behaviors == [{"name": "acme.Rating", "config": {"maxStars": 5}}]' "$OUT/ratings-ts-ir.json" >/dev/null
 "$OUT/acme-schematic" json-schema >"$OUT/acme-schema-file.json"
-jq -e '."$defs".BehaviorRef.properties.name.enum == ["acme.Rating"]' "$OUT/acme-schema-file.json" >/dev/null
+jq -e '."$defs".BehaviorRef.properties.name.enum == ["Comments", "Revisions", "Workflow", "acme.Rating"]' "$OUT/acme-schema-file.json" >/dev/null
 "$OUT/acme-schematic" format --to=yaml --stdout "$RATINGS/src/product.schema.json" >"$OUT/ratings.schema.yaml"
 grep -qx '          maxStars: 5' "$OUT/ratings.schema.yaml"
 "$OUT/acme-schematic" format --to=ts --stdout "$RATINGS/src/product.schema.json" >"$OUT/ratings.schema.ts"
@@ -462,7 +463,7 @@ if "$OUT/superschematic" build "$RATINGS" --emit-ir --naming "$OUT/session.toml"
   echo "ERROR: the core-only binary accepted acme.Rating" >&2
   exit 1
 fi
-grep -q 'behavior "acme.Rating" on type "Product" is not a registered behavior (none are registered)' "$OUT/core-ratings.log"
+grep -q 'behavior "acme.Rating" on type "Product" is not a registered behavior (registered: Comments, Revisions, Workflow)' "$OUT/core-ratings.log"
 
 echo "==> version graph: shop-db's Planogram, declared with no core edit"
 # The loader expands the declarations into ordinary types, marked with their
