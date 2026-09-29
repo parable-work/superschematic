@@ -13,6 +13,38 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
+- Rust SDK: an empty list query parameter (`QueryParam<T[]>`) is left out
+  of the request. `Some(vec![])` sent `?statuses=`, which the Go route
+  refuses (`statuses cannot be empty`). A required list with no item fails
+  before the request with `ids is required`. The list is sent as one
+  comma-separated value, which the route splits on commas and trims item
+  by item, so an item of an enum, a string or a scalar that is not a
+  number or boolean is checked first: an empty or blank one fails with
+  `tags[0] is required`, and one with a comma or surrounding space with
+  `tags[0] must not contain a comma or surrounding space`. Before, such an
+  item reached the route as two items, trimmed, or refused
+  (`tags cannot contain empty values`). The check is the new
+  `runtime::check_query_list_item`, written when an operation takes such a
+  list. A `listMin` of 1 is no longer checked, since a list that is sent
+  has an item. A non-empty list of numbers or booleans, and a scalar query
+  parameter, are sent as before. Minor.
+- TypeScript SDK: an empty list query parameter (`QueryParam<T[]>`) is
+  left out of the request: `serializeParams` in `client.ts` drops an empty
+  array as it drops `null` and `undefined`, where it sent `?statuses=`,
+  which the Go route refuses. A list argument of a `GET` operation, sent in
+  the query string too, is left out the same way. A required list with no
+  item is `required` at `ids`. Each item is checked at `name[i]` before the
+  request: an item of an enum, a string or a scalar that is not a number
+  or boolean is `required` when empty or blank, and `pattern` when it
+  holds a comma or surrounding space (Unicode White_Space, what the route
+  trims); then its `minLength`, `maxLength` and `pattern`, or a number's
+  `min` and `max`. Before, those rules looked at the whole array: the
+  length and pattern checks never ran, and `min` and `max` compared
+  `Number(array)`, which is the item of a one-item array and 0 of an empty
+  one. `listMin` bounds only a list that is sent, so a `listMin` of 0 or 1
+  is no longer written (it was `statusesValue.length < 0`). A non-empty
+  list of numbers or booleans with no rules, and a scalar query parameter,
+  are sent and checked as before. Patch.
 - Verification refuses an `@index` of a DB table that the SQL generator
   cannot build: one with a key that resolves to no column of the table, or
   one with no keys. The SQL generator left such an index out of the DDL

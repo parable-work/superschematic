@@ -277,15 +277,7 @@ impl {{.Namespace.StructName}} {
 {{- if .HasQueryParams}}
         if let Some(query) = query {
 {{- range .QueryParams}}
-{{- if .Required}}
-            let query_param_value = &query.{{.RustName}};
-{{- else}}
-            if let Some(query_param_value) = &query.{{.RustName}} {
-{{- end}}
-{{- template "queryParamValue" .}}
-{{- if not .Required}}
-            }
-{{- end}}
+{{- template "queryParam" .}}
 {{- end}}
         }{{if .HasRequiredQueryParams}} else {
             return Err(SDKError::config("query parameters are required"));
@@ -453,15 +445,7 @@ impl {{.Namespace.StructName}} {
         let mut query_params: Vec<(String, String)> = Vec::new();
         if let Some(query) = query {
 {{- range .QueryParams}}
-{{- if .Required}}
-            let query_param_value = &query.{{.RustName}};
-{{- else}}
-            if let Some(query_param_value) = &query.{{.RustName}} {
-{{- end}}
-{{- template "queryParamValue" .}}
-{{- if not .Required}}
-            }
-{{- end}}
+{{- template "queryParam" .}}
 {{- end}}
         }{{if .HasRequiredQueryParams}} else {
             return Err(SDKError::config("query parameters are required"));
@@ -478,19 +462,48 @@ impl {{.Namespace.StructName}} {
 
 {{- end}}
 }
-{{- /* queryParamValue validates one query parameter and appends it to
-query_params. The server splits an array into items and checks each one,
-so an array is checked item by item and counted as a list. */}}
+{{- /* queryParam binds query_param_value to one query parameter, checks
+it and appends it to query_params. A list is sent as one
+comma-separated value (?name=a,b), which the route splits on commas,
+trimming each item and refusing an empty one; so an empty list is left
+out (a required one is refused), and each item is checked: that the value
+carries its text as it is, and the argument's rules, which the route
+checks per item. */}}
+{{- define "queryParam"}}
+{{- if .Required}}
+            let query_param_value = &query.{{.RustName}};
+{{- if .IsArray}}
+            if query_param_value.is_empty() {
+                return Err(SDKError::config("{{.Name}} is required"));
+            }
+{{- end}}
+{{- else if .IsArray}}
+            // An empty list is left out: the route refuses a present empty value.
+            if let Some(query_param_value) = query.{{.RustName}}.as_ref().filter(|list| !list.is_empty()) {
+{{- else}}
+            if let Some(query_param_value) = &query.{{.RustName}} {
+{{- end}}
+{{- template "queryParamValue" .}}
+{{- if not .Required}}
+            }
+{{- end}}
+{{- end}}
 {{- define "queryParamValue"}}
 {{- if .IsArray}}
-{{- if or .ValidateMin .ValidateMax .ValidateMinLength .ValidateMaxLength .ValidatePattern}}
 {{- if .ValidatePattern}}
             let query_param_pattern = Regex::new({{printf "%q" .ValidatePattern}})
                 .map_err(|err| SDKError::config(format!("invalid validation pattern for {{.Name}}: {}", err)))?;
 {{- end}}
+{{- if .ChecksItems}}
             // The server validates each item, not the joined value.
+{{- if .ItemIsText}}
+            for (query_param_index, query_param_item) in query_param_value.iter().enumerate() {
+                let query_param_item_text = query_param_item.to_string();
+                runtime::check_query_list_item("{{.Name}}", query_param_index, &query_param_item_text)?;
+{{- else}}
             for query_param_item in query_param_value.iter() {
                 let query_param_item_text = query_param_item.to_string();
+{{- end}}
 {{- if or .ValidateMin .ValidateMax}}
                 let query_param_item_number = query_param_item_text
                     .parse::<f64>()
@@ -523,7 +536,7 @@ so an array is checked item by item and counted as a list. */}}
 {{- end}}
             }
 {{- end}}
-{{- if .ValidateListMin}}
+{{- if .ChecksListMin}}
             if query_param_value.len() < {{.ValidateListMin}} {
                 return Err(SDKError::config("{{.Name}} must contain at least {{.ValidateListMin}} items"));
             }
