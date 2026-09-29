@@ -13,21 +13,14 @@ of a generated artifact is always listed here with the bump it requires.
 
 ### Fixed
 
-- TypeScript, Go and Rust SDKs: an SDK carries its auth surface when any
-  operation needs a caller (`@auth`, `@requirePermission`,
-  `@requireOwnership`), whether or not the config sets `public` (D15,
-  amended). The TypeScript SDK of an API that was not public took
-  `auth.token` and never sent it, so it could not call the protected
-  routes of the TypeScript server, which checks them on every API; setting
-  `public` required an `authDb` that server never reads. Its client now
-  sends `Authorization: Bearer`, retries once on 401 through
-  `auth.refreshToken`, and the SDK class has `setToken` and `clearToken`.
-  The Go and Rust SDKs, whose clients already sent a configured token,
-  gain `SetToken` / `ClearToken` and `set_token` / `clear_token`. The
-  TypeScript server needs neither `public` nor `authDb`. A Go API that is
-  not public still has no auth middleware; only middleware the service
-  adds itself reads the token. Output for a public API, or for one with no
-  such operation, is unchanged. Minor.
+- `scripts/bump_version.py` versions the Python runtime's own entry in
+  `runtime/schema/python/uv.lock` (`superschematic-schema-runtime`), in
+  the PEP 440 form its `pyproject.toml` carries: `set` writes it and
+  `check` fails when it disagrees with `versions.env`. The committed
+  lockfile said `0.1.0` while every other site said `0.0.0`, so `uv sync`
+  (and `make setup`) rewrote it and left the tree dirty; it now says
+  `0.0.0`. The script has tests, which CI's scrub job and
+  `make versions` run. Patch (release tooling only).
 - The generated TypeScript validator checks a scalar field's own rules.
   For a field typed with a scalar it ran the scalar's validator and the
   list bounds only, and dropped the field's `minLength`, `maxLength`,
