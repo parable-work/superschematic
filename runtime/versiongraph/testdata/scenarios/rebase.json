@@ -80,7 +80,7 @@
       "ingredient": [{"entity_key": "Flour"}, {"entity_key": "Salt"}],
       "step": [{"entity_key": "Mix", "timings": {"knead": 12, "rest": 45}}]
     }}},
-    {"op": "rows", "ref": "e", "kind": "step", "expect": {"rows": [{"entity_key": "Bake", "deleted_on_ref": true}]}},
+    {"op": "rows", "ref": "e", "kind": "step", "expect": {"rows": [{"entity_key": "Bake", "deleted_on_ref": true, "_version": 1}]}},
 
     {"op": "seal", "ref": "e"},
     {"op": "rebase", "ref": "e", "expect": {"error": "ref_sealed"}},

@@ -43,7 +43,8 @@ type VersionGraphConfig struct {
 	// SnapshotEvery is how many commits past the nearest snapshot on its
 	// chain a commit is snapshotted at: its full pin set is stored, so
 	// reading its tree stops there. Nil means DefaultSnapshotEvery; a set
-	// value is positive.
+	// value is positive. Verification enforces that, not the data form's
+	// JSON Schema, whose subset has no numeric bounds.
 	SnapshotEvery *int64 `json:"snapshotEvery,omitempty" yaml:"snapshotEvery,omitempty"`
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "sweep",
-  "description": "A sweep needs an actor and skips its pass while another holds the graph's sweep lock. It deletes the member rows of refs discarded longer ago than the grace period and keeps their commits readable, discards change sets idle past abandonAfter and no primary line, prunes history past retention while keeping every row version a patch or a snapshot pins, and writes the snapshots a chain lacks.",
+  "description": "A sweep needs an actor and skips its pass while another holds the graph's sweep lock. It deletes the member rows of refs discarded longer ago than the grace period and keeps their commits readable, discards change sets idle past abandonAfter and no primary line, prunes history older than each kind's declared retention and nothing younger, keeping every row version a patch or a snapshot pins, and writes the snapshots a chain lacks, at the interval and on tagged commits.",
   "steps": [
     {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
     {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
@@ -40,6 +40,7 @@
     {"op": "save", "ref": "p", "edits": {"step": {"upsert": [{"entity_key": "Knead", "position": 1, "instruction": "Knead well", "timings": {}}]}}},
     {"op": "save", "ref": "p", "edits": {"step": {"upsert": [{"entity_key": "Knead", "position": 1, "instruction": "Knead hard", "timings": {}}]}}},
     {"op": "commit", "ref": "p", "as": "pCommit"},
+    {"op": "sweep", "expect": {"report": {"pruned": {}}}},
     {"op": "sql", "statement": "UPDATE step_history SET recorded_at = now() - interval '400 days' WHERE id IN (SELECT id FROM step WHERE ref_id = $1::uuid)", "args": [{"ref": "p"}]},
     {"op": "sweep", "expect": {"report": {"pruned": {"step": 2}}}},
     {"op": "materialize", "commit": "pCommit", "expect": {"contentHashOf": "pCommit", "tree": {"step": [{"entity_key": "Knead", "instruction": "Knead hard"}]}}},
@@ -68,6 +69,17 @@
       {"kind": "step", "entityKey": "Mix", "entityVersion": 1},
       {"kind": "step", "entityKey": "Rest", "entityVersion": 1}
     ]}},
-    {"op": "sweep", "expect": {"report": {"snapshots": 0}}}
+    {"op": "sweep", "expect": {"report": {"snapshots": 0}}},
+
+    {"op": "save", "ref": "q", "edits": {"step": {"upsert": [{"entity_key": "Cool", "position": 4, "instruction": "Cool", "timings": {}}]}}},
+    {"op": "commit", "ref": "q", "tag": true, "as": "q4"},
+    {"op": "sql", "statement": "DELETE FROM recipe_snapshot_entry WHERE commit_id = $1::uuid", "args": [{"commit": "q4"}]},
+    {"op": "sweep", "expect": {"report": {"snapshots": 1}}},
+    {"op": "snapshot", "commit": "q4", "expect": {"snapshot": [
+      {"kind": "step", "entityKey": "Bake", "entityVersion": 1},
+      {"kind": "step", "entityKey": "Cool", "entityVersion": 1},
+      {"kind": "step", "entityKey": "Mix", "entityVersion": 1},
+      {"kind": "step", "entityKey": "Rest", "entityVersion": 1}
+    ]}}
   ]
 }

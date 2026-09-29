@@ -389,6 +389,27 @@ func TestVersionGraphFacadeReleasesRebasesAndSweeps(t *testing.T) {
 		t.Fatalf("the collected row's last history row = (%s, %s), want (DELETE, %s)", operation, actor, janitor.ToUUID())
 	}
 
+	// A change set the sweep abandons records the sweep's actor as its
+	// discarder.
+	idle, err := g.Branch(ctx, mainID, "idle")
+	if err != nil {
+		t.Fatalf("Branch idle: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE recipe_ref SET updated_at = now() - interval '3 days' WHERE id = $1", idle.Id.ToUUID()); err != nil {
+		t.Fatalf("age the idle change set: %v", err)
+	}
+	report, err = g.Sweep(context.Background(), GraphSweepOptions{Actor: janitor, AbandonAfter: 48 * time.Hour})
+	if err != nil {
+		t.Fatalf("Sweep with AbandonAfter: %v", err)
+	}
+	var discarder string
+	if err := pool.QueryRow(ctx, "SELECT deleted_by::text FROM recipe_ref WHERE id = $1", idle.Id.ToUUID()).Scan(&discarder); err != nil {
+		t.Fatalf("read the abandoned change set: %v", err)
+	}
+	if report.Abandoned != 1 || discarder != janitor.ToUUID().String() {
+		t.Fatalf("abandon pass = %+v with discarder %s, want one change set discarded by %s", report, discarder, janitor.ToUUID())
+	}
+
 	// The sweeper runs a pass at once and stops with its context.
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
