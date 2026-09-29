@@ -409,6 +409,28 @@ func TestTenantUserOptionalMaps(t *testing.T) {
 		t.Fatalf("SetNull left maps = %v %v %v, want nil", row.Labels, row.AliasesByLocale, row.SettingsByName)
 	}
 }
+
+// An optional boolean keeps an explicit false through a snapshot and
+// ApplyTo; an absent one snapshots as SetNull.
+func TestTenantUserOptionalBool(t *testing.T) {
+	snapshot := NewTenantUserSnapshotUpdate(&types.TenantUser{Suspended: new(false)})
+	if snapshot.SuspendedSetNull || snapshot.Suspended == nil || *snapshot.Suspended {
+		t.Fatalf("snapshot Suspended = %v (SetNull %t), want false", snapshot.Suspended, snapshot.SuspendedSetNull)
+	}
+	var row types.TenantUser
+	snapshot.ApplyTo(&row)
+	if row.Suspended == nil || *row.Suspended {
+		t.Fatalf("ApplyTo Suspended = %v, want false", row.Suspended)
+	}
+	empty := NewTenantUserSnapshotUpdate(&types.TenantUser{})
+	if !empty.SuspendedSetNull {
+		t.Fatal("an absent optional boolean must snapshot as SetNull")
+	}
+	empty.ApplyTo(&row)
+	if row.Suspended != nil {
+		t.Fatalf("SetNull left Suspended = %v, want nil", *row.Suspended)
+	}
+}
 `
 	if err := os.WriteFile(filepath.Join(ormDir, "apply_to_test.go"), []byte(applyToTest), 0o644); err != nil {
 		t.Fatalf("write apply to test: %v", err)
@@ -1016,7 +1038,7 @@ func TestCreateBindsTheEnumDefaultWhenUnset(t *testing.T) {
 // columns, a table of closed-union JSON columns
 // (single, nullable, list, map and nullable map), createdBy/updatedBy user
 // audit fields, scalar arrays, optional enums, optional non-audit datetime
-// scalars, and optional maps.
+// scalars, optional maps and an optional boolean.
 // Soft-delete fields (deletedAt/deletedBy) live on the fixture's TenantUser
 // itself. The mutation reuses scalars the fixture already resolves so the
 // generated types module stays compilable.
@@ -1104,6 +1126,9 @@ func extendFixtureForCompileCoverage(schema *ir.Schema) {
 		&ir.FieldDef{Name: "labels", TypeRef: ir.TypeRef{Name: "string", IsMap: true}},
 		&ir.FieldDef{Name: "aliasesByLocale", TypeRef: ir.TypeRef{Name: "string", IsMap: true, IsArray: true}},
 		&ir.FieldDef{Name: "settingsByName", TypeRef: ir.TypeRef{Name: "Generic.JSON", IsMap: true}},
+		// An optional boolean without a default is *bool, so a false value is
+		// stored rather than read as the zero value and cleared.
+		&ir.FieldDef{Name: "suspended", TypeRef: ir.TypeRef{Name: "boolean"}},
 	)
 
 	// A table whose only optional string-typed field is a map.
