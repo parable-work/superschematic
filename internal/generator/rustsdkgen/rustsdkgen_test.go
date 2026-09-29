@@ -249,7 +249,9 @@ func intPtr(value int) *int {
 // each typed item and counts the typed list. It must not check the joined
 // "a,b" text: the comma fails a pattern and a length limit, a list of
 // numbers does not parse as one number, and an item with a comma in it
-// counts twice.
+// counts twice. A text item is first checked to be one the comma-separated
+// value carries, and a required list must have an item, which leaves a
+// listMin of 1 nothing to check.
 func TestArrayQueryParamsValidateEachItem(t *testing.T) {
 	endpoint := apigen.EndpointInfo{
 		Name:          "listItems",
@@ -283,18 +285,22 @@ func TestArrayQueryParamsValidateEachItem(t *testing.T) {
 	generated := string(source)
 	// Both the JSON and the multipart method validate the same way.
 	for want, count := range map[string]int{
-		"for query_param_item in query_param_value.iter() {":           4,
-		"let query_param_item_text = query_param_item.to_string();":    4,
-		"if !query_param_pattern.is_match(&query_param_item_text) {":   2,
-		"if query_param_item_text.chars().count() < 2 {":               2,
-		"if query_param_item_text.chars().count() > 3 {":               2,
-		"if query_param_value.len() < 1 {":                             2,
-		"if query_param_value.len() > 2 {":                             2,
-		"let query_param_item_number = query_param_item_text":          2,
-		"if query_param_item_number < 1.0 {":                           2,
-		"if query_param_item_number > 5.0 {":                           2,
-		`query_params.push(("tags".to_string(), query_param_text));`:   2,
-		`query_params.push(("scores".to_string(), query_param_text));`: 2,
+		"for query_param_item in query_param_value.iter() {":                                       2,
+		"for (query_param_index, query_param_item) in query_param_value.iter().enumerate() {":      2,
+		`runtime::check_query_list_item("tags", query_param_index, &query_param_item_text)?;`:      2,
+		`return Err(SDKError::config("tags is required"));`:                                        2,
+		"let query_param_item_text = query_param_item.to_string();":                                4,
+		"if !query_param_pattern.is_match(&query_param_item_text) {":                               2,
+		"if query_param_item_text.chars().count() < 2 {":                                           2,
+		"if query_param_item_text.chars().count() > 3 {":                                           2,
+		"if query_param_value.len() < 1 {":                                                         0,
+		"if query_param_value.len() > 2 {":                                                         2,
+		"let query_param_item_number = query_param_item_text":                                      2,
+		"if query_param_item_number < 1.0 {":                                                       2,
+		"if query_param_item_number > 5.0 {":                                                       2,
+		"if let Some(query_param_value) = query.scores.as_ref().filter(|list| !list.is_empty()) {": 2,
+		`query_params.push(("tags".to_string(), query_param_text));`:                               2,
+		`query_params.push(("scores".to_string(), query_param_text));`:                             2,
 	} {
 		if got := strings.Count(generated, want); got != count {
 			t.Errorf("namespace has %d of %q, want %d", got, want, count)
@@ -332,5 +338,51 @@ func TestWriteSDKGolden(t *testing.T) {
 	}
 	if len(got) == 0 {
 		t.Fatal("expected non-empty Cargo.toml")
+	}
+}
+
+// TestSDKTokenMethodsFollowOperationsNotPublic pins when the SDK gets
+// set_token and clear_token: when any operation needs a caller, whether or
+// not the API is public, as in the TypeScript SDK. fixture-api declares
+// such operations; fixture-nested-arrays-api declares none.
+func TestSDKTokenMethodsFollowOperationsNotPublic(t *testing.T) {
+	nestedArraysAPI := func(t *testing.T) *apigen.APIOutput {
+		_, apiOutput := loadNestedArraysAPI(t)
+		return apiOutput
+	}
+	for _, test := range []struct {
+		name   string
+		load   func(t *testing.T) *apigen.APIOutput
+		public bool
+		want   bool
+	}{
+		{"public with protected operations", loadFixtureAPI, true, true},
+		{"not public with protected operations", loadFixtureAPI, false, true},
+		{"public without protected operations", nestedArraysAPI, true, false},
+		{"not public without protected operations", nestedArraysAPI, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			apiOutput := test.load(t)
+			apiOutput.IsPublic = test.public
+			clock := codegen.DefaultClock()
+			sdkOutput, err := Generate(apiOutput, naming.Default().RustSDKCrate(apiOutput.SchemaName), naming.Default().RustTypesCrate(apiOutput.SchemaName), clock)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if sdkOutput.HasAuth != test.want {
+				t.Errorf("HasAuth = %v, want %v", sdkOutput.HasAuth, test.want)
+			}
+			outDir := t.TempDir()
+			if err := WriteSDKWithTools(sdkOutput, apiOutput, outDir, t.TempDir(), clock); err != nil {
+				t.Fatalf("WriteSDKWithTools: %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(outDir, "src", "sdk.rs"))
+			if err != nil {
+				t.Fatalf("read src/sdk.rs: %v", err)
+			}
+			if marker := "pub fn set_token(&self, token: impl Into<String>) {"; strings.Contains(string(got), marker) != test.want {
+				t.Errorf("src/sdk.rs contains %q: %v, want %v", marker, !test.want, test.want)
+			}
+		})
 	}
 }

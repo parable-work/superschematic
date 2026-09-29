@@ -1,0 +1,18 @@
+# Types in every language over dependencies that generate only Go and
+# TypeScript types: its Python and Rust types import shop-common's and
+# shop-db's, which do not exist. shop-ids contributes only a scalar.
+name: shop-orders
+kind: API
+dependencies:
+  - name: shop-common
+    kind: General
+  - name: shop-db
+    kind: DB
+  - name: shop-ids
+    kind: General
+outputs:
+  types:
+    go: { enabled: true }
+    typescript: { enabled: true }
+    python: { enabled: true }
+    rust: { enabled: true }

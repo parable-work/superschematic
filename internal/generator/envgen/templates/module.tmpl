@@ -8,6 +8,18 @@ go 1.26.4
 require (
 	{{ .TypesModule }} v0.0.0-00010101000000-000000000000
 	github.com/joho/godotenv v1.5.1
+{{- range .IndirectModules }}
+	{{ . }} v0.0.0-00010101000000-000000000000 // indirect
+{{- end }}
 )
 
 replace {{ .TypesModule }} => ../../types/go/{{ .SchemaName }}
+{{- range .IndirectModules }}
+replace {{ . }} => ../../types/go/{{ base . }}
+{{- end }}
+{{- if .ScalarLibReplacePath }}
+replace {{ .Naming.ScalarGoModule }} => {{ .ScalarLibReplacePath }}
+{{- end }}
+{{- if .SchemaIRReplacePath }}
+replace {{ .Naming.SchemaIRGoModule }} => {{ .SchemaIRReplacePath }}
+{{- end }}

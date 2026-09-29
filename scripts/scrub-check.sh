@@ -183,10 +183,8 @@ fi
 # distribution declares its field directives with extension DecoratorSpecs
 # that write the IR Extensions slot (docs/DECISIONS.md, D18). Any transform*
 # identifier fails here, in camelCase, PascalCase or snake_case, which covers
-# IR keys, x-transform* vendor keys and Go names. CHANGELOG.md names the
-# fields the core removed and is the one file skipped.
-transforms="$(scan '[Tt]ransform([A-Z]|_[a-z])' . -- "${hashes[@]}" \
-  | drop '^\./CHANGELOG\.md:[0-9]+:')"
+# IR keys, x-transform* vendor keys and Go names.
+transforms="$(scan '[Tt]ransform([A-Z]|_[a-z])' . -- "${hashes[@]}")"
 
 if [ -n "$transforms" ]; then
   echo "scrub: transform* identifiers:" >&2

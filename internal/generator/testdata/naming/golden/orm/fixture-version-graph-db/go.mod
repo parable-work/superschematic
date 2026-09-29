@@ -20,4 +20,8 @@ require (
 
 replace example.com/acme/schemas/types/go/fixture-version-graph-db => ../../types/go/fixture-version-graph-db
 
+replace example.com/acme/scalars => ../../vendor/acme-scalars
+
+replace example.com/acme/schema-ir => ../../vendor/acme-schema-ir
+
 replace example.com/acme/versiongraph => ../../vendor/acme-versiongraph

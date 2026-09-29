@@ -11,11 +11,7 @@ function sdkFor(token?: string) {
   const app = storefrontApp();
   return new ShopStorefrontSDK({
     baseUrl: 'http://storefront.test',
-    // An SDK attaches auth.token only for an API marked public, and public
-    // needs an authDb, which the TypeScript router has no use for. So the
-    // caller sets the header itself.
-    requestInterceptor: config =>
-      token ? { ...config, headers: { ...config.headers, Authorization: `Bearer ${token}` } } : config,
+    auth: { token },
     fetch: (input, init) => app.fetch(new Request(input, init)),
   });
 }

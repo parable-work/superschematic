@@ -16,6 +16,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
+	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -223,6 +224,13 @@ type APIOutput struct {
 	// on; the API go.mod carries replace directives for them.
 	ModuleDependencies []string
 
+	// IndirectModules are the generated Go types modules the API module
+	// reaches only through TypesModule and the upstream ORM: the upstream
+	// types module, and what AddIndirectModules adds. go.mod requires each
+	// as indirect and replaces it, since Go takes neither from a
+	// dependency's go.mod.
+	IndirectModules []string
+
 	ORMModule           string // upstream ORM module path (public APIs only)
 	IsPublic            bool
 	UpstreamSchema      string // upstream DB schema name (public APIs only)
@@ -311,6 +319,20 @@ type APIOutput struct {
 	VersionGraphReplacePath  string
 }
 
+// AddIndirectModules adds modules to IndirectModules: the dispatch layer
+// adds the Go types modules the types module and the upstream types module
+// import, directly or through one another, to its copy of the output before
+// it writes the Go server.
+func (o *APIOutput) AddIndirectModules(modules []string) {
+	o.IndirectModules = goutil.UniqueModules([]string{o.TypesModule}, o.IndirectModules, modules)
+}
+
+// TypesModuleReplaces lists the generated Go types modules go.mod replaces
+// beside TypesModule: the declared dependencies' and IndirectModules, sorted.
+func (o *APIOutput) TypesModuleReplaces() []string {
+	return goutil.UniqueModules([]string{o.TypesModule}, o.ModuleDependencies, o.IndirectModules)
+}
+
 // HasConstants reports whether constants.go is generated: public schemas
 // with a UUID-like scalar get a SystemUserID constant.
 func (o *APIOutput) HasConstants() bool {
@@ -327,6 +349,88 @@ func (o *APIOutput) HasBodyArgs() bool {
 		}
 	}
 	return false
+}
+
+// RoutesNeedTypes gates the types import in routes.go: only a handler
+// factory (written for every endpoint, mounted or not) references the
+// generated types module, as handlerUsesTypes lists.
+func (o *APIOutput) RoutesNeedTypes() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.handlerUsesTypes() {
+			return true
+		}
+	}
+	return false
+}
+
+// handlerUsesTypes reports whether the endpoint's handler factory in
+// routes.go references the generated types module. It follows the branches
+// of routes.tmpl.
+func (e EndpointInfo) handlerUsesTypes() bool {
+	// An input type, with or without file uploads, is decoded into
+	// types.<Input>, and body arguments collect types.ValidationErrors.
+	if e.HasInput || (len(e.ScalarArgs) > 0 && e.Method != "GET") {
+		return true
+	}
+	// A nil inner list of a list-of-lists response is sent as []<Output>{}.
+	if e.OutputType != "" && e.OutputIsArrayOfArrays && strings.HasPrefix(e.OutputGoType, "types.") {
+		return true
+	}
+	// A path parameter of a generated type is parsed (a UUID or a
+	// timestamp) or cast (a string-backed scalar or an enum).
+	for _, param := range e.PathParams {
+		if strings.HasPrefix(param.GoType, "types.") {
+			return true
+		}
+	}
+	for _, param := range e.QueryParams {
+		if param.queryParamUsesTypes() {
+			return true
+		}
+	}
+	if e.Method == "GET" {
+		for _, arg := range e.ScalarArgs {
+			if arg.queryArgUsesTypes() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// queryParamUsesTypes reports whether routes.go references the generated
+// types module to read the @query parameter: a list checks each item
+// against types.ValidationError, a generated type is parsed or cast, and a
+// bound on a number or a length or pattern rule on a string reports a
+// types.ValidationError.
+func (p Param) queryParamUsesTypes() bool {
+	switch {
+	case p.IsArray, strings.HasPrefix(p.GoType, "types."):
+		return true
+	case p.IsInt, p.IsFloat:
+		return p.ValidateMin != nil || p.ValidateMax != nil
+	case p.IsString:
+		return p.ValidateMinLength != nil || p.ValidateMaxLength != nil || p.ValidatePattern != ""
+	}
+	return false
+}
+
+// queryArgUsesTypes reports whether routes.go references the generated
+// types module to read the argument of a GET operation from the query
+// string: a list collects types.ValidationErrors, a bound on a number
+// reports a types.ValidationError, a UUID or a timestamp is parsed into a
+// generated type, and a string, a string-backed scalar or an enum is
+// checked against types.ValidationError. A boolean uses none of them.
+func (p Param) queryArgUsesTypes() bool {
+	switch {
+	case p.IsArray:
+		return true
+	case p.IsInt, p.IsFloat:
+		return p.ValidateMin != nil || p.ValidateMax != nil
+	case p.IsBool:
+		return false
+	}
+	return true
 }
 
 // EndpointOutput is the template data for per-endpoint scaffold files.
@@ -468,6 +572,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	if opts.UpstreamSchema != "" && opts.UpstreamIR == nil {
 		return nil, fmt.Errorf("apigen: upstream schema %s declared but no upstream IR provided", opts.UpstreamSchema)
 	}
+	output.IndirectModules = goutil.UniqueModules([]string{output.TypesModule}, []string{upstreamTypesModule})
 	output.UpstreamVersionGraph = declaresVersionGraph(opts.UpstreamIR)
 	auth, err := opts.Provider.Analyze(schema, opts.UpstreamIR)
 	if err != nil {

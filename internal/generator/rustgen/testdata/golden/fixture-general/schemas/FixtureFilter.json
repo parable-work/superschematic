@@ -2,6 +2,41 @@
   "name": "fixture-general",
   "kind": "General",
   "rootType": "FixtureFilter",
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Identity.Name": {
+      "name": "Identity.Name",
+      "description": "An objects name",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityName",
+        "json_schema": "string",
+        "python": "str",
+        "rust": "String",
+        "sql": "VARCHAR(80)",
+        "typescript": "string"
+      },
+      "maxLength": 80,
+      "minLength": 2
+    }
+  },
   "types": {
     "FixtureFilter": {
       "name": "FixtureFilter",
@@ -26,6 +61,23 @@
           "validateMaxLength": 64,
           "validateListMin": 1,
           "validateListMax": 10
+        },
+        {
+          "name": "minCents",
+          "comment": "Scalars with rules of their own, checked after the scalar's.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 0
+        },
+        {
+          "name": "labels",
+          "typeRef": {
+            "name": "Identity.Name",
+            "isArray": true
+          },
+          "validateMaxLength": 16
         }
       ],
       "jsonField": true

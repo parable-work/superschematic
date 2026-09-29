@@ -83,6 +83,47 @@ func (r run) loadDependencySchemas() (map[string]*ir.Schema, error) {
 	return deps, nil
 }
 
+// goTypesClosure returns the module paths of the Go types modules the types
+// module of schema imports, directly or through one another, sorted. Go
+// takes no replace directive from a dependency's go.mod, so every generated
+// Go module built on that types module requires and replaces each of them
+// itself; otherwise a local build fetches the next hop from the network.
+// The walk follows each schema's IR imports and keeps the dependencies
+// typegen imports a module for (typegen.ImportedDependencies).
+func (r run) goTypesClosure(schema *ir.Schema) ([]string, error) {
+	seen := map[string]bool{schema.Name: true}
+	var modules []string
+	for queue := []*ir.Schema{schema}; len(queue) > 0; queue = queue[1:] {
+		current := queue[0]
+		deps := make(map[string]*ir.Schema, len(current.Imports))
+		for _, imp := range current.Imports {
+			name := typegen.DependencyServiceName(imp.Package)
+			if deps[name] != nil {
+				continue
+			}
+			dep, err := r.LoadDependency(name)
+			if err != nil {
+				return nil, fmt.Errorf("generator: load dependency %s of %s: %w", name, current.Name, err)
+			}
+			deps[name] = dep
+		}
+		imported, err := typegen.ImportedDependencies(current, deps)
+		if err != nil {
+			return nil, fmt.Errorf("generator: go types imports of %s: %w", current.Name, err)
+		}
+		for _, name := range imported {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			modules = append(modules, r.Options.Naming.GoTypesModule(name))
+			queue = append(queue, deps[name])
+		}
+	}
+	sort.Strings(modules)
+	return modules, nil
+}
+
 // runMemo is the state one generator run shares across its pipeline: the
 // dependency IRs loaded so far and the API output apigen produced. The
 // context's LoadDependency and APIOutput closures are its methods.
@@ -143,6 +184,7 @@ func (m *runMemo) loadDependency(name string) (*ir.Schema, error) {
 func (r run) generateGoTypes() error {
 	var deps map[string]*ir.Schema
 	depModules := map[string]string{}
+	var closure []string
 	if err := r.measure("output.types-go.prepare", func() error {
 		var err error
 		deps, err = r.loadDependencySchemas()
@@ -153,7 +195,8 @@ func (r run) generateGoTypes() error {
 		for name := range deps {
 			depModules[name] = r.Options.Naming.GoTypesModule(name)
 		}
-		return nil
+		closure, err = r.goTypesClosure(r.Schema)
+		return err
 	}); err != nil {
 		return err
 	}
@@ -166,6 +209,7 @@ func (r run) generateGoTypes() error {
 			ModulePath:        r.Options.Naming.GoTypesModule(r.Config.Name),
 			Dependencies:      deps,
 			DependencyModules: depModules,
+			ModuleClosure:     closure,
 			Naming:            r.Options.Naming,
 			Clock:             r.Options.Clock,
 		})
@@ -364,16 +408,21 @@ func (r run) generateORM() error {
 	if err != nil {
 		return fmt.Errorf("generator: load ORM dependencies for %s: %w", r.Config.Name, err)
 	}
+	closure, err := r.goTypesClosure(r.Schema)
+	if err != nil {
+		return err
+	}
 	var output *ormgen.ORMOutput
 	if err := r.measure("output.orm.generate", func() error {
 		var err error
 		output, err = ormgen.Generate(r.Schema, ormgen.Options{
-			SchemaName:   r.Config.Name,
-			ModulePath:   r.Options.Naming.GoORMModule(r.Config.Name),
-			TypesModule:  r.Options.Naming.GoTypesModule(r.Config.Name),
-			Naming:       r.Options.Naming,
-			Dependencies: deps,
-			Clock:        r.Options.Clock,
+			SchemaName:    r.Config.Name,
+			ModulePath:    r.Options.Naming.GoORMModule(r.Config.Name),
+			TypesModule:   r.Options.Naming.GoTypesModule(r.Config.Name),
+			Naming:        r.Options.Naming,
+			Dependencies:  deps,
+			ModuleClosure: closure,
+			Clock:         r.Options.Clock,
 		})
 		return err
 	}); err != nil {
@@ -574,7 +623,7 @@ func (r run) generateGoAPI() error {
 		return err
 	}
 	if output == nil {
-		return r.generateEnvConfig(false)
+		return r.generateEnvConfig(LangGo)
 	}
 	apiOutput := *output
 	output = &apiOutput
@@ -591,6 +640,25 @@ func (r run) generateGoAPI() error {
 		return nil
 	}); err != nil {
 		return fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
+	}
+
+	// The Go server alone needs the modules the types modules reach, so
+	// they go on this copy rather than the output the other generators
+	// share.
+	roots := []*ir.Schema{r.Schema}
+	if output.UpstreamSchema != "" {
+		upstream, err := r.LoadDependency(output.UpstreamSchema)
+		if err != nil {
+			return fmt.Errorf("generator: load upstream auth schema %s: %w", output.UpstreamSchema, err)
+		}
+		roots = append(roots, upstream)
+	}
+	for _, root := range roots {
+		closure, err := r.goTypesClosure(root)
+		if err != nil {
+			return err
+		}
+		output.AddIndirectModules(closure)
 	}
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
@@ -643,7 +711,7 @@ func (r run) generateRustAPI() error {
 		return fmt.Errorf("generator: rust api for %s: %w", r.Config.Name, err)
 	}
 	if output == nil {
-		return r.generateEnvConfig(true)
+		return r.generateEnvConfig(LangRust)
 	}
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
@@ -664,13 +732,15 @@ func (r run) generateRustAPI() error {
 		r.Logf("  + api scaffolds: %d created, %d skipped (existing) in %s\n",
 			len(scaffolds.Generated), len(scaffolds.Skipped), scaffoldsDir)
 	}
-	return r.generateEnvConfig(true)
+	return r.generateEnvConfig(LangRust)
 }
 
 // generateEnvConfig emits the standalone env-var loader for schemas whose API
 // path does not write it: env-only schemas (no operations) and Rust API
-// schemas. Silently does nothing when the schema declares no @envVars type.
-func (r run) generateEnvConfig(rust bool) error {
+// schemas. lang is the loader's language, LangGo or LangRust; "" writes the
+// values schema alone (see envLoaderLanguage). Silently does nothing when
+// the schema declares no @envVars type.
+func (r run) generateEnvConfig(lang string) error {
 	deps, err := r.loadDependencySchemas()
 	if err != nil {
 		return err
@@ -689,16 +759,28 @@ func (r run) generateEnvConfig(rust bool) error {
 	}
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
-	if rust {
-		err = envgen.WriteRustConfig(output, dir)
-	} else {
+	switch lang {
+	case LangGo:
+		if output.IndirectModules, err = r.goTypesClosure(r.Schema); err != nil {
+			return err
+		}
+		if err = envgen.SetReplacePaths(output, r.Options.Paths, dir); err != nil {
+			return fmt.Errorf("generator: env config replace paths for %s: %w", r.Config.Name, err)
+		}
 		err = envgen.WriteConfigModule(output, dir)
+	case LangRust:
+		err = envgen.WriteRustConfig(output, dir)
+	default:
+		err = envgen.WriteValuesSchema(output, dir)
 	}
 	if err != nil {
 		return fmt.Errorf("generator: env config for %s: %w", r.Config.Name, err)
 	}
 
 	r.Done("env-config", dir)
+	if lang == "" {
+		r.Logf("  - env-config: values-schema.json only, no loader; enable outputs.types.go for the Go loader, which imports the Go types, or outputs.types.rust for the Rust one\n")
+	}
 	return nil
 }
 
@@ -822,6 +904,12 @@ func (r run) generateGoSDK() error {
 	}); err != nil {
 		return fmt.Errorf("generator: go sdk for %s: %w", r.Config.Name, err)
 	}
+
+	closure, err := r.goTypesClosure(r.Schema)
+	if err != nil {
+		return err
+	}
+	sdkOutput.IndirectModules = closure
 
 	dir := SDKDir(r.Options.OutputRoot, "go", r.Config.Name)
 	typesDir := TypesDir(r.Options.OutputRoot, "go", r.Config.Name)

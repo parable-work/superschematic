@@ -251,7 +251,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	tableTypes := tableTypeDefs(schema)
+	tableTypes, err := tableTypeDefs(schema)
+	if err != nil {
+		return nil, err
+	}
 	if len(tableTypes) == 0 {
 		return nil, nil
 	}
@@ -485,20 +488,30 @@ func sqlTypeFromTraits(traits codegen.ScalarTraits) string {
 
 // tableTypeDefs returns the schema's table-backed type definitions sorted by
 // name: Role == DBTable, not a @jsonField payload, and not a base class
-// (base-class fields arrive pre-flattened on the subclasses).
-func tableTypeDefs(schema *ir.Schema) []*ir.TypeDef {
+// (base-class fields arrive pre-flattened on the subclasses, and their
+// indexes do not). Verification refuses an @index on any other type
+// (checkIndexTables); it fails here too, as a backstop, rather than drop
+// the index.
+func tableTypeDefs(schema *ir.Schema) ([]*ir.TypeDef, error) {
 	baseTypes := codegen.BaseTypeNames(schema)
 
 	var defs []*ir.TypeDef
 	for _, typeDef := range schema.Types {
-		if typeDef.Role != ir.RoleDBTable || typeDef.JsonField || baseTypes[typeDef.Name] {
-			continue
-		}
 		defs = append(defs, typeDef)
 	}
-
 	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
-	return defs
+
+	var tables []*ir.TypeDef
+	for _, typeDef := range defs {
+		if typeDef.Role != ir.RoleDBTable || typeDef.JsonField || baseTypes[typeDef.Name] {
+			if len(typeDef.Indexes) > 0 {
+				return nil, fmt.Errorf("type %s declares an @index but gets no table", typeDef.Name)
+			}
+			continue
+		}
+		tables = append(tables, typeDef)
+	}
+	return tables, nil
 }
 
 // isRelationalTarget reports whether typeName names a table-backed type in

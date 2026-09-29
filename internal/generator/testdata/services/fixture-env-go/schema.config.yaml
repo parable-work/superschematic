@@ -1,0 +1,8 @@
+# A General service with Go types and an @envVars class: build writes the
+# types module and the standalone Go env-var loader beside it, which
+# env_config_compile_test.go builds in-tree.
+name: fixture-env-go
+kind: General
+outputs:
+  types:
+    go: { enabled: true }

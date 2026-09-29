@@ -93,12 +93,19 @@ payload = money.to_json()
 `from_json` / `from_dict` are strict. `from_json_non_strict` /
 `from_dict_non_strict` are not. YAML variants exist when the package
 depends on PyYAML. Field names in Python are snake_case; JSON keys stay
-as the schema spelled them.
+as the schema spelled them. `validate_all()` checks the model's fields
+and every model they hold, in lists and maps too, each nested error
+under its path (`lines[0].quantity`). It keys its errors by the
+snake_case names; `validate_all(by_alias=True)` keys them by the JSON
+names, nested fields included, as the Go and TypeScript validators do.
+`str()` of the result lists each error.
 
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk` for Python writes
-`schemas_<stem>_sdk` (default prefix `schemas_`, suffix `_sdk`).
+`schemas_<stem>_sdk` (default prefix `schemas_`, suffix `_sdk`). It needs
+`outputs.types` for Python too: the SDK validates inputs with the types
+package, and the build refuses the config without it.
 
 ```python
 from schemas_catalog_sdk import CatalogSDK, ClientConfig
@@ -113,3 +120,10 @@ product = sdk.product_queries.get_product(id)
 `auth_token` is static. `auth_token_provider` is called per request.
 `set_token` / `clear_token` change the token after construction.
 Operation sets become snake_case properties.
+
+With the types package installed, an input is checked before the request:
+pydantic checks its types and required fields, then `validate_all` checks
+the schema's rules (`listMin`, `minLength`, `min`, `pattern`, ...) on the
+input and on every object it holds. A failure raises `ValidationError`,
+whose `errors` maps each path (`lines`, `lines[0].quantity`) to its rule
+and message, as the Go and TypeScript SDKs report them.

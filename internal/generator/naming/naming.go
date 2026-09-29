@@ -167,7 +167,9 @@ type DepsConfig struct {
 	// the schemas root, as for [paths]) that build-all also writes the
 	// graph to, byte for byte. The output root is usually ignored by
 	// version control; a copy outside it can be committed, so a tool reads
-	// the graph without building. The --deps-copy flag overrides it.
+	// the graph without building. The --deps-copy flag overrides it. Parse
+	// refuses an absolute value, which DepsCopyPath would join under the
+	// root.
 	Copy string `toml:"copy"`
 }
 
@@ -179,14 +181,23 @@ func (n Naming) DepsCopyPath(repoRoot string) string {
 	return filepath.Join(repoRoot, filepath.FromSlash(n.Deps.Copy))
 }
 
+// checkRelative returns an error when copy is an absolute path.
+func (d DepsConfig) checkRelative() error {
+	if isAbsPath(d.Copy) {
+		return fmt.Errorf("deps.copy %q is an absolute path: [deps] copy is relative to the parent of the schemas root", d.Copy)
+	}
+	return nil
+}
+
 // PathsConfig is the [paths] table of superschematic.toml: where the
 // runtime modules the generated code imports live in the repository, for
 // generated manifests to point path dependencies at (go.mod replace, Cargo
 // path, npm file:). Every key is optional and repo-relative (the repository
 // root is the parent of the schemas root, as for [cache] inputs) and names
-// the directory that holds the module, package or crate itself. An unset
-// key emits no path dependency, so the generated manifest resolves the
-// published module instead.
+// the directory that holds the module, package or crate itself. Parse
+// refuses an absolute value, which LocalPaths would join under the root. An
+// unset key emits no path dependency, so the generated manifest resolves
+// the published module instead.
 type PathsConfig struct {
 	// ScalarGo holds the scalar library's Go module (its go.mod).
 	ScalarGo string `toml:"scalar_go"`
@@ -245,6 +256,28 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 	}
 }
 
+// checkRelative returns an error naming the first key whose value is an
+// absolute path. A leading slash counts on every platform, so a value
+// written on macOS or Linux fails the same way on Windows.
+func (p PathsConfig) checkRelative() error {
+	for _, entry := range []struct{ key, value string }{
+		{"scalar_go", p.ScalarGo},
+		{"scalar_typescript", p.ScalarTypeScript},
+		{"scalar_rust", p.ScalarRust},
+		{"schema_ir", p.SchemaIR},
+		{"schema_runtime_go", p.SchemaRuntimeGo},
+		{"versiongraph_go", p.VersionGraphGo},
+		{"http_runtime_go", p.HTTPRuntimeGo},
+		{"http_runtime_rust", p.HTTPRuntimeRust},
+		{"ptr", p.Ptr},
+	} {
+		if strings.HasPrefix(entry.value, "/") || filepath.IsAbs(entry.value) {
+			return fmt.Errorf("paths.%s %q is an absolute path: [paths] values are relative to the parent of the schemas root", entry.key, entry.value)
+		}
+	}
+	return nil
+}
+
 // RelPath returns target relative to outputDir in slash form for a
 // generated manifest, or "" when target is unset so the manifest omits the
 // path dependency.
@@ -280,8 +313,28 @@ type CacheConfig struct {
 	// Inputs are repo-relative files hashed into every build-all cache key
 	// alongside the schema tree, the tool tree and the workspace lockfile:
 	// files generation reads that live outside the schema tree, so a change
-	// to them cannot reuse an entry built before it.
+	// to them cannot reuse an entry built before it. Parse refuses an
+	// absolute entry, which the cache would join under the root and hash as
+	// a missing file.
 	Inputs []string `toml:"inputs"`
+}
+
+// checkRelative returns an error naming the first inputs entry that is an
+// absolute path. Root is not checked: it may be absolute.
+func (c CacheConfig) checkRelative() error {
+	for i, input := range c.Inputs {
+		if isAbsPath(input) {
+			return fmt.Errorf("cache.inputs[%d] %q is an absolute path: [cache] inputs are relative to the parent of the schemas root", i, input)
+		}
+	}
+	return nil
+}
+
+// isAbsPath reports whether a repo-relative value is an absolute path. A
+// leading slash counts on every platform, so a value written on macOS or
+// Linux fails the same way on Windows.
+func isAbsPath(value string) bool {
+	return strings.HasPrefix(value, "/") || filepath.IsAbs(value)
 }
 
 // ExtensionConfig returns the [extension.<name>] table from the loaded file
@@ -596,6 +649,15 @@ func Parse(data []byte, name string) (Naming, error) {
 	}
 	if n.ScalarJSDocTag != "" && !jsdocTagRE.MatchString(n.ScalarJSDocTag) {
 		return Naming{}, fmt.Errorf("naming: %s: scalar_jsdoc_tag %q is not a JSDoc tag name: use letters, digits and _, not starting with a digit, without the @", name, n.ScalarJSDocTag)
+	}
+	if err := n.Paths.checkRelative(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if err := n.Deps.checkRelative(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if err := n.Cache.checkRelative(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	n = n.OrDefault()
 	if !historyActorSettingRE.MatchString(n.HistoryActorSetting) {

@@ -3,6 +3,9 @@ module {{.ModulePath}}
 go 1.26.4
 
 require {{.TypesModule}} v0.0.0
+{{- range .IndirectModules}}
+require {{.}} v0.0.0 // indirect
+{{- end}}
 {{- if .HasFilterableEndpoints}}
 require {{ .Naming.HTTPRuntimeGoModule }} v0.0.0
 {{- end}}

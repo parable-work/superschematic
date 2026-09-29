@@ -7,7 +7,10 @@ sidebar:
 
 The CLI is a Go binary. Generated Go types, ORM, API and SDK are ordinary
 Go modules whose paths come from `go_module_root` in
-[superschematic.toml](/superschematic/reference/naming/).
+[superschematic.toml](/superschematic/reference/naming/). The ORM, the API
+server and the SDK import the schema's Go types, so a DB schema (which
+always gets the ORM) needs `outputs.types.go`, and so do a Go API server
+and a Go SDK. The build refuses the config without it.
 
 ## Requirements
 
@@ -100,8 +103,13 @@ for this service are the module `example.com/schemas/types/go/catalog`
 under `schemas/dist/types/go/catalog`.
 
 `[paths]` in the naming file points generated `go.mod` replace lines at a
-checkout so you can compile before the modules are tagged. Leave the table
-out when you consume published modules.
+checkout so you can compile before the modules are tagged. Its values are
+relative to the parent of the schemas root; an absolute path is an error.
+Leave the table out when you consume published modules. Go reads replace
+lines only from the module it builds, so each generated `go.mod` also
+requires and replaces every generated types module it reaches through
+another one: an API whose auth DB takes a type from a General service
+replaces that service's types module too.
 
 ## Consume generated types
 
@@ -163,7 +171,9 @@ checks membership.
 ## Serve a generated API
 
 An API schema with a Go API output writes the module
-`example.com/schemas/api/<name>`. `RegisterRoutes` mounts its routes on a
+`example.com/schemas/api/<name>`. It needs `outputs.types.go` too: the
+routes decode requests into the schema's Go types and the handler
+interfaces take and return them. `RegisterRoutes` mounts its routes on a
 chi router and calls your implementations.
 
 An operation with an input type reads it from the JSON body. An operation
@@ -238,7 +248,9 @@ value, the items of a list or the values of a map, and `listMin` and
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk.go` enabled writes
-`example.com/schemas/sdk/go/<name>`. Construct the client with `New`:
+`example.com/schemas/sdk/go/<name>`. It needs `outputs.types.go` too: the
+SDK's methods take and return the schema's Go types, and the build refuses
+the config without them. Construct the client with `New`:
 
 ```go
 sdk, err := catalogsdk.New(catalogsdk.SDKConfig{

@@ -38,6 +38,8 @@
 #      build cache; the sql generator wrote the storefront.stock view, its
 #      migration and its Arrow schema under acme's metadata key prefix;
 #   8. the API service compiles against the acme auth provider (go build);
+#      shop-config's standalone Go env-var loader compiles too, its go.mod
+#      carrying the [paths] replaces its types module needs;
 #   9. the core-only binary rejects the Catalog service with the registered
 #      kinds named, and rejects the naming file that selects apikey;
 #  10. the core-only binary builds shop-db and shop-api with the session
@@ -239,6 +241,9 @@ echo "==> API service compiles against the acme auth provider"
 grep -q 'X-API-Key' "$DIST/api/shop-api/middleware.go"
 grep -q 'scalars.ParseUUID' "$DIST/api/shop-api/middleware.go"
 go_module_compiles "$DIST/api/shop-api"
+
+echo "==> shop-config's Go env-var loader compiles against its Go types"
+go_module_compiles "$DIST/api/shop-config"
 
 echo "==> core-only binary rejects what the extension adds"
 sed 's/^auth_provider = "apikey"/auth_provider = "session"/' "$SCHEMAS/superschematic.toml" >"$OUT/session.toml"

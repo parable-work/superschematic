@@ -15,11 +15,13 @@ package ormgen
 import (
 	"embed"
 	"fmt"
+	"path"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
@@ -34,6 +36,9 @@ type ORMOutput struct {
 	ModulePath               string
 	TypesModule              string
 	ModuleDependencyReplaces []ModuleDependencyReplace
+	// IndirectModules are the Go types modules the ORM reaches through its
+	// types module (Options.ModuleClosure), required as indirect.
+	IndirectModules          []string
 	Repositories             []Repository
 	HasSoftDeletes           bool
 	HasVersionedRepositories bool
@@ -378,6 +383,12 @@ type Options struct {
 	// generation uses it to identify imported closed unions in JSONB fields.
 	Dependencies map[string]*ir.Schema
 
+	// ModuleClosure lists the Go types modules the types module imports,
+	// directly or through one another (the dispatch layer walks the
+	// dependency schemas for it). go.mod requires and replaces each: Go
+	// takes neither from the types module's go.mod.
+	ModuleClosure []string
+
 	// Clock stamps the generated output.
 	Clock codegen.Clock
 }
@@ -461,7 +472,8 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		SchemaName:               opts.SchemaName,
 		ModulePath:               opts.ModulePath,
 		TypesModule:              opts.TypesModule,
-		ModuleDependencyReplaces: dependencyTypeModuleReplaces(opts.Naming, opts.Dependencies),
+		ModuleDependencyReplaces: dependencyTypeModuleReplaces(opts.Naming, opts.Dependencies, opts.ModuleClosure),
+		IndirectModules:          goutil.UniqueModules([]string{opts.TypesModule}, opts.ModuleClosure),
 		Naming:                   opts.Naming,
 		Repositories:             repositories,
 		HasSoftDeletes:           hasSoftDeletes,
@@ -482,26 +494,30 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 }
 
 // dependencyTypeModuleReplaces returns a replace line per declared
-// dependency's Go types module. The ORM module is built as the main module,
-// and replace directives are not inherited from the types module it
-// requires, so a dependency the types module imports must be replaced here
-// too.
-func dependencyTypeModuleReplaces(n naming.Naming, dependencies map[string]*ir.Schema) []ModuleDependencyReplace {
-	if len(dependencies) == 0 {
+// dependency's Go types module and per module of closure, sorted by module.
+// The ORM module is built as the main module, and replace directives are not
+// inherited from the types module it requires, so every module the types
+// module imports, directly or not, must be replaced here too.
+func dependencyTypeModuleReplaces(n naming.Naming, dependencies map[string]*ir.Schema, closure []string) []ModuleDependencyReplace {
+	n = n.OrDefault()
+	relPaths := make(map[string]string, len(dependencies)+len(closure))
+	for name := range dependencies {
+		relPaths[n.GoTypesModule(name)] = "../../types/go/" + name
+	}
+	for _, modulePath := range closure {
+		relPaths[modulePath] = "../../types/go/" + path.Base(modulePath)
+	}
+	if len(relPaths) == 0 {
 		return nil
 	}
-	n = n.OrDefault()
-	names := make([]string, 0, len(dependencies))
-	for name := range dependencies {
-		names = append(names, name)
+	modules := make([]string, 0, len(relPaths))
+	for modulePath := range relPaths {
+		modules = append(modules, modulePath)
 	}
-	sort.Strings(names)
-	replaces := make([]ModuleDependencyReplace, 0, len(names))
-	for _, name := range names {
-		replaces = append(replaces, ModuleDependencyReplace{
-			Module:  n.GoTypesModule(name),
-			RelPath: "../../types/go/" + name,
-		})
+	sort.Strings(modules)
+	replaces := make([]ModuleDependencyReplace, 0, len(modules))
+	for _, modulePath := range modules {
+		replaces = append(replaces, ModuleDependencyReplace{Module: modulePath, RelPath: relPaths[modulePath]})
 	}
 	return replaces
 }

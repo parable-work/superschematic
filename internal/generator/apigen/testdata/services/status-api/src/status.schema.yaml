@@ -1,0 +1,22 @@
+# One GET operation without arguments that returns an object. No handler in
+# routes.go parses a parameter, validates a value or decodes a body, so
+# routes.go has no use for the generated types module. The Go compile tests
+# in apigen load it.
+name: status-api
+kind: API
+types:
+  Status:
+    name: Status
+    role: APIView
+    fields:
+      - name: ok
+        typeRef: { name: boolean }
+        required: true
+operationSets:
+  - name: StatusQueries
+    operations:
+      - name: status
+        typeRef: { name: Status }
+        required: true
+        httpMethod: GET
+        restPath: status

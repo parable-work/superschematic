@@ -117,7 +117,10 @@ text; any other JSON type is `type`
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk` for TypeScript writes
-`@schemas/<name>-sdk`. The class is `<Name>SDK`:
+`@schemas/<name>-sdk`. It needs `outputs.types` for TypeScript too: the SDK
+decodes responses and validates inputs with the types package, a peer
+dependency, and the build refuses the config without it. The class is
+`<Name>SDK`:
 
 ```ts
 import { CatalogSDK } from "@schemas/catalog-sdk";
@@ -131,9 +134,12 @@ const product = await sdk.product.getProduct(id);
 ```
 
 `auth.token` is a static token. `auth.getToken` is called per request.
-`setToken` / `clearToken` change the token after construction. Each
-namespace is a camelCase field, and operation sets that share a namespace
-share it: `ProductQueries` and `ProductMutations` are both `sdk.product`.
+`setToken` / `clearToken` change the token after construction. The SDK of
+an API with an operation that needs a caller (`@auth`,
+`@requirePermission`, `@requireOwnership`) sends the token on every request
+as `Authorization: Bearer <token>`. Each namespace is a camelCase field,
+and operation sets that share a namespace share it: `ProductQueries` and
+`ProductMutations` are both `sdk.product`.
 
 ## Serve a generated API
 
@@ -146,6 +152,10 @@ outputs: {
   api: { enabled: true, language: "TYPESCRIPT" }
 }
 ```
+
+The server needs `outputs.types` for TypeScript, as above: the router
+validates requests with the types package's decoders, a peer dependency,
+and the build refuses the config without it.
 
 The build writes `schemas/dist/api/<name>` as `@schemas/<name>-api`:
 `interfaces.ts` has one `<Namespace>Implementation` interface per operation
@@ -226,7 +236,8 @@ nested under it (`carts` covers `carts.write`). Pass `permissionMatcher` to
 use another rule. An operation declared `@manualRouteRegistration` is gated
 the same way and then handed to `options.manualRoutes.<operation>` with the
 Hono context, for a streaming response or anything else the JSON router
-cannot express.
+cannot express. The config needs neither `public` nor `authDb` for this
+server: those wire the Go server's auth middleware to an auth store.
 
 Two kinds of operation must be `@manualRouteRegistration`, and the build
 fails with the operation named when one is not:

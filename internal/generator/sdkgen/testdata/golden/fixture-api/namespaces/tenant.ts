@@ -70,30 +70,54 @@ export class TenantNamespace {
     // Validate query parameters before sending request
     const queryParamErrors = newValidationErrors();
     {
+      // ids is sent as one comma-separated value (?ids=a,b), and an
+      // empty list is left out: the route refuses a present empty value.
+      // Each item is checked at ids[i]: the route splits the value on
+      // commas and trims each item, so one must be non-blank, with no comma or
+      // surrounding space.
       const idsErrors: { validator: string; message: string }[] = [];
       const idsValue = params?.ids;
-      if (idsValue === undefined || idsValue === null) {
+      if (idsValue === undefined || idsValue === null || (Array.isArray(idsValue) && idsValue.length === 0)) {
         idsErrors.push({ validator: 'required', message: 'ids is required' });
-      } else {
-      if (Array.isArray(idsValue) && idsValue.length < 1) {
-        idsErrors.push({ validator: 'listMin', message: 'ids must contain at least 1 items.' });
-      }
-      if (Array.isArray(idsValue) && idsValue.length > 100) {
-        idsErrors.push({ validator: 'listMax', message: 'ids must contain at most 100 items.' });
-      }
+      } else if (Array.isArray(idsValue)) {
+        if (idsValue.length > 100) {
+          idsErrors.push({ validator: 'listMax', message: 'ids must contain at most 100 items.' });
+        }
+        idsValue.forEach((item: unknown, index: number) => {
+          const itemPath = `ids[${index}]`;
+          const itemText = String(item);
+          if (/^\p{White_Space}*$/u.test(itemText)) {
+            setFieldErrors(queryParamErrors, itemPath, [{ validator: 'required', message: `ids[${index}] is required.` }]);
+          } else if (itemText.includes(',') || /^\p{White_Space}|\p{White_Space}$/u.test(itemText)) {
+            setFieldErrors(queryParamErrors, itemPath, [{ validator: 'pattern', message: `ids[${index}] must not contain a comma or surrounding space.` }]);
+          }
+        });
       }
       if (idsErrors.length > 0) {
         setFieldErrors(queryParamErrors, "ids", idsErrors);
       }
     }
     {
+      // statuses is sent as one comma-separated value (?statuses=a,b), and an
+      // empty list is left out: the route refuses a present empty value.
+      // Each item is checked at statuses[i]: the route splits the value on
+      // commas and trims each item, so one must be non-blank, with no comma or
+      // surrounding space.
       const statusesErrors: { validator: string; message: string }[] = [];
       const statusesValue = params?.statuses;
-      if (Array.isArray(statusesValue) && statusesValue.length < 0) {
-        statusesErrors.push({ validator: 'listMin', message: 'statuses must contain at least 0 items.' });
-      }
-      if (Array.isArray(statusesValue) && statusesValue.length > 10) {
-        statusesErrors.push({ validator: 'listMax', message: 'statuses must contain at most 10 items.' });
+      if (Array.isArray(statusesValue) && statusesValue.length > 0) {
+        if (statusesValue.length > 10) {
+          statusesErrors.push({ validator: 'listMax', message: 'statuses must contain at most 10 items.' });
+        }
+        statusesValue.forEach((item: unknown, index: number) => {
+          const itemPath = `statuses[${index}]`;
+          const itemText = String(item);
+          if (/^\p{White_Space}*$/u.test(itemText)) {
+            setFieldErrors(queryParamErrors, itemPath, [{ validator: 'required', message: `statuses[${index}] is required.` }]);
+          } else if (itemText.includes(',') || /^\p{White_Space}|\p{White_Space}$/u.test(itemText)) {
+            setFieldErrors(queryParamErrors, itemPath, [{ validator: 'pattern', message: `statuses[${index}] must not contain a comma or surrounding space.` }]);
+          }
+        });
       }
       if (statusesErrors.length > 0) {
         setFieldErrors(queryParamErrors, "statuses", statusesErrors);
