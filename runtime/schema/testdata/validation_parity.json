@@ -35,6 +35,23 @@
           "typescript": "number[]"
         }
       },
+      "Generic.Int64": {
+        "name": "Generic.Int64",
+        "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+        "languagePrimitive": "number",
+        "primitive": "Int",
+        "typeMappings": {
+          "go": "GenericInt64",
+          "json_schema": "integer",
+          "python": "int",
+          "rust": "i64",
+          "sql": "BIGINT",
+          "typescript": "number"
+        },
+        "minimum": -9007199254740991,
+        "maximum": 9007199254740991,
+        "hasCustomParse": true
+      },
       "Generic.JSON": {
         "name": "Generic.JSON",
         "description": "Any valid JSON value: object, array, primitive, or null",
@@ -462,6 +479,72 @@
               "name": "ParityShade"
             },
             "required": true
+          }
+        ],
+        "jsonField": true
+      },
+      "ScalarRuleMatrix": {
+        "name": "ScalarRuleMatrix",
+        "owner": "src/parity-matrix.schema.json",
+        "role": "EmbeddedStruct",
+        "fields": [
+          {
+            "name": "reqAmount",
+            "typeRef": {
+              "name": "Generic.Int64"
+            },
+            "required": true,
+            "validateMin": 0,
+            "validateMax": 1000
+          },
+          {
+            "name": "optRank",
+            "typeRef": {
+              "name": "Ordering.Rank"
+            },
+            "validateMax": 10
+          },
+          {
+            "name": "optShare",
+            "typeRef": {
+              "name": "Generic.Probability"
+            },
+            "validateMax": 0.5
+          },
+          {
+            "name": "optName",
+            "typeRef": {
+              "name": "Identity.Name"
+            },
+            "validateMaxLength": 5,
+            "validatePattern": "^[a-z]+$"
+          },
+          {
+            "name": "names",
+            "typeRef": {
+              "name": "Identity.Name",
+              "isArray": true
+            },
+            "validateMaxLength": 5,
+            "validateListMax": 2
+          },
+          {
+            "name": "reqRanks",
+            "typeRef": {
+              "name": "Ordering.Rank",
+              "isArray": true
+            },
+            "required": true,
+            "validateMax": 10
+          },
+          {
+            "name": "rankGrid",
+            "typeRef": {
+              "name": "Ordering.Rank",
+              "isArray": true,
+              "isArrayOfArrays": true
+            },
+            "validateMax": 10
           }
         ],
         "jsonField": true
@@ -2857,6 +2940,220 @@
           "type"
         ],
         "vecList": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "scalar_rules_at_bounds",
+      "type": "ScalarRuleMatrix",
+      "payload": {
+        "names": [
+          "ab",
+          "cde"
+        ],
+        "optName": "abcde",
+        "optRank": 10,
+        "optShare": 0.5,
+        "rankGrid": [
+          [
+            1,
+            10
+          ],
+          []
+        ],
+        "reqAmount": 1000,
+        "reqRanks": [
+          1,
+          10
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "scalar_rules_optional_absent",
+      "type": "ScalarRuleMatrix",
+      "payload": {
+        "reqAmount": 0,
+        "reqRanks": []
+      },
+      "want": {}
+    },
+    {
+      "name": "scalar_field_min",
+      "type": "ScalarRuleMatrix",
+      "payload": {
+        "reqAmount": -1,
+        "reqRanks": []
+      },
+      "want": {
+        "reqAmount": [
+          "min"
+        ]
+      }
+    },
+    {
+      "name": "scalar_field_max",
+      "type": "ScalarRuleMatrix",
+      "payload": {
+        "optRank": 11,
+        "optShare": 0.75,
+        "reqAmount": 1001,
+        "reqRanks": []
+      },
+      "want": {
+        "optRank": [
+          "max"
+        ],
+        "optShare": [
+          "max"
+        ],
+        "reqAmount": [
+          "max"
+        ]
+      }
+    },
+    {
+      "name": "scalar_field_max_length",
+      "type": "ScalarRuleMatrix",
+      "payload": {
+        "names": [
+          "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+          "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"
+        ],
+        "optName": "abcdef",
+        "reqAmount": 0,
+        "reqRanks": []
+      },
+      "want": {
+        "names[1]": [
+          "maxLength"
+        ],
+        "optName": [
+          "maxLength"
+        ]
+      }
+    },
+    {
+      "name": "scalar_field_pattern",
+      "type": "ScalarRuleMatrix",
+      "payload": {
+        "optName": "abC",
+        "reqAmount": 0,
+        "reqRanks": []
+      },
+      "want": {
+        "optName": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "scalar_field_rules_on_elements",
+      "type": "ScalarRuleMatrix",
+      "payload": {
+        "rankGrid": [
+          [
+            2
+          ],
+          [
+            3,
+            12
+          ]
+        ],
+        "reqAmount": 0,
+        "reqRanks": [
+          1,
+          11
+        ]
+      },
+      "want": {
+        "rankGrid[1][1]": [
+          "max"
+        ],
+        "reqRanks[1]": [
+          "max"
+        ]
+      }
+    },
+    {
+      "name": "scalar_field_list_max_and_element",
+      "type": "ScalarRuleMatrix",
+      "payload": {
+        "names": [
+          "ab",
+          "abcdef",
+          "cd"
+        ],
+        "reqAmount": 0,
+        "reqRanks": []
+      },
+      "want": {
+        "names": [
+          "listMax"
+        ],
+        "names[1]": [
+          "maxLength"
+        ]
+      }
+    },
+    {
+      "name": "scalar_own_rules_beside_field_rules",
+      "type": "ScalarRuleMatrix",
+      "payload": {
+        "optName": "a",
+        "optRank": -1,
+        "reqAmount": 0,
+        "reqRanks": [
+          0
+        ]
+      },
+      "want": {
+        "optName": [
+          "minLength"
+        ],
+        "optRank": [
+          "min"
+        ],
+        "reqRanks[0]": [
+          "min"
+        ]
+      }
+    },
+    {
+      "name": "scalar_and_field_rules_fail",
+      "type": "ScalarRuleMatrix",
+      "payload": {
+        "optName": "A",
+        "reqAmount": 0,
+        "reqRanks": []
+      },
+      "want": {
+        "optName": [
+          "minLength",
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "scalar_field_rules_wrong_type",
+      "type": "ScalarRuleMatrix",
+      "payload": {
+        "names": [
+          7
+        ],
+        "optName": 42,
+        "reqAmount": "-5",
+        "reqRanks": []
+      },
+      "want": {
+        "names[0]": [
+          "type"
+        ],
+        "optName": [
+          "type"
+        ],
+        "reqAmount": [
           "type"
         ]
       }

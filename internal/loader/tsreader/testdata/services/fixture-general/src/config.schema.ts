@@ -1,4 +1,4 @@
-import { Network } from "superscalar";
+import { Generic, Identity, Network } from "superscalar";
 import { Default, Nullable, Secret, Validate, docs, icon, jsonField, purpose } from "@superschematic/schema";
 import { envVars } from "@superschematic/schema-config";
 
@@ -32,4 +32,9 @@ export abstract class FixtureFilter {
   kind: Validate<string, { maxLength: 32 }>;
 
   values: Nullable<Validate<string[], { maxLength: 64; listMin: 1; listMax: 10 }>>;
+
+  // Scalars with rules of their own, checked after the scalar's.
+  minCents: Validate<Generic.Int64, { min: 0 }>;
+
+  labels: Nullable<Validate<Identity.Name[], { maxLength: 16 }>>;
 }

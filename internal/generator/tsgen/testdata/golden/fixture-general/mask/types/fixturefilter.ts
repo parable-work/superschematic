@@ -11,5 +11,7 @@ export function maskSecretsFixtureFilter(value: FixtureFilter): FixtureFilter {
   return {
     kind: value.kind,
     values: Array.isArray(value.values) ? value.values : null,
+    minCents: value.minCents,
+    labels: value.labels,
   };
 }
