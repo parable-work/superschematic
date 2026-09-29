@@ -6,9 +6,13 @@ import {
   setFieldErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
-import { expectList, expectString } from '../primitives';
+import { expectList, expectString, isFiniteNumber } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import type { FixtureFilter } from '../../types';
+
+import { validateGenericInt64Required, validateGenericInt64 } from '../scalars/generic_int64';
+
+import { validateIdentityNameRequired, validateIdentityName } from '../scalars/identity_name';
 
 /**
  * Validates a FixtureFilter object
@@ -70,6 +74,54 @@ export function validateFixtureFilter(value: FixtureFilter | null | undefined): 
     });
   }
 
+  {
+    const [valid, fieldErrors] = validateGenericInt64Required(value.minCents);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "minCents", fieldErrors);
+    }
+  }
+
+  {
+    const fieldValue = value.minCents;
+
+    if (isFiniteNumber(fieldValue) && fieldValue < 0) {
+      addFieldError(errors, "minCents", "min", "must be at least 0");
+    }
+
+  }
+
+  expectList(errors, "labels", value.labels);
+
+  if (Array.isArray(value.labels)) {
+    value.labels.forEach((item, index) => {
+      const [valid, fieldErrors] = validateIdentityName(item);
+      if (!valid && fieldErrors) {
+        setFieldErrors(errors, `labels[${index}]`, fieldErrors);
+      }
+    });
+  }
+
+  if (Array.isArray(value.labels)) {
+    const fieldValue = value.labels;
+
+    fieldValue.forEach((item, index) => {
+      if (typeof item === "string" && [...item].length > 16) {
+        addFieldError(errors, `labels[${index}]`, "maxLength", "must be at most 16 characters");
+      }
+    });
+
+  }
+
+  // A list element is never null: its one error is "required", in place of
+  // whatever the element checks above made of it.
+  if (Array.isArray(value.labels)) {
+    value.labels.forEach((item, index) => {
+      if (item === null || item === undefined) {
+        setFieldErrors(errors, `labels[${index}]`, [{ validator: "required", message: "required field" }]);
+      }
+    });
+  }
+
   return Object.keys(errors).length > 0 ? errors : true;
 }
 
@@ -89,6 +141,8 @@ export function validateFixtureFilterRequired(value: FixtureFilter | null | unde
 const FixtureFilterKnownFields = new Set<string>([
   'kind',
   'values',
+  'minCents',
+  'labels',
 ]);
 
 type FixtureFilterTextParser = (value: string) => unknown;
