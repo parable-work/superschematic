@@ -6,6 +6,7 @@ import (
 	"context"
 
 	types "example.com/schemas/types/go/fixture-optimistic-db"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -54,6 +55,7 @@ type DatabaseInterface interface {
 // TxInterface defines repository access within a transaction.
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	GetShelfRepository() ShelfRepositoryInterface
 	GetStockRepository() StockRepositoryInterface
 }
@@ -99,6 +101,21 @@ func (db *NoOpDatabase) Close() {}
 func (tx *NoOpTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, nil
 }
+
+// Query returns no rows for no-op transactions.
+func (tx *NoOpTx) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+
+// noOpRows is an empty, already-exhausted result set. It embeds pgx.Rows so it
+// keeps satisfying the interface as pgx grows it; a caller that stops when Next
+// returns false never reaches the nil embedded value.
+type noOpRows struct{ pgx.Rows }
+
+func (noOpRows) Close()                        {}
+func (noOpRows) Err() error                    { return nil }
+func (noOpRows) Next() bool                    { return false }
+func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 
 func (db *NoOpDatabase) GetShelfRepository() ShelfRepositoryInterface {
 	return db.Shelf
