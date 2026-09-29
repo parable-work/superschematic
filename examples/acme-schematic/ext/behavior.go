@@ -15,8 +15,8 @@ const RatingBehavior = Name + ".Rating"
 
 // ratingDeclaration is the behavior's declaration: one JSON file beside
 // this package, which embeds it. The compiler checks every type that lists
-// the behavior against it; the engine that runs the behavior reads the same
-// file.
+// the behavior against it; the engine runs @acme/behaviors, which carries
+// the copy `acme-schematic behaviors` writes from this registration.
 //
 //go:embed rating.behavior.json
 var ratingDeclaration json.RawMessage

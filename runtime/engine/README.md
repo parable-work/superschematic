@@ -6,8 +6,10 @@ schema-file document, versions it per namespace, and keeps it, its
 instances and an event log in one SQLite file.
 
 Built: the storage layer and its migrations, the schema registry with its
-compatibility rule, instances, the event log and the access policy. Not
-built yet: the HTTP API, the event stream, the MCP tools and behaviors.
+compatibility rule, instances, the event log, the access policy, the
+HTTP API with the event stream (`@superschematic/engine/http`) and the
+behavior plug-in interface. Not built yet: the MCP tools, the HTTP route
+for behavior operations and the behaviors the engine packages ship.
 
 ```ts
 import { allowAll, openEngine } from '@superschematic/engine';
@@ -33,7 +35,9 @@ does not strip types from files under `node_modules`. It runs on Node.js
 `@superschematic/schema-runtime`, `@superschematic/schema-ir` and
 `superscalar` next to it in `node_modules`; until they are published, a
 consumer declares all three itself (D3), and this package's own build and
-tests get them from `typescript/scripts/link-local-deps.mjs`.
+tests get them from `typescript/scripts/link-local-deps.mjs`. The
+`./http` entry point also needs `hono` and `@superschematic/http-runtime`,
+its optional peer dependencies; the main entry point imports neither.
 
 ## Storage
 
@@ -50,14 +54,16 @@ Opening a file sets a busy timeout (`busyTimeoutMs`, default 5000),
 write-ahead logging and foreign keys. A write runs in a transaction that
 starts with `BEGIN IMMEDIATE`; a transaction inside another is a
 savepoint that rolls back alone. A transaction is synchronous: a function
-that returns a promise rolls it back.
+that returns a promise rolls it back. `afterCommit(work)` queues work for
+after the outermost commit, dropped if the transaction or savepoint that
+queued it rolls back; the event log announces its events this way.
 
 One process writes the file. SQLite queues writers from several
 processes on the busy timeout, but the engine keeps per-process state
-(the validator cache, and the behaviors' state to come) that nothing
+(the cache of each version's validator and behaviors) that nothing
 coordinates across processes.
 
-The engine's tables, as its two migrations leave them:
+The engine's tables, as its four migrations leave them:
 
 ```sql
 -- Every schema document by namespace, name and version. Version 0 is the
@@ -99,7 +105,7 @@ CREATE INDEX engine_instances_list ON engine_instances (namespace, schema, posit
 -- The append-only event log. Triggers refuse an UPDATE or DELETE.
 CREATE TABLE engine_events (
   cursor      INTEGER PRIMARY KEY AUTOINCREMENT,  -- the global cursor
-  kind        TEXT    NOT NULL CHECK (kind IN ('create', 'update', 'delete', 'publish')),
+  kind        TEXT    NOT NULL CHECK (kind IN ('create', 'update', 'delete', 'operation', 'publish')),
   namespace   TEXT    NOT NULL,
   schema      TEXT    NOT NULL,
   instance_id TEXT,                               -- null for a publish
@@ -115,6 +121,16 @@ CREATE UNIQUE INDEX engine_events_instance ON engine_events (namespace, schema, 
   WHERE instance_id IS NOT NULL;
 CREATE INDEX engine_events_namespace ON engine_events (namespace, cursor);
 CREATE INDEX engine_events_schema ON engine_events (namespace, schema, cursor);
+-- The publish events alone, which a namespace reads from its shared namespace.
+CREATE INDEX engine_events_publish ON engine_events (namespace, cursor) WHERE kind = 'publish';
+
+-- The key of each behavior whose storage the file holds: its columns on
+-- engine_instances and its tables are named bhv_<key>__<name>.
+CREATE TABLE engine_behaviors (
+  name       TEXT    PRIMARY KEY,
+  key        TEXT    NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+) STRICT;
 
 -- The migration ledger, one row per applied migration of each owner.
 CREATE TABLE engine_migrations (
@@ -129,8 +145,8 @@ CREATE TABLE engine_migrations (
 ### Migrations
 
 Migrations are forward-only and recorded per owner: the engine's are owned
-by `engine` (`engineMigrations`), and a behavior will own the columns and
-tables it adds under its own name. `migrate(storage, { owner, migrations })`
+by `engine` (`engineMigrations`), and a behavior's by its name (see
+"Behaviors"). `migrate(storage, { owner, migrations })`
 applies the versions the ledger lacks, numbered 1, 2, 3, ..., each in its
 own transaction with its ledger row. A file whose ledger is ahead of the
 build, or names a version differently, is refused. The tests run the
@@ -155,8 +171,8 @@ deployment's binary, the core's by default. The engine then requires:
   scalar, or an enum or type of the document, alone, as a list or as a
   list of lists. A union or a map is refused, since the runtime checks
   neither;
-- no behaviors. None has an implementation yet, so a type that declares
-  one is refused, naming it ("no implementation registered").
+- behaviors on the instance type that this engine has implementations
+  for, composed as the compiler's loader requires (see "Behaviors").
 
 A refused document throws `SchemaDocumentError` with an issue per problem,
 each at a JSON pointer.
@@ -189,6 +205,8 @@ types, enums and scalars its fields reach.
 | descriptions, comments, defaults, UI metadata | another type, or another list depth (`T`, `T[]`, `T[][]`) |
 | any change to a type, enum or scalar no field reaches | a scalar that accepts less: a primitive or JSON type change, a narrower bound, a new or changed pattern, new reserved words, a new custom validator |
 | | another instance type |
+| a behavior's config changed as its implementation allows | any other config change |
+| a behavior added or removed while the schema has no instances, or with its implementation's consent | a behavior added or removed while it has instances, otherwise |
 
 A refused version throws `IncompatibleChangeError`, whose `changes` name
 each change and whose message says to use a new schema name.
@@ -203,9 +221,10 @@ engine adds two checks the runtime does not make, which the
 compatibility rule relies on: the value is JSON (plain objects and
 arrays, strings, finite numbers, booleans, null; a member whose value is
 `undefined` is absent), and an object holds no key its type does not
-declare, at any depth. `validate` returns `{ path, rule, message }`
-issues, with paths such as `lines[2].sku`, and `validator` the cached
-validator itself.
+declare, at any depth. A field a behavior adds is the behavior's: an
+instance that sets one is refused with the rule `readOnly`. `validate`
+returns `{ path, rule, message }` issues, with paths such as
+`lines[2].sku`, and `validator` the cached validator itself.
 
 ## Instances
 
@@ -219,6 +238,7 @@ holds instances in the namespace that creates them.
 
 - `create` validates the instance against the schema's live version and
   refuses an id the namespace already has for the schema (`conflict`).
+  Each behavior initializes its state for it.
 - `get` returns the instance, or `undefined`.
 - `list` returns a page in creation order: `{ items, next }`, where `next`
   is an opaque cursor, null after the last page. A page holds 50 instances
@@ -229,8 +249,21 @@ holds instances in the namespace that creates them.
   member replaces the instance's member, a nested object merges, `null`
   removes the member, and a list or any other value replaces what was
   there. The result is validated against the live version; a patch that
-  changes nothing writes nothing.
-- `delete` removes the instance and returns whether there was one.
+  changes nothing writes nothing. The behaviors' guards may veto it.
+- `delete` removes the instance and returns whether there was one. The
+  behaviors' guards may veto it.
+- `update` and `delete` take `expectedSeq`, the sequence the caller last
+  read. Inside the write transaction the engine refuses the call
+  (`seq_mismatch`) unless the instance is still at it; an instance that
+  does not exist is still `not_found` for `update` and `false` for
+  `delete`. This is optimistic concurrency, the HTTP API's `If-Match`.
+- `invoke` calls a behavior operation on the instance (see "Behaviors").
+
+An instance's `data` holds its own fields as stored, then each field its
+behaviors add that has a value. The row stores only its own fields; the
+behaviors' are read from their storage. Its `seq` is the sequence of its
+last event, so every write that appends one moves it: a create, an update
+that changes something and a writing behavior operation.
 
 Every operation on a schema with no live version is `not_found`. A row
 records the schema version it was last written with; the compatibility
@@ -240,12 +273,17 @@ stored.
 ## The event log
 
 Each write appends one event in its own transaction: an instance's
-`create`, `update` and `delete`, and a schema's `publish` (a publish that
-mints nothing appends nothing). An event carries its namespace (for a
-publish, the namespace that holds the schema), schema, instance id,
-per-instance sequence, schema version, actor (the principal's subject),
-time and change: the instance for a create, the merge patch for an
-update, nothing for a delete and the schema document for a publish. The
+`create`, `update` and `delete`, a behavior `operation` that writes, and a
+schema's `publish` (a publish that mints nothing appends nothing). An
+event carries its namespace (for a publish, the namespace that holds the
+schema), schema, instance id, per-instance sequence, schema version,
+actor (the principal's subject), time and change: the instance for a
+create, its behaviors' fields included; for an update, the merge patch,
+with any change the behaviors' fields took merged in; for an operation,
+`{ behavior, operation, params, patch }`, where `patch` is the merge patch
+of the behaviors' fields; nothing for a delete; and the schema document
+for a publish. Applying each change in order to the create's instance
+gives the instance as a read returns it. The
 cursor orders the whole log; an instance's sequence runs 1, 2, 3, ...
 across its life, a re-create after a delete included. A delete never
 removes earlier events.
@@ -257,6 +295,20 @@ default and at most 500 scanned per page. Read on from `next`. Without a
 schema filter, events of schemas the principal may not read are skipped,
 so a page can hold fewer events than its limit while `more` is true.
 
+A namespace that looks names up in a shared namespace also reads the
+shared namespace's publish events, which change the schemas it reaches;
+they keep the shared namespace as their `namespace`. Its own instance
+events and the shared publishes are two indexed range reads merged by
+cursor.
+
+`engine.events.watch({ committed, closed })` registers a watcher and
+returns the function that removes it. After each commit, the engine
+calls `committed(cursor)` once for each event the commit appended, and it
+calls `closed()` once when it closes. The notice is in-process,
+which is complete because one process writes the file: every event passes
+through it. A watcher reads the log as its own principal from its own
+cursor; the notice tells it only that the log grew.
+
 There is no retention yet: the log grows until a later change adds a
 policy for it.
 
@@ -264,21 +316,21 @@ policy for it.
 
 Every entry point takes the principal it acts for and asks the access
 policy the deployment supplies (`policy`) before it reads or writes. The
-policy answers `{ principal, action, namespace, schema }`, where the
-action is `read` (a schema, its instances or its events), `write`
-(create, update, delete), `define` or `publish`; only `true` allows, and
-anything else is `forbidden`. It runs synchronously. There is no default
+policy answers `{ principal, action, namespace, schema, operation }`,
+where the action is `read` (a schema, its instances or its events),
+`write` (create, update, delete), `define` or `publish`; a behavior
+operation asks `write` when its declaration says it writes and `read`
+otherwise, and names itself in `operation`, absent for every other call.
+Only `true` allows, and anything else is `forbidden`. It runs synchronously. There is no default
 policy: `allowAll` is explicit, for tests and local use. The engine has
 no roles; a policy can hold the principal's `permissions` to whatever
 rule the deployment has, through the HTTP runtime's `PermissionMatcher`
 for example.
 
 `Principal` has the shape of the HTTP runtime's (`subject`,
-`permissions`, `claims`), so a principal its `Authenticator` returns is
-passed on as it is. The engine does not import that package: its entry
-point is TypeScript source, which the engine's compiled declarations
-would pull into every consumer's compile, and it brings Hono as a peer
-dependency.
+`permissions`, `claims`), so a principal its `Authenticator` returns can
+be passed on as it is. The main entry point does not import the HTTP
+runtime, which brings Hono; the `./http` entry point does.
 
 ## Errors
 
@@ -286,8 +338,200 @@ Every refusal is an `EngineError` with a `code` a server maps to a
 status: `invalid_schema` (`SchemaDocumentError`, with its issues),
 `incompatible_change` (`IncompatibleChangeError`, with its changes),
 `invalid_instance` (`InstanceValidationError`, with its issues),
-`name_taken`, `not_found`, `conflict`, `forbidden`, `unknown_namespace`
-and `invalid_argument`.
+`name_taken`, `not_found`, `conflict`, `forbidden`, `unknown_namespace`,
+`invalid_argument` (`OperationParamsError` for an operation's parameters,
+with its issues), `seq_mismatch`, `vetoed` (`BehaviorVetoError`: a
+behavior's guard refused the change) and `unavailable` (the live version
+composes a behavior this engine has no implementation for, or whose
+implementation refuses its config). A message names only what the call
+named: `name_taken` in the shared namespace does not say which namespace
+holds the name. "Statuses" under "HTTP" gives each code's status.
+
+A defect in a behavior's code is a `BehaviorError`, not an `EngineError`,
+so a server answers it as an internal error: a result its `resultSchema`
+refuses, a field value that is not JSON, SQL outside its own storage, a
+write from a read, a promise from a synchronous function.
+
+## Behaviors
+
+A behavior adds fields, operations, checks and storage to a schema's
+instance type (D16 in `docs/DECISIONS.md`). The compiler declares it in a
+JSON file (section 3.16 of `docs/extension-model.md`); the engine runs an
+implementation of it that carries the same file. The engine names no
+behavior: a deployment registers the implementations it runs, when the
+engine opens or later.
+
+```ts
+import { defineBehavior, openEngine } from '@superschematic/engine';
+import declaration from './counter.behavior.json' with { type: 'json' };
+
+// counter.behavior.json declares test.Counter: a `limit` config, the field
+// `count` and the writing operation `increment`.
+export const counter = defineBehavior<{ limit?: number }>({
+  declaration,
+  migrations: [{ version: 1, name: 'count', columns: { count: { type: 'integer', notNull: true, default: 0 } } }],
+  guard(view, request) {
+    if (request.kind === 'operation' && request.operation === 'increment' && view.config.limit !== undefined
+        && Number(view.columns.get().count) >= view.config.limit) {
+      return `the count is at its limit, ${view.config.limit}`;
+    }
+  },
+  operations: {
+    increment(context) {
+      const count = Number(context.columns.get().count) + 1;
+      context.columns.set({ count });
+      return { count };
+    },
+  },
+  fields: { count: (view) => view.columns.get().count },
+});
+
+const engine = openEngine({ path: 'shop.db', policy, metaSchema, behaviors: [counter] });
+engine.behaviors.register(another);                                   // later
+engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count: 1 }
+```
+
+`metaSchema` is the `json-schema` output of the deployment's binary, which
+lists the behaviors it declares; the core's lists none, so its loader
+refuses every behavior.
+
+### The implementation
+
+`BehaviorImplementation<Config>`; `defineBehavior` types its config. Every
+function is synchronous (D16): one that returns a promise is a
+`BehaviorError`, which rolls the write back.
+
+| Member | What it is |
+| --- | --- |
+| `declaration` | the declaration the compiler registers, as its JSON file holds it |
+| `parseConfig(config, target)` | checks a config its `configSchema` accepted and returns what the other functions get as `config`; throws `BehaviorConfigError` to refuse it. Absent, `config` is the JSON config, `{}` when the type gives none |
+| `configChange(before, after)` | whether a new version may change the config, add the behavior (`before` undefined) or remove it (`after` undefined) on a schema with instances: a reason refuses. Absent, only an identical config, and no adding or removing while there are instances |
+| `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table and an `up(sql)` for its own tables |
+| `initialize(context)` | sets up its state for a new instance |
+| `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes |
+| `operations` | a handler per declared operation: `(context, params) => result` |
+| `fields` | a reader per declared field: `(view) => value` |
+| `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction |
+
+Registration (`openEngine({ behaviors })` or `engine.behaviors.register`)
+refuses, naming every problem, an implementation whose `operations` or
+`fields` are not exactly the ones its declaration names; a declaration of
+the wrong shape, with an operation named `create`, `get`, `list`,
+`update` or `delete`, or with a schema that does not compile; and
+malformed migrations or columns. The engine adds two rules to the
+compiler's: a name is `<extension>.<Name>` with an extension name of a
+letter, then letters, digits, `_` and `-` (or a core `<Name>`), since the
+migration ledger is keyed by it; and an operation's `paramsSchema` sets
+`additionalProperties: false`, so the handler and every guard read the
+same declared parameters and no alias reaches one and not the other. A
+name registers once.
+
+### Contexts
+
+A function reaches only what its behavior may touch. A view (a guard's,
+a field reader's) has:
+
+- `behavior`, `config`, `namespace`, `schema`, `version`, `id`;
+- `principal`, and `now`, the clock's time, read once for the whole call;
+- `data`: the instance's own fields, deep-frozen, without any behavior's;
+- `columns.get()`: its own columns on the instance, by its own names;
+- `sql`: `get` and `all` on its own tables, reads only, with
+  `sql.table(name)` for the SQL name of one of them.
+
+A context (initialize, afterChange, an operation) adds `columns.set()`,
+`sql.run()` and `call(behavior, operation, params)`. In a read-only
+operation `set` and `run` refuse and `call` reaches only read-only
+operations; after a delete, `columns.get()` returns what the instance
+had and `set` and `call` refuse. There is no handle on the instances
+table, the event log, another behavior's storage or the connection: a
+status one behavior owns changes at another's request only through its
+operations, whose guards run.
+
+### Storage
+
+When a schema that composes a behavior is first published, the engine
+records a key for it in `engine_behaviors`: the name lowercased, each run
+of other characters one `_` (`acme.Rating` is `acme_rating`), with `_2`,
+`_3`, ... when that key is taken. Everything the behavior owns is named
+`bhv_<key>__<name>`: its columns on `engine_instances` and its tables, so
+two behaviors never collide. Its migrations run through the ledger under
+its name, in the publish's transaction: each adds its columns, then runs
+`up(sql)`, after which every object `sqlite_master` gained must be a
+table or index of its own, on a table of its own. A column is `integer`,
+`real`, `text`, `blob` or `any`, with an optional default; a `NOT NULL`
+one needs a default, which every instance that exists takes. When an
+implementation registers and the file already holds its storage, its new
+migrations run then; a file whose ledger is ahead of the implementation
+is refused.
+
+A behavior's SQL runs one statement at a time. Before it reaches SQLite
+the engine refuses a statement that names, bare, quoted or as a string
+literal, anything starting with `engine_`, `sqlite_`, `pragma_` or `bhv_`
+other than the behavior's own `bhv_<key>__` names, and one that calls
+`load_extension`. A read runs `SELECT`, `VALUES` and `WITH ... SELECT`; a
+write adds `INSERT`, `UPDATE`, `DELETE` and `REPLACE`; a migration adds
+`CREATE TABLE`, `CREATE [UNIQUE] INDEX`, `CREATE VIRTUAL TABLE`, `ALTER
+TABLE`, `DROP TABLE` and `DROP INDEX`. `PRAGMA`, `ATTACH`, transaction
+control, triggers, views and temporary objects are refused. Pass data as
+parameters.
+
+### Composition
+
+`define` and `publish` check each type's behaviors as the compiler's
+loader does, with its wording, at `/types/<Type>/behaviors/<i>`: a
+behavior listed twice, a config its `configSchema` (checked with ajv) or
+`parseConfig` refuses, a requirement the type does not list, a conflict
+it does, a field that collides with one of the type's own or another
+behavior's, and two behaviors that add an operation of the same name.
+They also refuse a behavior with no implementation registered, one on a
+type other than the instance type (only it has instances), and a
+behavior field with the JSON key, not only the name, of one of the
+type's own fields. A live version whose behavior has no implementation
+in this engine, as after a restart without it, makes every call on the
+schema `unavailable` until one registers.
+
+### Lifecycle
+
+| Call | Order, in one transaction for a write |
+| --- | --- |
+| `create` | validate (a behavior field is `readOnly`) -> insert -> each `initialize` -> each `afterChange` -> event |
+| `get`, `list` | each field reader |
+| `update` | refuse a behavior field (`readOnly`) -> check `expectedSeq` -> merge and validate -> nothing more if nothing changed -> every guard -> write -> each `afterChange` -> event |
+| `delete` | check `expectedSeq` -> every guard -> the row goes -> each `afterChange` -> event |
+| `invoke` | policy -> parameters against `paramsSchema` -> every guard -> the handler -> its result against `resultSchema` -> for a writing operation, each `afterChange`, the next `seq` and the event |
+
+Functions of several behaviors run in the type's list order, and the
+first veto wins: `BehaviorVetoError` (`vetoed`). `call(behavior,
+operation, params)` checks the parameters and runs every guard and the
+handler in a savepoint, which rolls back alone if the caller catches its
+failure; it does not run `afterChange` or append an event of its own, and
+calls nest at most 16 deep. `afterChange` sees the caller's change only.
+Anything that throws out of a call rolls the whole call back.
+
+### Instances and events
+
+A behavior field sits in an instance's `data` beside the type's own
+fields, after them, in the type's behavior order and each behavior's
+field order. A reader's `undefined` or `null` leaves the field out; any
+other value must be JSON. A field is read-only to `create` and `update`
+(`readOnly`), and `schemas.validate` reports one the same way.
+`schemas.behaviors(principal, name)` lists what a version composes, with
+each config and declaration.
+
+A writing operation appends an `operation` event, `{ behavior,
+operation, params, patch }`, with the merge patch of the behaviors'
+fields; a read-only one appends none. A create's event carries the
+behaviors' fields, and an update's merges in any change they took, so
+the log replays to the instance a read returns.
+
+An operation event is a change to the instance a read returns, so a
+writing operation takes the instance's next sequence and moves its
+`seq`, and with it the HTTP API's `ETag`, as an update does. It does so
+even when its `patch` is empty: the engine cannot see what the operation
+changed in its behavior's own tables. An `update` or `delete` that
+expects the sequence from before the operation is refused
+(`seq_mismatch`) before any guard is asked. `invoke` takes no
+`expectedSeq`.
 
 ## Namespaces
 
@@ -301,10 +545,162 @@ cannot define a name the shared namespace holds, and the shared namespace
 cannot define a name another namespace holds, so what a namespace reaches
 never changes under it.
 
+## HTTP
+
+`@superschematic/engine/http` serves an engine over HTTP (D16).
+`engineApp(engine, options)` returns a Hono app with a fixed set of routes
+that carry the namespace and the schema name as path parameters and
+resolve them per request, so publishing a version mounts nothing. Every
+route goes through `@superschematic/http-runtime` (D15): the request id,
+the rate limit, the timeout, the body limit, the authentication gate, the
+`{data, meta: {requestId}}` envelope and RFC 9457 problem documents.
+
+```ts
+import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
+import { openEngine } from '@superschematic/engine';
+import { engineApp } from '@superschematic/engine/http';
+
+const engine = openEngine({ path: 'shop.db', policy });
+const app = new Hono();
+app.route('/api', engineApp(engine, {
+  authenticate: async ctx => callerFor(ctx.bearerToken),   // the deployment's Authenticator
+  rateLimitPerMinute: 600,
+  timeoutSeconds: 10,
+}));
+serve({ fetch: app.fetch, port: 8080 });
+```
+
+The options are the HTTP runtime's router options (`authenticate`,
+`permissionMatcher`, `onError`, `bodyLimitBytes`, `rateLimit`), with
+`rateLimitPerMinute` and `timeoutSeconds` for every route and `stream:
+{ pageSize, heartbeatMs }`. The deployment's `onError` sees what the
+engine does not raise.
+
+### Routes
+
+| Method | Path | Engine call | Success |
+| --- | --- | --- | --- |
+| GET | `/namespaces/{namespace}/schemas` | `schemas.list` | 200, the names the namespace reaches |
+| POST | `/namespaces/{namespace}/schemas` | `schemas.define`, body: the document | 200, the draft |
+| GET | `/namespaces/{namespace}/schemas/{name}` | `schemas.live` | 200, the live version |
+| GET | `/namespaces/{namespace}/schemas/{name}/draft` | `schemas.draft` | 200, the draft |
+| GET | `/namespaces/{namespace}/schemas/{name}/versions/{version}` | `schemas.version` | 200, that version |
+| POST | `/namespaces/{namespace}/schemas/{name}/publish` | `schemas.publish` | 200, `{namespace, name, version, published}` |
+| GET | `/namespaces/{namespace}/schemas/{name}/instances?limit=&cursor=` | `instances.list` | 200, `{items, next}` |
+| POST | `/namespaces/{namespace}/schemas/{name}/instances` | `instances.create`, body `{"id"?, "data"}` | 201, the instance, `ETag`, `Location` |
+| GET | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.get` | 200, the instance, `ETag` |
+| PATCH | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.update`, body: a merge patch; `If-Match` | 200, the instance, `ETag` |
+| DELETE | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.delete`; `If-Match` | 200, `null` |
+| GET | `/namespaces/{namespace}/events?after=&limit=&schema=&instanceId=` | `events.read` | 200, `{events, next, more}`; with `Accept: text/event-stream`, the stream |
+
+A schema version is the stored record without its canonical text, which
+`hash` identifies. An instance is the stored record (`namespace`,
+`schema`, `id`, `schemaNamespace`, `version`, `seq`, `data`, and who
+created and last updated it, and when); its `data` carries its
+behaviors' fields, which a create or an update may not set (422,
+`readOnly`). A request body is `application/json`, and an update's
+`application/merge-patch+json` (RFC 7386); another media type is 415,
+with `Accept-Patch` on PATCH. Behavior operations have no route yet:
+`instances.invoke` is reached from code only.
+
+### Statuses
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 400 | `invalid_argument` | a page size, cursor, instance id, schema name or version the engine refuses; an operation's parameters its `paramsSchema` refuses (`OperationParamsError`), `details.issues` |
+| 400 | `bad_request` | a parameter or body the runtime cannot decode, a create body that is not `{id?, data}`, a path that is not valid percent-encoding |
+| 401 | `unauthorized` | the `Authenticator` returned no caller, or one without a subject |
+| 403 | `forbidden` | the access policy refused |
+| 404 | `not_found` | no such version, draft or instance in the namespace, or no such route |
+| 404 | `unknown_namespace` | the namespace is not configured |
+| 409 | `conflict` | an instance with the id exists |
+| 409 | `name_taken` | the name is defined on the other side of the shared lookup |
+| 409 | `incompatible_change` | the version breaks the compatibility rule; `details.changes` |
+| 409 | `vetoed` | a behavior's guard refused the update or delete; `details` is `{behavior, action, reason}` |
+| 412 | `seq_mismatch` | `If-Match` names a sequence the instance is no longer at |
+| 413 | `payload_too_large` | the body exceeds `bodyLimitBytes` |
+| 415 | `unsupported_media_type` | the body is not of the route's media type |
+| 422 | `invalid_schema` | the document is refused; `details.issues` |
+| 422 | `invalid_instance` | the instance, or an update's result, is refused; `details.issues` |
+| 429 | `too_many_requests` | the rate limit; `Retry-After` |
+| 500 | `internal_error` | anything else the deployment's `onError` does not map, a `BehaviorError` included; the failure stays off the wire |
+| 503 | `unavailable` | the schema's live version composes a behavior this engine has no implementation for, or whose implementation refuses its config |
+| 504 | `gateway_timeout` | the timeout elapsed |
+
+`engineProblem` and `ENGINE_ERROR_STATUS` hold the engine's rows. `type`
+is `about:blank`, as the HTTP runtime writes it for every problem; `code`
+names the problem. A detail names only what the request named, so an
+instance id that exists only in another namespace answers as one that
+exists nowhere. The namespaces a deployment configures are not secret: an
+unknown namespace is 404, and a configured one the policy refuses is 403.
+
+### Authentication and access
+
+The runtime's gate requires a caller on every route: the deployment's
+`Authenticator` returns a principal, or none (401). The engine acts as
+that principal, which already has the engine's `Principal` shape, and
+asks its access policy (403). The routes name no permissions, so
+`permissionMatcher` matters only where the policy calls it.
+
+### Concurrency
+
+An instance's `seq` is its entity tag (`ETag: "3"`). PATCH and DELETE pass
+the sequence `If-Match` names to `update` and `delete` as `expectedSeq`,
+which the engine checks inside the write transaction, so a lost update
+answers 412 and writes nothing. `*` asks only that the instance exist; a
+weak tag never matches. An instance that does not exist is 404 whatever
+`If-Match` says: RFC 9110 evaluates a precondition only where the request
+would otherwise succeed. A writing behavior operation moves `seq` too
+("Instances and events" under "Behaviors"), so a tag read before it no
+longer matches.
+
+### The event stream
+
+`GET /namespaces/{namespace}/events` with `Accept: text/event-stream`
+answers server-sent events:
+
+```
+: open
+
+id: 41
+data: {"cursor":41,"kind":"create","namespace":"default","schema":"Order","instanceId":"o1","seq":1,"version":1,"actor":"alice","at":1790000000000,"change":{"title":"Desk"}}
+
+: keepalive
+```
+
+- Each event is one message with no `event:` field, so
+  `EventSource.onmessage` receives every one: `id:` is its cursor and
+  `data:` the event as `events.read` returns it, of every kind, an
+  `operation` included.
+- The stream starts after `Last-Event-ID`, which a reconnecting
+  `EventSource` sends, else after `after`, else at the start of the log.
+  `schema` and `instanceId` filter as on the JSON route; `limit` applies
+  to the JSON route only.
+- It replays in pages of `stream.pageSize` (100) and reads the next page
+  only when the server has sent the previous one, so a slow client holds
+  one page and replay never loads the backlog. Caught up, it waits for the
+  engine's notice of a commit (`events.watch`) and reads on from its
+  cursor.
+- While it waits it sends a comment every `stream.heartbeatMs` (5000),
+  under the 10 seconds after which `Bun.serve` closes a quiet connection.
+- A namespace's stream, like its JSON page, carries the shared
+  namespace's publish events, which change the schemas it reaches.
+- It reads as its principal: `read` on each event's schema in the
+  namespace, and events of schemas it may not read are skipped (with
+  `schema`, `read` on that schema, or 403). The first page is read before
+  the response, so a refusal is a problem document. A later refusal, a
+  policy change say, ends the stream; the client reconnects and gets the
+  problem.
+- It ends when the client disconnects, which removes its watcher, and
+  when the engine closes. `timeoutSeconds` covers the first page, not the
+  stream.
+
 ## Development
 
 ```
 cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build
+cd runtime/http/typescript && bun install --frozen-lockfile && bun run build
 cd runtime/engine/typescript
 bun install --frozen-lockfile
 bun run typecheck
@@ -314,4 +710,6 @@ bun run test        # build, then test:node (node --test) and test:bun (bun test
 The tests are TypeScript that Node.js runs with type stripping and Bun
 runs as is; they import the built package from `dist/` and open real
 SQLite files in temporary directories. On Bun most cases run against both
-adapters.
+adapters. `test/http.test.ts` drives the routes through Hono's
+`app.request`; `test/stream.test.ts` reads the event stream from a
+listening server, `@hono/node-server` on Node.js and `Bun.serve` on Bun.

@@ -13,8 +13,8 @@ module owns how those specs are applied to one request. ./hono.ts binds it to
 Hono; nothing in this file imports a framework.
 */
 
-export { ErrorCode, HttpProblem, problemBody, problemResponse, statusText } from './problem';
-export type { HttpProblemOptions, ProblemBody } from './problem';
+export { ErrorCode, HttpProblem, problemBody, problemResponse, statusText } from './problem.js';
+export type { HttpProblemOptions, ProblemBody } from './problem.js';
 export {
   badRequest,
   conflict,
@@ -28,13 +28,13 @@ export {
   tooManyRequests,
   unauthorized,
   unprocessableEntity,
-} from './problem';
-export { MemoryRateLimitStore, clientIpKey, clientIpOf } from './ratelimit';
-export type { RateLimitDecision, RateLimitOptions, RateLimitStore } from './ratelimit';
-export { OperationResult, envelope, envelopeResponse, requestIdOf } from './envelope';
-export type { Envelope, EnvelopeMeta } from './envelope';
-export { decodeJsonParam, decodeListOfLists, decodeMap, decodeParam, decodeParams } from './params';
-export type { ParamKind, ParamSpec, ParamLocation, ParamSource, ScalarConstraints } from './params';
-export { authorize, covers, hasAnyPermission } from './auth';
-export type { Authenticator, PermissionMatcher, Principal } from './auth';
-export type { OperationAuth, OperationInput, OperationSpec, RequestContext } from './operation';
+} from './problem.js';
+export { MemoryRateLimitStore, clientIpKey, clientIpOf } from './ratelimit.js';
+export type { RateLimitDecision, RateLimitOptions, RateLimitStore } from './ratelimit.js';
+export { OperationResult, envelope, envelopeResponse, requestIdOf } from './envelope.js';
+export type { Envelope, EnvelopeMeta } from './envelope.js';
+export { decodeJsonParam, decodeListOfLists, decodeMap, decodeParam, decodeParams } from './params.js';
+export type { ParamKind, ParamSpec, ParamLocation, ParamSource, ScalarConstraints } from './params.js';
+export { authorize, covers, hasAnyPermission } from './auth.js';
+export type { Authenticator, PermissionMatcher, Principal } from './auth.js';
+export type { OperationAuth, OperationInput, OperationSpec, RequestContext } from './operation.js';

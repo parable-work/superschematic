@@ -16,8 +16,8 @@ const encryptedArgumentService = "encrypted-argument-api"
 // TestEncryptedArgumentSDKBuildsAndRuns runs encryptedArgumentSDKTest in
 // the generated SDK: storeCard, which takes an EncryptedField<string>
 // argument, takes EncryptedRequestOptions and sends its body as an RSA-OAEP
-// envelope the private key opens, with the card number nowhere in the
-// clear; renameCard sends plain JSON.
+// envelope the private key opens to that body, with the card number
+// nowhere in the clear; renameCard sends plain JSON.
 func TestEncryptedArgumentSDKBuildsAndRuns(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join("..", "apigen", "testdata", "services", encryptedArgumentService))
 	if err != nil {
@@ -135,10 +135,10 @@ func TestStoreCardSendsAnEncryptedEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the private key does not open the payload: %v", err)
 	}
-	for _, want := range []string{` + "`" + `"number":"4242424242424242"` + "`" + `, ` + "`" + `"label":"work"` + "`" + `} {
-		if !strings.Contains(string(plaintext), want) {
-			t.Errorf("plaintext %s lacks %s", plaintext, want)
-		}
+	// The plaintext is the request body itself, which the server decodes
+	// as it would a plain JSON body.
+	if string(plaintext) != ` + "`" + `{"number":"4242424242424242","label":"work"}` + "`" + ` {
+		t.Errorf("plaintext = %s, want the body {number, label}", plaintext)
 	}
 }
 

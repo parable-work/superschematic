@@ -98,6 +98,9 @@ type ConfigField struct {
 	// Secret indicates the field carries @secret in the IR. Deploy values
 	// must bind such fields with a secretRef, never a literal.
 	Secret bool
+	// OptionalBool marks an optional boolean without a default, which the
+	// types module declares as *bool; the loader leaves it nil when unset.
+	OptionalBool bool
 }
 
 // findEnvVarsTypeIR finds the type with EnvVars == true in the IR schema.
@@ -230,6 +233,8 @@ func extractConfigFieldIR(field *ir.FieldDef, schema *ir.Schema, enumMap map[str
 		IsScalar:    isScalar,
 		Description: codegen.DocText(field.Description, field.Comment),
 		Secret:      field.Secret,
+		OptionalBool: codegen.GoOptionalBoolIsPointer(
+			typeName, field.Required, field.TypeRef.IsArray, field.TypeRef.IsMap, field.Default),
 	}
 
 	if isEnum {

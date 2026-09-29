@@ -82,11 +82,13 @@ the `PermissionMatcher`.
 
 ## Using it
 
-The package ships TypeScript sources, like the generated API packages that
-import it, so the consuming service needs a TypeScript-aware toolchain (Bun,
-a bundler, or a loader such as tsx). Its peer dependencies are `hono` and,
-optionally, `@hono/node-server`. It imports `superscalar`, which the
-consuming service already declares for the generated types packages.
+The package ships compiled ESM with declarations (`dist/`), so it runs
+on Node.js as well as on Bun. The generated API packages that import it
+ship TypeScript sources, so a service that serves one still needs a
+TypeScript-aware toolchain for them (Bun, a bundler, or a loader such as
+tsx). Its peer dependencies are `hono` and, optionally,
+`@hono/node-server`. It imports `superscalar`, which the consuming service
+already declares for the generated types packages.
 
 ```ts
 import { Hono } from 'hono';
@@ -106,11 +108,13 @@ app.onError(errorHandler());
 ```
 cd runtime/http/typescript
 bun install --frozen-lockfile
+bun run build    # links superscalar, then tsc writes dist/
 bun run test     # links superscalar, runs tsc --noEmit, then bun test src
 ```
 
-`bun run test` links `third_party/superscalar` (built by
+Both scripts link `third_party/superscalar` (built by
 `scripts/superscalar-dep.sh`) into `node_modules`, because superscalar is
-not published yet. The generator's own tests (`internal/generator/tsrestgen`)
-type-check a generated package against this runtime and drive its router
-over HTTP.
+not published yet. The tests run the sources under Bun. A package that
+resolves this one by name gets `dist/`, so build before linking it: the
+generator's own tests (`internal/generator/tsrestgen`) build it, then
+type-check a generated package against it and drive its router over HTTP.

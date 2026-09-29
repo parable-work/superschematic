@@ -18,8 +18,8 @@ set. Extensions that implement `cli.CommandProvider` add subcommands at
 resolves, so the same command tree serves a core-only binary and one that
 carries extensions.
 
-The core binary has four commands: `build`, `build-all`, `json-schema`
-and `format`.
+The core binary has five commands: `build`, `build-all`, `json-schema`,
+`format` and `behaviors`.
 
 ## `build <service-dir>`
 
@@ -75,8 +75,11 @@ A General schema whose class carries `@envVars` gets the class's
 `values-schema.json` in `api/<name>`, and an environment loader next to it
 in the language `outputs.types` picks: Go when `go` is on, Rust when only
 `rust` is. The Go loader imports the Go types, so with neither on the build
-writes no loader, rather than a Go module that cannot compile, and logs
-`- env-config: values-schema.json only, no loader; enable outputs.types.go for the Go loader, which imports the Go types, or outputs.types.rust for the Rust one`.
+writes no loader there, rather than a Go module that cannot compile. When
+`typescript` is on, the TypeScript types package gets the TypeScript
+loader, `config.ts`, exported as `<types package>/config`, whichever
+standalone loader the build writes. With none of the three the build logs
+`- env-config: values-schema.json only, no loader; enable outputs.types.go for the Go loader, which imports the Go types, outputs.types.rust for the Rust one, or outputs.types.typescript for the TypeScript one`.
 
 `--with-deps` also builds every service the target transitively depends
 on (declared `dependencies` plus `authDb`), dependencies first. The
@@ -243,6 +246,37 @@ and YAML with its extension data. The TypeScript writer cannot render an
 extension's decorators: converting such a file to `ts` fails and names the
 extension slot instead of dropping it. It writes a type's behaviors as
 `@behavior` decorators.
+
+## `behaviors --out <dir>`
+
+Write the declaration of every behavior the binary registers into the npm
+package that implements it for `@superschematic/engine`: one
+`<name>.behavior.json` per behavior, the same declaration the Go package
+embeds and registers. The engine implementation imports that copy, so the
+engine and the compiler read one declaration. Other `*.behavior.json`
+files in the directory are removed.
+
+A copy is canonical rather than the source bytes: the declaration's keys
+in `BehaviorDeclaration`'s order, each JSON Schema's object keys sorted
+with number literals as written, two-space indents and a final newline.
+It changes only when the declaration does.
+
+```
+acme-schematic behaviors --extension acme --out packages/behaviors/declarations
+acme-schematic behaviors --extension acme --out packages/behaviors/declarations --check
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--out` | (required) | the directory the copies go in |
+| `--check` | false | write nothing; fail, naming each file, when a copy differs, is missing, or is no registered behavior's |
+| `--extension` | every behavior | only the behaviors this extension (its `Name()`) registered; fails when it registers none |
+| `--naming` | built-in names | naming config file; this command has no service directory to discover one from |
+
+It is a command of the binary, not a tool in the core module, because an
+extension's declarations are registered only in its own binary: acme's
+copy comes from `acme-schematic`, and its smoke runs `--check`. The core
+binary registers no behavior yet and writes none.
 
 ## Extension commands
 

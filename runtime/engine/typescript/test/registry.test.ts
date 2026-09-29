@@ -221,15 +221,18 @@ for (const driver of drivers) {
       assert.deepEqual(engine.schemas.list(alice), []);
     });
 
-    test('a behavior the loader accepts is refused: no implementation is registered', () => {
+    test('a behavior the loader accepts is refused without an implementation, and on a nested type', () => {
       const engine = open({ metaSchema: behaviorMetaSchema });
       const document = clone(orderDocument()) as { types: { Order: Record<string, unknown>; OrderLine: Record<string, unknown> } };
       document.types.Order.behaviors = [{ name: 'acme.Audited' }];
       document.types.OrderLine.behaviors = [{ name: 'acme.Stock', config: { aisles: 3 } }];
       const error = thrown(() => engine.schemas.define(alice, document), SchemaDocumentError);
       assert.deepEqual(error.issues, [
+        {
+          path: '/types/OrderLine/behaviors/0',
+          message: 'type OrderLine: behavior acme.Stock composes on the instance type, Order; OrderLine is a nested type, which has no instances',
+        },
         { path: '/types/Order/behaviors/0', message: 'behavior acme.Audited on type Order: no implementation registered' },
-        { path: '/types/OrderLine/behaviors/0', message: 'behavior acme.Stock on type OrderLine: no implementation registered' },
       ]);
       assert.deepEqual(engine.schemas.list(alice), []);
       // Without the behavior, the deployment's meta-schema loads the document.

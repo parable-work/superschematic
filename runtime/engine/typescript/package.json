@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/engine",
   "version": "0.0.0",
-  "description": "An engine that runs a schema with no generated code: it takes schema-file documents as data, versions them, and stores their instances in one SQLite file. Runs on Node.js 24 and Bun. Needs @superschematic/schema-runtime, @superschematic/schema-ir and superscalar next to it in node_modules; see scripts/link-local-deps.mjs.",
+  "description": "An engine that runs a schema with no generated code: it takes schema-file documents as data, versions them, and stores their instances in one SQLite file. Runs on Node.js 24 and Bun. Needs @superschematic/schema-runtime, @superschematic/schema-ir and superscalar next to it in node_modules; see scripts/link-local-deps.mjs. The ./http subpath serves an engine over HTTP on @superschematic/http-runtime and Hono, its optional peer dependencies.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./http": {
+      "types": "./dist/http/index.d.ts",
+      "import": "./dist/http/index.js"
     }
   },
   "files": [
@@ -25,8 +29,25 @@
     "test:node": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && node --test 'test/*.test.ts'",
     "test:bun": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && bun test ./test"
   },
+  "dependencies": {
+    "ajv": "8.20.0"
+  },
+  "peerDependencies": {
+    "@superschematic/http-runtime": "*",
+    "hono": "4.13.8"
+  },
+  "peerDependenciesMeta": {
+    "@superschematic/http-runtime": {
+      "optional": true
+    },
+    "hono": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@hono/node-server": "2.1.1",
     "@types/node": "22.19.9",
+    "hono": "4.13.8",
     "typescript": "5.9.3"
   },
   "license": "Apache-2.0"

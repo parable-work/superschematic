@@ -79,7 +79,9 @@ type Options struct {
 // Generate produces Rust REST API metadata from an IR schema. Handlers take
 // the request body and return the response as serde_json::Value, so a body
 // argument or response that is an array of arrays (T[][]) passes through as
-// nested JSON arrays; the implementation decodes it.
+// nested JSON arrays; the implementation decodes it. The router has no step
+// that decrypts a request body, so an encrypted operation that is not
+// @manualRouteRegistration is refused.
 func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	generated, err := rustapigen.Generate(schema, rustapigen.Options{
 		SchemaName:     opts.SchemaName,
@@ -107,6 +109,14 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 
 	namespaceSet := make(map[string]struct{})
 	for _, endpoint := range generated.Endpoints {
+		// The Go router decrypts an encrypted operation's body with the
+		// configured PayloadDecryptor before it parses it. The Rust router
+		// has no such step and would hand the envelope to the implementation
+		// as the body. An operation declared @manualRouteRegistration is the
+		// service's to decrypt: its implementation receives the envelope.
+		if endpoint.Encrypted && !endpoint.ManualRouteRegistration {
+			return nil, fmt.Errorf("rustrestgen: operation %s.%s is encrypted (an Encrypted operation set, @encrypted, or an EncryptedField<T> result or argument); the Rust router has no decryption step, declare it @manualRouteRegistration and decrypt the payload in the service's implementation", endpoint.Namespace, endpoint.Name)
+		}
 		ns := endpoint.Namespace
 		if ns == "" {
 			ns = "root"

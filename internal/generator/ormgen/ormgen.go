@@ -194,6 +194,7 @@ type Field struct {
 	JSONUnionDecoder   string // generated per-repository decoder for a closed-union JSON field
 	IsNullableEnum     bool   // optional enum: typegen emits *Enum
 	IsNullableScalar   bool   // optional non-integer (or DistinctNull) scalar: typegen emits *Scalar
+	IsNullableBool     bool   // optional boolean without a default: typegen emits *bool
 	IsUUIDScalar       bool   // non-array UUID-like scalar: values coerce via .ToUUID()
 	IsDateTimeScalar   bool   // non-array datetime-like scalar: values coerce via time.Time()
 	IsUUIDLike         bool
@@ -949,6 +950,7 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 	isMap := fieldDef.TypeRef.IsMap
 	isNullableEnum := !isRequired && !isArray && !isMap && isEnum
 	isNullableScalar := !isRequired && !isArray && !isMap && isScalar && (!traits.IsIntegerLike || fieldDef.DistinctNull)
+	isNullableBool := codegen.GoOptionalBoolIsPointer(irType, isRequired, isArray, isMap, fieldDef.Default)
 	preservesExplicitJSONNull := isScalar && irType == "Generic.JSON" && !isArray && !isMap
 
 	field := Field{
@@ -973,6 +975,7 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsScalarType:              isScalar || isEnum,
 		IsNullableEnum:            isNullableEnum,
 		IsNullableScalar:          isNullableScalar,
+		IsNullableBool:            isNullableBool,
 		IsUUIDScalar:              isScalar && !isArray && traits.IsUUIDLike,
 		IsDateTimeScalar:          isScalar && !isArray && traits.IsDateTimeLike,
 		IsUUIDLike:                traits.IsUUIDLike,
@@ -991,8 +994,8 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 	nullableComplex := !field.IsRequired && !field.IsArray && !field.IsMap && !field.IsUnion &&
 		strings.HasPrefix(field.GoType, "types.") && !field.IsScalarType
 	field.OptionalNilCheck = nilCheckedJSONScalar || nullableComplex || field.IsUnion || field.IsMap ||
-		field.IsNullableEnum || field.IsNullableScalar
-	field.DerefValue = nullableComplex || field.IsNullableEnum || field.IsNullableScalar
+		field.IsNullableEnum || field.IsNullableScalar || field.IsNullableBool
+	field.DerefValue = nullableComplex || field.IsNullableEnum || field.IsNullableScalar || field.IsNullableBool
 
 	return field
 }

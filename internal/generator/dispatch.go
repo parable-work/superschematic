@@ -285,8 +285,27 @@ func (r run) generateTSTypes() error {
 	}); err != nil {
 		return fmt.Errorf("generator: typescript types for %s: %w", r.Config.Name, err)
 	}
-
 	r.Done("types-typescript", dir)
+
+	// An @envVars class also gets its TypeScript env loader, config.ts, in
+	// the same package; tsgen exports it as "./config".
+	if !output.HasEnvConfig {
+		return nil
+	}
+	if err := r.measure("output.types-typescript.env-config", func() error {
+		envOutput, err := envgen.GenerateWithOptions(r.Schema, envgen.Options{
+			SchemaName:   r.Config.Name,
+			Dependencies: deps,
+			Naming:       r.Options.Naming,
+		})
+		if err != nil {
+			return err
+		}
+		return envgen.WriteTypeScriptConfig(envOutput, dir)
+	}); err != nil {
+		return fmt.Errorf("generator: typescript env config for %s: %w", r.Config.Name, err)
+	}
+	r.Done("env-config-typescript", dir)
 	return nil
 }
 
@@ -467,9 +486,9 @@ func (r run) generateAPI() error {
 }
 
 // generateTypeScriptAPI emits the TypeScript (Hono) REST API package from the
-// shared apigen output. There is no TypeScript env loader: an @envVars class
-// contributes its values-schema.json beside the package, and the service
-// reads its config through the generated types package.
+// shared apigen output. An @envVars class contributes its values-schema.json
+// beside the package; its TypeScript env loader is config.ts in the generated
+// types package (generateTSTypes).
 func (r run) generateTypeScriptAPI() error {
 	var apiOutput *apigen.APIOutput
 	if err := r.measure("output.api.prepare", func() error {
@@ -778,8 +797,10 @@ func (r run) generateEnvConfig(lang string) error {
 	}
 
 	r.Done("env-config", dir)
-	if lang == "" {
-		r.Logf("  - env-config: values-schema.json only, no loader; enable outputs.types.go for the Go loader, which imports the Go types, or outputs.types.rust for the Rust one\n")
+	// The TypeScript loader lives in the TypeScript types package
+	// (generateTSTypes), so only a run with none of the three has no loader.
+	if lang == "" && !r.Outputs.TypesEnabled(LangTypeScript) {
+		r.Logf("  - env-config: values-schema.json only, no loader; enable outputs.types.go for the Go loader, which imports the Go types, outputs.types.rust for the Rust one, or outputs.types.typescript for the TypeScript one\n")
 	}
 	return nil
 }

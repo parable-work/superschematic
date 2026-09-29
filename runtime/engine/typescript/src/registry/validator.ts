@@ -10,7 +10,10 @@ stored instance can hold:
 - the value is JSON: plain objects and arrays, strings, finite numbers,
   booleans and null. A member whose value is undefined counts as absent;
 - an object holds no key its type does not declare, at every level, so a
-  new optional field never meets a value an older version let through.
+  new optional field never meets a value an older version let through. A
+  field a behavior on the instance type adds is declared too, but it is
+  the behavior's to change: an instance written with one is refused with
+  the `readOnly` rule rather than `unknown`.
 */
 
 import { Runtime, parseSchemaIR } from '@superschematic/schema-runtime';
@@ -25,7 +28,14 @@ export class SchemaValidator {
   private readonly runtime: Runtime;
   private readonly isInput: boolean;
 
-  constructor(readonly model: SchemaModel) {
+  /**
+   * behaviorFields maps each field the instance type's behaviors add to
+   * the behavior that adds it.
+   */
+  constructor(
+    readonly model: SchemaModel,
+    private readonly behaviorFields: ReadonlyMap<string, string> = new Map()
+  ) {
     const schema = parseSchemaIR(model.document);
     this.runtime = new Runtime(schema);
     this.isInput = !Object.prototype.hasOwnProperty.call(schema.types ?? {}, model.instanceType);
@@ -42,13 +52,24 @@ export class SchemaValidator {
     if (issues.length > 0) {
       return issues;
     }
-    undeclaredKeys(this.model.document, this.model.instanceType, value, '', issues);
+    for (const key of Object.keys(value)) {
+      const behavior = this.behaviorFields.get(key);
+      if (behavior !== undefined && value[key] !== undefined) {
+        issues.push(readOnlyIssue(key, behavior));
+      }
+    }
+    undeclaredKeys(this.model.document, this.model.instanceType, value, '', issues, this.behaviorFields);
     const errors = this.isInput
       ? this.runtime.validateInput(this.model.instanceType, value)
       : this.runtime.validateType(this.model.instanceType, value);
     flatten(errors, '', issues);
     return issues;
   }
+}
+
+/** readOnlyIssue refuses a value for a field a behavior adds. */
+export function readOnlyIssue(field: string, behavior: string): ValidationIssue {
+  return { path: field, rule: 'readOnly', message: `${field} is a field of behavior ${behavior}, which only its operations change` };
 }
 
 function jsonIssues(value: unknown, path: string, issues: ValidationIssue[]): void {
@@ -90,12 +111,13 @@ function undeclaredKeys(
   typeName: string,
   value: Record<string, unknown>,
   path: string,
-  issues: ValidationIssue[]
+  issues: ValidationIssue[],
+  behaviorFields: ReadonlyMap<string, string> = new Map()
 ): void {
   const type = (document.types ?? {})[typeName] as TypeDef;
   const fields = new Map<string, FieldDef>((type.fields ?? []).map((field) => [jsonKey(field), field]));
   for (const [key, member] of Object.entries(value)) {
-    if (member !== undefined && !fields.has(key)) {
+    if (member !== undefined && !fields.has(key) && !behaviorFields.has(key)) {
       issues.push({ path: join(path, key), rule: 'unknown', message: `${typeName} has no field ${key}` });
     }
   }

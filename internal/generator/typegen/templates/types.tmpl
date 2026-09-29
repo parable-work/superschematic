@@ -512,7 +512,7 @@ func validate{{.Symbol}}Value(value {{.Symbol}}, required bool) (bool, []Validat
 {{formatComment .Name .Doc}}
 type {{.Name}} struct {
 	{{range .Fields}}
-	{{.GoName}} {{.GoType}} `json:"{{.Name}}{{if not .Required}}{{if or .UsesWrapper (and .IsArray (not .IsMap))}},omitzero{{else}},omitempty{{end}}{{end}}"`
+	{{.GoName}} {{.GoType}} `json:"{{.Name}}{{if not .Required}}{{if or .UsesWrapper (and .IsArray (not .IsMap))}},omitzero{{else if not .KeepsZeroValue}},omitempty{{end}}{{end}}"`
 	{{end}}
 }
 
@@ -1745,12 +1745,14 @@ func (in *{{.InputName}}) To{{.OutputName}}() *{{.OutputName}} {
 {{- else}}
 		out.{{.GoName}} = in.{{.GoName}}.Value.To{{.PairedTypeName}}()
 {{- end}}
-{{- else if and .IsScalar (hasPrefix .GoType "*")}}
+{{- else if .TakesAddress}}
 		out.{{.GoName}} = &in.{{.GoName}}.Value
 {{- else}}
 		out.{{.GoName}} = in.{{.GoName}}.Value
 {{- end}}
-	}
+	}{{if .KeepsZeroValue}} else {
+		out.{{.GoName}} = {{.DefaultLiteral}}
+	}{{end}}
 {{- else if .IsPaired}}
 {{- if .IsArrayOfArrays}}
 	if len(in.{{.GoName}}) > 0 {

@@ -112,7 +112,9 @@ generated validator refuses throws `ValidationError` before any request.
 ## Install the packages
 
 Until the packages are published, a service resolves the generated
-packages and the runtime from the checkout.
+packages and the runtime from the checkout. The runtime ships compiled
+JavaScript, so `scripts/check.sh` first runs `bun install` and
+`bun run build` in `runtime/http/typescript`.
 `schemas/dist/types/typescript` is a Bun workspace, so `bun install` there
 links `@acme/shop-storefront-types` to `@acme/shop-common-types`. The
 router, the SDK and the app then need those packages, the HTTP runtime and
@@ -126,8 +128,8 @@ With the links in place, run the tests from `examples/acme-shop/typescript`:
 bun test
 ```
 
-The generated packages and the runtime ship TypeScript sources, so run
-them with Bun, a bundler or a TypeScript loader.
+The generated packages ship TypeScript sources, so run them with Bun, a
+bundler or a TypeScript loader.
 
 <LinkCard
   title="Next: build the whole tree"

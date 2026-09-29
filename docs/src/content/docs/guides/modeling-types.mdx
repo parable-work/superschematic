@@ -64,10 +64,16 @@ A field is required unless it is `Nullable<T>` or declared optional with
 
 | Language | A nullable field |
 | --- | --- |
-| Go | a pointer for a scalar or object type (`UpdatedAt *TemporalDateTime`); the plain value, left out when empty, for `string`, `number` and `boolean` |
+| Go | a pointer for a scalar or object type (`UpdatedAt *TemporalDateTime`) and for a `boolean` without a default (`*bool`); the plain value, left out when empty, for `string` and `number` |
 | TypeScript | `updatedAt?: Date \| null` |
 | Python | `Optional[T]` with a default of `None` |
 | Rust | `Option<T>` |
+
+A nullable `boolean` is `*bool` in Go because `encoding/json` leaves a
+`false` out of a plain `bool` with `omitempty`, and a reader then cannot tell
+`false` from absent. With `Default<boolean, true>` the field stays `bool`
+and is always written, since an absent value would read back as `true`.
+With `Default<boolean, false>` it stays `bool` and is left out when `false`.
 
 ## Defaults
 
