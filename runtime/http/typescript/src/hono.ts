@@ -3,10 +3,10 @@ import { bearerAuth } from 'hono/bearer-auth';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
 import { timeout } from 'hono/timeout';
-import { authorize, type Authenticator, type PermissionMatcher } from './auth';
-import { OperationResult, envelopeResponse, requestIdOf } from './envelope';
-import type { OperationSpec, RequestContext } from './operation';
-import { decodeJsonParam, decodeParams } from './params';
+import { authorize, type Authenticator, type PermissionMatcher } from './auth.js';
+import { OperationResult, envelopeResponse, requestIdOf } from './envelope.js';
+import type { OperationSpec, RequestContext } from './operation.js';
+import { decodeJsonParam, decodeParams } from './params.js';
 import {
   HttpProblem,
   badRequest,
@@ -18,8 +18,8 @@ import {
   problemResponse,
   tooManyRequests,
   unauthorized,
-} from './problem';
-import { MemoryRateLimitStore, clientIpKey, clientIpOf, type RateLimitOptions, type RateLimitStore } from './ratelimit';
+} from './problem.js';
+import { MemoryRateLimitStore, clientIpKey, clientIpOf, type RateLimitOptions, type RateLimitStore } from './ratelimit.js';
 
 /*
 The Hono binding of the http runtime. A generated router calls

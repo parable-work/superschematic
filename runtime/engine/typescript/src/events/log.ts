@@ -8,9 +8,16 @@ included. A delete appends an event and removes nothing before it. There
 is no retention: the log grows until a later change adds a policy for it.
 
 Reading is paged from a cursor, within one namespace and optionally one
-schema and instance. The principal needs `read` on each event's schema;
-without a schema filter, events of schemas it may not read are skipped,
-so a page can hold fewer events than its limit while more follow.
+schema and instance. A namespace that looks schema names up in a shared
+namespace also reads the shared namespace's publish events, since the
+schemas it reaches change with them; they keep the shared namespace as
+theirs. The principal needs `read` on each event's schema in the
+namespace it reads; without a schema filter, events of schemas it may not
+read are skipped, so a page can hold fewer events than its limit while
+more follow.
+
+Each commit that appends events notifies the engine's watchers after it
+commits (notifier.ts), which is how a stream learns the log grew.
 */
 
 import { checkPrincipal, type Access, type Principal } from '../access.js';
@@ -18,8 +25,9 @@ import { EngineError } from '../errors.js';
 import type { Namespaces } from '../namespaces.js';
 import { pageSize } from '../paging.js';
 import { checkSchemaName } from '../registry/document.js';
-import type { Row } from '../storage/driver.js';
+import type { Row, SqlValue } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
+import { notifierOf, type EventNotifier, type EventWatcher } from './notifier.js';
 
 export type EventKind = 'create' | 'update' | 'delete' | 'publish';
 
@@ -80,14 +88,25 @@ export interface NewEvent {
   change: string | null;
 }
 
-/** appendEvent appends one event and returns its cursor; call it inside the change's transaction. */
+/**
+ * appendEvent appends one event and returns its cursor; call it inside the
+ * change's transaction. The engine's watchers hear of it once that
+ * transaction commits, and never if it rolls back.
+ */
 export function appendEvent(storage: Storage, event: NewEvent): number {
   const result = storage.run(
     `INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [event.kind, event.namespace, event.schema, event.instanceId, event.seq, event.version, event.actor, event.at, event.change]
   );
-  return Number(result.lastInsertRowid);
+  const cursor = Number(result.lastInsertRowid);
+  const notify = () => notifierOf(storage).committed(cursor);
+  if (storage.inTransaction) {
+    storage.afterCommit(notify);
+  } else {
+    notify();
+  }
+  return cursor;
 }
 
 /** nextSeq returns the sequence an instance's next event takes. */
@@ -99,12 +118,18 @@ export function nextSeq(storage: Storage, namespace: string, schema: string, ins
   return row?.seq === null || row?.seq === undefined ? 1 : Number(row.seq) + 1;
 }
 
+const EVENT_COLUMNS = 'cursor, kind, namespace, schema, instance_id, seq, version, actor, at, change';
+
 export class EventLog {
+  private readonly notifier: EventNotifier;
+
   constructor(
     private readonly storage: Storage,
     private readonly namespaces: Namespaces,
     private readonly access: Access
-  ) {}
+  ) {
+    this.notifier = notifierOf(storage);
+  }
 
   /** read returns the page of events after a cursor that the principal may read. */
   read(principal: Principal, options: ReadEventsOptions = {}): EventPage {
@@ -115,32 +140,25 @@ export class EventLog {
       throw new EngineError('invalid_argument', `an event cursor is a non-negative integer, got ${String(after)}`);
     }
     const limit = pageSize(options.limit);
-    const filters = ['namespace = ?', 'cursor > ?'];
-    const params: Array<string | number> = [namespace, after];
     if (options.schema !== undefined) {
       checkSchemaName(options.schema);
       this.access.require(principal, 'read', namespace, options.schema);
-      filters.push('schema = ?');
-      params.push(options.schema);
     }
-    let source = 'engine_events';
-    let order = 'cursor';
+    let rows: Row[];
     if (options.instanceId !== undefined) {
       if (options.schema === undefined) {
         throw new EngineError('invalid_argument', 'reading one instance\'s events needs its schema');
       }
-      filters.push('instance_id = ?');
-      params.push(options.instanceId);
       // One instance's events come from its own index, in sequence order,
       // which is their cursor order; the read scans that instance only.
-      source = 'engine_events INDEXED BY engine_events_instance';
-      order = 'seq';
+      rows = this.storage.all(
+        `SELECT ${EVENT_COLUMNS} FROM engine_events INDEXED BY engine_events_instance
+         WHERE namespace = ? AND schema = ? AND instance_id = ? AND cursor > ? ORDER BY seq LIMIT ?`,
+        [namespace, options.schema, options.instanceId, after, limit + 1]
+      );
+    } else {
+      rows = this.namespaceRows(namespace, options.schema, after, limit + 1);
     }
-    const rows = this.storage.all(
-      `SELECT cursor, kind, namespace, schema, instance_id, seq, version, actor, at, change
-       FROM ${source} WHERE ${filters.join(' AND ')} ORDER BY ${order} LIMIT ?`,
-      [...params, limit + 1]
-    );
     const scanned = rows.slice(0, limit);
     const readable = new Map<string, boolean>();
     const events: EngineEvent[] = [];
@@ -157,6 +175,46 @@ export class EventLog {
     }
     const last = scanned[scanned.length - 1];
     return { events, next: last ? Number(last.cursor) : after, more: rows.length > limit };
+  }
+
+  /**
+   * watch registers a watcher the engine calls after each commit that
+   * appended events, and once when it closes. It returns the function
+   * that removes the watcher.
+   */
+  watch(watcher: EventWatcher): () => void {
+    return this.notifier.watch(watcher);
+  }
+
+  /** The watchers registered, for tests and diagnostics. */
+  get watching(): number {
+    return this.notifier.size;
+  }
+
+  /** close tells every watcher the engine is closing; Engine.close calls it. */
+  close(): void {
+    this.notifier.close();
+  }
+
+  // The events of a namespace after a cursor, optionally of one schema,
+  // with the shared namespace's publish events when the namespace looks
+  // names up there. Each arm is one indexed range read of at most `count`
+  // rows, and the merge keeps the first `count` by cursor.
+  private namespaceRows(namespace: string, schema: string | undefined, after: number, count: number): Row[] {
+    const own = `SELECT ${EVENT_COLUMNS} FROM engine_events
+      WHERE namespace = ?${schema === undefined ? '' : ' AND schema = ?'} AND cursor > ? ORDER BY cursor LIMIT ?`;
+    const ownParams: SqlValue[] = schema === undefined ? [namespace, after, count] : [namespace, schema, after, count];
+    const shared = this.namespaces.lookup(namespace)[1];
+    if (shared === undefined) {
+      return this.storage.all(own, ownParams);
+    }
+    const published = `SELECT ${EVENT_COLUMNS} FROM engine_events
+      WHERE kind = 'publish' AND namespace = ?${schema === undefined ? '' : ' AND schema = ?'} AND cursor > ? ORDER BY cursor LIMIT ?`;
+    const publishedParams: SqlValue[] = schema === undefined ? [shared, after, count] : [shared, schema, after, count];
+    return this.storage.all(
+      `SELECT ${EVENT_COLUMNS} FROM (${own}) UNION ALL SELECT ${EVENT_COLUMNS} FROM (${published}) ORDER BY cursor LIMIT ?`,
+      [...ownParams, ...publishedParams, count]
+    );
   }
 }
 

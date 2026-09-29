@@ -146,6 +146,37 @@ for (const driver of drivers) {
       assert.deepEqual(storage.all('SELECT id FROM notes ORDER BY id'), [{ id: 'outer' }, { id: 'second inner' }]);
     });
 
+    test('afterCommit runs once the outermost transaction commits, and never for what rolls back', () => {
+      const storage = open();
+      storage.exec('CREATE TABLE notes (id TEXT PRIMARY KEY) STRICT');
+      const ran: string[] = [];
+      assert.throws(() => storage.afterCommit(() => ran.push('outside')), /needs an open transaction/);
+      storage.transaction(() => {
+        storage.afterCommit(() => ran.push('outer'));
+        storage.transaction(() => storage.afterCommit(() => ran.push('inner kept')));
+        assert.throws(() =>
+          storage.transaction(() => {
+            storage.afterCommit(() => ran.push('inner dropped'));
+            throw new Error('inner refused');
+          })
+        );
+        storage.afterCommit(() => {
+          throw new Error('a failing hook');
+        });
+        storage.afterCommit(() => ran.push('after a failing hook'));
+        assert.deepEqual(ran, []);
+      });
+      assert.deepEqual(ran, ['outer', 'inner kept', 'after a failing hook']);
+      assert.throws(() =>
+        storage.transaction(() => {
+          storage.afterCommit(() => ran.push('rolled back'));
+          throw new Error('refused');
+        })
+      );
+      storage.transaction(() => storage.run('INSERT INTO notes VALUES (?)', ['n1']));
+      assert.deepEqual(ran, ['outer', 'inner kept', 'after a failing hook']);
+    });
+
     test('a transaction whose function returns a promise is rolled back', () => {
       const storage = open();
       storage.exec('CREATE TABLE notes (id TEXT PRIMARY KEY) STRICT');

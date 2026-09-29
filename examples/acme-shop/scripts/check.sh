@@ -104,7 +104,7 @@ echo "==> TypeScript: the generated router and SDKs type-check"
 RUNTIME="$REPO_ROOT/runtime/http/typescript"
 TYPES="$DIST/types/typescript"
 APP="$EXAMPLE_DIR/typescript"
-(cd "$RUNTIME" && bun install --frozen-lockfile >/dev/null && bun run link-deps >/dev/null)
+(cd "$RUNTIME" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 # The types packages form one Bun workspace; installing it links each to the
 # types packages of the services it depends on.
 (cd "$TYPES" && bun install >/dev/null)

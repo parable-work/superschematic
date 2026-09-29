@@ -24,10 +24,11 @@ export { SCHEMA_NAME } from './registry/document.js';
 export { SchemaValidator } from './registry/validator.js';
 
 export { INSTANCE_ID, InstanceStore } from './instances/store.js';
-export type { CreateOptions, InstancePage, InstanceRecord, InstanceTarget, ListOptions } from './instances/store.js';
+export type { CreateOptions, DeleteOptions, InstancePage, InstanceRecord, InstanceTarget, ListOptions, UpdateOptions } from './instances/store.js';
 
 export { EventLog } from './events/log.js';
 export type { EngineEvent, EventKind, EventPage, ReadEventsOptions } from './events/log.js';
+export type { EventWatcher } from './events/notifier.js';
 
 export { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './paging.js';
 

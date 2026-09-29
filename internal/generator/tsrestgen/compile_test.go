@@ -44,9 +44,10 @@ func link(t *testing.T, target, name string) {
 	}
 }
 
-// installRuntime installs the http runtime's dependencies and links the
-// in-repository package it imports (its link-deps script). It returns the
-// bun binary, the runtime directory and the in-repository runtime paths.
+// installRuntime installs the http runtime's dependencies and builds it:
+// its build script links the in-repository package it imports, and a
+// consumer resolves the runtime to its compiled dist/. It returns the bun
+// binary, the runtime directory and the in-repository runtime paths.
 func installRuntime(t *testing.T) (string, string, naming.LocalPaths) {
 	t.Helper()
 	if testing.Short() {
@@ -66,10 +67,10 @@ func installRuntime(t *testing.T) (string, string, naming.LocalPaths) {
 	if out, err := install.CombinedOutput(); err != nil {
 		requireOrSkipTSTooling(t, fmt.Sprintf("bun install failed for the http runtime (likely offline): %v\n%s", err, out))
 	}
-	linkDeps := exec.Command(bunPath, "run", "link-deps")
-	linkDeps.Dir = runtimeDir
-	if out, err := linkDeps.CombinedOutput(); err != nil {
-		t.Fatalf("link the http runtime's local dependencies: %v\n%s", err, out)
+	build := exec.Command(bunPath, "run", "build")
+	build.Dir = runtimeDir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build the http runtime: %v\n%s", err, out)
 	}
 	return bunPath, runtimeDir, paths
 }

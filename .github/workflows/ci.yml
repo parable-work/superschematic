@@ -407,15 +407,16 @@ jobs:
           bun run build
           bun run test
 
-      - name: runtime/http/typescript typecheck + test
+      - name: runtime/http/typescript typecheck + build + test
         working-directory: runtime/http/typescript
         run: |
           bun install --frozen-lockfile
+          bun run build
           bun run test
 
       - name: runtime/engine/typescript typecheck + build + test (Node.js and Bun)
-        # Runs after the schema runtime's build, whose dist/ the engine's
-        # scripts/link-local-deps.mjs copies into node_modules.
+        # Runs after the schema and http runtimes' builds, whose dist/ the
+        # engine's scripts/link-local-deps.mjs copies into node_modules.
         working-directory: runtime/engine/typescript
         run: |
           bun install --frozen-lockfile

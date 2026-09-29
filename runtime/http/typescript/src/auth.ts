@@ -1,5 +1,5 @@
-import type { OperationAuth, RequestContext } from './operation';
-import { forbidden, unauthorized } from './problem';
+import type { OperationAuth, RequestContext } from './operation.js';
+import { forbidden, unauthorized } from './problem.js';
 
 /*
 The permission gate, with the semantics of the Go runtime's session

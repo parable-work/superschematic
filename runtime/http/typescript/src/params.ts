@@ -5,7 +5,7 @@ import {
   validateTemporalDateTime,
 } from 'superscalar/scalars';
 import type { ValidationError } from 'superscalar/validation';
-import { badRequest } from './problem';
+import { badRequest } from './problem.js';
 
 /*
 Path, query, and body parameters. The generated router carries one ParamSpec

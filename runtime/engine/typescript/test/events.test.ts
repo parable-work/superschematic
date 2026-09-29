@@ -116,7 +116,7 @@ for (const driver of drivers) {
       );
     });
 
-    test('reads keep to a namespace, and filter by schema and instance', () => {
+    test('reads keep to a namespace and the shared publishes it reaches, and filter by schema and instance', () => {
       const engine = openTestEngine({ driver, namespaces: { names: ['east', 'common'], shared: 'common' } });
       engine.schemas.define(alice, orderDocument());
       engine.schemas.publish(alice, 'Order');
@@ -127,28 +127,124 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Note', { body: 'hello' }, { id: 'n1' });
       engine.instances.create(alice, 'Note', { body: 'east' }, { id: 'n1', namespace: 'east' });
 
+      // A publish is logged in the namespace that holds the schema, and
+      // every namespace that looks names up there reads it too.
       assert.deepEqual(
-        engine.events.read(alice).events.map((event) => [event.kind, event.schema, event.instanceId]),
+        engine.events.read(alice).events.map((event) => [event.kind, event.namespace, event.schema, event.instanceId]),
         [
-          ['publish', 'Order', null],
-          ['create', 'Order', 'o1'],
-          ['create', 'Order', 'o2'],
-          ['create', 'Note', 'n1'],
+          ['publish', 'default', 'Order', null],
+          ['publish', 'common', 'Note', null],
+          ['create', 'default', 'Order', 'o1'],
+          ['create', 'default', 'Order', 'o2'],
+          ['create', 'default', 'Note', 'n1'],
         ]
       );
-      // A publish is logged in the namespace that holds the schema.
       assert.deepEqual(
         engine.events.read(alice, { namespace: 'common' }).events.map((event) => [event.kind, event.schema]),
         [['publish', 'Note']]
       );
       assert.deepEqual(
         engine.events.read(alice, { namespace: 'east' }).events.map((event) => [event.kind, event.namespace, event.instanceId]),
-        [['create', 'east', 'n1']]
+        [
+          ['publish', 'common', null],
+          ['create', 'east', 'n1'],
+        ]
       );
+      assert.deepEqual(
+        engine.events.read(alice, { namespace: 'east', schema: 'Note' }).events.map((event) => [event.kind, event.namespace]),
+        [
+          ['publish', 'common'],
+          ['create', 'east'],
+        ]
+      );
+      assert.deepEqual(engine.events.read(alice, { namespace: 'east', schema: 'Order' }).events, []);
       assert.deepEqual(
         engine.events.read(alice, { schema: 'Order', instanceId: 'o2' }).events.map((event) => event.instanceId),
         ['o2']
       );
+    });
+
+    test('a read pages through a namespace and the shared publishes in cursor order', () => {
+      const engine = openTestEngine({ driver, namespaces: { names: ['east', 'common'], shared: 'common' } });
+      engine.schemas.define(alice, noteDocument, { namespace: 'common' });
+      engine.schemas.publish(alice, 'Note', { namespace: 'common' });
+      // The shared namespace's own instances are not the other namespaces' events.
+      engine.instances.create(alice, 'Note', { body: 'shared' }, { id: 'c1', namespace: 'common' });
+      engine.instances.create(alice, 'Note', { body: 'one' }, { id: 'n1', namespace: 'east' });
+      engine.schemas.define(alice, { ...noteDocument, description: 'second' }, { namespace: 'common' });
+      engine.schemas.publish(alice, 'Note', { namespace: 'common' });
+      engine.instances.create(alice, 'Note', { body: 'two' }, { id: 'n2', namespace: 'east' });
+      engine.instances.create(alice, 'Note', { body: 'three' }, { id: 'n3', namespace: 'east' });
+
+      const seen: unknown[] = [];
+      let after = 0;
+      for (let page = 0; page < 10; page += 1) {
+        const read = engine.events.read(alice, { namespace: 'east', after, limit: 2 });
+        assert.ok(read.events.length <= 2);
+        seen.push(...read.events.map((event) => [event.kind, event.instanceId ?? event.version]));
+        after = read.next;
+        if (!read.more) {
+          break;
+        }
+      }
+      assert.deepEqual(seen, [
+        ['publish', 1],
+        ['create', 'n1'],
+        ['publish', 2],
+        ['create', 'n2'],
+        ['create', 'n3'],
+      ]);
+    });
+
+    test('watchers hear of each commit that appended events, after it commits', () => {
+      const engine = openTestEngine({ driver });
+      const heard: number[] = [];
+      let closed = 0;
+      const stop = engine.events.watch({ committed: (cursor) => heard.push(cursor), closed: () => (closed += 1) });
+      assert.equal(engine.events.watching, 1);
+
+      engine.schemas.define(alice, orderDocument());
+      assert.deepEqual(heard, [], 'a draft appends no event');
+      engine.schemas.publish(alice, 'Order');
+      const created = engine.storage.transaction(() => {
+        const record = engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
+        assert.equal(heard.length, 1, 'nothing is heard before the commit');
+        return record;
+      });
+      assert.throws(() =>
+        engine.storage.transaction(() => {
+          engine.instances.update(alice, 'Order', 'o1', { title: 'Lamp' });
+          throw new Error('rolled back');
+        })
+      );
+      assert.throws(() => engine.instances.create(alice, 'Order', { title: 3 }));
+      const cursors = engine.events.read(alice).events.map((event) => event.cursor);
+      assert.deepEqual(heard, cursors);
+      assert.equal(created.seq, 1);
+
+      stop();
+      engine.instances.delete(alice, 'Order', 'o1');
+      assert.equal(heard.length, 2);
+      assert.equal(engine.events.watching, 0);
+
+      engine.events.watch({ committed: () => undefined, closed: () => (closed += 1) });
+      engine.close();
+      assert.equal(closed, 1, 'the watcher still registered hears the close; the removed one does not');
+      assert.throws(() => engine.events.watch({ committed: () => undefined }), /the engine is closed/);
+    });
+
+    test('a watcher that throws does not fail the write or silence the others', () => {
+      const engine = openTestEngine({ driver });
+      const heard: number[] = [];
+      engine.events.watch({
+        committed: () => {
+          throw new Error('a broken watcher');
+        },
+      });
+      engine.events.watch({ committed: (cursor) => heard.push(cursor) });
+      engine.schemas.define(alice, orderDocument());
+      assert.equal(engine.schemas.publish(alice, 'Order').published, true);
+      assert.equal(heard.length, 1);
     });
 
     test('a read checks its arguments', () => {

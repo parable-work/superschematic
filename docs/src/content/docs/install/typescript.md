@@ -255,6 +255,7 @@ fails with the operation named when one is not:
   payload and decodes it.
 - An operation that uploads files. The router has no multipart adapter.
 
-The generated package and the runtime ship TypeScript sources, so run them
-with Bun, a bundler or a TypeScript loader. `examples/acme-schematic`
+The generated package ships TypeScript sources, so run it with Bun, a
+bundler or a TypeScript loader. The runtime ships compiled JavaScript with
+declarations. `examples/acme-schematic`
 (`shop-storefront` and its `storefront/` app) is a complete example.

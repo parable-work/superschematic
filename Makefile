@@ -91,7 +91,7 @@ schema-file-types-check:
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
 	cd runtime/schema/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
-	cd runtime/http/typescript && bun install --frozen-lockfile && bun run test
+	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && bun run test
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
 

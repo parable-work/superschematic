@@ -309,12 +309,12 @@ jobs:
           cat SHA256SUMS
 
       - name: Pack the npm tarballs
-        # The four authoring packages and the http runtime ship their
-        # TypeScript source; the schema runtime and the engine ship their
+        # The four authoring packages ship their TypeScript source; the
+        # schema runtime, the http runtime and the engine ship their
         # compiled dist; the version-graph package ships its compiled dist
         # and the core's wasm module; the schema IR ships its declarations
         # and the schema-file JSON Schema. The engine builds after the schema
-        # runtime, whose dist/ its link script copies. npm pack writes
+        # and http runtimes, whose dist/ its link script copies. npm pack writes
         # superschematic-<name>-<version>.tgz for a scoped
         # @superschematic/<name>.
         run: |
@@ -325,7 +325,7 @@ jobs:
           done
           (cd ir/typescript && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
-          (cd runtime/http/typescript && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
+          (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           ls -l release-assets/npm
