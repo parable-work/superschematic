@@ -19,8 +19,10 @@ import (
 
 // acmeRegistry is what an extension binary's cli.New would assemble: the
 // core kinds and decorators (registry.New), the core generators
-// (generator.RegisterCore), the extension (Use), then Finalize.
-func acmeRegistry(t *testing.T) *registry.Registry {
+// (generator.RegisterCore), the extension (Use), then Finalize. Each of
+// coreBehaviors is a behavior declaration the core registers beside them,
+// for a test that needs one the core does not declare.
+func acmeRegistry(t *testing.T, coreBehaviors ...json.RawMessage) *registry.Registry {
 	t.Helper()
 	// The default naming with the core's own auth provider selected: the
 	// in-tree default names the Acme provider, which only the Acme
@@ -33,6 +35,11 @@ func acmeRegistry(t *testing.T) *registry.Registry {
 	}
 	if err := reg.Use(registrytest.Acme{}); err != nil {
 		t.Fatal(err)
+	}
+	for _, declaration := range coreBehaviors {
+		if err := reg.RegisterBehavior(registry.BehaviorSpec{Declaration: declaration}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := reg.Finalize(); err != nil {
 		t.Fatal(err)
@@ -191,6 +198,67 @@ func TestAcmeExtensionEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(string(root.Defs["Document"].Properties["kind"]), `"Catalog"`) {
 		t.Errorf("Document.kind enum lacks Catalog: %s", root.Defs["Document"].Properties["kind"])
+	}
+}
+
+// An empty list or object in an extension decorator's argument reaches the
+// extension slot as the value the data forms store for it
+// (extension-model.md, sections 2 and 4.2): @meta's tiers is [] from every
+// form, where the TypeScript form used to store null.
+func TestAcmeDecoratorArgumentWithEmptyListsMatchesTheDataForms(t *testing.T) {
+	reg := acmeRegistry(t)
+	const wantSlot = `{"meta":{"labels":{},"region":"eu","tiers":[]}}`
+	tsDir := tsStockService(t, `import { meta } from "@acme/schematic";
+
+@meta({ region: "eu", tiers: [], labels: {} })
+export abstract class Item {
+  name: string;
+}
+`)
+	tsSchema, err := loader.LoadService(tsDir, loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatalf("loading the TypeScript form: %v", err)
+	}
+	if got := string(tsSchema.Types["Item"].Extensions["acme"]); got != wantSlot {
+		t.Errorf("TypeScript form: TypeDef.Extensions[acme] = %s, want %s", got, wantSlot)
+	}
+	want := normalized(t, tsSchema)
+	for file, source := range map[string]string{
+		"src/item.schema.json": `{
+  "types": {
+    "Item": {
+      "name": "Item",
+      "role": "EmbeddedStruct",
+      "extensions": { "acme": { "meta": { "region": "eu", "tiers": [], "labels": {} } } },
+      "fields": [{ "name": "name", "typeRef": { "name": "string" }, "required": true }]
+    }
+  }
+}`,
+		"src/item.schema.yaml": `types:
+  Item:
+    name: Item
+    role: EmbeddedStruct
+    extensions:
+      acme:
+        meta: { region: eu, tiers: [], labels: {} }
+    fields:
+      - name: name
+        typeRef: { name: string }
+        required: true
+`,
+	} {
+		dir := t.TempDir()
+		writeFiles(t, dir, map[string][]byte{
+			"schema.config.json": []byte(`{"name": "stock", "kind": "General", "outputs": {}}`),
+			file:                 []byte(source),
+		})
+		schema, err := loader.LoadService(dir, loader.WithRegistry(reg))
+		if err != nil {
+			t.Fatalf("loading %s: %v", file, err)
+		}
+		if got := normalized(t, schema); got != want {
+			t.Errorf("%s and the TypeScript form produced different IR\n%s:\n%s\nts:\n%s", file, file, got, want)
+		}
 	}
 }
 
