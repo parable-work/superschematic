@@ -49,6 +49,10 @@ type ORMOutput struct {
 	// (@versioned or @optimistic); it emits ErrVersionConflict.
 	HasVersionFences bool
 
+	// HasOptimisticTables is true when a repository is @optimistic:
+	// it has the fenced methods and no history. The README says so.
+	HasOptimisticTables bool
+
 	// HasArraysOfArrays is true when a column is an array of arrays (T[][]);
 	// it emits the encoder those columns write through.
 	HasArraysOfArrays bool
@@ -462,6 +466,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
 	hasVersionFences := false
+	hasOptimisticTables := false
 	hasHistoryActor := false
 	hasGenericJSON := false
 	hasArraysOfArrays := false
@@ -477,6 +482,9 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		}
 		if repo.HasVersion {
 			hasVersionFences = true
+		}
+		if repo.HasVersion && !repo.Versioned {
+			hasOptimisticTables = true
 		}
 		if repo.HistoryActorCol != "" {
 			hasHistoryActor = true
@@ -511,6 +519,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		HasSoftDeletes:           hasSoftDeletes,
 		HasVersionedRepositories: hasVersionedRepositories,
 		HasVersionFences:         hasVersionFences,
+		HasOptimisticTables:      hasOptimisticTables,
 		HasHistoryActor:          hasHistoryActor,
 		HasGenericJSON:           hasGenericJSON,
 		HasArraysOfArrays:        hasArraysOfArrays,
