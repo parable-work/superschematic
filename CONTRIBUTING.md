@@ -189,7 +189,8 @@ One version for everything: the npm packages (`@superschematic/schema`, `db`,
 `versiongraph`, `engine`), the
 PyPI distributions (`superschematic-schema-runtime`, and
 `superschematic-versiongraph`, which is not published), the crates
-(`superschematic-http-runtime`, and `superschematic-versiongraph` and
+(`superschematic-http-runtime`, and `superschematic-versiongraph`,
+`superschematic-versiongraph-engine` and
 `superschematic-versiongraph-python`, which are not published) and the five
 Go modules all carry the SemVer
 version in `versions.env`, and `scripts/bump_version.py` is the only thing

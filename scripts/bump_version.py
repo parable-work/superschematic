@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """One version for the whole repository: set it, check it, read it.
 
-The npm packages, the PyPI distribution, the crate and the Go modules share one
-SemVer version (CONTRIBUTING.md, "Releases"). versions.env holds it and this
-script is the only thing that writes it or the sites below. It edits the files
-in place with anchored regular expressions so comments and formatting survive,
-and it refuses to continue if any site matched a different number of times
-than expected.
+The npm packages, the PyPI distributions, the crates and the Go modules share
+one SemVer version (CONTRIBUTING.md, "Releases"). versions.env holds it and
+this script is the only thing that writes it or the sites below. It edits the
+files in place with anchored regular expressions so comments and formatting
+survive, and it refuses to continue if any site matched a different number of
+times than expected.
 
   bump_version.py current                 print the version (versions.env)
   bump_version.py set <version>           write <version> everywhere
@@ -49,6 +49,12 @@ Version sites (relative to the repository root):
                                       [package] version
   runtime/versiongraph/rust/Cargo.lock
                                       the superschematic-versiongraph package
+  runtime/versiongraph/rust-engine/Cargo.toml
+                                      [package] version
+  runtime/versiongraph/rust-engine/Cargo.lock
+                                      the superschematic-versiongraph-engine
+                                      package and the superschematic-versiongraph
+                                      core it builds on
   go.mod                              require .../superschematic/ir vX.Y.Z
   runtime/schema/go/go.mod            require .../superschematic/ir vX.Y.Z
   runtime/http/go/go.mod              require .../runtime/schema/go vX.Y.Z and
@@ -266,6 +272,25 @@ def sites():
         (
             ROOT / "runtime" / "versiongraph" / "rust" / "Cargo.lock",
             [(r'(\[\[package\]\]\nname = "superschematic-versiongraph"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "versiongraph" / "rust-engine" / "Cargo.toml",
+            [(r'(\[package\]\nname = "superschematic-versiongraph-engine"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    # The engine's lockfile records the core's version too, as the
+    # binding's does.
+    out.append(
+        (
+            ROOT / "runtime" / "versiongraph" / "rust-engine" / "Cargo.lock",
+            [
+                (r'(\[\[package\]\]\nname = "superschematic-versiongraph-engine"\nversion = ")' + V + r'(")', 1),
+                (r'(\[\[package\]\]\nname = "superschematic-versiongraph"\nversion = ")' + V + r'(")', 1),
+            ],
             "semver",
         )
     )
