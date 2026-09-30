@@ -174,6 +174,11 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 			}); err != nil {
 				return nil, nil, err
 			}
+			if err := o.profile.Measure("loader.default-values", func() error {
+				return validateDefaultValues(schema, vin.ExternalEnums)
+			}); err != nil {
+				return nil, nil, err
+			}
 			if err := loadDocuments(servicePath, schema, cfg, &o, reg); err != nil {
 				return nil, nil, err
 			}
@@ -261,6 +266,13 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 	}
 	if len(errs) > 0 {
 		return nil, nil, errors.Join(errs...)
+	}
+	// After the IR checks, so a default of a type the schema does not
+	// resolve is reported as that, not as a bad default.
+	if err := o.profile.Measure("loader.default-values", func() error {
+		return validateDefaultValues(schema, vin.ExternalEnums)
+	}); err != nil {
+		return nil, nil, err
 	}
 
 	if err := loadDocuments(servicePath, schema, cfg, &o, reg); err != nil {

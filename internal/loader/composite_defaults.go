@@ -380,7 +380,7 @@ func validateCompositeObject(schema *ir.Schema, externalEnums map[string]*ir.Enu
 		if field.InternalMetadata && field.Default != nil && compositeLiteralString(fieldValue) != *field.Default {
 			return fmt.Errorf("%s.%s must equal discriminator value %q", path, field.Name, *field.Default)
 		}
-		if err := validateCompositeFieldConstraints(field, fieldValue, path+"."+field.Name); err != nil {
+		if err := validateCompositeFieldConstraints(fieldValueRules(field), field.TypeRef, fieldValue, path+"."+field.Name); err != nil {
 			return err
 		}
 	}
@@ -407,25 +407,82 @@ func compositeLiteralString(value any) string {
 	}
 }
 
-func validateCompositeFieldConstraints(field *ir.FieldDef, value any, path string) error {
-	if items, ok := value.([]any); ok {
-		if field.ValidateListMin != nil && len(items) < *field.ValidateListMin {
-			return fmt.Errorf("%s must contain at least %d items", path, *field.ValidateListMin)
+// valueRules are the rules a field or an argument declares on its own value:
+// listMin and listMax bound a list, and the length, pattern and range rules
+// apply to a single value and to every element of a list (D12, amended).
+type valueRules struct {
+	minLength, maxLength *int
+	pattern              string
+	min, max             *float64
+	listMin, listMax     *int
+}
+
+func fieldValueRules(field *ir.FieldDef) valueRules {
+	return valueRules{
+		minLength: field.ValidateMinLength,
+		maxLength: field.ValidateMaxLength,
+		pattern:   field.ValidatePattern,
+		min:       field.ValidateMin,
+		max:       field.ValidateMax,
+		listMin:   field.ValidateListMin,
+		listMax:   field.ValidateListMax,
+	}
+}
+
+func argumentValueRules(arg *ir.ArgumentDef) valueRules {
+	return valueRules{
+		minLength: arg.ValidateMinLength,
+		maxLength: arg.ValidateMaxLength,
+		pattern:   arg.ValidatePattern,
+		min:       arg.ValidateMin,
+		max:       arg.ValidateMax,
+		listMin:   arg.ValidateListMin,
+		listMax:   arg.ValidateListMax,
+	}
+}
+
+// validateCompositeFieldConstraints applies a field's own rules to a value
+// that validateCompositeValue has already type-checked. For a list, listMin
+// and listMax bound the list (the outer list of T[][]), and the length,
+// pattern and range rules apply to every innermost element, as every
+// validator applies them (D12, amended).
+func validateCompositeFieldConstraints(rules valueRules, ref ir.TypeRef, value any, path string) error {
+	if ref.IsArray {
+		items, ok := value.([]any)
+		if !ok {
+			return nil
 		}
-		if field.ValidateListMax != nil && len(items) > *field.ValidateListMax {
-			return fmt.Errorf("%s must contain at most %d items", path, *field.ValidateListMax)
+		if rules.listMin != nil && len(items) < *rules.listMin {
+			return fmt.Errorf("%s must contain at least %d items", path, *rules.listMin)
 		}
+		if rules.listMax != nil && len(items) > *rules.listMax {
+			return fmt.Errorf("%s must contain at most %d items", path, *rules.listMax)
+		}
+		elementRef := ref
+		if ref.IsArrayOfArrays {
+			elementRef.IsArrayOfArrays = false
+		} else {
+			elementRef.IsArray = false
+		}
+		elementRules := rules
+		elementRules.listMin, elementRules.listMax = nil, nil
+		for i, item := range items {
+			if err := validateCompositeFieldConstraints(elementRules, elementRef, item, fmt.Sprintf("%s[%d]", path, i)); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	if text, ok := value.(string); ok {
 		length := utf8.RuneCountInString(text)
-		if field.ValidateMinLength != nil && length < *field.ValidateMinLength {
-			return fmt.Errorf("%s must contain at least %d characters", path, *field.ValidateMinLength)
+		if rules.minLength != nil && length < *rules.minLength {
+			return fmt.Errorf("%s must contain at least %d characters", path, *rules.minLength)
 		}
-		if field.ValidateMaxLength != nil && length > *field.ValidateMaxLength {
-			return fmt.Errorf("%s must contain at most %d characters", path, *field.ValidateMaxLength)
+		if rules.maxLength != nil && length > *rules.maxLength {
+			return fmt.Errorf("%s must contain at most %d characters", path, *rules.maxLength)
 		}
-		if field.ValidatePattern != "" {
-			pattern, err := regexp.Compile(field.ValidatePattern)
+		if rules.pattern != "" {
+			pattern, err := regexp.Compile(rules.pattern)
 			if err != nil {
 				return fmt.Errorf("%s has invalid validation pattern: %w", path, err)
 			}
@@ -439,11 +496,11 @@ func validateCompositeFieldConstraints(field *ir.FieldDef, value any, path strin
 		if err != nil {
 			return fmt.Errorf("%s must be a valid number", path)
 		}
-		if field.ValidateMin != nil && parsed < *field.ValidateMin {
-			return fmt.Errorf("%s must be at least %s", path, strconv.FormatFloat(*field.ValidateMin, 'g', -1, 64))
+		if rules.min != nil && parsed < *rules.min {
+			return fmt.Errorf("%s must be at least %s", path, strconv.FormatFloat(*rules.min, 'g', -1, 64))
 		}
-		if field.ValidateMax != nil && parsed > *field.ValidateMax {
-			return fmt.Errorf("%s must be at most %s", path, strconv.FormatFloat(*field.ValidateMax, 'g', -1, 64))
+		if rules.max != nil && parsed > *rules.max {
+			return fmt.Errorf("%s must be at most %s", path, strconv.FormatFloat(*rules.max, 'g', -1, 64))
 		}
 	}
 	return nil
