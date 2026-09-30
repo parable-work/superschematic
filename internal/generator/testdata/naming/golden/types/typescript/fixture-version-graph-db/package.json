@@ -1,7 +1,7 @@
 {
-  "name": "{{.PackageName}}",
+  "name": "@acme/fixture-version-graph-db-types",
   "version": "1.0.0",
-  "description": "TypeScript types for {{.SchemaName}} schema",
+  "description": "TypeScript types for fixture-version-graph-db schema",
   "type": "module",
   "main": "index.ts",
   "types": "index.ts",
@@ -33,15 +33,11 @@
     "./validators/types/*": {
       "types": "./validators/types/*.ts",
       "import": "./validators/types/*.ts"
-    }{{if .VersionGraphs}},
+    },
     "./versiongraph": {
       "types": "./versiongraph/index.ts",
       "import": "./versiongraph/index.ts"
-    }{{end}}{{if .HasEnvConfig}},
-    "./config": {
-      "types": "./config.ts",
-      "import": "./config.ts"
-    }{{end}}
+    }
   },
   "scripts": {
     "build": "tsc",
@@ -51,15 +47,14 @@
   "keywords": [
     "typescript",
     "types",
-    "{{.SchemaName}}"
+    "fixture-version-graph-db"
   ],
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {
-    "{{.Naming.ScalarNpmPackage}}": "{{if .ScalarLibSpec}}{{.ScalarLibSpec}}{{else}}*{{end}}",
-    "js-yaml": "4.1.1"{{if .VersionGraphs}},
-    "{{.Naming.VersionGraphNpmPackage}}": "{{if .VersionGraphLibSpec}}{{.VersionGraphLibSpec}}{{else}}*{{end}}"{{end}}{{range .PackageDependencies}},
-    "{{.Name}}": "{{.Spec}}"{{end}}
+    "@acme/scalars": "*",
+    "js-yaml": "4.1.1",
+    "@acme/versiongraph": "file:../../../vendor/acme-versiongraph-ts"
   },
   "devDependencies": {
     "@types/js-yaml": "4.0.9",

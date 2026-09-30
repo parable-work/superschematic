@@ -29,6 +29,7 @@ versiongraph_go_module = "github.com/parable-work/superschematic/runtime/version
 http_runtime_go_module = "github.com/parable-work/superschematic/runtime/http/go"
 http_runtime_rust_crate = "superschematic-http-runtime"
 http_runtime_npm_package = "@superschematic/http-runtime"
+versiongraph_npm_package = "@superschematic/versiongraph"
 ptr_go_module = "github.com/parable-work/superschematic/runtime/schema/go/ptr"
 
 # Prose the generated readmes and package manifests carry.
@@ -86,5 +87,6 @@ scalar_rust = "third_party/superscalar/crates/core"
 schema_ir = "ir"
 schema_runtime_go = "runtime/schema/go"
 versiongraph_go = "runtime/versiongraph/go"
+versiongraph_typescript = "runtime/versiongraph/typescript"
 http_runtime_go = "runtime/http/go"
 http_runtime_rust = "runtime/http/rust"

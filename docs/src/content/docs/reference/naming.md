@@ -141,6 +141,16 @@ npm package name of the TypeScript HTTP runtime. A generated TypeScript
 API package imports its request pipeline from this package and from its
 `/hono` entry point, and lists it as a peer dependency.
 
+### `versiongraph_npm_package`
+
+Default: `@superschematic/versiongraph`
+
+npm package name of the TypeScript version-graph runtime: the core's wasm
+build, the engine, its Postgres adapter and the facade base. A generated
+TypeScript types package whose schema declares a version graph imports
+the facade base from its `/facade` entry point and lists the package as a
+dependency ([Use the engine from TypeScript](/superschematic/reference/version-graphs/#use-the-engine-from-typescript)).
+
 ### `ptr_go_module`
 
 Default: `github.com/parable-work/superschematic/runtime/schema/go/ptr`
@@ -350,6 +360,15 @@ Directory of the schema runtime Go module.
 Default: unset. This repository's own file sets `runtime/versiongraph/go`.
 
 Directory of the version-graph core's Go binding module.
+
+### `paths.versiongraph_typescript`
+
+Default: unset. This repository's own file sets
+`runtime/versiongraph/typescript`.
+
+Directory of the TypeScript version-graph runtime's npm package
+(`package.json`). A generated TypeScript types package whose schema
+declares a version graph depends on it with a `file:` spec.
 
 ### `paths.http_runtime_go`
 

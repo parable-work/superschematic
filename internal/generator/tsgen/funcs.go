@@ -17,6 +17,7 @@ func customTemplateFuncs() template.FuncMap {
 		"uniqueScalarLibTypeNames": uniqueScalarLibTypeNames,
 		"scalarLibTypeName":        scalarLibTypeName,
 		"elemType":                 elemType,
+		"lowerFirst":               lowerFirst,
 		"hasStringValidator": func(s ScalarInfo) bool {
 			return s.TSType == "string" && s.Primitive == ir.LanguageString
 		},

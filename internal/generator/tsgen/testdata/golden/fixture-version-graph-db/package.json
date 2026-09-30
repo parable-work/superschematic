@@ -33,6 +33,10 @@
     "./validators/types/*": {
       "types": "./validators/types/*.ts",
       "import": "./validators/types/*.ts"
+    },
+    "./versiongraph": {
+      "types": "./versiongraph/index.ts",
+      "import": "./versiongraph/index.ts"
     }
   },
   "scripts": {
@@ -49,7 +53,8 @@
   "private": true,
   "dependencies": {
     "superscalar": "file:../scalars/typescript",
-    "js-yaml": "4.1.1"
+    "js-yaml": "4.1.1",
+    "@superschematic/versiongraph": "file:../versiongraph/typescript"
   },
   "devDependencies": {
     "@types/js-yaml": "4.0.9",

@@ -86,6 +86,11 @@ type Naming struct {
 	// API router imports its request pipeline from.
 	HTTPRuntimeNpmPackage string `toml:"http_runtime_npm_package"`
 
+	// VersionGraphNpmPackage is the TypeScript version-graph runtime (D19):
+	// the engine, its Postgres adapter and the facade base the generated
+	// TypeScript types import when their schema declares a graph.
+	VersionGraphNpmPackage string `toml:"versiongraph_npm_package"`
+
 	// SchemaLanguage is how generated readmes and the schema-file JSON
 	// Schema name the schema language ("generated from <SchemaLanguage>
 	// definitions").
@@ -212,6 +217,9 @@ type PathsConfig struct {
 	SchemaRuntimeGo string `toml:"schema_runtime_go"`
 	// VersionGraphGo holds the version-graph core's Go binding module.
 	VersionGraphGo string `toml:"versiongraph_go"`
+	// VersionGraphTypeScript holds the version-graph runtime's npm package
+	// (its package.json).
+	VersionGraphTypeScript string `toml:"versiongraph_typescript"`
 	// HTTPRuntimeGo holds the http runtime Go module.
 	HTTPRuntimeGo string `toml:"http_runtime_go"`
 	// HTTPRuntimeRust holds the http runtime Rust crate.
@@ -224,15 +232,16 @@ type PathsConfig struct {
 // LocalPaths is PathsConfig resolved against a repository root: every set
 // key as an absolute path, every unset key "".
 type LocalPaths struct {
-	ScalarGo         string
-	ScalarTypeScript string
-	ScalarRust       string
-	SchemaIR         string
-	SchemaRuntimeGo  string
-	VersionGraphGo   string
-	HTTPRuntimeGo    string
-	HTTPRuntimeRust  string
-	Ptr              string
+	ScalarGo               string
+	ScalarTypeScript       string
+	ScalarRust             string
+	SchemaIR               string
+	SchemaRuntimeGo        string
+	VersionGraphGo         string
+	VersionGraphTypeScript string
+	HTTPRuntimeGo          string
+	HTTPRuntimeRust        string
+	Ptr                    string
 }
 
 // LocalPaths resolves the [paths] table against repoRoot.
@@ -244,15 +253,16 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		return filepath.Join(repoRoot, filepath.FromSlash(rel))
 	}
 	return LocalPaths{
-		ScalarGo:         resolve(n.Paths.ScalarGo),
-		ScalarTypeScript: resolve(n.Paths.ScalarTypeScript),
-		ScalarRust:       resolve(n.Paths.ScalarRust),
-		SchemaIR:         resolve(n.Paths.SchemaIR),
-		SchemaRuntimeGo:  resolve(n.Paths.SchemaRuntimeGo),
-		VersionGraphGo:   resolve(n.Paths.VersionGraphGo),
-		HTTPRuntimeGo:    resolve(n.Paths.HTTPRuntimeGo),
-		HTTPRuntimeRust:  resolve(n.Paths.HTTPRuntimeRust),
-		Ptr:              resolve(n.Paths.Ptr),
+		ScalarGo:               resolve(n.Paths.ScalarGo),
+		ScalarTypeScript:       resolve(n.Paths.ScalarTypeScript),
+		ScalarRust:             resolve(n.Paths.ScalarRust),
+		SchemaIR:               resolve(n.Paths.SchemaIR),
+		SchemaRuntimeGo:        resolve(n.Paths.SchemaRuntimeGo),
+		VersionGraphGo:         resolve(n.Paths.VersionGraphGo),
+		VersionGraphTypeScript: resolve(n.Paths.VersionGraphTypeScript),
+		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
+		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
+		Ptr:                    resolve(n.Paths.Ptr),
 	}
 }
 
@@ -267,6 +277,7 @@ func (p PathsConfig) checkRelative() error {
 		{"schema_ir", p.SchemaIR},
 		{"schema_runtime_go", p.SchemaRuntimeGo},
 		{"versiongraph_go", p.VersionGraphGo},
+		{"versiongraph_typescript", p.VersionGraphTypeScript},
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},
 		{"ptr", p.Ptr},
@@ -367,6 +378,7 @@ func Default() Naming {
 		HTTPRuntimeRustCrate:    "superschematic-http-runtime",
 		PtrGoModule:             "github.com/parable-work/superschematic/runtime/schema/go/ptr",
 		HTTPRuntimeNpmPackage:   "@superschematic/http-runtime",
+		VersionGraphNpmPackage:  "@superschematic/versiongraph",
 		SchemaLanguage:          "Superschematic",
 		PackageAuthor:           "superschematic",
 		MetaSchemaURLPrefix:     "superschematic://",
@@ -411,6 +423,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.HTTPRuntimeRustCrate, d.HTTPRuntimeRustCrate)
 	fill(&n.PtrGoModule, d.PtrGoModule)
 	fill(&n.HTTPRuntimeNpmPackage, d.HTTPRuntimeNpmPackage)
+	fill(&n.VersionGraphNpmPackage, d.VersionGraphNpmPackage)
 	fill(&n.SchemaLanguage, d.SchemaLanguage)
 	fill(&n.PackageAuthor, d.PackageAuthor)
 	fill(&n.MetaSchemaURLPrefix, d.MetaSchemaURLPrefix)

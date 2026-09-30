@@ -67,13 +67,20 @@ func TestWriteTypesGolden(t *testing.T) {
 				t.Fatalf("generate: %v", err)
 			}
 
-			// Use a superscalar path inside the temp tree so the computed
-			// relative file: spec is deterministic across machines.
+			// Use superscalar and version-graph paths inside the temp tree so
+			// the computed relative file: specs are deterministic across
+			// machines.
 			tempRoot := t.TempDir()
 			outDir := filepath.Join(tempRoot, tc.service)
-			paths := naming.LocalPaths{ScalarTypeScript: filepath.Join(tempRoot, "scalars", "typescript")}
+			paths := naming.LocalPaths{
+				ScalarTypeScript:       filepath.Join(tempRoot, "scalars", "typescript"),
+				VersionGraphTypeScript: filepath.Join(tempRoot, "versiongraph", "typescript"),
+			}
 			if err := SetScalarLibSpec(output, paths, outDir); err != nil {
 				t.Fatalf("set superscalar spec: %v", err)
+			}
+			if err := SetVersionGraphLibSpec(output, paths, outDir); err != nil {
+				t.Fatalf("set version-graph spec: %v", err)
 			}
 
 			if err := WriteTypes(output, outDir); err != nil {

@@ -1434,8 +1434,28 @@ change sets as abandoned but never a primary line, and reports nonzero
 counts only; pruning uses each kind's declared
 retention; and the facade's sweep writes as `GraphSweepOptions.Actor`, not
 the context user.
-The TypeScript, Rust and Python engines and facades follow and must pass
-the same scenarios. Each change that lands a piece updates this paragraph.
+The TypeScript engine, its Postgres adapter and its facade are built in
+`@superschematic/versiongraph`: the engine, its storage interface, the
+named errors and the canonical rules at `./engine`, the adapter at
+`./postgres`, and the facade base at `./facade`. tsgen writes each graph's
+typed `<Name>Graph` into `versiongraph/<name>.ts` of the TypeScript types,
+which depend on the package the `versiongraph_npm_package` naming key names,
+at `[paths] versiongraph_typescript` when that is set, and CI runs every
+scenario, and every canonical vector against Postgres, through it
+(`make versiongraph-scenarios-ts`). Five rules settled as they were built:
+a canonical row travels as JSON text, as Go's `json.RawMessage` does, so a
+number keeps its digits; the adapter's client returns every column as the
+text Postgres writes, so no driver's type parsing touches a value, and its
+`pg` bindings call only the methods they need, so `pg` is an optional peer
+dependency no entry imports and the core loads without it; durations are
+milliseconds, and `runSweeper` stops when its `AbortSignal` aborts, runs no
+pass when it has already aborted, and lets a pass under way finish, where
+Go's `RunSweeper` cancels that pass through its context; the
+TypeScript facade returns the engine's refs, commits and release pointers,
+since there is no TypeScript ORM to read them typed; and it records its
+writes as the actor it is given, a sweep as its options' actor.
+The Rust and Python engines and facades follow and must pass the same
+scenarios. Each change that lands a piece updates this paragraph.
 
 ## D20. An `EncryptedField<T>` argument encrypts its operation's request body
 
