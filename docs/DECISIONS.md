@@ -1495,9 +1495,41 @@ given another codec, as the TypeScript package's use `JSON.parse`, so a
 number a double does not hold needs a codec that keeps it, or `run`; and
 the package and its crate are version sites but are not published, since a
 wheel needs a build per platform.
-The Python engine and facade follow and must pass the same scenarios.
-Each change that lands a piece of what remains, the Python engine, its
-Postgres adapter and the Python facade, updates this paragraph.
+The Python engine, its Postgres adapter and its facade are built in
+`superschematic-versiongraph`: the engine at
+`superschematic_versiongraph.engine`, its storage protocol at `.storage`,
+the named errors and `error_code` at `.errors`, the canonical rules at
+`.canonical`, the adapter at `.postgres` and the facade base at `.facade`.
+pygen writes each graph's typed `<Name>Graph` into
+`versiongraph_<name>.py` of the Python types package, which depends on the
+distribution the naming key `versiongraph_pypi_dist` names, from a uv path
+source at `[paths] versiongraph_python` when that is set, and imports the
+module `versiongraph_python_module` names. CI runs every scenario, and
+every canonical vector against Postgres, through it
+(`make versiongraph-scenarios-python`), and runs the generated package
+against Postgres in the go job. Seven rules settled as they were built:
+the engine and the adapter are synchronous, the simplest idiomatic API and
+one psycopg 3 serves, and `run_sweeper` stops when its `threading.Event`
+is set, runs no pass when it already is, and lets a pass under way finish;
+a canonical row travels as JSON text read by an exact reader, so a number
+keeps its digits and a lone surrogate reads as U+FFFD, as Go reads it;
+the adapter's client takes Postgres's own `$1` placeholders and returns
+every column as the text Postgres writes, and the psycopg binding runs a
+raw cursor and reads the libpq result, so psycopg's type adaptation
+touches no value; psycopg is the package's `postgres` extra, which no
+module imports until the binding is called, and the binding runs one
+transaction at a time over a connection, as a savepoint when the caller
+holds a transaction on it, and one per pooled connection over a
+`psycopg_pool` pool; durations are `timedelta`s; the facade records its
+writes as the actor it is built with and a sweep as its options' actor,
+returns the engine's refs, commits and release pointers, and reads a typed
+row back through the model's `model_validate_json` with its to-one
+relations empty, as the Rust facade does; and the generated module is not
+imported by the package's `__init__`, so the types load without the
+engine. Every language's engine is now built, Go, TypeScript, Rust and
+Python, and each passes every scenario against Postgres; what stays open
+is schema-epoch transforms (`Materialize` still refuses a commit from a
+newer epoch) and a SQLite adapter for D16's engine.
 
 ## D20. An `EncryptedField<T>` argument encrypts its operation's request body
 

@@ -96,6 +96,13 @@ type Naming struct {
 	// TypeScript types import when their schema declares a graph.
 	VersionGraphNpmPackage string `toml:"versiongraph_npm_package"`
 
+	// VersionGraphPyPIDist and VersionGraphPythonModule are the Python
+	// version-graph runtime (D19): the engine, its Postgres adapter and the
+	// facade base, which the generated Python types depend on and import
+	// when their schema declares a graph.
+	VersionGraphPyPIDist     string `toml:"versiongraph_pypi_dist"`
+	VersionGraphPythonModule string `toml:"versiongraph_python_module"`
+
 	// SchemaLanguage is how generated readmes and the schema-file JSON
 	// Schema name the schema language ("generated from <SchemaLanguage>
 	// definitions").
@@ -227,6 +234,8 @@ type PathsConfig struct {
 	VersionGraphTypeScript string `toml:"versiongraph_typescript"`
 	// VersionGraphRust holds the version graph's Rust engine crate.
 	VersionGraphRust string `toml:"versiongraph_rust"`
+	// VersionGraphPython holds the version graph's Python package.
+	VersionGraphPython string `toml:"versiongraph_python"`
 	// HTTPRuntimeGo holds the http runtime Go module.
 	HTTPRuntimeGo string `toml:"http_runtime_go"`
 	// HTTPRuntimeRust holds the http runtime Rust crate.
@@ -247,6 +256,7 @@ type LocalPaths struct {
 	VersionGraphGo         string
 	VersionGraphTypeScript string
 	VersionGraphRust       string
+	VersionGraphPython     string
 	HTTPRuntimeGo          string
 	HTTPRuntimeRust        string
 	Ptr                    string
@@ -269,6 +279,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		VersionGraphGo:         resolve(n.Paths.VersionGraphGo),
 		VersionGraphTypeScript: resolve(n.Paths.VersionGraphTypeScript),
 		VersionGraphRust:       resolve(n.Paths.VersionGraphRust),
+		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
 		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
 		Ptr:                    resolve(n.Paths.Ptr),
@@ -288,6 +299,7 @@ func (p PathsConfig) checkRelative() error {
 		{"versiongraph_go", p.VersionGraphGo},
 		{"versiongraph_typescript", p.VersionGraphTypeScript},
 		{"versiongraph_rust", p.VersionGraphRust},
+		{"versiongraph_python", p.VersionGraphPython},
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},
 		{"ptr", p.Ptr},
@@ -370,32 +382,34 @@ func (n Naming) ExtensionConfig(name string) (map[string]any, bool) {
 // defaults table: the only place these literals appear.
 func Default() Naming {
 	return Naming{
-		GoModuleRoot:            "example.com/schemas",
-		NpmScope:                "@schemas",
-		PythonTypesModulePrefix: "schemas_types_",
-		PythonSDKModulePrefix:   "schemas_",
-		PythonSDKModuleSuffix:   "_sdk",
-		RustCratePrefix:         "schemas-",
-		ScalarGoModule:          "github.com/parable-work/superscalar/go",
-		ScalarNpmPackage:        "superscalar",
-		ScalarPyPIDist:          "superscalar",
-		ScalarPythonModule:      "superscalar",
-		ScalarRustCrate:         "superscalar",
-		SchemaIRGoModule:        "github.com/parable-work/superschematic/ir",
-		SchemaRuntimeGoModule:   "github.com/parable-work/superschematic/runtime/schema/go",
-		VersionGraphGoModule:    "github.com/parable-work/superschematic/runtime/versiongraph/go",
-		VersionGraphRustCrate:   "superschematic-versiongraph-engine",
-		HTTPRuntimeGoModule:     "github.com/parable-work/superschematic/runtime/http/go",
-		HTTPRuntimeRustCrate:    "superschematic-http-runtime",
-		PtrGoModule:             "github.com/parable-work/superschematic/runtime/schema/go/ptr",
-		HTTPRuntimeNpmPackage:   "@superschematic/http-runtime",
-		VersionGraphNpmPackage:  "@superschematic/versiongraph",
-		SchemaLanguage:          "Superschematic",
-		PackageAuthor:           "superschematic",
-		MetaSchemaURLPrefix:     "superschematic://",
-		MetadataKeyPrefix:       "superschematic.",
-		HistoryActorSetting:     "superschematic.history_actor_id",
-		AuthProvider:            "session",
+		GoModuleRoot:             "example.com/schemas",
+		NpmScope:                 "@schemas",
+		PythonTypesModulePrefix:  "schemas_types_",
+		PythonSDKModulePrefix:    "schemas_",
+		PythonSDKModuleSuffix:    "_sdk",
+		RustCratePrefix:          "schemas-",
+		ScalarGoModule:           "github.com/parable-work/superscalar/go",
+		ScalarNpmPackage:         "superscalar",
+		ScalarPyPIDist:           "superscalar",
+		ScalarPythonModule:       "superscalar",
+		ScalarRustCrate:          "superscalar",
+		SchemaIRGoModule:         "github.com/parable-work/superschematic/ir",
+		SchemaRuntimeGoModule:    "github.com/parable-work/superschematic/runtime/schema/go",
+		VersionGraphGoModule:     "github.com/parable-work/superschematic/runtime/versiongraph/go",
+		VersionGraphRustCrate:    "superschematic-versiongraph-engine",
+		HTTPRuntimeGoModule:      "github.com/parable-work/superschematic/runtime/http/go",
+		HTTPRuntimeRustCrate:     "superschematic-http-runtime",
+		PtrGoModule:              "github.com/parable-work/superschematic/runtime/schema/go/ptr",
+		HTTPRuntimeNpmPackage:    "@superschematic/http-runtime",
+		VersionGraphNpmPackage:   "@superschematic/versiongraph",
+		VersionGraphPyPIDist:     "superschematic-versiongraph",
+		VersionGraphPythonModule: "superschematic_versiongraph",
+		SchemaLanguage:           "Superschematic",
+		PackageAuthor:            "superschematic",
+		MetaSchemaURLPrefix:      "superschematic://",
+		MetadataKeyPrefix:        "superschematic.",
+		HistoryActorSetting:      "superschematic.history_actor_id",
+		AuthProvider:             "session",
 		AuthoringPackages: []string{
 			"@superschematic/api",
 			"@superschematic/db",
@@ -436,6 +450,8 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.PtrGoModule, d.PtrGoModule)
 	fill(&n.HTTPRuntimeNpmPackage, d.HTTPRuntimeNpmPackage)
 	fill(&n.VersionGraphNpmPackage, d.VersionGraphNpmPackage)
+	fill(&n.VersionGraphPyPIDist, d.VersionGraphPyPIDist)
+	fill(&n.VersionGraphPythonModule, d.VersionGraphPythonModule)
 	fill(&n.SchemaLanguage, d.SchemaLanguage)
 	fill(&n.PackageAuthor, d.PackageAuthor)
 	fill(&n.MetaSchemaURLPrefix, d.MetaSchemaURLPrefix)

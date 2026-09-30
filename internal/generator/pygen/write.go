@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 )
 
 // templateData wraps ModuleOutput with rendering-only flags that are derived
@@ -64,12 +65,25 @@ func WriteTypes(output *ModuleOutput, outputDir string) error {
 	}); err != nil {
 		return err
 	}
+	for _, graph := range output.VersionGraphs {
+		graphData := versionGraphFile{Graph: graph, Naming: output.Naming}
+		if err := generateFile("versiongraph.tmpl", filepath.Join(moduleDir, versionGraphFileName(graph)), graphData, output); err != nil {
+			return err
+		}
+	}
 
 	if err := os.WriteFile(filepath.Join(moduleDir, "py.typed"), []byte(""), 0o644); err != nil {
 		return fmt.Errorf("failed to create py.typed marker: %w", err)
 	}
 
 	return nil
+}
+
+// versionGraphFile is what versiongraph.tmpl renders: one graph and the
+// naming its runtime's coordinates come from.
+type versionGraphFile struct {
+	Graph  VersionGraphInfo
+	Naming naming.Naming
 }
 
 // cleanOutputDir removes stale generated module files before regeneration so

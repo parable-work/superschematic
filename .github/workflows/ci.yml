@@ -172,6 +172,14 @@ jobs:
           test -n "$version"
           python -m pip install "pydantic==$version"
 
+      - name: Install uv
+        # pygen's TestVersionGraphFacadeOnPostgres runs the generated Python
+        # facade in runtime/versiongraph/python's uv environment, which uv
+        # builds with maturin.
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+
       - name: Start Postgres
         # The ORM and SQL tests that read SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL
         # and SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL skip without a database.
@@ -205,8 +213,9 @@ jobs:
           SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           # tsgen's TestVersionGraphFacadeOnPostgres runs the generated
-          # TypeScript facade against it, and rustgen's version-graph facade
-          # test builds the generated crate and runs it on it.
+          # TypeScript facade against it, rustgen's version-graph facade test
+          # builds the generated crate and runs it on it, and pygen's runs the
+          # generated Python package on it.
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
