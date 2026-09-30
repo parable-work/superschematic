@@ -258,7 +258,10 @@ registered for several targets; the core does this for `jsonField`,
 
 `Apply(node, args, site)` receives the statically evaluated arguments
 (strings, `float64`, bools, nil, `[]any`, `map[string]any`), after both
-frontends have validated them against `Args`. `registry.DecodeArgs` decodes
+frontends have validated them against `Args`. Only the `null` literal
+evaluates to nil: `[]` and `{}` are an empty `[]any` and `map[string]any`
+from the TypeScript form, as the data forms decode them, so an empty list
+reaches `Args` and the IR as `[]`, not `null`. `registry.DecodeArgs` decodes
 the argument into a Go struct. An `ArgError` (`registry.ArgErrorf`) points
 the TypeScript diagnostic at one argument instead of the decorator.
 
