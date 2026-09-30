@@ -29,20 +29,37 @@ fn run(py: Python<'_>, operation: &str, input: &[u8]) -> PyResult<(bool, String)
 fn call(op: Op, input: &[u8]) -> (bool, String) {
     match catch_unwind(AssertUnwindSafe(|| run_json(op, input))) {
         Ok((output, ok)) => (ok, output),
-        // The operation names are plain ASCII, so the message needs no
-        // escaping.
-        Err(_) => (
-            false,
-            format!(
-                r#"{{"error":{{"code":"internal","message":"{} panicked"}}}}"#,
-                op.name()
-            ),
-        ),
+        Err(_) => (false, panic_document(op)),
     }
+}
+
+/// The error document for a panic in an operation, the one the C ABI
+/// returns: the `internal` code and `<operation> panicked`. The operation
+/// names are plain ASCII, so the message needs no escaping.
+fn panic_document(op: Op) -> String {
+    format!(
+        r#"{{"error":{{"code":"internal","message":"{} panicked"}}}}"#,
+        op.name()
+    )
 }
 
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A panic's document is the C ABI's: the core's error document with
+    /// the internal code, naming the operation.
+    #[test]
+    fn a_panic_is_the_internal_error_document() {
+        assert_eq!(
+            panic_document(Op::ContentHash),
+            r#"{"error":{"code":"internal","message":"content_hash panicked"}}"#
+        );
+    }
 }

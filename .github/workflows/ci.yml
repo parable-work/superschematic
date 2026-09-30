@@ -509,11 +509,12 @@ jobs:
         working-directory: runtime/schema/python
         run: uv run pytest -q
 
-      - name: Version-graph package (fmt / clippy / every vector and the engine's tests that need no database, also on Python 3.9)
+      - name: Version-graph package (fmt / clippy / the binding's unit tests / every vector and the engine's tests that need no database, also on Python 3.9)
         working-directory: runtime/versiongraph/python
         run: |
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
+          cargo test
           uv run pytest -q
           uv run --python 3.9 --isolated pytest -q
 

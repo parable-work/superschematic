@@ -97,15 +97,16 @@ ts:
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
 
-# The version-graph core's Python binding: uv builds the PyO3 extension with
-# maturin into the package's environment, then pytest runs every core vector
-# through it and the engine's tests that need no database, under the default
-# Python and under 3.9, the floor its pyproject.toml declares. The Postgres
-# tests skip here; versiongraph-scenarios-python runs them.
+# The version-graph core's Python binding: cargo test runs the binding's own
+# unit tests, uv builds the PyO3 extension with maturin into the package's
+# environment, then pytest runs every core vector through it and the
+# engine's tests that need no database, under the default Python and under
+# 3.9, the floor its pyproject.toml declares. The Postgres tests skip here;
+# versiongraph-scenarios-python runs them.
 python:
 	cd runtime/schema/python && uv run pytest -q
 	cd runtime/versiongraph/python && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
-		&& uv run pytest -q && uv run --python 3.9 --isolated pytest -q
+		&& cargo test && uv run pytest -q && uv run --python 3.9 --isolated pytest -q
 
 # The version-graph crates' tests run again with serde_json's preserve_order
 # on, which superscalar turns on and Cargo unifies into every crate of a

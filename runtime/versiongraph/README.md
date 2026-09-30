@@ -504,7 +504,7 @@ crate's Rust API, and the binding returns the same documents.
 make versiongraph            # static archive for the Go binding (scripts/versiongraph-archive.sh)
 make rust                    # fmt, clippy (native and wasm32) and cargo test, then cargo test again with serde_json's preserve_order
 make ts                      # among the TypeScript packages: the wasm build, the package, every vector through it
-make python                  # among the Python packages: the PyO3 extension, every vector through the package
+make python                  # among the Python packages: the binding's unit tests, the PyO3 extension, every vector through the package
 cd runtime/versiongraph/go && go test ./...
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
