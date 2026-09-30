@@ -45,6 +45,7 @@ setup:
 	cd runtime/versiongraph/typescript && bun install
 	cd runtime/engine/typescript && bun install
 	cd runtime/schema/python && uv sync
+	cd runtime/versiongraph/python && uv sync
 
 build: go-build $(BIN)
 
@@ -95,8 +96,14 @@ ts:
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
 
+# The version-graph core's Python binding: uv builds the PyO3 extension with
+# maturin into the package's environment, then pytest runs every core vector
+# through it, under the default Python and under 3.9, the floor its
+# pyproject.toml declares.
 python:
 	cd runtime/schema/python && uv run pytest -q
+	cd runtime/versiongraph/python && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+		&& uv run pytest -q && uv run --python 3.9 --isolated pytest -q
 
 # The version-graph crates' tests run again with serde_json's preserve_order
 # on, which superscalar turns on and Cargo unifies into every crate of a
@@ -182,6 +189,7 @@ fmt:
 	cd runtime/http/rust && cargo fmt
 	cd runtime/versiongraph/rust && cargo fmt
 	cd runtime/versiongraph/rust-engine && cargo fmt
+	cd runtime/versiongraph/python && cargo fmt
 
 clean:
 	rm -rf bin

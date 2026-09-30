@@ -485,9 +485,10 @@ jobs:
 
       - name: Install Rust toolchain
         # The superscalar Python package is built from the checkout by
-        # maturin when uv syncs the runtime's dependencies.
+        # maturin when uv syncs the runtime's dependencies, and so is the
+        # version-graph core's binding.
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy
           rustup default "$RUST_VERSION"
 
       - name: Build the superscalar dependency
@@ -496,6 +497,14 @@ jobs:
       - name: pytest
         working-directory: runtime/schema/python
         run: uv run pytest -q
+
+      - name: Version-graph core binding (fmt / clippy / every vector through the package, also on Python 3.9)
+        working-directory: runtime/versiongraph/python
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          uv run pytest -q
+          uv run --python 3.9 --isolated pytest -q
 
   rust:
     name: rust (http runtime crate)
