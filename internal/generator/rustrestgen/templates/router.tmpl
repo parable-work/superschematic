@@ -19,7 +19,15 @@ use std::sync::Arc;
 pub struct RouterState {
     pub implementations: Implementations,
 }
-
+{{ if .ManualEndpoints }}
+/// Mounts every operation except those declared @manualRouteRegistration,
+/// which the service mounts itself by adding a route for each to the
+/// returned router:
+///
+{{- range .ManualEndpoints }}
+/// - `{{ toUpper .Method }} {{ .Path }}` ({{ .Namespace }}.{{ .Name }})
+{{- end }}
+{{- end }}
 pub fn build_router(implementations: Implementations) -> Router {
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();

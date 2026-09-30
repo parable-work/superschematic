@@ -73,17 +73,20 @@ func TestEncryptedOperationsAreRefused(t *testing.T) {
 	}
 }
 
-// TestEncryptedManualOperationReachesItsImplementation: an encrypted
-// operation declared @manualRouteRegistration builds. The Rust router
-// mounts it as it mounts every operation and hands the request body, the
-// envelope, to the implementation, which decrypts it.
-func TestEncryptedManualOperationReachesItsImplementation(t *testing.T) {
+// TestEncryptedManualOperationIsLeftToTheService: an encrypted operation
+// declared @manualRouteRegistration builds. The Rust router does not mount
+// it, so the service adds its route and decrypts the envelope there
+// (TestNestedArraysAPICrateBuildsAndRoutes runs such a route).
+func TestEncryptedManualOperationIsLeftToTheService(t *testing.T) {
 	output, err := generateSecretAPI(secretAPI(true, false, false, true))
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if len(output.Endpoints) != 1 || output.Endpoints[0].Name != "saveSecret" || !output.Endpoints[0].HasInput {
-		t.Errorf("endpoints %+v; want saveSecret with its body", output.Endpoints)
+	if len(output.Endpoints) != 0 || len(output.Namespaces) != 0 {
+		t.Errorf("mounted endpoints %+v in namespaces %v; want none", output.Endpoints, output.Namespaces)
+	}
+	if len(output.ManualEndpoints) != 1 || output.ManualEndpoints[0].Name != "saveSecret" {
+		t.Errorf("manual endpoints %+v; want saveSecret", output.ManualEndpoints)
 	}
 }
 

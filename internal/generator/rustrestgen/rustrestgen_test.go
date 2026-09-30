@@ -145,8 +145,27 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 	return generated
 }
 
+// TestWriteRustAPIGolden pins the crate for fixture-api. Its
+// tenant.customHandler is @manualRouteRegistration, so the router does not
+// mount it and TenantImplementation has no method for it, as the Go server
+// leaves it out of RegisterRoutes and the TypeScript server out of its
+// implementation interfaces. build_router's doc names its method and path
+// for the service, which adds the route to the router it returns.
 func TestWriteRustAPIGolden(t *testing.T) {
-	writeGoldenAPI(t, "fixture-api", generateFixtureAPIRust(t))
+	generated := writeGoldenAPI(t, "fixture-api", generateFixtureAPIRust(t))
+
+	router := generated["src/router.rs"]
+	for _, mounted := range []string{"handle_tenant_custom_handler", `"/api/tenant/custom-handler"`} {
+		if strings.Contains(router, mounted) {
+			t.Errorf("router.rs mounts the manual operation tenant.customHandler: it contains %q", mounted)
+		}
+	}
+	if want := "/// - `POST /api/tenant/custom-handler` (tenant.customHandler)"; !strings.Contains(router, want) {
+		t.Errorf("router.rs does not name the manual operation for the service: missing %q", want)
+	}
+	if interfaces := generated["src/interfaces.rs"]; strings.Contains(interfaces, "fn custom_handler") {
+		t.Error("interfaces.rs declares a method for the manual operation tenant.customHandler")
+	}
 }
 
 // rustFnName matches the name of every generated Rust function, hyphens
@@ -204,8 +223,10 @@ func TestGenerateFixtureAPIShape(t *testing.T) {
 	if output.CrateName != "schemas-fixture-api-api" {
 		t.Errorf("CrateName = %q, want schemas-fixture-api-api", output.CrateName)
 	}
-	if len(output.Endpoints) != 6 {
-		t.Fatalf("expected 6 endpoints, got %d", len(output.Endpoints))
+	// Five mounted operations; the sixth, tenant.customHandler, is
+	// @manualRouteRegistration.
+	if len(output.Endpoints) != 5 {
+		t.Fatalf("expected 5 endpoints, got %d", len(output.Endpoints))
 	}
 	if len(output.Namespaces) != 2 || output.Namespaces[0] != "session" || output.Namespaces[1] != "tenant" {
 		t.Fatalf("expected [session tenant] namespace, got %v", output.Namespaces)
@@ -234,5 +255,12 @@ func TestWriteScaffolds(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(scaffoldsDir, "README.md")); err != nil {
 		t.Fatalf("expected README.md scaffold: %v", err)
+	}
+	// The manual tenant.customHandler has no trait method to implement.
+	if _, err := os.Stat(filepath.Join(scaffoldsDir, "tenant", "list_tenants.rs")); err != nil {
+		t.Fatalf("expected tenant/list_tenants.rs scaffold: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(scaffoldsDir, "tenant", "custom_handler.rs")); !os.IsNotExist(err) {
+		t.Errorf("custom_handler.rs scaffold for the manual operation: stat err %v, want not exist", err)
 	}
 }
