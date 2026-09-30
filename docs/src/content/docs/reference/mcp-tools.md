@@ -330,7 +330,9 @@ declaration, else the default: the core's behaviors (`Workflow`,
 registers, name none.
 Its argument schemas are the generators':
 `runtime/engine/testdata/tool_parameters_parity.json` holds them to
-`toolsutil`. `runtime/engine/README.md` ("Tools", "MCP") has the rest.
+`toolsutil`. `runtime/engine/README.md` ("Tools", "MCP") has the rest, and
+[the engine guide](/superschematic/guides/engine/#mcp-tools) lists and calls
+them on a running server.
 
 ## Rules an extension adds
 

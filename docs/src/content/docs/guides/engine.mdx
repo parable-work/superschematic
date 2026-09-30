@@ -1,0 +1,608 @@
+---
+title: The engine
+description: Run a schema with no generated code. Publish it into @superschematic/engine as JSON, keep its instances and an event log in one SQLite file, and serve them over HTTP, an event stream and MCP, with the Workflow, Comments and Revisions behaviors.
+sidebar:
+  order: 6
+---
+
+import Snippet from '../../../components/Snippet.astro';
+
+The other guides generate code from a schema. `@superschematic/engine`
+runs a schema with no generated code. Your server hands it the schema as
+JSON while it runs; the engine versions the schema, keeps its instances
+and an event log in one SQLite file, and serves them over HTTP, a
+server-sent event stream and MCP. A type in the schema composes
+behaviors: code that adds fields, operations, checks and storage to it,
+such as a state machine, comments or reviewed revisions.
+
+This guide builds `examples/engine-notes`, a notes server. A note moves
+from draft through review to published, collects comments and keeps its
+revisions, and a reader can propose a change for an editor to approve.
+CI runs the example's end-to-end test on Node.js and on Bun on every pull
+request. The
+[engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md)
+is the reference for everything below: every route, status, option and
+rule.
+
+## What the engine is
+
+- A TypeScript library for Node.js 24 and Bun. Your server opens it in
+  its own process; the engine has no server or process of its own.
+- One SQLite file, through the runtime's built-in `node:sqlite` or
+  `bun:sqlite`. There is no native addon and no database server.
+- One process writes the file. The engine caches each schema version's
+  validator and behaviors in the process and announces new events in the
+  process, and nothing coordinates either across processes. Run one server
+  process per file.
+- A schema is one JSON document of kind `General`, with no `imports` and
+  no operation sets. Every schema has the operations `create`, `get`,
+  `list`, `update` and `delete`, and its behaviors add their own.
+- It has no roles and no default policy. Your server says who each caller
+  is and what each caller may do.
+
+It is not a database server that several processes share, and it does not
+run on Postgres. D16 in
+[docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
+records the design, what is built and what is still to come.
+
+## Set up
+
+Nothing is published yet, so the example links the engine from the
+checkout. From the repository root, after
+[setting up the checkout](/superschematic/start/prerequisites/#set-up-the-checkout)
+with `make setup`:
+
+```sh
+examples/engine-notes/scripts/check.sh
+```
+
+It builds the schema runtime, the HTTP runtime and the engine (`bun
+install --frozen-lockfile` and `bun run build` in each), links them into
+the example's `node_modules` (`scripts/link.sh`), type-checks the example,
+and runs its end-to-end test with `node --test` and with `bun test`. The
+last line it prints is `engine-notes: ok`.
+
+`scripts/link.sh` links `@superschematic/engine`, and, from the engine's
+own install, the packages the example imports: `@superschematic/http-runtime`,
+`hono`, `@hono/node-server` and `@modelcontextprotocol/client`, and
+TypeScript and the Node.js types for the type-check. Each resolves to the
+engine's copy, so the engine and the example share one Hono. The engine
+needs `@superschematic/schema-runtime`, `@superschematic/schema-ir`,
+`@superschematic/http-runtime` and `superscalar` beside it, which its build
+links into its own `node_modules`. Its `./http` entry point also needs
+`hono`, and its `./mcp` entry point `hono` and
+`@modelcontextprotocol/server`.
+
+## The schema
+
+The engine reads a schema in the JSON data form of a schema file, the form
+[`superschematic format --to=json`](/superschematic/reference/cli/) writes
+from a TypeScript or YAML schema file. The notes schema:
+
+<Snippet example="engine-notes" file="schemas/notes.schema.json" />
+
+- `name` keys the schema's versions and names it in every route and tool.
+- The instance type, the one whose instances the engine stores, is the
+  type named like the schema or, as here, the only type.
+- A field's type is a builtin primitive, a scalar, or an enum or type of
+  the document, alone or as a list. The engine refuses a union or a map,
+  which the schema runtime does not check.
+- `behaviors` lists what `Note` composes, with each one's config.
+  `Workflow` keeps a `status` and moves it only along the listed
+  transitions; moving a note from review to published, or from published
+  to archived, needs the permission `notes.publish`. `Comments` keeps
+  comments on the note. `Revisions` records a revision at every change,
+  and its `review` config lets a caller propose a change that someone
+  holding `notes.review` approves or rejects.
+
+The engine checks a document with the strict loader of
+`@superschematic/schema-runtime`, against the core binary's
+[`json-schema`](/superschematic/reference/cli/) output by default, which
+admits the core's behaviors. A deployment whose binary registers
+more behaviors passes that binary's output as the `metaSchema` option.
+
+## Open the engine and publish the schema
+
+<Snippet example="engine-notes" file="src/server.ts" symbol={['notesSchema', 'deployer', 'openNotes']} />
+
+`openEngine` takes the file's path and the access policy (next section),
+creates the file if it is absent and brings it up to the engine's
+migrations. `define` stores the document as the draft of its name, and
+`publish` makes the draft the next live version. Publishing a draft
+identical to the live version mints nothing, so the server publishes its
+schema file every time it starts.
+
+### The compatibility rule
+
+A new version may change a schema only in ways every instance the live
+version accepts still satisfies. A new optional field, a new enum value, a
+looser bound and a required field made optional are allowed. A removed or
+renamed field, a new required field, a tighter bound and another type are
+refused: the engine throws `IncompatibleChangeError`, and the HTTP API
+answers 409 `incompatible_change`. To make such a change, publish it under
+a new schema name. Each behavior decides which changes to its own config a
+new version may make. The README's
+[compatibility rule](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#the-compatibility-rule)
+has the full table.
+
+The end-to-end test restarts the server on the same file, first with a
+schema that drops `tags`, then with one that adds an optional `pinned`:
+
+<Snippet example="engine-notes" file="test/notes.test.ts" from="// Removing a field" to="engine = openNotes(path, withPinned);" />
+
+The first is refused and the server would not start; the second becomes
+version 2, and every stored note stays as it was. The same rule holds for
+a draft defined over HTTP; see
+[Change the schema over HTTP](#change-the-schema-over-http).
+
+## Callers and the access policy
+
+<Snippet example="engine-notes" file="src/auth.ts" symbol={['callers', 'authenticate', 'policy']} />
+
+- The HTTP runtime's authentication gate calls `authenticate` on every
+  route. It returns the caller, a principal with a `subject` and
+  `permissions`, or `null`, which answers 401. A real server verifies a
+  signed token or looks a session up; the example reads a fixed table.
+- The engine asks `policy` before every read and write, with the
+  principal, the action (`read`, `write`, `define` or `publish`), the
+  namespace, the schema and, for a behavior operation, the operation's
+  name. Only `true` allows; anything else is 403 `forbidden`. The policy
+  runs synchronously. There is no default: `allowAll` is there for tests.
+- A behavior operation asks `write` when it writes and `read` when it only
+  reads. This policy lets a reader call `comment` and `propose`, and
+  nothing else that writes.
+- Where a behavior limits who may do something, its config names a
+  permission and the behavior asks the engine's permission matcher. That
+  is the HTTP runtime's `hasAnyPermission` unless you pass another, so
+  `notes` covers `notes.publish` and `notes.review`. Workflow and
+  Revisions check those after the policy has allowed the write. A server
+  that replaces the matching rule passes the same `permissionMatcher` to
+  `openEngine` and to the HTTP options.
+
+## Serve it
+
+<Snippet example="engine-notes" file="src/server.ts" symbol={['notesApp', 'listen']} />
+
+- `engineApp` serves the HTTP API and the event stream. Its routes carry
+  the namespace and the schema name as path parameters and look them up
+  per request, so publishing a version mounts nothing. Every route goes
+  through the HTTP runtime: the request id, the rate limit, the timeout,
+  the body limit, the authentication gate, the `{data, meta}` envelope and
+  RFC 9457 problem documents.
+- `engineMcp` serves the MCP endpoint at `/namespaces/{namespace}/mcp`,
+  with the same options.
+- There is one namespace, `default`, unless you configure more with the
+  `namespaces` option.
+
+Start the server from the example's directory:
+
+```sh
+cd examples/engine-notes
+node src/main.ts
+```
+
+```
+engine-notes: http://127.0.0.1:8787/api, database notes.db
+```
+
+`bun src/main.ts` runs the same server on Bun. Ctrl-C stops it. The
+commands below run in a second terminal, from `examples/engine-notes`, and
+print JSON with `jq`. The live schema:
+
+```sh
+API=http://127.0.0.1:8787/api/namespaces/default
+curl -s $API/schemas -H 'authorization: Bearer carol-token' | jq .data
+```
+
+```json
+[
+  {
+    "namespace": "default",
+    "name": "notes",
+    "liveVersion": 1,
+    "hasDraft": false
+  }
+]
+```
+
+## Instances
+
+Create a note as alice, an author:
+
+```sh
+curl -s $API/schemas/notes/instances \
+  -H 'authorization: Bearer alice-token' -H 'content-type: application/json' \
+  -d '{"id": "launch", "data": {"title": "Launch", "tags": ["launch"]}}' | jq
+```
+
+```json
+{
+  "data": {
+    "namespace": "default",
+    "schema": "notes",
+    "id": "launch",
+    "schemaNamespace": "default",
+    "version": 1,
+    "seq": 1,
+    "data": {
+      "title": "Launch",
+      "tags": [
+        "launch"
+      ],
+      "status": "draft",
+      "commentCount": 0,
+      "revision": 1
+    },
+    "createdAt": 1790790700324,
+    "createdBy": "alice",
+    "updatedAt": 1790790700324,
+    "updatedBy": "alice"
+  },
+  "meta": {
+    "requestId": "0ab67d9c-70d3-442b-b5f2-7c9377174d23"
+  }
+}
+```
+
+The response is 201. The note's `data` holds its own fields and, after
+them, the fields its behaviors add: Workflow's `status`, Comments'
+`commentCount` and Revisions' `revision`. Those are read-only; a create or
+an update that sets one is 422. `seq` is the sequence of the note's last
+event, and the response sends it as the `ETag`, `"1"`. Without an `id`, the
+engine makes a random UUID.
+
+carol, a reader, may not create one:
+
+```sh
+curl -s $API/schemas/notes/instances \
+  -H 'authorization: Bearer carol-token' -H 'content-type: application/json' \
+  -d '{"data": {"title": "Mine"}}' | jq
+```
+
+```json
+{
+  "type": "about:blank",
+  "title": "Forbidden",
+  "status": 403,
+  "detail": "carol may not write notes in namespace default",
+  "code": "forbidden",
+  "requestId": "4dd339ca-b651-4f99-9256-f3d958e8fddb"
+}
+```
+
+An update is a JSON merge patch (RFC 7386): a member replaces the note's
+member, a nested object merges, `null` removes the member, and a list
+replaces the list. `If-Match` names the sequence you last read; the engine
+checks it inside the write, and answers 412 `seq_mismatch` when the note
+has moved on since.
+
+```sh
+curl -s -X PATCH $API/schemas/notes/instances/launch \
+  -H 'authorization: Bearer alice-token' -H 'content-type: application/merge-patch+json' \
+  -H 'if-match: "1"' -d '{"body": "Ships in the fall.", "tags": null}' | jq .data.data
+```
+
+```json
+{
+  "title": "Launch",
+  "body": "Ships in the fall.",
+  "status": "draft",
+  "commentCount": 0,
+  "revision": 2
+}
+```
+
+`GET $API/schemas/notes/instances` lists notes in creation order, a page
+at a time (`limit`, and the `next` cursor as `cursor`), `GET` on a note
+reads it, and `DELETE` removes it.
+
+## Behaviors
+
+Each behavior operation is a route:
+`POST .../instances/{id}/operations/{operation}`, with the operation's
+parameters as the body and an optional `If-Match`. The README's
+[core behaviors](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#core-behaviors)
+section lists every operation, guard and config change of each. The core
+also declares `Dependencies` and `Links`, which reach other instances; the
+example does not use them.
+
+### Workflow
+
+alice sends the note to review:
+
+```sh
+curl -s $API/schemas/notes/instances/launch/operations/transition \
+  -H 'authorization: Bearer alice-token' -H 'content-type: application/json' \
+  -H 'if-match: "2"' -d '{"to": "review"}' | jq .data
+```
+
+```json
+{
+  "from": "draft",
+  "to": "review"
+}
+```
+
+The move from review to published names `notes.publish`, which alice does
+not hold. The policy lets her write, and Workflow refuses the move:
+
+```sh
+curl -s $API/schemas/notes/instances/launch/operations/transition \
+  -H 'authorization: Bearer alice-token' -H 'content-type: application/json' \
+  -d '{"to": "published"}' | jq
+```
+
+```json
+{
+  "type": "about:blank",
+  "title": "Forbidden",
+  "status": 403,
+  "detail": "alice may not move notes launch from review to published: the transition needs permission notes.publish",
+  "code": "forbidden",
+  "requestId": "f6949e8e-dea0-4968-a8d3-6a3d386bf177"
+}
+```
+
+bob, an editor, holds `notes`, which covers it:
+
+```sh
+curl -s $API/schemas/notes/instances/launch/operations/transition \
+  -H 'authorization: Bearer bob-token' -H 'content-type: application/json' \
+  -d '{"to": "published"}' | jq .data
+```
+
+```json
+{
+  "from": "review",
+  "to": "published"
+}
+```
+
+A transition the config does not list is 409 `vetoed`, and a state it
+does not name is 400 `invalid_argument`.
+
+### Comments
+
+```sh
+curl -s $API/schemas/notes/instances/launch/operations/comment \
+  -H 'authorization: Bearer carol-token' -H 'content-type: application/json' \
+  -d '{"body": "Which fall?"}' | jq .data
+```
+
+```json
+{
+  "id": 1,
+  "body": "Which fall?",
+  "createdBy": "carol",
+  "createdAt": 1790790700450
+}
+```
+
+A comment can reply to another (`replyTo`), and `listComments` pages
+through them.
+
+### Revisions
+
+carol cannot change the note, but she can propose a change. The proposal
+is checked as the update would be, and changes nothing yet:
+
+```sh
+curl -s $API/schemas/notes/instances/launch/operations/propose \
+  -H 'authorization: Bearer carol-token' -H 'content-type: application/json' \
+  -d '{"patch": {"body": "Ships on October 1."}, "note": "Adds the date."}' | jq .data
+```
+
+```json
+{
+  "id": 1,
+  "patch": {
+    "body": "Ships on October 1."
+  },
+  "note": "Adds the date.",
+  "base": 2,
+  "state": "pending",
+  "createdBy": "carol",
+  "createdAt": 1790790700466
+}
+```
+
+bob's `notes` covers `notes.review`, so he may approve it. The approval
+applies the patch with the same validation and guards as an update, and
+records revision 3 with the proposal's id:
+
+```sh
+curl -s $API/schemas/notes/instances/launch/operations/approve \
+  -H 'authorization: Bearer bob-token' -H 'content-type: application/json' \
+  -d '{"proposal": 1}' | jq .data
+```
+
+```json
+{
+  "id": 1,
+  "patch": {
+    "body": "Ships on October 1."
+  },
+  "note": "Adds the date.",
+  "base": 2,
+  "state": "approved",
+  "createdBy": "carol",
+  "createdAt": 1790790700466,
+  "reviewedBy": "bob",
+  "reviewedAt": 1790790700481,
+  "revision": 3
+}
+```
+
+```sh
+curl -s $API/schemas/notes/instances/launch -H 'authorization: Bearer carol-token' | jq .data.data
+```
+
+```json
+{
+  "title": "Launch",
+  "body": "Ships on October 1.",
+  "status": "published",
+  "commentCount": 1,
+  "revision": 3
+}
+```
+
+`reject` settles a proposal without applying it, `listProposals` and
+`listRevisions` page through them, and a revision's `data` is the note's
+own fields as that change left them.
+
+### Your own behaviors
+
+An extension adds a behavior in two halves. The compiler half is a JSON
+declaration its Go package registers; the binary's
+[`behaviors --out`](/superschematic/reference/cli/) command copies it into
+the npm package that implements it. The engine half is a
+`BehaviorImplementation`, built with `defineBehavior`: a handler per
+operation, a reader per field, guards, and migrations for its own
+storage. A server registers it with `openEngine({ behaviors, metaSchema })`,
+where `metaSchema` is the extension binary's `json-schema` output, which
+declares it. `acme.Rating` in `examples/acme-schematic` is the worked
+example, and
+[Write an extension](/superschematic/extending/write-an-extension/#a-behavior)
+walks through it.
+
+## The event log
+
+Every write appends one event in its own transaction: a create, an update,
+a delete, a behavior operation that writes, and a publish. The cursor
+orders the whole log:
+
+```sh
+curl -s "$API/events?after=0" -H 'authorization: Bearer carol-token' \
+  | jq -c '.data.events[] | [.cursor, .kind, .actor, .change.operation]'
+```
+
+```
+[1,"publish","engine-notes",null]
+[2,"create","alice",null]
+[3,"update","alice",null]
+[4,"operation","alice","transition"]
+[5,"operation","bob","transition"]
+[6,"operation","carol","comment"]
+[7,"operation","carol","propose"]
+[8,"operation","bob","approve"]
+```
+
+A page is `{events, next, more}`; read on with `after` set to `next`.
+`schema` and `instanceId` narrow it, and events of schemas the caller may
+not read are left out. An event's `change` is the instance for a create,
+the merge patch for an update, and `{behavior, operation, params, patch}`
+for an operation, so applying the changes in order gives the note as a
+read returns it.
+
+With `Accept: text/event-stream` the same route streams. It replays from
+`after` (or `Last-Event-ID`, which a reconnecting `EventSource` sends),
+then waits and sends each event as it commits:
+
+```sh
+curl -sN "$API/events?after=5" -H 'accept: text/event-stream' -H 'authorization: Bearer carol-token'
+```
+
+```
+: open
+
+id: 6
+data: {"cursor":6,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":5,"version":1,"actor":"carol","at":1790790700450,"change":{"behavior":"Comments","operation":"comment","params":{"body":"Which fall?"},"patch":{"commentCount":1}}}
+
+id: 7
+data: {"cursor":7,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":6,"version":1,"actor":"carol","at":1790790700466,"change":{"behavior":"Revisions","operation":"propose","params":{"patch":{"body":"Ships on October 1."},"note":"Adds the date."},"patch":{}}}
+
+id: 8
+data: {"cursor":8,"kind":"operation","namespace":"default","schema":"notes","instanceId":"launch","seq":7,"version":1,"actor":"bob","at":1790790700481,"change":{"behavior":"Revisions","operation":"approve","params":{"proposal":1},"patch":{"body":"Ships on October 1.","revision":3}}}
+
+: keepalive
+```
+
+While it waits it sends a `: keepalive` comment every five seconds. Stop
+it with Ctrl-C. The end-to-end test reads the stream from a cursor, then
+adds a comment and receives its event.
+
+## MCP tools
+
+The MCP endpoint serves one tool per operation of every live schema the
+caller may read, and three schema tools: `list_schemas`, `describe_schema`
+and `define_schema`. A tool's name is the schema's and the operation's,
+in snake case: `notes_create`, `notes_transition`, `notes_list_comments`.
+A tool the policy refuses the caller is left out of the caller's list, so
+carol, a reader, sees these:
+
+```sh
+curl -s $API/mcp -H 'authorization: Bearer carol-token' -H 'content-type: application/json' \
+  -H 'accept: application/json, text/event-stream' \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}' \
+  | sed -n 's/^data: //p' | jq -r '.result.tools[].name'
+```
+
+```
+list_schemas
+describe_schema
+define_schema
+notes_get
+notes_list
+notes_comment
+notes_list_comments
+notes_list_revisions
+notes_propose
+notes_list_proposals
+```
+
+The schema tools name no schema until they are called, so everyone lists
+them and the policy answers the call. No tool publishes: a draft that
+`define_schema` stores goes live only through the HTTP publish route.
+
+An MCP client connects to `http://127.0.0.1:8787/api/namespaces/default/mcp`
+with the header `Authorization: Bearer <token>`. The end-to-end test uses
+the official TypeScript client:
+
+<Snippet example="engine-notes" file="test/notes.test.ts" symbol="mcp" />
+
+<Snippet example="engine-notes" file="test/notes.test.ts" from="const read = " to="problem.code, 'forbidden'" />
+
+A call the engine refuses is a tool error that carries the problem
+document the HTTP API answers with.
+
+## Change the schema over HTTP
+
+dana holds `schemas`, so the policy lets her define drafts
+(`POST $API/schemas`, the document as the body) and publish them
+(`POST $API/schemas/notes/publish`). A draft that adds a required field is
+refused, since a note the live version accepts need not have it:
+
+```sh
+jq '.types.Note.fields += [{"name": "owner", "typeRef": {"name": "string"}, "required": true}]' schemas/notes.schema.json \
+  | curl -s $API/schemas -H 'authorization: Bearer dana-token' -H 'content-type: application/json' -d @- \
+  | jq '{status, code, changes: .details.changes}'
+```
+
+```json
+{
+  "status": 409,
+  "code": "incompatible_change",
+  "changes": [
+    {
+      "path": "Note.owner",
+      "message": "field Note.owner is added as required"
+    }
+  ]
+}
+```
+
+A draft the rule allows is stored, and the publish route makes it the
+live version. This server publishes its schema file each time it starts,
+so change the file rather than the live version: after a version with a
+field the file lacks goes live over HTTP, the next start refuses the file.
+
+## Where to go next
+
+- The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md):
+  the storage, the routes and statuses, the event stream, the describe and
+  tools documents, and the behavior interface.
+- [Write an extension](/superschematic/extending/write-an-extension/#a-behavior):
+  declare and implement a behavior of your own.
+- [MCP tools](/superschematic/reference/mcp-tools/#the-engine): how the
+  engine's tools match the ones the SDK generators write.

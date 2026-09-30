@@ -7,7 +7,7 @@
 // attaches every comment above a declaration to it as its description.
 
 export interface Selection {
-  /** Path under examples/acme-shop, for error messages. */
+  /** Path under examples/, such as acme-shop/go/auth.go, for error messages. */
   file: string;
   /** One or more top-level declarations: `Price`, `NewHandler`, or a Go method as `Products.GetProduct`. */
   symbol?: string | string[];
@@ -47,7 +47,7 @@ function declaration(lines: string[], name: string, file: string): string[] {
   const pattern = headerPattern(name);
   const header = lines.findIndex(line => pattern.test(line));
   if (header < 0) {
-    throw new Error(`Snippet: no top-level declaration named ${name} in examples/acme-shop/${file}`);
+    throw new Error(`Snippet: no top-level declaration named ${name} in examples/${file}`);
   }
   // Comments, decorators and Rust attributes directly above belong to it.
   let start = header;
@@ -64,7 +64,7 @@ function declaration(lines: string[], name: string, file: string): string[] {
   } else if (opensBlock.test(lines[header])) {
     end = lines.findIndex((line, i) => i > header && closesAtColumnZero.test(line));
     if (end < 0) {
-      throw new Error(`Snippet: ${name} in examples/acme-shop/${file} never closes at column 0`);
+      throw new Error(`Snippet: ${name} in examples/${file} never closes at column 0`);
     }
   }
   return lines.slice(start, end + 1);
@@ -73,14 +73,14 @@ function declaration(lines: string[], name: string, file: string): string[] {
 function between(lines: string[], from: string, to: string | undefined, file: string): string[] {
   const start = lines.findIndex(line => line.includes(from));
   if (start < 0) {
-    throw new Error(`Snippet: no line contains ${JSON.stringify(from)} in examples/acme-shop/${file}`);
+    throw new Error(`Snippet: no line contains ${JSON.stringify(from)} in examples/${file}`);
   }
   if (to === undefined) {
     return lines.slice(start, start + 1);
   }
   const offset = lines.slice(start).findIndex(line => line.includes(to));
   if (offset < 0) {
-    throw new Error(`Snippet: no line after ${JSON.stringify(from)} contains ${JSON.stringify(to)} in examples/acme-shop/${file}`);
+    throw new Error(`Snippet: no line after ${JSON.stringify(from)} contains ${JSON.stringify(to)} in examples/${file}`);
   }
   return lines.slice(start, start + offset + 1);
 }

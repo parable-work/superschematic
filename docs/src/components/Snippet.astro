@@ -1,20 +1,22 @@
 ---
-// Quotes a file of examples/acme-shop, read when the site builds, so the code
-// on a page is the code that example builds and tests
-// (examples/acme-shop/scripts/check.sh). See src/lib/snippet.ts for how a
-// page picks the part it quotes.
+// Quotes a file of an example, read when the site builds, so the code on a
+// page is the code that example builds and tests: examples/acme-shop
+// (scripts/check.sh there), the default, or examples/engine-notes
+// (scripts/check.sh there). See src/lib/snippet.ts for how a page picks the
+// part it quotes.
 //
-// Files under testdata/generated/ are committed copies of the build's output; the
-// title shows them where a reader's own build writes them, under
-// schemas/dist/. Files under testdata/generated/logs/ are the output of the
-// commands the pages show, and carry no title.
+// Files under acme-shop's testdata/generated/ are committed copies of the
+// build's output; the title shows them where a reader's own build writes
+// them, under schemas/dist/. Files under testdata/generated/logs/ are the
+// output of the commands the pages show, and carry no title.
 import { Code } from '@astrojs/starlight/components';
 import { extract } from '../lib/snippet';
 
 const files = import.meta.glob(
   [
     '../../../examples/acme-shop/**/*.{ts,go,sql,toml,json,mod,sh,txt,py,rs}',
-    '!../../../examples/acme-shop/**/node_modules/**',
+    '../../../examples/engine-notes/**/*.{ts,json,sh}',
+    '!../../../examples/*/**/node_modules/**',
     '!../../../examples/acme-shop/schemas/dist/**',
     '!../../../examples/acme-shop/rust/target/**',
   ],
@@ -35,7 +37,9 @@ const languages: Record<string, string> = {
 };
 
 interface Props {
-  /** Path under examples/acme-shop. */
+  /** The example under examples/ the file belongs to. */
+  example?: 'acme-shop' | 'engine-notes';
+  /** Path under the example. */
   file: string;
   symbol?: string | string[];
   from?: string;
@@ -47,12 +51,12 @@ interface Props {
   mark?: string | string[];
 }
 
-const { file, symbol, from, to, lang, title, mark } = Astro.props;
-const source = files[`../../../examples/acme-shop/${file}`];
+const { example = 'acme-shop', file, symbol, from, to, lang, title, mark } = Astro.props;
+const source = files[`../../../examples/${example}/${file}`];
 if (source === undefined) {
-  throw new Error(`Snippet: examples/acme-shop/${file} does not exist`);
+  throw new Error(`Snippet: examples/${example}/${file} does not exist`);
 }
-const code = extract(source, { file, symbol, from, to });
+const code = extract(source, { file: `${example}/${file}`, symbol, from, to });
 const extension = file.split('.').pop() ?? '';
 const logs = 'testdata/generated/logs/';
 const generated = 'testdata/generated/';

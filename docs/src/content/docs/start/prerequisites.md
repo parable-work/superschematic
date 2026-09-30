@@ -22,7 +22,7 @@ The versions are the pins in `tools.env`, which CI reads too.
 | A C compiler | any | The CLI and generated Go code link superscalar through cgo (`CGO_ENABLED=1`). |
 | Rust (rustup) | superscalar's checkout pins its own toolchain | Builds superscalar's static archive and the version-graph archive from source. |
 | git | any | Checks superscalar out at the commit in `superscalar.pin`. |
-| Node | 22.12 or newer | Builds superscalar's TypeScript binding, and the docs site. |
+| Node | 22.12 or newer; 24 for the engine | Builds superscalar's TypeScript binding and the docs site, and runs [the engine](/superschematic/guides/engine/). |
 | Bun | 1.4 | Installs the TypeScript runtimes and the generated TypeScript packages, which use the `workspace:` protocol. |
 | Python and uv | 3.12, uv 0.12 | Only for Python output: the Python schema runtime. |
 | Postgres | 16 | Only to run the SQL and the Go ORM a DB schema generates. |
