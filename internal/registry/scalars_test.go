@@ -136,3 +136,115 @@ func TestScalarCatalogWithUploadsRejectsUnknownScalarAndNilCatalog(t *testing.T)
 		t.Fatalf("nil catalog: err = %v", err)
 	}
 }
+
+// jsonKeysCheck is a raw-body check for the tests below.
+var jsonKeysCheck = ScalarRawBodyCheck{
+	ImportPath:  "example.com/checks/jsonkeys",
+	PackageName: "jsonkeys",
+	Func:        "DuplicateKeyErrors",
+	ErrorsVar:   "keyErrors",
+	Comment:     "Check the raw body first.",
+}
+
+func TestScalarCatalogWithRawBodyChecksDeclaresChecks(t *testing.T) {
+	checks := map[string]ScalarRawBodyCheck{"Generic.JSON": jsonKeysCheck}
+	catalog, err := ScalarCatalogWithRawBodyChecks(CoreScalars(), checks)
+	if err != nil {
+		t.Fatalf("ScalarCatalogWithRawBodyChecks: %v", err)
+	}
+	if got, want := catalog.Names(), CoreScalars().Names(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Names() = %d names, want the wrapped catalog's %d", len(got), len(want))
+	}
+	if check, ok := catalog.RawBodyCheck("Generic.JSON"); !ok || check != jsonKeysCheck {
+		t.Fatalf("RawBodyCheck(Generic.JSON) = %+v, %v; want the declared check", check, ok)
+	}
+	if _, ok := catalog.RawBodyCheck("Identity.UUID"); ok {
+		t.Fatal("RawBodyCheck() declared a check nobody registered")
+	}
+
+	// The catalog keeps its own copy of the map.
+	checks["Identity.UUID"] = jsonKeysCheck
+	if _, ok := catalog.RawBodyCheck("Identity.UUID"); ok {
+		t.Fatal("an edit to the declaring map reached the catalog")
+	}
+}
+
+func TestScalarCatalogWithRawBodyChecksRejectsUnknownScalarInvalidCheckAndNilCatalog(t *testing.T) {
+	_, err := ScalarCatalogWithRawBodyChecks(CoreScalars(), map[string]ScalarRawBodyCheck{"Media.Note": jsonKeysCheck})
+	if err == nil || !strings.Contains(err.Error(), "Media.Note") || !strings.Contains(err.Error(), "does not define") {
+		t.Fatalf("check on an unknown scalar: err = %v, want it named", err)
+	}
+	invalid := jsonKeysCheck
+	invalid.Func = "duplicateKeyErrors"
+	_, err = ScalarCatalogWithRawBodyChecks(CoreScalars(), map[string]ScalarRawBodyCheck{"Generic.JSON": invalid})
+	if err == nil || !strings.Contains(err.Error(), "Generic.JSON") || !strings.Contains(err.Error(), "exported") {
+		t.Fatalf("invalid check: err = %v, want the scalar and the rule named", err)
+	}
+	if _, err := ScalarCatalogWithRawBodyChecks(nil, map[string]ScalarRawBodyCheck{"Generic.JSON": jsonKeysCheck}); err == nil || !strings.Contains(err.Error(), "nil scalar catalog") {
+		t.Fatalf("nil catalog: err = %v", err)
+	}
+}
+
+// TestUploadsAndRawBodyChecksComposeInEitherOrder: a distribution with an
+// upload scalar and a checked scalar wraps its catalog twice, and the outer
+// wrapper answers for both, whichever it is.
+func TestUploadsAndRawBodyChecksComposeInEitherOrder(t *testing.T) {
+	rows := map[string]*scalars.ScalarMetadata{
+		"Generic.JSON": scalars.ScalarMetadataByCanonical["Generic.JSON"],
+		"Media.Photo":  {CanonicalName: "Media.Photo", Symbol: "MediaPhoto", Primitive: "String"},
+	}
+	uploads := map[string]ScalarUpload{"Media.Photo": {FileUpload: ir.FileUploadConfig{MaxSize: 1024}}}
+	checks := map[string]ScalarRawBodyCheck{"Generic.JSON": jsonKeysCheck}
+
+	uploadsFirst, err := ScalarCatalogWithUploads(ScalarCatalogOf(rows), uploads)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checksOuter, err := ScalarCatalogWithRawBodyChecks(uploadsFirst, checks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checksFirst, err := ScalarCatalogWithRawBodyChecks(ScalarCatalogOf(rows), checks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadsOuter, err := ScalarCatalogWithUploads(checksFirst, uploads)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, catalog := range map[string]ScalarCatalog{"checks outside": checksOuter, "uploads outside": uploadsOuter} {
+		declaresUploads, ok := catalog.(UploadCatalog)
+		if !ok {
+			t.Fatalf("%s: not an UploadCatalog", name)
+		}
+		if upload, ok := declaresUploads.Upload("Media.Photo"); !ok || upload.FileUpload.MaxSize != 1024 {
+			t.Errorf("%s: Upload(Media.Photo) = %+v, %v", name, upload, ok)
+		}
+		declaresChecks, ok := catalog.(RawBodyCheckCatalog)
+		if !ok {
+			t.Fatalf("%s: not a RawBodyCheckCatalog", name)
+		}
+		if check, ok := declaresChecks.RawBodyCheck("Generic.JSON"); !ok || check != jsonKeysCheck {
+			t.Errorf("%s: RawBodyCheck(Generic.JSON) = %+v, %v", name, check, ok)
+		}
+
+		reg := New(naming.Default())
+		if err := reg.RegisterScalars("acme", catalog); err != nil {
+			t.Fatal(err)
+		}
+		lookup := reg.RawBodyChecks()
+		if lookup == nil {
+			t.Fatalf("%s: RawBodyChecks() = nil", name)
+		}
+		if check, ok := lookup.RawBodyCheck("Generic.JSON"); !ok || check != jsonKeysCheck {
+			t.Errorf("%s: RawBodyChecks().RawBodyCheck(Generic.JSON) = %+v, %v", name, check, ok)
+		}
+	}
+}
+
+func TestRawBodyChecksIsNilForACatalogThatDeclaresNone(t *testing.T) {
+	if lookup := New(naming.Default()).RawBodyChecks(); lookup != nil {
+		t.Fatalf("RawBodyChecks() over the core catalog = %v, want nil", lookup)
+	}
+}

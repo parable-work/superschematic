@@ -135,7 +135,7 @@ public packages at the module root:
 
 | Package | What it is |
 | --- | --- |
-| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`) and the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) are aliased here too |
+| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`) and the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) are aliased here too |
 | `loader` | `LoadService` and `LoadServiceWithConfig` with `WithRegistry`, `WithNaming` and `WithSchemaCatalog`, for extension tests against real fixtures; `NewDeclarationProgram`, a type-checked TypeScript program over in-memory files with the loader's compiler, lib files and module resolution, for an extension that checks declarations the schema frontend does not walk; `SchemaError` and `SchemaErrorList`, its located diagnostics |
 | `cli` | `cli.New`, `cli.Config`, `cli.CommandProvider` |
 | `ir` | The IR, its own Go module, with the extension codecs (section 4.2) |
@@ -494,6 +494,47 @@ own validation (`ir.Schema.Validate`) runs before hydration and leaves the
 bound alone. acme registers a catalog with one upload scalar, `Acme.Photo`
 (section 10); `internal/registry/scalars_test.go` and
 `internal/loader/upload_max_bytes_test.go` cover the seam.
+
+A catalog that implements `RawBodyCheckCatalog` names a raw-body check for
+some of its scalars: `RawBodyCheck(canonical)` returns a
+`ScalarRawBodyCheck`, a Go function that a generated route calls on the
+raw JSON of its request body before decoding it. A distribution uses one
+when decoding a value of the scalar loses something a write must refuse,
+such as a key the decoded form has no place for.
+`registry.ScalarCatalogWithRawBodyChecks` wraps a catalog with a map of
+checks and composes with `ScalarCatalogWithUploads` in either order.
+
+- The check names `ImportPath`, the `PackageName` routes.go imports it
+  under, and `Func`, whose signature is
+  `func(body []byte, fields ...string) E` with `E` the scalar package's
+  `ValidationErrors`. The function reports each error at its path under
+  the field it names.
+- `ErrorsVar` (default `checkErrors`) names the result variable, and
+  `Comment` writes line comments above the call. Both exist so a
+  distribution can keep the output of a generator it ported byte for byte.
+- For an input type with single-valued top-level fields of the scalar, the
+  Go route calls
+  `if <ErrorsVar> := <PackageName>.<Func>(body, "<field>", ...); <ErrorsVar>.HasErrors()`
+  and answers 400 with the result. It does so in each place it decodes the
+  input from JSON: the body of a route without file uploads, and the JSON
+  body or the multipart `data` part of a route with them. The call follows
+  the refusal of a null body and precedes `json.Unmarshal`. The comment is
+  written in the two JSON-body paths only.
+- Scalars that share a check share one call. A list or a map of the scalar
+  is not named. A scalar without a check gets no call and no import, so the
+  output for a catalog without checks is unchanged.
+- The wrapper rejects a name the catalog does not define and a check whose
+  call would not compile (`apigen.RawBodyCheck.Validate`). apigen also
+  rejects two checks that import different packages under one name.
+- Only the Go API generator renders the calls; the Rust and TypeScript
+  servers do not.
+- An auth provider whose `routesImports` snippet needs a check's package
+  asks `APIOutput.ImportsRawBodyCheckPackage` and leaves its own import
+  out.
+
+D24 records the decision. `internal/generator/apigen/raw_body_check_test.go`
+covers the seam, including a generated router that refuses a body before
+decoding it.
 
 ### 3.11 Extension configuration
 

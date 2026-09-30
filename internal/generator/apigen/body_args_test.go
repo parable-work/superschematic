@@ -374,6 +374,13 @@ func TestBodyArgsRoutesApplyTheListRules(t *testing.T) {
 // API module's directory.
 func writeGoAPIModule(t *testing.T, schema *ir.Schema, service string) string {
 	t.Helper()
+	return writeGoAPIModuleWith(t, schema, service, nil)
+}
+
+// writeGoAPIModuleWith is writeGoAPIModule with the raw-body checks the
+// routes run.
+func writeGoAPIModuleWith(t *testing.T, schema *ir.Schema, service string, checks apigen.RawBodyChecks) string {
+	t.Helper()
 	typesModule := "example.com/schemas/types/go/" + service
 	paths := testpaths.Local(t)
 	root := t.TempDir()
@@ -396,11 +403,12 @@ func writeGoAPIModule(t *testing.T, schema *ir.Schema, service string) string {
 	}
 
 	apiOutput, err := apigen.Generate(schema, apigen.Options{
-		Provider:    sessionauth.Provider{},
-		SchemaName:  service,
-		ModulePath:  "example.com/schemas/api/" + service,
-		TypesModule: typesModule,
-		Clock:       goModuleClock,
+		Provider:      sessionauth.Provider{},
+		SchemaName:    service,
+		ModulePath:    "example.com/schemas/api/" + service,
+		TypesModule:   typesModule,
+		Clock:         goModuleClock,
+		RawBodyChecks: checks,
 	})
 	if err != nil {
 		t.Fatalf("apigen.Generate: %v", err)
