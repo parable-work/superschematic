@@ -1,6 +1,6 @@
 ---
 title: Version graphs
-description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine and the generated facade from TypeScript, and the Rust engine and facade.
+description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine and the generated facade from TypeScript, the Rust engine and facade, and the core from Python.
 sidebar:
   order: 8
 ---
@@ -184,14 +184,16 @@ contract, with the descriptor's members, every rule, the error codes and the
 C ABI, is
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md).
 Its vectors in `runtime/versiongraph/testdata/vectors` are the executable
-form: the Rust tests, the Go binding and the TypeScript package's tests run
-every one.
+form: the Rust tests, the Go binding, the TypeScript package's tests and the
+Python package's tests run every one.
 
 The same exports are built three ways: a static archive, which the Go
 binding `runtime/versiongraph/go` (package `versiongraph`) links through
 cgo; a `cdylib`; and `wasm32-unknown-unknown`, which the TypeScript package
 `@superschematic/versiongraph` ships
-([Use the core from TypeScript](#use-the-core-from-typescript)).
+([Use the core from TypeScript](#use-the-core-from-typescript)). Python
+calls the crate's Rust API through a PyO3 extension instead
+([Use the core from Python](#use-the-core-from-python)).
 
 ### The descriptor
 
@@ -723,6 +725,63 @@ The Rust facade differs from the Go one where the languages do:
 The facade turns a typed edit into a canonical row from each field's serde
 JSON, and a canonical row back into a typed value, so a field comes back in
 its canonical form, as through the Go facade.
+
+## Use the core from Python
+
+`superschematic-versiongraph` (module `superschematic_versiongraph`,
+[runtime/versiongraph/python](https://github.com/parable-work/superschematic/tree/main/runtime/versiongraph/python))
+is the core for Python: a PyO3 extension module over the crate, built with
+maturin as superscalar's Python binding is, for CPython 3.9 and newer. It
+calls the core's Rust API natively, with the GIL released, and types every
+input and output of the contract. It is not published yet; build it from a
+checkout (`uv sync` in its directory, which needs cargo).
+
+```python
+import superschematic_versiongraph as vg
+
+result = vg.compose({"descriptor": descriptor, "base": base, "overlay": overlay})
+merged = vg.merge({"descriptor": descriptor, "base": base, "ours": ours, "theirs": theirs})
+changes = vg.diff({"descriptor": descriptor, "from": base, "to": result["tree"]})["changes"]
+content_hash = vg.content_hash({"descriptor": descriptor, "tree": result["tree"]})["contentHash"]
+
+try:
+    vg.validate({"descriptor": descriptor, "tree": {"recipe_step": []}})
+except vg.VersionGraphError as error:
+    print(error.code)  # "unknown_kind"
+```
+
+| Function | Operation | Input and output types |
+| --- | --- | --- |
+| `compose` | `compose` | `ComposeInput`, `ComposeOutput` |
+| `merge` | `merge` | `MergeInput`, `MergeOutput` |
+| `diff` | `diff` | `DiffInput`, `DiffOutput` |
+| `content_hash` | `content_hash` | `TreeInput`, `ContentHashOutput` |
+| `validate` | `validate` | `TreeInput`, `ValidateOutput` |
+| `run(operation, json)` | any, by its contract name | JSON text or bytes in, JSON text out |
+
+The types are `TypedDict`s and `Literal`s in
+`superschematic_versiongraph.contract`, re-exported from the package, each
+member named as the contract names it; inputs and outputs are plain dicts
+and lists. A refused input raises `VersionGraphError`, whose `code` is the
+contract's error code (`ErrorCode`) and whose `message` is the core's. An
+operation name the core does not have raises `ValueError`.
+
+The module-level functions encode with `json` and decode with
+`json.loads`, which keeps an integer's digits however wide but reads a
+number with a fraction or an exponent as a float, so a numeric column that
+a double does not hold would lose digits. `VersionGraph(loads=..., dumps=...)`
+gives the same methods over another codec, for example one that decodes
+with `parse_float=decimal.Decimal` and writes a Decimal's digits back;
+`run` leaves the JSON to the caller.
+
+The package's tests run every core vector through `run` and through the
+typed methods with an exact codec, and compare each output with the
+vector, member order and number digits included, and through the
+module-level functions when `json` reads the vector without loss. They
+check each vector's input and output against the types
+and fail when a member or literal of the types appears in no vector. `make
+python` runs them under the default Python and under 3.9, and CI's python
+job runs them too.
 
 ## Limits
 
