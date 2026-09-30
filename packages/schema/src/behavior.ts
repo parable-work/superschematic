@@ -27,6 +27,10 @@ export interface BehaviorConfigs {
   Comments: undefined;
   /** Immutable revisions of the instance's own fields, with an optional review step. */
   Revisions: RevisionsConfig;
+  /** Blockers between instances, which hold up the type's Workflow; it requires Workflow. */
+  Dependencies: DependenciesConfig;
+  /** Typed links to instances of the schemas it names, optionally pinned to a revision. */
+  Links: LinksConfig;
 }
 
 /** Workflow's config. */
@@ -54,6 +58,34 @@ export interface RevisionsConfig {
     /** The permission a caller needs to approve or reject a proposal. */
     readonly permission: string;
   };
+}
+
+/** Dependencies' config. */
+export interface DependenciesConfig {
+  /** The schemas whose instances may block this type's, each composing Workflow; the type's own schema when absent. */
+  readonly schemas?: readonly string[];
+  /**
+   * The terminal states of the type's Workflow that a transition into
+   * waits for every blocker to reach a terminal state of its own; every
+   * terminal state when absent.
+   */
+  readonly gatedStates?: readonly string[];
+}
+
+/** Links' config. */
+export interface LinksConfig {
+  /** The links an instance may hold, by name: camelCase, at most 64 characters. */
+  readonly links: Readonly<Record<string, LinkConfig>>;
+}
+
+/** One link of a Links config. */
+export interface LinkConfig {
+  /** The schema of the instance the link points at. */
+  readonly schema: string;
+  /** Once set, the link can be moved to another target but not unlinked, and the delete of its target is refused. */
+  readonly required?: boolean;
+  /** The link records the target's revision and reports whether the target has moved past it; the schema must compose Revisions. */
+  readonly pinned?: boolean;
 }
 
 /** A name @behavior takes: a key of BehaviorConfigs. */

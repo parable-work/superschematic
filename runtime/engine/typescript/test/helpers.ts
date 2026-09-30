@@ -125,3 +125,17 @@ export function documentsDocument(): Record<string, unknown> {
     readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-behaviors-json/src/document.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
+
+/**
+ * tasksDocument is the General schema-file document the core binary loads
+ * with no extension linked beside documentsDocument (make cli-smoke,
+ * fixture-cross-instance-json): its Task type composes Workflow,
+ * Dependencies, whose blockers are tasks or documents and whose gated
+ * state is done, and Links, with spec pinned to a document's revision and
+ * a required parent task.
+ */
+export function tasksDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-cross-instance-json/src/task.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}

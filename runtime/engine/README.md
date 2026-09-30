@@ -10,8 +10,9 @@ compatibility rule, instances, the event log, the access policy, the
 HTTP API with the event stream (`@superschematic/engine/http`), the
 behavior plug-in interface, the describe and tools documents, the MCP
 endpoint (`@superschematic/engine/mcp`), and the core's behaviors:
-`Workflow`, `Comments` and `Revisions`. Not built yet: the other
-behaviors D16 lists.
+`Workflow`, `Comments`, `Revisions`, and `Dependencies` and `Links`,
+which reach other instances. Not built yet: derived fields, reactions,
+search, and the work-queue package D16 lists.
 
 ```ts
 import { allowAll, openEngine } from '@superschematic/engine';
@@ -408,7 +409,8 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 
 `metaSchema` is the `json-schema` output of the deployment's binary, which
 lists the behaviors it declares; the core's lists the core's own
-(`Workflow`, `Comments` and `Revisions`), so its loader refuses any other.
+(`Workflow`, `Comments`, `Revisions`, `Dependencies` and `Links`), so its
+loader refuses any other.
 
 ### The implementation
 
@@ -694,7 +696,7 @@ operation that expects the sequence from before the operation is refused
 
 ### Core behaviors
 
-The core declares three behaviors (`internal/registry/behaviors`, section
+The core declares five behaviors (`internal/registry/behaviors`, section
 3.16 of `docs/extension-model.md`), so every binary's meta-schema admits
 them, and the engine implements them in `src/behaviors/core` and
 registers them when it opens, before `behaviors`: a schema that composes
@@ -714,6 +716,20 @@ deployment cannot register another implementation under their names.
       ] } },
   { "name": "Comments" },
   { "name": "Revisions", "config": { "review": { "permission": "documents.review" } } }
+]
+```
+
+`Dependencies` and `Links` reach other instances through the interface
+("Other instances", "References"), always as the caller, with this on a
+`tasks` schema whose tasks wait on tasks and documents:
+
+```json
+"behaviors": [
+  { "name": "Workflow", "config": { "states": ["todo", "doing", "done", "dropped"], "transitions": [...] } },
+  { "name": "Dependencies", "config": { "schemas": ["tasks", "documents"], "gatedStates": ["done"] } },
+  { "name": "Links", "config": { "links": {
+      "spec": { "schema": "documents", "pinned": true },
+      "parent": { "schema": "tasks", "required": true } } } }
 ]
 ```
 
@@ -820,6 +836,73 @@ patch, note?, base?, state, createdBy, createdAt, reviewedBy?,
 reviewedAt?, reason?, revision? }`, `state` one of `pending`, `approved`
 and `rejected`; approving or rejecting one that is not pending is
 `vetoed`, and naming none is `invalid_argument`.
+
+#### Dependencies
+
+Blockers between instances, which hold up the type's Workflow.
+
+| | |
+| --- | --- |
+| Config | `schemas`: the schemas a blocker may be an instance of, each composing Workflow (the type's own when absent); `gatedStates`: the terminal states of the type's Workflow a transition into waits for every blocker (every terminal state when absent). Requires `Workflow` |
+| Fields | `blocked`: whether a blocker's status is not a terminal state of its own schema's Workflow |
+| Operations | `addBlocker({ schema?, id })` -> `{ schema, id, status?, open }`, writes; `removeBlocker({ schema?, id })` -> `{ schema, id }`, writes; `listBlockers({ limit?, cursor? })` -> a page of `{ schema, id, status?, open }`, read-only; `listDependents({ limit?, cursor? })` -> a page of `{ schema, id }`, read-only |
+| Guards | a Workflow `transition` of the instance into a gated state, whoever asks, while `blocked`: `vetoed`, naming the open blockers |
+| Refusals | `addBlocker`: the instance itself, a schema the config does not list, one without Workflow, an instance that does not exist (`invalid_argument`); a blocker already added, an edge that would close a cycle, an open blocker of an instance in a gated state (`vetoed`). `removeBlocker` of an instance that does not block it (`invalid_argument`) |
+| Deletes | deleting a blocker removes its edges: its reference hook invokes `removeBlocker` on each dependent, as the caller, each with its own event. Deleting a dependent deletes its edges |
+| Events | `addBlocker`'s and `removeBlocker`'s operation events carry `blocked` when it changes |
+| `configChange` | `schemas` and `gatedStates` may change (edges made before stay); added to a schema with instances, which start with none; not removed from one, since its edges and references would stay behind |
+
+A blocker is open while its status is not a terminal state of its own
+schema's Workflow config (`isTerminalState` over what `schemas.config`
+returns), whatever the gated states say. One function answers that for
+the `blocked` field and the guard, over every blocker in every schema, so
+they cannot disagree. The guard reads the state a transition moves to
+from its `to`, the one parameter Workflow's closed `paramsSchema` takes,
+and it runs before any handler for a caller's transition, another
+behavior's `call()` and another instance's invoke alike. `parseConfig`
+holds `gatedStates` to the terminal states of the type's Workflow, which
+it reads in `target.configs`.
+
+Blockers are read as the caller: a caller who may not read a blocker's
+schema cannot read `blocked` on the instances it blocks, or list them.
+`blocked` is computed at each read, so a blocker's transition shows in
+its dependents' next read, with no event on them. `listDependents`
+leaves out dependents of schemas the caller may not read, so a page can
+hold fewer than its limit while more follow.
+
+#### Links
+
+Typed links from the instance to instances of other schemas, or its own.
+
+| | |
+| --- | --- |
+| Config | `links`: by camelCase name, `{ schema, required?, pinned? }`; at least one |
+| Fields | `links`: `{ <name>: { schema, id, revision?, stale? } }`, the links the instance holds; absent when it holds none |
+| Operations | `link({ name, id, revision? })` -> `{ name, schema, id, revision? }`, writes; `unlink({ name })` -> the link as it was, writes; schema-level `listLinked({ name, id, stale?, limit?, cursor? })` -> a page of `{ id, revision?, stale? }`, read-only |
+| Guards | the delete of an instance a required link points at, whoever the caller: `vetoed` (`guardReference`) |
+| Refusals | a name the config does not give, a target that does not exist, a `revision` for a link that is not pinned or past the target's latest, a pinned link whose schema does not compose Revisions (`invalid_argument`); a target with no revision yet, unlinking a required link (`vetoed`); unlinking a link the instance does not hold (`invalid_argument`) |
+| Deletes | an optional link's target's delete unlinks it: its reference hook invokes `unlink` on each instance that points at it, as the caller, each with its own event. Deleting an instance deletes its links |
+| Events | `link`'s and `unlink`'s operation events carry `links` |
+| `configChange` | every link keeps its name and schema; `required` and `pinned` may change, and links may be added; added to a schema with instances, which start with none; not removed from one |
+
+A link holds one target, an instance of its schema in the same namespace
+(the schema looked up as any name is: the namespace, then the shared
+one); `link` again moves it. A pinned link records the target's latest
+revision, read through its `revision` field, or the earlier one `link`
+names, and `links` reports `stale` when the target's latest revision has
+moved past it. `listLinked` answers the other way round, on the schema:
+which instances point a link at a target, and with `stale: true` only the
+pinned ones the target has moved past, which is how to find the
+instances that point at a superseded revision.
+
+A required link can be moved, never unlinked, and its target cannot be
+deleted while it points there; the refusal names the linking schema, not
+the instance, which the caller may not be able to read. A pinned link is
+read as the caller: without read on its target's schema, `links` cannot
+be read. `stale` is computed at each read, so a target's new revision
+shows in the next read of the instances that link to it, with no event on
+them. A link made before its spec was pinned records no revision until it
+is linked again.
 
 ## Namespaces
 
@@ -1167,7 +1250,10 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   as the name, the title, the description, the arguments as `inputSchema`,
   `annotations.readOnlyHint`, and `_meta` with the tool's guidance and its
   invocation policy under the policy's key. The list is the caller's: a
-  tool the policy refuses is not in it.
+  tool the policy refuses is not in it. The schema tools
+  (`list_schemas`, `describe_schema`, `define_schema`) are in every
+  caller's list, since they name no schema until they are called: the
+  access policy answers the call, not the listing.
 - `tools/call` returns the result as JSON text and, when it is an object,
   as `structuredContent`. A call the engine refuses is a tool error:
   `isError`, with the problem document the HTTP API answers with as text

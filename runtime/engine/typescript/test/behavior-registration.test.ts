@@ -10,7 +10,7 @@ import { cleanup, clone, drivers, openTestEngine } from './helpers.ts';
 afterEach(cleanup);
 
 // The core's behaviors, which every engine registers when it opens.
-const CORE = ['Comments', 'Revisions', 'Workflow'];
+const CORE = ['Comments', 'Dependencies', 'Links', 'Revisions', 'Workflow'];
 
 // refusal registers an implementation with a fresh engine and returns the message it is refused with.
 function refusal(implementation: AnyBehaviorImplementation): string {

@@ -16,7 +16,7 @@ var coreBehaviorFiles embed.FS
 
 // coreBehaviors are the core's behavior declarations, in the order New
 // registers them.
-var coreBehaviors = []string{"workflow", "comments", "revisions"}
+var coreBehaviors = []string{"workflow", "comments", "revisions", "dependencies", "links"}
 
 // coreBehaviorSpecs returns the core's BehaviorSpecs. A declaration that
 // does not read is a defect of the build, as a core decorator that does not

@@ -1,0 +1,229 @@
+{
+  "name": "Links",
+  "description": "Named, single-valued links from the instance to instances of the schemas its config names. A pinned link records the target's revision (its schema composes Revisions) and reports whether the target has moved past it. A required link can be moved to another target but not unlinked, and the delete of its target is refused; an optional link is cleared when its target is deleted.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "links": {
+        "additionalProperties": {
+          "additionalProperties": false,
+          "properties": {
+            "pinned": {
+              "description": "The link records the target's revision, and reports whether the target has moved past it. The schema must compose Revisions.",
+              "type": "boolean"
+            },
+            "required": {
+              "description": "Once set, the link can be moved to another target but not unlinked, and the delete of its target is refused.",
+              "type": "boolean"
+            },
+            "schema": {
+              "description": "The schema of the instance the link points at.",
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "schema"
+          ],
+          "type": "object"
+        },
+        "description": "The links an instance may hold, by name: camelCase, at most 64 characters.",
+        "minProperties": 1,
+        "propertyNames": {
+          "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
+        },
+        "type": "object"
+      }
+    },
+    "required": [
+      "links"
+    ],
+    "type": "object"
+  },
+  "fields": [
+    {
+      "name": "links",
+      "description": "The links the instance holds, by name: each target's schema and id, and for a pinned link the revision it records and whether the target has moved past it."
+    }
+  ],
+  "operations": [
+    {
+      "name": "link",
+      "description": "Points a link at an instance of its schema, replacing the target it had. A pinned link records the target's latest revision, or the one given.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "The target's id.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+            "type": "string"
+          },
+          "name": {
+            "description": "The link's name in the config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "revision": {
+            "description": "For a pinned link, the target's revision to record, one it has had; its latest when absent.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "id"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The link.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision": {
+            "description": "The target's revision a pinned link records.",
+            "type": "integer"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "schema",
+          "id"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "unlink",
+      "description": "Clears an optional link. A required link cannot be unlinked, only moved.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "The link's name in the config.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "description": "The link as it was.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "schema",
+          "id"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "listLinked",
+      "description": "Lists the instances of this schema whose link points at an instance, in the order the links were made, one page at a time; for a pinned link, with the revision each records and whether the target has moved past it.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The target's id.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many instances; 50 when absent.",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "description": "The link's name in the config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "stale": {
+            "description": "Only the pinned links whose target has moved past the revision they record.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "id"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "The id of the instance that holds the link.",
+                  "type": "string"
+                },
+                "revision": {
+                  "description": "The target's revision a pinned link records.",
+                  "type": "integer"
+                },
+                "stale": {
+                  "description": "Whether the target has moved past that revision.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null after the last.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      },
+      "scope": "schema"
+    }
+  ]
+}

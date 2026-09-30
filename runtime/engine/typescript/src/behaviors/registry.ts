@@ -162,7 +162,7 @@ export class BehaviorRegistry {
       }
     }
     const operations = (declaration.operations ?? []).map((operation) => {
-      const scope: OperationScope = operation.scope ?? 'instance';
+      const scope: OperationScope = operation.scope === 'schema' ? 'schema' : 'instance';
       return {
         name: operation.name,
         declaration: operation,

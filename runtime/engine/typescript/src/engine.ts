@@ -46,7 +46,8 @@ export interface EngineOptions extends StorageOptions {
   clock?: () => number;
   /**
    * The behavior implementations this engine runs besides the core's
-   * (Workflow, Comments and Revisions, which it registers first), registered
+   * (Workflow, Comments, Revisions, Dependencies and Links, which it
+   * registers first), registered
    * when it opens; engine.behaviors.register adds more later. A schema that
    * composes a behavior without one is refused.
    */

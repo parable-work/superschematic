@@ -1031,18 +1031,19 @@ Status: built are the schema-file types and meta-schema
 and the `@behavior` decorator (section 3.16 of `docs/extension-model.md`),
 and `@superschematic/engine` (`runtime/engine/README.md`): storage, the
 schema registry, instances, the event log, the access policy, the
-behavior plug-in interface, the HTTP API with its event stream and
-operation route, and the describe and tools documents and MCP tools. The
-core declares `Workflow`, `Comments` and `Revisions`, and the engine
-registers its implementations of them when it opens, so D10's done
-criterion is met: the core binary with no extension linked loads a schema
-that composes them (`make cli-smoke`), an engine with only its own
-behaviors runs it (`test/core-behaviors.test.ts`), and acme's
-`acme.Rating` runs with no core edit (`scripts/smoke.sh`). Not built: the
-cross-instance behaviors (dependency edges, links, derived fields,
-reactions), search, and the work-queue package. Each change that lands a
-piece updates this paragraph, the README layout table and the pages that
-describe it. The names and rules are reversible until the first release.
+behavior plug-in interface with its reach into other instances (the
+amendment below), the HTTP API with its event stream and operation
+routes, and the describe and tools documents and MCP tools. The core
+declares `Workflow`, `Comments`, `Revisions`, `Dependencies` and `Links`,
+and the engine registers its implementations of them when it opens, so
+D10's done criterion is met: the core binary with no extension linked
+loads schemas that compose them (`make cli-smoke`), an engine with only
+its own behaviors runs them (`test/core-behaviors.test.ts`), and acme's
+`acme.Rating` runs with no core edit (`scripts/smoke.sh`). Not built:
+derived fields, reactions, search, and the work-queue package. Each
+change that lands a piece updates this paragraph, the README layout table
+and the pages that describe it. The names and rules are reversible until
+the first release.
 
 ### D16, amended: behaviors that reach other instances
 

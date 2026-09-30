@@ -180,10 +180,11 @@ docs:
 	cd docs && npm ci && npm run build
 
 # The binary with no extension linked builds a DB, an API and a General
-# service from the fixture corpus, and loads fixture-behaviors-json, whose
-# type composes the core's behaviors (D10): --emit-ir carries all three and
-# json-schema admits them. The engine runs that document with its own
-# behaviors in runtime/engine/typescript/test/core-behaviors.test.ts.
+# service from the fixture corpus, and loads fixture-behaviors-json and
+# fixture-cross-instance-json, whose types compose the core's behaviors
+# (D10): --emit-ir carries all five and json-schema admits them. The engine
+# runs those documents with its own behaviors in
+# runtime/engine/typescript/test/core-behaviors.test.ts.
 cli-smoke: $(BIN)
 	@rm -rf /tmp/superschematic-cli-smoke
 	@for s in fixture-db fixture-api fixture-general; do \
@@ -192,8 +193,10 @@ cli-smoke: $(BIN)
 		$(BIN) build internal/loader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
 	@$(BIN) build internal/loader/testdata/services/fixture-behaviors-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(BIN) build internal/loader/testdata/services/fixture-cross-instance-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
-	@for b in Workflow Comments Revisions; do \
+	@for b in Workflow Comments Revisions Dependencies Links; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 

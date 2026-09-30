@@ -90,7 +90,13 @@ export type { Page } from './behaviors/paging.js';
 // The core's behaviors, which every engine registers (runtime/engine/README.md, "Core behaviors").
 export { isTerminalState } from './behaviors/core/index.js';
 export type {
+  BlockerRecord,
   CommentRecord,
+  DependenciesConfig,
+  DependentRecord,
+  LinkRecord,
+  LinkSpec,
+  LinksConfig,
   ProposalRecord,
   ProposalState,
   RevisionRecord,

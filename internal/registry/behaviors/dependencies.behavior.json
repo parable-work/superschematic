@@ -1,0 +1,146 @@
+{
+  "name": "Dependencies",
+  "description": "Blockers between instances. An instance is blocked while one of its blockers is in a state that is not terminal in its own schema's Workflow, and a transition of its own Workflow into a gated state waits until none blocks it. A blocker is an instance of the type's own schema, or of a schema the config lists, that composes Workflow; an edge that would close a cycle is refused. Deleting a blocker removes its edges.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "schemas": {
+        "description": "The schemas whose instances may block this type's, each composing Workflow; the type's own schema when absent.",
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" }
+      },
+      "gatedStates": {
+        "description": "The terminal states of the type's Workflow that a transition into waits for every blocker to reach a terminal state of its own; every terminal state when absent.",
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "requires": ["Workflow"],
+  "fields": [
+    { "name": "blocked", "description": "Whether a blocker is in a state that is not terminal in its schema's Workflow." }
+  ],
+  "operations": [
+    {
+      "name": "addBlocker",
+      "description": "Makes another instance block this one. It must be of the type's own schema or one the config lists, exist, and not be blocked by this instance, directly or through others. An instance in a gated state takes no blocker that is not in a terminal state.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "schema": { "description": "The blocker's schema; the instance's own when absent.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
+          "id": { "description": "The blocker's id.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" }
+        }
+      },
+      "resultSchema": {
+        "description": "The blocker.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schema", "id", "open"],
+        "properties": {
+          "schema": { "type": "string" },
+          "id": { "type": "string" },
+          "status": { "description": "The blocker's Workflow status.", "type": "string" },
+          "open": { "description": "Whether its status is not a terminal state of its schema's Workflow, so it blocks.", "type": "boolean" }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "removeBlocker",
+      "description": "Stops another instance from blocking this one.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "schema": { "description": "The blocker's schema; the instance's own when absent.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
+          "id": { "description": "The blocker's id.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" }
+        }
+      },
+      "resultSchema": {
+        "description": "The blocker removed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schema", "id"],
+        "properties": {
+          "schema": { "type": "string" },
+          "id": { "type": "string" }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "listBlockers",
+      "description": "Lists the instance's blockers in the order they were added, one page at a time, with each one's status and whether it blocks.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": { "description": "At most this many blockers; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 500 },
+          "cursor": { "description": "The next of the previous page.", "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["schema", "id", "open"],
+              "properties": {
+                "schema": { "type": "string" },
+                "id": { "type": "string" },
+                "status": { "description": "The blocker's Workflow status.", "type": "string" },
+                "open": { "description": "Whether its status is not a terminal state of its schema's Workflow, so it blocks.", "type": "boolean" }
+              }
+            }
+          },
+          "next": { "description": "The cursor of the next page; null after the last.", "type": ["string", "null"] }
+        }
+      }
+    },
+    {
+      "name": "listDependents",
+      "description": "Lists the instances this one blocks, of every schema the caller may read, in the order they were added, one page at a time.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": { "description": "At most this many dependents; 50 when absent. A page holds fewer when the caller may not read some of their schemas.", "type": "integer", "minimum": 1, "maximum": 500 },
+          "cursor": { "description": "The next of the previous page.", "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["schema", "id"],
+              "properties": {
+                "schema": { "type": "string" },
+                "id": { "type": "string" }
+              }
+            }
+          },
+          "next": { "description": "The cursor of the next page; null after the last.", "type": ["string", "null"] }
+        }
+      }
+    }
+  ]
+}

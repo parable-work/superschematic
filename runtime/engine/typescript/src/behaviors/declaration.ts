@@ -52,9 +52,10 @@ export interface BehaviorOperationDeclaration {
   readonly writes?: boolean;
   /**
    * What it runs on: `instance` (or absent), one instance a call names by
-   * id; `schema`, the schema as a whole, with no instance.
+   * id; `schema`, the schema as a whole, with no instance. A string, as a
+   * JSON module types it; checkDeclaration refuses any other value.
    */
-  readonly scope?: OperationScope;
+  readonly scope?: string;
   /** The MCP invocation policy of its tool (D11); absent for the policy's default. */
   readonly invocationPolicy?: string;
 }

@@ -20,7 +20,7 @@ import { defineBehavior, type AccessPolicy, type Engine, type EngineOptions } fr
 import { engineApp } from '../dist/http/index.js';
 import { MCP_PATH, engineMcp, type EngineMcpOptions } from '../dist/mcp/index.js';
 import { openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, documentsDocument, openTestEngine, orderDocument } from './helpers.ts';
+import { alice, cleanup, documentsDocument, openTestEngine, orderDocument, tasksDocument } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 
 // The bearer token is the caller's subject; reader may only read.
@@ -461,5 +461,50 @@ describe("the core's behaviors", () => {
     const published = await call(pat, 'documents_transition', { id: 'doc-1', params: { to: 'published' }, expectedSeq: 3 });
     assert.deepEqual(published.structuredContent, { from: 'review', to: 'published' });
     assert.equal(engine.instances.get(alice, 'documents', 'doc-1')?.data.status, 'published');
+  });
+
+  test('Dependencies and Links are tools: listLinked takes no id; a gated transition and a required target\'s delete are tool errors with the 409 problem', async () => {
+    const { url, engine } = await withDocument();
+    engine.schemas.define(everything, tasksDocument());
+    engine.schemas.publish(everything, 'tasks');
+    engine.instances.create(everything, 'tasks', { title: 'Plan' }, { id: 'plan' });
+    engine.instances.create(everything, 'tasks', { title: 'Build' }, { id: 'build' });
+    const { client } = await connect(endpoint(url));
+    const tools = (await client.listTools()).tools.filter((tool) => tool.name.startsWith('tasks_'));
+    assert.deepEqual(
+      tools.map((tool) => [tool.name, tool.annotations?.readOnlyHint, Object.keys(tool.inputSchema.properties ?? {}).join(' ')]),
+      [
+        ['tasks_create', false, 'data id'],
+        ['tasks_get', true, 'id'],
+        ['tasks_list', true, 'cursor limit'],
+        ['tasks_update', false, 'expectedSeq id patch'],
+        ['tasks_delete', false, 'expectedSeq id'],
+        ['tasks_transition', false, 'expectedSeq id params'],
+        ['tasks_add_blocker', false, 'expectedSeq id params'],
+        ['tasks_remove_blocker', false, 'expectedSeq id params'],
+        ['tasks_list_blockers', true, 'expectedSeq id params'],
+        ['tasks_list_dependents', true, 'expectedSeq id params'],
+        ['tasks_link', false, 'expectedSeq id params'],
+        ['tasks_unlink', false, 'expectedSeq id params'],
+        ['tasks_list_linked', true, 'params'],
+      ]
+    );
+    assert.deepEqual((await call(client, 'tasks_add_blocker', { id: 'build', params: { id: 'plan' } })).structuredContent, {
+      schema: 'tasks',
+      id: 'plan',
+      status: 'todo',
+      open: true,
+    });
+    await call(client, 'tasks_link', { id: 'build', params: { name: 'parent', id: 'plan' } });
+    await call(client, 'tasks_link', { id: 'build', params: { name: 'spec', id: 'doc-1' } });
+    await call(client, 'tasks_transition', { id: 'build', params: { to: 'doing' } });
+    const gated = problemOf(await call(client, 'tasks_transition', { id: 'build', params: { to: 'done' } }));
+    assert.deepEqual([gated.status, gated.code, gated.details.behavior], [409, 'vetoed', 'Dependencies']);
+    const { client: reader } = await connect(endpoint(url), 'reader');
+    const linked = await call(reader, 'tasks_list_linked', { params: { name: 'spec', id: 'doc-1' } });
+    assert.deepEqual(linked.structuredContent, { items: [{ id: 'build', revision: 1, stale: false }], next: null });
+    const required = problemOf(await call(client, 'tasks_delete', { id: 'plan' }));
+    assert.deepEqual([required.status, required.code, required.details.behavior], [409, 'vetoed', 'Links']);
+    assert.ok(engine.instances.get(alice, 'tasks', 'plan'));
   });
 });
