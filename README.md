@@ -88,6 +88,11 @@ complete downstream example: a schemas root with one service per kind and an
 extension that adds a kind, a decorator, a document, a generator, an auth
 provider and a command without editing the core. Its README walks through
 each surface; `examples/acme-schematic/scripts/smoke.sh` runs it.
+`examples/engine-notes` is the engine guide's project: a notes server on
+`@superschematic/engine` whose schema composes `Workflow`, `Comments` and
+`Revisions`, served over HTTP, the event stream and MCP;
+`examples/engine-notes/scripts/check.sh` runs its end-to-end test on
+Node.js and Bun.
 
 ## Status
 
