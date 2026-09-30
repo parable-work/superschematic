@@ -1,5 +1,6 @@
 """The Postgres adapter's own rules, which the scenarios do not reach: what
-its constructor refuses, a prune that keeps pinned images, a sweep lock that
+its constructor refuses, a row with more members than a table has columns,
+a prune that keeps pinned images, a sweep lock that
 one transaction holds at a time, a ref lock another transaction waits for,
 the version fences of update_ref and discard_ref, and the psycopg client's
 savepoint over a transaction the caller holds, its one transaction at a time
@@ -9,13 +10,13 @@ postgres_test.go."""
 import json
 import threading
 import time
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Sequence, TypeVar
 
 import pytest
 from support import DESCRIPTOR, DSN, Scratch, requires_database
 
 from superschematic_versiongraph.errors import NameTakenError, VersionConflictError
-from superschematic_versiongraph.postgres import PostgresAdapter, psycopg_client
+from superschematic_versiongraph.postgres import Arg, Conn, PostgresAdapter, QueryResult, psycopg_client
 from superschematic_versiongraph.storage import NewCommit, NewRef, Patch, RefUpdate, RowWrite, Tx
 
 
@@ -63,6 +64,28 @@ def test_new_adapter(name: str, edit: Callable[[Dict[str, Any]], None], refuse: 
         return
     with pytest.raises(ValueError, match=refuse):
         PostgresAdapter(json.dumps(d))
+
+
+T = TypeVar("T")
+
+
+class _NoStatements:
+    """A client whose transactions fail the test on any statement."""
+
+    def transact(self, fn: Callable[[Conn], T]) -> T:
+        return fn(self)
+
+    def query(self, sql: str, args: Sequence[Arg] = ()) -> QueryResult:
+        pytest.fail(f"ran {sql}")
+
+
+def test_upsert_row_refuses_more_columns_than_a_table() -> None:
+    """A row with more members than a Postgres table has columns is refused
+    before any statement runs."""
+    members = {f"c{i}": i for i in range(1601)}
+    store = PostgresAdapter(DESCRIPTOR).storage(_NoStatements())
+    with pytest.raises(ValueError, match="at most 1600"):
+        store.transact(lambda tx: tx.upsert_row("step", RowWrite("1", "1", json.dumps(members), False, "2")))
 
 
 ROOT = "00000000-0000-0000-0000-000000000001"
