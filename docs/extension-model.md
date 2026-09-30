@@ -716,7 +716,13 @@ shape is `BehaviorDeclaration`:
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
 | `fields` | the fields it adds: `name` and `description` |
-| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+
+An operation's `scope` says what a call names: `instance`, one instance
+by id, or `schema`, the schema as a whole with no instance, which an
+engine serves at `POST /namespaces/{ns}/schemas/{name}/operations/{op}`
+and as a tool that takes its parameters and no `id` (D16, amended).
+`RegisterBehavior` refuses any other value, and the engine does too.
 
 A field carries only a name and a description. A field's type can depend
 on the behavior's config, and the loader needs only the name to refuse a
@@ -727,7 +733,8 @@ follows the bare-name rule (`^[A-Z][A-Za-z0-9]*$`), and the prefix is the
 registering extension's `Name()`; inside `Use` the spec's `Extension` must
 be the extension whose `Register` is running, so an extension cannot
 declare a core name. An operation may not be named `create`, `get`,
-`list`, `update` or `delete`, which every schema has (D16). `Finalize`
+`list`, `update` or `delete`, which every schema has (D16), or declare a
+scope other than `instance` or `schema`. `Finalize`
 checks `requires`, `conflicts` and the invocation policy values, since the
 policy is fixed only once every extension has registered.
 `Registry.Behavior(name)` returns a registered `Behavior`: the declaration,

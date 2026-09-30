@@ -18,7 +18,8 @@ import {
   openEngine,
   type Engine,
 } from '../dist/index.js';
-import { counter, openMetaSchema, publishItem } from './behavior-fixtures.ts';
+import { counter, itemDocument, openMetaSchema, publishItem } from './behavior-fixtures.ts';
+import { holder } from './reach-fixtures.ts';
 import { alice, cleanup, drivers, freshPath, orderDocument, schemaDocument, track } from './helpers.ts';
 
 afterEach(cleanup);
@@ -151,6 +152,38 @@ const seeds: Record<number, Seed> = {
       checkOperationEvents(engine, 4);
     },
   },
+  // Version 4 added operation events and behavior storage, with no
+  // references between instances.
+  4: {
+    write(storage) {
+      const order = canonical(orderDocument());
+      storage.run(
+        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
+      );
+      storage.run(
+        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 'o1', 'default', 1, 1, '{"title":"Desk"}', 300, 'alice', 300, 'alice']
+      );
+      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+      storage.run(insert, ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text]);
+      storage.run(insert, ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}']);
+    },
+    check(engine) {
+      // A behavior on a migrated file records a reference to an instance
+      // the seed wrote, and the delete of that instance runs its hook.
+      engine.schemas.define(alice, itemDocument([{ name: 'test.Holder' }]));
+      engine.schemas.publish(alice, 'Item');
+      engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i1' });
+      engine.instances.invoke(alice, 'Item', 'i1', 'hold', { schema: 'Order', id: 'o1' });
+      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data.held, ['Order/o1/']);
+      assert.equal(engine.instances.delete(alice, 'Order', 'o1'), true);
+      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.held, undefined);
+      assert.deepEqual(engine.instances.invoke(alice, 'Item', 'i1', 'notes'), ['delete Order o1']);
+    },
+  },
 };
 
 // checkOperationEvents publishes a schema with a behavior on a migrated file,
@@ -206,7 +239,7 @@ for (const driver of drivers) {
         seed.write(storage);
         storage.close();
 
-        const engine = track(openEngine({ path, driver, policy: allowAll, metaSchema: openMetaSchema(), behaviors: [counter] }));
+        const engine = track(openEngine({ path, driver, policy: allowAll, metaSchema: openMetaSchema(), behaviors: [counter, holder] }));
         assert.deepEqual(
           appliedMigrations(engine.storage, ENGINE_OWNER).map((row) => row.version),
           engineMigrations.migrations.map((migration) => migration.version)

@@ -72,6 +72,10 @@ type BehaviorOperation struct {
 	ResultSchema json.RawMessage `json:"resultSchema"`
 	// Writes is true for an operation that changes stored state.
 	Writes bool `json:"writes,omitempty"`
+	// Scope is what the operation runs on: "instance" (or empty, the
+	// default), one instance, which an engine's call names by id; or
+	// "schema", the schema as a whole, with no instance.
+	Scope string `json:"scope,omitempty"`
 	// InvocationPolicy is the MCP invocation policy of the operation's
 	// tool: one of the values of the registry's ToolInvocationPolicy.
 	// Empty means the policy's default.
@@ -93,6 +97,13 @@ type Behavior struct {
 // instance type (D16). A behavior operation cannot take one of these names.
 var builtinOperations = []string{"create", "get", "list", "update", "delete"}
 
+// The scopes an operation declares: an instance, the default, or its
+// schema as a whole.
+const (
+	OperationScopeInstance = "instance"
+	OperationScopeSchema   = "schema"
+)
+
 var (
 	behaviorBareName      = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 	behaviorOperationName = regexp.MustCompile(`^[a-z][A-Za-z0-9]*$`)
@@ -110,7 +121,8 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // false, the engine's rule, so no parameter reaches a handler without its
 // guards seeing it; an operation name that is not camelCase, repeats, or
 // is one an engine gives every schema (create, get, list, update, delete);
-// and a field name that is not an identifier or repeats. Finalize checks
+// a scope other than "instance" or "schema"; and a field name that is not
+// an identifier or repeats. Finalize checks
 // what needs the whole registry: requires and conflicts name registered
 // behaviors, and each operation's invocation policy is a value of the
 // registry's policy.
@@ -214,6 +226,9 @@ func checkBehaviorOperations(decl BehaviorDeclaration) error {
 			return fmt.Errorf("registry: behavior %s declares operation %q twice", decl.Name, op.Name)
 		}
 		seen[op.Name] = true
+		if op.Scope != "" && op.Scope != OperationScopeInstance && op.Scope != OperationScopeSchema {
+			return fmt.Errorf("registry: behavior %s operation %s scope %q is not %q or %q", decl.Name, op.Name, op.Scope, OperationScopeInstance, OperationScopeSchema)
+		}
 		for _, s := range []struct {
 			key    string
 			schema json.RawMessage

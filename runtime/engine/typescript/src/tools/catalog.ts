@@ -8,8 +8,9 @@ the schema registry and the instance store, so the access policy answers
 each one.
 
 A tool is one operation: create, get, list, update and delete of every
-live schema the namespace reaches, each operation its behaviors add, and
-three tools for writing schemas: list, describe and define a draft. No
+live schema the namespace reaches, each operation its behaviors add (a
+schema-level one takes its parameters and no instance id), and three
+tools for writing schemas: list, describe and define a draft. No
 tool publishes: a draft goes live only through an HTTP call the access
 policy governs, so an MCP client cannot put a schema live on its own.
 
@@ -27,7 +28,7 @@ be called by its handle: the call is refused.
 */
 
 import { checkPrincipal, type Access, type Action, type Principal } from '../access.js';
-import type { BehaviorOperationDeclaration } from '../behaviors/declaration.js';
+import type { BehaviorOperationDeclaration, OperationScope } from '../behaviors/declaration.js';
 import { EngineError } from '../errors.js';
 import { isPlainObject } from '../instances/patch.js';
 import { INSTANCE_ID, type InstanceStore } from '../instances/store.js';
@@ -93,6 +94,8 @@ export interface DescribedOperation {
   name: string;
   /** The behavior that adds it; absent for the operations every schema has. */
   behavior?: string;
+  /** For a behavior's operation, what it runs on: an instance, or the schema as a whole. */
+  scope?: OperationScope;
   description: string;
   writes: boolean;
   params: JSONSchemaObject;
@@ -158,7 +161,17 @@ export class UnknownToolError extends EngineError {
   }
 }
 
-type ToolKind = 'create' | 'get' | 'list' | 'update' | 'delete' | 'operation' | 'listSchemas' | 'describeSchema' | 'defineSchema';
+type ToolKind =
+  | 'create'
+  | 'get'
+  | 'list'
+  | 'update'
+  | 'delete'
+  | 'operation'
+  | 'schemaOperation'
+  | 'listSchemas'
+  | 'describeSchema'
+  | 'defineSchema';
 
 // One tool before it is rendered: its names, what it does, and who may see it.
 interface ToolSpec {
@@ -236,7 +249,7 @@ export class ToolCatalog {
       })),
       operations: tools.map((tool) => ({
         name: tool.methodName,
-        ...(tool.behavior ? { behavior: tool.behavior.name } : {}),
+        ...(tool.behavior ? { behavior: tool.behavior.name, scope: tool.kind === 'schemaOperation' ? 'schema' : 'instance' } : {}),
         description: tool.description,
         writes: tool.writes,
         [policyKey]: tool.policy,
@@ -347,6 +360,10 @@ export class ToolCatalog {
         const params = input.params ?? {};
         return this.instances.invoke(principal, schema, id, tool.methodName, params, { namespace, ...expectedSeqOf(tool, input) });
       }
+      case 'schemaOperation': {
+        only(tool, input, ['params']);
+        return this.instances.invokeSchema(principal, schema, tool.methodName, input.params ?? {}, { namespace });
+      }
     }
   }
 
@@ -451,7 +468,8 @@ export class ToolCatalog {
     const name = record.name;
     const kebab = kebabCase(name);
     const invocation = this.options.invocation;
-    const instances = `/namespaces/${encodeURIComponent(namespace)}/schemas/${encodeURIComponent(name)}/instances`;
+    const schemaPath = `/namespaces/${encodeURIComponent(namespace)}/schemas/${encodeURIComponent(name)}`;
+    const instances = `${schemaPath}/instances`;
     const spec = (kind: ToolKind, methodName: string, parts: Omit<ToolSpec, 'kind' | 'name' | 'handle' | 'namespace' | 'methodName' | 'operationId' | 'schema'>): ToolSpec => ({
       kind,
       name: `${kebab}.${methodName}`,
@@ -506,14 +524,15 @@ export class ToolCatalog {
     ];
     for (const behavior of behaviors) {
       for (const operation of behavior.declaration.operations ?? []) {
+        const schemaLevel = operation.scope === 'schema';
         tools.push(
-          spec('operation', operation.name, {
+          spec(schemaLevel ? 'schemaOperation' : 'operation', operation.name, {
             title: `${name}: ${operation.name}`,
             description: operation.description || `Operation ${operation.name} of behavior ${behavior.name}.`,
             writes: operation.writes === true,
             policy: operation.invocationPolicy ?? this.options.invocationPolicy.default,
             httpMethod: 'POST',
-            httpPath: `${instances}/{id}/operations/${encodeURIComponent(operation.name)}`,
+            httpPath: `${schemaLevel ? schemaPath : `${instances}/{id}`}/operations/${encodeURIComponent(operation.name)}`,
             behavior,
             operation,
           })
@@ -576,7 +595,7 @@ export class ToolCatalog {
       return undefined;
     }
     const action: Action = tool.writes ? 'write' : 'read';
-    const operation = tool.kind === 'operation' ? tool.methodName : undefined;
+    const operation = tool.kind === 'operation' || tool.kind === 'schemaOperation' ? tool.methodName : undefined;
     return this.access.allows(principal, action, namespace, tool.schema.name, operation)
       ? undefined
       : `the access policy refuses ${principal.subject} ${action} on ${tool.schema.name}${operation ? ` (${operation})` : ''}`;
@@ -650,6 +669,11 @@ export class ToolCatalog {
           required ? ['id', 'params'] : ['id']
         );
       }
+      case 'schemaOperation': {
+        const params = (tool.operation as BehaviorOperationDeclaration).paramsSchema;
+        const required = isPlainObject(params) && Array.isArray(params.required) && params.required.length > 0;
+        return schema([['params', { raw: params }]], required ? ['params'] : []);
+      }
     }
   }
 
@@ -709,6 +733,7 @@ export class ToolCatalog {
       case 'delete':
         return { type: 'null' };
       case 'operation':
+      case 'schemaOperation':
         return (tool.operation as BehaviorOperationDeclaration).resultSchema;
       default:
         return true;
@@ -734,7 +759,8 @@ export class ToolCatalog {
         return { type: 'object', description: 'The describe document' };
       case 'defineSchema':
         return { type: 'object', description: 'The draft' };
-      case 'operation': {
+      case 'operation':
+      case 'schemaOperation': {
         const result = (tool.operation as BehaviorOperationDeclaration).resultSchema;
         const type = typeOf(result);
         const description = isPlainObject(result) && typeof result.description === 'string' ? result.description : `The result of ${tool.methodName}`;

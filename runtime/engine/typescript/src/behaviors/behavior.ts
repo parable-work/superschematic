@@ -11,6 +11,12 @@ and gets a context that reaches only what the behavior may touch:
 - the principal, the schema version and the clock's time for the call;
 - can(permission), which asks the deployment's PermissionMatcher whether
   the principal holds a permission the behavior's config names (D16);
+- instances and schemas: other instances of the namespace and the configs
+  of other schemas' behaviors, read as the principal, with the access
+  policy asked at each read, and in a write another instance's operation,
+  which runs as a caller's would (D16, amended);
+- references: the instances this one refers to, recorded with the engine
+  so the behavior hears when one of them changes or goes;
 - in a write, call(), which runs another behavior's operation on the same
   instance, that behavior's guards and every other guard first;
 - in a writing operation, update(), which changes the instance's own
@@ -18,11 +24,13 @@ and gets a context that reaches only what the behavior may touch:
 
 There is no handle on the instances table, on another behavior's storage
 or on the storage connection. A status one behavior owns changes at
-another's request only through its operations, so its guards always run.
+another's request only through its operations, so its guards always run,
+on this instance or another.
 */
 
 import type { Principal } from '../access.js';
 import type { ValidationIssue } from '../errors.js';
+import type { InstanceRecord } from '../instances/store.js';
 import type { Row, RunResult, SqlValue } from '../storage/driver.js';
 import type { BehaviorDeclaration } from './declaration.js';
 
@@ -92,6 +100,99 @@ export interface SqlWriter extends SqlReader {
   run(sql: string, params?: readonly SqlValue[]): RunResult;
 }
 
+/** How much of another instance a read returns. */
+export interface ReadOptions {
+  /**
+   * The behavior fields to read, by name; every one when absent, none for
+   * []. A name the schema's behaviors do not declare is left out. A field
+   * that reads other instances in turn nests the call deeper, so a
+   * behavior names the fields it needs.
+   */
+  readonly fields?: readonly string[];
+}
+
+/**
+ * The namespace's instances as the call's principal reaches them. Each
+ * read asks the access policy for read on the schema it names, and each
+ * invoke asks what instances.invoke asks: write or read, with the
+ * operation's name. A schema name is looked up in the namespace, then in
+ * the shared one; an instance is always the namespace's own. Reads,
+ * invokes and call() nest at most MAX_CALL_DEPTH deep together.
+ */
+export interface Instances {
+  /**
+   * Reads an instance: its record, with the behavior fields options names
+   * (every one by default); deep-frozen. undefined when the namespace has
+   * none with the id. Inside a write it reads the instance as the call has
+   * left it so far.
+   */
+  get(schema: string, id: string, options?: ReadOptions): InstanceRecord | undefined;
+  /**
+   * Reads the instances of one schema with the ids, at most 500, in one
+   * query and one policy question: a map by id, without the ids that have
+   * none.
+   */
+  getMany(schema: string, ids: readonly string[], options?: ReadOptions): ReadonlyMap<string, InstanceRecord>;
+  /**
+   * Runs an instance operation of another instance, or of this one, as
+   * its caller would: the parameters against its paramsSchema, every
+   * guard of that instance, its handler and its result, then for a writing
+   * operation that instance's afterChange, its next seq and its operation
+   * event, all in this call's transaction, in a savepoint that rolls back
+   * alone when it throws. From a guard, a field reader and a read-only
+   * operation it reaches read-only operations only. Invoking a writing
+   * operation of an instance whose write is still running up the call is
+   * a cycle, and refused (BehaviorError).
+   */
+  invoke(schema: string, id: string, operation: string, params?: FrozenJSON): unknown;
+}
+
+/** The schemas the namespace reaches, as the call's principal may read them. */
+export interface Schemas {
+  /**
+   * The config of a behavior a schema's live version composes, as the
+   * schema holds it ({} when it gives none), deep-frozen; undefined when
+   * it does not compose the behavior. Asks read on the schema, unless it
+   * is the call's own. not_found when the schema has no live version.
+   */
+  config(schema: string, behavior: string): FrozenJSON | undefined;
+  /** Whether the principal may read a schema, as the access policy answers. */
+  readable(schema: string): boolean;
+}
+
+/** A reference a behavior recorded from its instance to another. */
+export interface Reference {
+  /** The referenced instance's schema, looked up from the namespace. */
+  readonly schema: string;
+  /** The referenced instance's id, in the call's namespace. */
+  readonly id: string;
+  /** The behavior's own label for the reference, '' when it gives none. */
+  readonly key: string;
+}
+
+/** The references a behavior recorded from its instance: its own only. */
+export interface ReferenceReader {
+  /** Every reference, in the order they were recorded. */
+  list(): Reference[];
+}
+
+/**
+ * Records references, so the engine can find this instance when a
+ * referenced one changes or goes: the behavior's guardReference and
+ * afterReferenceChange run then. A reference is the behavior's, from this
+ * instance, and is dropped when this instance is deleted.
+ */
+export interface References extends ReferenceReader {
+  /**
+   * Records a reference to an instance of the namespace. It asks the
+   * access policy for read on the schema, and throws not_found when there
+   * is no such instance. Recording one that exists changes nothing.
+   */
+  add(schema: string, id: string, key?: string): void;
+  /** Removes a reference; false when there was none. */
+  remove(schema: string, id: string, key?: string): boolean;
+}
+
 /** What every behavior function gets: the behavior, its config and the call. */
 export interface BehaviorScope<Config> {
   /** The behavior's name. */
@@ -113,6 +214,10 @@ export interface BehaviorScope<Config> {
    * its config names the permission and this decides (D16).
    */
   can(permission: string): boolean;
+  /** Other instances of the namespace, as the principal reaches them. */
+  readonly instances: Instances;
+  /** The configs of the behaviors other schemas compose. */
+  readonly schemas: Schemas;
 }
 
 /** A read of one instance: a guard's view and a field reader's. */
@@ -125,7 +230,27 @@ export interface InstanceView<Config> extends BehaviorScope<Config> {
   readonly data: FrozenJSON;
   readonly columns: Columns;
   readonly sql: SqlReader;
+  /** The references the behavior recorded from the instance. */
+  readonly references: ReferenceReader;
 }
+
+/**
+ * A schema-level operation's context: the schema as a whole, with no
+ * instance. Its SQL reads the behavior's tables and writes nothing, and no
+ * event is appended for it: it changes state only through the operations
+ * it invokes (instances.invoke), whose events record what they change.
+ */
+export interface SchemaContext<Config> extends BehaviorScope<Config> {
+  readonly sql: SqlReader;
+}
+
+/**
+ * afterReferenceChange's context: a view of the referencing instance whose
+ * instances.invoke also runs writing operations. It changes the
+ * referencing instance only through an operation it invokes on it, so
+ * that instance's guards run and its change gets an event.
+ */
+export interface ReferenceContext<Config> extends InstanceView<Config> {}
 
 /**
  * A write to one instance: initialize, afterChange and an operation. In a
@@ -136,6 +261,8 @@ export interface InstanceView<Config> extends BehaviorScope<Config> {
 export interface InstanceContext<Config> extends InstanceView<Config> {
   readonly columns: WritableColumns;
   readonly sql: SqlWriter;
+  /** Records and removes the behavior's references from the instance. */
+  readonly references: References;
   /**
    * Calls an operation of a behavior the type composes, on this instance.
    * The parameters are checked against its paramsSchema, every behavior's
@@ -220,10 +347,15 @@ export interface ConfigTarget {
   readonly fields: readonly string[];
   /** Every behavior the type lists, in order. */
   readonly behaviors: readonly string[];
+  /** The config of each behavior the type lists, as the schema holds it ({} when it gives none). */
+  readonly configs: Readonly<Record<string, unknown>>;
 }
 
-/** An operation's handler. Its result is checked against resultSchema. */
+/** An instance operation's handler. Its result is checked against resultSchema. */
 export type OperationHandler<Config> = (context: OperationContext<Config>, params: FrozenJSON) => unknown;
+
+/** A schema-level operation's handler. Its result is checked against resultSchema. */
+export type SchemaOperationHandler<Config> = (context: SchemaContext<Config>, params: FrozenJSON) => unknown;
 
 /** Reads one declared field for an instance: a JSON value, or undefined (or null) for none. */
 export type FieldReader<Config> = (context: InstanceView<Config>) => unknown;
@@ -269,8 +401,11 @@ export interface BehaviorImplementation<Config = unknown> {
    */
   guard?(context: InstanceView<Config>, request: GuardRequest): string | undefined | void;
 
-  /** A handler per declared operation. */
+  /** A handler per declared operation of scope instance (the default). */
   readonly operations?: Readonly<Record<string, OperationHandler<Config>>>;
+
+  /** A handler per declared operation of scope schema. */
+  readonly schemaOperations?: Readonly<Record<string, SchemaOperationHandler<Config>>>;
 
   /** A reader per declared field. */
   readonly fields?: Readonly<Record<string, FieldReader<Config>>>;
@@ -281,6 +416,25 @@ export interface BehaviorImplementation<Config = unknown> {
    * order. Operations it calls do not run it again.
    */
   afterChange?(context: InstanceContext<Config>, change: InstanceChange): void;
+
+  /**
+   * May veto an update, a delete or a writing operation of an instance the
+   * behavior's instance refers to (a recorded reference), whoever the
+   * caller: return a reason. The view is the referencing instance's. It
+   * runs with the referenced instance's own guards, after them, for each
+   * reference; the first veto wins (BehaviorVetoError, vetoed).
+   */
+  guardReference?(view: InstanceView<Config>, reference: Reference, request: GuardRequest): string | undefined | void;
+
+  /**
+   * Runs after an update, a delete or a writing operation of an instance
+   * the behavior's instance refers to, once that change and its event are
+   * done, in the same transaction, for each reference. After a delete it
+   * must remove the reference, through an operation of the referencing
+   * instance it invokes: a reference to a deleted instance left behind is
+   * a BehaviorError, which rolls the delete back.
+   */
+  afterReferenceChange?(context: ReferenceContext<Config>, reference: Reference, change: InstanceChange): void;
 }
 
 /** defineBehavior types an implementation's config; it returns the implementation unchanged. */

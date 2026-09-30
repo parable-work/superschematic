@@ -13,6 +13,7 @@ import { EngineError, type AccessPolicy, type Engine, type EngineOptions } from 
 import { engineApp } from '../dist/http/index.js';
 import { flag, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, thrown } from './helpers.ts';
+import { reachBehaviors } from './reach-fixtures.ts';
 
 afterEach(cleanup);
 
@@ -183,6 +184,55 @@ describe('the operation route', () => {
     const { app } = serve({ path, behaviors: [flag] });
     assert.equal((await problem(call(app, 'POST', operation('i1', 'increment')), 503)).code, 'unavailable');
     assert.equal((await problem(call(app, 'GET', '/namespaces/default/schemas/Item/describe'), 503)).code, 'unavailable');
+  });
+});
+
+describe('the schema-level operation route', () => {
+  const schemaOperation = (name: string) => `/namespaces/default/schemas/Item/operations/${name}`;
+
+  function withHolders(): { engine: Engine; app: Hono } {
+    const served = serve({ behaviors: [...testBehaviors, ...reachBehaviors] });
+    publishItem(served.engine, [{ name: 'test.Holder' }]);
+    for (const id of ['i1', 'i2', 'i3']) {
+      served.engine.instances.create(alice, 'Item', { title: id }, { id });
+    }
+    served.engine.instances.invoke(alice, 'Item', 'i2', 'hold', { schema: 'Item', id: 'i1' });
+    served.engine.instances.invoke(alice, 'Item', 'i3', 'hold', { schema: 'Item', id: 'i1' });
+    return served;
+  }
+
+  test('runs a schema-level operation with the body as its parameters and answers its result, with no ETag', async () => {
+    const { app, engine } = withHolders();
+    assert.deepEqual(await data(call(app, 'POST', schemaOperation('holders'), { body: { schema: 'Item', id: 'i1' }, token: 'reader' })), {
+      data: ['i2', 'i3'],
+      etag: null,
+    });
+    const before = engine.events.read(alice, { limit: 500 }).events.length;
+    assert.deepEqual((await data(call(app, 'POST', schemaOperation('releaseAll'), { body: { schema: 'Item', id: 'i1' } }))).data, 2);
+    assert.deepEqual(
+      engine.events.read(alice, { limit: 500 }).events.slice(before).map((event) => [event.instanceId, (event.change as { operation: string }).operation]),
+      [
+        ['i2', 'release'],
+        ['i3', 'release'],
+      ]
+    );
+    assert.deepEqual((await data(call(app, 'POST', schemaOperation('holders'), { body: { schema: 'Item', id: 'i1' } }))).data, []);
+  });
+
+  test('answers each refusal with its status; each route refuses the other scope', async () => {
+    const { app } = withHolders();
+    assert.equal((await problem(call(app, 'POST', schemaOperation('holders'), { body: { schema: 'Item' } }), 400)).code, 'invalid_argument');
+    await problem(call(app, 'POST', schemaOperation('holders'), { body: '{}', type: 'text/plain' }), 415);
+    assert.equal((await problem(call(app, 'POST', schemaOperation('releaseAll'), { body: { schema: 'Item', id: 'i1' }, token: 'reader' }), 403)).code, 'forbidden');
+    await problem(call(app, 'POST', schemaOperation('holders'), { token: null }), 401);
+    const instanceRoute = await problem(call(app, 'POST', operation('i2', 'holders'), { body: { schema: 'Item', id: 'i1' } }), 404);
+    assert.equal(instanceRoute.detail, "Item's holders is a schema-level operation: call it on the schema, with no instance");
+    const schemaRoute = await problem(call(app, 'POST', schemaOperation('hold'), { body: { schema: 'Item', id: 'i1' } }), 404);
+    assert.equal(schemaRoute.detail, "Item's hold is an instance operation: call it on an instance");
+    assert.equal((await problem(call(app, 'POST', '/namespaces/default/schemas/Missing/operations/holders'), 404)).code, 'not_found');
+    assert.equal((await problem(call(app, 'POST', '/namespaces/nowhere/schemas/Item/operations/holders'), 404)).code, 'unknown_namespace');
+    const defect = await problem(call(app, 'POST', schemaOperation('scribble')), 500);
+    assert.equal(defect.code, 'internal_error');
   });
 });
 

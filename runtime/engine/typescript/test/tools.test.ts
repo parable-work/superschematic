@@ -20,6 +20,7 @@ import {
 } from '../dist/index.js';
 import { counterDeclaration, flagDeclaration, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
+import { reachBehaviors } from './reach-fixtures.ts';
 
 afterEach(cleanup);
 
@@ -143,6 +144,30 @@ describe('the describe document', () => {
     assert.deepEqual(increment.result, counterDeclaration.operations?.[0].resultSchema);
     // flag's parameters require a reason, so the tool requires params.
     assert.deepEqual(operationOf(engine, 'Item', 'flag').params.required, ['id', 'params']);
+  });
+
+  test('describes a behavior operation with its scope; a schema-level one takes params and no id, and says where it is served', () => {
+    const engine = openTestEngine({ policy, metaSchema: openMetaSchema(), behaviors: [...testBehaviors, ...reachBehaviors] });
+    publishItem(engine, [{ name: 'test.Holder' }]);
+    const holders = operationOf(engine, 'Item', 'holders');
+    assert.deepEqual([holders.behavior, holders.scope, holders.writes, holders.tool], ['test.Holder', 'schema', false, 'item.holders']);
+    assert.deepEqual(Object.keys(holders.params.properties as object), ['params']);
+    assert.deepEqual(holders.params.required, ['params']);
+    assert.deepEqual(operationOf(engine, 'Item', 'hold').scope, 'instance');
+    assert.equal(operationOf(engine, 'Item', 'create').scope, undefined);
+    assert.equal(operationOf(engine, 'Item', 'scribble').params.required, undefined, 'no parameter is required, so params is not');
+
+    const read = tool(engine, 'item.holders');
+    assert.deepEqual(
+      [read.httpMethod, read.httpPath, read.mcp.hidden ? undefined : read.mcp.handle, read.replay?.mode, Object.keys(read.parameters.properties as object)],
+      ['POST', '/namespaces/default/schemas/Item/operations/holders', 'item_holders', 'read_only', ['params']]
+    );
+    const write = tool(engine, 'item.releaseAll');
+    assert.deepEqual([write.httpPath, write.replay, write.mcp.hidden ? undefined : write.mcp.handle], ['/namespaces/default/schemas/Item/operations/releaseAll', null, 'item_release_all']);
+    assert.equal(tool(engine, 'item.hold').httpPath, '/namespaces/default/schemas/Item/instances/{id}/operations/hold');
+    // The policy hides it from a caller it refuses, naming the operation.
+    const hidden = tool(engine, 'item.releaseAll', reader).mcp;
+    assert.deepEqual(hidden, { hidden: true, hiddenReason: 'the access policy refuses reader write on Item (releaseAll)' });
   });
 
   test('describes a schema the namespace reaches in the shared one, and refuses what it cannot describe', () => {
@@ -467,6 +492,20 @@ describe('tool calls', () => {
     assert.equal(engine.tools.call(alice, 'item_delete', { id: 'i1', expectedSeq: 3 }), null);
     assert.equal(thrown(() => engine.tools.call(alice, 'item_get', { id: 'i1' }), EngineError).code, 'not_found');
     assert.equal(thrown(() => engine.tools.call(alice, 'item_delete', { id: 'i1' }), EngineError).code, 'not_found');
+  });
+
+  test('a schema-level tool runs its operation with params and no instance', () => {
+    const engine = openTestEngine({ policy, metaSchema: openMetaSchema(), behaviors: [...testBehaviors, ...reachBehaviors] });
+    publishItem(engine, [{ name: 'test.Holder' }]);
+    engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
+    engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i2' });
+    engine.tools.call(alice, 'item_hold', { id: 'i2', params: { schema: 'Item', id: 'i1' } });
+    assert.deepEqual(engine.tools.call(reader, 'item_holders', { params: { schema: 'Item', id: 'i1' } }), ['i2']);
+    assert.equal(thrown(() => engine.tools.call(alice, 'item_holders', { id: 'i2', params: { schema: 'Item', id: 'i1' } }), EngineError).code, 'invalid_argument');
+    assert.equal(thrown(() => engine.tools.call(alice, 'item_holders', {}), EngineError).code, 'invalid_argument');
+    assert.equal(thrown(() => engine.tools.call(reader, 'item_release_all', { params: { schema: 'Item', id: 'i1' } }), EngineError).code, 'forbidden');
+    assert.equal(engine.tools.call(alice, 'item_release_all', { params: { schema: 'Item', id: 'i1' } }), 1);
+    assert.deepEqual(engine.tools.call(alice, 'item_holders', { params: { schema: 'Item', id: 'i1' } }), []);
   });
 
   test('the schema tools list, describe and define a draft, which stays a draft', () => {

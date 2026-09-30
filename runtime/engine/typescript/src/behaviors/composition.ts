@@ -111,12 +111,7 @@ export function compose(target: ComposeTarget, registry: BehaviorRegistry): { co
     own.add(field.name);
     own.add(jsonKey(field));
   }
-  const configTarget: ConfigTarget = deepFreeze({
-    schema: target.name,
-    type: target.instanceType,
-    fields: (type.fields ?? []).map(jsonKey),
-    behaviors: [...listed],
-  });
+  const configTarget = targetOf(target);
 
   const bound: BoundBehavior[] = [];
   const seen = new Set<string>();
@@ -199,15 +194,6 @@ export function configChanges(
   const afterRefs = (after.document.types ?? {})[type]?.behaviors ?? [];
   let instances: boolean | undefined;
   const populated = (): boolean => (instances ??= hasInstances());
-  const targetOf = (target: ComposeTarget): ConfigTarget => {
-    const typeDef = (target.document.types ?? {})[target.instanceType] as TypeDef;
-    return deepFreeze({
-      schema: target.name,
-      type: target.instanceType,
-      fields: (typeDef.fields ?? []).map(jsonKey),
-      behaviors: (typeDef.behaviors ?? []).map((ref) => ref.name),
-    });
-  };
 
   for (const ref of afterRefs) {
     const earlier = beforeRefs.find((candidate) => candidate.name === ref.name);
@@ -258,6 +244,28 @@ export function configChanges(
     }
   }
   return changes;
+}
+
+// targetOf is what parseConfig is told about the type a config is given
+// on: its schema, its fields, and every behavior it lists with its config
+// as the schema holds it. A behavior listed twice keeps its first config;
+// compose refuses the list.
+function targetOf(target: ComposeTarget): ConfigTarget {
+  const typeDef = (target.document.types ?? {})[target.instanceType] as TypeDef;
+  const refs = typeDef.behaviors ?? [];
+  const configs: Record<string, unknown> = {};
+  for (const ref of refs) {
+    if (!Object.prototype.hasOwnProperty.call(configs, ref.name)) {
+      configs[ref.name] = ref.config === undefined ? {} : (JSON.parse(JSON.stringify(ref.config)) as unknown);
+    }
+  }
+  return deepFreeze({
+    schema: target.name,
+    type: target.instanceType,
+    fields: (typeDef.fields ?? []).map(jsonKey),
+    behaviors: refs.map((ref) => ref.name),
+    configs,
+  });
 }
 
 // decide asks an implementation's configChange; undefined allows.

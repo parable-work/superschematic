@@ -21,6 +21,7 @@ import { engineApp } from '../dist/http/index.js';
 import { MCP_PATH, engineMcp, type EngineMcpOptions } from '../dist/mcp/index.js';
 import { openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, documentsDocument, openTestEngine, orderDocument } from './helpers.ts';
+import { reachBehaviors } from './reach-fixtures.ts';
 
 // The bearer token is the caller's subject; reader may only read.
 const authenticate: Authenticator = async (ctx) => {
@@ -271,6 +272,42 @@ describe('tools/list', () => {
       (await client.listTools()).tools.map((tool) => tool.name),
       ['list_schemas', 'describe_schema', 'define_schema', 'item_get', 'item_list', 'item_history']
     );
+  });
+});
+
+describe('schema-level operations', () => {
+  test('are tools without an id: tools/list shows their params alone, and tools/call runs them on the schema', async () => {
+    const { url, engine } = await served({ behaviors: [...testBehaviors, broken, ...reachBehaviors] }, {}, (engine) => {
+      publishItem(engine, [{ name: 'test.Holder' }]);
+      for (const id of ['i1', 'i2']) {
+        engine.instances.create(everything, 'Item', { title: id }, { id });
+      }
+      engine.instances.invoke(everything, 'Item', 'i2', 'hold', { schema: 'Item', id: 'i1' });
+    });
+    const { client } = await connect(endpoint(url));
+    const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
+    const holders = byName.get('item_holders');
+    assert.ok(holders);
+    assert.deepEqual([Object.keys(holders.inputSchema.properties ?? {}), holders.inputSchema.required, holders.annotations], [
+      ['params'],
+      ['params'],
+      { readOnlyHint: true },
+    ]);
+    assert.deepEqual(Object.keys(byName.get('item_hold')?.inputSchema.properties ?? {}), ['expectedSeq', 'id', 'params']);
+
+    const listed = (await client.callTool({ name: 'item_holders', arguments: { params: { schema: 'Item', id: 'i1' } } })) as CallToolResult;
+    assert.deepEqual(listed.content, [{ type: 'text', text: '["i2"]' }]);
+    const withId = (await client.callTool({ name: 'item_holders', arguments: { id: 'i2', params: { schema: 'Item', id: 'i1' } } })) as CallToolResult;
+    assert.equal(problemOf(withId).code, 'invalid_argument');
+    const released = (await client.callTool({ name: 'item_release_all', arguments: { params: { schema: 'Item', id: 'i1' } } })) as CallToolResult;
+    assert.deepEqual(released.content, [{ type: 'text', text: '1' }]);
+    assert.equal(engine.instances.get(alice, 'Item', 'i2')?.data.held, undefined);
+
+    const { client: readOnly } = await connect(endpoint(url), 'reader');
+    const names = (await readOnly.listTools()).tools.map((tool) => tool.name);
+    assert.ok(names.includes('item_holders') && !names.includes('item_release_all'));
+    const refused = (await readOnly.callTool({ name: 'item_release_all', arguments: { params: { schema: 'Item', id: 'i1' } } })) as CallToolResult;
+    assert.equal(problemOf(refused).status, 403);
   });
 });
 

@@ -2,9 +2,10 @@
 The behaviors an engine can run: implementations registered when it opens
 (EngineOptions.behaviors) or later (engine.behaviors.register). Registering
 checks the declaration (declaration.ts), compiles its config, parameter
-and result schemas, and refuses an implementation whose operations or
-fields are not exactly the ones its declaration names, or whose
-migrations are malformed. A name registers once.
+and result schemas, and refuses an implementation whose operations,
+schema-level operations or fields are not exactly the ones its
+declaration names, or whose migrations are malformed. A name registers
+once.
 
 A behavior whose storage already exists in the file (a schema that
 composes it was published before) has its storage brought up to its
@@ -25,8 +26,15 @@ import type {
   ColumnSpec,
   FieldReader,
   OperationHandler,
+  SchemaOperationHandler,
 } from './behavior.js';
-import { checkDeclaration, type BehaviorDeclaration, type BehaviorOperationDeclaration, type JSONSchema } from './declaration.js';
+import {
+  checkDeclaration,
+  type BehaviorDeclaration,
+  type BehaviorOperationDeclaration,
+  type JSONSchema,
+  type OperationScope,
+} from './declaration.js';
 import { deepFreeze } from './json.js';
 import { assignKey, columnProblems, migrationSet, prefixOf, storedKey } from './storage.js';
 
@@ -36,7 +44,10 @@ export interface OperationSpec {
   readonly name: string;
   readonly declaration: BehaviorOperationDeclaration;
   readonly writes: boolean;
-  readonly handler: OperationHandler<unknown>;
+  /** What it runs on: an instance, or the schema as a whole. */
+  readonly scope: OperationScope;
+  /** An OperationHandler for an instance operation, a SchemaOperationHandler for a schema-level one. */
+  readonly handler: OperationHandler<unknown> | SchemaOperationHandler<unknown>;
   readonly params: ValidateFunction;
   readonly result: ValidateFunction;
 }
@@ -142,6 +153,7 @@ export class BehaviorRegistry {
     const config = declaration.configSchema === undefined ? undefined : this.schema(declaration.configSchema, 'configSchema', problems);
 
     const handlers = ownFunctions(implementation.operations, 'operations', problems);
+    const schemaHandlers = ownFunctions(implementation.schemaOperations, 'schemaOperations', problems);
     for (const operation of declaration.operations ?? []) {
       if (operation.invocationPolicy !== undefined && this.invocation && !this.invocation.values.includes(operation.invocationPolicy)) {
         problems.push(
@@ -149,20 +161,22 @@ export class BehaviorRegistry {
         );
       }
     }
-    const operations = (declaration.operations ?? []).map((operation) => ({
-      name: operation.name,
-      declaration: operation,
-      writes: operation.writes === true,
-      handler: handlers.get(operation.name) as OperationHandler<unknown>,
-      params: this.schema(operation.paramsSchema, `operation ${operation.name} paramsSchema`, problems) as ValidateFunction,
-      result: this.schema(operation.resultSchema, `operation ${operation.name} resultSchema`, problems) as ValidateFunction,
-    }));
-    matchNames(
-      'operations',
-      handlers,
-      (declaration.operations ?? []).map((operation) => operation.name),
-      problems
-    );
+    const operations = (declaration.operations ?? []).map((operation) => {
+      const scope: OperationScope = operation.scope ?? 'instance';
+      return {
+        name: operation.name,
+        declaration: operation,
+        writes: operation.writes === true,
+        scope,
+        handler: (scope === 'schema' ? schemaHandlers : handlers).get(operation.name) as OperationHandler<unknown> | SchemaOperationHandler<unknown>,
+        params: this.schema(operation.paramsSchema, `operation ${operation.name} paramsSchema`, problems) as ValidateFunction,
+        result: this.schema(operation.resultSchema, `operation ${operation.name} resultSchema`, problems) as ValidateFunction,
+      };
+    });
+    const scoped = (scope: OperationScope) =>
+      (declaration.operations ?? []).filter((operation) => (operation.scope ?? 'instance') === scope).map((operation) => operation.name);
+    matchNames('operations', handlers, scoped('instance'), problems);
+    matchNames('schemaOperations', schemaHandlers, scoped('schema'), problems);
 
     const readers = ownFunctions(implementation.fields, 'fields', problems);
     const fields = (declaration.fields ?? []).map((field) => ({ name: field.name, read: readers.get(field.name) as FieldReader<unknown> }));
@@ -173,7 +187,7 @@ export class BehaviorRegistry {
       problems
     );
 
-    for (const hook of ['parseConfig', 'configChange', 'initialize', 'guard', 'afterChange'] as const) {
+    for (const hook of ['parseConfig', 'configChange', 'initialize', 'guard', 'afterChange', 'guardReference', 'afterReferenceChange'] as const) {
       if (implementation[hook] !== undefined && typeof implementation[hook] !== 'function') {
         problems.push(`${hook} is a function`);
       }

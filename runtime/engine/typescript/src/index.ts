@@ -33,7 +33,7 @@ export { SchemaValidator } from './registry/validator.js';
 
 export { INSTANCE_ID, InstanceStore } from './instances/store.js';
 export type { CreateOptions, DeleteOptions, InstancePage, InstanceRecord, InstanceTarget, ListOptions, UpdateOptions } from './instances/store.js';
-export type { InvokeOptions, OperationOutcome } from './instances/store.js';
+export type { InvokeOptions, InvokeSchemaOptions, OperationOutcome } from './instances/store.js';
 
 export { EventLog } from './events/log.js';
 export type { EngineEvent, EventKind, EventPage, OperationChange, ReadEventsOptions } from './events/log.js';
@@ -59,16 +59,33 @@ export type {
   InstanceChange,
   InstanceContext,
   InstanceView,
+  Instances,
   OperationContext,
   OperationHandler,
+  ReadOptions,
+  Reference,
+  ReferenceContext,
+  ReferenceReader,
+  References,
+  SchemaContext,
+  SchemaOperationHandler,
+  Schemas,
   SqlReader,
   SqlWriter,
   WritableColumns,
 } from './behaviors/behavior.js';
-export { BEHAVIOR_NAME, BUILTIN_OPERATIONS } from './behaviors/declaration.js';
-export type { BehaviorDeclaration, BehaviorFieldDeclaration, BehaviorOperationDeclaration, JSONSchema } from './behaviors/declaration.js';
+export { BEHAVIOR_NAME, BUILTIN_OPERATIONS, OPERATION_SCOPES } from './behaviors/declaration.js';
+export type {
+  BehaviorDeclaration,
+  BehaviorFieldDeclaration,
+  BehaviorOperationDeclaration,
+  JSONSchema,
+  OperationScope,
+} from './behaviors/declaration.js';
 export { BehaviorRegistry } from './behaviors/registry.js';
-export { MAX_CALL_DEPTH } from './behaviors/execution.js';
+export { MAX_BATCH_READ, MAX_CALL_DEPTH } from './behaviors/execution.js';
+export { page, pageRequest } from './behaviors/paging.js';
+export type { Page } from './behaviors/paging.js';
 
 // The core's behaviors, which every engine registers (runtime/engine/README.md, "Core behaviors").
 export { isTerminalState } from './behaviors/core/index.js';

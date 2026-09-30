@@ -3,23 +3,34 @@ Running a type's behaviors for one call on one instance: its guards, its
 initializers, an operation and the operations it calls, its after-change
 hooks and its field readers. The instance store creates one Execution per
 create, read, update, delete or operation, inside the write transaction
-for a write. Everything here is synchronous (D16): a function that returns
-a promise is a BehaviorError, which rolls the write back.
+for a write, and one per other instance a behavior reads or invokes. They
+share the call's Chain: its principal, namespace and time, how deep calls
+nest and which instances are being written. Everything here is synchronous
+(D16): a function that returns a promise is a BehaviorError, which rolls
+the write back.
 
 Each function gets a context for its own behavior (behavior.ts). A guard
-and a field reader get a view: read-only columns and SQL. initialize,
-afterChange and a writing operation get a writable context and call(); a
-read-only operation gets one whose writes refuse and whose call() reaches
-only read-only operations. An operation's context also has update(),
-which changes the instance's own fields with instances.update's checks and
-every guard, and validateUpdate(). A called operation runs in a savepoint,
-so a failure the caller catches leaves nothing of it behind.
+and a field reader get a view: read-only columns and SQL, reads of other
+instances and their read-only operations. initialize, afterChange and a
+writing operation get a writable context, call(), references, and invoke
+of writing operations on other instances; a read-only operation gets one
+whose writes refuse and whose call() and invoke reach only read-only
+operations. An operation's context also has update(), which changes the
+instance's own fields with instances.update's checks and every guard,
+and validateUpdate(). A called operation runs in a savepoint, so a failure
+the caller catches leaves nothing of it behind.
+
+What a behavior reaches beyond its instance goes through the Reach, which
+the instance store implements: reads, invokes and references there ask
+the access policy as the chain's principal (D16, amended). A schema-level
+operation runs in a SchemaExecution, with the same reach and no instance.
 */
 
 import type { PermissionMatcher } from '@superschematic/http-runtime';
 
 import type { Principal } from '../access.js';
 import { BehaviorError, BehaviorVetoError, EngineError, InstanceValidationError, OperationParamsError, type ValidationIssue } from '../errors.js';
+import type { InstanceRecord } from '../instances/store.js';
 import { isPlainObject, jsonEqual, mergePatch, setMember } from '../instances/patch.js';
 import { readOnlyIssue } from '../registry/validator.js';
 import type { SqlValue } from '../storage/driver.js';
@@ -30,7 +41,16 @@ import type {
   InstanceChange,
   InstanceContext,
   InstanceView,
+  Instances,
   OperationContext,
+  OperationHandler,
+  ReadOptions,
+  Reference,
+  ReferenceContext,
+  References,
+  SchemaContext,
+  SchemaOperationHandler,
+  Schemas,
   WritableColumns,
 } from './behavior.js';
 import type { BoundBehavior, Composition } from './composition.js';
@@ -38,20 +58,11 @@ import { deepFreeze, jsonCopy } from './json.js';
 import { BehaviorRegistry, type OperationSpec } from './registry.js';
 import { BehaviorSql, DeletedColumns, InstanceColumns, synchronous } from './storage.js';
 
-/** The call an execution runs for. */
-export interface CallScope {
-  readonly namespace: string;
-  readonly schema: string;
-  readonly version: number;
-  readonly principal: Principal;
-  /** The clock's time for the whole call. */
-  readonly now: number;
-  /** Answers a context's can(): whether the principal's permissions cover a required one. */
-  readonly permissions: PermissionMatcher;
-}
-
-/** How deep call() may nest; deeper is a cycle between behaviors. */
+/** How deep call(), invokes and reads of other instances may nest together; deeper is a cycle. */
 export const MAX_CALL_DEPTH = 16;
+
+/** The most ids one getMany reads. */
+export const MAX_BATCH_READ = 500;
 
 /** The prefix of each bound behavior's storage, by behavior name. */
 export type Prefixes = ReadonlyMap<string, string>;
@@ -61,24 +72,128 @@ export interface InstanceValidator {
   validate(value: unknown): ValidationIssue[];
 }
 
+/** What running a version needs: its behaviors, their storage and its validator. */
+export interface Runtime {
+  readonly composition: Composition;
+  readonly prefixes: Prefixes;
+  readonly validator: InstanceValidator;
+}
+
+/**
+ * One engine call across every instance it reaches: who acts, in which
+ * namespace, at what time, how deep calls nest, and which instances have a
+ * write running. The instance store makes one per public call.
+ */
+export class Chain {
+  private depth = 0;
+  private readonly writes = new Set<string>();
+
+  constructor(
+    readonly principal: Principal,
+    readonly namespace: string,
+    /** The clock's time for the whole call. */
+    readonly now: number,
+    /** Answers a context's can(): whether the principal's permissions cover a required one. */
+    readonly permissions: PermissionMatcher
+  ) {}
+
+  /** nest runs fn one level deeper, refusing past MAX_CALL_DEPTH with a BehaviorError of behavior. */
+  nest<T>(behavior: string, what: string, fn: () => T): T {
+    if (this.depth >= MAX_CALL_DEPTH) {
+      throw new BehaviorError(behavior, `${what}: calls nest more than ${MAX_CALL_DEPTH} deep`);
+    }
+    this.depth += 1;
+    try {
+      return fn();
+    } finally {
+      this.depth -= 1;
+    }
+  }
+
+  /** writing reports whether an instance has a write running up the chain. */
+  writing(schema: string, id: string): boolean {
+    return this.writes.has(instanceKey(schema, id));
+  }
+
+  /** write runs fn as the write of an instance: while it runs, invoking a writing operation of it is a cycle. */
+  write<T>(schema: string, id: string, fn: () => T): T {
+    const key = instanceKey(schema, id);
+    if (this.writes.has(key)) {
+      return fn();
+    }
+    this.writes.add(key);
+    try {
+      return fn();
+    } finally {
+      this.writes.delete(key);
+    }
+  }
+}
+
+function instanceKey(schema: string, id: string): string {
+  return `${schema}\u0000${id}`;
+}
+
+/** Where a reference starts: a behavior on an instance. */
+export interface ReferenceSource {
+  readonly schema: string;
+  readonly id: string;
+  readonly behavior: string;
+}
+
+/**
+ * What a behavior reaches beyond its own instance, as the chain's
+ * principal, in the chain's namespace. The instance store implements it;
+ * each method asks the access policy what its doc says.
+ */
+export interface Reach {
+  /** Reads instances of a schema, with the named behavior fields (every one when undefined); asks read. */
+  read(chain: Chain, schema: string, ids: readonly string[], fields: readonly string[] | undefined): Map<string, InstanceRecord>;
+  /** Invokes an instance operation as instances.invoke does, inside the chain's transaction; asks write or read. */
+  invoke(chain: Chain, from: string, schema: string, id: string, operation: string, params: unknown, writes: boolean): unknown;
+  /** The config of a behavior a schema's live version composes, as the schema holds it; asks read unless the schema is own. */
+  config(chain: Chain, own: string, schema: string, behavior: string): unknown;
+  /** Whether the principal may read a schema. */
+  readable(chain: Chain, schema: string): boolean;
+  /** Records a reference; asks read on the target's schema and refuses a target that does not exist. */
+  addReference(chain: Chain, source: ReferenceSource, target: Reference): void;
+  /** Removes a reference; false when there was none. */
+  removeReference(chain: Chain, source: ReferenceSource, target: Reference): boolean;
+  /** The references a behavior recorded from an instance, in the order recorded. */
+  listReferences(chain: Chain, source: ReferenceSource): Reference[];
+  /** Asks the guardReference of every behavior that refers to an instance; the first veto throws. */
+  guardReferences(chain: Chain, schema: string, id: string, request: GuardRequest): void;
+}
+
+/** The instance an execution runs for. */
+export interface ExecutionTarget {
+  readonly schema: string;
+  /** The live version the call runs with. */
+  readonly version: number;
+  readonly id: string;
+}
+
+type ColumnsMode = 'reading' | 'writing' | 'a read-only operation';
+
 export class Execution {
   private data: FrozenJSON;
-  private depth = 0;
   private deleted: Map<string, Record<string, SqlValue>> | undefined;
 
   constructor(
     private readonly storage: Storage,
-    private readonly composition: Composition,
-    private readonly prefixes: Prefixes,
-    private readonly scope: CallScope,
-    private readonly id: string,
+    private readonly runtime: Runtime,
+    private readonly chain: Chain,
+    private readonly reach: Reach,
+    private readonly target: ExecutionTarget,
     data: Record<string, unknown>,
     /** False for a read and a read-only operation: nothing may write. */
-    private readonly writable: boolean,
-    /** The live version's validator, which an operation's update() runs. */
-    private readonly validator: InstanceValidator
+    private readonly writable: boolean
   ) {
     this.data = freezeCopy(data);
+  }
+
+  private get composition(): Composition {
+    return this.runtime.composition;
   }
 
   /** setData replaces the instance's own fields the contexts see, after an update. */
@@ -91,8 +206,12 @@ export class Execution {
     return this.data;
   }
 
-  /** guard asks every behavior's guard in list order; the first veto throws BehaviorVetoError. */
-  guard(request: GuardRequest): void {
+  /**
+   * guard asks every behavior's guard in list order, then, for a request
+   * that writes, the guardReference of every behavior on another instance
+   * that refers to this one; the first veto throws BehaviorVetoError.
+   */
+  guard(request: GuardRequest, writes = true): void {
     const action = request.kind === 'operation' ? request.operation : request.kind;
     for (const bound of this.composition.behaviors) {
       const guard = bound.behavior.implementation.guard;
@@ -101,13 +220,13 @@ export class Execution {
       }
       const answer: unknown = guard.call(bound.behavior.implementation, this.view(bound), request);
       synchronous(bound.behavior.name, 'guard', answer);
-      if (answer === undefined || answer === null) {
-        continue;
+      const reason = vetoReason(bound.behavior.name, 'a guard', answer);
+      if (reason !== undefined) {
+        throw new BehaviorVetoError(bound.behavior.name, action, this.target.schema, this.target.id, reason);
       }
-      if (typeof answer !== 'string' || answer === '') {
-        throw new BehaviorError(bound.behavior.name, 'a guard returns a reason (a non-empty string) to veto, or undefined to allow');
-      }
-      throw new BehaviorVetoError(bound.behavior.name, action, this.scope.schema, this.id, answer);
+    }
+    if (writes) {
+      this.reach.guardReferences(this.chain, this.target.schema, this.target.id, request);
     }
   }
 
@@ -143,15 +262,19 @@ export class Execution {
     }
   }
 
-  /** fields reads every behavior's declared fields: a JSON value by field name, none for undefined or null. */
-  fields(): Record<string, unknown> {
+  /**
+   * fields reads the behaviors' declared fields, every one or the ones
+   * named: a JSON value by field name, none for undefined or null.
+   */
+  fields(only?: readonly string[]): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     for (const bound of this.composition.behaviors) {
-      if (bound.behavior.fields.length === 0) {
+      const wanted = only === undefined ? bound.behavior.fields : bound.behavior.fields.filter((field) => only.includes(field.name));
+      if (wanted.length === 0) {
         continue;
       }
       const view = this.view(bound);
-      for (const field of bound.behavior.fields) {
+      for (const field of wanted) {
         const value: unknown = field.read.call(bound.behavior.implementation.fields, view);
         synchronous(bound.behavior.name, `field ${field.name}`, value);
         if (value === undefined || value === null) {
@@ -168,37 +291,35 @@ export class Execution {
    * result against resultSchema. params are already checked (checkParams).
    */
   invoke(operation: OperationSpec, params: FrozenJSON, caller?: string): unknown {
-    if (this.depth >= MAX_CALL_DEPTH) {
-      throw new BehaviorError(operation.behavior.name, `operation ${operation.name}: calls nest more than ${MAX_CALL_DEPTH} deep`);
-    }
-    this.depth += 1;
-    try {
+    return this.chain.nest(operation.behavior.name, `operation ${operation.name}`, () => {
       this.guard(
         caller === undefined
           ? { kind: 'operation', behavior: operation.behavior.name, operation: operation.name, params }
-          : { kind: 'operation', behavior: operation.behavior.name, operation: operation.name, params, caller }
+          : { kind: 'operation', behavior: operation.behavior.name, operation: operation.name, params, caller },
+        operation.writes
       );
       const bound = this.composition.bound(operation.behavior.name) as BoundBehavior;
-      const result: unknown = operation.handler.call(
+      const result: unknown = (operation.handler as OperationHandler<unknown>).call(
         bound.behavior.implementation.operations,
         this.operationContext(bound, operation.writes && this.writable),
         params
       );
-      synchronous(operation.behavior.name, `operation ${operation.name}`, result);
-      const value = json(operation.behavior.name, `operation ${operation.name} result`, result === undefined ? null : result);
-      if (!operation.result(value)) {
-        const detail = BehaviorRegistry.issues(operation.result.errors)
-          .map((issue) => (issue.path ? `${issue.path} ${issue.message}` : issue.message))
-          .join('; ');
-        throw new BehaviorError(
-          operation.behavior.name,
-          `operation ${operation.name} returned a result its resultSchema refuses: ${detail}`
-        );
-      }
-      return value;
-    } finally {
-      this.depth -= 1;
-    }
+      return checkResult(operation, result);
+    });
+  }
+
+  /**
+   * view is a view of the instance for one of its behaviors: what a guard
+   * and a field reader get, and what guardReference gets on the
+   * referencing instance.
+   */
+  view(bound: BoundBehavior): InstanceView<unknown> {
+    return this.frozen(this.viewMembers(bound, false));
+  }
+
+  /** referenceContext is a view whose instances.invoke also runs writing operations: afterReferenceChange's. */
+  referenceContext(bound: BoundBehavior): ReferenceContext<unknown> {
+    return this.frozen(this.viewMembers(bound, true));
   }
 
   private call(from: BoundBehavior, writable: boolean, behavior: string, name: string, params: unknown): unknown {
@@ -207,7 +328,10 @@ export class Execution {
     }
     const operation = this.composition.operations.get(name);
     if (!operation || operation.behavior.name !== behavior) {
-      throw new EngineError('not_found', `${this.scope.schema} has no operation ${name} of behavior ${behavior}`);
+      throw new EngineError('not_found', `${this.target.schema} has no operation ${name} of behavior ${behavior}`);
+    }
+    if (operation.scope === 'schema') {
+      throw new EngineError('not_found', `${this.target.schema}'s ${name} is a schema-level operation; call() runs an operation of this instance`);
     }
     if (operation.writes && !writable) {
       throw new BehaviorError(from.behavior.name, `a read-only operation cannot call ${behavior}.${name}, which writes`);
@@ -242,7 +366,7 @@ export class Execution {
     }
     const { patch: copy, merged, issues } = this.merge(from, patch);
     if (issues.length > 0) {
-      throw new InstanceValidationError(this.scope.namespace, this.scope.schema, this.scope.version, issues);
+      throw new InstanceValidationError(this.chain.namespace, this.target.schema, this.target.version, issues);
     }
     if (jsonEqual(merged, this.data)) {
       return this.data;
@@ -250,9 +374,9 @@ export class Execution {
     this.guard({ kind: 'update', patch: deepFreeze(copy), after: freezeCopy(merged), caller: from.behavior.name });
     this.storage.run('UPDATE engine_instances SET data = ? WHERE namespace = ? AND schema = ? AND id = ?', [
       JSON.stringify(merged),
-      this.scope.namespace,
-      this.scope.schema,
-      this.id,
+      this.chain.namespace,
+      this.target.schema,
+      this.target.id,
     ]);
     this.setData(merged);
     return this.data;
@@ -275,21 +399,7 @@ export class Execution {
       }
     }
     const merged = mergePatch(this.data, value) as Record<string, unknown>;
-    return { patch: value, merged, issues: issues.length > 0 ? issues : this.validator.validate(merged) };
-  }
-
-  private scopeFor(bound: BoundBehavior) {
-    return {
-      behavior: bound.behavior.name,
-      config: bound.config,
-      namespace: this.scope.namespace,
-      schema: this.scope.schema,
-      version: this.scope.version,
-      principal: this.scope.principal,
-      now: this.scope.now,
-      can: (permission: string) => this.can(bound, permission),
-      id: this.id,
-    };
+    return { patch: value, merged, issues: issues.length > 0 ? issues : this.runtime.validator.validate(merged) };
   }
 
   // frozen freezes a view or a context whose data reads the instance's own
@@ -299,25 +409,15 @@ export class Execution {
     return Object.freeze(value) as T & { readonly data: FrozenJSON };
   }
 
-  // can asks the deployment's matcher whether the principal holds one
-  // permission; only a literal true is yes.
-  private can(bound: BoundBehavior, permission: string): boolean {
-    if (typeof permission !== 'string' || permission === '') {
-      throw new BehaviorError(bound.behavior.name, 'can() takes a permission: a non-empty string');
-    }
-    const answer: unknown = this.scope.permissions(this.scope.principal.permissions, [permission]);
-    if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
-      throw new TypeError('a permission matcher is synchronous: it returned a promise');
-    }
-    return answer === true;
-  }
-
-  private view(bound: BoundBehavior): InstanceView<unknown> {
-    return this.frozen({
-      ...this.scopeFor(bound),
+  private viewMembers(bound: BoundBehavior, invokeWrites: boolean) {
+    const source: ReferenceSource = { schema: this.target.schema, id: this.target.id, behavior: bound.behavior.name };
+    return {
+      ...scopeMembers(this.chain, this.reach, bound, this.target.schema, this.target.version, invokeWrites),
+      id: this.target.id,
       columns: this.columns(bound, 'reading'),
       sql: new BehaviorSql(this.storage, bound.behavior.name, this.prefix(bound), 'read'),
-    });
+      references: Object.freeze({ list: () => this.reach.listReferences(this.chain, source) }),
+    };
   }
 
   // context is a writable context when writes is true and the execution
@@ -339,14 +439,43 @@ export class Execution {
 
   private contextMembers(bound: BoundBehavior, writable: boolean) {
     return {
-      ...this.scopeFor(bound),
+      ...scopeMembers(this.chain, this.reach, bound, this.target.schema, this.target.version, writable),
+      id: this.target.id,
       columns: this.columns(bound, writable ? 'writing' : 'a read-only operation'),
       sql: new BehaviorSql(this.storage, bound.behavior.name, this.prefix(bound), writable ? 'write' : 'read'),
+      references: this.references(bound, writable),
       call: (behavior: string, operation: string, params?: FrozenJSON) => this.call(bound, writable, behavior, operation, params),
     };
   }
 
-  private columns(bound: BoundBehavior, mode: 'reading' | 'writing' | 'a read-only operation'): WritableColumns {
+  // references is a context's handle on its behavior's references from the
+  // instance: add and remove refuse in a read-only operation and after a
+  // delete, when the engine drops them.
+  private references(bound: BoundBehavior, writable: boolean): References {
+    const name = bound.behavior.name;
+    const source: ReferenceSource = { schema: this.target.schema, id: this.target.id, behavior: name };
+    const writing = (what: string): void => {
+      if (this.deleted) {
+        throw new BehaviorError(name, `the instance is deleted; references.${what} changes nothing, and the engine drops its references`);
+      }
+      if (!writable) {
+        throw new BehaviorError(name, `a read-only operation cannot ${what} a reference`);
+      }
+    };
+    return Object.freeze({
+      add: (schema: string, id: string, key = '') => {
+        writing('add');
+        this.reach.addReference(this.chain, source, reference(name, schema, id, key));
+      },
+      remove: (schema: string, id: string, key = '') => {
+        writing('remove');
+        return this.reach.removeReference(this.chain, source, reference(name, schema, id, key));
+      },
+      list: () => this.reach.listReferences(this.chain, source),
+    });
+  }
+
+  private columns(bound: BoundBehavior, mode: ColumnsMode): WritableColumns {
     const values = this.deleted?.get(bound.behavior.name);
     if (values !== undefined) {
       return new DeletedColumns(bound.behavior.name, values);
@@ -358,18 +487,180 @@ export class Execution {
       bound.behavior.name,
       this.prefix(bound),
       bound.behavior.columns,
-      [this.scope.namespace, this.scope.schema, this.id],
+      [this.chain.namespace, this.target.schema, this.target.id],
       readOnly
     );
   }
 
   private prefix(bound: BoundBehavior): string {
-    const prefix = this.prefixes.get(bound.behavior.name);
-    if (prefix === undefined) {
-      throw new Error(`behavior ${bound.behavior.name} has no storage in this file`);
-    }
-    return prefix;
+    return prefixOf(this.runtime.prefixes, bound);
   }
+}
+
+/**
+ * A schema-level operation's run: the operation's behavior on the schema
+ * as a whole, with no instance, no instance guard and no event of its own.
+ */
+export class SchemaExecution {
+  constructor(
+    private readonly storage: Storage,
+    private readonly runtime: Runtime,
+    private readonly chain: Chain,
+    private readonly reach: Reach,
+    private readonly schema: string,
+    private readonly version: number
+  ) {}
+
+  /** invoke runs the operation's handler, then checks its result. params are already checked. */
+  invoke(operation: OperationSpec, params: FrozenJSON): unknown {
+    return this.chain.nest(operation.behavior.name, `operation ${operation.name}`, () => {
+      const bound = this.runtime.composition.bound(operation.behavior.name) as BoundBehavior;
+      const context: SchemaContext<unknown> = Object.freeze({
+        ...scopeMembers(this.chain, this.reach, bound, this.schema, this.version, operation.writes),
+        sql: new BehaviorSql(this.storage, bound.behavior.name, prefixOf(this.runtime.prefixes, bound), 'read'),
+      });
+      const result: unknown = (operation.handler as SchemaOperationHandler<unknown>).call(
+        bound.behavior.implementation.schemaOperations,
+        context,
+        params
+      );
+      return checkResult(operation, result);
+    });
+  }
+}
+
+// scopeMembers are what every function of a behavior gets: the behavior,
+// its config, the call, can(), and its reach into other instances and
+// schemas. invokeWrites lets instances.invoke run writing operations.
+function scopeMembers(chain: Chain, reach: Reach, bound: BoundBehavior, schema: string, version: number, invokeWrites: boolean) {
+  const name = bound.behavior.name;
+  return {
+    behavior: name,
+    config: bound.config,
+    namespace: chain.namespace,
+    schema,
+    version,
+    principal: chain.principal,
+    now: chain.now,
+    can: (permission: string) => can(chain, name, permission),
+    instances: instancesOf(chain, reach, name, invokeWrites),
+    schemas: schemasOf(chain, reach, name, schema),
+  };
+}
+
+function instancesOf(chain: Chain, reach: Reach, behavior: string, invokeWrites: boolean): Instances {
+  const read = (schema: string, ids: readonly string[], options: ReadOptions | undefined, what: string): Map<string, InstanceRecord> => {
+    checkName(behavior, what, 'schema', schema);
+    const fields = fieldsOption(behavior, what, options);
+    return chain.nest(behavior, what, () => reach.read(chain, schema, ids, fields));
+  };
+  return Object.freeze({
+    get: (schema: string, id: string, options?: ReadOptions) => {
+      checkName(behavior, 'instances.get', 'id', id);
+      return read(schema, [id], options, 'instances.get').get(id);
+    },
+    getMany: (schema: string, ids: readonly string[], options?: ReadOptions) => {
+      if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) {
+        throw new BehaviorError(behavior, 'instances.getMany takes a list of instance ids');
+      }
+      const unique = [...new Set(ids)];
+      if (unique.length > MAX_BATCH_READ) {
+        throw new BehaviorError(behavior, `instances.getMany reads at most ${MAX_BATCH_READ} instances at once, not ${unique.length}`);
+      }
+      return read(schema, unique, options, 'instances.getMany');
+    },
+    invoke: (schema: string, id: string, operation: string, params?: FrozenJSON) => {
+      checkName(behavior, 'instances.invoke', 'schema', schema);
+      checkName(behavior, 'instances.invoke', 'id', id);
+      checkName(behavior, 'instances.invoke', 'operation', operation);
+      return reach.invoke(chain, behavior, schema, id, operation, params ?? {}, invokeWrites);
+    },
+  });
+}
+
+function schemasOf(chain: Chain, reach: Reach, behavior: string, own: string): Schemas {
+  return Object.freeze({
+    config: (schema: string, name: string) => {
+      checkName(behavior, 'schemas.config', 'schema', schema);
+      checkName(behavior, 'schemas.config', 'behavior', name);
+      return reach.config(chain, own, schema, name) as FrozenJSON | undefined;
+    },
+    readable: (schema: string) => {
+      checkName(behavior, 'schemas.readable', 'schema', schema);
+      return reach.readable(chain, schema);
+    },
+  });
+}
+
+// can asks the deployment's matcher whether the principal holds one
+// permission; only a literal true is yes.
+function can(chain: Chain, behavior: string, permission: string): boolean {
+  if (typeof permission !== 'string' || permission === '') {
+    throw new BehaviorError(behavior, 'can() takes a permission: a non-empty string');
+  }
+  const answer: unknown = chain.permissions(chain.principal.permissions, [permission]);
+  if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
+    throw new TypeError('a permission matcher is synchronous: it returned a promise');
+  }
+  return answer === true;
+}
+
+function reference(behavior: string, schema: string, id: string, key: string): Reference {
+  checkName(behavior, 'references', 'schema', schema);
+  checkName(behavior, 'references', 'id', id);
+  if (typeof key !== 'string') {
+    throw new BehaviorError(behavior, 'a reference key is a string');
+  }
+  return { schema, id, key };
+}
+
+function checkName(behavior: string, what: string, name: string, value: unknown): void {
+  if (typeof value !== 'string' || value === '') {
+    throw new BehaviorError(behavior, `${what} takes ${name === 'id' ? 'an instance id' : `a ${name} name`}: a non-empty string`);
+  }
+}
+
+function fieldsOption(behavior: string, what: string, options: ReadOptions | undefined): readonly string[] | undefined {
+  const fields = options?.fields;
+  if (fields === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(fields) || fields.some((field) => typeof field !== 'string')) {
+    throw new BehaviorError(behavior, `${what}: fields is a list of behavior field names`);
+  }
+  return fields;
+}
+
+/** vetoReason reads a guard's answer: a reason, or undefined to allow. */
+export function vetoReason(behavior: string, what: string, answer: unknown): string | undefined {
+  if (answer === undefined || answer === null) {
+    return undefined;
+  }
+  if (typeof answer !== 'string' || answer === '') {
+    throw new BehaviorError(behavior, `${what} returns a reason (a non-empty string) to veto, or undefined to allow`);
+  }
+  return answer;
+}
+
+function prefixOf(prefixes: Prefixes, bound: BoundBehavior): string {
+  const prefix = prefixes.get(bound.behavior.name);
+  if (prefix === undefined) {
+    throw new Error(`behavior ${bound.behavior.name} has no storage in this file`);
+  }
+  return prefix;
+}
+
+// checkResult copies an operation's result and holds it to its resultSchema.
+function checkResult(operation: OperationSpec, result: unknown): unknown {
+  synchronous(operation.behavior.name, `operation ${operation.name}`, result);
+  const value = json(operation.behavior.name, `operation ${operation.name} result`, result === undefined ? null : result);
+  if (!operation.result(value)) {
+    const detail = BehaviorRegistry.issues(operation.result.errors)
+      .map((issue) => (issue.path ? `${issue.path} ${issue.message}` : issue.message))
+      .join('; ');
+    throw new BehaviorError(operation.behavior.name, `operation ${operation.name} returned a result its resultSchema refuses: ${detail}`);
+  }
+  return value;
 }
 
 /**

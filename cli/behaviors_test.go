@@ -134,6 +134,29 @@ func TestBehaviorsCommand(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// An operation's scope sits after writes in the canonical copy, and an
+// operation that gives none keeps none: the default, an instance, is not
+// written out.
+func TestBehaviorDeclarationFileKeepsScope(t *testing.T) {
+	params := json.RawMessage(`{"type":"object","additionalProperties":false}`)
+	written, err := behaviorDeclarationFile(registry.BehaviorDeclaration{
+		Name: "acme.Rating",
+		Operations: []registry.BehaviorOperation{
+			{Name: "rate", ParamsSchema: params, ResultSchema: json.RawMessage(`true`), Writes: true},
+			{Name: "topRated", ParamsSchema: params, ResultSchema: json.RawMessage(`true`), Writes: true, Scope: registry.OperationScopeSchema, InvocationPolicy: "ask"},
+		},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, string(written), "\"resultSchema\": true,\n      \"writes\": true\n    },")
+	assert.Contains(t, string(written), "\"writes\": true,\n      \"scope\": \"schema\",\n      \"invocationPolicy\": \"ask\"\n")
+
+	reg := registry.New(naming.Default())
+	require.NoError(t, reg.RegisterBehavior(registry.BehaviorSpec{Extension: "acme", Declaration: written}))
+	copied, ok := reg.Behavior("acme.Rating")
+	require.True(t, ok)
+	assert.Equal(t, []string{"", registry.OperationScopeSchema}, []string{copied.Operations[0].Scope, copied.Operations[1].Scope})
+}
+
 // --extension keeps one extension's behaviors, and names what the binary
 // registers when that extension registers none; the core binary writes the
 // core's declarations.

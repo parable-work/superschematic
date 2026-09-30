@@ -20,6 +20,12 @@ engine_behaviors records the key of each behavior whose storage the file
 holds: the behavior's columns on engine_instances and its tables are named
 bhv_<key>__<name> (behaviors/storage.ts), and its migrations are in the
 ledger under its own name.
+
+engine_references holds the references behaviors record from one
+instance to another in the same namespace (instances/references.ts): by
+target, for the guards and hooks a change of the target runs, and by
+source, for a behavior's own list and for dropping them when the source
+is deleted.
 */
 
 import type { MigrationSet } from './storage/migrations.js';
@@ -160,6 +166,26 @@ CREATE TABLE engine_behaviors (
   key        TEXT    NOT NULL UNIQUE,
   created_at INTEGER NOT NULL
 ) STRICT;
+`);
+      },
+    },
+    {
+      version: 5,
+      name: 'references between instances',
+      up(storage) {
+        storage.exec(`
+CREATE TABLE engine_references (
+  namespace     TEXT NOT NULL,
+  target_schema TEXT NOT NULL,
+  target_id     TEXT NOT NULL,
+  source_schema TEXT NOT NULL,
+  source_id     TEXT NOT NULL,
+  behavior      TEXT NOT NULL,
+  key           TEXT NOT NULL,
+  PRIMARY KEY (namespace, target_schema, target_id, source_schema, source_id, behavior, key)
+) STRICT;
+
+CREATE INDEX engine_references_source ON engine_references (namespace, source_schema, source_id, behavior);
 `);
       },
     },
