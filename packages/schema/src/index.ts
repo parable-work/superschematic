@@ -32,6 +32,7 @@ export type {
   RollupConfig,
   RollupSource,
   RollupsConfig,
+  SearchConfig,
   WorkflowConfig,
   WorkflowTransition,
 } from "./behavior";

@@ -11,8 +11,9 @@ HTTP API with the event stream (`@superschematic/engine/http`), the
 behavior plug-in interface, the describe and tools documents, the MCP
 endpoint (`@superschematic/engine/mcp`), and the core's behaviors:
 `Workflow`, `Comments`, `Revisions`, and `Dependencies`, `Links` and
-`Rollups`, which reach other instances. Not built yet: reactions,
-search, and the work-queue package D16 lists.
+`Rollups`, which reach other instances, and `Search`, full-text search.
+Not built yet: reactions, the vectors D16 lists beside search, and the
+work-queue package.
 
 ```ts
 import { allowAll, openEngine } from '@superschematic/engine';
@@ -409,8 +410,8 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 
 `metaSchema` is the `json-schema` output of the deployment's binary, which
 lists the behaviors it declares; the core's lists the core's own
-(`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links` and
-`Rollups`), so its loader refuses any other.
+(`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`,
+`Rollups` and `Search`), so its loader refuses any other.
 
 ### The implementation
 
@@ -751,7 +752,7 @@ operation that expects the sequence from before the operation is refused
 
 ### Core behaviors
 
-The core declares six behaviors (`internal/registry/behaviors`, section
+The core declares seven behaviors (`internal/registry/behaviors`, section
 3.16 of `docs/extension-model.md`), so every binary's meta-schema admits
 them, and the engine implements them in `src/behaviors/core` and
 registers them when it opens, before `behaviors`: a schema that composes
@@ -1034,6 +1035,100 @@ handler for a caller's transition, another behavior's `call()` and
 another instance's invoke alike. A rollup may name its own schema: a
 task can roll up its subtasks through its own `parent` link, and
 `parseConfig` reads the version being defined for that name.
+
+#### Search
+
+Full-text search over the instance's own text fields.
+
+| | |
+| --- | --- |
+| Config | `fields`: the type's own top-level fields to index, by JSON key, 1 to 16, each a string or a scalar whose values are strings; `weights`: by indexed field, above 0 and at most 1000, 1 for a field it does not name |
+| Fields | none |
+| Operations | schema-level `search({ query, syntax?, limit?, cursor? })` -> a page of `{ id, rank, field?, snippet? }`, read-only |
+| Refusals | a field the type does not declare, or one that is not text (a number, an enum, a list, an object), and a weight for a field it does not index, when the schema is defined; a caller who may not `read` the schema, even one the policy lets call `search` (`forbidden`); an FTS5 expression FTS5 cannot parse, or one with a column filter (`invalid_argument`) |
+| Events | none: the index is the behavior's own, written with the change of the instance |
+| `configChange` | every change: `fields` and `weights` may change, and it may be added to or removed from a schema with instances |
+
+```json
+"behaviors": [{ "name": "Search", "config": { "fields": ["title", "body"], "weights": { "title": 3 } } }]
+```
+
+```ts
+engine.instances.invokeSchema(me, 'notes', 'search', { query: 'release plan', limit: 20 });
+// { items: [{ id: 'n2', rank: 1, field: 'title',
+//             snippet: [{ text: 'Release', match: true }, { text: ' ', match: false }, { text: 'plan', match: true }] }],
+//   next: null }
+```
+
+The index is one FTS5 table, `bhv_search__text`, with a column per
+indexed field in the config's order, and `bhv_search__rows`, which gives
+each of its rows a namespace, a schema and an id. The tokenizer is
+`unicode61` with diacritics removed, so `cafe` also finds the word with
+an accent on its e, and case does not matter; there is no stemming. `afterChange` writes an
+instance's row in the transaction of its create, of an update or a
+writing operation that changes an indexed field (an approved revision
+included), and deletes it with the instance, so a search never sees a
+row the instances do not hold, and a write that fails takes its index
+change back with it.
+
+A query is plain words by default. Each whitespace-separated word goes to
+FTS5 as a quoted string, so quotes, `AND`, `OR`, `NOT`, `NEAR`, `*`,
+`:` and parentheses in it are text: an instance matches when its indexed
+fields hold every word, in any field and any order. A word FTS5 splits
+(`slips-a-week`) is a phrase of its parts, one it tokenizes to nothing
+(`-`, `"`) counts for nothing, and a query of only such words matches
+nothing, without an error.
+`syntax: "fts5"` takes the query as an FTS5 expression instead: phrases,
+`AND`, `OR`, `NOT`, `NEAR`, `^` and prefixes (`wal*`). A column filter
+(`title: walnut`, `{title body}: walnut`, `-title`) is refused, since it
+would name the index's columns rather than the type's fields, and so is
+an expression FTS5 cannot parse, as `invalid_argument` at `/query`. The
+expression is the risk: FTS5 reads every term that starts with a
+prefix, so `a*` over a large index is slow, and the engine runs a search
+synchronously, in the process that serves every other call. The
+1000-character bound on a query caps how much one expression asks for,
+not how long it takes, and there is no switch to turn the syntax off: a
+deployment that serves `search` to callers it does not trust takes on
+that cost.
+
+Results come best first, by bm25 with the config's weights, then in the
+order the instances were first indexed. `rank` is the place in that
+order, from 1, across pages; a hit carries no score. The FTS5 table is
+shared by every schema and namespace in the file, so bm25's statistics
+(how many rows hold a term, how long a field is on average) are taken
+over all of them: the ids and snippets a search returns are only the
+caller's, but their order can shift with another namespace's text, and
+a score would carry that further. `field` and `snippet` are those of the
+indexed field with the most matches, the earliest in `fields` on a tie:
+a few words around them (at most 12, with `...` where it cuts), in parts
+that each say whether they are a match, so a client marks them up as it
+likes. A page is an offset into the ranking (`limit`, 50 by default, and
+the `next` cursor), so a write between two pages can move an instance
+across the boundary.
+
+`search` asks the policy for `read` with the operation's name, as every
+schema-level operation does, then for `read` on the schema alone: it
+returns ids and text, which only a caller who may read the schema sees.
+The namespace and the schema are conditions of the query, so a search
+answers from the caller's namespace only, and for a schema of the shared
+namespace each namespace's index holds its own instances. The access
+policy answers per schema (`AccessRequest` has no instance id), so a
+caller who may read the schema may read every hit.
+
+A version that adds Search (a first version included) or changes
+`fields`, their order included, rebuilds the index of the schema's
+instances in `afterConfigChange` ("Publishing"); one that removes it
+drops the index, so a deleted field's text does not stay behind; a
+change of `weights` alone needs nothing, since they apply when a search
+runs. The rebuild runs in the publish's transaction and holds the
+write lock until every instance is indexed: on an Apple M-series laptop,
+adding Search to a schema of 10,000 instances of about 160 words each
+took 0.4 s and changing its fields 0.5 to 0.9 s, on Node.js and on Bun.
+
+There are no vectors. D16 lists them as optional beside search; SQLite
+has no vector search without an extension, which the engine refuses to
+load, and an embedding comes from a provider the engine would call
+outside its synchronous write transaction.
 
 ## Namespaces
 

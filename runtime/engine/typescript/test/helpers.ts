@@ -153,3 +153,15 @@ export function projectsDocument(): Record<string, unknown> {
     readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-rollups-json/src/project.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
+
+/**
+ * notesDocument is the General schema-file document the core binary loads
+ * with no extension linked beside the others (make cli-smoke,
+ * fixture-search-json): its Note type composes Search over its title and
+ * body, the title weighing three times the body.
+ */
+export function notesDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-search-json/src/note.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}

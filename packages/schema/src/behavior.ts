@@ -33,6 +33,8 @@ export interface BehaviorConfigs {
   Links: LinksConfig;
   /** Values derived from the instances that point at this one through a link, computed when it is read. */
   Rollups: RollupsConfig;
+  /** Full-text search over the type's own text fields. */
+  Search: SearchConfig;
 }
 
 /** Workflow's config. */
@@ -118,6 +120,14 @@ export type RollupConfig =
       /** The states of the type's Workflow that a transition into waits for the rollup to hold. */
       readonly gatedStates?: readonly string[];
     });
+
+/** Search's config. */
+export interface SearchConfig {
+  /** The type's own top-level fields to index, by JSON key: each a string, or a scalar whose values are strings; at most 16. */
+  readonly fields: readonly string[];
+  /** A weight per indexed field, which multiplies that field's part of a match's score; 1 for a field it does not name. */
+  readonly weights?: Readonly<Record<string, number>>;
+}
 
 /** A name @behavior takes: a key of BehaviorConfigs. */
 export type BehaviorName = keyof BehaviorConfigs;
