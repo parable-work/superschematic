@@ -1260,4 +1260,67 @@ mod tests {
             }
         }
     }
+
+    /// A client whose transactions fail the test on any statement.
+    struct NoStatements;
+
+    #[async_trait]
+    impl Client for NoStatements {
+        async fn begin(&self) -> Result<Box<dyn Conn + '_>, ClientError> {
+            Ok(Box::new(NoStatements))
+        }
+    }
+
+    #[async_trait]
+    impl Conn for NoStatements {
+        async fn query(
+            &mut self,
+            sql: &str,
+            _: &[SqlValue],
+        ) -> Result<Vec<Vec<SqlValue>>, ClientError> {
+            panic!("ran {sql}")
+        }
+        async fn execute(&mut self, sql: &str, _: &[SqlValue]) -> Result<u64, ClientError> {
+            panic!("ran {sql}")
+        }
+        async fn commit(self: Box<Self>) -> Result<(), ClientError> {
+            Ok(())
+        }
+        async fn rollback(self: Box<Self>) -> Result<(), ClientError> {
+            Ok(())
+        }
+    }
+
+    /// A row with more members than a Postgres table has columns is refused
+    /// before any statement runs. No kind a Postgres table holds declares
+    /// that many columns, so the adapter refuses the row for a column its
+    /// descriptor does not declare; the Go and Python adapters refuse it by
+    /// count first.
+    #[tokio::test]
+    async fn upsert_row_refuses_more_columns_than_a_table() {
+        let members: Map<String, Value> = (0..=1600).map(|i| (format!("c{i}"), i.into())).collect();
+        let adapter = Arc::new(
+            Adapter::new(&fixture().to_string(), Options::default())
+                .expect("the fixture's adapter"),
+        );
+        let store = adapter.storage(NoStatements);
+        let mut tx = store.begin().await.expect("begin");
+        let write = RowWrite {
+            ref_id: "1".to_owned(),
+            root: "1".to_owned(),
+            row: Value::Object(members),
+            tombstone: false,
+            actor: "2".to_owned(),
+        };
+        let error = tx
+            .upsert_row("step", write)
+            .await
+            .expect_err("a row of 1601 members is refused");
+        assert!(
+            error
+                .to_string()
+                .contains("which its descriptor does not declare"),
+            "{error}"
+        );
+    }
 }

@@ -31,6 +31,8 @@ http_runtime_go_module = "github.com/parable-work/superschematic/runtime/http/go
 http_runtime_rust_crate = "superschematic-http-runtime"
 http_runtime_npm_package = "@superschematic/http-runtime"
 versiongraph_npm_package = "@superschematic/versiongraph"
+versiongraph_pypi_dist = "superschematic-versiongraph"
+versiongraph_python_module = "superschematic_versiongraph"
 ptr_go_module = "github.com/parable-work/superschematic/runtime/schema/go/ptr"
 
 # Prose the generated readmes and package manifests carry.
@@ -75,12 +77,12 @@ authoring_packages = [
 ]
 
 # Where the runtime modules live when generated manifests should point path
-# dependencies at a checkout (go.mod replace, Cargo path, npm file:). Every
-# key is optional and relative to the repository root, the parent of the
-# schemas root. An unset key emits no path dependency and the generated
-# manifest resolves the published module. These are this repository's own
-# paths; a consumer replaces them with the location of its checkout or
-# leaves the table out.
+# dependencies at a checkout (go.mod replace, Cargo path, npm file:, uv path
+# source). Every key is optional and relative to the repository root, the
+# parent of the schemas root. An unset key emits no path dependency and the
+# generated manifest resolves the published module. These are this
+# repository's own paths; a consumer replaces them with the location of its
+# checkout or leaves the table out.
 [paths]
 scalar_go = "third_party/superscalar/go"
 scalar_typescript = "third_party/superscalar/bindings/typescript"
@@ -90,5 +92,6 @@ schema_runtime_go = "runtime/schema/go"
 versiongraph_go = "runtime/versiongraph/go"
 versiongraph_typescript = "runtime/versiongraph/typescript"
 versiongraph_rust = "runtime/versiongraph/rust-engine"
+versiongraph_python = "runtime/versiongraph/python"
 http_runtime_go = "runtime/http/go"
 http_runtime_rust = "runtime/http/rust"

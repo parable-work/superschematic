@@ -20,6 +20,15 @@ HTTP client over those types. Module names come from
   release; until then the schema runtime and generated packages resolve it
   from a checkout.
 
+A types package whose schema declares a
+[version graph](/superschematic/reference/version-graphs/#use-the-engine-from-python)
+depends on `superschematic-versiongraph`, the engine and its Postgres
+adapter, also unpublished: it is a PyO3 extension that uv builds from a
+checkout with maturin, which needs cargo. `[paths].versiongraph_python`
+points the generated `pyproject.toml` at `runtime/versiongraph/python`
+through `[tool.uv.sources]`. Its Postgres client binds psycopg 3, the
+package's `postgres` extra (`superschematic-versiongraph[postgres]`).
+
 ## Install
 
 The CLI install is on the [Go](/superschematic/install/go/) page. Author

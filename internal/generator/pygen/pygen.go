@@ -108,6 +108,17 @@ type ModuleOutput struct {
 
 	// Naming supplies the scalar library's PyPI and import names.
 	Naming naming.Naming
+
+	// VersionGraphs are the typed facades of the graphs the schema
+	// declares, each written as <module>/versiongraph_<name>.py. The
+	// package then depends on the version graph's Python runtime
+	// (Naming.VersionGraphPyPIDist).
+	VersionGraphs []VersionGraphInfo
+
+	// VersionGraphDepPath is the uv path source of the version graph's
+	// Python runtime, relative to the output directory, set by
+	// SetVersionGraphPath. Empty names the dependency without a source.
+	VersionGraphDepPath string
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -262,6 +273,10 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 
 	applyUnionDiscriminatorLiterals(output)
 	collectModelRebuildTypes(output, imported.enumNames)
+
+	if output.VersionGraphs, err = versionGraphs(schema); err != nil {
+		return nil, err
+	}
 
 	return output, nil
 }

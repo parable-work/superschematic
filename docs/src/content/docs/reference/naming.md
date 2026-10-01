@@ -160,6 +160,23 @@ TypeScript types package whose schema declares a version graph imports
 the facade base from its `/facade` entry point and lists the package as a
 dependency ([Use the engine from TypeScript](/superschematic/reference/version-graphs/#use-the-engine-from-typescript)).
 
+### `versiongraph_pypi_dist`
+
+Default: `superschematic-versiongraph`
+
+PyPI distribution name of the Python version-graph runtime: the core's
+PyO3 binding, the engine, its Postgres adapter and the facade base. A
+generated Python types package whose schema declares a version graph lists
+it as a dependency ([Use the engine from Python](/superschematic/reference/version-graphs/#use-the-engine-from-python)).
+
+### `versiongraph_python_module`
+
+Default: `superschematic_versiongraph`
+
+Python import name of the Python version-graph runtime. A generated
+facade (`<module>/versiongraph_<name>.py`) imports the facade base from
+its `facade` module.
+
 ### `ptr_go_module`
 
 Default: `github.com/parable-work/superschematic/runtime/schema/go/ptr`
@@ -394,6 +411,16 @@ Default: unset. This repository's own file sets
 
 Directory of the version graph's Rust engine crate. Unset, a generated
 Rust types crate names the crate's version instead of a path.
+
+### `paths.versiongraph_python`
+
+Default: unset. This repository's own file sets
+`runtime/versiongraph/python`.
+
+Directory of the Python version-graph runtime (`pyproject.toml`). A
+generated Python types package whose schema declares a version graph
+names it as a uv path source (`[tool.uv.sources]`); unset, the dependency
+has no source and resolves from the index.
 
 ### `paths.http_runtime_go`
 

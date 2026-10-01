@@ -71,6 +71,7 @@ http_runtime_rust = "../../runtime/http/rust"
 versiongraph_go = "../../runtime/versiongraph/go"
 versiongraph_typescript = "../../runtime/versiongraph/typescript"
 versiongraph_rust = "../../runtime/versiongraph/rust-engine"
+versiongraph_python = "../../runtime/versiongraph/python"
 
 # build-all writes the dependency graph of the generated packages to
 # dist/.deps.json and, with this key, a copy at this path, relative to the

@@ -1,5 +1,6 @@
 // The Postgres adapter's own rules, which the scenarios do not reach: what
-// its constructor refuses, a prune that keeps pinned images, a sweep lock
+// its constructor refuses, a row with more members than a table has
+// columns, a prune that keeps pinned images, a sweep lock
 // that one transaction holds at a time, a ref lock another transaction
 // waits for, the version fences of updateRef and discardRef, and pgClient's
 // savepoint over a transaction the caller holds. The TypeScript counterpart of the Go
@@ -8,6 +9,7 @@ import { afterEach, expect, test } from "bun:test";
 import { VersionConflictError } from "../dist/engine.js";
 import type { Ref } from "../dist/engine.js";
 import { PostgresAdapter, pgClient, pgPool } from "../dist/postgres.js";
+import type { Client, Conn } from "../dist/postgres.js";
 import { descriptor, dsn, scratchSchema, type Scratch } from "./postgres.js";
 
 type Doc = { [key: string]: unknown; kinds: { [key: string]: unknown; columns: Record<string, string> }[] };
@@ -40,6 +42,35 @@ for (const [name, edit, refuse] of refusals) {
     }
   });
 }
+
+// noStatements is a Client whose transactions fail the test on any
+// statement.
+const noStatements: Client = {
+  transact: (fn) => {
+    const conn: Conn = {
+      query: (sql) => {
+        throw new Error(`ran ${sql}`);
+      },
+    };
+    return fn(conn);
+  },
+};
+
+// A row with more members than a Postgres table has columns is refused
+// before any statement runs. No kind a Postgres table holds declares that
+// many columns, so the adapter refuses the row for a column its descriptor
+// does not declare; the Go and Python adapters refuse it by count first.
+test("upsertRow refuses more columns than a table", async () => {
+  const members: Record<string, number> = {};
+  for (let i = 0; i <= 1600; i++) {
+    members[`c${i}`] = i;
+  }
+  const s = new PostgresAdapter(descriptor).storage(noStatements);
+  const row = JSON.stringify(members);
+  await expect(
+    s.transact((tx) => tx.upsertRow("step", { ref: "1", root: "1", row, tombstone: false, actor: "2" })),
+  ).rejects.toThrow("which its descriptor does not declare");
+});
 
 const scratches: Scratch[] = [];
 afterEach(async () => {
