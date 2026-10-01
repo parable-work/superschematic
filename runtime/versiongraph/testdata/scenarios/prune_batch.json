@@ -1,0 +1,18 @@
+{
+  "name": "prune_batch",
+  "description": "A sweep's pruneBatch caps how many history images of each kind one pass prunes: two images past retention take two passes of one each, and a pass without a cap then has nothing left to prune. The pinned image stays.",
+  "steps": [
+    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "branch", "from": "main", "name": "knead", "as": "p"},
+    {"op": "save", "ref": "p", "edits": {"step": {"upsert": [{"entity_key": "Knead", "position": 1, "instruction": "Knead", "timings": {}}]}}},
+    {"op": "save", "ref": "p", "edits": {"step": {"upsert": [{"entity_key": "Knead", "position": 1, "instruction": "Knead well", "timings": {}}]}}},
+    {"op": "save", "ref": "p", "edits": {"step": {"upsert": [{"entity_key": "Knead", "position": 1, "instruction": "Knead hard", "timings": {}}]}}},
+    {"op": "commit", "ref": "p", "as": "pCommit"},
+    {"op": "sql", "statement": "UPDATE step_history SET recorded_at = now() - interval '400 days' WHERE id IN (SELECT id FROM step WHERE ref_id = $1::uuid)", "args": [{"ref": "p"}]},
+    {"op": "sweep", "sweep": {"pruneBatch": 1}, "expect": {"report": {"pruned": {"step": 1}}}},
+    {"op": "sweep", "sweep": {"pruneBatch": 1}, "expect": {"report": {"pruned": {"step": 1}}}},
+    {"op": "sweep", "expect": {"report": {"pruned": {}}}},
+    {"op": "materialize", "commit": "pCommit", "expect": {"contentHashOf": "pCommit", "tree": {"step": [{"entity_key": "Knead", "instruction": "Knead hard"}]}}}
+  ]
+}

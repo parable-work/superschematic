@@ -10,3 +10,4 @@ license = "UNLICENSED"
 serde = { version = "1.0.228", features = ["derive"] }
 superscalar = "0.1.0"
 serde_json = { version = "1.0" }
+superschematic-versiongraph-engine = "0.0.0"

@@ -9,6 +9,7 @@ This crate contains Rust types generated from the `fixture-version-graph-db` sch
 - `src/scalars.rs` - scalar aliases
 - `src/enums.rs` - enum definitions
 - `src/types.rs` - object/input structs and imported type aliases
+- `src/versiongraph_recipe.rs` - the Recipe version graph's typed facade over `superschematic-versiongraph-engine`
 
 
 ## Notes

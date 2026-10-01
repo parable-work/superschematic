@@ -120,6 +120,15 @@ the core's static archive through cgo; the
 [Go install page](/superschematic/install/go/#requirements) says how to
 build it.
 
+### `versiongraph_rust_crate`
+
+Default: `superschematic-versiongraph-engine`
+
+Cargo crate name of the version graph's Rust engine. A generated Rust
+types crate depends on it when its schema declares a version graph, and
+its typed facade (`src/versiongraph_<name>.rs`) imports it as the
+identifier form of this name (`superschematic_versiongraph_engine`).
+
 ### `http_runtime_go_module`
 
 Default: `github.com/parable-work/superschematic/runtime/http/go`
@@ -369,6 +378,14 @@ Default: unset. This repository's own file sets
 Directory of the TypeScript version-graph runtime's npm package
 (`package.json`). A generated TypeScript types package whose schema
 declares a version graph depends on it with a `file:` spec.
+
+### `paths.versiongraph_rust`
+
+Default: unset. This repository's own file sets
+`runtime/versiongraph/rust-engine`.
+
+Directory of the version graph's Rust engine crate. Unset, a generated
+Rust types crate names the crate's version instead of a path.
 
 ### `paths.http_runtime_go`
 

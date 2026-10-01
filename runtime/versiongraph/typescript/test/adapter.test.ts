@@ -1,9 +1,11 @@
 // The Postgres adapter's own rules, which the scenarios do not reach: what
 // its constructor refuses, a prune that keeps pinned images, a sweep lock
-// that one transaction holds at a time, and pgClient's savepoint over a
-// transaction the caller holds. The TypeScript counterpart of the Go
+// that one transaction holds at a time, a ref lock another transaction
+// waits for, the version fences of updateRef and discardRef, and pgClient's
+// savepoint over a transaction the caller holds. The TypeScript counterpart of the Go
 // module's postgres_test.go.
 import { afterEach, expect, test } from "bun:test";
+import { VersionConflictError } from "../dist/engine.js";
 import type { Ref } from "../dist/engine.js";
 import { PostgresAdapter, pgClient, pgPool } from "../dist/postgres.js";
 import { descriptor, dsn, scratchSchema, type Scratch } from "./postgres.js";
@@ -111,6 +113,66 @@ test.skipIf(dsn === "")("the sweep lock is held by one transaction", async () =>
     expect(await take()).toBe(false);
   });
   expect(await take()).toBe(true);
+});
+
+// While one transaction holds a ref's lock, another transaction's lockRef
+// of it waits (here past its lock_timeout, with lock_not_available) while
+// readRef does not, and once the first ends the lock is free.
+test.skipIf(dsn === "")("lockRef waits for the holder", async () => {
+  const { pool } = await scratch();
+  await pool.query(insertRoot);
+  const a = new PostgresAdapter(descriptor);
+  const holder = a.storage(pgPool(pool));
+  const ref = await holder.transact((tx) => tx.createRef({ root: "1", parent: null, base: null, name: "main", actor: "2" }));
+  const conn = await pool.connect();
+  try {
+    await conn.query("SET lock_timeout = '200ms'");
+    const other = a.storage(pgClient(conn));
+    const lock = () => other.transact((tx) => tx.lockRef(ref.id));
+    await holder.transact(async (tx) => {
+      await tx.lockRef(ref.id);
+      await expect(lock()).rejects.toMatchObject({ code: "55P03" });
+      expect((await other.transact((t) => t.readRef(ref.id))).id).toBe(ref.id);
+    });
+    expect((await lock()).id).toBe(ref.id);
+  } finally {
+    conn.release();
+  }
+});
+
+// updateRef at the ref's version moves it to the next version, and
+// updateRef at the version it had before rejects with VersionConflictError
+// and changes nothing.
+test.skipIf(dsn === "")("updateRef fences its version", async () => {
+  const { pool } = await scratch();
+  await pool.query(insertRoot);
+  const s = new PostgresAdapter(descriptor).storage(pgPool(pool));
+  await s.transact(async (tx) => {
+    const ref = await tx.createRef({ root: "1", parent: null, base: null, name: "main", actor: "2" });
+    const update = { id: ref.id, version: ref.version, head: null, base: null, seal: false, actor: "2" };
+    const moved = await tx.updateRef(update);
+    expect(moved.version).toBe(ref.version + 1);
+    await expect(tx.updateRef({ ...update, seal: true })).rejects.toBeInstanceOf(VersionConflictError);
+    const now = await tx.readRef(ref.id);
+    expect([now.version, now.sealed]).toEqual([moved.version, false]);
+  });
+});
+
+// discardRef of a ref already discarded, even at its current version,
+// rejects with VersionConflictError and keeps who discarded it first.
+test.skipIf(dsn === "")("discardRef refuses a discarded ref", async () => {
+  const { pool } = await scratch();
+  await pool.query(insertRoot);
+  const s = new PostgresAdapter(descriptor).storage(pgPool(pool));
+  await s.transact(async (tx) => {
+    const ref = await tx.createRef({ root: "1", parent: null, base: null, name: "main", actor: "2" });
+    await tx.discardRef(ref.id, ref.version, "2");
+    const discarded = await tx.readRef(ref.id);
+    expect(discarded.discarded).toBe(true);
+    await expect(tx.discardRef(ref.id, discarded.version, "3")).rejects.toBeInstanceOf(VersionConflictError);
+  });
+  const by = await pool.query("SELECT deleted_by::text AS by FROM recipe_ref");
+  expect(by.rows.map((r) => r.by)).toEqual(["00000000-0000-0000-0000-000000000002"]);
 });
 
 // Bound to a transaction the caller holds with savepoint set, the adapter's

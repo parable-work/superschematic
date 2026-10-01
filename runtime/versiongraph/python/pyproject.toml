@@ -1,0 +1,43 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "superschematic-versiongraph"
+version = "0.0.0"
+description = "The version-graph core for Python: compose, merge, diff, content_hash and validate over the core's JSON contract, a PyO3 binding of the Rust core."
+requires-python = ">=3.9"
+license = "Apache-2.0"
+dependencies = []
+classifiers = ["Programming Language :: Rust"]
+
+[project.urls]
+Repository = "https://github.com/parable-work/superschematic"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.maturin]
+# Mixed layout: the Python package superschematic_versiongraph/ lives here
+# beside the PyO3 crate (Cargo.toml, src/), whose compiled module is placed
+# at superschematic_versiongraph._native.
+module-name = "superschematic_versiongraph._native"
+python-source = "."
+features = ["pyo3/extension-module"]
+
+[tool.uv]
+# uv builds this package with maturin into the project environment; a change
+# to the binding or to the core it compiles rebuilds it.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "src/**/*.rs" },
+    { file = "../rust/Cargo.toml" },
+    { file = "../rust/src/**/*.rs" },
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
