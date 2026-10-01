@@ -654,49 +654,6 @@ func TestGenerateCreateOnePreservesExplicitPrimaryKey(t *testing.T) {
 	}
 }
 
-// TestGenerateCreateManyIncludesRelationFK verifies the generated CreateMany
-// carries the same relation foreign-key columns CreateOne does. The bulk insert
-// used to omit Relation<> FK columns entirely: fieldNames
-// and the per-row value loop only ranged over scalar fields, so bulk-inserting
-// rows with relations silently dropped the FK and callers fell back to per-row
-// CreateOne. TenantUser has a required to-one Tenant relationship (tenant_id).
-func TestGenerateCreateManyIncludesRelationFK(t *testing.T) {
-	output := generateFixtureDB(t)
-
-	outDir := t.TempDir()
-	if err := WriteORM(output, outDir); err != nil {
-		t.Fatalf("write orm: %v", err)
-	}
-
-	repoFile, err := os.ReadFile(filepath.Join(outDir, "repository_tenant_user.go"))
-	if err != nil {
-		t.Fatalf("read repository_tenant_user.go: %v", err)
-	}
-	repo := string(repoFile)
-
-	// Isolate the CreateMany body so the assertions cannot pass on CreateOne's
-	// FK handling (which was never the bug).
-	start := strings.Index(repo, "func (r *TenantUserRepository) CreateMany(")
-	if start == -1 {
-		t.Fatal("repository_tenant_user.go missing CreateMany")
-	}
-	nextFunc := strings.Index(repo[start+1:], "\nfunc (r *TenantUserRepository)")
-	var createMany string
-	if nextFunc == -1 {
-		createMany = repo[start:]
-	} else {
-		createMany = repo[start : start+1+nextFunc]
-	}
-
-	// The FK column must join the fixed column list and each row's values.
-	if !strings.Contains(createMany, `fieldNames = append(fieldNames, "tenant_id")`) {
-		t.Error("CreateMany column list must include the tenant_id relation FK")
-	}
-	if !strings.Contains(createMany, "values = append(values, relID.ToUUID())") {
-		t.Error("CreateMany per-row values must bind the tenant_id relation FK")
-	}
-}
-
 // TestGenerateSkipsNonTableSchemas verifies that schemas without DBTable
 // types produce no ORM output.
 func TestGenerateSkipsNonTableSchemas(t *testing.T) {
@@ -933,44 +890,6 @@ func TestMapIRToGoType(t *testing.T) {
 	}
 }
 
-// TestGenerateCreateManyPreservesExplicitPrimaryKey verifies the batch insert
-// carries supplied schema-owned UUIDs the same way CreateOne does, and refuses
-// a batch that mixes explicit and default primary keys rather than silently
-// dropping the supplied ids.
-func TestGenerateCreateManyPreservesExplicitPrimaryKey(t *testing.T) {
-	output := generateFixtureDB(t)
-
-	outDir := t.TempDir()
-	if err := WriteORM(output, outDir); err != nil {
-		t.Fatalf("write orm: %v", err)
-	}
-
-	repoFile, err := os.ReadFile(filepath.Join(outDir, "repository_tenant.go"))
-	if err != nil {
-		t.Fatalf("read repository_tenant.go: %v", err)
-	}
-	repo := string(repoFile)
-	start := strings.Index(repo, "func (r *TenantRepository) CreateMany(")
-	if start == -1 {
-		t.Fatal("repository_tenant.go missing CreateMany")
-	}
-	nextFunc := strings.Index(repo[start+1:], "\nfunc (r *TenantRepository)")
-	if nextFunc == -1 {
-		t.Fatal("repository_tenant.go CreateMany is not bounded by another method")
-	}
-	createMany := repo[start : start+1+nextFunc]
-
-	if !strings.Contains(createMany, "if primaryKey, ok := tenantUUIDValue(inputs[0].Id)") {
-		t.Error("CreateMany must detect an explicit schema-owned primary key on the first input")
-	}
-	if !strings.Contains(createMany, "inputs mix explicit and default primary keys") {
-		t.Error("CreateMany must refuse a batch mixing explicit and default primary keys")
-	}
-	if !strings.Contains(createMany, "values = append(values, primaryKey.ToUUID())") {
-		t.Error("CreateMany must bind the explicit primary-key values")
-	}
-}
-
 // TestJSONUnionFieldsUseWrapperDispatch: a JSONB column typed with a closed
 // union imported from a dependency decodes through the union's Wrapper, the
 // nullable one stays a nil interface, and the ORM's go.mod replaces the
@@ -1182,12 +1101,16 @@ func TestRequiredEnumDefaultAppliesToLocalAndImportedEnums(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read repository: %v", err)
 	}
+	// CreateOne binds the default as a value and CreateMany as a row's cell.
+	// TestCreateBindsTheEnumDefaultWhenUnset in compile_test.go runs both.
 	for _, want := range []string{
 		`values = append(values, types.OrderStatus("pending"))`,
 		`values = append(values, types.OrderPriority("normal"))`,
+		`cell.value = types.OrderStatus("pending")`,
+		`cell.value = types.OrderPriority("normal")`,
 	} {
-		if n := strings.Count(string(source), want); n != 2 {
-			t.Errorf("CreateOne and CreateMany must each insert the default; found %d of %q", n, want)
+		if n := strings.Count(string(source), want); n != 1 {
+			t.Errorf("CreateOne and CreateMany must each insert the default; found %d of %q, want 1", n, want)
 		}
 	}
 }

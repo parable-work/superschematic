@@ -1363,100 +1363,67 @@ func (r *UtensilRepository) CreateMany(ctx context.Context, inputs []*types.Uten
 
 	// Set audit fields
 
-	// Build batch INSERT query - collect field names from first input
-	var fieldNames []string
-	// Schema-owned identities may supply stable UUIDs, matching CreateOne. One
-	// INSERT has one column set, so a batch must supply ids for every row or
-	// none; mixing is refused rather than silently dropping the supplied ids.
-	explicitPrimaryKey := false
-	{
-		var zeroPrimaryKey types.IdentityUUID
-		if primaryKey, ok := utensilUUIDValue(inputs[0].Id); ok && primaryKey != zeroPrimaryKey {
-			explicitPrimaryKey = true
-		}
-		for _, input := range inputs {
-			primaryKey, ok := utensilUUIDValue(input.Id)
-			if (ok && primaryKey != zeroPrimaryKey) != explicitPrimaryKey {
-				return nil, fmt.Errorf("inputs mix explicit and default primary keys; a batch must supply ids for every row or none")
-			}
-		}
-	}
-	if explicitPrimaryKey {
-		fieldNames = append(fieldNames, `id`)
-	}
-	fieldNames = append(fieldNames, `"name"`)
-	fieldNames = append(fieldNames, `deleted_on_ref`)
-
-	// Add optional/auto-generated fields that are set in first input
-	{
-		if !reflect.ValueOf(inputs[0].EntityKey).IsZero() {
-			fieldNames = append(fieldNames, `entity_key`)
-		}
-	}
-
-	// Add relationship foreign key columns present in first input (matches CreateOne's column set)
-	// Relationship: recipe (FK: recipe_id)
-	{
-		var zeroId types.IdentityUUID
-		if relID, ok := utensilUUIDValue(inputs[0].Recipe.Id); ok && relID != zeroId {
-			fieldNames = append(fieldNames, "recipe_id")
-		}
-	}
-	// Relationship: ref (FK: ref_id)
-	{
-		var zeroId types.IdentityUUID
-		if relID, ok := utensilUUIDValue(inputs[0].Ref.Id); ok && relID != zeroId {
-			fieldNames = append(fieldNames, "ref_id")
-		}
-	}
-
-	var valuePlaceholders []string
-	var values []interface{}
-	paramNum := 0
-
+	// Build the batch INSERT in one pass over the fields. Each row records every
+	// candidate column in the same order, with the value it binds or no value
+	// when it leaves an optional column unset; buildBatchInsert inserts the
+	// columns any row sets and writes DEFAULT for a row that leaves one unset.
+	batch := make([][]batchInsertCell, 0, len(inputs))
 	for _, input := range inputs {
-		var placeholders []string
-		if explicitPrimaryKey {
-			paramNum++
-			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-			primaryKey, _ := utensilUUIDValue(input.Id)
-			values = append(values, primaryKey.ToUUID())
-		}
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Name)
+		var row []batchInsertCell
+		// Primary key: id. Schema-owned identities may supply a stable
+		// UUID, matching CreateOne; a row without one takes the generated default.
 		{
-			if !reflect.ValueOf(input.EntityKey).IsZero() {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, input.EntityKey.ToUUID())
+			cell := batchInsertCell{column: `id`}
+			var zeroPrimaryKey types.IdentityUUID
+			if primaryKey, ok := utensilUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+				cell.value, cell.set = primaryKey.ToUUID(), true
 			}
+			row = append(row, cell)
 		}
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.DeletedOnRef)
+		// Required field: name
+		{
+			cell := batchInsertCell{column: `"name"`, set: true}
+			cell.value = input.Name
+			row = append(row, cell)
+		}
+		// Auto-generated field: entityKey
+		{
+			cell := batchInsertCell{column: `entity_key`}
+			if !reflect.ValueOf(input.EntityKey).IsZero() {
+				cell.value = input.EntityKey.ToUUID()
+				cell.set = true
+			}
+			row = append(row, cell)
+		}
+		// Required field: deletedOnRef
+		{
+			cell := batchInsertCell{column: `deleted_on_ref`, set: true}
+			cell.value = input.DeletedOnRef
+			row = append(row, cell)
+		}
 
-		// Handle relationship foreign key columns (per-row, matches CreateOne)
+		// Relationship foreign key columns, matching CreateOne
 		// Relationship: recipe (FK: recipe_id)
 		{
+			cell := batchInsertCell{column: "recipe_id"}
 			var zeroId types.IdentityUUID
 			if relID, ok := utensilUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, relID.ToUUID())
+				cell.value, cell.set = relID.ToUUID(), true
 			}
+			row = append(row, cell)
 		}
 		// Relationship: ref (FK: ref_id)
 		{
+			cell := batchInsertCell{column: "ref_id"}
 			var zeroId types.IdentityUUID
 			if relID, ok := utensilUUIDValue(input.Ref.Id); ok && relID != zeroId {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, relID.ToUUID())
+				cell.value, cell.set = relID.ToUUID(), true
 			}
+			row = append(row, cell)
 		}
-		valuePlaceholders = append(valuePlaceholders, "("+strings.Join(placeholders, ", ")+")")
+		batch = append(batch, row)
 	}
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
 	returningClauseMany := `"id", "recipe_id", "name", "entity_key", "ref_id", "deleted_on_ref", "_version"`

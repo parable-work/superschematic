@@ -114,6 +114,15 @@ the ORM marshals it for you. `shop-db`'s `ShippingAddress` is one; see
 [Modeling types](/superschematic/guides/modeling-types/#constraints). Maps
 and lists of lists are `JSONB` too.
 
+## Inserts
+
+`CreateOne` inserts only the optional fields a row sets, so an unset
+optional column takes its database default. `CreateMany` writes the batch
+as one multi-row `INSERT` by the same rule: its rows may set different
+optional fields, and some may supply an id while others take the generated
+one. A row that leaves unset a column another row sets writes `DEFAULT`
+for it, not `NULL`.
+
 ## Soft delete
 
 A table with nullable `deletedAt` and `deletedBy` fields, like `Review`, is

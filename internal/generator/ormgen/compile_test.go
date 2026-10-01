@@ -929,6 +929,12 @@ func findSnapshotUser(t *testing.T, users []types.TenantUser, id types.IdentityU
 	if err := os.WriteFile(filepath.Join(ormDir, "tx_query_test.go"), []byte(txQueryTest), 0o644); err != nil {
 		t.Fatalf("write tx query test: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(ormDir, "create_many_statement_test.go"), []byte(createManyStatementTest), 0o644); err != nil {
+		t.Fatalf("write create many statement test: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ormDir, "create_many_test.go"), []byte(createManyTest), 0o644); err != nil {
+		t.Fatalf("write create many test: %v", err)
+	}
 
 	tidy := exec.Command("go", "mod", "tidy")
 	tidy.Dir = ormDir
@@ -956,7 +962,7 @@ func findSnapshotUser(t *testing.T, users []types.TenantUser, id types.IdentityU
 }
 
 // enumDefaultTest runs in the generated ORM module. Its transaction records
-// the arguments of the INSERT that CreateOne and CreateMany send and fails
+// the INSERT that CreateOne and CreateMany send, with its arguments, and fails
 // the statement, so the test reads what would reach Postgres without one.
 // The fixture's status is Default<TenantStatus, TenantStatus.Active>.
 const enumDefaultTest = `package orm
@@ -975,16 +981,17 @@ var errCaptured = errors.New("statement captured")
 
 type captureTx struct {
 	pgx.Tx
+	sql  string
 	args []any
 }
 
-func (tx *captureTx) QueryRow(_ context.Context, _ string, args ...any) pgx.Row {
-	tx.args = args
+func (tx *captureTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	tx.sql, tx.args = sql, args
 	return capturedRow{}
 }
 
-func (tx *captureTx) Query(_ context.Context, _ string, args ...any) (pgx.Rows, error) {
-	tx.args = args
+func (tx *captureTx) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	tx.sql, tx.args = sql, args
 	return nil, errCaptured
 }
 
@@ -1094,13 +1101,406 @@ func TestTxQueryReadsInsideTheTransaction(t *testing.T) {
 }
 `
 
+// createManyStatementTest runs in the generated ORM module without a
+// database. It reads the multi-row INSERT that CreateMany sends through
+// captureTx (enum_default_test.go) and pairs each column of each row with the
+// argument its placeholder names.
+const createManyStatementTest = `package orm
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"regexp"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	types "example.com/schemas/types/go/fixture-db"
+)
+
+var (
+	batchInsertStatement = regexp.MustCompile("^INSERT INTO \\S+ \\(([^)]*)\\) VALUES (.+) RETURNING ")
+	batchInsertTuple     = regexp.MustCompile("\\(([^()]*)\\)")
+)
+
+// columnDefault stands for DEFAULT in a captured VALUES tuple.
+type columnDefault struct{}
+
+// CreateMany binds each value to its own column. It used to list the
+// required columns ahead of the optional ones while binding values in
+// declaration order, and to take the optional columns from the first row
+// while each row bound its own.
+func TestCreateManyStatementBindsEachValueToItsColumn(t *testing.T) {
+	actorID := mustUUID(t, "00000000-0000-0000-0000-0000000000aa")
+	ownerID := mustUUID(t, "00000000-0000-0000-0000-000000000300")
+	ctx := WithUserID(context.Background(), actorID)
+
+	t.Run("optional field declared before a required field", func(t *testing.T) {
+		// tenant_user declares the optional display_name before the required
+		// created_by and updated_by.
+		tx := &captureTx{}
+		aliceID := mustUUID(t, "00000000-0000-0000-0000-000000000311")
+		aliceToken := mustUUID(t, "00000000-0000-0000-0000-000000000321")
+		if _, err := (&TenantUserRepository{tx: tx}).CreateMany(ctx, []*types.TenantUser{
+			{Id: &aliceID, InviteToken: &aliceToken, Tenant: types.Tenant{Id: &ownerID}, DisplayName: "Alice"},
+		}); !errors.Is(err, errCaptured) {
+			t.Fatalf("CreateMany err = %v, want the captured statement", err)
+		}
+		assertBatchRows(t, tx, []map[string]any{{
+			"id": aliceID.ToUUID(), "tenant_id": ownerID.ToUUID(), "display_name": "Alice",
+			"created_by": actorID.ToUUID(), "updated_by": actorID.ToUUID(), "invite_token": aliceToken.ToUUID(),
+		}})
+	})
+
+	t.Run("rows set different optional fields", func(t *testing.T) {
+		tx := &captureTx{}
+		bobID := mustUUID(t, "00000000-0000-0000-0000-000000000312")
+		carolID := mustUUID(t, "00000000-0000-0000-0000-000000000313")
+		bobToken := mustUUID(t, "00000000-0000-0000-0000-000000000322")
+		carolToken := mustUUID(t, "00000000-0000-0000-0000-000000000323")
+		lastSeen := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+		lastSeenAt := types.TemporalDateTime(lastSeen)
+		lastStatus := types.TenantStatus_Suspended
+		if _, err := (&TenantUserRepository{tx: tx}).CreateMany(ctx, []*types.TenantUser{
+			{
+				Id: &bobID, InviteToken: &bobToken, Tenant: types.Tenant{Id: &ownerID},
+				DisplayName: "Bob", Roles: []string{"admin"}, Suspended: new(false),
+			},
+			{
+				Id: &carolID, InviteToken: &carolToken, Tenant: types.Tenant{Id: &ownerID},
+				LastStatus: &lastStatus, LastSeenAt: &lastSeenAt,
+			},
+		}); !errors.Is(err, errCaptured) {
+			t.Fatalf("CreateMany err = %v, want the captured statement", err)
+		}
+		assertBatchRows(t, tx, []map[string]any{
+			{
+				"id": bobID.ToUUID(), "tenant_id": ownerID.ToUUID(), "display_name": "Bob",
+				"created_by": actorID.ToUUID(), "updated_by": actorID.ToUUID(), "roles": []string{"admin"},
+				"last_status": columnDefault{}, "last_seen_at": columnDefault{}, "suspended": false,
+				"invite_token": bobToken.ToUUID(),
+			},
+			{
+				"id": carolID.ToUUID(), "tenant_id": ownerID.ToUUID(), "display_name": columnDefault{},
+				"created_by": actorID.ToUUID(), "updated_by": actorID.ToUUID(), "roles": columnDefault{},
+				"last_status": types.TenantStatus_Suspended, "last_seen_at": lastSeen, "suspended": columnDefault{},
+				"invite_token": carolToken.ToUUID(),
+			},
+		})
+	})
+
+	t.Run("a row that leaves a column unset writes DEFAULT", func(t *testing.T) {
+		// The second row supplies no id and no invite token, so both take
+		// the database default while the first row binds its own.
+		tx := &captureTx{}
+		eveID := mustUUID(t, "00000000-0000-0000-0000-000000000315")
+		eveToken := mustUUID(t, "00000000-0000-0000-0000-000000000325")
+		if _, err := (&TenantUserRepository{tx: tx}).CreateMany(ctx, []*types.TenantUser{
+			{Id: &eveID, InviteToken: &eveToken, Tenant: types.Tenant{Id: &ownerID}, DisplayName: "Eve"},
+			{Tenant: types.Tenant{Id: &ownerID}, DisplayName: "Frank"},
+		}); !errors.Is(err, errCaptured) {
+			t.Fatalf("CreateMany err = %v, want the captured statement", err)
+		}
+		assertBatchRows(t, tx, []map[string]any{
+			{
+				"id": eveID.ToUUID(), "tenant_id": ownerID.ToUUID(), "display_name": "Eve",
+				"created_by": actorID.ToUUID(), "updated_by": actorID.ToUUID(), "invite_token": eveToken.ToUUID(),
+			},
+			{
+				"id": columnDefault{}, "tenant_id": ownerID.ToUUID(), "display_name": "Frank",
+				"created_by": actorID.ToUUID(), "updated_by": actorID.ToUUID(), "invite_token": columnDefault{},
+			},
+		})
+	})
+}
+
+// assertBatchRows checks that the captured INSERT has exactly the wanted
+// rows, each with exactly the wanted columns bound to the wanted values.
+func assertBatchRows(t *testing.T, tx *captureTx, want []map[string]any) {
+	t.Helper()
+	statement := batchInsertStatement.FindStringSubmatch(tx.sql)
+	if statement == nil {
+		t.Fatalf("captured statement is not a multi-row INSERT: %s", tx.sql)
+	}
+	columns := strings.Split(statement[1], ", ")
+	tuples := batchInsertTuple.FindAllStringSubmatch(statement[2], -1)
+	if len(tuples) != len(want) {
+		t.Fatalf("INSERT has %d rows, want %d: %s", len(tuples), len(want), tx.sql)
+	}
+	for i, tuple := range tuples {
+		cells := strings.Split(tuple[1], ", ")
+		if len(cells) != len(columns) {
+			t.Errorf("row %d: VALUES (%s) has %d entries for the %d columns %v", i, tuple[1], len(cells), len(columns), columns)
+			continue
+		}
+		got := map[string]any{}
+		for j, cell := range cells {
+			if cell == "DEFAULT" {
+				got[columns[j]] = columnDefault{}
+				continue
+			}
+			n, err := strconv.Atoi(strings.TrimPrefix(cell, "$"))
+			if err != nil || n < 1 || n > len(tx.args) {
+				t.Fatalf("row %d: placeholder %q names none of the %d arguments", i, cell, len(tx.args))
+			}
+			got[columns[j]] = tx.args[n-1]
+		}
+		for column, value := range want[i] {
+			if bound, ok := got[column]; !ok {
+				t.Errorf("row %d: no %s column in %v", i, column, columns)
+			} else if !reflect.DeepEqual(bound, value) {
+				t.Errorf("row %d: %s bound %#v, want %#v", i, column, bound, value)
+			}
+		}
+		for column, bound := range got {
+			if _, ok := want[i][column]; !ok {
+				t.Errorf("row %d: %s bound %#v, want no such column", i, column, bound)
+			}
+		}
+	}
+}
+`
+
+// createManyTest runs in the generated ORM module against Postgres. It
+// inserts with CreateMany and reads every column back with SQL, so a value
+// bound to another column shows up even where the column types agree.
+// tenant and tenant_user are both versioned, and tenant_user is keyed on a
+// UUID the caller may supply.
+const createManyTest = `package orm
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	types "example.com/schemas/types/go/fixture-db"
+)
+
+// CreateMany binds every value to its own column. It used to list required
+// columns ahead of optional ones while binding values in declaration order,
+// so an optional field declared before a required one shifted every later
+// value. It also chose the optional columns from the first row alone while
+// each row bound its own, so rows that set different optional fields shifted
+// too.
+func TestCreateManyBindsEachValueToItsColumn(t *testing.T) {
+	db, pool := openStrategyADatabase(t)
+	actorID := mustUUID(t, "00000000-0000-0000-0000-0000000000aa")
+	actor := actorID.ToUUID().String()
+	ctx := WithUserID(context.Background(), actorID)
+
+	// Every tenant_user row below belongs to this tenant.
+	ownerID := mustUUID(t, "00000000-0000-0000-0000-000000000300")
+	owner := ownerID.ToUUID().String()
+	execStrategyASQL(t, pool, "INSERT INTO tenant (id, name, slug, email, status, is_active, seat_count, metadata, metadata_list, metadata_by_name) VALUES ($1, 'Owner', 'owner', 'owner@example.com', 'active', true, 1, '{}', '[]', '{}')", ownerID.ToUUID())
+
+	t.Run("optional field declared before a required field", func(t *testing.T) {
+		// tenant declares optional_metadata before the required metadata_list
+		// and metadata_by_name. All three are JSONB, so a shifted value lands
+		// in the wrong column instead of failing.
+		tenantID := mustUUID(t, "00000000-0000-0000-0000-000000000301")
+		optionalMetadata := types.GenericJSON("{\"optional\": true}")
+		if _, err := db.Tenant.CreateMany(ctx, []*types.Tenant{{
+			Id: &tenantID, Name: "First", Slug: "first", Email: "first@example.com",
+			Status:           types.TenantStatus_Suspended,
+			Metadata:         types.GenericJSON("{\"metadata\": 1}"),
+			OptionalMetadata: &optionalMetadata,
+			MetadataList:     []types.GenericJSON{types.GenericJSON("\"list\"")},
+			MetadataByName:   map[string]types.GenericJSON{"key": types.GenericJSON("\"by-name\"")},
+		}}); err != nil {
+			t.Fatalf("create tenant: %v", err)
+		}
+		wantTenant := createManyTenantRow{
+			id: tenantID.ToUUID().String(), name: "First", email: "first@example.com", status: "suspended",
+			metadata: "{\"metadata\": 1}", optionalMetadata: "{\"optional\": true}",
+			metadataList: "[\"list\"]", metadataByName: "{\"key\": \"by-name\"}", version: "1",
+		}
+		if got := readCreateManyTenant(t, pool, "first"); got != wantTenant {
+			t.Errorf("tenant row =\n%+v\nwant\n%+v", got, wantTenant)
+		}
+
+		// tenant_user declares the optional display_name before the required
+		// created_by and updated_by.
+		userID := mustUUID(t, "00000000-0000-0000-0000-000000000311")
+		token := mustUUID(t, "00000000-0000-0000-0000-000000000321")
+		if _, err := db.TenantUser.CreateMany(ctx, []*types.TenantUser{{
+			Id: &userID, Tenant: types.Tenant{Id: &ownerID}, DisplayName: "Alice", InviteToken: &token,
+		}}); err != nil {
+			t.Fatalf("create tenant user: %v", err)
+		}
+		wantUser := createManyUserRow{
+			id: userID.ToUUID().String(), tenantID: owner, displayName: "Alice", createdBy: actor, updatedBy: actor,
+			roles: "NULL", lastStatus: "NULL", lastSeenAt: "NULL", labels: "NULL", suspended: "NULL", inviteToken: token.ToUUID().String(),
+			version: "1",
+		}
+		if got := readCreateManyUser(t, pool, userID); got != wantUser {
+			t.Errorf("tenant user row =\n%+v\nwant\n%+v", got, wantUser)
+		}
+	})
+
+	t.Run("rows set different optional fields", func(t *testing.T) {
+		// Every row supplies its own id.
+		bobID := mustUUID(t, "00000000-0000-0000-0000-000000000312")
+		carolID := mustUUID(t, "00000000-0000-0000-0000-000000000313")
+		daveID := mustUUID(t, "00000000-0000-0000-0000-000000000314")
+		bobToken := mustUUID(t, "00000000-0000-0000-0000-000000000322")
+		carolToken := mustUUID(t, "00000000-0000-0000-0000-000000000323")
+		daveToken := mustUUID(t, "00000000-0000-0000-0000-000000000324")
+		lastSeen := types.TemporalDateTime(time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC))
+		lastStatus := types.TenantStatus_Suspended
+		if _, err := db.TenantUser.CreateMany(ctx, []*types.TenantUser{
+			{
+				Id: &bobID, InviteToken: &bobToken, Tenant: types.Tenant{Id: &ownerID},
+				DisplayName: "Bob", Roles: []string{"admin"}, Suspended: new(false),
+			},
+			{
+				Id: &carolID, InviteToken: &carolToken, Tenant: types.Tenant{Id: &ownerID},
+				LastStatus: &lastStatus, LastSeenAt: &lastSeen, Labels: map[string]*string{"team": new("core")},
+			},
+			{Id: &daveID, InviteToken: &daveToken, Tenant: types.Tenant{Id: &ownerID}},
+		}); err != nil {
+			t.Fatalf("create tenant users: %v", err)
+		}
+		for _, want := range []createManyUserRow{
+			{
+				id: bobID.ToUUID().String(), tenantID: owner, displayName: "Bob", createdBy: actor, updatedBy: actor,
+				roles: "{admin}", lastStatus: "NULL", lastSeenAt: "NULL", labels: "NULL", suspended: "false", inviteToken: bobToken.ToUUID().String(),
+				version: "1",
+			},
+			{
+				id: carolID.ToUUID().String(), tenantID: owner, displayName: "NULL", createdBy: actor, updatedBy: actor,
+				roles: "NULL", lastStatus: "suspended", lastSeenAt: "2026-09-29 12:00:00", labels: "{\"team\": \"core\"}", suspended: "NULL", inviteToken: carolToken.ToUUID().String(),
+				version: "1",
+			},
+			{
+				id: daveID.ToUUID().String(), tenantID: owner, displayName: "NULL", createdBy: actor, updatedBy: actor,
+				roles: "NULL", lastStatus: "NULL", lastSeenAt: "NULL", labels: "NULL", suspended: "NULL", inviteToken: daveToken.ToUUID().String(),
+				version: "1",
+			},
+		} {
+			id, err := types.ParseIdentityUUID(want.id)
+			if err != nil {
+				t.Fatalf("parse id %s: %v", want.id, err)
+			}
+			if got := readCreateManyUser(t, pool, id); got != want {
+				t.Errorf("tenant user row =\n%+v\nwant\n%+v", got, want)
+			}
+			// The history trigger recorded the row as inserted.
+			history, err := db.TenantUser.ListVersions(context.Background(), id, nil)
+			if err != nil {
+				t.Fatalf("list versions of %s: %v", want.id, err)
+			}
+			if len(history) != 1 || history[0].Operation != "INSERT" || history[0].Version != 1 || history[0].Value == nil ||
+				history[0].Value.InviteToken == nil || history[0].Value.InviteToken.ToUUID().String() != want.inviteToken {
+				t.Errorf("history of %s = %+v, want one INSERT at version 1 with invite token %s", want.id, history, want.inviteToken)
+			}
+		}
+	})
+
+	t.Run("a row that leaves a column unset gets its default", func(t *testing.T) {
+		// The second tenant supplies no id and no status: it takes the
+		// generated id and the enum's schema default.
+		secondID := mustUUID(t, "00000000-0000-0000-0000-000000000302")
+		tenants, err := db.Tenant.CreateMany(ctx, []*types.Tenant{
+			{
+				Id: &secondID, Name: "Second", Slug: "second", Email: "second@example.com", Status: types.TenantStatus_Suspended,
+				Metadata: types.GenericJSON("{}"), MetadataList: []types.GenericJSON{}, MetadataByName: map[string]types.GenericJSON{},
+			},
+			{
+				Name: "Third", Slug: "third", Email: "third@example.com",
+				Metadata: types.GenericJSON("{}"), MetadataList: []types.GenericJSON{}, MetadataByName: map[string]types.GenericJSON{},
+			},
+		})
+		if err != nil {
+			t.Fatalf("create tenants: %v", err)
+		}
+		if len(tenants) != 2 {
+			t.Fatalf("created %d tenants, want 2", len(tenants))
+		}
+		if got := readCreateManyTenant(t, pool, "second"); got.id != secondID.ToUUID().String() || got.status != "suspended" {
+			t.Errorf("second tenant id/status = %s/%s, want %s/suspended", got.id, got.status, secondID.ToUUID())
+		}
+		if got := readCreateManyTenant(t, pool, "third"); got.id == "" || got.id == secondID.ToUUID().String() || got.status != "active" {
+			t.Errorf("third tenant id/status = %s/%s, want a generated id and active", got.id, got.status)
+		}
+
+		// invite_token is NOT NULL DEFAULT gen_random_uuid(). A row that
+		// leaves it unset must write DEFAULT, where a bound NULL would fail.
+		eveID := mustUUID(t, "00000000-0000-0000-0000-000000000315")
+		eveToken := mustUUID(t, "00000000-0000-0000-0000-000000000325")
+		if _, err := db.TenantUser.CreateMany(ctx, []*types.TenantUser{
+			{Id: &eveID, InviteToken: &eveToken, Tenant: types.Tenant{Id: &ownerID}, DisplayName: "Eve"},
+			{Tenant: types.Tenant{Id: &ownerID}, DisplayName: "Frank"},
+		}); err != nil {
+			t.Fatalf("create tenant users: %v", err)
+		}
+		var frankID, frankToken string
+		if err := pool.QueryRow(context.Background(), "SELECT id::text, invite_token::text FROM tenant_user WHERE display_name = 'Frank'").Scan(&frankID, &frankToken); err != nil {
+			t.Fatalf("read Frank: %v", err)
+		}
+		if frankID == eveID.ToUUID().String() || frankToken == eveToken.ToUUID().String() {
+			t.Errorf("Frank id/invite_token = %s/%s, want generated values distinct from Eve's", frankID, frankToken)
+		}
+
+		// CreateOne takes the same enum default for an unset status.
+		fourth, err := db.Tenant.CreateOne(ctx, &types.Tenant{
+			Name: "Fourth", Slug: "fourth", Email: "fourth@example.com",
+			Metadata: types.GenericJSON("{}"), MetadataList: []types.GenericJSON{}, MetadataByName: map[string]types.GenericJSON{},
+		})
+		if err != nil {
+			t.Fatalf("create fourth tenant: %v", err)
+		}
+		if fourth.Status != types.TenantStatus_Active {
+			t.Errorf("fourth tenant status = %q, want active", fourth.Status)
+		}
+	})
+}
+
+// createManyTenantRow and createManyUserRow hold columns as text, NULL as
+// "NULL", so a row compares with ==.
+type createManyTenantRow struct {
+	id, name, email, status, metadata, optionalMetadata, metadataList, metadataByName, version string
+}
+
+type createManyUserRow struct {
+	id, tenantID, displayName, createdBy, updatedBy, roles, lastStatus, lastSeenAt, labels, suspended, inviteToken, version string
+}
+
+func readCreateManyTenant(t *testing.T, pool *pgxpool.Pool, slug string) createManyTenantRow {
+	t.Helper()
+	var row createManyTenantRow
+	if err := pool.QueryRow(context.Background(), "SELECT id::text, name, email, status, metadata::text, "+
+		"COALESCE(optional_metadata::text, 'NULL'), metadata_list::text, metadata_by_name::text, _version::text FROM tenant WHERE slug = $1", slug,
+	).Scan(&row.id, &row.name, &row.email, &row.status, &row.metadata, &row.optionalMetadata, &row.metadataList, &row.metadataByName, &row.version); err != nil {
+		t.Fatalf("read tenant %s: %v", slug, err)
+	}
+	return row
+}
+
+func readCreateManyUser(t *testing.T, pool *pgxpool.Pool, id types.IdentityUUID) createManyUserRow {
+	t.Helper()
+	var row createManyUserRow
+	if err := pool.QueryRow(context.Background(), "SELECT id::text, tenant_id::text, COALESCE(display_name, 'NULL'), "+
+		"created_by::text, updated_by::text, COALESCE(roles::text, 'NULL'), COALESCE(last_status, 'NULL'), "+
+		"COALESCE((last_seen_at AT TIME ZONE 'UTC')::text, 'NULL'), COALESCE(labels::text, 'NULL'), "+
+		"COALESCE(suspended::text, 'NULL'), invite_token::text, _version::text FROM tenant_user WHERE id = $1", id.ToUUID(),
+	).Scan(&row.id, &row.tenantID, &row.displayName, &row.createdBy, &row.updatedBy, &row.roles, &row.lastStatus,
+		&row.lastSeenAt, &row.labels, &row.suspended, &row.inviteToken, &row.version); err != nil {
+		t.Fatalf("read tenant user %s: %v", id.ToUUID(), err)
+	}
+	return row
+}
+`
+
 // extendFixtureForCompileCoverage mutates the loaded fixture-db IR to
 // exercise template branches the fixture schema does not reach: nullable,
 // list (JSONB and native JSONB[]), list-of-lists and map Generic.JSON
 // columns, a table of closed-union JSON columns
 // (single, nullable, list, map and nullable map), createdBy/updatedBy user
 // audit fields, scalar arrays, optional enums, optional non-audit datetime
-// scalars, optional maps and an optional boolean.
+// scalars, optional maps, an optional boolean and an auto-generated UUID.
 // Soft-delete fields (deletedAt/deletedBy) live on the fixture's TenantUser
 // itself. The mutation reuses scalars the fixture already resolves so the
 // generated types module stays compilable.
@@ -1191,6 +1591,9 @@ func extendFixtureForCompileCoverage(schema *ir.Schema) {
 		// An optional boolean without a default is *bool, so a false value is
 		// stored rather than read as the zero value and cleared.
 		&ir.FieldDef{Name: "suspended", TypeRef: ir.TypeRef{Name: "boolean"}},
+		// An auto-generated column is NOT NULL with a database default, so a
+		// CreateMany row that leaves it unset must get DEFAULT, not a bound NULL.
+		&ir.FieldDef{Name: "inviteToken", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, AutoGenerated: true},
 	)
 
 	// A table whose only optional string-typed field is a map.
