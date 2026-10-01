@@ -9,8 +9,12 @@ and gets a context that reaches only what the behavior may touch:
 - the behavior's own columns on the instance, by the names it declared;
 - SQL on the behavior's own tables, which the engine names;
 - the principal, the schema version and the clock's time for the call;
+- can(permission), which asks the deployment's PermissionMatcher whether
+  the principal holds a permission the behavior's config names (D16);
 - in a write, call(), which runs another behavior's operation on the same
-  instance, that behavior's guards and every other guard first.
+  instance, that behavior's guards and every other guard first;
+- in a writing operation, update(), which changes the instance's own
+  fields with the checks and guards of an update.
 
 There is no handle on the instances table, on another behavior's storage
 or on the storage connection. A status one behavior owns changes at
@@ -18,6 +22,7 @@ another's request only through its operations, so its guards always run.
 */
 
 import type { Principal } from '../access.js';
+import type { ValidationIssue } from '../errors.js';
 import type { Row, RunResult, SqlValue } from '../storage/driver.js';
 import type { BehaviorDeclaration } from './declaration.js';
 
@@ -101,12 +106,22 @@ export interface BehaviorScope<Config> {
   readonly principal: Principal;
   /** The engine clock's time for the call, in epoch milliseconds: one value for the whole call. */
   readonly now: number;
+  /**
+   * Whether the principal holds a permission, as the engine's
+   * PermissionMatcher (EngineOptions.permissionMatcher) answers for the
+   * principal's permissions. Where a behavior limits who may do something,
+   * its config names the permission and this decides (D16).
+   */
+  can(permission: string): boolean;
 }
 
 /** A read of one instance: a guard's view and a field reader's. */
 export interface InstanceView<Config> extends BehaviorScope<Config> {
   readonly id: string;
-  /** The instance's own fields, without any behavior's; deep-frozen. */
+  /**
+   * The instance's own fields, without any behavior's; deep-frozen. In an
+   * operation it reads them as the operation's update() calls leave them.
+   */
   readonly data: FrozenJSON;
   readonly columns: Columns;
   readonly sql: SqlReader;
@@ -130,9 +145,43 @@ export interface InstanceContext<Config> extends InstanceView<Config> {
   call(behavior: string, operation: string, params?: FrozenJSON): unknown;
 }
 
+/**
+ * An operation handler's context. Beside what every context has, a writing
+ * operation can change the instance's own fields, as instances.update
+ * does, so a behavior that applies a change on a caller's behalf (approving
+ * a proposed revision, say) runs the same checks an update runs.
+ */
+export interface OperationContext<Config> extends InstanceContext<Config> {
+  /**
+   * Applies a JSON merge patch (RFC 7386) to the instance's own fields and
+   * returns them after it. A behavior's field in the patch is refused
+   * (InstanceValidationError, rule readOnly), and so is a result the live
+   * version refuses; then every behavior's guard is asked, in list order,
+   * with an update request whose caller is this behavior. A patch that
+   * changes nothing writes nothing. The access policy is not asked again,
+   * since it allowed the operation, and no event is appended: the
+   * operation's event carries the change, and afterChange gets the fields
+   * from before it (InstanceChange before). A read-only operation's
+   * update() refuses.
+   */
+  update(patch: FrozenJSON): FrozenJSON;
+  /**
+   * What update(patch) would refuse the patch for, without writing or
+   * asking a guard: a behavior's field, then what the live version refuses
+   * in the merged instance. Empty when it would validate.
+   */
+  validateUpdate(patch: FrozenJSON): readonly ValidationIssue[];
+}
+
 /** What a guard is asked to allow. The instance before the change is the view's data. */
 export type GuardRequest =
-  | { readonly kind: 'update'; readonly patch: FrozenJSON; readonly after: FrozenJSON }
+  | {
+      readonly kind: 'update';
+      readonly patch: FrozenJSON;
+      readonly after: FrozenJSON;
+      /** The behavior whose operation applied it with update(); absent for a caller's update. */
+      readonly caller?: string;
+    }
   | { readonly kind: 'delete' }
   | {
       readonly kind: 'operation';
@@ -150,7 +199,18 @@ export type InstanceChange =
   | { readonly kind: 'create' }
   | { readonly kind: 'update'; readonly patch: FrozenJSON; readonly before: FrozenJSON }
   | { readonly kind: 'delete' }
-  | { readonly kind: 'operation'; readonly behavior: string; readonly operation: string; readonly params: FrozenJSON };
+  | {
+      readonly kind: 'operation';
+      readonly behavior: string;
+      readonly operation: string;
+      readonly params: FrozenJSON;
+      /**
+       * The instance's own fields before the operation, when it changed them
+       * with update(); absent when they did not change. The context's data
+       * holds them after.
+       */
+      readonly before?: FrozenJSON;
+    };
 
 /** The type a config is given on, for parseConfig. */
 export interface ConfigTarget {
@@ -163,7 +223,7 @@ export interface ConfigTarget {
 }
 
 /** An operation's handler. Its result is checked against resultSchema. */
-export type OperationHandler<Config> = (context: InstanceContext<Config>, params: FrozenJSON) => unknown;
+export type OperationHandler<Config> = (context: OperationContext<Config>, params: FrozenJSON) => unknown;
 
 /** Reads one declared field for an instance: a JSON value, or undefined (or null) for none. */
 export type FieldReader<Config> = (context: InstanceView<Config>) => unknown;

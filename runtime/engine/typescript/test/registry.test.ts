@@ -239,11 +239,13 @@ for (const driver of drivers) {
       assert.equal(engine.schemas.define(alice, orderDocument()).name, 'Order');
     });
 
-    test('with the core meta-schema, the loader itself refuses a behavior', () => {
+    test('with the core meta-schema, the loader itself refuses a behavior the core does not declare', () => {
       const engine = open();
       const document = clone(orderDocument()) as { types: { Order: Record<string, unknown> } };
       document.types.Order.behaviors = [{ name: 'acme.Audited' }];
-      assert.equal(issuesOf(() => engine.schemas.define(alice, document))[0].path, '/types/Order/behaviors');
+      assert.deepEqual(issuesOf(() => engine.schemas.define(alice, document)), [
+        { path: '/types/Order/behaviors/0/name', message: 'must be one of "Comments", "Revisions", "Workflow"' },
+      ]);
     });
   });
 

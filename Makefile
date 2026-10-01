@@ -29,7 +29,7 @@ BIN := bin/superschematic
 GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
-        go-goldens catalog-check schema-file-types schema-file-types-check ts python rust \
+        go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check ts python rust \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke scrub versions clean
 
@@ -89,6 +89,17 @@ schema-file-types:
 
 schema-file-types-check:
 	go run ./internal/tools/schemafiletypes -check
+
+# The engine implements the core's behaviors over a copy of each
+# declaration (internal/registry/behaviors), which the core binary writes.
+# CI fails when a committed copy differs.
+ENGINE_DECLARATIONS := runtime/engine/typescript/src/behaviors/core/declarations
+
+behaviors:
+	go run ./cmd/superschematic behaviors --out $(ENGINE_DECLARATIONS)
+
+behaviors-check:
+	go run ./cmd/superschematic behaviors --out $(ENGINE_DECLARATIONS) --check
 
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
@@ -169,13 +180,22 @@ docs:
 	cd docs && npm ci && npm run build
 
 # The binary with no extension linked builds a DB, an API and a General
-# service from the fixture corpus.
+# service from the fixture corpus, and loads fixture-behaviors-json, whose
+# type composes the core's behaviors (D10): --emit-ir carries all three and
+# json-schema admits them. The engine runs that document with its own
+# behaviors in runtime/engine/typescript/test/core-behaviors.test.ts.
 cli-smoke: $(BIN)
 	@rm -rf /tmp/superschematic-cli-smoke
 	@for s in fixture-db fixture-api fixture-general; do \
 		$(BIN) build internal/loader/tsreader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
 	@for s in fixture-db-json fixture-general-yaml; do \
 		$(BIN) build internal/loader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
+	@$(BIN) build internal/loader/testdata/services/fixture-behaviors-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
+	@for b in Workflow Comments Revisions; do \
+		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
+			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 
 # The extraction scrub: the only allowed maintainer mentions are the license
 # holder, the GitHub org in module paths and publisher registrations, and the
@@ -191,7 +211,7 @@ versions:
 	python3 scripts/bump_version.py check
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 
-test: go-test catalog-check schema-file-types-check ts python rust cli-smoke versions
+test: go-test catalog-check schema-file-types-check behaviors-check ts python rust cli-smoke versions
 
 lint: go-vet go-fmt-check go-lint scrub
 

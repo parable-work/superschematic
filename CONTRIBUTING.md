@@ -112,6 +112,7 @@ of them; run them locally before pushing.
 | `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the five Go modules      |
 | `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
+| `make behaviors-check` | The engine's copies of the core's behavior declarations (`runtime/engine/typescript/src/behaviors/core/declarations`) match the core registry; `make behaviors` rewrites them |
 | `make cli-smoke`      | `bin/superschematic build` with no extension builds the DB, API and General fixtures |
 | `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript` and `runtime/engine/typescript` typecheck, build and test; the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and the engine's tests run under Node.js and Bun |
 | `make python`         | `runtime/schema/python` pytest; `runtime/versiongraph/python` fmt, clippy `-D warnings`, the PyO3 extension built by uv with maturin, and every core vector and the engine's tests that need no database through the package under the default Python and 3.9 |

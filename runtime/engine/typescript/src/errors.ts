@@ -14,7 +14,7 @@ export type EngineErrorCode =
   | 'not_found'
   | 'unknown_namespace'
   | 'invalid_argument'
-  /** The access policy refuses the call. */
+  /** The access policy refuses the call, or a behavior a caller without the permission its config names. */
   | 'forbidden'
   /** The instance, or an update's result, does not validate against the live version. */
   | 'invalid_instance'

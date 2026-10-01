@@ -158,7 +158,16 @@ func (d *declarations) writeDef(name string, schema any) error {
 	if !ok {
 		return fmt.Errorf("%s: a definition must be an object schema", at)
 	}
-	if err := onlyKeys(node, at, "type", "properties", "required", "additionalProperties", "description", "title"); err != nil {
+	keys := []string{"type", "properties", "required", "additionalProperties", "description", "title"}
+	if name == "BehaviorRef" {
+		// allOf holds one branch per registered behavior, closing its
+		// config; the types leave the config open.
+		keys = append(keys, "allOf")
+		if err := d.behaviorBranches(node["allOf"], at+"/allOf"); err != nil {
+			return err
+		}
+	}
+	if err := onlyKeys(node, at, keys...); err != nil {
 		return err
 	}
 	if node["type"] != "object" || node["additionalProperties"] != false {
@@ -212,7 +221,7 @@ func (d *declarations) writeDef(name string, schema any) error {
 				return err
 			}
 			d.sawBehaviorList = true
-			d.writeComment("  ", "The behaviors the type composes, in the order their checks run. A registry admits the behaviors it registers; the core registers none.")
+			d.writeComment("  ", "The behaviors the type composes, in the order their checks run. A registry admits the behaviors it registers: the core's, which the engine implements, and its extensions'.")
 			typ = "BehaviorRef[]"
 		case name == "BehaviorRef" && key == "name":
 			if err := d.behaviorName(props[key], propAt); err != nil {
@@ -386,6 +395,36 @@ func (d *declarations) behaviorName(schema any, at string) error {
 	_, hasEnum := node["enum"]
 	if err != nil || node["type"] != "string" || hasEnum != (len(d.behaviors) > 0) || !slices.Equal(values, d.behaviors) {
 		return fmt.Errorf("%s: expected a string enum of the registry's behaviors %v", at, d.behaviors)
+	}
+	return nil
+}
+
+// behaviorBranches checks that BehaviorRef.allOf is what closeBehaviors
+// writes: one if/then branch per registered behavior, in the registry's
+// order, that holds the config of the behavior the if names; absent when
+// the registry has no behavior.
+func (d *declarations) behaviorBranches(schema any, at string) error {
+	if schema == nil && len(d.behaviors) == 0 {
+		return nil
+	}
+	branches, ok := schema.([]any)
+	if !ok || len(branches) != len(d.behaviors) {
+		return fmt.Errorf("%s: expected one branch per registered behavior %v", at, d.behaviors)
+	}
+	for i, branch := range branches {
+		branchAt := fmt.Sprintf("%s/%d", at, i)
+		node, _ := branch.(map[string]any)
+		if err := onlyKeys(node, branchAt, "if", "then"); err != nil {
+			return err
+		}
+		cond, _ := node["if"].(map[string]any)
+		props, _ := cond["properties"].(map[string]any)
+		name, _ := props["name"].(map[string]any)
+		then, _ := node["then"].(map[string]any)
+		thenProps, _ := then["properties"].(map[string]any)
+		if len(cond) != 1 || len(props) != 1 || len(name) != 1 || name["const"] != d.behaviors[i] || len(thenProps) != 1 || thenProps["config"] == nil {
+			return fmt.Errorf("%s: expected the branch that holds the config of behavior %s", branchAt, d.behaviors[i])
+		}
 	}
 	return nil
 }

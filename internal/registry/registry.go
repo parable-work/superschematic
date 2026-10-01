@@ -79,8 +79,8 @@ type decoratorKey struct {
 	target DecoratorTarget
 }
 
-// New returns a registry with the core kinds and core decorators
-// registered: everything the loader consults. It never errors. Core
+// New returns a registry with the core kinds, core decorators and core
+// behaviors registered: everything the loader consults. It never errors. Core
 // generators and the build-all hook are added by generator.RegisterCore,
 // whose closures live in that package; generator.CoreRegistry runs the whole
 // sequence for callers that want the core in one call.
@@ -110,6 +110,14 @@ func New(n naming.Naming) *Registry {
 	for _, spec := range coreDecorators(r) {
 		if err := r.RegisterDecorator(spec); err != nil {
 			panic("registry: core decorators: " + err.Error())
+		}
+	}
+	// The core declares the behaviors @superschematic/engine implements
+	// (core_behaviors.go), so a binary with no extension linked accepts a
+	// schema that composes them.
+	for _, spec := range coreBehaviorSpecs() {
+		if err := r.RegisterBehavior(spec); err != nil {
+			panic("registry: core behaviors: " + err.Error())
 		}
 	}
 	// The core session provider is the only one the core registers; every

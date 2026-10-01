@@ -10,16 +10,29 @@ Each function gets a context for its own behavior (behavior.ts). A guard
 and a field reader get a view: read-only columns and SQL. initialize,
 afterChange and a writing operation get a writable context and call(); a
 read-only operation gets one whose writes refuse and whose call() reaches
-only read-only operations. A called operation runs in a savepoint, so a
-failure the caller catches leaves nothing of it behind.
+only read-only operations. An operation's context also has update(),
+which changes the instance's own fields with instances.update's checks and
+every guard, and validateUpdate(). A called operation runs in a savepoint,
+so a failure the caller catches leaves nothing of it behind.
 */
 
+import type { PermissionMatcher } from '@superschematic/http-runtime';
+
 import type { Principal } from '../access.js';
-import { BehaviorError, BehaviorVetoError, EngineError, OperationParamsError } from '../errors.js';
-import { setMember } from '../instances/patch.js';
+import { BehaviorError, BehaviorVetoError, EngineError, InstanceValidationError, OperationParamsError, type ValidationIssue } from '../errors.js';
+import { isPlainObject, jsonEqual, mergePatch, setMember } from '../instances/patch.js';
+import { readOnlyIssue } from '../registry/validator.js';
 import type { SqlValue } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
-import type { FrozenJSON, GuardRequest, InstanceChange, InstanceContext, InstanceView, WritableColumns } from './behavior.js';
+import type {
+  FrozenJSON,
+  GuardRequest,
+  InstanceChange,
+  InstanceContext,
+  InstanceView,
+  OperationContext,
+  WritableColumns,
+} from './behavior.js';
 import type { BoundBehavior, Composition } from './composition.js';
 import { deepFreeze, jsonCopy } from './json.js';
 import { BehaviorRegistry, type OperationSpec } from './registry.js';
@@ -33,6 +46,8 @@ export interface CallScope {
   readonly principal: Principal;
   /** The clock's time for the whole call. */
   readonly now: number;
+  /** Answers a context's can(): whether the principal's permissions cover a required one. */
+  readonly permissions: PermissionMatcher;
 }
 
 /** How deep call() may nest; deeper is a cycle between behaviors. */
@@ -40,6 +55,11 @@ export const MAX_CALL_DEPTH = 16;
 
 /** The prefix of each bound behavior's storage, by behavior name. */
 export type Prefixes = ReadonlyMap<string, string>;
+
+/** Checks an instance's own fields against the live version (registry/validator.ts). */
+export interface InstanceValidator {
+  validate(value: unknown): ValidationIssue[];
+}
 
 export class Execution {
   private data: FrozenJSON;
@@ -54,7 +74,9 @@ export class Execution {
     private readonly id: string,
     data: Record<string, unknown>,
     /** False for a read and a read-only operation: nothing may write. */
-    private readonly writable: boolean
+    private readonly writable: boolean,
+    /** The live version's validator, which an operation's update() runs. */
+    private readonly validator: InstanceValidator
   ) {
     this.data = freezeCopy(data);
   }
@@ -62,6 +84,11 @@ export class Execution {
   /** setData replaces the instance's own fields the contexts see, after an update. */
   setData(data: Record<string, unknown>): void {
     this.data = freezeCopy(data);
+  }
+
+  /** current is the instance's own fields as the call has left them, deep-frozen. */
+  current(): FrozenJSON {
+    return this.data;
   }
 
   /** guard asks every behavior's guard in list order; the first veto throws BehaviorVetoError. */
@@ -154,7 +181,7 @@ export class Execution {
       const bound = this.composition.bound(operation.behavior.name) as BoundBehavior;
       const result: unknown = operation.handler.call(
         bound.behavior.implementation.operations,
-        this.context(bound, operation.writes && this.writable),
+        this.operationContext(bound, operation.writes && this.writable),
         params
       );
       synchronous(operation.behavior.name, `operation ${operation.name}`, result);
@@ -189,7 +216,66 @@ export class Execution {
     if (!writable) {
       return this.invoke(operation, checked, from.behavior.name);
     }
-    return this.storage.transaction(() => this.invoke(operation, checked, from.behavior.name));
+    // The savepoint rolls back an update() the called operation made along
+    // with the rest of it, so the fields the contexts see go back too.
+    const data = this.data;
+    try {
+      return this.storage.transaction(() => this.invoke(operation, checked, from.behavior.name));
+    } catch (error) {
+      this.data = data;
+      throw error;
+    }
+  }
+
+  /**
+   * update applies a merge patch to the instance's own fields for an
+   * operation of bound: the checks and guards of instances.update, without
+   * the access policy, which allowed the operation, and without an event,
+   * which the operation appends.
+   */
+  private update(from: BoundBehavior, writable: boolean, patch: unknown): FrozenJSON {
+    if (this.deleted) {
+      throw new BehaviorError(from.behavior.name, 'the instance is deleted; update() changes nothing');
+    }
+    if (!writable) {
+      throw new BehaviorError(from.behavior.name, 'a read-only operation cannot update the instance');
+    }
+    const { patch: copy, merged, issues } = this.merge(from, patch);
+    if (issues.length > 0) {
+      throw new InstanceValidationError(this.scope.namespace, this.scope.schema, this.scope.version, issues);
+    }
+    if (jsonEqual(merged, this.data)) {
+      return this.data;
+    }
+    this.guard({ kind: 'update', patch: deepFreeze(copy), after: freezeCopy(merged), caller: from.behavior.name });
+    this.storage.run('UPDATE engine_instances SET data = ? WHERE namespace = ? AND schema = ? AND id = ?', [
+      JSON.stringify(merged),
+      this.scope.namespace,
+      this.scope.schema,
+      this.id,
+    ]);
+    this.setData(merged);
+    return this.data;
+  }
+
+  // merge applies a behavior's merge patch to a copy of the instance's own
+  // fields and lists what update() would refuse: a behavior's field, then
+  // whatever the live version refuses in the result.
+  private merge(from: BoundBehavior, patch: unknown): { patch: Record<string, unknown>; merged: Record<string, unknown>; issues: ValidationIssue[] } {
+    const copied = jsonCopy(patch);
+    if (!('value' in copied) || !isPlainObject(copied.value)) {
+      throw new BehaviorError(from.behavior.name, 'update() takes a JSON merge patch of the instance: a JSON object');
+    }
+    const value = copied.value;
+    const issues: ValidationIssue[] = [];
+    for (const key of Object.keys(value)) {
+      const owner = this.composition.fields.get(key);
+      if (owner !== undefined) {
+        issues.push(readOnlyIssue(key, owner.behavior.name));
+      }
+    }
+    const merged = mergePatch(this.data, value) as Record<string, unknown>;
+    return { patch: value, merged, issues: issues.length > 0 ? issues : this.validator.validate(merged) };
   }
 
   private scopeFor(bound: BoundBehavior) {
@@ -201,13 +287,33 @@ export class Execution {
       version: this.scope.version,
       principal: this.scope.principal,
       now: this.scope.now,
+      can: (permission: string) => this.can(bound, permission),
       id: this.id,
-      data: this.data,
     };
   }
 
+  // frozen freezes a view or a context whose data reads the instance's own
+  // fields as they are now, an operation's update() included.
+  private frozen<T extends object>(value: T): T & { readonly data: FrozenJSON } {
+    Object.defineProperty(value, 'data', { get: () => this.data, enumerable: true });
+    return Object.freeze(value) as T & { readonly data: FrozenJSON };
+  }
+
+  // can asks the deployment's matcher whether the principal holds one
+  // permission; only a literal true is yes.
+  private can(bound: BoundBehavior, permission: string): boolean {
+    if (typeof permission !== 'string' || permission === '') {
+      throw new BehaviorError(bound.behavior.name, 'can() takes a permission: a non-empty string');
+    }
+    const answer: unknown = this.scope.permissions(this.scope.principal.permissions, [permission]);
+    if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
+      throw new TypeError('a permission matcher is synchronous: it returned a promise');
+    }
+    return answer === true;
+  }
+
   private view(bound: BoundBehavior): InstanceView<unknown> {
-    return Object.freeze({
+    return this.frozen({
       ...this.scopeFor(bound),
       columns: this.columns(bound, 'reading'),
       sql: new BehaviorSql(this.storage, bound.behavior.name, this.prefix(bound), 'read'),
@@ -217,13 +323,27 @@ export class Execution {
   // context is a writable context when writes is true and the execution
   // may write; otherwise a read-only operation's.
   private context(bound: BoundBehavior, writes: boolean): InstanceContext<unknown> {
+    return this.frozen(this.contextMembers(bound, writes && this.writable));
+  }
+
+  // operationContext is an operation handler's context: a context with
+  // update() and validateUpdate().
+  private operationContext(bound: BoundBehavior, writes: boolean): OperationContext<unknown> {
     const writable = writes && this.writable;
-    return Object.freeze({
+    return this.frozen({
+      ...this.contextMembers(bound, writable),
+      update: (patch: FrozenJSON) => this.update(bound, writable, patch),
+      validateUpdate: (patch: FrozenJSON) => this.merge(bound, patch).issues,
+    });
+  }
+
+  private contextMembers(bound: BoundBehavior, writable: boolean) {
+    return {
       ...this.scopeFor(bound),
       columns: this.columns(bound, writable ? 'writing' : 'a read-only operation'),
       sql: new BehaviorSql(this.storage, bound.behavior.name, this.prefix(bound), writable ? 'write' : 'read'),
       call: (behavior: string, operation: string, params?: FrozenJSON) => this.call(bound, writable, behavior, operation, params),
-    });
+    };
   }
 
   private columns(bound: BoundBehavior, mode: 'reading' | 'writing' | 'a read-only operation'): WritableColumns {

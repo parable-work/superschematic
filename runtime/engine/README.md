@@ -8,9 +8,10 @@ instances and an event log in one SQLite file.
 Built: the storage layer and its migrations, the schema registry with its
 compatibility rule, instances, the event log, the access policy, the
 HTTP API with the event stream (`@superschematic/engine/http`), the
-behavior plug-in interface, the describe and tools documents and the MCP
-endpoint (`@superschematic/engine/mcp`). Not built yet: the behaviors the
-engine packages ship.
+behavior plug-in interface, the describe and tools documents, the MCP
+endpoint (`@superschematic/engine/mcp`), and the core's behaviors:
+`Workflow`, `Comments` and `Revisions`. Not built yet: the other
+behaviors D16 lists.
 
 ```ts
 import { allowAll, openEngine } from '@superschematic/engine';
@@ -33,14 +34,15 @@ engine.close();
 The package ships compiled ESM with declarations (`dist/`), since Node.js
 does not strip types from files under `node_modules`. It runs on Node.js
 24 and on Bun, and its tests run under both. It needs
-`@superschematic/schema-runtime`, `@superschematic/schema-ir` and
-`superscalar` next to it in `node_modules`; until they are published, a
-consumer declares all three itself (D3), and this package's own build and
-tests get them from `typescript/scripts/link-local-deps.mjs`. The
-`./http` entry point also needs `hono` and `@superschematic/http-runtime`,
-its optional peer dependencies, and the `./mcp` entry point those and
-`@modelcontextprotocol/server`; the main entry point imports none of
-them.
+`@superschematic/schema-runtime`, `@superschematic/schema-ir`,
+`@superschematic/http-runtime` and `superscalar` next to it in
+`node_modules`; until they are published, a consumer declares all four
+itself (D3), and this package's own build and tests get them from
+`typescript/scripts/link-local-deps.mjs`. The main entry point imports the
+HTTP runtime's framework-free entry point, for the default permission
+matcher, and not Hono; the `./http` entry point also needs `hono`, an
+optional peer dependency, and the `./mcp` entry point `hono` and
+`@modelcontextprotocol/server`, another.
 
 ## Storage
 
@@ -287,7 +289,9 @@ actor (the principal's subject), time and change: the instance for a
 create, its behaviors' fields included; for an update, the merge patch,
 with any change the behaviors' fields took merged in; for an operation,
 `{ behavior, operation, params, patch }`, where `patch` is the merge patch
-of the behaviors' fields; nothing for a delete; and the schema document
+of the instance's own fields the operation changed (an operation's
+`update()`, under "Contexts") and of its behaviors' fields; nothing for a
+delete; and the schema document
 for a publish. Applying each change in order to the create's instance
 gives the instance as a read returns it. The
 cursor orders the whole log; an instance's sequence runs 1, 2, 3, ...
@@ -331,7 +335,11 @@ Only `true` allows, and anything else is `forbidden`. It runs synchronously. The
 policy: `allowAll` is explicit, for tests and local use. The engine has
 no roles; a policy can hold the principal's `permissions` to whatever
 rule the deployment has, through the HTTP runtime's `PermissionMatcher`
-for example.
+for example. A behavior's own checks, a transition only a reviewer may
+make say, ask the `permissionMatcher` option (a `PermissionMatcher`, the
+HTTP runtime's `hasAnyPermission` by default) through `can()` ("Contexts"
+under "Behaviors"); a deployment passes the matcher it gives the HTTP
+runtime, so one rule answers both.
 
 `Principal` has the shape of the HTTP runtime's (`subject`,
 `permissions`, `claims`), so a principal its `Authenticator` returns can
@@ -363,9 +371,10 @@ write from a read, a promise from a synchronous function.
 A behavior adds fields, operations, checks and storage to a schema's
 instance type (D16 in `docs/DECISIONS.md`). The compiler declares it in a
 JSON file (section 3.16 of `docs/extension-model.md`); the engine runs an
-implementation of it that carries the same file. The engine names no
-behavior: a deployment registers the implementations it runs, when the
-engine opens or later.
+implementation of it that carries the same file. The engine registers
+the core's behaviors when it opens ("Core behaviors"); a deployment
+registers the implementations of its own, when the engine opens or
+later.
 
 ```ts
 import { defineBehavior, openEngine } from '@superschematic/engine';
@@ -398,8 +407,8 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 ```
 
 `metaSchema` is the `json-schema` output of the deployment's binary, which
-lists the behaviors it declares; the core's lists none, so its loader
-refuses every behavior.
+lists the behaviors it declares; the core's lists the core's own
+(`Workflow`, `Comments` and `Revisions`), so its loader refuses any other.
 
 ### The implementation
 
@@ -414,10 +423,10 @@ function is synchronous (D16): one that returns a promise is a
 | `configChange(before, after)` | whether a new version may change the config, add the behavior (`before` undefined) or remove it (`after` undefined) on a schema with instances: a reason refuses. Absent, only an identical config, and no adding or removing while there are instances |
 | `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table and an `up(sql)` for its own tables |
 | `initialize(context)` | sets up its state for a new instance |
-| `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes |
-| `operations` | a handler per declared operation: `(context, params) => result` |
+| `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does |
+| `operations` | a handler per declared operation: `(context, params) => result`, with an `OperationContext` |
 | `fields` | a reader per declared field: `(view) => value` |
-| `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction |
+| `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them |
 
 Registration (`openEngine({ behaviors })` or `engine.behaviors.register`)
 refuses, naming every problem, an implementation whose `operations` or
@@ -440,6 +449,12 @@ a field reader's) has:
 
 - `behavior`, `config`, `namespace`, `schema`, `version`, `id`;
 - `principal`, and `now`, the clock's time, read once for the whole call;
+- `can(permission)`: whether the principal holds a permission, as the
+  engine's `permissionMatcher` answers for its permissions. The default is
+  the HTTP runtime's `hasAnyPermission`: dotted paths, a granted
+  permission covering itself and everything nested under it, no root
+  permission. Where a behavior limits who may do something, its config
+  names the permission and `can` decides (D16); the engine has no roles;
 - `data`: the instance's own fields, deep-frozen, without any behavior's;
 - `columns.get()`: its own columns on the instance, by its own names;
 - `sql`: `get` and `all` on its own tables, reads only, with
@@ -453,6 +468,23 @@ had and `set` and `call` refuse. There is no handle on the instances
 table, the event log, another behavior's storage or the connection: a
 status one behavior owns changes at another's request only through its
 operations, whose guards run.
+
+An operation's context (`OperationContext`) adds two more, so a
+behavior that changes the instance on a caller's behalf, approving a
+proposed change say, runs the checks an update runs:
+
+- `update(patch)` applies a JSON merge patch to the instance's own fields
+  and returns them after it. A behavior's field in the patch is refused
+  (`InstanceValidationError`, rule `readOnly`), so is a result the live
+  version refuses, and then every guard is asked with `{ kind: 'update',
+  patch, after, caller }`. A patch that changes nothing writes nothing.
+  The access policy is not asked again, and no event is appended: the
+  operation's event carries the change in its `patch`, and `afterChange`
+  gets `before`. A read-only operation's `update` refuses, and a called
+  operation's update rolls back with its savepoint. `data` reads the
+  fields as the operation's updates leave them.
+- `validateUpdate(patch)` returns the issues `update(patch)` would refuse
+  the patch for, without writing or asking a guard.
 
 ### Storage
 
@@ -525,8 +557,9 @@ other value must be JSON. A field is read-only to `create` and `update`
 each config and declaration.
 
 A writing operation appends an `operation` event, `{ behavior,
-operation, params, patch }`, with the merge patch of the behaviors'
-fields; a read-only one appends none. A create's event carries the
+operation, params, patch }`, with the merge patch of the own fields its
+`update()` changed and of the behaviors' fields; a read-only one appends
+none. A create's event carries the
 behaviors' fields, and an update's merges in any change they took, so
 the log replays to the instance a read returns.
 
@@ -538,6 +571,135 @@ changed in its behavior's own tables. An `update`, `delete` or
 operation that expects the sequence from before the operation is refused
 (`seq_mismatch`) before any guard is asked. A read-only operation checks
 `expectedSeq` against the sequence it reads and moves nothing.
+
+### Core behaviors
+
+The core declares three behaviors (`internal/registry/behaviors`, section
+3.16 of `docs/extension-model.md`), so every binary's meta-schema admits
+them, and the engine implements them in `src/behaviors/core` and
+registers them when it opens, before `behaviors`: a schema that composes
+them runs with no extension linked. Each implementation imports the copy
+of its declaration in `src/behaviors/core/declarations`, which the core
+binary writes (`make behaviors`) and CI checks (`make behaviors-check`).
+They reach the engine only through the plug-in interface above. A
+deployment cannot register another implementation under their names.
+
+```json
+"behaviors": [
+  { "name": "Workflow", "config": {
+      "states": ["draft", "review", "published"],
+      "transitions": [
+        { "from": "draft", "to": "review" },
+        { "from": "review", "to": "published", "permission": "documents.publish" }
+      ] } },
+  { "name": "Comments" },
+  { "name": "Revisions", "config": { "review": { "permission": "documents.review" } } }
+]
+```
+
+Their records number from 1 per instance (a comment's id, a revision, a
+proposal's id), so a number says nothing about another instance. Their
+list operations are read-only, so the policy is asked for `read` and they
+append no event: they take `limit` (1 to 500, 50 by default) and
+`cursor`, and return `{ items, next }` in the order the records were
+made, as `instances.list` does. Deleting an instance deletes what they
+keep for it.
+
+Their operations are served as any behavior's are. For a schema named
+`documents`, the operation route runs `transition` with `If-Match`
+(`POST .../schemas/documents/instances/{id}/operations/transition`, body
+`{"to": "review"}`), and it is the tool `documents.transition`, MCP handle
+`documents_transition`; the list operations' tools only read (`replay`
+`read_only`, `readOnlyHint`). None names an invocation policy, so each
+takes the default of the policy the engine is given, the core's or a
+distribution's (D11, "The invocation policy and the vendor keys"). A
+refusal is the HTTP API's problem: a transition whose permission the
+caller lacks is 403 `forbidden`, and over MCP a tool error carrying that
+problem.
+
+#### Workflow
+
+A state machine on the instance's `status`.
+
+| | |
+| --- | --- |
+| Config | `states` (one or more names: a letter, then letters, digits, `_` and `-`), `initial` (the first state when absent), `transitions`: `{ from, to, permission? }` |
+| Fields | `status` |
+| Operations | `transition({ to })` -> `{ from, to }`, writes |
+| Guards | its own `transition`, whoever asks: `to` not a state is `invalid_argument`; the state the instance is in, a transition the config does not list and a move out of a terminal state are `vetoed`; a transition that names a permission the caller lacks (`can`) is `forbidden` |
+| Events | `transition`'s operation event, `patch: { status }` |
+| `configChange` | every old state stays; transitions, permissions and `initial` may change. Not added to or removed from a schema with instances |
+
+A new instance starts in `initial`. The status is Workflow's own column,
+so a create or an update that sets it is refused (`readOnly`), and
+another behavior moves it only by calling `transition`, whose guard runs
+for that call as for a caller's. `transition` takes `to` and nothing else;
+its closed `paramsSchema` lets no alias through. Beyond its config
+schema, which the compiler checks too, the engine refuses a config whose
+`initial` or a transition names a state it does not list, and a
+transition from a state to itself or listed twice. A state no transition
+reaches is allowed: a new version keeps every state an instance may be
+in, one it no longer enters included.
+
+A state that no transition leaves is terminal. `isTerminalState(config,
+state)`, exported by the package, answers that for a config as a schema
+holds it (`schemas.behaviors` lists it): true for one of its states that
+no transition leaves.
+
+#### Comments
+
+Comments on the instance, each a reply to one of its comments or not.
+
+| | |
+| --- | --- |
+| Config | none |
+| Fields | `commentCount` |
+| Operations | `comment({ body, replyTo? })` -> the comment, writes; `listComments({ limit?, cursor? })` -> a page, read-only |
+| Guards | none; `comment`'s `replyTo` must name a comment of the same instance (`invalid_argument`), and `body` must hold a non-space character, at most 10000 code points |
+| Events | `comment`'s operation event, `patch: { commentCount }` |
+| `configChange` | added to a schema with instances, which start with none; not removed from one, since their comments would stay behind |
+
+A comment is `{ id, replyTo?, body, createdBy, createdAt }`: the caller's
+subject and the engine clock's time.
+
+#### Revisions
+
+Immutable revisions of the instance's own fields, with an optional review
+step.
+
+| | |
+| --- | --- |
+| Config | `review: { permission }`, optional |
+| Fields | `revision`: the latest revision's number, absent before the first |
+| Operations | `listRevisions({ limit?, cursor? })`, read-only; with review, `propose({ patch, note? })`, `approve({ proposal })`, `reject({ proposal, reason? })`, which write, and `listProposals({ state?, limit?, cursor? })`, read-only |
+| Guards | without review, the four review operations are `vetoed`; `approve` and `reject` need the review permission (`can`), else `forbidden`, whoever calls them |
+| Events | a create's and an update's event carry `revision`; `propose` appends an operation event with an empty `patch`; `approve`'s carries the fields its patch changed and `revision` |
+| `configChange` | `review` may be added, removed or changed. Added to a schema with instances, whose history starts at their next change; not removed from one |
+
+A create records revision 1 and every change of the own fields the next,
+in its transaction: an update that changes something, and an operation
+that changes them with `update()`, an approval included. A revision is
+`{ revision, data, createdBy, createdAt, proposal? }`, where `data` is the
+own fields as the change left them, never a behavior's field. An
+operation that changes no own field, a comment or a transition, records
+none.
+
+`propose` checks its patch with `validateUpdate`: one that sets a
+behavior's field or leaves the instance invalid is `invalid_instance`,
+and one that changes nothing is `invalid_argument`. It stores the patch
+as a pending proposal and changes nothing a reader sees. Who may propose
+is the access policy's call: it is asked for `write` with the operation
+`propose`, apart from a plain update, which names no operation. `approve`
+applies a pending proposal's patch with `update()`, so the update's
+validation and every guard run, and records the revision it makes with
+the proposal's id; a refusal leaves the proposal pending. The patch
+applies to the instance as it is then, not as it was proposed; `base` is
+the revision it was proposed against, so a reviewer can see the instance
+moved. `reject` settles it with an optional reason. A proposal is `{ id,
+patch, note?, base?, state, createdBy, createdAt, reviewedBy?,
+reviewedAt?, reason?, revision? }`, `state` one of `pending`, `approved`
+and `rejected`; approving or rejecting one that is not pending is
+`vetoed`, and naming none is `invalid_argument`.
 
 ## Namespaces
 
@@ -622,7 +784,7 @@ read-only operation leaves where it was.
 | 400 | `invalid_argument` | a page size, cursor, instance id, schema name or version the engine refuses; an operation's parameters its `paramsSchema` refuses (`OperationParamsError`), `details.issues` |
 | 400 | `bad_request` | a parameter or body the runtime cannot decode, a create body that is not `{id?, data}`, a path that is not valid percent-encoding |
 | 401 | `unauthorized` | the `Authenticator` returned no caller, or one without a subject |
-| 403 | `forbidden` | the access policy refused |
+| 403 | `forbidden` | the access policy refused, or a behavior refused a caller without the permission its config names |
 | 404 | `not_found` | no such version, draft or instance in the namespace, or no such route |
 | 404 | `unknown_namespace` | the namespace is not configured |
 | 409 | `conflict` | an instance with the id exists |
@@ -831,7 +993,8 @@ openEngine({
   operation or schema tool takes `invocation`'s value for it, else the
   default; a behavior operation takes its declaration's `invocationPolicy`,
   else the default. Registration refuses a declaration whose value is not
-  one of the values, as the compiler's `Finalize` does.
+  one of the values, as the compiler's `Finalize` does. The core's
+  behaviors name none, so they register under any policy.
 - `keys` are `apigen.ToolKeys` (section 3.14 of `docs/extension-model.md`):
   the key a property names its scalar under, the `_meta` key of a tool's
   guidance, and keys written at the root of every argument schema.

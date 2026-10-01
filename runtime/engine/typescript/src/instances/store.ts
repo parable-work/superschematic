@@ -25,6 +25,8 @@ while a client pages moves no other instance between pages.
 
 import { randomUUID } from 'node:crypto';
 
+import type { PermissionMatcher } from '@superschematic/http-runtime';
+
 import { checkPrincipal, type Access, type Action, type Principal } from '../access.js';
 import type { FrozenJSON } from '../behaviors/behavior.js';
 import { Execution, checkParams } from '../behaviors/execution.js';
@@ -38,7 +40,7 @@ import { checkSchemaName } from '../registry/document.js';
 import { readOnlyIssue } from '../registry/validator.js';
 import type { Row } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
-import { isPlainObject, jsonEqual, mergePatch, setMember } from './patch.js';
+import { diffPatch, isPlainObject, jsonEqual, mergePatch } from './patch.js';
 
 /** An instance id: a letter or digit, then letters, digits, `.`, `_`, `:` and `-`, at most 256 characters. */
 export const INSTANCE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -129,7 +131,9 @@ export class InstanceStore {
     private readonly catalog: SchemaCatalog,
     private readonly access: Access,
     private readonly ids: () => string,
-    private readonly clock: () => number
+    private readonly clock: () => number,
+    /** Answers a behavior's can(); EngineOptions.permissionMatcher. */
+    private readonly permissions: PermissionMatcher
   ) {}
 
   /** create validates data against the schema's live version and stores it under a new id. */
@@ -258,7 +262,7 @@ export class InstanceStore {
         version: record.version as number,
         actor: principal.subject,
         at: now,
-        change: JSON.stringify({ ...frozenPatch, ...fieldPatch(before, after) }),
+        change: JSON.stringify({ ...frozenPatch, ...diffPatch(before, after) }),
       });
       return toInstance(this.row(namespace, schema, id) as Row, after);
     });
@@ -358,9 +362,18 @@ export class InstanceStore {
       const row = this.existing(namespace, schema, id);
       matchSeq(row, options.expectedSeq);
       const execution = this.execution(runtime, record, namespace, principal, now, id, JSON.parse(String(row.data)) as Record<string, unknown>, true);
+      const own = execution.current();
       const before = execution.fields();
       const result = execution.invoke(spec, checked);
-      execution.afterChange({ kind: 'operation', behavior: spec.behavior.name, operation: spec.name, params: checked });
+      // An operation may change the instance's own fields through update();
+      // afterChange gets them from before it, and the event carries the change.
+      const ownAfter = execution.current();
+      const changed = !jsonEqual(own, ownAfter);
+      execution.afterChange(
+        changed
+          ? { kind: 'operation', behavior: spec.behavior.name, operation: spec.name, params: checked, before: own }
+          : { kind: 'operation', behavior: spec.behavior.name, operation: spec.name, params: checked }
+      );
       const after = execution.fields();
       const seq = Number(row.seq) + 1;
       this.storage.run(
@@ -368,7 +381,12 @@ export class InstanceStore {
          WHERE namespace = ? AND schema = ? AND id = ?`,
         [record.version as number, record.namespace, seq, now, principal.subject, namespace, schema, id]
       );
-      const change: OperationChange = { behavior: spec.behavior.name, operation: spec.name, params: checked, patch: fieldPatch(before, after) };
+      const change: OperationChange = {
+        behavior: spec.behavior.name,
+        operation: spec.name,
+        params: checked,
+        patch: { ...diffPatch(own, ownAfter), ...diffPatch(before, after) },
+      };
       appendEvent(this.storage, {
         kind: 'operation',
         namespace,
@@ -421,10 +439,11 @@ export class InstanceStore {
       this.storage,
       runtime.composition,
       runtime.prefixes,
-      { namespace, schema: record.name, version: record.version as number, principal, now },
+      { namespace, schema: record.name, version: record.version as number, principal, now, permissions: this.permissions },
       id,
       data,
-      writable
+      writable,
+      runtime.validator
     );
   }
 
@@ -491,24 +510,6 @@ function decodeCursor(cursor: string): number {
     throw new EngineError('invalid_argument', 'the list cursor is not one this engine returned');
   }
   return Number(match[1]);
-}
-
-// fieldPatch is the merge patch from one reading of an instance's behavior
-// fields to another: each changed or new field, and null for one that has
-// no value any more.
-function fieldPatch(before: Record<string, unknown>, after: Record<string, unknown>): Record<string, unknown> {
-  const patch: Record<string, unknown> = {};
-  for (const [field, value] of Object.entries(after)) {
-    if (!Object.prototype.hasOwnProperty.call(before, field) || !jsonEqual(before[field], value)) {
-      setMember(patch, field, value);
-    }
-  }
-  for (const field of Object.keys(before)) {
-    if (!Object.prototype.hasOwnProperty.call(after, field)) {
-      setMember(patch, field, null);
-    }
-  }
-  return patch;
 }
 
 function toInstance(row: Row, fields: Record<string, unknown>): InstanceRecord {

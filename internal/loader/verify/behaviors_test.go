@@ -63,7 +63,7 @@ func TestBehaviorsVerify(t *testing.T) {
 		{"accepted", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Audit"}}, nil},
 		{"requirement listed first", []ir.BehaviorRef{{Name: "Audit"}, stock(`{"aisles":2}`)}, nil},
 		{"unknown", []ir.BehaviorRef{{Name: "Ghost"}},
-			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Audit, Clearance, Recount, Shelved, Stock)`}},
+			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Audit, Clearance, Comments, Recount, Revisions, Shelved, Stock, Workflow)`}},
 		{"config rejected", []ir.BehaviorRef{stock(`{"aisles":0}`)},
 			[]string{"src/item.schema.json: type Item: behavior Stock config: "}},
 		{"config missing", []ir.BehaviorRef{{Name: "Stock"}},
@@ -129,11 +129,26 @@ func TestBehaviorsVerifyFieldJSONKey(t *testing.T) {
 	}
 }
 
-// With no behavior registered, which is the core today, every behavior a
-// type lists fails the load.
-func TestBehaviorsVerifyWithNoneRegistered(t *testing.T) {
-	r := Run(behaviorSchema(ir.BehaviorRef{Name: "Stock"}), Input{Registry: registry.New(naming.Naming{})})
-	if want := `type Item: behavior "Stock" is not a registered behavior (none are registered)`; !hasError(r, want) {
+// The core registry accepts the core's behaviors with no extension linked,
+// and holds them to the same rules: a behavior it does not register fails
+// the load, and so does a core behavior's field the type already declares.
+func TestBehaviorsVerifyWithTheCore(t *testing.T) {
+	core := registry.New(naming.Naming{})
+	workflow := ir.BehaviorRef{Name: "Workflow", Config: json.RawMessage(`{"states":["open","done"],"transitions":[{"from":"open","to":"done"}]}`)}
+	r := Run(behaviorSchema(workflow, ir.BehaviorRef{Name: "Comments"}, ir.BehaviorRef{Name: "Revisions"}), Input{Registry: core})
+	if got := errorStrings(r); len(got) != 0 {
+		t.Fatalf("errors = %v, want none", got)
+	}
+
+	r = Run(behaviorSchema(ir.BehaviorRef{Name: "Stock"}), Input{Registry: core})
+	if want := `type Item: behavior "Stock" is not a registered behavior (registered: Comments, Revisions, Workflow)`; !hasError(r, want) {
+		t.Fatalf("errors = %v, want %q", errorStrings(r), want)
+	}
+
+	schema := behaviorSchema(workflow)
+	schema.Types["Item"].Fields = append(schema.Types["Item"].Fields, &ir.FieldDef{Name: "status", TypeRef: ir.TypeRef{Name: "string"}})
+	r = Run(schema, Input{Registry: core})
+	if want := "type Item: behavior Workflow adds field status, which the type declares"; !hasError(r, want) {
 		t.Fatalf("errors = %v, want %q", errorStrings(r), want)
 	}
 }

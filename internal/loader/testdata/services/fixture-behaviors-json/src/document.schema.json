@@ -1,0 +1,31 @@
+{
+  "kind": "General",
+  "name": "documents",
+  "description": "A document an engine runs with the core's behaviors and no extension: it moves from draft through review to published, collects comments, and keeps its revisions, and a change to it can be proposed for a reviewer to approve.",
+  "types": {
+    "Document": {
+      "name": "Document",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["draft", "review", "published", "archived"],
+            "transitions": [
+              { "from": "draft", "to": "review" },
+              { "from": "review", "to": "draft" },
+              { "from": "review", "to": "published", "permission": "documents.publish" },
+              { "from": "published", "to": "archived" }
+            ]
+          }
+        },
+        { "name": "Comments" },
+        { "name": "Revisions", "config": { "review": { "permission": "documents.review" } } }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },
+        { "name": "body", "typeRef": { "name": "string" } }
+      ]
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "name": "Workflow",
+  "description": "A state machine on the instance: a status that starts in the initial state and changes only through transition, along a transition the config lists. A transition may name a permission the caller must hold. A state that no transition leaves is terminal.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["states", "transitions"],
+    "properties": {
+      "states": {
+        "description": "Every state an instance can be in.",
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$", "maxLength": 64 }
+      },
+      "initial": {
+        "description": "The state a new instance starts in; the first of states when absent.",
+        "type": "string"
+      },
+      "transitions": {
+        "description": "The moves the status may make. A state that no transition leaves is terminal.",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from", "to"],
+          "properties": {
+            "from": { "description": "The state the instance is in.", "type": "string" },
+            "to": { "description": "The state it moves to.", "type": "string" },
+            "permission": {
+              "description": "The permission a caller needs to make this transition. Absent, any caller who may write the instance can.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  },
+  "fields": [
+    { "name": "status", "description": "The state the instance is in." }
+  ],
+  "operations": [
+    {
+      "name": "transition",
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["to"],
+        "properties": {
+          "to": { "description": "The state to move to.", "type": "string", "minLength": 1 }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "description": "The state the instance was in.", "type": "string" },
+          "to": { "description": "The state it is in now.", "type": "string" }
+        }
+      },
+      "writes": true
+    }
+  ]
+}

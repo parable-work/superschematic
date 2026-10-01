@@ -1005,51 +1005,25 @@ the acme example declares one behavior (`acme.<Name>`) with its
 TypeScript implementation and no core edit, asserted by
 `scripts/smoke.sh` (section 10 of `docs/extension-model.md`).
 
-Status: five pieces are built. `internal/tools/schemafiletypes` writes
-the data form's TypeScript types and meta-schema into
-`@superschematic/schema-ir` (`./schema-file`, `./schema-file.json`). The
-strict loader is in `@superschematic/schema-runtime`, held to the Go
-reader by `runtime/schema/testdata/schema_file_parity.json`
-(`runtime/schema/README.md`). Behavior declarations and the `@behavior`
-decorator are in the compiler (section 3.16 of `docs/extension-model.md`);
-the core declares no behavior yet, acme declares `acme.Rating`, and every
-generator refuses a type that declares one. To match the Go reader's
-canonical bytes, which drop a value its decoder cannot tell from an
-absent key, the meta-schema gives each such property that value as its
-default (section 5), and the loader needs `JSON.parse` source text access
-(Node.js 21 or later, or Bun). `@superschematic/engine`
-(`runtime/engine/README.md`) has storage on `node:sqlite` and
-`bun:sqlite`, the schema registry with the compatibility rule,
-namespaces, instances, the event log and the access policy; its `./http`
-entry point serves the HTTP API and the event stream on the HTTP runtime
-(D15, amended), with an instance's sequence as its entity tag; and it
-runs behaviors through a plug-in interface (`BehaviorImplementation`),
-checking composition at define and publish, creating a behavior's
-storage at publish, and running its guards, operations, hooks and field
-readers. Its HTTP API routes a behavior operation, with `If-Match` as
-the operation's expected sequence, and serves a describe document per
-schema and a namespace's tools document in `tools/schema.json`'s shape;
-its `./mcp` entry point serves the tools over MCP on the official
-TypeScript SDK, with the policy and vendor keys as engine options and no
-publish tool. `runtime/engine/testdata/tool_parameters_parity.json`,
-written from `toolsutil`, holds its field schemas to the SDK
-generators'. Beyond the schema runtime's checks it refuses union and map
-fields, which no runtime validates yet, and object keys a type does not
-declare; beyond the compiler's, a behavior composes on the instance type
-only. Both refuse an operation whose `paramsSchema` does not set
-`additionalProperties: false`, the compiler when the declaration
-registers, and a behavior field that takes a type field's JSON key, the
-compiler when the schema loads. The binary's `behaviors --out <dir>
-[--check]` command copies a declaration into its npm package; it is a
-command rather than a tool in the core module, since an extension's
-declarations are registered only in its own binary (section 3.16 of
-`docs/extension-model.md`). acme implements
-`acme.Rating` in `@acme/behaviors` over that copy, and its smoke runs it
-in the engine with no core edit. Not built: the behaviors the engine
-packages ship, without which the engine runs no behavior with no
-extension linked. Each change that lands a piece updates this paragraph,
-the README layout table and the pages that describe it. The names and
-rules are reversible until the first release.
+Status: built are the schema-file types and meta-schema
+(`@superschematic/schema-ir`), the strict loader
+(`@superschematic/schema-runtime`, held to the Go reader by
+`runtime/schema/testdata/schema_file_parity.json`), behavior declarations
+and the `@behavior` decorator (section 3.16 of `docs/extension-model.md`),
+and `@superschematic/engine` (`runtime/engine/README.md`): storage, the
+schema registry, instances, the event log, the access policy, the
+behavior plug-in interface, the HTTP API with its event stream and
+operation route, and the describe and tools documents and MCP tools. The
+core declares `Workflow`, `Comments` and `Revisions`, and the engine
+registers its implementations of them when it opens, so D10's done
+criterion is met: the core binary with no extension linked loads a schema
+that composes them (`make cli-smoke`), an engine with only its own
+behaviors runs it (`test/core-behaviors.test.ts`), and acme's
+`acme.Rating` runs with no core edit (`scripts/smoke.sh`). Not built: the
+cross-instance behaviors (dependency edges, links, derived fields,
+reactions), search, and the work-queue package. Each change that lands a
+piece updates this paragraph, the README layout table and the pages that
+describe it. The names and rules are reversible until the first release.
 
 ## D17. A version graph over versioned tables, with one merge core
 

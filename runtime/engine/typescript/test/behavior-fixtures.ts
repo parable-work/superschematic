@@ -8,15 +8,21 @@ import { alice, openTestEngine, schemaDocument, type Field } from './helpers.ts'
 
 /**
  * The core meta-schema with behaviors let through: any name, any config.
- * The core registry declares none, so its own refuses every behavior; a
- * deployment passes its binary's, which lists what the binary declares.
- * With this one the engine's own checks are what refuse a composition.
+ * The core registry's own admits only the core's behaviors, each config
+ * held to its declaration; a deployment passes its binary's, which lists
+ * what the binary declares. With this one the engine's own checks are
+ * what refuse a composition.
  */
 export function openMetaSchema(): Record<string, unknown> {
   const metaSchema = JSON.parse(readFileSync(new URL('../../../../ir/typescript/schema-file.json', import.meta.url), 'utf8')) as {
-    $defs: { TypeDef: { properties: { behaviors: Record<string, unknown> } } };
+    $defs: {
+      TypeDef: { properties: { behaviors: Record<string, unknown> } };
+      BehaviorRef: { allOf?: unknown; properties: { name: Record<string, unknown> } };
+    };
   };
   delete metaSchema.$defs.TypeDef.properties.behaviors.maxItems;
+  delete metaSchema.$defs.BehaviorRef.properties.name.enum;
+  delete metaSchema.$defs.BehaviorRef.allOf;
   return metaSchema as unknown as Record<string, unknown>;
 }
 

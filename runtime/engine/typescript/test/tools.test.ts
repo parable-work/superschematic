@@ -1,8 +1,8 @@
 // The describe document, the tools document and the calls the tools make:
 // names and MCP handles, hidden tools and why, invocation policies (the
 // default, configured ones, a behavior operation's and a distribution's
-// policy), the options' checks, what each tool call does and refuses, and
-// that no tool publishes.
+// policy), the options' checks, the core's behaviors' operations as tools,
+// what each tool call does and refuses, and that no tool publishes.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -19,7 +19,7 @@ import {
   type ToolDefinition,
 } from '../dist/index.js';
 import { counterDeclaration, flagDeclaration, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, freshPath, openTestEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -359,6 +359,94 @@ describe('invocation policies', () => {
     assert.match(refusal({ keys: { scalar: 'x-s', parameters: [{ key: 'x-s', value: 1 }] } }), /"x-s" is the scalar key/);
     assert.match(refusal({ keys: { parameters: [{ key: 'x-a', value: 1 }, { key: 'x-a', value: 2 }] } }), /"x-a" is listed twice/);
     assert.match(refusal({ keys: { parameters: [{ key: 'x-a', value: Number.NaN }] } }), /"x-a" is not JSON/);
+  });
+});
+
+describe("the core's behaviors", () => {
+  // An engine with the core meta-schema and only its own behaviors, and
+  // documents, which composes all three. No core operation names an
+  // invocation policy, so each takes the default of the policy the engine
+  // is given.
+  const tools = (engine: Engine) => engine.tools.manifest(alice).tools.filter((entry) => entry.namespace === 'documents');
+
+  test('their operations are tools with the default policy, and the list operations only read', () => {
+    const engine = openTestEngine({ policy });
+    publish(engine, documentsDocument());
+    assert.deepEqual(
+      tools(engine).map((entry) => [entry.name, entry.mcp.hidden ? entry.mcp.hiddenReason : entry.mcp.handle, entry.replay?.mode ?? 'writes']),
+      [
+        ['documents.create', 'documents_create', 'writes'],
+        ['documents.get', 'documents_get', 'read_only'],
+        ['documents.list', 'documents_list', 'read_only'],
+        ['documents.update', 'documents_update', 'writes'],
+        ['documents.delete', 'documents_delete', 'writes'],
+        ['documents.transition', 'documents_transition', 'writes'],
+        ['documents.comment', 'documents_comment', 'writes'],
+        ['documents.listComments', 'documents_list_comments', 'read_only'],
+        ['documents.listRevisions', 'documents_list_revisions', 'read_only'],
+        ['documents.propose', 'documents_propose', 'writes'],
+        ['documents.approve', 'documents_approve', 'writes'],
+        ['documents.reject', 'documents_reject', 'writes'],
+        ['documents.listProposals', 'documents_list_proposals', 'read_only'],
+      ]
+    );
+    for (const entry of tools(engine)) {
+      assert.equal(entry.mcp.hidden ? undefined : entry.mcp.invocationPolicy, 'auto', entry.name);
+    }
+    const transition = tool(engine, 'documents.transition');
+    assert.equal(transition.httpPath, '/namespaces/default/schemas/documents/instances/{id}/operations/transition');
+    assert.deepEqual((transition.parameters.properties as Record<string, unknown>).params, {
+      additionalProperties: false,
+      properties: { to: { description: 'The state to move to.', minLength: 1, type: 'string' } },
+      required: ['to'],
+      type: 'object',
+    });
+
+    // The describe document names each operation's behavior and policy, and
+    // holds the behaviors' fields read-only in the instance.
+    const described = engine.tools.describe(alice, 'documents');
+    assert.deepEqual(
+      described.operations.filter((operation) => operation.behavior !== undefined).map((operation) => [operation.behavior, operation.name, operation.writes, operation.invocationPolicy]),
+      [
+        ['Workflow', 'transition', true, 'auto'],
+        ['Comments', 'comment', true, 'auto'],
+        ['Comments', 'listComments', false, 'auto'],
+        ['Revisions', 'listRevisions', false, 'auto'],
+        ['Revisions', 'propose', true, 'auto'],
+        ['Revisions', 'approve', true, 'auto'],
+        ['Revisions', 'reject', true, 'auto'],
+        ['Revisions', 'listProposals', false, 'auto'],
+      ]
+    );
+    const properties = described.instance.properties as Record<string, { readOnly?: boolean }>;
+    assert.deepEqual(
+      ['status', 'commentCount', 'revision', 'title'].map((field) => properties[field]?.readOnly === true),
+      [true, true, true, false]
+    );
+  });
+
+  test("under a distribution's policy they take its default, and the engine still opens", () => {
+    const confirm = { key: 'confirm', values: ['never', 'always'], default: 'always' };
+    const engine = openTestEngine({ policy, tools: { invocationPolicy: confirm, invocation: { get: 'never', list: 'never' } } });
+    publish(engine, documentsDocument());
+    assert.deepEqual(
+      tools(engine).map((entry) => [entry.name, entry.mcp.hidden ? undefined : entry.mcp.confirm]),
+      [
+        ['documents.create', 'always'],
+        ['documents.get', 'never'],
+        ['documents.list', 'never'],
+        ['documents.update', 'always'],
+        ['documents.delete', 'always'],
+        ['documents.transition', 'always'],
+        ['documents.comment', 'always'],
+        ['documents.listComments', 'always'],
+        ['documents.listRevisions', 'always'],
+        ['documents.propose', 'always'],
+        ['documents.approve', 'always'],
+        ['documents.reject', 'always'],
+        ['documents.listProposals', 'always'],
+      ]
+    );
   });
 });
 

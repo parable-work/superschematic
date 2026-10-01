@@ -2,7 +2,7 @@
 // temporary directory (not :memory:, so write-ahead logging behaves as it
 // does in a deployment), and cleanup closes and removes them.
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -112,4 +112,16 @@ export function orderDocument(): Record<string, unknown> {
 /** clone deep-copies a JSON document so a test can change it. */
 export function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+/**
+ * documentsDocument is the General schema-file document the core binary
+ * loads with no extension linked (make cli-smoke, fixture-behaviors-json):
+ * its Document type composes Workflow, Comments and Revisions, and the
+ * transition from review to published needs documents.publish.
+ */
+export function documentsDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-behaviors-json/src/document.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
 }

@@ -66,7 +66,11 @@ export interface OperationChange {
   operation: string;
   /** The parameters, as its guards and handler got them. */
   params: Record<string, unknown>;
-  /** A merge patch of the instance's behavior fields, from before the call to after it. */
+  /**
+   * A merge patch of the instance as a read returns it, from before the
+   * call to after it: its own fields an update() in the operation changed,
+   * and its behaviors' fields.
+   */
   patch: Record<string, unknown>;
 }
 

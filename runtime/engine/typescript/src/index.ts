@@ -59,6 +59,7 @@ export type {
   InstanceChange,
   InstanceContext,
   InstanceView,
+  OperationContext,
   OperationHandler,
   SqlReader,
   SqlWriter,
@@ -68,6 +69,19 @@ export { BEHAVIOR_NAME, BUILTIN_OPERATIONS } from './behaviors/declaration.js';
 export type { BehaviorDeclaration, BehaviorFieldDeclaration, BehaviorOperationDeclaration, JSONSchema } from './behaviors/declaration.js';
 export { BehaviorRegistry } from './behaviors/registry.js';
 export { MAX_CALL_DEPTH } from './behaviors/execution.js';
+
+// The core's behaviors, which every engine registers (runtime/engine/README.md, "Core behaviors").
+export { isTerminalState } from './behaviors/core/index.js';
+export type {
+  CommentRecord,
+  ProposalRecord,
+  ProposalState,
+  RevisionRecord,
+  RevisionsConfig,
+  WorkflowConfig,
+  WorkflowStates,
+  WorkflowTransition,
+} from './behaviors/core/index.js';
 
 // Storage.
 export { SQLITE_BUSY, SqliteError, isBun, openDriver } from './storage/driver.js';
