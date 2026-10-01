@@ -329,7 +329,8 @@ In-tree locations generated modules point path dependencies at (`go.mod`
 replace, Cargo `path`, npm `file:`). Every key is optional and
 repo-relative. The repository root is the parent of the schemas root. An
 absolute value is an error that names the key. An unset key emits no path
-dependency, so the generated manifest resolves the published module.
+dependency, so the generated manifest resolves the published module; set
+the key until that module is published.
 
 ### `paths.scalar_go`
 
@@ -343,7 +344,10 @@ Directory of the scalar library's Go module (`go.mod`).
 Default: unset. This repository's own file sets
 `third_party/superscalar/bindings/typescript`.
 
-Directory of the scalar library's npm package (`package.json`).
+Directory of the scalar library's npm package (`package.json`). Unset, a
+generated TypeScript types package depends on `superscalar` with `*`,
+which fails `bun install` with a 404 until superscalar publishes the
+package.
 
 ### `paths.scalar_rust`
 
@@ -377,7 +381,11 @@ Default: unset. This repository's own file sets
 
 Directory of the TypeScript version-graph runtime's npm package
 (`package.json`). A generated TypeScript types package whose schema
-declares a version graph depends on it with a `file:` spec.
+declares a version graph depends on it with a `file:` spec. Unset, the
+dependency is `*`, and `@superschematic/versiongraph` is unpublished until
+the first tag, so until then set this key whenever a schema declares a
+graph. Without it `bun install` fails with a 404, and since the generated
+types packages form one Bun workspace, it fails for every package in it.
 
 ### `paths.versiongraph_rust`
 
