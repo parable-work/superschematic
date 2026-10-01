@@ -64,6 +64,7 @@ export type {
   Instances,
   OperationContext,
   OperationHandler,
+  PublishContext,
   ReadOptions,
   Reference,
   ReferenceContext,
@@ -74,6 +75,7 @@ export type {
   Schemas,
   SqlReader,
   SqlWriter,
+  StoredInstance,
   WritableColumns,
 } from './behaviors/behavior.js';
 export { BEHAVIOR_NAME, BUILTIN_OPERATIONS, OPERATION_SCOPES } from './behaviors/declaration.js';

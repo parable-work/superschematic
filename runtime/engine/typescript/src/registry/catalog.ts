@@ -21,7 +21,9 @@ namespace's other schemas in reach of their configs as the caller may
 read them (ConfigTarget.schemas), and the compatibility rule against
 each behavior's rule for its config. publish creates the storage of
 every behavior the new version composes, in its own transaction, so a
-publish that fails leaves none behind.
+publish that fails leaves none behind, then runs the afterConfigChange
+of each behavior whose config the version adds, removes or changes
+(behaviors/publish.ts).
 
 The runtime of a version, its validator and its behaviors bound to their
 configs and storage, is built once and cached per namespace, name and
@@ -36,8 +38,9 @@ import type { SchemaFileLoader } from '@superschematic/schema-runtime';
 import type { Document } from '@superschematic/schema-ir/schema-file';
 
 import type { ConfigSchema, ConfigSchemas } from '../behaviors/behavior.js';
-import { compose, configChanges, configSchemaOf, type Composition } from '../behaviors/composition.js';
+import { compose, configChanges, configSchemaOf, configTransitions, type Composition } from '../behaviors/composition.js';
 import type { Prefixes } from '../behaviors/execution.js';
+import { afterConfigChanges } from '../behaviors/publish.js';
 import type { BehaviorRegistry } from '../behaviors/registry.js';
 import { prefixOf, storedKey } from '../behaviors/storage.js';
 import { EngineError, IncompatibleChangeError, SchemaDocumentError } from '../errors.js';
@@ -184,6 +187,13 @@ export class SchemaCatalog {
          WHERE namespace = ? AND name = ? AND version = ?`,
         [version, model.canonical, hash, now, actor, namespace, name, DRAFT]
       );
+      afterConfigChanges(this.storage, configTransitions(live ? modelOf(String(live.document)) : undefined, model, this.behaviors), {
+        holder: namespace,
+        schema: name,
+        version,
+        now,
+        namespaces: namespace === this.namespaces.shared ? this.namespaces.names : [namespace],
+      });
       appendEvent(this.storage, {
         kind: 'publish',
         namespace,
