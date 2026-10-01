@@ -2248,172 +2248,115 @@ func (r *RecipeRefRepository) CreateMany(ctx context.Context, inputs []*types.Re
 		input.UpdatedBy = GetUserID(ctx)
 	}
 
-	// Build batch INSERT query - collect field names from first input
-	var fieldNames []string
-	// Schema-owned identities may supply stable UUIDs, matching CreateOne. One
-	// INSERT has one column set, so a batch must supply ids for every row or
-	// none; mixing is refused rather than silently dropping the supplied ids.
-	explicitPrimaryKey := false
-	{
-		var zeroPrimaryKey types.IdentityUUID
-		if primaryKey, ok := recipeRefUUIDValue(inputs[0].Id); ok && primaryKey != zeroPrimaryKey {
-			explicitPrimaryKey = true
-		}
-		for _, input := range inputs {
-			primaryKey, ok := recipeRefUUIDValue(input.Id)
-			if (ok && primaryKey != zeroPrimaryKey) != explicitPrimaryKey {
-				return nil, fmt.Errorf("inputs mix explicit and default primary keys; a batch must supply ids for every row or none")
-			}
-		}
-	}
-	if explicitPrimaryKey {
-		fieldNames = append(fieldNames, `id`)
-	}
-	fieldNames = append(fieldNames, `"name"`)
-	fieldNames = append(fieldNames, `created_by`)
-	fieldNames = append(fieldNames, `updated_by`)
-
-	// Add optional/auto-generated fields that are set in first input
-	{
-		if inputs[0].SealedAt != nil {
-			fieldNames = append(fieldNames, `sealed_at`)
-		}
-	}
-	{
-		if inputs[0].DeletedAt != nil {
-			fieldNames = append(fieldNames, `deleted_at`)
-		}
-	}
-	{
-		if inputs[0].DeletedBy != nil {
-			fieldNames = append(fieldNames, `deleted_by`)
-		}
-	}
-
-	// Add relationship foreign key columns present in first input (matches CreateOne's column set)
-	// Relationship: root (FK: root_id)
-	{
-		var zeroId types.IdentityUUID
-		if relID, ok := recipeRefUUIDValue(inputs[0].Root.Id); ok && relID != zeroId {
-			fieldNames = append(fieldNames, "root_id")
-		}
-	}
-	// Relationship: parentRef (FK: parent_ref_id)
-	{
-		var zeroId types.IdentityUUID
-		if inputs[0].ParentRef != nil {
-			if relID, ok := recipeRefUUIDValue(inputs[0].ParentRef.Id); ok && relID != zeroId {
-				fieldNames = append(fieldNames, "parent_ref_id")
-			}
-		}
-	}
-	// Relationship: baseCommit (FK: base_commit_id)
-	{
-		var zeroId types.IdentityUUID
-		if inputs[0].BaseCommit != nil {
-			if relID, ok := recipeRefUUIDValue(inputs[0].BaseCommit.Id); ok && relID != zeroId {
-				fieldNames = append(fieldNames, "base_commit_id")
-			}
-		}
-	}
-	// Relationship: headCommit (FK: head_commit_id)
-	{
-		var zeroId types.IdentityUUID
-		if inputs[0].HeadCommit != nil {
-			if relID, ok := recipeRefUUIDValue(inputs[0].HeadCommit.Id); ok && relID != zeroId {
-				fieldNames = append(fieldNames, "head_commit_id")
-			}
-		}
-	}
-
-	var valuePlaceholders []string
-	var values []interface{}
-	paramNum := 0
-
+	// Build the batch INSERT in one pass over the fields. Each row records every
+	// candidate column in the same order, with the value it binds or no value
+	// when it leaves an optional column unset; buildBatchInsert inserts the
+	// columns any row sets and writes DEFAULT for a row that leaves one unset.
+	batch := make([][]batchInsertCell, 0, len(inputs))
 	for _, input := range inputs {
-		var placeholders []string
-		if explicitPrimaryKey {
-			paramNum++
-			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-			primaryKey, _ := recipeRefUUIDValue(input.Id)
-			values = append(values, primaryKey.ToUUID())
-		}
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Name)
+		var row []batchInsertCell
+		// Primary key: id. Schema-owned identities may supply a stable
+		// UUID, matching CreateOne; a row without one takes the generated default.
 		{
+			cell := batchInsertCell{column: `id`}
+			var zeroPrimaryKey types.IdentityUUID
+			if primaryKey, ok := recipeRefUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+				cell.value, cell.set = primaryKey.ToUUID(), true
+			}
+			row = append(row, cell)
+		}
+		// Required field: name
+		{
+			cell := batchInsertCell{column: `"name"`, set: true}
+			cell.value = input.Name
+			row = append(row, cell)
+		}
+		// Optional field: sealedAt
+		{
+			cell := batchInsertCell{column: `sealed_at`}
 			if input.SealedAt != nil {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, time.Time(*input.SealedAt))
+				cell.value = time.Time(*input.SealedAt)
+				cell.set = true
 			}
+			row = append(row, cell)
 		}
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.CreatedBy.ToUUID())
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.UpdatedBy.ToUUID())
+		// Required field: createdBy
 		{
+			cell := batchInsertCell{column: `created_by`, set: true}
+			cell.value = input.CreatedBy.ToUUID()
+			row = append(row, cell)
+		}
+		// Required field: updatedBy
+		{
+			cell := batchInsertCell{column: `updated_by`, set: true}
+			cell.value = input.UpdatedBy.ToUUID()
+			row = append(row, cell)
+		}
+		// Optional field: deletedAt
+		{
+			cell := batchInsertCell{column: `deleted_at`}
 			if input.DeletedAt != nil {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, time.Time(*input.DeletedAt))
+				cell.value = time.Time(*input.DeletedAt)
+				cell.set = true
 			}
+			row = append(row, cell)
 		}
+		// Optional field: deletedBy
 		{
+			cell := batchInsertCell{column: `deleted_by`}
 			if input.DeletedBy != nil {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, input.DeletedBy.ToUUID())
+				cell.value = input.DeletedBy.ToUUID()
+				cell.set = true
 			}
+			row = append(row, cell)
 		}
 
-		// Handle relationship foreign key columns (per-row, matches CreateOne)
+		// Relationship foreign key columns, matching CreateOne
 		// Relationship: root (FK: root_id)
 		{
+			cell := batchInsertCell{column: "root_id"}
 			var zeroId types.IdentityUUID
 			if relID, ok := recipeRefUUIDValue(input.Root.Id); ok && relID != zeroId {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, relID.ToUUID())
+				cell.value, cell.set = relID.ToUUID(), true
 			}
+			row = append(row, cell)
 		}
 		// Relationship: parentRef (FK: parent_ref_id)
 		{
+			cell := batchInsertCell{column: "parent_ref_id"}
 			var zeroId types.IdentityUUID
 			if input.ParentRef != nil {
 				if relID, ok := recipeRefUUIDValue(input.ParentRef.Id); ok && relID != zeroId {
-					paramNum++
-					placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-					values = append(values, relID.ToUUID())
+					cell.value, cell.set = relID.ToUUID(), true
 				}
 			}
+			row = append(row, cell)
 		}
 		// Relationship: baseCommit (FK: base_commit_id)
 		{
+			cell := batchInsertCell{column: "base_commit_id"}
 			var zeroId types.IdentityUUID
 			if input.BaseCommit != nil {
 				if relID, ok := recipeRefUUIDValue(input.BaseCommit.Id); ok && relID != zeroId {
-					paramNum++
-					placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-					values = append(values, relID.ToUUID())
+					cell.value, cell.set = relID.ToUUID(), true
 				}
 			}
+			row = append(row, cell)
 		}
 		// Relationship: headCommit (FK: head_commit_id)
 		{
+			cell := batchInsertCell{column: "head_commit_id"}
 			var zeroId types.IdentityUUID
 			if input.HeadCommit != nil {
 				if relID, ok := recipeRefUUIDValue(input.HeadCommit.Id); ok && relID != zeroId {
-					paramNum++
-					placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-					values = append(values, relID.ToUUID())
+					cell.value, cell.set = relID.ToUUID(), true
 				}
 			}
+			row = append(row, cell)
 		}
-		valuePlaceholders = append(valuePlaceholders, "("+strings.Join(placeholders, ", ")+")")
+		batch = append(batch, row)
 	}
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
 	returningClauseMany := `"id", "root_id", "parent_ref_id", "base_commit_id", "head_commit_id", "name", "sealed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version"`

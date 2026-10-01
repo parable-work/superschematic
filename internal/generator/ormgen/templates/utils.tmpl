@@ -233,6 +233,54 @@ func enterRelationHydration(
 	return context.WithValue(ctx, relationHydrationPathKey{}, next), true
 }
 
+// batchInsertCell is one column of one row in a CreateMany INSERT. A cell that
+// is not set leaves its column to the database default.
+type batchInsertCell struct {
+	column string
+	value  any
+	set    bool
+}
+
+// buildBatchInsert turns CreateMany rows into the column list, one VALUES tuple
+// per row, and the bound values. Every row holds the same columns in the same
+// order. A column is inserted when any row sets it, and a row that leaves it
+// unset writes DEFAULT, so that row gets the database default CreateOne's
+// omitted column gets; a bound NULL would not. Each placeholder is numbered as
+// its value is bound, so a value cannot land in another column.
+func buildBatchInsert(rows [][]batchInsertCell) (columns []string, tuples []string, values []any) {
+	if len(rows) == 0 {
+		return nil, nil, nil
+	}
+	inserted := make([]bool, len(rows[0]))
+	for _, row := range rows {
+		for i, cell := range row {
+			if cell.set {
+				inserted[i] = true
+			}
+		}
+	}
+	for i, cell := range rows[0] {
+		if inserted[i] {
+			columns = append(columns, cell.column)
+		}
+	}
+	for _, row := range rows {
+		placeholders := make([]string, 0, len(columns))
+		for i, cell := range row {
+			switch {
+			case !inserted[i]:
+			case cell.set:
+				values = append(values, cell.value)
+				placeholders = append(placeholders, fmt.Sprintf("$%d", len(values)))
+			default:
+				placeholders = append(placeholders, "DEFAULT")
+			}
+		}
+		tuples = append(tuples, "("+strings.Join(placeholders, ", ")+")")
+	}
+	return columns, tuples, values
+}
+
 // marshalJSONFieldValue converts a JSON-backed field value into the form pgx
 // sends to a JSONB column.
 func marshalJSONFieldValue(value any) (any, error) {

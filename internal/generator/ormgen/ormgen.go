@@ -1242,8 +1242,8 @@ func computeImportNeeds(repo *Repository) {
 
 		// The optional/auto-generated insert path falls back to
 		// reflect.ValueOf(...).IsZero() when no nil check applies. This must match
-		// the template's reflect-emission guard exactly (CreateOne / CreateMany
-		// field-names / CreateMany values in repository.tmpl), which also excludes
+		// the template's reflect-emission guard exactly (CreateOne and CreateMany
+		// in repository.tmpl), which also excludes
 		// IsInternalMetadata columns (e.g. `_version`) -- otherwise an entity whose
 		// only optional insert field is internal metadata sets NeedsReflect=true
 		// while the template emits no reflect.* call, yielding an unused import
