@@ -120,6 +120,12 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/documents",
 			Handler: createTagStoreDocumentHandler(cfg.Implementations.Tag),
 		},
+		// Revise a stored document; returns the document.
+		{
+			Method:  "PUT",
+			Path:    "/documents",
+			Handler: createTagReviseDocumentHandler(cfg.Implementations.Tag),
+		},
 		// Search posts by score, rank, flag, related post, date and code.
 		{
 			Method:  "GET",
@@ -177,7 +183,7 @@ func createTagStoreDocumentHandler(impl TagImplementation) gohttp.HandlerFunc {
 	// Body arguments: the JSON type of each value, then its rules in the
 	// order they are checked (the scalar type's own, then the argument's).
 	bodyDocumentArg := bodyargs.NewArg("document", bodyargs.Any, bodyargs.Required())
-	bodyNoteArg := bodyargs.NewArg("note", bodyargs.Any)
+	bodyNoteArg := bodyargs.NewArg("note", bodyargs.Any, bodyargs.KeepNull())
 	bodyExtrasArg := bodyargs.NewArg("extras", bodyargs.Any)
 	bodyGridArg := bodyargs.NewArg("grid", bodyargs.Any)
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
@@ -215,6 +221,54 @@ func createTagStoreDocumentHandler(impl TagImplementation) gohttp.HandlerFunc {
 
 		// Call implementation
 		result, err := impl.StoreDocument(r.Context(), requestBody.Document, requestBody.Note, requestBody.Extras, requestBody.Grid)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createTagReviseDocumentHandler creates a handler for PUT /api/documents
+//
+// Revise a stored document; returns the document.
+func createTagReviseDocumentHandler(impl TagImplementation) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Parse and validate input
+		var input types.DocumentRevision
+		var rawInput json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&rawInput); err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+			return
+		}
+		if string(rawInput) == "null" {
+			RespondError(w, r, gohttp.StatusBadRequest, "input is required")
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.ReviseDocument(r.Context(), &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

@@ -108,7 +108,8 @@ func TestGenerateScalarListsShape(t *testing.T) {
 // name[i] as required and a wrong-type one as type, "5" is not a number,
 // [] satisfies a required list, list bounds and the scalar's own pattern,
 // lengths and range apply, and a Generic.JSON argument is any JSON value
-// but null. A GET list still reads comma-separated query values, and each
+// but null, except that an optional one takes null as a value, apart from
+// absent. A GET list still reads comma-separated query values, and each
 // item is checked at name[i], a GET argument and a query parameter alike.
 func TestGeneratedScalarListsRouter(t *testing.T) {
 	tree := materializeAPI(t, scalarListsFixture(t))

@@ -49,8 +49,10 @@ A method's arguments say where each value comes from:
 - **Body, as fields**: on a method without an input type, the other
   arguments are the fields of a JSON body object. `cancelOrder`'s `reason`
   is one: `POST /api/orders/{id}/cancel` with `{"reason": "..."}`. An
-  optional one reaches Go as its zero value, here `""`. On `GET`, such
-  arguments come from the query string instead.
+  optional one reaches Go as its zero value, here `""`, but an optional
+  `Generic.JSON` keeps a null apart from an absent key
+  ([null in an optional Generic.JSON](/superschematic/reference/json-scalars/#null-in-an-optional-genericjson)).
+  On `GET`, such arguments come from the query string instead.
 
 <Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol={['PlaceOrderLine', 'PlaceOrderInput']} />
 

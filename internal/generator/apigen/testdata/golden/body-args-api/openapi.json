@@ -1,6 +1,22 @@
 {
   "components": {
     "schemas": {
+      "DocumentRevision": {
+        "description": "A revision of a stored document.",
+        "properties": {
+          "document": {
+            "description": "Any valid JSON value: object, array, primitive, or null"
+          },
+          "note": {
+            "description": "Null clears the note; left out, the note is kept.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "document"
+        ],
+        "type": "object"
+      },
       "Error": {
         "properties": {
           "error": {
@@ -181,6 +197,71 @@
           }
         },
         "summary": "storeDocument",
+        "tags": [
+          "tag"
+        ]
+      },
+      "put": {
+        "description": "Revise a stored document; returns the document.",
+        "operationId": "TagReviseDocumentHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentRevision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "description": "Any valid JSON value: object, array, primitive, or null"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "reviseDocument",
         "tags": [
           "tag"
         ]

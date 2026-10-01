@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/profile"
@@ -83,6 +84,41 @@ func (t TypeInfo) ListFields() []FieldInfo {
 		}
 	}
 	return fields
+}
+
+// KeptNullJSONFields returns the optional single Generic.JSON fields of t
+// that are pointers (*GenericJSON), in field order. JSON null is a value
+// there, apart from absent, but encoding/json leaves the pointer nil for
+// null as for an absent key, so UnmarshalJSON sets it to the JSON null
+// token. An input type's own field is an InputField, which keeps null
+// itself.
+func (t TypeInfo) KeptNullJSONFields() []FieldInfo {
+	var fields []FieldInfo
+	for _, field := range t.Fields {
+		if keepsJSONNull(field) {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
+// keepsJSONNull reports whether field is an optional single value of a
+// scalar that holds any JSON value (Generic.JSON) and a pointer to it.
+func keepsJSONNull(field FieldInfo) bool {
+	return !field.Required && !field.UsesWrapper && !field.IsArray && !field.IsMap &&
+		field.IsScalar && field.ScalarInfo != nil && field.ScalarInfo.Traits.IsAnyJSON &&
+		strings.HasPrefix(field.GoType, "*")
+}
+
+// HasKeptNullJSONFields reports whether any type in types.go has a field
+// KeptNullJSONFields returns, so the file carries nullJSONMembers.
+func (o *ModuleOutput) HasKeptNullJSONFields() bool {
+	for _, typeInfo := range o.Types {
+		if len(typeInfo.KeptNullJSONFields()) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // HasListFields reports whether any type in types.go has a list field, so

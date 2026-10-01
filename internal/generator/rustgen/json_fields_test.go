@@ -56,7 +56,8 @@ func jsonFieldsSchema() *ir.Schema {
 
 // TestGenericJSONFieldAdapters pins which fields decode through the lossless
 // adapter: every Generic.JSON field and nothing else, with the adapter path
-// taken from the naming file's scalar crate.
+// taken from the naming file's scalar crate. An optional single value reads
+// through it by way of an adapter that keeps a present null.
 func TestGenericJSONFieldAdapters(t *testing.T) {
 	output, err := Generate(jsonFieldsSchema(), Options{SchemaName: "json-fields"})
 	if err != nil {
@@ -83,8 +84,24 @@ func TestGenericJSONFieldAdapters(t *testing.T) {
 	if output.JSONFieldAdapter() != "superscalar::scalars::json_scalar::serde::deserialize" {
 		t.Fatalf("adapter path = %q", output.JSONFieldAdapter())
 	}
-	if got := strings.Count(string(data), `#[serde(deserialize_with = "superscalar::scalars::json_scalar::serde::deserialize")]`); got != 8 {
-		t.Fatalf("got %d JSON adapter attributes, want 8", got)
+	if got := strings.Count(string(data), `#[serde(deserialize_with = "superscalar::scalars::json_scalar::serde::deserialize")]`); got != 7 {
+		t.Fatalf("got %d JSON adapter attributes, want 7", got)
+	}
+	// The optional single value keeps null apart from absent through its own
+	// adapter, defined once, over the lossless one.
+	if got := strings.Count(string(data), `#[serde(deserialize_with = "deserialize_optional_generic_json")]`); got != 1 {
+		t.Fatalf("got %d optional JSON adapter attributes, want 1", got)
+	}
+	if !strings.Contains(string(data), "fn deserialize_optional_generic_json<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>") ||
+		!strings.Contains(string(data), "superscalar::scalars::json_scalar::serde::deserialize(deserializer).map(Some)") {
+		t.Fatalf("types.rs does not define the optional JSON adapter:\n%s", data)
+	}
+	for _, typ := range output.Types {
+		for _, field := range typ.Fields {
+			if got, want := field.KeepsJSONNull, typ.Name == "JsonFields" && field.Name == "optionalValue"; got != want {
+				t.Errorf("%s.%s keeps JSON null = %v, want %v", typ.Name, field.Name, got, want)
+			}
+		}
 	}
 }
 
@@ -118,7 +135,8 @@ func TestGenericJSONUnionImportsAndRecursion(t *testing.T) {
 // crate and runs Rust tests: Generic.JSON keeps exact number digits and
 // objects whose keys look like serde_json's private markers, in every field
 // shape and through both union forms, from text and from a Value; the other
-// fields and the missing, null and empty cases behave as before.
+// fields and the missing, null and empty cases behave as before, but for an
+// optional Generic.JSON value, whose null is a value apart from absent.
 func TestGeneratedGenericJSONFields(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compiled generated JSON field contract in -short mode")
@@ -199,10 +217,19 @@ fn generated_missing_null_empty_and_non_json_semantics() {
     assert!(value.value.is_null());
     assert!(value.optional_value.is_none() && value.optional_values.is_none() && value.optional_mapping.is_none());
     assert!(value.values.is_empty() && value.mapping.is_empty() && value.map_of_arrays.is_empty());
-    for optional in ["optionalValue","optionalValues","optionalMapping"] {
+    // An optional list or map that is null is absent.
+    for optional in ["optionalValues","optionalMapping"] {
         let mut changed = input.clone(); changed[optional] = Value::Null;
         assert_eq!(serde_json::from_value::<JsonFields>(changed).unwrap(), value);
     }
+    // An optional Generic.JSON value takes null as a value, apart from
+    // absent: it decodes to Some(Value::Null) and is written back as null.
+    let mut nulled = input.clone(); nulled["optionalValue"] = Value::Null;
+    for decoded in [serde_json::from_value::<JsonFields>(nulled.clone()).unwrap(), serde_json::from_str::<JsonFields>(&nulled.to_string()).unwrap()] {
+        assert_eq!(decoded.optional_value, Some(Value::Null));
+        assert_eq!(serde_json::to_value(&decoded).unwrap().get("optionalValue"), Some(&Value::Null));
+    }
+    assert!(serde_json::to_value(&value).unwrap().get("optionalValue").is_none());
     for (optional, empty) in [("optionalValue",json!({})),("optionalValues",json!([])),("optionalMapping",json!({}))] {
         let mut changed = input.clone(); changed[optional] = empty.clone();
         let decoded: JsonFields = serde_json::from_value(changed).unwrap();

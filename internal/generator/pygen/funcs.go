@@ -32,12 +32,21 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 		},
 		"hasNonRequiredValidations": hasNonRequiredValidations,
 		"isAnyJSONRoot":             isAnyJSONRoot,
-		"isStructuredJSONRoot":      isStructuredJSONRoot,
-		"structuredJSONListValue":   structuredJSONListValue,
-		"isList":                    isList,
-		"nullEntryCheck":            nullEntryCheck,
-		"wireNameRenames":           wireNameRenames,
-		"holdsModels":               holdsModels,
+		"keptNullJSONFields":        keptNullJSONFields,
+		"anyKeptNullJSONFields": func(types []codegen.TypeInfo) bool {
+			for _, typeInfo := range types {
+				if len(keptNullJSONFields(typeInfo)) > 0 {
+					return true
+				}
+			}
+			return false
+		},
+		"isStructuredJSONRoot":    isStructuredJSONRoot,
+		"structuredJSONListValue": structuredJSONListValue,
+		"isList":                  isList,
+		"nullEntryCheck":          nullEntryCheck,
+		"wireNameRenames":         wireNameRenames,
+		"holdsModels":             holdsModels,
 		"anyFieldHoldsModels": func(types []codegen.TypeInfo) bool {
 			for _, typeInfo := range types {
 				for _, field := range typeInfo.Fields {
@@ -180,6 +189,21 @@ const genericJSONScalar = "Generic.JSON"
 func isAnyJSONRoot(field codegen.FieldInfo) bool {
 	return field.IsScalar && field.ScalarInfo != nil && field.ScalarInfo.Traits.IsAnyJSON &&
 		!field.IsArray && !field.IsMap
+}
+
+// keptNullJSONFields returns the optional direct Generic.JSON fields of a
+// type, in field order. Null is a value there, apart from absent: the model
+// records a field set to None in model_fields_set, and its serializer
+// writes it as JSON null even in a dump that leaves out None (the SDK's
+// exclude_none), while an unset one stays out.
+func keptNullJSONFields(typeInfo codegen.TypeInfo) []codegen.FieldInfo {
+	var fields []codegen.FieldInfo
+	for _, field := range typeInfo.Fields {
+		if !field.Required && !field.IsRelation && isAnyJSONRoot(field) {
+			fields = append(fields, field)
+		}
+	}
+	return fields
 }
 
 // isStructuredJSONRoot reports whether the field is a direct value of a

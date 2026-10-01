@@ -110,9 +110,10 @@ const JSONSchemaAnyType = "any"
 // IsAnyJSON reports whether the scalar's value is any JSON value, which its
 // json_schema type mapping declares as "any". The scalar catalog gives such a
 // scalar the String primitive, but its value is not a string: an object, an
-// array, a string, a number and a boolean are all values, and only JSON null
-// stands for a missing one. Validators key the rule off this mapping, not the
-// scalar's name or primitive.
+// array, a string, a number and a boolean are all values. JSON null is a
+// missing value of a required one and of a list element, and a value of an
+// optional single one, apart from absent. Validators key the rule off this
+// mapping, not the scalar's name or primitive.
 func (s *ScalarDef) IsAnyJSON() bool {
 	return s != nil && s.TypeMappings["json_schema"] == JSONSchemaAnyType
 }

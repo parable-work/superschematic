@@ -15,7 +15,7 @@ from datetime import datetime
 {{- end}}
 import json
 import re
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError as PydanticValidationError{{if .HasVersionedTypes}}, BeforeValidator{{end}}
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError as PydanticValidationError{{if .HasVersionedTypes}}, BeforeValidator{{end}}{{if anyKeptNullJSONFields .Types}}, SerializationInfo, SerializerFunctionWrapHandler, model_serializer{{end}}
 
 {{if gt (len .Scalars) 0 -}}
 from .scalars import (
@@ -300,6 +300,30 @@ class {{.Name}}(BaseModel):
     {{- $default := pythonFieldDefault .}}
     {{.TargetName}}: {{if or (not .Required) .IsRelation}}Optional[{{end}}{{.TargetType}}{{if or (not .Required) .IsRelation}}]{{end}} = Field({{if $default}}default={{$default}}{{else if and .Required (not .IsRelation)}}...{{else}}default=None{{end}}, alias="{{.Name}}", serialization_alias="{{.Name}}")
     {{end}}
+{{- with keptNullJSONFields .}}
+
+    @model_serializer(mode="wrap")
+    def _keep_json_nulls(self, handler: SerializerFunctionWrapHandler, info: SerializationInfo) -> Any:
+        """
+        Write an optional Generic.JSON field set to None as JSON null.
+
+        Null is a value of such a field, apart from absent, so a dump that
+        leaves out None (exclude_none) still writes a field the model was
+        given as None; one it was not given stays out.
+        """
+        data = handler(self)
+        if info.exclude_none and isinstance(data, dict):
+            include, exclude = info.include, info.exclude or ()
+            for name, wire_name in ({{range .}}("{{.TargetName}}", "{{.Name}}"),{{end}}):
+                if (
+                    name in self.model_fields_set
+                    and getattr(self, name) is None
+                    and name not in exclude
+                    and (include is None or name in include)
+                ):
+                    data[wire_name if info.by_alias else name] = None
+        return data
+{{- end}}
 
     def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """

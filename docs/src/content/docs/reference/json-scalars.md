@@ -14,7 +14,7 @@ scalar's name
 
 | Scalar | `json_schema` | Value on the wire |
 |--------|---------------|-------------------|
-| `Generic.JSON` | `any` | Any JSON value but null |
+| `Generic.JSON` | `any` | Any JSON value; null only when optional |
 | `Generic.StringMap` | `object` | A JSON object of string values, such as `{"region": "eu"}` |
 | `Embedding.Vector` | `array` | A JSON array of numbers, such as `[0.12, -0.5]` |
 | `Geo.Location` | `object` | Not settled: see [below](#geolocation) |
@@ -62,7 +62,40 @@ into the value.
 
 `Generic.JSON` takes any JSON value but null: an object, an array, a
 string, a number or a boolean, with no type check. A null or missing
-required one is `required`.
+required one is `required`, and a null list element is `required` at its
+index.
+
+## Null in an optional Generic.JSON
+
+Null is a value of an optional single `Generic.JSON` field or argument. It
+means "set to nothing", and it stays apart from an absent key, which means
+"not present". A service can then clear a stored value through it: the
+client sends `null` to clear it and leaves the key out to keep it
+([D14, amended](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d14-amended-an-optional-genericjson-takes-null-as-a-value)).
+Every validator accepts both, so the difference is in what the decoders
+hand over:
+
+| Target | Absent | Null |
+|--------|--------|------|
+| Go API routes, a body argument | `GenericJSON(nil)` | `GenericJSON("null")` |
+| Go types, an input type's field | `InputField` not set | `IsNull()` |
+| Go types, any other type's field | `nil` | a pointer to `GenericJSON("null")` |
+| TypeScript API server and types | `undefined` | `null` |
+| Python types | not in `model_fields_set` | `None`, in `model_fields_set` |
+| Rust types | `None` | `Some(Value::Null)` |
+
+Each SDK sends the two apart. The Go SDK leaves out a nil
+`*types.GenericJSON` and sends a pointer to `GenericJSON("null")` as null.
+The TypeScript SDK leaves out `undefined` and sends `null`. The Rust SDK
+leaves out `None` and sends `Some(Value::Null)`. The Python SDK leaves out
+an optional `Generic.JSON` argument the caller does not pass (its default
+is `UNSET`) and sends `None` as null; it sends an input type's field as
+null when the model was given `None` for it.
+
+The rule covers a single value. An optional `Generic.JSON[]`, list of
+lists or map that is null is absent, as any other list or map is. A
+`Generic.JSON` in the query string, a `GET` argument or a `@query`
+parameter, has no null to carry.
 
 ## Geo.Location
 

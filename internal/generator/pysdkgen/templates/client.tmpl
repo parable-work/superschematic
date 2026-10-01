@@ -39,6 +39,22 @@ def path_segment(value: Any) -> str:
     """
     return parse.quote(str(value), safe="")
 {{- end}}
+{{- if .HasUnsetArgs}}
+
+
+class Unset:
+    """The type of UNSET, the default of an optional Generic.JSON argument.
+
+    Null is a value of such an argument, apart from absent: left out (UNSET),
+    the argument is not sent, and None sends JSON null.
+    """
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+
+UNSET = Unset()
+{{- end}}
 
 
 @dataclass(slots=True)

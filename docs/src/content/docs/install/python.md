@@ -136,3 +136,10 @@ the schema's rules (`listMin`, `minLength`, `min`, `pattern`, ...) on the
 input and on every object it holds. A failure raises `ValidationError`,
 whose `errors` maps each path (`lines`, `lines[0].quantity`) to its rule
 and message, as the Go and TypeScript SDKs report them.
+
+An optional argument left as `None` is not sent, but for an optional
+`Generic.JSON`, whose null is a value: its default is the SDK's `UNSET`,
+so leaving it out sends nothing and passing `None` sends `null`. An input
+type's optional `Generic.JSON` field is sent as `null` when the model was
+given `None` for it, and left out when it was not
+([null in an optional Generic.JSON](/superschematic/reference/json-scalars/#null-in-an-optional-genericjson)).

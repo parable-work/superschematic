@@ -124,7 +124,9 @@ Every object type gets `parse<Type>Json`, `parse<Type>JsonNonStrict`,
 `validate<Type>`, which rejects a field value of the wrong JSON type, such
 as `"5"` in a `number` field, with `type` at the field's path. A
 `Generic.JSON` field takes any JSON value but null: a null or missing
-required one is `required`. A `Generic.StringMap` field takes a JSON
+required one is `required`. An optional one also takes null, and the
+parsers keep it apart from an absent one, as `null` and `undefined`
+([null in an optional Generic.JSON](/superschematic/reference/json-scalars/#null-in-an-optional-genericjson)). A `Generic.StringMap` field takes a JSON
 object and an `Embedding.Vector` field a JSON array, or the value's JSON
 text; any other JSON type is `type`
 ([JSON-valued scalars](/superschematic/reference/json-scalars/)). Type-only imports (no runtime) come from
@@ -216,7 +218,9 @@ JSON value it holds, alone, as a list (`T[]`) or as a list of lists
   boolean. Any other JSON type answers 400 with `type`: `"5"` is not a
   number, and `5` is not a string.
 - A `Generic.JSON` argument takes any JSON value but null, and the
-  implementation receives that value.
+  implementation receives that value. An optional one also takes null:
+  the implementation receives `null`, apart from an absent one, which is
+  `undefined`.
 - A `Generic.StringMap` argument takes a JSON object and an
   `Embedding.Vector` argument a JSON array, as the generated types send
   them; any other JSON type, the value's JSON text included, answers 400

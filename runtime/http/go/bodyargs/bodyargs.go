@@ -7,8 +7,10 @@
 // errors:
 //
 //   - A required argument is present: absent or null is "required" at its
-//     name. An optional one that is absent or null is its zero value.
-//     [] satisfies a required list.
+//     name. An optional one that is absent or null is its zero value, but
+//     for an optional JSON value built with KeepNull (Generic.JSON), whose
+//     null is a value: it decodes to the JSON null token, apart from an
+//     absent one. [] satisfies a required list.
 //   - A value must have its kind's JSON type ("type": "expected a string",
 //     "expected a number", ...). A string is not a number, a number is not a
 //     string, and "true" is not a boolean.
@@ -89,8 +91,9 @@ func ReadObject(r io.Reader) (Body, error) {
 type Kind uint8
 
 const (
-	// Any is any JSON value but null (Generic.JSON). The Go type's decoder
-	// decides the rest.
+	// Any is any JSON value (Generic.JSON). Null is a value only of an
+	// optional single argument built with KeepNull; otherwise it is
+	// "required" or the zero value. The Go type's decoder decides the rest.
 	Any Kind = iota
 	// String is a JSON string: a string, enum, UUID, timestamp or other
 	// string scalar.
@@ -177,6 +180,7 @@ type Arg struct {
 	name     string
 	kind     Kind
 	required bool
+	keepNull bool
 	listMin  int
 	listMax  int
 	rules    []rule
@@ -200,6 +204,14 @@ func NewArg(name string, kind Kind, options ...Option) *Arg {
 
 // Required makes the argument required: absent or null is "required".
 func Required() Option { return func(a *Arg) { a.required = true } }
+
+// KeepNull makes a present null a value of an optional single argument
+// whose Go type holds JSON null, as Generic.JSON's does: Value decodes it
+// into T (the JSON null token), so the implementation tells it from an
+// absent argument, which stays T's zero value (nil). A required argument's
+// null is still "required". List and map decoders ignore it: an element is
+// never null, and an absent or null list or map is nil.
+func KeepNull() Option { return func(a *Arg) { a.keepNull = true } }
 
 // ListMin is the least number of elements of a list argument ("listMin").
 func ListMin(n int) Option { return func(a *Arg) { a.listMin = n } }
@@ -240,13 +252,18 @@ func Max(v float64) Option {
 }
 
 // Value decodes a single-valued argument. An absent or null value is the
-// zero T, and "required" when the argument is required.
+// zero T, and "required" when the argument is required. With KeepNull, a
+// null value of an optional argument is T decoded from null.
 func Value[T any](errs validate.ValidationErrors, body Body, arg *Arg) T {
 	var value T
 	raw := present(body, arg.name)
 	if raw == nil {
 		if arg.required {
 			errs.AddFieldError(arg.name, "required", "required field")
+		} else if _, ok := body[arg.name]; ok && arg.keepNull {
+			if err := json.Unmarshal([]byte("null"), &value); err != nil {
+				errs.AddFieldError(arg.name, "type", "does not match the declared type")
+			}
 		}
 		return value
 	}

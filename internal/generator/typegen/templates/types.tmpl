@@ -407,6 +407,78 @@ func findJSONNullElement(data []byte, i, depth int) (end int, at [2]int, found b
 		}
 	}
 }
+{{- end}}
+{{- if .HasKeptNullJSONFields}}
+{{- if not .HasListFields}}
+
+// jsonNull is the JSON null token.
+var jsonNull = []byte("null")
+{{- end}}
+
+// nullJSONMembers reports, for each of names, whether data, an object
+// json.Unmarshal has already decoded, holds that key as null. It reads the
+// members of the object itself, not of the values in it. A key names a
+// field as encoding/json matches it, exactly or else without regard to
+// case, and a repeated key counts at every occurrence: encoding/json leaves
+// the field nil only when the last one is null.
+func nullJSONMembers(data []byte, names ...string) []bool {
+	nulls := make([]bool, len(names))
+	i := skipJSONSpace(data, 0)
+	if i >= len(data) || data[i] != '{' {
+		return nulls
+	}
+	i++
+	for {
+		i = skipJSONSpace(data, i)
+		if i >= len(data) || data[i] != '"' {
+			return nulls
+		}
+		keyEnd := skipJSONString(data, i)
+		at := matchJSONKey(data[i:keyEnd], names)
+		i = skipJSONSpace(data, keyEnd)
+		if i >= len(data) || data[i] != ':' {
+			return nulls
+		}
+		i = skipJSONSpace(data, i+1)
+		if at >= 0 && i < len(data) && data[i] == 'n' {
+			nulls[at] = true
+		}
+		i = skipJSONSpace(data, skipJSONValue(data, i))
+		if i >= len(data) || data[i] != ',' {
+			return nulls
+		}
+		i++
+	}
+}
+
+// matchJSONKey returns the index of the name an object key, quoted as in
+// the payload, matches, or -1.
+func matchJSONKey(quoted []byte, names []string) int {
+	if len(quoted) < 2 {
+		return -1
+	}
+	key := quoted[1 : len(quoted)-1]
+	if bytes.IndexByte(key, '\\') >= 0 {
+		var unquoted string
+		if err := json.Unmarshal(quoted, &unquoted); err != nil {
+			return -1
+		}
+		key = []byte(unquoted)
+	}
+	for at, name := range names {
+		if string(key) == name {
+			return at
+		}
+	}
+	for at, name := range names {
+		if strings.EqualFold(string(key), name) {
+			return at
+		}
+	}
+	return -1
+}
+{{- end}}
+{{- if or .HasListFields .HasKeptNullJSONFields}}
 
 // skipJSONSpace returns the index of the first non-space byte at or after i.
 func skipJSONSpace(data []byte, i int) int {
@@ -1359,6 +1431,7 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 		return err
 	}
 {{- end}}
+{{- template "keepJSONNulls" .}}
 
 {{- range .Fields}}
 {{- if .IsUnion}}
@@ -1523,6 +1596,7 @@ func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
 		return err
 	}
 {{- end}}
+{{- template "keepJSONNulls" .}}
 
 	// Preserve nil lists on input: absent/null required arrays must fail Validate.
 	return nil
@@ -1752,6 +1826,9 @@ func (in *{{.InputName}}) To{{.OutputName}}() *{{.OutputName}} {
 {{- end}}
 	}{{if .KeepsZeroValue}} else {
 		out.{{.GoName}} = {{.DefaultLiteral}}
+	}{{else if .KeepsJSONNull}} else if in.{{.GoName}}.IsNull() {
+		null := {{slice .GoType 1}}("null")
+		out.{{.GoName}} = &null
 	}{{end}}
 {{- else if .IsPaired}}
 {{- if .IsArrayOfArrays}}
@@ -1818,6 +1895,23 @@ func {{.AccessorName}}() {{.Type}} {
   into converted[key]: a map whose output values are pointers keeps a null
   entry null, since To<Type> returns nil for it. The nestedList blocks
   render a list-of-lists (T[][]) field from its nestedList view. */ -}}
+
+{{- /* keepJSONNulls ends UnmarshalJSON's decode of a type: each optional
+  Generic.JSON pointer field the payload holds as null, which encoding/json
+  left nil as for an absent key, becomes the JSON null token. */ -}}
+{{- define "keepJSONNulls"}}
+{{- with .KeptNullJSONFields}}
+	if bytes.Contains(data, jsonNull) {
+		nulls := nullJSONMembers(data{{range .}}, "{{.Name}}"{{end}})
+{{- range $at, $field := .}}
+		if nulls[{{$at}}] && t.{{$field.GoName}} == nil {
+			null := {{slice $field.GoType 1}}("null")
+			t.{{$field.GoName}} = &null
+		}
+{{- end}}
+	}
+{{- end}}
+{{- end}}
 
 {{- define "pairedMapEntry"}}
 {{- if hasPrefix .GoType "map[string]*"}}

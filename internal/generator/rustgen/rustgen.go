@@ -68,6 +68,12 @@ type FieldInfo struct {
 	// every number exactly as written.
 	PreserveJSON bool
 
+	// KeepsJSONNull is true for an optional single Generic.JSON field, whose
+	// null is a value apart from absent: it decodes through
+	// OptionalJSONFieldAdapter, so a present null is Some(Value::Null) and
+	// only an absent key is None.
+	KeepsJSONNull bool
+
 	// IsVersion marks the _version metadata field of a versioned table. It
 	// is always written and reads as 0 when absent, as Go decodes it.
 	IsVersion bool
@@ -198,6 +204,10 @@ type ModuleOutput struct {
 	// UsesScalarLib is true when any generated type references the scalar
 	// runtime crate (Naming.ScalarRustCrate).
 	UsesScalarLib bool
+
+	// HasOptionalJSONFields is true when a field keeps JSON null
+	// (FieldInfo.KeepsJSONNull); types.rs then defines its adapter.
+	HasOptionalJSONFields bool
 
 	// ScalarLibDepPath is the Cargo.toml path entry for the scalar runtime
 	// crate (an extension crate), computed relative to the output
@@ -358,6 +368,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 	output.UsesHashMap = hasMapFields(output.Types)
 	output.UsesUnions = hasUnionFields(output.Types)
+	output.HasOptionalJSONFields = hasOptionalJSONFields(output.Types)
 	output.ExternalCrateDeps = collectExternalCrateDeps(output)
 	output.UsesScalarLib = usesScalarLib(output)
 	output.RuntimeSchemas, err = runtimeSchemas(schema, opts.Dependencies)
@@ -604,6 +615,7 @@ func convertTypes(codegenTypes []codegen.TypeInfo, enums []codegen.EnumInfo, enu
 				PreserveJSON: f.IsScalar && f.Type == "Generic.JSON",
 				IsVersion:    f.Name == "_version" && f.InternalMetadata,
 			}
+			field.KeepsJSONNull = field.PreserveJSON && !required && !f.IsArray && !f.IsMap
 
 			if f.Default != nil {
 				kind := codegen.ClassifyDefault(f, enumLookup)
@@ -937,6 +949,10 @@ func collectExternalCrateDeps(output *ModuleOutput) []ExternalCrateDep {
 	// A version graph's facade reads and writes canonical rows as
 	// serde_json values.
 	if len(output.VersionGraphs) > 0 {
+		crateNames["serde_json"] = struct{}{}
+	}
+	// The optional Generic.JSON adapter returns a serde_json::Value.
+	if output.HasOptionalJSONFields {
 		crateNames["serde_json"] = struct{}{}
 	}
 

@@ -442,12 +442,14 @@ each value, and the first rule a value breaks is its one error (D14);
 lengths count code points (D14, amended). A value those rules
 accept then passes its type's own `Validate`: a scalar's core check, an
 enum's membership, an object's fields nested under its path. A
-`Generic.JSON` argument is any JSON value but null, and an optional one
-that is absent or null reaches the implementation empty, as in the
-TypeScript server below. A map argument (`Record<string, T>`) is a JSON
-object whose values follow the element rules at `name[key]`, and a map of
-lists (`Record<string, T[]>`) has its elements at `name[key][i]`; list
-bounds do not bound a map, as in the generated types. The Go SDK types
+`Generic.JSON` argument is any JSON value but null. An optional one also
+takes null as a value: an absent one reaches the implementation empty and
+a null one as the JSON null token, as in the TypeScript server below (D14,
+amended below: an optional `Generic.JSON` takes null as a value). A map
+argument (`Record<string, T>`) is a JSON object whose values follow the
+element rules at `name[key]`, and a map of lists (`Record<string, T[]>`)
+has its elements at `name[key][i]`; list bounds do not bound a map, as in
+the generated types. The Go SDK types
 a map argument as the route takes it, `map[string]T` or
 `map[string][]T`, and checks each value at `name[key]` before it sends
 the request; it typed one as its value type.
@@ -503,9 +505,11 @@ type.
 
 For `Generic.JSON` the server follows the rule every validator follows
 (D14, amended): a null value of a required field is `required`, a null
-optional one is absent, and a null element of `Generic.JSON[]` (or an
-innermost one of `Generic.JSON[][]`) is `required` at its index. Any other
-JSON value is accepted and reaches the implementation as it is. The Go
+optional one reaches the implementation as `null`, apart from an absent
+one (`undefined`; D14, amended below), and a null element of
+`Generic.JSON[]` (or an innermost one of `Generic.JSON[][]`) is `required`
+at its index. Any other JSON value is accepted and reaches the
+implementation as it is. The Go
 decoder refuses a null element of `Generic.JSON[]`, as it does any null
 list element (above).
 
@@ -748,7 +752,7 @@ TypeScript API server refused, and the Go one accepted a missing one.
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | A `Generic.JSON` value is any JSON value but null. A present value of any JSON type passes, with no `type`, length or pattern check, and a string need not be JSON text. A null inside an object or an array is part of the value. | Checking it as the `String` primitive says |
-| Null is a missing value, as for every other field. A null or missing required `Generic.JSON` is `required`, a null optional one is absent, and a null element of `Generic.JSON[]`, or a null innermost element of `Generic.JSON[][]`, is `required` at its index (D12, amended). | JSON null as a present value of a required field, which the generated validators took it for |
+| Null is a missing value, as for every other field. A null or missing required `Generic.JSON` is `required`, a null optional one passes (and is a value apart from absent: amended below), and a null element of `Generic.JSON[]`, or a null innermost element of `Generic.JSON[][]`, is `required` at its index (D12, amended). | JSON null as a present value of a required field, which the generated validators took it for |
 | Every validator keys the rule off the scalar's `json_schema` type mapping, `any`, not its name or primitive: `ir.ScalarDef.IsAnyJSON` in Go (the Go runtime, and the generators through the `IsAnyJSON` scalar trait), `isAnyJSONScalar` in the TypeScript runtime and `ScalarDef.is_any_json` in the Python runtime. The IR, the TypeScript runtime's builtin catalog and the schema JSON document (`x-typeMapping`) all carry the mapping. | Keying off the name; a primitive of its own derived by the catalog generator, which would reach neither the IR the loader emits nor the schema JSON document, and would change the IR `primitive` that sqlgen, rustgen, pygen and envgen read |
 | The runtimes' parse step passes the value through unchanged. Validation refuses only a value no JSON document can carry (NaN, an infinite number, a set, `undefined` inside an object, a cycle) as `type`. | Checking the value in parse too |
 | A map value is outside the rule: every generated validator still accepts a null `Generic.JSON` map value, and the runtimes do not walk maps. | Refusing it in the generated TypeScript validator alone, the one validator that checks map values, which would make the languages disagree |
@@ -943,13 +947,44 @@ that every validator refuses as `required`.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| A `Generic.JSON` argument's type lists every JSON type but null: `["object", "array", "string", "number", "boolean"]`. An optional body argument adds `"null"`, as every optional body argument's type does, and a null there is absent. A required argument, a query argument (never nullable in a tool schema), a list element and a map value take no null. | Every JSON type, null included, for every argument |
+| A `Generic.JSON` argument's type lists every JSON type but null: `["object", "array", "string", "number", "boolean"]`. An optional body argument adds `"null"`, as every optional body argument's type does, and a null there is absent (amended below: it is a value, apart from absent). A required argument, a query argument (never nullable in a tool schema), a list element and a map value take no null. | Every JSON type, null included, for every argument |
 | A map value takes no null, although every generated validator still accepts a null `Generic.JSON` map value (above). The schema states the rule; a caller that follows it sends nothing a validator refuses. | Listing null in a map value's type, to match the validators' gap |
 | `inputSchemaDigest` hashes the type as written, not the internal `any` type of the scalar table, so the digest of every argument schema with a `Generic.JSON` argument changed. | Hashing the internal type, which would keep a required argument's digest while its schema changed |
 
 A tool's `returns` is unchanged and still lists null for a `Generic.JSON`
 result. The scalar's description, which superscalar's catalog supplies,
 still says null is a value.
+
+### D14, amended: an optional `Generic.JSON` takes null as a value
+
+The rule above made null a missing value of every `Generic.JSON` field and
+argument. For a required one and for a list element that stands. For an
+optional one it lost information: a route could not tell an argument the
+client set to null from one it left out, so an implementation could not
+clear a stored value through it. The decoders and SDKs collapsed the two
+in different places. The Go routes (`bodyargs.Value`) and the TypeScript
+server (`decodeJsonParam`) handed a null optional argument over as the
+zero value or `undefined`. `encoding/json` decoded a null into a generated
+Go output type's `*GenericJSON` field as nil. The Rust types' adapter read
+null into `Option<Value>` as `None`. The Python SDK left out an argument
+or an input type's field set to `None`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A null optional single `Generic.JSON` field or argument is a value, "set to nothing", apart from an absent one, "not present", in every decoder and SDK. A null required one is still `required`, and a null list element is still `required` at its index. Validation does not change: an optional one passes null and absent alike, so the parity verdicts stand. | Keeping null as absent; making every optional field and argument three-state, which changes the Go type of each |
+| Only a single value keeps null. An optional `Generic.JSON[]`, list of lists or map that is null is absent, as any other list or map is (D12), and a map value is still outside the rule. A `Generic.JSON` in the query string, a `GET` argument or a `@query` parameter, has no null to carry: the Go route reads its raw text and the TypeScript server a string. | A null list as a value |
+| No generated type changes. Go: a body argument is a `GenericJSON`, nil when absent and the JSON null token (`GenericJSON("null")`) when null, through `bodyargs.KeepNull`, which apigen adds to an optional single `Generic.JSON` argument. An input type's field is an `InputField[GenericJSON]`, which already kept null (`IsNull`). Any other type's field is a `*GenericJSON`: `UnmarshalJSON` points it at the token when `encoding/json` left it nil for a null member, scanning the payload's members only when it holds a `null` token, and `To<Type>` carries an input's null over the same way. The SDK already sent a pointer to the token as null. | `GenericJSON` without the pointer in output types, which changes their Go type and the ORM's; `InputField` on output types, which D21 turned down |
+| TypeScript: the server hands the implementation `null` for a null optional argument and `undefined` for an absent one. The argument's type, `GenericJSON` (`JSONValue`), already includes null, and the input type's parsers and the SDK already kept it. | |
+| Rust: an optional single `Generic.JSON` field decodes through `deserialize_optional_generic_json`, which types.rs defines over the lossless adapter: a present value, null included, is `Some`, and an absent one is `None`. `Some(Value::Null)` is written as null. The SDK already sent it, and the router hands the body over as a `Value`. | `Option<Option<Value>>`, which changes the field's type |
+| Python: an optional single `Generic.JSON` argument of the SDK defaults to `UNSET` (`Unset`, in the SDK's client module); left out it is not sent, and `None` sends null. A model records a field given `None` in `model_fields_set`, and a model with an optional `Generic.JSON` field has a serializer that writes such a field as null in a dump that leaves out `None`, as the SDK sends an input type; a field the model was not given stays out. | A sentinel for every optional argument, or dumping with `exclude_unset`, either of which changes how every optional value is sent |
+
+The tool argument schemas (amended above) already list `"null"` in an
+optional `Generic.JSON` body argument's type; that null is now this value.
+
+Not changed: the Python types' `to_dict` and `to_json` write every field,
+`None` included, so they do not tell an unset optional field from a null
+one; the SDK does not send through them. The engine's `update` tool and
+`PATCH` route (D16) follow JSON merge patch, where null removes a member.
 
 ## D16. An engine takes schemas as data, and behaviors compose on its types
 

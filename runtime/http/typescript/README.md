@@ -27,7 +27,9 @@ Two entry points:
   the schema runtimes' list rules. A value must arrive as its kind's JSON
   type (`type` otherwise); kind `object` goes through the generated parser
   of its type, and kind `json` (`Generic.JSON`) is any JSON value but
-  null. A list is its JSON array: `[]` satisfies a required list, list
+  null. An optional single `json` value takes null as a value: the
+  implementation receives `null`, apart from an absent one (`undefined`).
+  A list is its JSON array: `[]` satisfies a required list, list
   bounds apply to the outer list, and a null element is refused at
   `name[i]` (`required`). A list of lists (`T[][]`) travels only as a body
   parameter; `decodeListOfLists` also refuses a null inner list at

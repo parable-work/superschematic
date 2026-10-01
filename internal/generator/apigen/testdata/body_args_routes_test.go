@@ -53,6 +53,11 @@ func (s *tags) StoreDocument(_ context.Context, document types.GenericJSON, note
 	return &document, nil
 }
 
+func (s *tags) ReviseDocument(_ context.Context, input *types.DocumentRevision) (*types.GenericJSON, error) {
+	s.record(map[string]any{"document": input.Document, "note": input.Note})
+	return &input.Document, nil
+}
+
 func (s *tags) NameShades(_ context.Context, id string, shadeByName map[string]types.Shade, linksByLocale map[string][]types.NetworkUrl) (*bool, error) {
 	s.record(map[string]any{"id": id, "shadeByName": shadeByName, "linksByLocale": linksByLocale})
 	named := true
@@ -456,13 +461,36 @@ func TestAGenericJSONArgumentIsAnyJSONValueButNull(t *testing.T) {
 	for _, body := range []string{`{}`, `{"document": null}`} {
 		refusedWith(t, server, impl, http.MethodPost, storeDocumentPath, body, fieldError{"document", "required", "required field"})
 	}
-	// An optional one may be left out or null; it is then absent.
-	for _, body := range []string{`{"document": 1}`, `{"document": 1, "note": null}`} {
-		accepted(t, server, impl, http.MethodPost, storeDocumentPath, body)
-		if note := impl.last["note"].(types.GenericJSON); len(note) != 0 {
-			t.Errorf("%s: note = %s, want absent", body, note)
-		}
+	// An optional one takes null as a value: left out, it reaches the
+	// implementation as nil; null, as the JSON null token.
+	accepted(t, server, impl, http.MethodPost, storeDocumentPath, `{"document": 1}`)
+	if note := impl.last["note"].(types.GenericJSON); note != nil {
+		t.Errorf("an absent note = %q, want nil", note)
 	}
+	accepted(t, server, impl, http.MethodPost, storeDocumentPath, `{"document": 1, "note": null}`)
+	if note := impl.last["note"].(types.GenericJSON); string(note) != "null" {
+		t.Errorf("a null note = %q, want the JSON null token", note)
+	}
+}
+
+// An optional Generic.JSON field of an input type keeps null apart from
+// absent too: its InputField is unset when the key is left out, and set to
+// null when it is null. A required one is refused when null.
+func TestAnOptionalGenericJSONInputFieldKeepsNullApartFromAbsent(t *testing.T) {
+	server, impl := serve(t)
+	accepted(t, server, impl, http.MethodPut, storeDocumentPath, `{"document": {"a": 1}}`)
+	if note := impl.last["note"].(types.InputField[types.GenericJSON]); note.IsSet() {
+		t.Errorf("an absent note is set: %+v", note)
+	}
+	accepted(t, server, impl, http.MethodPut, storeDocumentPath, `{"document": {"a": 1}, "note": null}`)
+	if note := impl.last["note"].(types.InputField[types.GenericJSON]); !note.IsSet() || !note.IsNull() {
+		t.Errorf("a null note is not set to null: %+v", note)
+	}
+	accepted(t, server, impl, http.MethodPut, storeDocumentPath, `{"document": {"a": 1}, "note": [null]}`)
+	if note := impl.last["note"].(types.InputField[types.GenericJSON]); note.IsNull() || !jsonEqual(t, note.Value, `[null]`) {
+		t.Errorf("a note of [null] = %+v", note)
+	}
+	refusedWith(t, server, impl, http.MethodPut, storeDocumentPath, `{"document": null}`, fieldError{"document", "required", "required field"})
 }
 
 func TestAGenericJSONListTakesAnyElementButNull(t *testing.T) {
