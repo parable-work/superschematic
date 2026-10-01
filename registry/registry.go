@@ -58,6 +58,12 @@ type (
 	// scalars; ScalarUpload is the metadata it declares for one.
 	UploadCatalog = registry.UploadCatalog
 	ScalarUpload  = registry.ScalarUpload
+	// RawBodyCheckCatalog is a ScalarCatalog that declares raw-body checks
+	// for some of its scalars; ScalarRawBodyCheck is the check it declares
+	// for one: the Go function a generated route calls on the raw JSON of
+	// its request body before decoding it.
+	RawBodyCheckCatalog = registry.RawBodyCheckCatalog
+	ScalarRawBodyCheck  = registry.ScalarRawBodyCheck
 	// SchemaCatalogEntry is one discovered service's identity facts, the
 	// value type of LoadContext.Catalog.
 	SchemaCatalogEntry = registry.SchemaCatalogEntry
@@ -210,6 +216,12 @@ func ScalarCatalogOf(rows map[string]*scalars.ScalarMetadata) ScalarCatalog {
 // catalog; see internal/registry.ScalarCatalogWithUploads.
 func ScalarCatalogWithUploads(catalog ScalarCatalog, uploads map[string]ScalarUpload) (UploadCatalog, error) {
 	return registry.ScalarCatalogWithUploads(catalog, uploads)
+}
+
+// ScalarCatalogWithRawBodyChecks declares raw-body checks on scalars of
+// catalog; see internal/registry.ScalarCatalogWithRawBodyChecks.
+func ScalarCatalogWithRawBodyChecks(catalog ScalarCatalog, checks map[string]ScalarRawBodyCheck) (RawBodyCheckCatalog, error) {
+	return registry.ScalarCatalogWithRawBodyChecks(catalog, checks)
 }
 
 // EnvConfigOf resolves schema's @envVars contract under the default naming

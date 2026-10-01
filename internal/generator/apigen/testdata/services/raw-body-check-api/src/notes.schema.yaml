@@ -1,0 +1,70 @@
+# Input types with Generic.JSON fields, the scalar the raw-body check tests
+# register a check for. saveNote's route decodes a JSON body; attachPhoto's
+# decodes a JSON body or a multipart form whose data part holds the JSON.
+# A Generic.JSON list is not a single value, so no check names it. The Go
+# route tests in apigen load it.
+name: raw-body-check-api
+kind: API
+scalars:
+  Generic.JSON:
+    name: Generic.JSON
+    languagePrimitive: object
+  Media.Photo:
+    name: Media.Photo
+    languagePrimitive: object
+    fileUpload:
+      maxSize: 1048576
+      allowedTypes: [image/png]
+      category: image
+types:
+  # A note: its title, body and metadata.
+  SaveNoteInput:
+    name: SaveNoteInput
+    role: APIInput
+    fields:
+      - name: title
+        typeRef: { name: string }
+        required: true
+      - name: body
+        typeRef: { name: Generic.JSON }
+        required: true
+      - name: history
+        typeRef: { name: Generic.JSON, isArray: true }
+      - name: meta
+        typeRef: { name: Generic.JSON }
+  # A photo and its caption.
+  AttachPhotoInput:
+    name: AttachPhotoInput
+    role: APIInput
+    fields:
+      - name: photo
+        typeRef: { name: Media.Photo }
+        required: true
+      - name: caption
+        typeRef: { name: Generic.JSON }
+operationSets:
+  - name: NoteMutations
+    operations:
+      # Save a note; returns its title.
+      - name: saveNote
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: notes
+        arguments:
+          - name: input
+            typeRef: { name: SaveNoteInput }
+            required: true
+      # Attach a photo to a note; returns the note's title.
+      - name: attachPhoto
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: "notes/{id}/photos"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: input
+            typeRef: { name: AttachPhotoInput }
+            required: true

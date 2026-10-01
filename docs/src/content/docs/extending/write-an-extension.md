@@ -272,6 +272,31 @@ return r.RegisterScalars(Name, catalog)
 - The TypeScript brand (`string & { readonly __brand: "Acme.Photo" }`) can
   live in the extension's authoring package, as acme's does.
 
+A scalar whose decode loses something a write must refuse, such as a
+repeated key in a JSON object, can name a raw-body check: a Go function the
+generated Go routes call on the raw JSON body before they decode it.
+
+```go
+catalog, err := registry.ScalarCatalogWithRawBodyChecks(catalog, map[string]registry.ScalarRawBodyCheck{
+    "Generic.JSON": {
+        ImportPath:  "example.com/checks/jsonkeys",
+        PackageName: "jsonkeys",
+        Func:        "DuplicateKeyErrors",
+    },
+})
+```
+
+- The function has the signature
+  `func(body []byte, fields ...string) ValidationErrors` and reports each
+  error at its path under the field it names.
+- A route whose input type has single-valued top-level fields of the scalar
+  calls it with their wire names and answers 400 when it reports errors. It
+  runs in every place the route decodes the input from JSON, including the
+  `data` part of a multipart request.
+- It composes with `ScalarCatalogWithUploads` in either order. Section 3.10
+  of `docs/extension-model.md` and D24 in `docs/DECISIONS.md` have the
+  details.
+
 ## A document
 
 A document is a sidecar file the loader reads from the service directory

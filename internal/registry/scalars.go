@@ -7,6 +7,7 @@ import (
 
 	scalars "github.com/parable-work/superscalar/go"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -152,6 +153,91 @@ func (c uploadCatalog) Upload(canonical string) (ScalarUpload, bool) {
 		return ScalarUpload{}, false
 	}
 	return cloneScalarUpload(upload), true
+}
+
+// RawBodyCheck answers for the wrapped catalog, so uploads declared over a
+// catalog with raw-body checks keep them.
+func (c uploadCatalog) RawBodyCheck(canonical string) (ScalarRawBodyCheck, bool) {
+	if checks, ok := c.ScalarCatalog.(RawBodyCheckCatalog); ok {
+		return checks.RawBodyCheck(canonical)
+	}
+	return ScalarRawBodyCheck{}, false
+}
+
+// ScalarRawBodyCheck is the raw-body check of one scalar: the Go function a
+// generated route calls on the raw JSON of its request body before it
+// decodes an input type with fields of the scalar (apigen.RawBodyCheck).
+// The scalar package's ScalarMetadata row has no field for it, so a catalog
+// carries it beside the row (RawBodyCheckCatalog).
+type ScalarRawBodyCheck = apigen.RawBodyCheck
+
+// RawBodyCheckCatalog is a ScalarCatalog that declares raw-body checks for
+// some of its scalars. The api generator asks the registered catalog for
+// this interface (Registry.RawBodyChecks) and renders a call to each check
+// an input type's fields use. A scalar without one gets no call.
+type RawBodyCheckCatalog interface {
+	ScalarCatalog
+	// RawBodyCheck returns the check of canonical, false when it has none.
+	RawBodyCheck(canonical string) (ScalarRawBodyCheck, bool)
+}
+
+// ScalarCatalogWithRawBodyChecks returns catalog with raw-body checks
+// declared on it, keyed by canonical scalar name. Every key must name a
+// scalar of catalog, and every check must render a call that compiles
+// (apigen.RawBodyCheck.Validate). A distribution registers the result
+// through RegisterScalars; it composes with ScalarCatalogWithUploads in
+// either order.
+func ScalarCatalogWithRawBodyChecks(catalog ScalarCatalog, checks map[string]ScalarRawBodyCheck) (RawBodyCheckCatalog, error) {
+	if catalog == nil {
+		return nil, fmt.Errorf("registry: raw-body checks declared on a nil scalar catalog")
+	}
+	names := make([]string, 0, len(checks))
+	for name := range checks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, ok := catalog.Scalar(name); !ok {
+			return nil, fmt.Errorf("registry: raw-body check declared on %s, which the scalar catalog does not define", name)
+		}
+		if err := checks[name].Validate(); err != nil {
+			return nil, fmt.Errorf("registry: scalar %s: %w", name, err)
+		}
+	}
+	owned := make(map[string]ScalarRawBodyCheck, len(checks))
+	for name, check := range checks {
+		owned[name] = check
+	}
+	return rawBodyCheckCatalog{ScalarCatalog: catalog, checks: owned}, nil
+}
+
+type rawBodyCheckCatalog struct {
+	ScalarCatalog
+	checks map[string]ScalarRawBodyCheck
+}
+
+func (c rawBodyCheckCatalog) RawBodyCheck(canonical string) (ScalarRawBodyCheck, bool) {
+	check, ok := c.checks[canonical]
+	return check, ok
+}
+
+// Upload answers for the wrapped catalog, so raw-body checks declared over
+// a catalog with uploads keep them.
+func (c rawBodyCheckCatalog) Upload(canonical string) (ScalarUpload, bool) {
+	if uploads, ok := c.ScalarCatalog.(UploadCatalog); ok {
+		return uploads.Upload(canonical)
+	}
+	return ScalarUpload{}, false
+}
+
+// RawBodyChecks returns the registered scalar catalog's raw-body checks,
+// nil when the catalog declares none (it is not a RawBodyCheckCatalog).
+// The api generator reads it as apigen.Options.RawBodyChecks.
+func (r *Registry) RawBodyChecks() apigen.RawBodyChecks {
+	if checks, ok := r.Scalars().(RawBodyCheckCatalog); ok {
+		return checks
+	}
+	return nil
 }
 
 // cloneScalarUpload copies the slices and pointers of upload, so neither

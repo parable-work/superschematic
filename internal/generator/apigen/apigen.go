@@ -126,7 +126,11 @@ type EndpointInfo struct {
 
 	InputType       string  // input type name when the operation takes an @input-style argument
 	InputTypeFields []Param // fields of the input type (for scaffold docs)
-	HasInput        bool
+	// RawBodyChecks are the raw-body checks the route runs on the input's
+	// JSON before decoding it (RawBodyCheck), ordered by each one's first
+	// field; nil without an input or a registered check.
+	RawBodyChecks []RawBodyCheckCall
+	HasInput      bool
 	// InputRequired reports whether the input argument is non-null.
 	InputRequired bool
 
@@ -265,6 +269,10 @@ type APIOutput struct {
 	// RoutesNeedTime gates the time import in routes.go: only @rateLimit and
 	// @timeout render a time call, and only on routes RegisterRoutes mounts.
 	RoutesNeedTime bool
+
+	// RawBodyCheckImports are the packages routes.go imports for the
+	// endpoints' raw-body checks, sorted by path.
+	RawBodyCheckImports []RawBodyCheckImport
 
 	// UUIDTypeExpr is the qualified Go expression for the schema's UUID
 	// scalar (e.g. "types.IdentityUUID"). Empty when the schema declares no
@@ -519,6 +527,11 @@ type Options struct {
 	// value is DefaultToolInvocationPolicy; the registry's
 	// ToolInvocationPolicy supplies it.
 	ToolInvocation ToolInvocationPolicy
+
+	// RawBodyChecks looks up the raw-body check of each scalar an input
+	// type's fields use; nil means none. The registry's RawBodyChecks
+	// supplies it from the registered scalar catalog.
+	RawBodyChecks RawBodyChecks
 }
 
 // Generate extracts REST endpoints from the schema's operation sets and
@@ -593,6 +606,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 			if err != nil {
 				return nil, err
 			}
+			endpoint.RawBodyChecks = rawBodyCheckCalls(endpoint.InputTypeFields, opts.RawBodyChecks)
 			output.Endpoints = append(output.Endpoints, *endpoint)
 		}
 	}
@@ -666,6 +680,9 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		return nil, err
 	}
 	if err := validateHandlerNameCollisions(output.Endpoints); err != nil {
+		return nil, err
+	}
+	if output.RawBodyCheckImports, err = rawBodyCheckImports(output.Endpoints); err != nil {
 		return nil, err
 	}
 	keys, err := applyToolHooks(schema, output.Endpoints, opts.ToolHooks)
