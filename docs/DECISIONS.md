@@ -1568,6 +1568,24 @@ Three gaps in how an encrypted operation travels, each older than D20:
 
 The rules are reversible until the first release.
 
+### D20, amended: the Rust router leaves a manual operation to the service
+
+The Rust server's generator ignored `@manualRouteRegistration`.
+`build_router` mounted a generated route for every operation, and each
+operation had a method on its namespace's trait. The Go server leaves a
+manual operation out of `RegisterRoutes`, and the TypeScript server mounts
+it only through the service's handler (D15). So an encrypted operation the
+Rust generator accepted because it is manual (the amendment above) still
+reached its trait method with the envelope as its body. A service could not
+add its own route at that path and method either: axum panics on an
+overlapping route.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `build_router` does not mount a `@manualRouteRegistration` operation. Its namespace's trait has no method for it and it gets no scaffold, as the TypeScript server leaves it out of its implementation interfaces; a namespace whose operations are all manual has no trait. `build_router`'s doc lists each manual operation's method and path. The service adds the route to the router `build_router` returns, and its handler for an encrypted operation receives the envelope and decrypts it. A cargo test adds such a route beside the generated ones. | Keeping the trait method and making the generated handler public for the service to mount, as the Go server keeps `create<Handler>`. That handler only forwards the JSON body to the method, so it would hand an encrypted operation's envelope on unchanged, and it takes the router state that `build_router` has already applied. |
+
+The rule is reversible until the first release.
+
 ## D22. A TypeScript env loader in the TypeScript types package
 
 An `@envVars` class got a loader in Go or Rust and none in TypeScript, so a

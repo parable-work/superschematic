@@ -20,11 +20,15 @@ pub struct RouterState {
     pub implementations: Implementations,
 }
 
+/// Mounts every operation except those declared @manualRouteRegistration,
+/// which the service mounts itself by adding a route for each to the
+/// returned router:
+///
+/// - `POST /api/tenant/custom-handler` (tenant.customHandler)
 pub fn build_router(implementations: Implementations) -> Router {
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
     router = router.route("/api/auth/me", get(handle_session_current_tenant));
-    router = router.route("/api/tenant/custom-handler", post(handle_tenant_custom_handler));
     router = router.route("/api/tenants", get(handle_tenant_list_tenants));
     router = router.route("/api/tenants", post(handle_tenant_create_tenant));
     router = router.route("/api/tenants/{id}", get(handle_tenant_get_tenant));
@@ -71,24 +75,6 @@ async fn handle_session_current_tenant(
         .implementations
         .session
         .current_tenant(ctx, payload)
-        .await;
-    match result {
-        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
-        Err(err) => Err(error_response(err)),
-    }
-}
-async fn handle_tenant_custom_handler(
-    State(state): State<Arc<RouterState>>,
-    headers: HeaderMap,
-    Json(payload): Json<Value>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    let request_id = request_id_from_headers(&headers);
-    let mut ctx = RequestContext::new(method_from_str("post"), "/api/tenant/custom-handler".to_string());
-    ctx.headers = headers_to_map(&headers);
-    let result = state
-        .implementations
-        .tenant
-        .custom_handler(ctx, payload)
         .await;
     match result {
         Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
