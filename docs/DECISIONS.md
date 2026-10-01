@@ -907,6 +907,31 @@ own pattern with `u`. Patterns now match code points too:
 | Every TypeScript `RegExp` built from a scalar's or a field's `pattern` has the `u` flag: in the generated validator, in the runtime (and its check that a scalar's pattern compiles), in the SDK and in the API server. The parity matrix's `PatternMatrix` holds `.`, `\W` and a negated class with a count on a string, a list, a list of lists and a string scalar, with vectors of astral characters, and the six validators agree. | Leaving TypeScript on UTF-16 units; rewriting each pattern per language |
 | A pattern must also be valid in the `u` flag's stricter syntax, which refuses an escaped character that has no special meaning (`\-` outside a class, `\_`), a lone `{` or `}`, and an incomplete quantifier. Such a pattern fails as a pattern JavaScript cannot compile failed before: the runtime, the SDK and the API server's scalar check refuse every value, and the generated validator and the API server's argument check throw. Every pattern in superscalar's catalog, the fixtures and the examples compiles with `u`. The loader checks a pattern only with Go's `regexp`, when it checks a default value. | A loader check of JavaScript's pattern syntax, which needs a JavaScript engine or a second implementation of its grammar |
 
+### D14, amended: the loader checks defaults and examples by the validators' rules
+
+The loader checked a composite default against its scalars' rules and its
+fields' own rules, but a field's length, pattern and range rules reached
+only a single value: the elements of a list field met their scalar's rules
+and never the field's. A field's `default`, an argument's `default` and a
+scalar's `example` were not checked at all. A schema could build with a
+value every validator refuses.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| In a composite default, a field's `minLength`, `maxLength`, `pattern`, `min` and `max` apply to every element of a `T[]` value and every innermost element of a `T[][]` value, as every validator applies them (D12, amended). `listMin` and `listMax` bound the outer list, as before. | Checking the list bounds only |
+| A field's or an argument's `default` is checked as a composite default's value is: its JSON type, its scalar's lengths, pattern and range, an enum's membership, and the field's own rules. The IR's default text is read as the value it stands for: the text itself for a string, a string scalar or an enum; a number or a boolean for those primitives; a JSON array for a list, whose bounds and elements are checked. A default that breaks a rule fails the build, as a composite default does. | A warning, which lets a value every validator refuses reach the generated decoders |
+| A default of an object, a union or a map is not checked. It has no literal form, and the generators emit no such default. | Refusing one |
+| A scalar's `example` is checked against the scalar's own lengths, pattern and range, and one that breaks them fails the build. | A warning. Either is reversible until the first release; a failure was chosen because no schema this was tried on had a failing example, so the stricter rule costs nothing today |
+| The loader applies these rules with the functions it already used for composite defaults. The schema runtime's `validate` package lives in its own module (D1), which the compiler module does not import. The loader checks a scalar's lengths, pattern, range and integer type, not its reserved words or the scalar core's own checks. | Importing the runtime module into the compiler module |
+
+An enum member is checked against no rule. The runtimes check an enum
+value only for membership, and the IR has no length rule for an enum's
+declared values. A field's own length and pattern rules on an enum-typed
+field apply to its default as to any string value, as they already did for
+a composite default. An empty string is checked like any other value, so a
+`""` default for a scalar with a `minLength` fails the build, although a
+runtime reads `""` in an optional string scalar field as absent.
+
 ## D16. An engine takes schemas as data, and behaviors compose on its types
 
 A distribution built a server on the source tree that takes a schema while

@@ -79,8 +79,10 @@ With `Default<boolean, false>` it stays `bool` and is left out when `false`.
 
 `Default<T, V>` fills in a value when a payload leaves the field out. It is
 a default for decoders, not for the database: the Go, TypeScript, Python
-and Rust decoders all apply it, and the SQL column has no default. A new
-order starts `Placed`:
+and Rust decoders all apply it, and the SQL column has no default. The
+build checks `V` as a validator checks a value: its type, its scalar's
+lengths, pattern and range, and the field's own `Validate<T, C>` rules. A
+default that breaks them fails the build. A new order starts `Placed`:
 
 <Snippet file="schemas/services/shop-db/src/orders.schema.ts" from="export abstract class Order extends" to="status: Default" />
 
