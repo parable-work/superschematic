@@ -1,0 +1,60 @@
+[package]
+name = "superschematic-versiongraph-engine"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.95.0"
+description = "The version graph's engine: every graph operation over a storage adapter, with a Postgres adapter"
+license = "Apache-2.0"
+repository = "https://github.com/parable-work/superschematic"
+# Generated Rust types crates depend on it by path (see [paths]
+# versiongraph_rust in superschematic.toml); nothing consumes it from a
+# registry yet.
+publish = false
+
+# It carries its own dependency versions and lock file, as the core beside
+# it does, and calls the core natively through a path dependency.
+
+[features]
+default = ["tokio-postgres"]
+# The Postgres adapter's default client, over tokio-postgres. Without it the
+# adapter still builds; a caller implements postgres::Client over another
+# driver.
+tokio-postgres = ["dep:tokio-postgres"]
+
+[dependencies]
+async-trait = "0.1.89"
+regex = "1.12"
+serde = { version = "1.0.228", features = ["derive"] }
+# arbitrary_precision, which the core turns on too, keeps a number's digits as
+# written, so the canonical rules read a numeric column exactly.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision"] }
+superschematic-versiongraph = { path = "../rust" }
+tokio = { version = "1.52", features = ["macros", "sync", "time"] }
+tokio-postgres = { version = "0.7.18", optional = true }
+
+[dev-dependencies]
+# raw_value reads a member of a Postgres rendering exactly as Postgres wrote it.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "raw_value"] }
+tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio-postgres = "0.7.18"
+
+# The Postgres tests use the default client.
+[[test]]
+name = "canonical"
+required-features = ["tokio-postgres"]
+
+[[test]]
+name = "postgres"
+required-features = ["tokio-postgres"]
+
+[[test]]
+name = "scenarios"
+required-features = ["tokio-postgres"]
+
+[[test]]
+name = "sweeper"
+required-features = ["tokio-postgres"]
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+cognitive_complexity = "warn"

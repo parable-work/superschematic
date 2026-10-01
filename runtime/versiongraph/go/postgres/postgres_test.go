@@ -320,6 +320,134 @@ func TestPgxOverAnOpenTransaction(t *testing.T) {
 	}
 }
 
+// newRef writes the Bread root and a primary line of it, and returns the
+// ref.
+func newRef(t *testing.T, conn *pgx.Conn, s storage.Storage) storage.Ref {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := conn.Exec(ctx, "INSERT INTO recipe (id, title, created_by) VALUES ('00000000-0000-0000-0000-000000000001', 'Bread', '00000000-0000-0000-0000-000000000002')"); err != nil {
+		t.Fatal(err)
+	}
+	var ref storage.Ref
+	if err := s.Transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+		var err error
+		ref, err = tx.CreateRef(ctx, storage.NewRef{Root: "1", Name: "main", Actor: "2"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return ref
+}
+
+// TestLockRefWaitsForTheHolder: while one transaction holds a ref's lock,
+// another transaction's LockRef of it waits (here past its lock_timeout,
+// with lock_not_available) while ReadRef does not, and once the first ends
+// the lock is free.
+func TestLockRefWaitsForTheHolder(t *testing.T) {
+	first, second := connect(t)
+	ctx := context.Background()
+	a := adapter(t)
+	holder, other := a.Storage(postgres.Pgx(first)), a.Storage(postgres.Pgx(second))
+	ref := newRef(t, first, holder)
+	if _, err := second.Exec(ctx, "SET lock_timeout = '200ms'"); err != nil {
+		t.Fatal(err)
+	}
+	lock := func() error {
+		return other.Transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+			_, err := tx.LockRef(ctx, ref.ID)
+			return err
+		})
+	}
+	err := holder.Transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+		if _, err := tx.LockRef(ctx, ref.ID); err != nil {
+			return err
+		}
+		var pgErr *pgconn.PgError
+		if err := lock(); !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+			t.Errorf("a second transaction's LockRef = %v, want it to wait for the holder past its lock_timeout (55P03)", err)
+		}
+		if err := other.Transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+			_, err := tx.ReadRef(ctx, ref.ID)
+			return err
+		}); err != nil {
+			t.Errorf("a second transaction's ReadRef = %v, want the ref without waiting", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lock(); err != nil {
+		t.Fatalf("LockRef after the holder ended = %v, want the ref", err)
+	}
+}
+
+// TestUpdateRefFencesItsVersion: UpdateRef at the ref's version moves it to
+// the next version, and UpdateRef at the version it had before is
+// ErrVersionConflict and changes nothing.
+func TestUpdateRefFencesItsVersion(t *testing.T) {
+	conn, _ := connect(t)
+	ctx := context.Background()
+	s := adapter(t).Storage(postgres.Pgx(conn))
+	ref := newRef(t, conn, s)
+	err := s.Transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+		moved, err := tx.UpdateRef(ctx, storage.RefUpdate{ID: ref.ID, Version: ref.Version, Actor: "2"})
+		if err != nil {
+			return err
+		}
+		if moved.Version != ref.Version+1 {
+			t.Errorf("UpdateRef moved the ref to version %d, want %d", moved.Version, ref.Version+1)
+		}
+		if _, err := tx.UpdateRef(ctx, storage.RefUpdate{ID: ref.ID, Version: ref.Version, Seal: true, Actor: "2"}); !errors.Is(err, storage.ErrVersionConflict) {
+			t.Errorf("UpdateRef at the stale version %d = %v, want ErrVersionConflict", ref.Version, err)
+		}
+		now, err := tx.ReadRef(ctx, ref.ID)
+		if err != nil {
+			return err
+		}
+		if now.Version != moved.Version || now.Sealed {
+			t.Errorf("after the stale UpdateRef the ref is at version %d, sealed %t; want version %d, not sealed", now.Version, now.Sealed, moved.Version)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestDiscardRefRefusesADiscardedRef: DiscardRef of a ref already discarded,
+// even at its current version, is ErrVersionConflict and keeps who
+// discarded it first.
+func TestDiscardRefRefusesADiscardedRef(t *testing.T) {
+	conn, _ := connect(t)
+	ctx := context.Background()
+	s := adapter(t).Storage(postgres.Pgx(conn))
+	ref := newRef(t, conn, s)
+	err := s.Transact(ctx, func(ctx context.Context, tx storage.Tx) error {
+		if err := tx.DiscardRef(ctx, ref.ID, ref.Version, "2"); err != nil {
+			return err
+		}
+		discarded, err := tx.ReadRef(ctx, ref.ID)
+		if err != nil {
+			return err
+		}
+		if !discarded.Discarded {
+			t.Error("DiscardRef left the ref live")
+		}
+		if err := tx.DiscardRef(ctx, ref.ID, discarded.Version, "3"); !errors.Is(err, storage.ErrVersionConflict) {
+			t.Errorf("DiscardRef of a discarded ref at its version %d = %v, want ErrVersionConflict", discarded.Version, err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var by string
+	if err := conn.QueryRow(ctx, "SELECT deleted_by::text FROM recipe_ref").Scan(&by); err != nil || by != "00000000-0000-0000-0000-000000000002" {
+		t.Fatalf("the ref's deleted_by is %q (%v), want the first discard's actor", by, err)
+	}
+}
+
 func mustJSON(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	out, err := json.Marshal(v)
