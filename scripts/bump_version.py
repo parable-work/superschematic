@@ -33,6 +33,16 @@ Version sites (relative to the repository root):
                                       [project] version, in PEP 440 form
   runtime/schema/python/uv.lock       the superschematic-schema-runtime package,
                                       in PEP 440 form
+  runtime/versiongraph/python/pyproject.toml
+                                      [project] version, in PEP 440 form
+  runtime/versiongraph/python/uv.lock the superschematic-versiongraph package,
+                                      in PEP 440 form
+  runtime/versiongraph/python/Cargo.toml
+                                      [package] version
+  runtime/versiongraph/python/Cargo.lock
+                                      the superschematic-versiongraph-python
+                                      package and the superschematic-versiongraph
+                                      core it builds on
   runtime/http/rust/Cargo.toml        [package] version
   runtime/http/rust/Cargo.lock        the superschematic-http-runtime package
   runtime/versiongraph/rust/Cargo.toml
@@ -196,6 +206,39 @@ def sites():
             ROOT / "runtime" / "schema" / "python" / "uv.lock",
             [(r'(\[\[package\]\]\nname = "superschematic-schema-runtime"\nversion = ")' + V + r'(")', 1)],
             "pep440",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "versiongraph" / "python" / "pyproject.toml",
+            [(r'(\[project\]\nname = "superschematic-versiongraph"\nversion = ")' + V + r'(")', 1)],
+            "pep440",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "versiongraph" / "python" / "uv.lock",
+            [(r'(\[\[package\]\]\nname = "superschematic-versiongraph"\nversion = ")' + V + r'(")', 1)],
+            "pep440",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "versiongraph" / "python" / "Cargo.toml",
+            [(r'(\[package\]\nname = "superschematic-versiongraph-python"\nversion = ")' + V + r'(")', 1)],
+            "semver",
+        )
+    )
+    # The binding's lockfile records the core's version too, since the core
+    # is a path dependency: a lockfile left behind is one cargo rewrites.
+    out.append(
+        (
+            ROOT / "runtime" / "versiongraph" / "python" / "Cargo.lock",
+            [
+                (r'(\[\[package\]\]\nname = "superschematic-versiongraph-python"\nversion = ")' + V + r'(")', 1),
+                (r'(\[\[package\]\]\nname = "superschematic-versiongraph"\nversion = ")' + V + r'(")', 1),
+            ],
+            "semver",
         )
     )
     out.append(

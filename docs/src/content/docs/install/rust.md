@@ -21,6 +21,12 @@ The HTTP runtime generated servers import is
 `[paths].http_runtime_rust` points generated `Cargo.toml` path
 dependencies at `runtime/http/rust` in a checkout.
 
+A types crate whose schema declares a
+[version graph](/superschematic/reference/version-graphs/#use-the-engine-from-rust)
+depends on the engine `superschematic-versiongraph-engine`, also
+unpublished; `[paths].versiongraph_rust` points it at
+`runtime/versiongraph/rust-engine` in a checkout.
+
 ## Install
 
 The CLI install is on the [Go](/superschematic/install/go/) page. From
