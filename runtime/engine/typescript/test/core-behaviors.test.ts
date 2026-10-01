@@ -1,14 +1,15 @@
 // The core's behaviors with no extension linked (D10, D16): an engine with
 // only its own behaviors and the core meta-schema runs the documents the
 // core binary builds in the CLI smoke: fixture-behaviors-json, whose type
-// composes Workflow, Comments and Revisions, and fixture-cross-instance-json,
-// whose tasks wait on tasks and documents and link to both. They register
-// when the engine opens, under names no deployment can take.
+// composes Workflow, Comments and Revisions, fixture-cross-instance-json,
+// whose tasks wait on tasks and documents and link to both and to a
+// project, and fixture-rollups-json, whose projects roll their tasks up.
+// They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import { EngineError, defineBehavior, type Principal } from '../dist/index.js';
-import { alice, cleanup, documentsDocument, drivers, openTestEngine, tasksDocument } from './helpers.ts';
+import { alice, cleanup, documentsDocument, drivers, openTestEngine, projectsDocument, tasksDocument } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -16,6 +17,7 @@ afterEach(cleanup);
 // with no extension linked (make cli-smoke).
 const documents = documentsDocument();
 const tasks = tasksDocument();
+const projects = projectsDocument();
 
 const writer: Principal = { subject: 'wes', permissions: [] };
 const reviewer: Principal = { subject: 'rae', permissions: ['documents.review'] };
@@ -25,7 +27,7 @@ for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Dependencies', 'Links', 'Revisions', 'Workflow']);
+      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Dependencies', 'Links', 'Revisions', 'Rollups', 'Workflow']);
       assert.deepEqual(engine.behaviors.declaration('Workflow')?.fields, [{ name: 'status', description: 'The state the instance is in.' }]);
       const impostor = defineBehavior({ declaration: { name: 'Workflow' } });
       assert.throws(() => engine.behaviors.register(impostor), /behavior Workflow is already registered with this engine/);
@@ -179,6 +181,36 @@ for (const driver of drivers) {
         blocked: false,
         links: { parent: { schema: 'tasks', id: 'plan' } },
       });
+    });
+
+    test('it runs the projects document beside the tasks one: a project rolls up the tasks that point at it, and waits for them to finish', () => {
+      const engine = openTestEngine({ driver });
+      for (const document of [documents, tasks, projects]) {
+        engine.schemas.define(alice, document);
+        engine.schemas.publish(alice, document.name as string);
+      }
+      assert.deepEqual(
+        engine.schemas.behaviors(alice, 'projects').map(({ name }) => name),
+        ['Workflow', 'Rollups']
+      );
+      const created = engine.instances.create(writer, 'projects', { title: 'Launch' }, { id: 'launch' });
+      assert.deepEqual(created.data, { title: 'Launch', status: 'active', rollups: { tasks: 0, tasksByStatus: {}, tasksFinished: true } });
+      for (const id of ['plan', 'build']) {
+        engine.instances.create(writer, 'tasks', { title: id }, { id });
+        engine.instances.invoke(writer, 'tasks', id, 'link', { name: 'project', id: 'launch' });
+      }
+      engine.instances.invoke(writer, 'tasks', 'plan', 'transition', { to: 'doing' });
+      assert.deepEqual(engine.instances.get(alice, 'projects', 'launch')?.data.rollups, {
+        tasks: 2,
+        tasksByStatus: { doing: 1, todo: 1 },
+        tasksFinished: false,
+      });
+      assert.equal(thrown(() => engine.instances.invoke(writer, 'projects', 'launch', 'transition', { to: 'done' })).code, 'vetoed');
+      engine.instances.invoke(writer, 'tasks', 'plan', 'transition', { to: 'done' });
+      engine.instances.invoke(writer, 'tasks', 'build', 'transition', { to: 'dropped' });
+      const read = engine.instances.get(alice, 'projects', 'launch');
+      assert.deepEqual([read?.seq, read?.data.rollups], [1, { tasks: 2, tasksByStatus: { done: 1, dropped: 1 }, tasksFinished: true }]);
+      assert.deepEqual(engine.instances.invoke(writer, 'projects', 'launch', 'transition', { to: 'done' }), { from: 'active', to: 'done' });
     });
   });
 }

@@ -20,7 +20,7 @@ import { defineBehavior, type AccessPolicy, type Engine, type EngineOptions } fr
 import { engineApp } from '../dist/http/index.js';
 import { MCP_PATH, engineMcp, type EngineMcpOptions } from '../dist/mcp/index.js';
 import { openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, documentsDocument, openTestEngine, orderDocument, tasksDocument } from './helpers.ts';
+import { alice, cleanup, documentsDocument, openTestEngine, orderDocument, projectsDocument, tasksDocument } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 
 // The bearer token is the caller's subject; reader may only read.
@@ -506,5 +506,30 @@ describe("the core's behaviors", () => {
     const required = problemOf(await call(client, 'tasks_delete', { id: 'plan' }));
     assert.deepEqual([required.status, required.code, required.details.behavior], [409, 'vetoed', 'Links']);
     assert.ok(engine.instances.get(alice, 'tasks', 'plan'));
+  });
+
+  test('Rollups adds a field and no tool: get carries the rollups, computed at the read, and a gated transition is a tool error with the 409 problem', async () => {
+    const { url, engine } = await withDocument();
+    for (const document of [tasksDocument(), projectsDocument()]) {
+      engine.schemas.define(everything, document);
+      engine.schemas.publish(everything, document.name as string);
+    }
+    engine.instances.create(everything, 'projects', { title: 'Launch' }, { id: 'launch' });
+    engine.instances.create(everything, 'tasks', { title: 'Plan' }, { id: 'plan' });
+    engine.instances.invoke(everything, 'tasks', 'plan', 'link', { name: 'project', id: 'launch' });
+    const { client } = await connect(endpoint(url));
+    assert.deepEqual(
+      (await client.listTools()).tools.filter((tool) => tool.name.startsWith('projects_')).map((tool) => tool.name),
+      ['projects_create', 'projects_get', 'projects_list', 'projects_update', 'projects_delete', 'projects_transition']
+    );
+    const { client: reader } = await connect(endpoint(url), 'reader');
+    const read = await call(reader, 'projects_get', { id: 'launch' });
+    assert.deepEqual((read.structuredContent as { data: Record<string, unknown> }).data.rollups, { tasks: 1, tasksByStatus: { todo: 1 }, tasksFinished: false });
+    const gated = problemOf(await call(client, 'projects_transition', { id: 'launch', params: { to: 'done' } }));
+    assert.deepEqual([gated.status, gated.code, gated.details.behavior], [409, 'vetoed', 'Rollups']);
+    await call(client, 'tasks_transition', { id: 'plan', params: { to: 'dropped' } });
+    const again = await call(reader, 'projects_get', { id: 'launch' });
+    assert.deepEqual((again.structuredContent as { data: Record<string, unknown> }).data.rollups, { tasks: 1, tasksByStatus: { dropped: 1 }, tasksFinished: true });
+    assert.deepEqual((await call(client, 'projects_transition', { id: 'launch', params: { to: 'done' } })).structuredContent, { from: 'active', to: 'done' });
   });
 });

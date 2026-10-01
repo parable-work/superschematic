@@ -14,6 +14,7 @@ import { Validate, behavior } from "@superschematic/schema";
   links: {
     spec: { schema: "documents", pinned: true },
     parent: { schema: "tasks", required: true },
+    project: { schema: "projects" },
   },
 })
 export abstract class Task {

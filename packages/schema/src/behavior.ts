@@ -31,6 +31,8 @@ export interface BehaviorConfigs {
   Dependencies: DependenciesConfig;
   /** Typed links to instances of the schemas it names, optionally pinned to a revision. */
   Links: LinksConfig;
+  /** Values derived from the instances that point at this one through a link, computed when it is read. */
+  Rollups: RollupsConfig;
 }
 
 /** Workflow's config. */
@@ -87,6 +89,35 @@ export interface LinkConfig {
   /** The link records the target's revision and reports whether the target has moved past it; the schema must compose Revisions. */
   readonly pinned?: boolean;
 }
+
+/** Rollups' config. */
+export interface RollupsConfig {
+  /** The rollups, by name: camelCase, at most 64 characters. */
+  readonly rollups: Readonly<Record<string, RollupConfig>>;
+}
+
+/** Where a rollup reads from: the instances of a schema that point at this one through a link. */
+export interface RollupSource {
+  /** The schema whose instances point at this one; it composes Links. */
+  readonly schema: string;
+  /** The link of that schema's Links config that points at this schema. */
+  readonly link: string;
+}
+
+/**
+ * One rollup of a Rollups config. count, all and any take no field;
+ * countBy takes a string, enum or boolean field, or status, and sum, min
+ * and max a number or integer field. all and any may gate states of the
+ * type's Workflow.
+ */
+export type RollupConfig =
+  | (RollupSource & { readonly function: "count" })
+  | (RollupSource & { readonly function: "countBy" | "sum" | "min" | "max"; readonly field: string })
+  | (RollupSource & {
+      readonly function: "all" | "any";
+      /** The states of the type's Workflow that a transition into waits for the rollup to hold. */
+      readonly gatedStates?: readonly string[];
+    });
 
 /** A name @behavior takes: a key of BehaviorConfigs. */
 export type BehaviorName = keyof BehaviorConfigs;

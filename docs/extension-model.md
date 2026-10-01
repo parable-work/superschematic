@@ -822,17 +822,18 @@ No core generator sets the flag. `build --emit-ir`, `format` and
 The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`
 registers with no extension: `Workflow`, `Comments`, `Revisions`,
-`Dependencies` and `Links`. Every binary therefore accepts a schema that
-composes them, the schema-file JSON Schema lists them, and
+`Dependencies`, `Links` and `Rollups`. Every binary therefore accepts a
+schema that composes them, the schema-file JSON Schema lists them, and
 `BehaviorConfigs` in `@superschematic/schema` types their configs. None
 names an invocation policy, since a distribution's policy need not have
 the core's values; each operation takes the policy's default. Every
 `paramsSchema` sets `additionalProperties: false`. A config a
 declaration's `configSchema` accepts can still fail in the engine, whose
 implementation checks what JSON Schema cannot (a Workflow transition
-that names a state the config does not list, or a gated state of
-`Dependencies` that is not a terminal state of the type's Workflow,
-say); `runtime/engine/README.md`, "Core behaviors", has each one's
+that names a state the config does not list, a gated state of
+`Dependencies` that is not a terminal state of the type's Workflow, or a
+rollup whose linked schema has no such link, say);
+`runtime/engine/README.md`, "Core behaviors", has each one's
 config, fields and operations. The engine registers its implementations
 of them when it opens, so a schema that composes them runs with no
 extension linked (D10), its operations served over HTTP and as MCP tools
@@ -845,14 +846,18 @@ like any behavior's.
 | `Revisions` | `review` (`permission`), optional | `revision` | `listRevisions`, `propose`, `approve`, `reject`, `listProposals` |
 | `Dependencies` | `schemas`, `gatedStates`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
 | `Links` | `links` (by name: `schema`, `required`, `pinned`); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
+| `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`); required | `rollups` | none |
 
-`Dependencies` and `Links` reach other instances (D16, amended): a
-blocker or a link target is an instance of the schema a config names,
-which the loader does not resolve; the engine looks the name up when an
-operation runs, in the instance's namespace and then the shared one.
-`make cli-smoke` loads `fixture-cross-instance-json`, whose type composes
-both, with the core binary, and its TypeScript twin in the tsreader
-fixtures loads to the same IR.
+`Dependencies`, `Links` and `Rollups` reach other instances (D16,
+amended): a blocker, a link target or the instances a rollup reads are
+instances of the schema a config names, which the loader does not
+resolve; the engine looks the name up when an operation runs or a field
+is read, in the instance's namespace and then the shared one, and checks
+a rollup's schema and link when the schema is defined. `make cli-smoke`
+loads `fixture-cross-instance-json`, whose type composes the first two,
+and `fixture-rollups-json`, whose type rolls up its tasks, with the core
+binary, and their TypeScript twins in the tsreader fixtures load to the
+same IR.
 
 acme declares `acme.Rating` and types its config in
 `packages/schema/src/behaviors.ts` (section 10);
@@ -1310,7 +1315,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links` (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups` (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |

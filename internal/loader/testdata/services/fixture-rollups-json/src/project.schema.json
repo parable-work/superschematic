@@ -1,0 +1,36 @@
+{
+  "kind": "General",
+  "name": "projects",
+  "description": "A project an engine runs with the core's behaviors and no extension: it moves from active to done or dropped, and rolls up the tasks that point at it through their project link: how many there are, how many are in each status, and whether every one is in a terminal state, which it needs before it is done.",
+  "types": {
+    "Project": {
+      "name": "Project",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["active", "done", "dropped"],
+            "transitions": [
+              { "from": "active", "to": "done" },
+              { "from": "active", "to": "dropped" }
+            ]
+          }
+        },
+        {
+          "name": "Rollups",
+          "config": {
+            "rollups": {
+              "tasks": { "schema": "tasks", "link": "project", "function": "count" },
+              "tasksByStatus": { "schema": "tasks", "link": "project", "function": "countBy", "field": "status" },
+              "tasksFinished": { "schema": "tasks", "link": "project", "function": "all", "gatedStates": ["done"] }
+            }
+          }
+        }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 }
+      ]
+    }
+  }
+}

@@ -10,8 +10,8 @@ compatibility rule, instances, the event log, the access policy, the
 HTTP API with the event stream (`@superschematic/engine/http`), the
 behavior plug-in interface, the describe and tools documents, the MCP
 endpoint (`@superschematic/engine/mcp`), and the core's behaviors:
-`Workflow`, `Comments`, `Revisions`, and `Dependencies` and `Links`,
-which reach other instances. Not built yet: derived fields, reactions,
+`Workflow`, `Comments`, `Revisions`, and `Dependencies`, `Links` and
+`Rollups`, which reach other instances. Not built yet: reactions,
 search, and the work-queue package D16 lists.
 
 ```ts
@@ -409,8 +409,8 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 
 `metaSchema` is the `json-schema` output of the deployment's binary, which
 lists the behaviors it declares; the core's lists the core's own
-(`Workflow`, `Comments`, `Revisions`, `Dependencies` and `Links`), so its
-loader refuses any other.
+(`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links` and
+`Rollups`), so its loader refuses any other.
 
 ### The implementation
 
@@ -719,7 +719,7 @@ operation that expects the sequence from before the operation is refused
 
 ### Core behaviors
 
-The core declares five behaviors (`internal/registry/behaviors`, section
+The core declares six behaviors (`internal/registry/behaviors`, section
 3.16 of `docs/extension-model.md`), so every binary's meta-schema admits
 them, and the engine implements them in `src/behaviors/core` and
 registers them when it opens, before `behaviors`: a schema that composes
@@ -742,9 +742,10 @@ deployment cannot register another implementation under their names.
 ]
 ```
 
-`Dependencies` and `Links` reach other instances through the interface
-("Other instances", "References"), always as the caller, with this on a
-`tasks` schema whose tasks wait on tasks and documents:
+`Dependencies`, `Links` and `Rollups` reach other instances through the
+interface ("Other instances", "References"), always as the caller, with
+this on a `tasks` schema whose tasks wait on tasks and documents and
+belong to a project:
 
 ```json
 "behaviors": [
@@ -752,7 +753,8 @@ deployment cannot register another implementation under their names.
   { "name": "Dependencies", "config": { "schemas": ["tasks", "documents"], "gatedStates": ["done"] } },
   { "name": "Links", "config": { "links": {
       "spec": { "schema": "documents", "pinned": true },
-      "parent": { "schema": "tasks", "required": true } } } }
+      "parent": { "schema": "tasks", "required": true },
+      "project": { "schema": "projects" } } } }
 ]
 ```
 
@@ -926,6 +928,80 @@ be read. `stale` is computed at each read, so a target's new revision
 shows in the next read of the instances that link to it, with no event on
 them. A link made before its spec was pinned records no revision until it
 is linked again.
+
+#### Rollups
+
+Values derived from the instances that point at this one through a link
+of their schema's `Links` config: a parent's view of its children.
+
+| | |
+| --- | --- |
+| Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates? }`; at least one. `function` is `count`, `countBy`, `sum`, `min`, `max`, `all` or `any`. `countBy`, `sum`, `min` and `max` take `field`, the others none; only `all` and `any` take `gatedStates` |
+| Fields | `rollups`: `{ <name>: value }`, computed at each read |
+| Operations | none |
+| Guards | a Workflow `transition` of the instance into a state an `all` or `any` rollup gates, whoever asks, unless the rollup holds: `vetoed`, naming the rollup and how many linked instances keep it from holding |
+| Refusals | at define and publish (`invalid_schema`): a gated state that is not a state of the type's Workflow, or a type without Workflow; a linked schema with no live version, without `Links` or the link, or whose link points at another schema; a `countBy` field that is not a string, enum or boolean field of its type, or `status` when it composes Workflow; a `sum`, `min` or `max` field that is not a number or integer field; `all` or `any` over a schema without Workflow. A caller who may not read the linked schema cannot define or publish the rollup (`forbidden`) |
+| Events | none of its own: a linked instance's change appends no event on this one |
+| `configChange` | nothing is stored, so rollups may be added, removed and changed, and Rollups added to or removed from a schema with instances |
+
+```json
+{ "name": "Rollups", "config": { "rollups": {
+    "tasks": { "schema": "tasks", "link": "project", "function": "count" },
+    "tasksByStatus": { "schema": "tasks", "link": "project", "function": "countBy", "field": "status" },
+    "tasksFinished": { "schema": "tasks", "link": "project", "function": "all", "gatedStates": ["done"] } } } }
+```
+
+On a `projects` schema, with the `tasks` above, a project then reads
+`"rollups": { "tasks": 2, "tasksByStatus": { "doing": 1, "todo": 1 },
+"tasksFinished": false }`, and cannot move to `done` until every one of
+its tasks is done or dropped.
+
+| Function | Value | Over no instance |
+| --- | --- | --- |
+| `count` | how many instances point here | `0` |
+| `countBy` | `{ <value>: count }` over the field's values, keys sorted; a boolean's are `"true"` and `"false"`; an instance with no value is not counted | `{}` |
+| `sum` | the sum of the field over the instances that hold a value | `0` |
+| `min`, `max` | the least or greatest value | absent |
+| `all` | whether every one is in a terminal state of its schema's Workflow (`isTerminalState`) | `true` |
+| `any` | whether some one is | `false` |
+
+The set is closed so that each function is one pass over the records it
+reads, has one JSON type, and has a rule `parseConfig` checks against
+the linked schema when the schema is defined; filters, averages or
+expressions would make the config a query language.
+
+A value is computed when the instance is read, as the caller (D16,
+amended), and nothing is stored: a linked instance's change shows at
+this instance's next read, with no event on it and no move of its `seq`
+or `ETag`, and no reaction has to keep it current. For each schema and
+link its rollups name, a computation reads the schema's `Links` config,
+one page of `listLinked` on that schema (`instances.invokeSchema`), and,
+for every function but `count`, the instances in one `getMany`, with
+`status` when a function needs it, and the schema's Workflow config for
+`all` and `any`. Each asks `read` on that schema, so a caller who may
+not read it cannot read the instance, list its schema, or move it into a
+gated state. Rollups reads no table of `Links`. A link the schema's live
+config no longer gives, or that points at another schema, holds none of
+its instances: a later version may drop or re-point the link only while
+the schema has no instances. Each write of the instance computes its
+rollups too, since the engine reads its fields before and after for the
+event's `patch`; a rollup appears there only when the write changed it.
+
+A rollup reads at most `MAX_ROLLUP_READ` (500) linked instances per
+computation: one `listLinked` page and one `getMany`. Past it the rollup
+has no value, and its entry is `{ "over": true }`, which no function
+returns (`countBy`'s counts are numbers), so it is never read as a
+count, a number or a boolean; a gate on it does not hold, and the
+refusal says why. `Links` has no count operation, since every function
+but `count` needs each instance's fields, which only reading it gives,
+and one bound for every function keeps one rule.
+
+The guard reads the state a transition moves to from its `to`, the one
+parameter Workflow's closed `paramsSchema` takes, and runs before any
+handler for a caller's transition, another behavior's `call()` and
+another instance's invoke alike. A rollup may name its own schema: a
+task can roll up its subtasks through its own `parent` link, and
+`parseConfig` reads the version being defined for that name.
 
 ## Namespaces
 

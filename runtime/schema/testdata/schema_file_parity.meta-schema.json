@@ -213,6 +213,132 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Rollups"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "rollups": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "allOf": [
+                        {
+                          "else": {
+                            "not": {
+                              "required": [
+                                "field"
+                              ]
+                            }
+                          },
+                          "if": {
+                            "properties": {
+                              "function": {
+                                "enum": [
+                                  "countBy",
+                                  "sum",
+                                  "min",
+                                  "max"
+                                ]
+                              }
+                            }
+                          },
+                          "then": {
+                            "required": [
+                              "field"
+                            ]
+                          }
+                        },
+                        {
+                          "if": {
+                            "required": [
+                              "gatedStates"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "function": {
+                                "enum": [
+                                  "all",
+                                  "any"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      ],
+                      "properties": {
+                        "field": {
+                          "description": "For countBy, a string, enum or boolean field of the linked instances, or status when their schema composes Workflow; for sum, min and max, a numeric field.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "function": {
+                          "description": "count: how many instances point here. countBy: how many hold each value of field. sum, min, max: of the numeric field. all, any: whether every one, or some one, is in a terminal state of its schema's Workflow.",
+                          "enum": [
+                            "count",
+                            "countBy",
+                            "sum",
+                            "min",
+                            "max",
+                            "all",
+                            "any"
+                          ]
+                        },
+                        "gatedStates": {
+                          "description": "For all and any, the states of the type's Workflow that a transition into waits for the rollup to hold.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "link": {
+                          "description": "The link of that schema's Links config that points at this schema.",
+                          "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                          "type": "string"
+                        },
+                        "schema": {
+                          "description": "The schema whose instances point at this one; it composes Links.",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "schema",
+                        "link",
+                        "function"
+                      ],
+                      "type": "object"
+                    },
+                    "description": "The rollups, by name: camelCase, at most 64 characters.",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "rollups"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Workflow"
               }
             }
@@ -337,6 +463,7 @@
             "Dependencies",
             "Links",
             "Revisions",
+            "Rollups",
             "Workflow",
             "acme.Audited",
             "acme.Stock"
