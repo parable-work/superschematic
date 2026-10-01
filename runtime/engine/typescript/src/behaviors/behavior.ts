@@ -23,6 +23,14 @@ and gets a context that reaches only what the behavior may touch:
 - in a writing operation, update(), which changes the instance's own
   fields with the checks and guards of an update.
 
+Two more run after the commit, on the engine's runner, as the principal
+the deployment names for it (D16, amended): reactions, which hear the
+events of the instances of a schema that composes the behavior, one at a
+time in log order, and schedules, which run on an interval. Each runs
+in its own transaction with what the runner records for it, so its
+writes and that record commit together, and it changes state only
+through the operations it invokes.
+
 There is no handle on the instances table, on another behavior's storage
 or on the storage connection. A status one behavior owns changes at
 another's request only through its operations, so its guards always run,
@@ -31,6 +39,7 @@ on this instance or another.
 
 import type { Principal } from '../access.js';
 import type { ValidationIssue } from '../errors.js';
+import type { EngineEvent } from '../events/log.js';
 import type { InstanceRecord } from '../instances/store.js';
 import type { Row, RunResult, SqlValue } from '../storage/driver.js';
 import type { BehaviorDeclaration } from './declaration.js';
@@ -253,6 +262,63 @@ export interface InstanceView<Config> extends BehaviorScope<Config> {
  */
 export interface SchemaContext<Config> extends BehaviorScope<Config> {
   readonly sql: SqlReader;
+}
+
+/**
+ * The context of the runner's work: a reaction or a schedule run, on one
+ * schema that composes the behavior, in one namespace, as the runner's
+ * principal. Like a schema-level operation's, its SQL reads the
+ * behavior's tables and writes nothing, and it changes state only through
+ * the operations it invokes, which run writing operations here; their
+ * events record the cause.
+ */
+export interface WorkContext<Config> extends BehaviorScope<Config> {
+  readonly sql: SqlReader;
+}
+
+/** A reaction's context. */
+export interface ReactionContext<Config> extends WorkContext<Config> {
+  /**
+   * The instance of an event as the log had it just before the event: its
+   * own fields and its behaviors' fields, as the events before it recorded
+   * them; undefined when the event is its create. After a delete this is
+   * all that is left of it. A field that reads other instances holds what
+   * the last event recorded. Asks read on the event's schema.
+   */
+  before(event: EngineEvent): FrozenJSON | undefined;
+}
+
+/** A schedule run's context. */
+export interface ScheduleContext<Config> extends WorkContext<Config> {
+  /** The schedule's name. */
+  readonly schedule: string;
+  /** When its previous run committed, in epoch milliseconds; undefined before its first. */
+  readonly previous: number | undefined;
+}
+
+/**
+ * A behavior's reactions: after each commit, the runner hands the events
+ * of the instances of a schema that composes the behavior, and of the
+ * schemas watches names, to react, one at a time in log order, per
+ * namespace. react's invokes and the subscription's cursor commit in one
+ * transaction; a throw rolls both back and the event runs again later.
+ */
+export interface BehaviorReactions<Config> {
+  /**
+   * The schemas besides its own whose instance events the reactions on a
+   * schema hear, for the schema's config. Absent, its own alone.
+   */
+  watches?(config: Config, schema: string): readonly string[];
+  /** Handles one event. It is synchronous; it returns nothing. */
+  react(context: ReactionContext<Config>, event: EngineEvent): void;
+}
+
+/** A behavior's schedule: work the runner runs on each schema that composes it, once an interval. */
+export interface BehaviorSchedule<Config> {
+  /** How often it runs, in milliseconds: an integer of at least 1000. */
+  readonly everyMs: number;
+  /** One run. It is synchronous; it returns nothing. */
+  run(context: ScheduleContext<Config>): void;
 }
 
 /**
@@ -533,6 +599,16 @@ export interface BehaviorImplementation<Config = unknown> {
    * a BehaviorError, which rolls the delete back.
    */
   afterReferenceChange?(context: ReferenceContext<Config>, reference: Reference, change: InstanceChange): void;
+
+  /**
+   * Reactions to committed events, which the engine's runner runs after
+   * the commit, as its principal: they never refuse the change that caused
+   * them (D16, amended).
+   */
+  readonly reactions?: BehaviorReactions<Config>;
+
+  /** Timed work by name (camelCase), which the engine's runner runs as its principal. */
+  readonly schedules?: Readonly<Record<string, BehaviorSchedule<Config>>>;
 }
 
 /** defineBehavior types an implementation's config; it returns the implementation unchanged. */

@@ -36,8 +36,27 @@ export type { CreateOptions, DeleteOptions, InstancePage, InstanceRecord, Instan
 export type { InvokeOptions, InvokeSchemaOptions, OperationOutcome } from './instances/store.js';
 
 export { EventLog } from './events/log.js';
-export type { EngineEvent, EventKind, EventPage, OperationChange, ReadEventsOptions } from './events/log.js';
+export type { EngineEvent, EventCause, EventKind, EventPage, OperationChange, ReadEventsOptions } from './events/log.js';
 export type { EventWatcher } from './events/notifier.js';
+
+// The runner of reactions and schedules (runtime/engine/README.md, "The runner").
+export {
+  DEFAULT_BATCH_SIZE,
+  DEFAULT_MAX_ATTEMPTS,
+  DEFAULT_MAX_DEPTH,
+  DEFAULT_RETRY_INITIAL_MS,
+  DEFAULT_RETRY_MAX_MS,
+  Runner,
+} from './runner/runner.js';
+export type {
+  RunnerOptions,
+  RunnerPass,
+  RunnerStatus,
+  ScheduleStatus,
+  SubscriptionKey,
+  SubscriptionState,
+  SubscriptionStatus,
+} from './runner/runner.js';
 
 export { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './paging.js';
 
@@ -49,6 +68,8 @@ export type {
   AnyBehaviorImplementation,
   BehaviorImplementation,
   BehaviorMigration,
+  BehaviorReactions,
+  BehaviorSchedule,
   BehaviorScope,
   ColumnSpec,
   Columns,
@@ -65,17 +86,20 @@ export type {
   OperationContext,
   OperationHandler,
   PublishContext,
+  ReactionContext,
   ReadOptions,
   Reference,
   ReferenceContext,
   ReferenceReader,
   References,
+  ScheduleContext,
   SchemaContext,
   SchemaOperationHandler,
   Schemas,
   SqlReader,
   SqlWriter,
   StoredInstance,
+  WorkContext,
   WritableColumns,
 } from './behaviors/behavior.js';
 export { BEHAVIOR_NAME, BUILTIN_OPERATIONS, OPERATION_SCOPES } from './behaviors/declaration.js';
@@ -86,7 +110,7 @@ export type {
   JSONSchema,
   OperationScope,
 } from './behaviors/declaration.js';
-export { BehaviorRegistry } from './behaviors/registry.js';
+export { BehaviorRegistry, MIN_SCHEDULE_MS } from './behaviors/registry.js';
 export { MAX_BATCH_READ, MAX_CALL_DEPTH } from './behaviors/execution.js';
 export { page, pageRequest } from './behaviors/paging.js';
 export type { Page } from './behaviors/paging.js';

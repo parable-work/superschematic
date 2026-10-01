@@ -24,7 +24,8 @@ instances and invokes their operations as the chain's principal, asking
 the policy each time, records the references behaviors hold, asks the
 guards of the behaviors that refer to an instance before it changes and
 runs their hooks after, and refuses a delete that leaves a reference to
-the deleted instance behind.
+the deleted instance behind. The runner's work reaches through it too,
+on a chain whose cause each event it appends records.
 
 list pages through a schema's instances in creation order with an opaque
 cursor. Each page is one indexed range read of at most the page size, so
@@ -44,7 +45,7 @@ import { deepFreeze } from '../behaviors/json.js';
 import type { OperationSpec } from '../behaviors/registry.js';
 import { synchronous } from '../behaviors/storage.js';
 import { BehaviorError, BehaviorVetoError, EngineError, InstanceValidationError, type ValidationIssue } from '../errors.js';
-import { appendEvent, nextSeq, type OperationChange } from '../events/log.js';
+import { appendEvent, nextSeq, type EngineEvent, type OperationChange } from '../events/log.js';
 import type { Namespaces } from '../namespaces.js';
 import { pageSize } from '../paging.js';
 import type { SchemaCatalog, SchemaRecord, VersionRuntime } from '../registry/catalog.js';
@@ -142,8 +143,12 @@ const COLUMNS =
 
 export class InstanceStore {
   private readonly references: ReferenceTable;
-  // What the behaviors of every call reach beyond their instance.
-  private readonly reach: Reach;
+  /**
+   * What the behaviors of every call reach beyond their instance; the
+   * engine's runner gives its work the same reach. Not for callers: each
+   * method takes the chain it acts in.
+   */
+  readonly reach: Reach;
 
   constructor(
     private readonly storage: Storage,
@@ -160,6 +165,7 @@ export class InstanceStore {
       read: (chain, schema, ids, fields) => this.readFor(chain, schema, ids, fields),
       invoke: (chain, from, schema, id, operation, params, writes) => this.invokeFor(chain, from, schema, id, operation, params, writes),
       invokeSchema: (chain, from, schema, operation, params, writes) => this.invokeSchemaFor(chain, from, schema, operation, params, writes),
+      before: (chain, from, event) => this.beforeFor(chain, from, event),
       config: (chain, own, schema, behavior) => this.configFor(chain, own, schema, behavior),
       readable: (chain, schema) => {
         checkSchemaName(schema);
@@ -209,6 +215,7 @@ export class InstanceStore {
           actor: principal.subject,
           at: chain.now,
           change: JSON.stringify(instance.data),
+          cause: chain.cause,
         });
         return instance;
       })
@@ -303,6 +310,7 @@ export class InstanceStore {
           actor: principal.subject,
           at: chain.now,
           change: JSON.stringify({ ...frozenPatch, ...diffPatch(before, after) }),
+          cause: chain.cause,
         });
         const updated = toInstance(this.row(namespace, schema, id) as Row, after);
         this.referenced(chain, schema, id, change);
@@ -347,6 +355,7 @@ export class InstanceStore {
           actor: principal.subject,
           at: chain.now,
           change: null,
+          cause: chain.cause,
         });
         this.referenced(chain, schema, id, { kind: 'delete' });
         return true;
@@ -507,6 +516,7 @@ export class InstanceStore {
         actor: chain.principal.subject,
         at: chain.now,
         change: JSON.stringify(operationChange),
+        cause: chain.cause,
       });
       this.referenced(chain, schema, id, change);
       return { result, seq };
@@ -550,7 +560,7 @@ export class InstanceStore {
     if (spec.writes && !writes) {
       throw new BehaviorError(
         from,
-        `a read cannot invoke ${spec.name} of ${schema}, which writes; initialize, afterChange, afterReferenceChange and a writing operation can`
+        `a read cannot invoke ${spec.name} of ${schema}, which writes; initialize, afterChange, afterReferenceChange, a writing operation and the runner's work can`
       );
     }
     this.access.require(chain.principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
@@ -575,11 +585,55 @@ export class InstanceStore {
     if (spec.writes && !writes) {
       throw new BehaviorError(
         from,
-        `a read cannot invoke ${spec.name} of ${schema}, which writes; initialize, afterChange, afterReferenceChange and a writing operation can`
+        `a read cannot invoke ${spec.name} of ${schema}, which writes; initialize, afterChange, afterReferenceChange, a writing operation and the runner's work can`
       );
     }
     this.access.require(chain.principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
     return this.runSchemaOperation(chain, record, runtime, spec, checkParams(spec, params));
+  }
+
+  // beforeFor folds an instance's events before one of them into the
+  // instance as the log had it then, as the chain's principal, who needs
+  // read on the event's schema. The log records each change as a merge
+  // patch of what a read returns (a create the whole instance, an update
+  // its patch, an operation its patch), so folding them from its last
+  // create gives it.
+  private beforeFor(chain: Chain, from: string, event: EngineEvent): FrozenJSON | undefined {
+    if (
+      typeof event !== 'object' ||
+      event === null ||
+      typeof event.schema !== 'string' ||
+      typeof event.instanceId !== 'string' ||
+      typeof event.seq !== 'number' ||
+      !Number.isSafeInteger(event.seq)
+    ) {
+      throw new BehaviorError(from, 'before() takes an instance event of the log');
+    }
+    if (event.namespace !== chain.namespace) {
+      throw new BehaviorError(from, `before() reads the events of namespace ${chain.namespace}, not ${String(event.namespace)}`);
+    }
+    checkSchemaName(event.schema);
+    this.access.require(chain.principal, 'read', chain.namespace, event.schema);
+    const rows = this.storage.all(
+      `SELECT kind, change FROM engine_events INDEXED BY engine_events_instance
+       WHERE namespace = ? AND schema = ? AND instance_id = ? AND seq < ? ORDER BY seq`,
+      [chain.namespace, event.schema, event.instanceId, event.seq]
+    );
+    let data: unknown;
+    for (const row of rows) {
+      const change: unknown = row.change === null ? null : JSON.parse(String(row.change));
+      const kind = String(row.kind);
+      if (kind === 'create') {
+        data = change;
+      } else if (kind === 'update') {
+        data = mergePatch(data ?? {}, change);
+      } else if (kind === 'operation') {
+        data = mergePatch(data ?? {}, (change as OperationChange).patch);
+      } else {
+        data = undefined;
+      }
+    }
+    return data === undefined ? undefined : deepFreeze(data as FrozenJSON);
   }
 
   // configFor returns the config a schema's live version gives a
