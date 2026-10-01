@@ -140,6 +140,13 @@ type EndpointInfo struct {
 	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
 	// set. OutputArrayDepth and OutputGoListType read both flags.
 	OutputIsArrayOfArrays bool
+	// OutputAnyJSON and OutputStructuredJSON describe an output scalar
+	// whose value is a JSON value, as BodyArg.AnyJSON and
+	// BodyArg.StructuredJSON describe an argument's: a Generic.JSON output
+	// is any JSON value, and a Generic.StringMap or Embedding.Vector one a
+	// JSON object or array. The response carries that value.
+	OutputAnyJSON        bool
+	OutputStructuredJSON string
 
 	PathParams  []Param
 	QueryParams []Param
@@ -832,6 +839,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	rateLimit, bodyLimit, timeout := resolveMiddleware(set.Middleware, op.Middleware)
 
 	outputGoType := types.qualifiedGoType(op.TypeRef.Name)
+	outputScalar, _ := types.findScalarDef(op.TypeRef.Name)
 
 	webhookHMACTypesExpr := ""
 	if op.HMACVerifiedProvider != "" {
@@ -861,6 +869,8 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		OutputGoType:                 outputGoType,
 		OutputIsArray:                op.TypeRef.IsArray,
 		OutputIsArrayOfArrays:        op.TypeRef.IsArrayOfArrays,
+		OutputAnyJSON:                outputScalar.IsAnyJSON(),
+		OutputStructuredJSON:         outputScalar.StructuredJSONType(),
 		PathParams:                   pathParams,
 		QueryParams:                  queryParams,
 		ScalarArgs:                   scalarArgs,

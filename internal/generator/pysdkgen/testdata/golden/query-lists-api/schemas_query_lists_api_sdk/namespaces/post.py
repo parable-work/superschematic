@@ -246,9 +246,8 @@ class PostNamespace:
         try:
             return TypeAdapter(scalar_type).validate_python(value, strict=True)
         except Exception as err:
-            raise ValidationError(
-                self._build_validation_errors(err, default_field=field_name),
-            ) from err
+            validation_errors = self._build_validation_errors(err, default_field=field_name)
+            raise ValidationError(validation_errors) from err
 
     def _validate_query_param_constraints(
         self,

@@ -21,10 +21,12 @@ _BUILTIN_VALIDATION_TYPES: dict[str, Any] = {
 _TYPES_PACKAGE_MODULE: Any | None = None
 _TYPES_PACKAGE_RESOLVED = False
 {{- if .Namespace.JSONValueTypes}}
-# The types of Generic.JSON body arguments, whose values are any JSON value
-# but null. _validate_scalar_argument refuses None as one: a required
-# argument and a list element are never null, and an optional one's null is
-# sent before validation.
+# The types of JSON-valued body arguments: Generic.JSON, whose values are
+# any JSON value but null, and JSON object and array scalars.
+# _validate_scalar_argument refuses None as one, since a required argument
+# and a list element are never null and an optional one's None is sent as
+# null or left out before validation. It checks one whole, as the route
+# does, so a failure inside one is the argument's.
 _JSON_VALUE_TYPES = frozenset({ {{- range $i, $type := .Namespace.JSONValueTypes}}{{if $i}}, {{end}}"{{$type}}"{{end -}} })
 {{- end}}
 
@@ -281,13 +283,19 @@ class {{.Namespace.ClassName}}:
         try:
             return TypeAdapter(scalar_type).validate_python(value, strict=True)
         except Exception as err:
-            raise ValidationError(
-                self._build_validation_errors(err, default_field=field_name),
-            ) from err
+            validation_errors = self._build_validation_errors(err, default_field=field_name)
+{{- if .Namespace.JSONValueTypes}}
+            if scalar_type_name in _JSON_VALUE_TYPES:
+                validation_errors = {
+                    field_name: [error for errors in validation_errors.values() for error in errors],
+                }
+{{- end}}
+            raise ValidationError(validation_errors) from err
 {{- if .Namespace.HasListOfListsArgs}}
 
-    def _validate_list_of_lists_argument(self, value: Any, element_type_name: str, field_name: str) -> None:
-        """Validate an array-of-arrays argument.
+    def _validate_list_of_lists_argument(self, value: Any, element_type_name: str, field_name: str) -> list[list[Any]]:
+        """Validate an array-of-arrays argument and return its rows of
+        validated elements.
 
         Each inner list must be a list (an empty one is valid) and each
         element is validated as element_type_name. Errors name the index:
@@ -298,15 +306,17 @@ class {{.Namespace.ClassName}}:
             raise ValidationError(
                 {field_name: [{"validator": "type", "message": f"{field_name} must be a list of lists"}]},
             )
+        rows: list[list[Any]] = []
         for row_index, row in enumerate(value):
             if not isinstance(row, (list, tuple)):
                 raise ValidationError(
                     {f"{field_name}[{row_index}]": [{"validator": "required", "message": "inner list must be a list"}]},
                 )
+            items: list[Any] = []
             for item_index, item in enumerate(row):
                 item_path = f"{field_name}[{row_index}][{item_index}]"
                 try:
-                    self._validate_scalar_argument(item, element_type_name, item_path)
+                    items.append(self._validate_scalar_argument(item, element_type_name, item_path))
                 except ValidationError as err:
                     raise ValidationError(
                         {
@@ -314,6 +324,8 @@ class {{.Namespace.ClassName}}:
                             for key, errors in err.errors.items()
                         },
                     ) from err
+            rows.append(items)
+        return rows
 {{- end}}
 {{- if .Namespace.HasListOfListsModelOutput}}
 
@@ -604,58 +616,7 @@ class {{.Namespace.ClassName}}:
 {{- if .HasInput}}
         payload: Any = self._client.to_dict(validated_input_data)
 {{- else if .HasScalarArgs}}
-        payload: dict[str, Any] = {}
-{{- range .ScalarArgs}}
-{{- if .IsArrayOfArrays}}
-{{- if .Required}}
-        if {{.PyName}} is None:
-            raise ValidationError(
-                {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
-            )
-        self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
-        payload["{{.Name}}"] = {{.PyName}}
-{{- else}}
-        if {{.PyName}} is not None:
-            self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
-            payload["{{.Name}}"] = {{.PyName}}
-{{- end}}
-{{- else if .IsArray}}
-{{- if .Required}}
-        for _elem in {{.PyName}}:
-            self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
-        payload["{{.Name}}"] = {{.PyName}}
-{{- else}}
-        if {{.PyName}} is not None:
-            for _elem in {{.PyName}}:
-                self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
-            payload["{{.Name}}"] = {{.PyName}}
-{{- end}}
-{{- else}}
-{{- if .Required}}
-        payload["{{.Name}}"] = self._validate_scalar_argument(
-            {{.PyName}},
-            "{{.PyType}}",
-            "{{.PyName}}",
-        )
-{{- else if .KeepsNull}}
-        if {{.PyName}} is None:
-            payload["{{.Name}}"] = None
-        elif {{.PyName}} is not UNSET:
-            payload["{{.Name}}"] = self._validate_scalar_argument(
-                {{.PyName}},
-                "{{.PyType}}",
-                "{{.PyName}}",
-            )
-{{- else}}
-        if {{.PyName}} is not None:
-            payload["{{.Name}}"] = self._validate_scalar_argument(
-                {{.PyName}},
-                "{{.PyType}}",
-                "{{.PyName}}",
-            )
-{{- end}}
-{{- end}}
-{{- end}}
+{{- template "scalarArgsPayload" .}}
 {{- else}}
         payload: dict[str, Any] = {}
 {{- end}}
@@ -678,58 +639,7 @@ class {{.Namespace.ClassName}}:
 {{- if .HasInput}}
         payload: Any = self._client.to_dict(validated_input_data)
 {{- else if .HasScalarArgs}}
-        payload: dict[str, Any] = {}
-{{- range .ScalarArgs}}
-{{- if .IsArrayOfArrays}}
-{{- if .Required}}
-        if {{.PyName}} is None:
-            raise ValidationError(
-                {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
-            )
-        self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
-        payload["{{.Name}}"] = {{.PyName}}
-{{- else}}
-        if {{.PyName}} is not None:
-            self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
-            payload["{{.Name}}"] = {{.PyName}}
-{{- end}}
-{{- else if .IsArray}}
-{{- if .Required}}
-        for _elem in {{.PyName}}:
-            self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
-        payload["{{.Name}}"] = {{.PyName}}
-{{- else}}
-        if {{.PyName}} is not None:
-            for _elem in {{.PyName}}:
-                self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
-            payload["{{.Name}}"] = {{.PyName}}
-{{- end}}
-{{- else}}
-{{- if .Required}}
-        payload["{{.Name}}"] = self._validate_scalar_argument(
-            {{.PyName}},
-            "{{.PyType}}",
-            "{{.PyName}}",
-        )
-{{- else if .KeepsNull}}
-        if {{.PyName}} is None:
-            payload["{{.Name}}"] = None
-        elif {{.PyName}} is not UNSET:
-            payload["{{.Name}}"] = self._validate_scalar_argument(
-                {{.PyName}},
-                "{{.PyType}}",
-                "{{.PyName}}",
-            )
-{{- else}}
-        if {{.PyName}} is not None:
-            payload["{{.Name}}"] = self._validate_scalar_argument(
-                {{.PyName}},
-                "{{.PyType}}",
-                "{{.PyName}}",
-            )
-{{- end}}
-{{- end}}
-{{- end}}
+{{- template "scalarArgsPayload" .}}
 {{- else}}
         payload: dict[str, Any] = {}
 {{- end}}
@@ -813,6 +723,76 @@ class {{.Namespace.ClassName}}:
 {{- end}}
 
 {{- end}}
+{{- /*
+scalarArgsPayload builds the JSON body of an endpoint's scalar arguments,
+each validated before it is set. A single value is sent as validated. A
+list of a JSON object or array scalar (IsStructuredJSON) is sent as
+validated too, since its alias reads JSON text into the object or array it
+holds; any other list is sent as given.
+*/ -}}
+{{- define "scalarArgsPayload"}}
+        payload: dict[str, Any] = {}
+{{- range .ScalarArgs}}
+{{- if .IsArrayOfArrays}}
+{{- if .Required}}
+        if {{.PyName}} is None:
+            raise ValidationError(
+                {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
+            )
+        {{if .IsStructuredJSON}}{{.PyName}} = {{end}}self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
+        payload["{{.Name}}"] = {{.PyName}}
+{{- else}}
+        if {{.PyName}} is not None:
+            {{if .IsStructuredJSON}}{{.PyName}} = {{end}}self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
+            payload["{{.Name}}"] = {{.PyName}}
+{{- end}}
+{{- else if .IsArray}}
+{{- if .Required}}
+{{- if .IsStructuredJSON}}
+        {{.PyName}} = [self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}") for _elem in {{.PyName}}]
+{{- else}}
+        for _elem in {{.PyName}}:
+            self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
+{{- end}}
+        payload["{{.Name}}"] = {{.PyName}}
+{{- else}}
+        if {{.PyName}} is not None:
+{{- if .IsStructuredJSON}}
+            {{.PyName}} = [self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}") for _elem in {{.PyName}}]
+{{- else}}
+            for _elem in {{.PyName}}:
+                self._validate_scalar_argument(_elem, "{{.PyElementType}}", "{{.PyName}}")
+{{- end}}
+            payload["{{.Name}}"] = {{.PyName}}
+{{- end}}
+{{- else}}
+{{- if .Required}}
+        payload["{{.Name}}"] = self._validate_scalar_argument(
+            {{.PyName}},
+            "{{.PyType}}",
+            "{{.PyName}}",
+        )
+{{- else if .KeepsNull}}
+        if {{.PyName}} is None:
+            payload["{{.Name}}"] = None
+        elif {{.PyName}} is not UNSET:
+            payload["{{.Name}}"] = self._validate_scalar_argument(
+                {{.PyName}},
+                "{{.PyType}}",
+                "{{.PyName}}",
+            )
+{{- else}}
+        if {{.PyName}} is not None:
+            payload["{{.Name}}"] = self._validate_scalar_argument(
+                {{.PyName}},
+                "{{.PyType}}",
+                "{{.PyName}}",
+            )
+{{- end}}
+{{- end}}
+{{- end}}
+{{- end}}
+
 {{- define "queryListArgs" -}}
 {{.PyName}}, "{{.PyName}}", "{{.PyElementType}}"
 {{- if .ValidateMin}}, min_value={{.ValidateMin}}{{end}}

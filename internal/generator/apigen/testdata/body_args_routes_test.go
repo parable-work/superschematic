@@ -3,8 +3,9 @@
 // generated routes with an implementation that records what each call
 // received, and drives them over httptest with the vectors the TypeScript
 // server's scalar list test uses, plus required single values of every
-// builtin type, a UUID list and a list of objects, the query string of a
-// GET operation, and a path parameter in each encoding of its value.
+// builtin type, a UUID list and a list of objects, Generic.JSON values and
+// JSON object and array scalars, the query string of a GET operation, and a
+// path parameter in each encoding of its value.
 package bodyargsapi_test
 
 import (
@@ -51,6 +52,11 @@ func (s *tags) SetFlags(_ context.Context, id string, pinned bool, score float64
 func (s *tags) StoreDocument(_ context.Context, document types.GenericJSON, note types.GenericJSON, extras []types.GenericJSON, grid [][]types.GenericJSON) (*types.GenericJSON, error) {
 	s.record(map[string]any{"document": document, "note": note, "extras": extras, "grid": grid})
 	return &document, nil
+}
+
+func (s *tags) StoreEmbedding(_ context.Context, labels types.GenericStringMap, vector types.EmbeddingVector, labelSets []types.GenericStringMap, vectorGrid [][]types.EmbeddingVector) (*types.GenericStringMap, error) {
+	s.record(map[string]any{"labels": labels, "vector": vector, "labelSets": labelSets, "vectorGrid": vectorGrid})
+	return &labels, nil
 }
 
 func (s *tags) ReviseDocument(_ context.Context, input *types.DocumentRevision) (*types.GenericJSON, error) {
@@ -131,6 +137,7 @@ const (
 	saveTagsPath      = "/api/posts/p1/tags"
 	setFlagsPath      = "/api/posts/p1/flags"
 	storeDocumentPath = "/api/documents"
+	embeddingsPath    = "/api/embeddings"
 	nameShadesPath    = "/api/posts/p1/shade-names"
 	placePointsPath   = "/api/posts/p1/points"
 	findTagsPath      = "/api/posts/tags"
@@ -505,6 +512,44 @@ func TestAGenericJSONListTakesAnyElementButNull(t *testing.T) {
 	refusedWith(t, server, impl, http.MethodPost, storeDocumentPath, `{"document": 1, "grid": [[null]]}`, fieldError{"grid[0][0]", "required", "required field"})
 	refusedWith(t, server, impl, http.MethodPost, storeDocumentPath, `{"document": 1, "grid": [null]}`, fieldError{"grid[0]", "required", "required field"})
 	refusedWith(t, server, impl, http.MethodPost, storeDocumentPath, `{"document": 1, "grid": [{}]}`, fieldError{"grid[0]", "type", "expected an array"})
+}
+
+// A JSON object or array scalar (Generic.StringMap, Embedding.Vector) takes
+// that object or array, alone and in a list, and not its JSON text, which
+// the route answers with type. A value that is the wrong JSON type, or
+// that holds one, is one type error at the argument's path.
+func TestAJSONObjectOrArrayScalarTakesThatObjectOrArray(t *testing.T) {
+	server, impl := serve(t)
+	const labels, vector = `{"en": "Hello", "fr": "Bonjour"}`, `[0.5, -1, 0]`
+	accepted(t, server, impl, http.MethodPost, embeddingsPath, `{"labels": `+labels+`, "vector": `+vector+`, "labelSets": [`+labels+`, {}], "vectorGrid": [[`+vector+`], []]}`)
+	for name, want := range map[string]string{
+		"labels":     labels,
+		"vector":     vector,
+		"labelSets":  `[` + labels + `, {}]`,
+		"vectorGrid": `[[` + vector + `], []]`,
+	} {
+		if !jsonEqual(t, impl.last[name], want) {
+			t.Errorf("%s: the implementation received %v, want %s", name, impl.last[name], want)
+		}
+	}
+	for _, tc := range []struct {
+		body string
+		want fieldError
+	}{
+		{`{"labels": "{\"en\": \"Hello\"}"}`, fieldError{"labels", "type", "expected an object"}},
+		{`{"labels": ["en"]}`, fieldError{"labels", "type", "expected an object"}},
+		{`{"labels": {"en": 1}}`, fieldError{"labels", "type", "does not match the declared type"}},
+		{`{"labels": {}, "vector": "[0.5]"}`, fieldError{"vector", "type", "expected an array"}},
+		{`{"labels": {}, "vector": {"x": 1}}`, fieldError{"vector", "type", "expected an array"}},
+		{`{"labels": {}, "vector": [1, true]}`, fieldError{"vector", "type", "does not match the declared type"}},
+		{`{"labels": null}`, fieldError{"labels", "required", "required field"}},
+		{`{"labels": {}, "labelSets": ["{}"]}`, fieldError{"labelSets[0]", "type", "expected an object"}},
+		{`{"labels": {}, "labelSets": [null]}`, fieldError{"labelSets[0]", "required", "required field"}},
+		{`{"labels": {}, "vectorGrid": [["[1]"]]}`, fieldError{"vectorGrid[0][0]", "type", "expected an array"}},
+		{`{"labels": {}, "vectorGrid": [[null]]}`, fieldError{"vectorGrid[0][0]", "required", "required field"}},
+	} {
+		refusedWith(t, server, impl, http.MethodPost, embeddingsPath, tc.body, tc.want)
+	}
 }
 
 func TestAMapArgumentIsAJSONObject(t *testing.T) {

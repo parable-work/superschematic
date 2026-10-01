@@ -246,12 +246,12 @@ class GridNamespace:
         try:
             return TypeAdapter(scalar_type).validate_python(value, strict=True)
         except Exception as err:
-            raise ValidationError(
-                self._build_validation_errors(err, default_field=field_name),
-            ) from err
+            validation_errors = self._build_validation_errors(err, default_field=field_name)
+            raise ValidationError(validation_errors) from err
 
-    def _validate_list_of_lists_argument(self, value: Any, element_type_name: str, field_name: str) -> None:
-        """Validate an array-of-arrays argument.
+    def _validate_list_of_lists_argument(self, value: Any, element_type_name: str, field_name: str) -> list[list[Any]]:
+        """Validate an array-of-arrays argument and return its rows of
+        validated elements.
 
         Each inner list must be a list (an empty one is valid) and each
         element is validated as element_type_name. Errors name the index:
@@ -262,15 +262,17 @@ class GridNamespace:
             raise ValidationError(
                 {field_name: [{"validator": "type", "message": f"{field_name} must be a list of lists"}]},
             )
+        rows: list[list[Any]] = []
         for row_index, row in enumerate(value):
             if not isinstance(row, (list, tuple)):
                 raise ValidationError(
                     {f"{field_name}[{row_index}]": [{"validator": "required", "message": "inner list must be a list"}]},
                 )
+            items: list[Any] = []
             for item_index, item in enumerate(row):
                 item_path = f"{field_name}[{row_index}][{item_index}]"
                 try:
-                    self._validate_scalar_argument(item, element_type_name, item_path)
+                    items.append(self._validate_scalar_argument(item, element_type_name, item_path))
                 except ValidationError as err:
                     raise ValidationError(
                         {
@@ -278,6 +280,8 @@ class GridNamespace:
                             for key, errors in err.errors.items()
                         },
                     ) from err
+            rows.append(items)
+        return rows
 
     def _validate_query_param_constraints(
         self,

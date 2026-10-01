@@ -87,9 +87,10 @@ type NamespaceInfo struct {
 	// keeps null (ScalarArg.KeepsNull).
 	HasUnsetArgs bool
 	// JSONValueTypes are the types of the values of the namespace's
-	// Generic.JSON body arguments (ScalarArg.IsAnyJSON), sorted. They gate
-	// _JSON_VALUE_TYPES, whose values _validate_scalar_argument refuses as
-	// None.
+	// JSON-valued body arguments (ScalarArg.IsAnyJSON, IsStructuredJSON),
+	// sorted. They gate _JSON_VALUE_TYPES: _validate_scalar_argument
+	// refuses None as one of them, and reports a failure inside one at the
+	// argument's path.
 	JSONValueTypes []string
 }
 
@@ -182,6 +183,21 @@ type ScalarArg struct {
 	// that value. None is refused where null is not a value: a required
 	// one and a list element.
 	IsAnyJSON bool
+
+	// IsStructuredJSON marks a body argument of a JSON object or array
+	// scalar (apigen.BodyArg.StructuredJSON; Generic.StringMap,
+	// Embedding.Vector), alone or in a list. Each value is typed as the
+	// types package's alias of the scalar (GenericStringMap,
+	// EmbeddingVector), which reads JSON text into the object or array it
+	// holds, and is sent as validated, so the route gets the object or
+	// array. None is refused as a required one and a list element.
+	IsStructuredJSON bool
+}
+
+// isJSONValue reports whether each value of the argument is a JSON value
+// typed as the types package's alias of its scalar.
+func (a ScalarArg) isJSONValue() bool {
+	return a.IsAnyJSON || a.IsStructuredJSON
 }
 
 // valueType is the Python type of one value of the argument: the element
@@ -309,7 +325,7 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 				namespace.HasUnsetArgs = true
 				output.HasUnsetArgs = true
 			}
-			if arg.IsAnyJSON {
+			if arg.isJSONValue() {
 				importsByNamespace[namespaceName][arg.valueType()] = struct{}{}
 				jsonTypesByNamespace[namespaceName][arg.valueType()] = struct{}{}
 			}
@@ -371,6 +387,9 @@ func collectNamespaceImports(target map[string]struct{}, endpoint apigen.Endpoin
 	if endpoint.OutputType != "" && shouldImportIRType(endpoint.OutputType) {
 		target[endpoint.OutputType] = struct{}{}
 	}
+	if outputIsJSONValue(endpoint) {
+		target[pythonJSONType(endpoint.OutputType)] = struct{}{}
+	}
 	for _, params := range [][]apigen.Param{endpoint.PathParams, endpoint.QueryParams, endpoint.ScalarArgs} {
 		for _, param := range params {
 			if param.Type != "" && !isPythonBuiltinType(pythonParamType(param)) {
@@ -420,20 +439,24 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 
 	keepsNull := map[string]bool{}
 	anyJSON := map[string]bool{}
+	structuredJSON := map[string]bool{}
 	for _, arg := range endpoint.BodyArgs {
 		keepsNull[arg.Name] = arg.KeepNull
 		anyJSON[arg.Name] = arg.AnyJSON
+		structuredJSON[arg.Name] = arg.StructuredJSON != ""
 	}
 	// The SDK sends the scalar arguments of a POST, PUT or PATCH in the
-	// body, where a Generic.JSON one is any JSON value. In the query string
-	// it stays the parameter's text.
+	// body, where a Generic.JSON one is any JSON value and a JSON object or
+	// array scalar one that object or array. In the query string each stays
+	// the parameter's text.
 	inBody := isBodyMethod(endpoint.Method)
 	scalarArgs := make([]ScalarArg, 0, len(endpoint.ScalarArgs))
 	for _, arg := range endpoint.ScalarArgs {
 		pyElementType := ""
 		pyType := pythonParamType(arg)
 		isAnyJSON := inBody && anyJSON[arg.Name]
-		if isAnyJSON {
+		isStructuredJSON := inBody && structuredJSON[arg.Name]
+		if isAnyJSON || isStructuredJSON {
 			pyType = pythonJSONType(arg.Type)
 		}
 		if arg.IsArray {
@@ -441,15 +464,16 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 			pyType = pythonListType(pyType, arg.ArrayDepth())
 		}
 		scalarArgs = append(scalarArgs, ScalarArg{
-			Name:            arg.Name,
-			PyName:          toPythonIdentifier(arg.Name),
-			PyType:          pyType,
-			PyElementType:   pyElementType,
-			Required:        arg.Required,
-			IsArray:         arg.IsArray,
-			IsArrayOfArrays: arg.IsArrayOfArrays,
-			KeepsNull:       keepsNull[arg.Name],
-			IsAnyJSON:       isAnyJSON,
+			Name:             arg.Name,
+			PyName:           toPythonIdentifier(arg.Name),
+			PyType:           pyType,
+			PyElementType:    pyElementType,
+			Required:         arg.Required,
+			IsArray:          arg.IsArray,
+			IsArrayOfArrays:  arg.IsArrayOfArrays,
+			KeepsNull:        keepsNull[arg.Name],
+			IsAnyJSON:        isAnyJSON,
+			IsStructuredJSON: isStructuredJSON,
 		})
 	}
 
@@ -498,7 +522,7 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		PathIsFString:        pathIsFString,
 		Description:          endpoint.Description,
 		InputType:            endpoint.InputType,
-		OutputTypeHint:       mapIRTypeToPythonTypeRef(endpoint.OutputType, endpoint.OutputArrayDepth()),
+		OutputTypeHint:       pythonOutputType(endpoint),
 		OutputModelName:      outputModelName(endpoint.OutputType),
 		OutputIsArray:        endpoint.OutputIsArray,
 		HasInput:             endpoint.HasInput,
@@ -683,13 +707,33 @@ func pythonParamType(param apigen.Param) string {
 	}
 }
 
-// pythonJSONType is the Python type of a value of a scalar whose value is
-// any JSON value (Generic.JSON): the types package's alias of the scalar,
-// GenericJSON, which pygen gives a field of it. It is Annotated[Any, ...],
-// so a dict, a list, a str, a number and a bool are values, and its
-// validator refuses what JSON cannot hold.
+// pythonJSONType is the Python type of a value of a scalar whose value is a
+// JSON value: the types package's alias of the scalar, which pygen gives a
+// field of it. GenericJSON (Generic.JSON, any JSON value) is
+// Annotated[Any, ...], so a dict, a list, a str, a number and a bool are
+// values, and its validator refuses what JSON cannot hold.
+// GenericStringMap and EmbeddingVector (a JSON object or array scalar) are
+// the dict or list, and read JSON text into the value it holds.
 func pythonJSONType(typeName string) string {
 	return codegen.BuildScalarTokens(typeName).Symbol
+}
+
+// outputIsJSONValue reports whether the endpoint's output is a scalar whose
+// value is a JSON value (apigen.EndpointInfo.OutputAnyJSON,
+// OutputStructuredJSON).
+func outputIsJSONValue(endpoint apigen.EndpointInfo) bool {
+	return endpoint.OutputAnyJSON || endpoint.OutputStructuredJSON != ""
+}
+
+// pythonOutputType is the Python type hint of the endpoint's response, in
+// its list levels. A JSON-valued scalar is the types package's alias of it
+// (pythonJSONType), as an argument of it is: the response is the JSON
+// value as decoded, which no model coerces.
+func pythonOutputType(endpoint apigen.EndpointInfo) string {
+	if outputIsJSONValue(endpoint) {
+		return pythonListType(pythonJSONType(endpoint.OutputType), endpoint.OutputArrayDepth())
+	}
+	return mapIRTypeToPythonTypeRef(endpoint.OutputType, endpoint.OutputArrayDepth())
 }
 
 // mapIRTypeToPython maps a schema type name to a Python type by name

@@ -1,6 +1,7 @@
 # Body arguments of operations without an input type: lists of strings,
 # numbers, an integer scalar, an enum, a string scalar, a UUID and an object
 # type, required single values of each builtin type, Generic.JSON values
+# and JSON object and array scalars (Generic.StringMap, Embedding.Vector)
 # alone, in a list and in a list of lists, and maps of an enum, of lists of
 # a string scalar and of an object type. searchPosts takes the arguments of
 # a GET operation, which travel in the query string: lists of numbers, an
@@ -23,6 +24,12 @@ scalars:
     languagePrimitive: string
   Generic.JSON:
     name: Generic.JSON
+    languagePrimitive: object
+  Generic.StringMap:
+    name: Generic.StringMap
+    languagePrimitive: object
+  Embedding.Vector:
+    name: Embedding.Vector
     languagePrimitive: object
   Temporal.DateTime:
     name: Temporal.DateTime
@@ -148,6 +155,25 @@ operationSets:
             typeRef: { name: Generic.JSON, isArray: true }
           - name: grid
             typeRef: { name: Generic.JSON, isArray: true, isArrayOfArrays: true }
+      # Store a post's labels and embedding, JSON object and array scalars
+      # alone, in a list and in a list of lists; returns the labels.
+      - name: storeEmbedding
+        typeRef: { name: Generic.StringMap }
+        required: true
+        httpMethod: POST
+        restPath: "embeddings"
+        arguments:
+          # A label per locale, a JSON object of strings.
+          - name: labels
+            typeRef: { name: Generic.StringMap }
+            required: true
+          # A JSON array of numbers.
+          - name: vector
+            typeRef: { name: Embedding.Vector }
+          - name: labelSets
+            typeRef: { name: Generic.StringMap, isArray: true }
+          - name: vectorGrid
+            typeRef: { name: Embedding.Vector, isArray: true, isArrayOfArrays: true }
       # Revise a stored document; returns the document.
       - name: reviseDocument
         typeRef: { name: Generic.JSON }
