@@ -15,6 +15,9 @@ pub mod types;
 {{end -}}
 {{if gt (len .Unions) 0 -}}
 pub mod unions;
+{{end -}}
+{{range .VersionGraphs -}}
+pub mod versiongraph_{{.FileName}};
 {{end}}
 {{if gt (len .Scalars) 0 -}}
 pub use scalars::*;
@@ -27,4 +30,7 @@ pub use types::*;
 {{end -}}
 {{if gt (len .Unions) 0 -}}
 pub use unions::*;
+{{end -}}
+{{range .VersionGraphs -}}
+pub use versiongraph_{{.FileName}}::*;
 {{end -}}

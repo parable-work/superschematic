@@ -71,9 +71,9 @@ By making a contribution to this project, I certify that:
 | golangci-lint | 2.11.4  | `tools.env` (`GOLANGCI_LINT_VERSION`)              |
 | Node          | 24      | `tools.env` (`NODE_VERSION`)                       |
 | Bun           | 1.4.0   | `tools.env` (`BUN_VERSION`)                        |
-| Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`) |
+| Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml` and `runtime/versiongraph/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`), and the version-graph binding on 3.9 too |
 | uv            | 0.12.9  | `tools.env` (`UV_VERSION`)                         |
-| Rust          | 1.95.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust` and `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript`) |
+| Rust          | 1.95.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust`, `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript`) and its Python binding `runtime/versiongraph/python` |
 | Postgres      | 16      | `tools.env` (`POSTGRES_VERSION`); CI's database tests run against it |
 | superscalar   | commit  | `superscalar.pin`; `go.mod` carries the same commit as a pseudo-version |
 
@@ -114,7 +114,7 @@ of them; run them locally before pushing.
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
 | `make cli-smoke`      | `bin/superschematic build` with no extension builds the DB, API and General fixtures |
 | `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript` and `runtime/engine/typescript` typecheck, build and test; the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and the engine's tests run under Node.js and Bun |
-| `make python`         | `runtime/schema/python` pytest                                       |
+| `make python`         | `runtime/schema/python` pytest; `runtime/versiongraph/python` fmt, clippy `-D warnings`, the PyO3 extension built by uv with maturin, and every core vector through the package under the default Python and 3.9 |
 | `make rust`           | `runtime/http/rust` and `runtime/versiongraph/rust` fmt, clippy `-D warnings` (the core for native and wasm32), test |
 | `make versiongraph`   | Builds the version-graph core's static archive the Go binding links (`scripts/versiongraph-archive.sh`) |
 | `make docs`           | Starlight site in `docs/` (`npm ci && npm run build`)                |
@@ -187,9 +187,11 @@ and concrete.
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
 `api`, `schema-config`, `schema-ir`, `schema-runtime`, `http-runtime`,
 `versiongraph`, `engine`), the
-PyPI distribution (`superschematic-schema-runtime`), the crates
-(`superschematic-http-runtime`, and `superschematic-versiongraph`, which is
-not published) and the five Go modules all carry the SemVer
+PyPI distributions (`superschematic-schema-runtime`, and
+`superschematic-versiongraph`, which is not published), the crates
+(`superschematic-http-runtime`, and `superschematic-versiongraph` and
+`superschematic-versiongraph-python`, which are not published) and the five
+Go modules all carry the SemVer
 version in `versions.env`, and `scripts/bump_version.py` is the only thing
 that writes it. `bump_version.py check` fails when any site disagrees; CI
 runs it on every pull request and the release workflow runs it before

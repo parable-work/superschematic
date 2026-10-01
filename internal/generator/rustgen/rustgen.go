@@ -220,6 +220,16 @@ type ModuleOutput struct {
 	// types.rs then declares HistoryRecord, whose recorded_at is the scalar
 	// crate's DateTime.
 	HasVersionedTypes bool
+
+	// VersionGraphs are the typed facades of the graphs the schema
+	// declares, each written as src/versiongraph_<name>.rs.
+	VersionGraphs []VersionGraphInfo
+
+	// VersionGraphDepPath is the Cargo.toml path entry for the version
+	// graph's Rust engine crate (Naming.VersionGraphRustCrate), relative to
+	// the output directory, set by SetVersionGraphPath. Empty names the
+	// crate's version instead.
+	VersionGraphDepPath string
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -343,6 +353,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
+	if output.VersionGraphs, err = versionGraphs(schema, output.Types); err != nil {
+		return nil, err
+	}
 	output.UsesHashMap = hasMapFields(output.Types)
 	output.UsesUnions = hasUnionFields(output.Types)
 	output.ExternalCrateDeps = collectExternalCrateDeps(output)
@@ -919,6 +932,11 @@ func collectExternalCrateDeps(output *ModuleOutput) []ExternalCrateDep {
 	// Every union decodes through serde_json::Value (unions.tmpl): a
 	// discriminated one reads its tag from it, an untagged one its keys.
 	if len(output.Unions) > 0 {
+		crateNames["serde_json"] = struct{}{}
+	}
+	// A version graph's facade reads and writes canonical rows as
+	// serde_json values.
+	if len(output.VersionGraphs) > 0 {
 		crateNames["serde_json"] = struct{}{}
 	}
 

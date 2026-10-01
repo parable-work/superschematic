@@ -1,0 +1,233 @@
+{
+  "name": "content_hash_ignores_key_order",
+  "op": "content_hash",
+  "input": {
+    "descriptor": {
+      "commitTable": "recipe_commit",
+      "graph": "recipe",
+      "kinds": [
+        {
+          "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "created_by": "uuid",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "id": "uuid",
+            "inputs": "json",
+            "parent_step_key": "uuid",
+            "position": "integer",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "timings": "json",
+            "title": "string",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "historyTable": "step_history",
+          "id": "id",
+          "key": "entity_key",
+          "kind": "step",
+          "order": "position",
+          "parent": {
+            "key": "parent_step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "table": "step",
+          "tombstone": "deleted_on_ref",
+          "units": {
+            "inputs": "jsonSchema",
+            "timings": "keyed"
+          },
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "created_by": "uuid",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "id": "uuid",
+            "name": "string",
+            "position": "integer",
+            "quantity": "string",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "step_key": "uuid",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "historyTable": "ingredient_history",
+          "id": "id",
+          "key": "entity_key",
+          "kind": "ingredient",
+          "order": "position",
+          "parent": {
+            "key": "step_key",
+            "kind": "step"
+          },
+          "ref": "ref",
+          "table": "ingredient",
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        },
+        {
+          "author": "updated_by",
+          "columns": {
+            "_version": "integer",
+            "created_at": "dateTime",
+            "created_by": "uuid",
+            "deleted_on_ref": "boolean",
+            "entity_key": "uuid",
+            "headline": "string",
+            "id": "uuid",
+            "recipe_id": "uuid",
+            "ref": "uuid",
+            "updated_at": "dateTime",
+            "updated_by": "uuid"
+          },
+          "excluded": [
+            "created_at",
+            "created_by",
+            "updated_at",
+            "recipe_id"
+          ],
+          "historyTable": "cover_history",
+          "id": "id",
+          "key": "entity_key",
+          "kind": "cover",
+          "ref": "ref",
+          "singleton": true,
+          "table": "cover",
+          "tombstone": "deleted_on_ref",
+          "version": "_version"
+        }
+      ],
+      "patchTable": "recipe_patch",
+      "refTable": "recipe_ref",
+      "releaseTable": "recipe_release",
+      "root": {
+        "key": "id",
+        "table": "recipe"
+      },
+      "snapshotTable": "recipe_snapshot_entry",
+      "version": 2
+    },
+    "tree": {
+      "step": [
+        {
+          "updated_by": "00000000-0000-4000-8000-00000000e002",
+          "updated_at": "2026-09-02T09:00:00+00:00",
+          "title": "Chop finely",
+          "timings": {
+            "prep": 5,
+            "boil": 10
+          },
+          "ref": "00000000-0000-4000-8000-0000000f0002",
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "position": 10,
+          "parent_step_key": null,
+          "inputs": {
+            "type": "object",
+            "required": [
+              "servings"
+            ],
+            "properties": {
+              "servings": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8,
+                "description": "People served"
+              },
+              "heat": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "high"
+                ]
+              }
+            },
+            "description": "What the step needs"
+          },
+          "id": "00000000-0000-4000-8000-0000000d0143",
+          "entity_key": "00000000-0000-4000-8000-00000000a001",
+          "deleted_on_ref": false,
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "_version": 1
+        },
+        {
+          "updated_by": "00000000-0000-4000-8000-00000000e001",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "title": "Simmer",
+          "timings": {},
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "position": 20,
+          "parent_step_key": null,
+          "inputs": {
+            "type": "object"
+          },
+          "id": "00000000-0000-4000-8000-0000000d0046",
+          "entity_key": "00000000-0000-4000-8000-00000000a002",
+          "deleted_on_ref": false,
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "_version": 1
+        }
+      ],
+      "ingredient": [
+        {
+          "updated_by": "00000000-0000-4000-8000-00000000e001",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "step_key": "00000000-0000-4000-8000-00000000a001",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "quantity": "1",
+          "position": 0,
+          "name": "onion",
+          "id": "00000000-0000-4000-8000-0000000d0047",
+          "entity_key": "00000000-0000-4000-8000-00000000b001",
+          "deleted_on_ref": false,
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "_version": 1
+        }
+      ],
+      "cover": [
+        {
+          "updated_by": "00000000-0000-4000-8000-00000000e001",
+          "updated_at": "2026-09-01T10:00:00+00:00",
+          "ref": "00000000-0000-4000-8000-0000000f0001",
+          "recipe_id": "00000000-0000-4000-8000-000000000100",
+          "id": "00000000-0000-4000-8000-0000000d0136",
+          "headline": "Weeknight soup",
+          "entity_key": "00000000-0000-4000-8000-00000000c001",
+          "deleted_on_ref": false,
+          "created_by": "00000000-0000-4000-8000-00000000e001",
+          "created_at": "2026-09-01T10:00:00+00:00",
+          "_version": 1
+        }
+      ]
+    }
+  },
+  "expect": {
+    "contentHash": "1e615e173c06441c278eff37bca7858a8c8ecc324c2c3ddd46fa79f24d9302ef"
+  }
+}
