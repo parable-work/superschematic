@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 )
 
 // WriteTypes writes the generated Rust crate into outputDir: Cargo.toml and
@@ -42,9 +43,25 @@ func WriteTypes(output *ModuleOutput, outputDir string) error {
 		{Condition: hasTypes, Template: "types.tmpl", Filename: "types.rs"},
 		{Condition: len(output.Unions) > 0, Template: "unions.tmpl", Filename: "unions.rs"},
 	}
-	return codegen.WriteConditionalFiles(srcFiles, srcDir, func(templateName, outputPath string) error {
+	if err := codegen.WriteConditionalFiles(srcFiles, srcDir, func(templateName, outputPath string) error {
 		return generateFile(templateName, outputPath, output)
-	})
+	}); err != nil {
+		return err
+	}
+	for _, graph := range output.VersionGraphs {
+		data := versionGraphFile{Graph: graph, Naming: output.Naming}
+		if err := generateFile("versiongraph.tmpl", filepath.Join(srcDir, versionGraphFileName(graph)), data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// versionGraphFile is what versiongraph.tmpl renders: one graph and the
+// naming its crate coordinates come from.
+type versionGraphFile struct {
+	Graph  VersionGraphInfo
+	Naming naming.Naming
 }
 
 // generateFile generates a file from an embedded template. Rust sources are
@@ -52,7 +69,7 @@ func WriteTypes(output *ModuleOutput, outputDir string) error {
 // blank lines behind, and rustfmt is not guaranteed to be installed at
 // generation time. Blank lines never affect Rust syntax, so collapsing them
 // is safe.
-func generateFile(templateName, outputPath string, output *ModuleOutput) error {
+func generateFile(templateName, outputPath string, output any) error {
 	cfg := codegen.NewFileConfig(templatesFS, templateName, outputPath, output, customTemplateFuncs())
 	if strings.HasSuffix(outputPath, ".rs") {
 		cfg.FormatOutput = normalizeRustWhitespace
