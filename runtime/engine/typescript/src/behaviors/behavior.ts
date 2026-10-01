@@ -64,10 +64,11 @@ export interface BehaviorMigration {
   readonly columns?: Readonly<Record<string, ColumnSpec>>;
   /**
    * DDL and data changes on the behavior's own tables: CREATE TABLE, CREATE
-   * [UNIQUE] INDEX, CREATE VIRTUAL TABLE, ALTER TABLE, DROP TABLE and DROP
-   * INDEX, and the statements a write runs. Every object it creates must be
-   * one of its own tables (sql.table(name)); a trigger, a view or a
-   * temporary object is refused.
+   * [UNIQUE] INDEX, CREATE VIRTUAL TABLE ... USING fts5, ALTER TABLE, DROP
+   * TABLE and DROP INDEX, and the statements a write runs. Every object it
+   * creates must be one of its own tables (sql.table(name)); a trigger, a
+   * view, a temporary object and a virtual table of another module are
+   * refused.
    */
   up?(sql: SqlWriter): void;
 }
@@ -349,12 +350,51 @@ export type InstanceChange =
       readonly before?: FrozenJSON;
     };
 
+/** One stored instance, as afterConfigChange visits it. */
+export interface StoredInstance {
+  readonly id: string;
+  /** The instance's own fields, without any behavior's; deep-frozen. */
+  readonly data: FrozenJSON;
+}
+
+/**
+ * afterConfigChange's context: the schema's instances in one namespace,
+ * in the publish's transaction. It has no principal and asks no policy:
+ * the publish was allowed, and what the behavior reads here goes into its
+ * own storage only, never back to the publisher.
+ */
+export interface PublishContext<Config> {
+  readonly behavior: string;
+  /** The config the published version gives the behavior; undefined when it no longer composes it. */
+  readonly config: Config | undefined;
+  /** The config the version it replaces gave; undefined when that one did not compose it, or there was none. */
+  readonly before: Config | undefined;
+  /** The namespace whose instances this call covers. */
+  readonly namespace: string;
+  readonly schema: string;
+  /** The version being published. */
+  readonly version: number;
+  /** The engine clock's time for the publish, in epoch milliseconds. */
+  readonly now: number;
+  /** SQL on the behavior's own tables, writes included. */
+  readonly sql: SqlWriter;
+  /** Visits every instance of the schema in the namespace, in creation order, reading 500 at a time. */
+  eachInstance(visit: (instance: StoredInstance) => void): void;
+}
+
 /** The type a config is given on, for parseConfig. */
 export interface ConfigTarget {
   readonly schema: string;
   readonly type: string;
   /** The JSON keys of the type's own fields. */
   readonly fields: readonly string[];
+  /**
+   * The JSON Schema of each of the type's own fields, by JSON key, as the
+   * describe document writes an instance's properties (without the scalar
+   * key): a string field, or one of a scalar whose values are strings, has
+   * the type "string", or ["string", "null"] when it is not required.
+   */
+  readonly fieldSchemas: Readonly<Record<string, unknown>>;
   /** Every behavior the type lists, in order. */
   readonly behaviors: readonly string[];
   /** The config of each behavior the type lists, as the schema holds it ({} when it gives none). */
@@ -433,6 +473,17 @@ export interface BehaviorImplementation<Config = unknown> {
    * nor removed from a schema that has instances.
    */
   configChange?(before: Config | undefined, after: Config | undefined): string | undefined;
+
+  /**
+   * Brings the behavior's own storage in line with a published config:
+   * runs in the publish's transaction, after the version is recorded, when
+   * the version adds the behavior (a schema's first version included),
+   * removes it, or changes its config, once for each namespace whose
+   * instances the schema serves (its own, or every namespace for a schema
+   * of the shared one). A throw refuses the publish. It holds the file's
+   * write lock while it runs, so it costs every writer as long as it takes.
+   */
+  afterConfigChange?(context: PublishContext<Config>): void;
 
   /** The storage it owns, created when a schema that composes it is published. */
   readonly migrations?: readonly BehaviorMigration[];

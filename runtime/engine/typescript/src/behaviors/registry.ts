@@ -187,7 +187,7 @@ export class BehaviorRegistry {
       problems
     );
 
-    for (const hook of ['parseConfig', 'configChange', 'initialize', 'guard', 'afterChange', 'guardReference', 'afterReferenceChange'] as const) {
+    for (const hook of ['parseConfig', 'configChange', 'afterConfigChange', 'initialize', 'guard', 'afterChange', 'guardReference', 'afterReferenceChange'] as const) {
       if (implementation[hook] !== undefined && typeof implementation[hook] !== 'function') {
         problems.push(`${hook} is a function`);
       }

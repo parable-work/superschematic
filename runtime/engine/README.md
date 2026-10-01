@@ -421,8 +421,9 @@ function is synchronous (D16): one that returns a promise is a
 | Member | What it is |
 | --- | --- |
 | `declaration` | the declaration the compiler registers, as its JSON file holds it |
-| `parseConfig(config, target)` | checks a config its `configSchema` accepted and returns what the other functions get as `config`; throws `BehaviorConfigError` to refuse it. Absent, `config` is the JSON config, `{}` when the type gives none |
+| `parseConfig(config, target)` | checks a config its `configSchema` accepted and returns what the other functions get as `config`; throws `BehaviorConfigError` to refuse it. Absent, `config` is the JSON config, `{}` when the type gives none. `target` has the schema, the type, its fields' JSON keys and `fieldSchemas` (each one's JSON Schema, as the describe document writes it), every behavior the type lists with its config, and, when the schema is defined or published, `schemas` ("Other instances") |
 | `configChange(before, after)` | whether a new version may change the config, add the behavior (`before` undefined) or remove it (`after` undefined) on a schema with instances: a reason refuses. Absent, only an identical config, and no adding or removing while there are instances |
+| `afterConfigChange(context)` | brings its own storage in line when a published version adds it (a first version included), removes it or changes its config ("Publishing") |
 | `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table and an `up(sql)` for its own tables |
 | `initialize(context)` | sets up its state for a new instance |
 | `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does |
@@ -551,9 +552,10 @@ if (milestone && flow && !isTerminalState(flow, String(milestone.data.status))) 
 `parseConfig(config, target)` gets `target.configs`, the config of every
 behavior the type lists as the schema holds it, so a behavior that builds
 on another checks its config against that one's when the schema is
-defined. When the schema is defined or published it also gets
-`target.schemas`, so a config that names another schema is checked
-against it then:
+defined, and `target.fieldSchemas`, so one that reads the type's own
+fields checks their types. When the schema is defined or published it
+also gets `target.schemas`, so a config that names another schema is
+checked against it then:
 
 ```ts
 const tasks = target.schemas?.get('Task');   // asks read on Task, as the caller who defines
@@ -636,7 +638,8 @@ of other characters one `_` (`acme.Rating` is `acme_rating`), with `_2`,
 two behaviors never collide. Its migrations run through the ledger under
 its name, in the publish's transaction: each adds its columns, then runs
 `up(sql)`, after which every object `sqlite_master` gained must be a
-table or index of its own, on a table of its own. A column is `integer`,
+table or index of its own, on a table of its own (an FTS5 table's shadow
+tables are named after it). A column is `integer`,
 `real`, `text`, `blob` or `any`, with an optional default; a `NOT NULL`
 one needs a default, which every instance that exists takes. When an
 implementation registers and the file already holds its storage, its new
@@ -650,9 +653,37 @@ other than the behavior's own `bhv_<key>__` names, and one that calls
 `load_extension`. A read runs `SELECT`, `VALUES` and `WITH ... SELECT`; a
 write adds `INSERT`, `UPDATE`, `DELETE` and `REPLACE`; a migration adds
 `CREATE TABLE`, `CREATE [UNIQUE] INDEX`, `CREATE VIRTUAL TABLE`, `ALTER
-TABLE`, `DROP TABLE` and `DROP INDEX`. `PRAGMA`, `ATTACH`, transaction
-control, triggers, views and temporary objects are refused. Pass data as
-parameters.
+TABLE`, `DROP TABLE` and `DROP INDEX`. A virtual table is `[IF NOT
+EXISTS] <own name> USING fts5`, unqualified: another module can reach
+past the behavior's tables (`dbstat` reports on every table in the
+file), and full-text search needs fts5 alone. `PRAGMA`, `ATTACH`,
+transaction control, triggers, views and temporary objects are refused.
+Pass data as parameters.
+
+### Publishing
+
+A publish runs a behavior's `afterConfigChange(context)` when the
+version adds the behavior (a schema's first version included), removes
+it, or changes its config as the schema holds it; a version that keeps
+the config runs nothing. It runs in the publish's transaction, after the
+behavior's migrations and the version's row and before its `publish`
+event, once for each namespace whose instances the schema serves: the
+namespace that holds it, or every namespace for a schema of the shared
+one. A throw refuses the publish, and the version and every write of the
+hook roll back with it.
+
+`PublishContext` has `behavior`, `config` (the parsed config the version
+gives, undefined when it removes the behavior), `before` (the version it
+replaces gave, undefined when that one did not compose it), `namespace`,
+`schema`, `version`, `now`, `sql` with writes on the behavior's own
+tables, and `eachInstance(visit)`, which visits every instance of the
+schema in the namespace in creation order, read 500 at a time, each `{
+id, data }` with its own fields, deep-frozen. It has no principal and
+asks no policy: the publish was allowed, and what the hook reads goes
+into the behavior's own storage, never back to the publisher. It holds
+the file's write lock until it returns, so a hook that visits every
+instance costs every writer that long. `Search` rebuilds its index this
+way.
 
 ### Composition
 
@@ -678,6 +709,7 @@ every call on the schema `unavailable` until one registers.
 | `delete` | check `expectedSeq` -> every guard, then each referencing behavior's `guardReference` -> the row goes -> each `afterChange` -> its references go -> event -> each `afterReferenceChange` -> no reference to it may remain |
 | `invoke` | policy -> parameters against `paramsSchema` -> check `expectedSeq` -> every guard (and, for a writing operation, each `guardReference`) -> the handler -> its result against `resultSchema` -> for a writing operation, each `afterChange`, the next `seq`, the event and each `afterReferenceChange` |
 | `invokeSchema` | policy -> parameters against `paramsSchema` -> the handler -> its result against `resultSchema`; no guard, no event |
+| `publish` (`schemas`) | policy -> the compatibility rule, with each `configChange` -> each `parseConfig` with `target.schemas` (`read` on each schema it reaches) -> each composed behavior's migrations -> the version -> each `afterConfigChange` of a behavior it adds, removes or changes, per namespace -> event |
 
 An `update` asks each `guardReference` after the guards and runs each
 `afterReferenceChange` after its event, as a writing operation does.
