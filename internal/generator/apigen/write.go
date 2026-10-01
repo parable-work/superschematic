@@ -228,6 +228,7 @@ func templateFuncs(provider AuthProvider) (template.FuncMap, error) {
 		"toPackageName":           toPackageName,
 		"trimPrefix":              strings.TrimPrefix,
 		"splitLines":              splitLines,
+		"commentLines":            commentLines,
 		"isPlainImage":            isPlainImage,
 		"isImageWithTransparency": isImageWithTransparency,
 	}

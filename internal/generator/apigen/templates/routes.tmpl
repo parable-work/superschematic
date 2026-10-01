@@ -47,6 +47,9 @@ import (
 {{- end }}
 	runtimemiddleware "{{ $.Naming.HTTPRuntimeGoModule }}/middleware"
 	runtimerouting "{{ $.Naming.HTTPRuntimeGoModule }}/routing"
+{{- range .RawBodyCheckImports }}
+	{{ .Name }} "{{ .Path }}"
+{{- end }}
 {{- if .IsPublic }}
 	orm "{{ .ORMModule }}"
 {{- end }}
@@ -662,6 +665,15 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 				RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
 				return
 			}
+			{{- range .RawBodyChecks }}
+			{{- range commentLines .Comment }}
+			{{ . }}
+			{{- end }}
+			if {{ .Var }} := {{ .PackageName }}.{{ .Func }}(rawInput{{ range .Fields }}, {{ printf "%q" . }}{{ end }}); {{ .Var }}.HasErrors() {
+				RespondValidationErrors(w, r, {{ .Var }})
+				return
+			}
+			{{- end }}
 			if err := json.Unmarshal(rawInput, &input); err != nil {
 				RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
 				return
@@ -745,6 +757,12 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			{{- if .HasInput }}
 			dataField := r.FormValue("data")
 			if dataField != "" {
+				{{- range .RawBodyChecks }}
+				if {{ .Var }} := {{ .PackageName }}.{{ .Func }}([]byte(dataField){{ range .Fields }}, {{ printf "%q" . }}{{ end }}); {{ .Var }}.HasErrors() {
+					RespondValidationErrors(w, r, {{ .Var }})
+					return
+				}
+				{{- end }}
 				if err := json.Unmarshal([]byte(dataField), &input); err != nil {
 					RespondError(w, r, gohttp.StatusBadRequest, "Invalid 'data' field: "+err.Error())
 					return
@@ -772,6 +790,15 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			RespondError(w, r, gohttp.StatusBadRequest, "input is required")
 			return
 		}
+		{{- range .RawBodyChecks }}
+		{{- range commentLines .Comment }}
+		{{ . }}
+		{{- end }}
+		if {{ .Var }} := {{ .PackageName }}.{{ .Func }}(rawInput{{ range .Fields }}, {{ printf "%q" . }}{{ end }}); {{ .Var }}.HasErrors() {
+			RespondValidationErrors(w, r, {{ .Var }})
+			return
+		}
+		{{- end }}
 		if err := json.Unmarshal(rawInput, &input); err != nil {
 			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
 			return

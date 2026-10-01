@@ -73,7 +73,10 @@ type AuthModel struct {
 // import the core template writes: under --skip-format nothing removes the
 // duplicate, and the file does not compile. routes.go imports the generated
 // types module only when a core handler uses it (RoutesNeedTypes), so a
-// routes snippet does not reference types.
+// routes snippet does not reference types. routes.go also imports the
+// package of each raw-body check an endpoint runs (RawBodyCheckImports); a
+// routesImports snippet that needs one of those packages leaves its own
+// import out when ImportsRawBodyCheckPackage reports it.
 var AuthSnippets = []string{
 	// context.tmpl
 	"contextImports", // imports the auth context shims need, in the runtime import group

@@ -1663,3 +1663,26 @@ SDK: the WHATWG URL parser both build on removes a dot segment, encoded
 (`%2E`) or not. The Go and Python SDKs send it as it is.
 
 The rule is reversible until the first release.
+
+## D24. A scalar's raw-body check runs before a route decodes the body
+
+Some writes must be refused for what decoding a scalar value throws away: a
+key the decoded form has no place for, a repeated key, a spelling the
+decode normalizes. Once the Go route has decoded the input, neither its
+rules nor the implementation can see what was lost. A distribution that
+checks the raw JSON in its own generator had no seam to emit that check:
+the Go routes decode each input type with `json.Unmarshal` and nothing runs
+before it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A scalar catalog declares a check per scalar beside its rows, as it declares uploads (D4): `RawBodyCheckCatalog`, built with `registry.ScalarCatalogWithRawBodyChecks`. A check names a Go function by import path, package name and function name. The registry hands the registered catalog's checks to apigen (`Options.RawBodyChecks`). The IR does not carry them, since only the Go routes read them. | A general route-body hook for extensions, which lets any extension rewrite handler code; a strict decode of the scalar, which would also refuse stored values when they are read; a field on `ir.ScalarDef`, which would put a Go import path into every IR form |
+| For an input type with single-valued top-level fields of a checked scalar, the Go route calls each distinct check once, with the raw body and the wire names of its fields, and answers 400 with the `ValidationErrors` it returns. The call sits in the three places the route decodes an input from JSON: the body of a route without file uploads, and the JSON body or the multipart `data` part of a route with them. It follows the refusal of a null body and precedes `json.Unmarshal`. | One call per field, which parses the body once per field; checking the decoded value, which is too late |
+| `ErrorsVar` and `Comment` belong to the registration. The core writes `checkErrors` and no comment. A distribution that checked the raw body in its own generator sets both to keep that generator's output byte for byte; the comment is written in the two JSON-body paths only, as such a generator may have written it. | Core literals, which would put one distribution's variable name and rationale into every distribution's output; no such fields, which costs that distribution a diff in every checked route |
+| routes.go imports a check's package under its `PackageName`. apigen refuses a name routes.go already imports a package under, one name for two import paths, an unexported function, and a result variable the call reads. An auth provider that imports the same package asks `APIOutput.ImportsRawBodyCheckPackage` and leaves its own import out, per the rule against repeated imports in `apigen.AuthSnippets`. | Leaving the duplicate import for gofmt to merge, which `--skip-format` does not do |
+| Only the Go API generator renders checks. The Rust and TypeScript servers decode as before. | A check in every server, which needs one function per language that no distribution has yet |
+
+Output for a schema whose catalog declares no check for the scalars it
+uses is unchanged byte for byte, and every existing golden is.
+
+The rule is reversible until the first release.
