@@ -1870,8 +1870,7 @@
               "array",
               "string",
               "number",
-              "boolean",
-              "null"
+              "boolean"
             ],
             "x-superschematic-scalar": "Generic.JSON"
           },
@@ -1884,8 +1883,7 @@
                 "array",
                 "string",
                 "number",
-                "boolean",
-                "null"
+                "boolean"
               ],
               "x-superschematic-scalar": "Generic.JSON"
             },
@@ -2005,7 +2003,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:5169596798374aae03af06eb3b36fb32af6a2f54348c032c6d668800e9f6b51b"
+      "inputSchemaDigest": "sha256:63b9139615387b301900b5e6f9262212d90108dfc1fcf8544fc13d033a163731"
     },
     {
       "name": "a distribution's keys",
@@ -3026,8 +3024,7 @@
               "array",
               "string",
               "number",
-              "boolean",
-              "null"
+              "boolean"
             ],
             "x-acme-scalar": "Generic.JSON"
           },
@@ -3040,8 +3037,7 @@
                 "array",
                 "string",
                 "number",
-                "boolean",
-                "null"
+                "boolean"
               ],
               "x-acme-scalar": "Generic.JSON"
             },
@@ -3163,7 +3159,7 @@
         "x-acme-arguments": 1,
         "x-acme-source": "a \u003cb\u003e \u0026 c"
       },
-      "inputSchemaDigest": "sha256:a3d78fb033ba19d7d3f7fa2965876663ff048f69f8459291eac449b2a01bc43e"
+      "inputSchemaDigest": "sha256:17d7adcfe377e67e9b8dbae796edc4e4fe2180b49118e1ed23629d7b30314648"
     },
     {
       "name": "no keys",
@@ -4111,8 +4107,7 @@
               "array",
               "string",
               "number",
-              "boolean",
-              "null"
+              "boolean"
             ]
           },
           "payloads": {
@@ -4124,8 +4119,7 @@
                 "array",
                 "string",
                 "number",
-                "boolean",
-                "null"
+                "boolean"
               ]
             },
             "type": [
@@ -4240,7 +4234,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:d05ba42bb8689fe7f464aadae103ddbc1e9b3d76d9622302c30d06ab98450de3"
+      "inputSchemaDigest": "sha256:48630724847549ef067d16b49968fee96dbc49ac93fd7982d4fa2739ff611013"
     }
   ],
   "defaults": {

@@ -15,8 +15,9 @@ var ToneValues = []any{"warm", "cool"}
 // in a tools/schema.json: an enum lists its values wherever it appears (a
 // path, query or body argument, an input field, an item of a list or of a
 // list of lists, a map value, a field of a nested object or of a union
-// member), a nullable enum also lists null, and a map body argument is an
-// object whose additionalProperties is the value schema.
+// member), a nullable enum also lists null, a required Generic.JSON takes
+// every JSON type but null, and a map body argument is an object whose
+// additionalProperties is the value schema.
 func CheckToolParamsSchema(t *testing.T, document []byte) {
 	t.Helper()
 	var manifest struct {
@@ -86,6 +87,10 @@ func CheckToolParamsSchema(t *testing.T, document []byte) {
 	// Not required, so nullable: null is one of the values.
 	if got, want := at("paint.paint/maybeTone")["enum"], append(append([]any(nil), ToneValues...), nil); !reflect.DeepEqual(got, want) {
 		t.Errorf("paint.paint/maybeTone: enum = %v, want %v", got, want)
+	}
+	// A required Generic.JSON is any JSON value but null (D14, amended).
+	if got, want := at("paint.paint/extra")["type"], []any{"object", "array", "string", "number", "boolean"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("paint.paint/extra: type = %v, want %v", got, want)
 	}
 
 	for path, value := range map[string]map[string]any{

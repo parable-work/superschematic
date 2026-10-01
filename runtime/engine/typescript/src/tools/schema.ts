@@ -11,7 +11,8 @@ argument schema whether a schema is generated or run by the engine:
   format from its declaration or from its name and mappings (an email, a
   date-time, a date or a URI), its description, pattern, lengths and
   range, and names itself under the scalar key (`x-superschematic-scalar`
-  by default). `Generic.JSON`'s mapping is `any`: every JSON type;
+  by default). `Generic.JSON`'s mapping is `any`: every JSON type but
+  null (D14, amended);
 - an enum is a string listing its serialized values;
 - a type of the document is a closed object of its fields, sorted
   `required`; a type already being expanded is a plain reference, so
@@ -33,10 +34,11 @@ runtime/engine/testdata/tool_parameters_parity.json, which a Go test
 writes from toolsutil, holds this to the Go output, digests included.
 
 A Property renders two ways: as tools/schema.json writes it (keys sorted,
-`any` as the list of every JSON type, a nullable type as [type, "null"]),
-and as the Go encoder writes it for inputSchemaDigest (struct field order,
-the scalar key first, a nullable property's type and enum last, HTML
-characters escaped).
+`any` as the list of every JSON type but null, a nullable type with
+"null" last), and as the Go encoder writes it for inputSchemaDigest
+(struct field order, the scalar key first, the type of a nullable or an
+`any` property and a nullable property's enum last, HTML characters
+escaped).
 */
 
 import { createHash } from 'node:crypto';
@@ -88,8 +90,24 @@ export interface ArgumentSchema {
   readonly required: readonly string[];
 }
 
-/** The JSON types `any` stands for, as tools/schema.json lists them. */
-export const ANY_JSON_TYPES: readonly string[] = ['object', 'array', 'string', 'number', 'boolean', 'null'];
+/**
+ * The JSON types an `any` property takes, as tools/schema.json lists them:
+ * every one but null (D14, amended). A nullable one also takes null.
+ */
+const JSON_VALUE_TYPES: readonly string[] = ['object', 'array', 'string', 'number', 'boolean'];
+
+/** Every JSON type, null included: a result schema that names no type. */
+export const ANY_JSON_TYPES: readonly string[] = [...JSON_VALUE_TYPES, 'null'];
+
+// typeValue is a property's JSON Schema type: `any` as every JSON type but
+// null, and a nullable type with null after it.
+function typeValue(property: Property): string | string[] {
+  const nullable = property.nullable === true && property.type !== 'null';
+  if (property.type === 'any') {
+    return nullable ? [...ANY_JSON_TYPES] : [...JSON_VALUE_TYPES];
+  }
+  return nullable ? [property.type ?? '', 'null'] : (property.type ?? '');
+}
 
 // A scalar's JSON Schema facts: apigen.ScalarJSONSchemaInfo.
 interface ScalarInfo {
@@ -420,8 +438,8 @@ function omitEmpty(property: Property): Property {
 /**
  * renderProperty writes a property as tools/schema.json does
  * (toolsutil.JSONSchemaPropertyLiteral): keys sorted, the scalar name
- * under scalarKey when it is not empty, `any` as every JSON type, and a
- * nullable type, enum or list with null.
+ * under scalarKey when it is not empty, `any` as every JSON type but null,
+ * and a nullable type, enum or list with null.
  */
 export function renderProperty(property: Property, scalarKeyName: string): unknown {
   if (property.raw !== undefined) {
@@ -445,7 +463,7 @@ export function renderProperty(property: Property, scalarKeyName: string): unkno
   if (property.pattern !== undefined) out.pattern = property.pattern;
   if (property.properties !== undefined && property.properties.size > 0) out.properties = renderProperties(property.properties, scalarKeyName);
   if (property.required !== undefined && property.required.length > 0) out.required = [...property.required];
-  out.type = property.type === 'any' ? [...ANY_JSON_TYPES] : nullable ? [property.type ?? '', 'null'] : (property.type ?? '');
+  out.type = typeValue(property);
   if (scalarKeyName !== '' && property.canonicalScalar !== undefined) {
     out[scalarKeyName] = property.canonicalScalar;
   }
@@ -526,7 +544,8 @@ function encodeProperties(properties: ReadonlyMap<string, Property>, scalarKeyNa
 
 // encodeProperty is toolsutil.JSONSchemaProperty.MarshalJSON. A nullable
 // property is a struct that embeds the plain one and redeclares type and
-// enum, which Go writes after every embedded member.
+// enum, and an `any` one a struct that redeclares type, which Go writes
+// after every embedded member.
 function encodeProperty(property: Property, scalarKeyName: string): string {
   if (property.raw !== undefined) {
     return goJSON(property.raw);
@@ -535,9 +554,10 @@ function encodeProperty(property: Property, scalarKeyName: string): string {
   if (scalarKeyName !== '' && property.canonicalScalar !== undefined) {
     members.push(`${goString(scalarKeyName)}:${goString(property.canonicalScalar)}`);
   }
-  const nullable = property.nullable === true && property.type !== 'any' && property.type !== 'null';
+  const any = property.type === 'any';
+  const nullable = property.nullable === true && !any && property.type !== 'null';
   if (property.additionalProperties !== undefined) members.push('"additionalProperties":false');
-  if (!nullable) members.push(`"type":${goString(property.type ?? '')}`);
+  if (!nullable && !any) members.push(`"type":${goString(property.type ?? '')}`);
   if (property.format !== undefined) members.push(`"format":${goString(property.format)}`);
   if (property.description !== undefined) members.push(`"description":${goString(property.description)}`);
   if (property.pattern !== undefined) members.push(`"pattern":${goString(property.pattern)}`);
@@ -551,10 +571,8 @@ function encodeProperty(property: Property, scalarKeyName: string): string {
     members.push(`"properties":${encodeProperties(property.properties, scalarKeyName)}`);
   }
   if (property.required !== undefined && property.required.length > 0) members.push(`"required":${goJSON(property.required)}`);
-  if (nullable) {
-    members.push(`"type":${goJSON([property.type ?? '', 'null'])}`);
-    if (values) members.push(`"enum":${goJSON([...values, null])}`);
-  }
+  if (nullable || any) members.push(`"type":${goJSON(typeValue(property))}`);
+  if (nullable && values) members.push(`"enum":${goJSON([...values, null])}`);
   return `{${members.join(',')}}`;
 }
 

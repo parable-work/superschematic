@@ -932,6 +932,25 @@ a composite default. An empty string is checked like any other value, so a
 `""` default for a scalar with a `minLength` fails the build, although a
 runtime reads `""` in an optional string scalar field as absent.
 
+### D14, amended: a tool argument schema writes `Generic.JSON` without null
+
+The tool argument schemas (`internal/generator/toolsutil`, which the
+TypeScript, Go and Rust SDK generators write into `tools/schema.json`, and
+the engine's MCP tools, which match them) wrote `Generic.JSON` as every
+JSON type, null included, for a required argument, an optional one and a
+list element alike. A caller that followed the schema could send a null
+that every validator refuses as `required`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A `Generic.JSON` argument's type lists every JSON type but null: `["object", "array", "string", "number", "boolean"]`. An optional body argument adds `"null"`, as every optional body argument's type does, and a null there is absent. A required argument, a query argument (never nullable in a tool schema), a list element and a map value take no null. | Every JSON type, null included, for every argument |
+| A map value takes no null, although every generated validator still accepts a null `Generic.JSON` map value (above). The schema states the rule; a caller that follows it sends nothing a validator refuses. | Listing null in a map value's type, to match the validators' gap |
+| `inputSchemaDigest` hashes the type as written, not the internal `any` type of the scalar table, so the digest of every argument schema with a `Generic.JSON` argument changed. | Hashing the internal type, which would keep a required argument's digest while its schema changed |
+
+A tool's `returns` is unchanged and still lists null for a `Generic.JSON`
+result. The scalar's description, which superscalar's catalog supplies,
+still says null is a value.
+
 ## D16. An engine takes schemas as data, and behaviors compose on its types
 
 A distribution built a server on the source tree that takes a schema while
