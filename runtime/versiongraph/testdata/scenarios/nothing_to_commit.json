@@ -1,0 +1,20 @@
+{
+  "name": "nothing_to_commit",
+  "description": "A commit with nothing to commit is refused with nothing_to_commit and writes no commit: on a change set with no rows, after a commit with no write since, and after a save that leaves the composed tree as the last commit holds it.",
+  "steps": [
+    {"op": "sql", "statement": "INSERT INTO recipe (id, title, created_by) VALUES ($1::uuid, 'Bread', $2::uuid)", "args": [{"uuid": "Bread"}, {"uuid": "Cook"}]},
+    {"op": "createPrimary", "root": "Bread", "name": "main", "as": "main"},
+    {"op": "branch", "from": "main", "name": "mix", "as": "mix"},
+    {"op": "commit", "ref": "mix", "expect": {"error": "nothing_to_commit"}},
+    {"op": "history", "ref": "mix", "expect": {"commits": []}},
+    {"op": "save", "ref": "mix", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}},
+    {"op": "commit", "ref": "mix", "as": "c1", "expect": {"commit": {"ref": "mix", "parent": null}}},
+    {"op": "commit", "ref": "mix", "expect": {"error": "nothing_to_commit"}},
+    {"op": "save", "ref": "mix", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix", "timings": {}}]}}, "expect": {"ref": {"head": "c1"}}},
+    {"op": "commit", "ref": "mix", "expect": {"error": "nothing_to_commit"}},
+    {"op": "history", "ref": "mix", "expect": {"commits": ["c1"]}},
+    {"op": "save", "ref": "mix", "edits": {"step": {"upsert": [{"entity_key": "Mix", "position": 1, "instruction": "Mix well", "timings": {}}]}}},
+    {"op": "commit", "ref": "mix", "as": "c2", "expect": {"commit": {"ref": "mix", "parent": "c1"}}},
+    {"op": "history", "ref": "mix", "expect": {"commits": ["c2", "c1"]}}
+  ]
+}

@@ -450,7 +450,10 @@ class Runner {
           break;
         case "sql": {
           const args = ((step.get("args") as JsonValue[] | undefined) ?? []).map((arg) => this.sqlArg(arg));
-          await this.scratch.pool.query({ text: str(step.get("statement")), values: args, types: rawTypes });
+          const result = await this.scratch.pool.query({ text: str(step.get("statement")), values: args, types: rawTypes });
+          // A query's rows, in the order it returns them, every column as
+          // the text Postgres writes.
+          rows = result.rows.map((row: Record<string, string | null>) => JSON.stringify(row));
           break;
         }
         default:
@@ -550,7 +553,7 @@ class Runner {
     const wantRows = x.get("rows");
     if (wantRows !== undefined && wantRows !== null) {
       const key = (row: string) => stringifyJson((parseJson(row) as JsonObject).get("entity_key") ?? null);
-      const sorted = [...rows].sort((a, b) => compareCodePoints(key(a), key(b)));
+      const sorted = op === "sql" ? rows : [...rows].sort((a, b) => compareCodePoints(key(a), key(b)));
       this.checkList("rows", sorted.map(parseJson), wantRows);
     }
     const wantSnapshot = x.get("snapshot");

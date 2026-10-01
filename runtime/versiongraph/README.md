@@ -13,8 +13,11 @@ go/canonical/       package canonical: Postgres renderings to canonical rows, pl
 go/storage/         package storage: the storage adapter interface the engine runs over, plain Go
 go/engine/          package engine: the Go engine, every graph operation over a storage adapter and the binding
 go/postgres/        package postgres: the Postgres storage adapter, with a pgx binding
+rust-engine/        superschematic-versiongraph-engine: the Rust engine, storage traits and Postgres adapter
 typescript/         @superschematic/versiongraph: the wasm32-unknown-unknown build with typed operations, and the
                     TypeScript engine (./engine), its Postgres adapter (./postgres) and the facade base (./facade)
+python/             superschematic-versiongraph (module superschematic_versiongraph): the Python binding, a PyO3
+                    extension over the core built with maturin, with typed operations
 testdata/vectors/   the core's contract as vectors: {name, op, input, expect}
 testdata/canonical/ the canonical row contract as vectors: {cases} per class, {rows}
 testdata/fixture/   the scenarios' graph: fixture-version-graph-db's descriptor and Postgres DDL
@@ -22,10 +25,11 @@ testdata/scenarios/ the engines' contract as scenarios: {name, description, step
 ```
 
 This page is the contract. The vectors are its executable form: the Rust
-tests, the Go binding and the TypeScript package's tests run every core
-vector, and package `canonical` runs every canonical vector. The scenarios
-are the engines' contract: the Go and the TypeScript engines run every one
-through their Postgres adapters. The package's
+tests, the Go binding, the TypeScript package's tests and the Python
+package's tests run every core vector, and package `canonical` and the Rust
+engine's module `canonical` run every canonical vector. The scenarios
+are the engines' contract: the Go, TypeScript and Rust engines run every
+one through their Postgres adapters. The package's
 types for this contract are `typescript/src/contract.ts`.
 
 ## Descriptor
@@ -370,9 +374,11 @@ past retention, and writes missing snapshots. The Go engine is package `engine`,
 over the interface in package `storage`; package `postgres` is its Postgres
 adapter, which builds its statements from the descriptor and needs each
 kind's `root`. The TypeScript engine, storage interface and Postgres
-adapter are `typescript/src/engine.ts`, `storage.ts` and `postgres.ts`;
-both adapters take the sweep lock under the same key, so a Go and a
-TypeScript sweeper exclude each other.
+adapter are `typescript/src/engine.ts`, `storage.ts` and `postgres.ts`. The
+Rust engine is the crate in `rust-engine/`, over its `Storage` and `Tx`
+traits, with its Postgres adapter in module `postgres` and the canonical
+rules in module `canonical`. Every adapter takes the sweep lock under the
+same key, so sweepers in different languages exclude each other.
 
 Every id an engine takes or returns is a UUID in its canonical form. Each
 write takes an actor, and each write through a ref the ref's expected
@@ -443,7 +449,7 @@ actors are UUIDs written in their canonical form, which reads as a word
 | `rows` | `ref`, `kind` | The adapter's rows of the ref, by entity key |
 | `patches` | `commit` | The adapter's patches of the commit, by kind and entity key |
 | `snapshot` | `commit` | The adapter's snapshot entries of the commit, by kind and entity key |
-| `sql` | `statement`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text | A statement on the scenario's schema |
+| `sql` | `statement`, `args`: `[{"uuid"} or {"ref"} or {"commit"}]`, each as hyphenated text | A statement on the scenario's schema; with `rows` expected, a query whose rows the step returns |
 
 `expect` holds what the step must return; a step without `error` must
 succeed.
@@ -457,7 +463,7 @@ succeed.
 | `contentHash`, `contentHashOf` | A read's content hash. |
 | `findings`, `conflicts`, `changes` | Compose's findings, a merge's conflicts, a diff's changes: in order, each with its listed members. A merge left conflicts only when the step lists them. |
 | `commits` | History's commits, by name, newest first. |
-| `rows`, `patches`, `snapshot` | The listed rows, patches or snapshot entries, in order, each with its listed members; a patch is `{kind, entityKey, operation, entityVersion}` and a snapshot entry `{kind, entityKey, entityVersion}`. |
+| `rows`, `patches`, `snapshot` | The listed rows, patches or snapshot entries, in order, each with its listed members; a patch is `{kind, entityKey, operation, entityVersion}` and a snapshot entry `{kind, entityKey, entityVersion}`. An `sql` step's rows are the statement's, in the order it returns them, each an object of its columns read as text, so the statement casts what it selects (a history image's actor, say, mapped to a name with `CASE`). |
 | `release` | The release pointer a release or released step returns: `commit` by name and `version`. |
 | `report` | A sweep's report, with its listed members: `skipped`, `abandoned`, `collectedRefs`, `collectedRows` and `pruned` (by kind, nonzero counts only) and `snapshots`. |
 
@@ -482,29 +488,40 @@ document's pointer and length through `out_ptr` and `out_len`. It returns 0
 with the operation's output, 1 with an error document, or 2 when an out
 pointer is null, writing nothing. Release each output with `vg_free`. A wasm
 host allocates its input and the two out slots with `vg_alloc` and releases
-them with `vg_dealloc`. `go/include/versiongraph.h` is the header.
+them with `vg_dealloc`. `go/include/versiongraph.h` is the header. The
+Python binding and the Rust engine do not go through it: they call the
+crate's Rust API, and the binding returns the same documents.
 
 ## Build and test
 
 ```
 make versiongraph            # static archive for the Go binding (scripts/versiongraph-archive.sh)
-make rust                    # fmt, clippy (native and wasm32) and cargo test
+make rust                    # fmt, clippy (native and wasm32) and cargo test, then cargo test again with serde_json's preserve_order
 make ts                      # among the TypeScript packages: the wasm build, the package, every vector through it
+make python                  # among the Python packages: the PyO3 extension, every vector through the package
 cd runtime/versiongraph/go && go test ./...
 SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL=postgres://... go test ./canonical  # the canonical vectors against Postgres
 UPDATE_VECTORS=1 cargo test  # in rust/: rewrite every vector's expect; review the diff
 make versiongraph-scenarios  # every scenario through the Go engine and the Postgres adapter
 make versiongraph-scenarios-ts  # every scenario through the TypeScript engine and its Postgres adapter
+make versiongraph-scenarios-rust  # every scenario and canonical vector through the Rust engine and its adapter
 ```
 
 The scenarios, the adapter's tests and the canonical vectors' Postgres
 check run against the Postgres that
 `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` names, and skip without it;
-`make versiongraph-scenarios` and `make versiongraph-scenarios-ts` fail
+`make versiongraph-scenarios`, `make versiongraph-scenarios-ts` and
+`make versiongraph-scenarios-rust` fail
 without it. The fixture is the
 compiler's output for `fixture-version-graph-db`, and a compiler test
 (`go test ./internal/generator -run TestVersionGraphScenarioFixtureIsCurrent`)
 fails when the checked-in copy is stale; `-update` rewrites it.
+
+superscalar turns on `serde_json`'s `preserve_order` feature, and Cargo
+unifies it into every crate of a build that uses superscalar, so the core
+and the Rust engine never rely on a `serde_json` map's order: the content
+hash and the canonical rules sort object keys themselves. `make rust` runs
+both crates' tests a second time with the feature on.
 
 The Go binding links `libsuperschematic_versiongraph.a` from
 `go/lib/<goos>_<goarch>`, which `make versiongraph` stages; the Makefile

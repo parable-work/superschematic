@@ -1,6 +1,6 @@
 ---
 title: Version graphs
-description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, and the core, the engine and the generated facade from TypeScript.
+description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine and the generated facade from TypeScript, the Rust engine and facade, and the core from Python.
 sidebar:
   order: 8
 ---
@@ -13,9 +13,9 @@ Each ref holds only the rows it overrides. A commit records the exact row
 versions a ref sealed. Work happens on change sets; a primary line takes
 writes only from merges, and each root's release pointer names the tagged
 commit readers see. One core composes, merges, diffs, hashes and
-validates trees. The Go and TypeScript engines run every graph operation
-on the core over a storage adapter, and a generated facade in each language
-gives each graph typed methods over its engine.
+validates trees. The Go, TypeScript and Rust engines run every graph
+operation on the core over a storage adapter, and a generated facade in
+each language gives each graph typed methods over its engine.
 
 The design and the alternatives not taken are D17 and D19 in
 [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md).
@@ -184,14 +184,16 @@ contract, with the descriptor's members, every rule, the error codes and the
 C ABI, is
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md).
 Its vectors in `runtime/versiongraph/testdata/vectors` are the executable
-form: the Rust tests, the Go binding and the TypeScript package's tests run
-every one.
+form: the Rust tests, the Go binding, the TypeScript package's tests and the
+Python package's tests run every one.
 
 The same exports are built three ways: a static archive, which the Go
 binding `runtime/versiongraph/go` (package `versiongraph`) links through
 cgo; a `cdylib`; and `wasm32-unknown-unknown`, which the TypeScript package
 `@superschematic/versiongraph` ships
-([Use the core from TypeScript](#use-the-core-from-typescript)).
+([Use the core from TypeScript](#use-the-core-from-typescript)). Python
+calls the crate's Rust API through a PyO3 extension instead
+([Use the core from Python](#use-the-core-from-python)).
 
 ### The descriptor
 
@@ -406,8 +408,8 @@ shares (`version_conflict`, `ref_sealed`, `primary_merge_only`,
 scenarios in `runtime/versiongraph/testdata/scenarios` run sequences of
 operations over canonical rows, with the expected trees, content hashes,
 conflicts and errors, against the fixture in
-`runtime/versiongraph/testdata/fixture`; the Go engine runs every one
-against Postgres. Their format is in
+`runtime/versiongraph/testdata/fixture`; the Go and Rust engines run
+every one against Postgres. Their format is in
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#scenarios).
 
 ## The generated facade
@@ -610,10 +612,10 @@ duration argument is in milliseconds. `runSweeper(intervalMs, options,
 onPass, signal)` runs until its `AbortSignal` aborts and then rejects with
 the signal's reason. It runs no pass when the signal has already aborted,
 and a pass under way when it aborts finishes first, where Go's
-`RunSweeper` cancels that pass through its context. The named errors are classes with the stable `code`
-the scenario files name (`VersionConflictError` is a `NotFoundError`, as
-in Go); `errorCode(err)` returns it, or the core's code for an input the
-core refused.
+`RunSweeper` cancels that pass through its context. The named errors are
+classes with the stable `code` the scenario files name
+(`VersionConflictError` is a `NotFoundError`, as in Go); `errorCode(err)`
+returns it, or the core's code for an input the core refused.
 
 When a schema declares a graph, tsgen writes a typed facade per graph into
 the TypeScript types package, `versiongraph/<name>.ts`, exported as
@@ -656,6 +658,130 @@ make versiongraph-scenarios-ts   # every scenario, the canonical vectors against
 
 The target needs `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and fails
 without it; CI runs it in the versiongraph job.
+
+## Use the engine from Rust
+
+`superschematic-versiongraph-engine`
+([runtime/versiongraph/rust-engine](https://github.com/parable-work/superschematic/tree/main/runtime/versiongraph/rust-engine))
+is the Rust engine. It has every operation, rule and error code of the Go
+engine, runs over the same kind of storage adapter, and calls the core
+natively. Its operations are `async`. Its Postgres adapter
+(`postgres::Adapter`) builds its statements from the descriptor at run
+time and reaches Postgres through `postgres::Client`, a two-trait seam;
+`postgres::TokioPostgres` binds one tokio-postgres connection and is on by
+default (the `tokio-postgres` feature). A service that runs operations side
+by side, or inside a transaction it holds, implements `Client` over its own
+pool or transaction. Every scenario runs through it against Postgres
+(`make versiongraph-scenarios-rust`).
+
+When a DB schema declares a graph and its Rust types are on, the types
+generator writes `src/versiongraph_<name>.rs` beside the types, and the
+crate depends on the engine
+([`versiongraph_rust_crate`](/superschematic/reference/naming/#versiongraph_rust_crate),
+at [`[paths] versiongraph_rust`](/superschematic/reference/naming/#pathsversiongraph_rust)
+when it is set). The file holds the descriptor
+(`RECIPE_GRAPH_DESCRIPTOR`), the schema epoch and snapshot interval, and a
+typed `RecipeGraph` with the Go facade's operations in Rust's spelling:
+
+```rust
+use std::str::FromStr;
+use schemas_recipes_types::{IdentityUUID, RecipeEdits, RecipeGraph, RecipeKindEdits};
+use superschematic_versiongraph_engine::{postgres::TokioPostgres, CommitOptions};
+
+let (client, connection) = tokio_postgres::connect(url, tokio_postgres::NoTls).await?;
+tokio::spawn(connection);
+let graph = RecipeGraph::postgres(TokioPostgres::new(client))?;
+
+let main = graph.create_primary(&actor, &recipe, "main").await?;
+let draft = graph.branch(&actor, &IdentityUUID::from_str(&main.id)?, "first draft").await?;
+let draft_id = IdentityUUID::from_str(&draft.id)?;
+let edits = RecipeEdits {
+    step: RecipeKindEdits { upsert: vec![mix], ..RecipeKindEdits::default() },
+    ..RecipeEdits::default()
+};
+let saved = graph.save(&actor, &draft_id, draft.version, &edits).await?;
+graph.commit(&actor, &draft_id, saved.ref_.version, &CommitOptions::default()).await?;
+let merged = graph
+    .merge(&actor, &draft_id, &IdentityUUID::from_str(&main.id)?, main.version, &[],
+        &CommitOptions { message: "first".into(), tag: true })
+    .await?;
+let tree = graph.materialize(&IdentityUUID::from_str(&merged.commit.unwrap().id)?).await?;
+```
+
+The Rust facade differs from the Go one where the languages do:
+
+- Every write takes its actor as an argument; there is no context user.
+  `sweep` and `run_sweeper` write as `SweepOptions::actor`, and
+  `run_sweeper` stops when its `shutdown` future completes, and lets a
+  pass under way finish, where Go's `RunSweeper` cancels it.
+- The types crate has no ORM, so refs, commits and release pointers come
+  back as the engine's `Ref`, `Commit` and `Release`, with ids as canonical
+  strings, rather than as typed rows.
+- A typed row read back through the facade leaves its to-one relations
+  (the root, the ref) `None`, since a canonical row holds only their keys.
+- Errors are the engine's `Error`; `Error::code()` is the stable code
+  (`version_conflict`, `primary_merge_only`, ...).
+
+The facade turns a typed edit into a canonical row from each field's serde
+JSON, and a canonical row back into a typed value, so a field comes back in
+its canonical form, as through the Go facade.
+
+## Use the core from Python
+
+`superschematic-versiongraph` (module `superschematic_versiongraph`,
+[runtime/versiongraph/python](https://github.com/parable-work/superschematic/tree/main/runtime/versiongraph/python))
+is the core for Python: a PyO3 extension module over the crate, built with
+maturin as superscalar's Python binding is, for CPython 3.9 and newer. It
+calls the core's Rust API natively, with the GIL released, and types every
+input and output of the contract. It is not published yet; build it from a
+checkout (`uv sync` in its directory, which needs cargo).
+
+```python
+import superschematic_versiongraph as vg
+
+result = vg.compose({"descriptor": descriptor, "base": base, "overlay": overlay})
+merged = vg.merge({"descriptor": descriptor, "base": base, "ours": ours, "theirs": theirs})
+changes = vg.diff({"descriptor": descriptor, "from": base, "to": result["tree"]})["changes"]
+content_hash = vg.content_hash({"descriptor": descriptor, "tree": result["tree"]})["contentHash"]
+
+try:
+    vg.validate({"descriptor": descriptor, "tree": {"recipe_step": []}})
+except vg.VersionGraphError as error:
+    print(error.code)  # "unknown_kind"
+```
+
+| Function | Operation | Input and output types |
+| --- | --- | --- |
+| `compose` | `compose` | `ComposeInput`, `ComposeOutput` |
+| `merge` | `merge` | `MergeInput`, `MergeOutput` |
+| `diff` | `diff` | `DiffInput`, `DiffOutput` |
+| `content_hash` | `content_hash` | `TreeInput`, `ContentHashOutput` |
+| `validate` | `validate` | `TreeInput`, `ValidateOutput` |
+| `run(operation, json)` | any, by its contract name | JSON text or bytes in, JSON text out |
+
+The types are `TypedDict`s and `Literal`s in
+`superschematic_versiongraph.contract`, re-exported from the package, each
+member named as the contract names it; inputs and outputs are plain dicts
+and lists. A refused input raises `VersionGraphError`, whose `code` is the
+contract's error code (`ErrorCode`) and whose `message` is the core's. An
+operation name the core does not have raises `ValueError`.
+
+The module-level functions encode with `json` and decode with
+`json.loads`, which keeps an integer's digits however wide but reads a
+number with a fraction or an exponent as a float, so a numeric column that
+a double does not hold would lose digits. `VersionGraph(loads=..., dumps=...)`
+gives the same methods over another codec, for example one that decodes
+with `parse_float=decimal.Decimal` and writes a Decimal's digits back;
+`run` leaves the JSON to the caller.
+
+The package's tests run every core vector through `run` and through the
+typed methods with an exact codec, and compare each output with the
+vector, member order and number digits included, and through the
+module-level functions when `json` reads the vector without loss. They
+check each vector's input and output against the types
+and fail when a member or literal of the types appears in no vector. `make
+python` runs them under the default Python and under 3.9, and CI's python
+job runs them too.
 
 ## Limits
 

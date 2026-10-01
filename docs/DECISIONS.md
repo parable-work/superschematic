@@ -1460,8 +1460,50 @@ Go's `RunSweeper` cancels that pass through its context; the
 TypeScript facade returns the engine's refs, commits and release pointers,
 since there is no TypeScript ORM to read them typed; and it records its
 writes as the actor it is given, a sweep as its options' actor.
-The Rust and Python engines and facades follow and must pass the same
-scenarios. Each change that lands a piece updates this paragraph.
+The Rust engine is built too: crate `superschematic-versiongraph-engine` in
+`runtime/versiongraph/rust-engine` calls the core natively and implements
+every operation over its `Storage` and `Tx` traits with the Go engine's
+rules and error codes, and its Postgres adapter builds its statements from
+the descriptor and reaches Postgres through a two-trait `Client` seam
+with a tokio-postgres binding, a default cargo feature. Its operations are
+async, and its module `canonical` ports package `canonical`. It runs every
+scenario and every canonical vector against Postgres
+(`make versiongraph-scenarios-rust`, in CI's versiongraph job). The Rust
+types generator writes a typed facade per graph,
+`src/versiongraph_<name>.rs`, over the engine that the naming key
+`versiongraph_rust_crate` and `[paths] versiongraph_rust` name. Six rules
+settled as it was built: the facade takes each write's actor as an
+argument, since Rust has no context user; it returns the engine's refs,
+commits and release pointers, since the Rust types have no ORM; a typed
+row it reads back leaves its to-one relations empty; the tokio-postgres
+binding runs one operation at a time on its connection and rolls back a
+transaction that a dropped operation left open; `run_sweeper` stops when a
+shutdown future completes and lets a pass under way finish; and without
+`[paths] versiongraph_rust` the generated manifest names the engine's
+version. Every engine's scenarios cover a commit with nothing to commit,
+the actor the history of a row an unset or a sweep removes records, and a
+sweep's prune cap, and every adapter's tests a ref lock another
+transaction waits for and the version fences of updating and discarding a
+ref; an `sql` step that expects rows reads the statement's rows as text.
+The Python core binding is built: the package `superschematic-versiongraph`
+(module `superschematic_versiongraph`) in `runtime/versiongraph/python` is
+a PyO3 extension over the core crate, built with maturin as superscalar's
+Python binding is, and PyO3 is a dependency of its own crate
+(`superschematic-versiongraph-python`), not of the core. It has typed
+`compose`, `merge`, `diff`, `content_hash` and `validate` over the
+contract's types, `run` for JSON text, and `VersionGraphError`, which
+carries the contract's error code; its tests run every core vector through
+it, and `make python` and CI's python job build it and run them, on
+Python 3.9 too. Three rules settled as it was built: the binding calls the
+core's Rust API, not the C ABI, returns the same documents, and runs the
+core with the GIL released; the typed operations decode with `json` unless
+given another codec, as the TypeScript package's use `JSON.parse`, so a
+number a double does not hold needs a codec that keeps it, or `run`; and
+the package and its crate are version sites but are not published, since a
+wheel needs a build per platform.
+The Python engine and facade follow and must pass the same scenarios.
+Each change that lands a piece of what remains, the Python engine, its
+Postgres adapter and the Python facade, updates this paragraph.
 
 ## D20. An `EncryptedField<T>` argument encrypts its operation's request body
 
