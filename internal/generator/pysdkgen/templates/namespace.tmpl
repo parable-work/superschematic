@@ -20,6 +20,13 @@ _BUILTIN_VALIDATION_TYPES: dict[str, Any] = {
 }
 _TYPES_PACKAGE_MODULE: Any | None = None
 _TYPES_PACKAGE_RESOLVED = False
+{{- if .Namespace.JSONValueTypes}}
+# The types of Generic.JSON body arguments, whose values are any JSON value
+# but null. _validate_scalar_argument refuses None as one: a required
+# argument and a list element are never null, and an optional one's null is
+# sent before validation.
+_JSON_VALUE_TYPES = frozenset({ {{- range $i, $type := .Namespace.JSONValueTypes}}{{if $i}}, {{end}}"{{$type}}"{{end -}} })
+{{- end}}
 
 
 def _load_types_package() -> Any | None:
@@ -247,6 +254,12 @@ class {{.Namespace.ClassName}}:
         return from_dict_non_strict(raw)
 
     def _validate_scalar_argument(self, value: Any, scalar_type_name: str, field_name: str) -> Any:
+{{- if .Namespace.JSONValueTypes}}
+        if value is None and scalar_type_name in _JSON_VALUE_TYPES:
+            raise ValidationError(
+                {field_name: [{"validator": "required", "message": f"{field_name} is required"}]},
+            )
+{{- end}}
         scalar_type = self._resolve_validation_type(scalar_type_name)
         if scalar_type is None:
             return value
