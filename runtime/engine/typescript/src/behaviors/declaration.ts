@@ -50,9 +50,21 @@ export interface BehaviorOperationDeclaration {
   readonly resultSchema: JSONSchema;
   /** True for an operation that changes stored state. */
   readonly writes?: boolean;
+  /**
+   * What it runs on: `instance` (or absent), one instance a call names by
+   * id; `schema`, the schema as a whole, with no instance. A string, as a
+   * JSON module types it; checkDeclaration refuses any other value.
+   */
+  readonly scope?: string;
   /** The MCP invocation policy of its tool (D11); absent for the policy's default. */
   readonly invocationPolicy?: string;
 }
+
+/** What an operation runs on. */
+export type OperationScope = 'instance' | 'schema';
+
+/** The scopes an operation declares. */
+export const OPERATION_SCOPES: readonly OperationScope[] = ['instance', 'schema'];
 
 /** A JSON Schema: an object, or true or false. */
 export type JSONSchema = boolean | { readonly [key: string]: unknown };
@@ -68,7 +80,7 @@ const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const DECLARATION_KEYS = new Set(['name', 'description', 'configSchema', 'requires', 'conflicts', 'fields', 'operations']);
 const FIELD_KEYS = new Set(['name', 'description']);
-const OPERATION_KEYS = new Set(['name', 'description', 'paramsSchema', 'resultSchema', 'writes', 'invocationPolicy']);
+const OPERATION_KEYS = new Set(['name', 'description', 'paramsSchema', 'resultSchema', 'writes', 'scope', 'invocationPolicy']);
 
 /**
  * checkDeclaration returns every problem with a declaration; empty means
@@ -166,6 +178,9 @@ function checkOperations(operations: unknown, problems: string[]): void {
     optionalString(operation.invocationPolicy, `${at} invocationPolicy`, problems);
     if (operation.writes !== undefined && typeof operation.writes !== 'boolean') {
       problems.push(`${at} writes is a boolean`);
+    }
+    if (operation.scope !== undefined && !OPERATION_SCOPES.includes(operation.scope as OperationScope)) {
+      problems.push(`${at} scope ${JSON.stringify(operation.scope)} is not "instance" or "schema"`);
     }
     if (!isSchema(operation.resultSchema)) {
       problems.push(`${at} has no resultSchema`);

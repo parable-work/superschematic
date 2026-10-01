@@ -1066,18 +1066,46 @@ Status: built are the schema-file types and meta-schema
 and the `@behavior` decorator (section 3.16 of `docs/extension-model.md`),
 and `@superschematic/engine` (`runtime/engine/README.md`): storage, the
 schema registry, instances, the event log, the access policy, the
-behavior plug-in interface, the HTTP API with its event stream and
-operation route, and the describe and tools documents and MCP tools. The
-core declares `Workflow`, `Comments` and `Revisions`, and the engine
-registers its implementations of them when it opens, so D10's done
-criterion is met: the core binary with no extension linked loads a schema
-that composes them (`make cli-smoke`), an engine with only its own
-behaviors runs it (`test/core-behaviors.test.ts`), and acme's
-`acme.Rating` runs with no core edit (`scripts/smoke.sh`). Not built: the
-cross-instance behaviors (dependency edges, links, derived fields,
-reactions), search, and the work-queue package. Each change that lands a
-piece updates this paragraph, the README layout table and the pages that
-describe it. The names and rules are reversible until the first release.
+behavior plug-in interface with its reach into other instances (the
+amendment below), the HTTP API with its event stream and operation
+routes, and the describe and tools documents and MCP tools. The core
+declares `Workflow`, `Comments`, `Revisions`, `Dependencies` and `Links`,
+and the engine registers its implementations of them when it opens, so
+D10's done criterion is met: the core binary with no extension linked
+loads schemas that compose them (`make cli-smoke`), an engine with only
+its own behaviors runs them (`test/core-behaviors.test.ts`), and acme's
+`acme.Rating` runs with no core edit (`scripts/smoke.sh`). Not built:
+derived fields, reactions, search, and the work-queue package. Each
+change that lands a piece updates this paragraph, the README layout table
+and the pages that describe it. The names and rules are reversible until
+the first release.
+
+### D16, amended: behaviors that reach other instances
+
+A behavior's context reached one instance. Dependency edges and links
+read other instances, change them, and must hear when one they point at
+changes or goes. D16's rule stands: a behavior changes another
+behavior's state only through that behavior's operations, and that
+includes the state of another instance.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A behavior acts as the caller. Its context reads another instance, or a batch of one schema's, with its behaviors' fields or only the ones it names, and each read asks the access policy for `read` on that schema. It invokes another instance's operation as `instances.invoke` does, asking `write` or `read` with the operation's name. A guard, a field reader and a read-only operation invoke read-only operations only; initialize, afterChange, `afterReferenceChange` and a writing operation invoke writing ones too. | A system principal, which would let a behavior read or change what its caller may not; skipping the policy because the caller could act on the first instance |
+| An invoked operation runs as a caller's would: the target's parameter check, every guard of the target, the handler and the result check, then for a writing operation the target's afterChange, its next `seq` and its own operation event. It runs in the caller's transaction, in a savepoint: a failure the behavior catches leaves nothing, and one it does not rolls back every instance the call changed. | Writing another instance's columns or tables; running the call after the commit, where it could not refuse the change that caused it |
+| `call()`, invokes and reads of other instances nest at most 16 deep together. Invoking a writing operation of an instance whose own write is still running up the chain is refused as a cycle (`BehaviorError`), so no instance is written by two frames at once; a cycle of reads ends at the depth limit. | Per-instance locks; letting the inner write run while the outer one holds stale data |
+| A behavior records each reference it holds to another instance with the engine (`references.add(schema, id, key)`), which asks `read` on the target's schema and refuses a target that does not exist. Before an update, a delete or a writing operation of a referenced instance, the referencing behavior's `guardReference` may veto it, whoever the caller; after the change, its `afterReferenceChange` runs in the same transaction. A delete no guard vetoes must leave no reference to the instance: the hook removes it through an operation of the referencing instance that it invokes, so that instance's guards run and it gets its own event. A reference left behind is a `BehaviorError`, which rolls the delete back. Deleting the referencing instance drops its references, and a reference to the instance itself is never asked. | Each behavior finding its referrers with its own SQL, which no other behavior's write would call; cascades in SQL, which skip the referencing instance's guards and events |
+| Everything happens in the caller's namespace. A schema name is looked up as D16 says, in the namespace, then in the shared one, for lookup only; an instance, a reference and an invoke are always the namespace's own. | References across namespaces, which would make a delete in one depend on another's instances and policy |
+| A behavior reads the config of a behavior another schema's live version composes, as the schema holds it, asking `read` on that schema. `parseConfig` gets the configs of the other behaviors on its type, so a behavior that builds on Workflow checks its states when the schema is defined. | Parsed configs, which are each implementation's own |
+| An operation's declaration takes a `scope`: `instance`, the default, or `schema`. A schema-level operation has no instance: its context has the config, `can`, reads of its behavior's tables and of instances, and invoke. No instance guard runs and it appends no event, so it changes state only through the operations it invokes, whose events record it. It is served at `POST /namespaces/{ns}/schemas/{name}/operations/{op}`, and its tool takes `params` and no `id`. | A pseudo-instance to hang it on; a second list of operations in the declaration |
+| A field that reads another instance is computed when it is read. The log records each instance's own changes, so a change of an instance that another's field reads shows at the reader's next read, without an event on the reader. | Storing derived values, which needs reactions to keep them current |
+
+The first behaviors built on it are `Dependencies` and `Links`, bare
+plain nouns as `Workflow`, `Comments` and `Revisions` are:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Dependencies` requires `Workflow`. A blocker is an instance of the type's own schema, or of a schema its config lists, that composes Workflow; an edge that would close a cycle is refused. An instance is blocked while a blocker's status is not a terminal state of its own schema's Workflow config (`isTerminalState`). The `blocked` field and the guard call one function, over every blocker. The guard refuses a transition into a gated state (every terminal state of the type's Workflow, or the ones the config lists) while the instance is blocked; it reads the target state from `transition`'s `to`, which the closed parameters make the only way to ask. Deleting a blocker removes its edges. | Counting blockers of every schema in the field and of one schema in the guard; refusing the delete of a blocker |
+| `Links` holds named, single-valued links, each to an instance of the schema its config names. A pinned link needs a target schema that composes `Revisions`, records the target's revision and reports whether the target has moved past it. A required link cannot be unlinked, only moved, and the delete of its target is refused; an optional link is cleared when its target is deleted. One read-only field, `links`, holds them all, since declared fields are static. | A field per link name; clearing a required link, which leaves an instance its config says must have one |
 
 ## D17. A version graph over versioned tables, with one merge core
 

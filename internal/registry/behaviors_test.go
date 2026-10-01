@@ -50,6 +50,7 @@ func ratingDeclaration() json.RawMessage {
 		"operations": []any{
 			operation("rate", map[string]any{"writes": true, "invocationPolicy": "ask"}),
 			operation("ratingSummary", nil),
+			operation("topRated", map[string]any{"scope": "schema"}),
 		},
 	})
 }
@@ -70,7 +71,7 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 	finalizeWithCoreGenerators(t, reg)
 
-	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Comments", "Pinned", "Revisions", "Workflow", "acme.Flag", "acme.Rating"}) {
+	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Comments", "Dependencies", "Links", "Pinned", "Revisions", "Workflow", "acme.Flag", "acme.Rating"}) {
 		t.Fatalf("BehaviorNames() = %v", got)
 	}
 	rating, ok := reg.Behavior("acme.Rating")
@@ -78,8 +79,9 @@ func TestRegisterBehavior(t *testing.T) {
 		t.Fatal("acme.Rating is not registered")
 	}
 	if rating.Extension != "acme" || rating.Description != "Shoppers rate an item." || len(rating.Fields) != 2 ||
-		rating.Fields[1].Description != "Mean of the ratings." || len(rating.Operations) != 2 ||
-		!rating.Operations[0].Writes || rating.Operations[0].InvocationPolicy != "ask" || rating.Operations[1].Writes {
+		rating.Fields[1].Description != "Mean of the ratings." || len(rating.Operations) != 3 ||
+		!rating.Operations[0].Writes || rating.Operations[0].InvocationPolicy != "ask" || rating.Operations[1].Writes ||
+		rating.Operations[0].Scope != "" || rating.Operations[2].Scope != OperationScopeSchema {
 		t.Fatalf("acme.Rating = %+v", rating)
 	}
 	if !rating.ConfigRequired() {
@@ -160,6 +162,8 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 		{"params not an object", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"paramsSchema": map[string]any{"type": "integer"}})}}), `behavior acme.Rating operation rate paramsSchema must be an object schema`},
 		{"params a boolean schema", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"paramsSchema": false})}}), `behavior acme.Rating operation rate paramsSchema must be an object schema`},
 		{"result schema", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"resultSchema": map[string]any{"required": "stars"}})}}), "behavior acme.Rating operation rate resultSchema: "},
+		{"scope", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"scope": "type"})}}), `behavior acme.Rating operation rate scope "type" is not "instance" or "schema"`},
+		{"scope case", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"scope": "Schema"})}}), `behavior acme.Rating operation rate scope "Schema" is not "instance" or "schema"`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			reg := New(naming.Default())
@@ -257,7 +261,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 		want  string
 	}{
 		{"requires unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Rating"}})},
-			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Comments, Revisions, Workflow, acme.Review)`},
+			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Comments, Dependencies, Links, Revisions, Workflow, acme.Review)`},
 		{"conflicts unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"conflicts": []string{"acme.Hidden"}})},
 			`behavior acme.Review conflicts "acme.Hidden", which is not a registered behavior`},
 		{"requires itself", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Review"}})},

@@ -15,7 +15,16 @@ a create or an update that sets one is refused (readOnly). invoke calls one
 of their operations: it checks the parameters, asks the policy for write
 or read as the operation's declaration says, and runs every guard, then
 the handler, in the write transaction for an operation that writes, which
-appends an operation event. Anything that throws rolls the whole call back.
+appends an operation event. invokeSchema calls a schema-level operation,
+which has no instance. Anything that throws rolls the whole call back.
+
+Each call is one Chain (behaviors/execution.ts) across every instance its
+behaviors reach. The store is their reach (D16, amended): it reads other
+instances and invokes their operations as the chain's principal, asking
+the policy each time, records the references behaviors hold, asks the
+guards of the behaviors that refer to an instance before it changes and
+runs their hooks after, and refuses a delete that leaves a reference to
+the deleted instance behind.
 
 list pages through a schema's instances in creation order with an opaque
 cursor. Each page is one indexed range read of at most the page size, so
@@ -28,10 +37,13 @@ import { randomUUID } from 'node:crypto';
 import type { PermissionMatcher } from '@superschematic/http-runtime';
 
 import { checkPrincipal, type Access, type Action, type Principal } from '../access.js';
-import type { FrozenJSON } from '../behaviors/behavior.js';
-import { Execution, checkParams } from '../behaviors/execution.js';
+import type { BoundBehavior } from '../behaviors/composition.js';
+import type { FrozenJSON, GuardRequest, InstanceChange, Reference } from '../behaviors/behavior.js';
+import { Chain, Execution, SchemaExecution, checkParams, vetoReason, type Reach, type ReferenceSource } from '../behaviors/execution.js';
 import { deepFreeze } from '../behaviors/json.js';
-import { EngineError, InstanceValidationError, type ValidationIssue } from '../errors.js';
+import type { OperationSpec } from '../behaviors/registry.js';
+import { synchronous } from '../behaviors/storage.js';
+import { BehaviorError, BehaviorVetoError, EngineError, InstanceValidationError, type ValidationIssue } from '../errors.js';
 import { appendEvent, nextSeq, type OperationChange } from '../events/log.js';
 import type { Namespaces } from '../namespaces.js';
 import { pageSize } from '../paging.js';
@@ -41,6 +53,7 @@ import { readOnlyIssue } from '../registry/validator.js';
 import type { Row } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
 import { diffPatch, isPlainObject, jsonEqual, mergePatch } from './patch.js';
+import { ReferenceTable, type IncomingReference } from './references.js';
 
 /** An instance id: a letter or digit, then letters, digits, `.`, `_`, `:` and `-`, at most 256 characters. */
 export const INSTANCE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -101,6 +114,9 @@ export interface InvokeOptions extends InstanceTarget {
   expectedSeq?: number;
 }
 
+/** Where a schema-level operation runs: a namespace, `default` when absent. */
+export type InvokeSchemaOptions = InstanceTarget;
+
 /** What an operation returns, with the instance's sequence after it: its entity tag. */
 export interface OperationOutcome {
   result: unknown;
@@ -125,6 +141,10 @@ const COLUMNS =
   'position, namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by';
 
 export class InstanceStore {
+  private readonly references: ReferenceTable;
+  // What the behaviors of every call reach beyond their instance.
+  private readonly reach: Reach;
+
   constructor(
     private readonly storage: Storage,
     private readonly namespaces: Namespaces,
@@ -134,47 +154,64 @@ export class InstanceStore {
     private readonly clock: () => number,
     /** Answers a behavior's can(); EngineOptions.permissionMatcher. */
     private readonly permissions: PermissionMatcher
-  ) {}
+  ) {
+    this.references = new ReferenceTable(storage);
+    this.reach = {
+      read: (chain, schema, ids, fields) => this.readFor(chain, schema, ids, fields),
+      invoke: (chain, from, schema, id, operation, params, writes) => this.invokeFor(chain, from, schema, id, operation, params, writes),
+      config: (chain, own, schema, behavior) => this.configFor(chain, own, schema, behavior),
+      readable: (chain, schema) => {
+        checkSchemaName(schema);
+        return this.access.allows(chain.principal, 'read', chain.namespace, schema);
+      },
+      addReference: (chain, source, target) => this.addReference(chain, source, target),
+      removeReference: (chain, source, target) => this.references.remove(chain.namespace, source, target),
+      listReferences: (chain, source) => this.references.from(chain.namespace, source),
+      guardReferences: (chain, schema, id, request) => this.guardReferences(chain, schema, id, request),
+    };
+  }
 
   /** create validates data against the schema's live version and stores it under a new id. */
   create(principal: Principal, schema: string, data: unknown, options: CreateOptions = {}): InstanceRecord {
     const namespace = this.target(principal, 'write', schema, options);
     const id = options.id ?? this.ids();
     checkId(id);
-    const now = this.clock();
-    return this.storage.transaction(() => {
-      const record = this.live(namespace, schema);
-      const runtime = this.catalog.runtimeOf(record);
-      this.validate(namespace, record, runtime, data);
-      const json = JSON.stringify(data);
-      const seq = nextSeq(this.storage, namespace, schema, id);
-      const inserted = this.storage.run(
-        `INSERT INTO engine_instances
-           (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (namespace, schema, id) DO NOTHING`,
-        [namespace, schema, id, record.namespace, record.version as number, seq, json, now, principal.subject, now, principal.subject]
-      );
-      if (inserted.changes === 0) {
-        throw new EngineError('conflict', `${schema} ${id} already exists in namespace ${namespace}`);
-      }
-      const execution = this.execution(runtime, record, namespace, principal, now, id, JSON.parse(json) as Record<string, unknown>, true);
-      execution.initialize();
-      execution.afterChange({ kind: 'create' });
-      const instance = toInstance(this.row(namespace, schema, id) as Row, execution.fields());
-      appendEvent(this.storage, {
-        kind: 'create',
-        namespace,
-        schema,
-        instanceId: id,
-        seq,
-        version: record.version as number,
-        actor: principal.subject,
-        at: now,
-        change: JSON.stringify(instance.data),
-      });
-      return instance;
-    });
+    const chain = this.chain(principal, namespace);
+    return this.storage.transaction(() =>
+      chain.write(schema, id, () => {
+        const record = this.live(namespace, schema);
+        const runtime = this.catalog.runtimeOf(record);
+        this.validate(namespace, record, runtime, data);
+        const json = JSON.stringify(data);
+        const seq = nextSeq(this.storage, namespace, schema, id);
+        const inserted = this.storage.run(
+          `INSERT INTO engine_instances
+             (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (namespace, schema, id) DO NOTHING`,
+          [namespace, schema, id, record.namespace, record.version as number, seq, json, chain.now, principal.subject, chain.now, principal.subject]
+        );
+        if (inserted.changes === 0) {
+          throw new EngineError('conflict', `${schema} ${id} already exists in namespace ${namespace}`);
+        }
+        const execution = this.execution(chain, runtime, record, id, JSON.parse(json) as Record<string, unknown>, true);
+        execution.initialize();
+        execution.afterChange({ kind: 'create' });
+        const instance = toInstance(this.row(namespace, schema, id) as Row, execution.fields());
+        appendEvent(this.storage, {
+          kind: 'create',
+          namespace,
+          schema,
+          instanceId: id,
+          seq,
+          version: record.version as number,
+          actor: principal.subject,
+          at: chain.now,
+          change: JSON.stringify(instance.data),
+        });
+        return instance;
+      })
+    );
   }
 
   /** get returns an instance, or undefined when the namespace has none with the id. */
@@ -183,7 +220,7 @@ export class InstanceStore {
     const record = this.live(namespace, schema);
     const runtime = this.catalog.runtimeOf(record);
     const row = this.row(namespace, schema, id);
-    return row ? this.read(runtime, record, namespace, principal, this.clock(), row) : undefined;
+    return row ? this.read(this.chain(principal, namespace), runtime, record, row) : undefined;
   }
 
   /** list returns a page of a schema's instances in creation order. */
@@ -193,7 +230,7 @@ export class InstanceStore {
     const after = options.cursor === undefined ? 0 : decodeCursor(options.cursor);
     const record = this.live(namespace, schema);
     const runtime = this.catalog.runtimeOf(record);
-    const now = this.clock();
+    const chain = this.chain(principal, namespace);
     const rows = this.storage.all(
       `SELECT ${COLUMNS} FROM engine_instances
        WHERE namespace = ? AND schema = ? AND position > ?
@@ -202,7 +239,7 @@ export class InstanceStore {
     );
     const items = rows.slice(0, limit);
     const next = rows.length > limit ? encodeCursor(Number(items[items.length - 1].position)) : null;
-    return { items: items.map((row) => this.read(runtime, record, namespace, principal, now, row)), next };
+    return { items: items.map((row) => this.read(chain, runtime, record, row)), next };
   }
 
   /**
@@ -217,92 +254,103 @@ export class InstanceStore {
     if (!isPlainObject(patch)) {
       throw new EngineError('invalid_argument', 'a merge patch of an instance is a JSON object');
     }
-    const now = this.clock();
-    return this.storage.transaction(() => {
-      const record = this.live(namespace, schema);
-      const runtime = this.catalog.runtimeOf(record);
-      const readOnly: ValidationIssue[] = [];
-      for (const [key, value] of Object.entries(patch)) {
-        const behavior = runtime.composition.fields.get(key);
-        if (behavior !== undefined && value !== undefined) {
-          readOnly.push(readOnlyIssue(key, behavior.behavior.name));
+    const chain = this.chain(principal, namespace);
+    return this.storage.transaction(() =>
+      chain.write(schema, id, () => {
+        const record = this.live(namespace, schema);
+        const runtime = this.catalog.runtimeOf(record);
+        const readOnly: ValidationIssue[] = [];
+        for (const [key, value] of Object.entries(patch)) {
+          const behavior = runtime.composition.fields.get(key);
+          if (behavior !== undefined && value !== undefined) {
+            readOnly.push(readOnlyIssue(key, behavior.behavior.name));
+          }
         }
-      }
-      if (readOnly.length > 0) {
-        throw new InstanceValidationError(namespace, schema, record.version as number, readOnly);
-      }
-      const row = this.existing(namespace, schema, id);
-      matchSeq(row, options.expectedSeq);
-      const current = JSON.parse(String(row.data)) as Record<string, unknown>;
-      const merged = mergePatch(current, patch) as Record<string, unknown>;
-      this.validate(namespace, record, runtime, merged);
-      if (jsonEqual(merged, current)) {
-        return this.read(runtime, record, namespace, principal, now, row);
-      }
-      const execution = this.execution(runtime, record, namespace, principal, now, id, current, true);
-      const frozenPatch = deepFreeze(JSON.parse(JSON.stringify(patch)) as FrozenJSON);
-      execution.guard({ kind: 'update', patch: frozenPatch, after: deepFreeze(JSON.parse(JSON.stringify(merged)) as FrozenJSON) });
-      const before = execution.fields();
-      const seq = Number(row.seq) + 1;
-      this.storage.run(
-        `UPDATE engine_instances
-         SET data = ?, version = ?, schema_namespace = ?, seq = ?, updated_at = ?, updated_by = ?
-         WHERE namespace = ? AND schema = ? AND id = ?`,
-        [JSON.stringify(merged), record.version as number, record.namespace, seq, now, principal.subject, namespace, schema, id]
-      );
-      execution.setData(merged);
-      execution.afterChange({ kind: 'update', patch: frozenPatch, before: deepFreeze(current) });
-      const after = execution.fields();
-      appendEvent(this.storage, {
-        kind: 'update',
-        namespace,
-        schema,
-        instanceId: id,
-        seq,
-        version: record.version as number,
-        actor: principal.subject,
-        at: now,
-        change: JSON.stringify({ ...frozenPatch, ...diffPatch(before, after) }),
-      });
-      return toInstance(this.row(namespace, schema, id) as Row, after);
-    });
+        if (readOnly.length > 0) {
+          throw new InstanceValidationError(namespace, schema, record.version as number, readOnly);
+        }
+        const row = this.existing(namespace, schema, id);
+        matchSeq(row, options.expectedSeq);
+        const current = JSON.parse(String(row.data)) as Record<string, unknown>;
+        const merged = mergePatch(current, patch) as Record<string, unknown>;
+        this.validate(namespace, record, runtime, merged);
+        if (jsonEqual(merged, current)) {
+          return this.read(chain, runtime, record, row);
+        }
+        const execution = this.execution(chain, runtime, record, id, current, true);
+        const frozenPatch = deepFreeze(JSON.parse(JSON.stringify(patch)) as FrozenJSON);
+        execution.guard({ kind: 'update', patch: frozenPatch, after: deepFreeze(JSON.parse(JSON.stringify(merged)) as FrozenJSON) });
+        const before = execution.fields();
+        const seq = Number(row.seq) + 1;
+        this.storage.run(
+          `UPDATE engine_instances
+           SET data = ?, version = ?, schema_namespace = ?, seq = ?, updated_at = ?, updated_by = ?
+           WHERE namespace = ? AND schema = ? AND id = ?`,
+          [JSON.stringify(merged), record.version as number, record.namespace, seq, chain.now, principal.subject, namespace, schema, id]
+        );
+        execution.setData(merged);
+        const change: InstanceChange = { kind: 'update', patch: frozenPatch, before: deepFreeze(current) };
+        execution.afterChange(change);
+        const after = execution.fields();
+        appendEvent(this.storage, {
+          kind: 'update',
+          namespace,
+          schema,
+          instanceId: id,
+          seq,
+          version: record.version as number,
+          actor: principal.subject,
+          at: chain.now,
+          change: JSON.stringify({ ...frozenPatch, ...diffPatch(before, after) }),
+        });
+        const updated = toInstance(this.row(namespace, schema, id) as Row, after);
+        this.referenced(chain, schema, id, change);
+        return updated;
+      })
+    );
   }
 
   /**
    * delete removes an instance and appends its delete event; false when
    * there is none. With expectedSeq, the instance must still be at that
-   * sequence.
+   * sequence. The references its behaviors recorded go with it; a
+   * reference to it that a referencing behavior's hook leaves behind
+   * refuses the delete (BehaviorError).
    */
   delete(principal: Principal, schema: string, id: string, options: DeleteOptions = {}): boolean {
     const namespace = this.target(principal, 'write', schema, options);
     checkExpectedSeq(options.expectedSeq);
-    const now = this.clock();
-    return this.storage.transaction(() => {
-      const record = this.live(namespace, schema);
-      const runtime = this.catalog.runtimeOf(record);
-      const row = this.row(namespace, schema, id);
-      if (!row) {
-        return false;
-      }
-      matchSeq(row, options.expectedSeq);
-      const execution = this.execution(runtime, record, namespace, principal, now, id, JSON.parse(String(row.data)) as Record<string, unknown>, true);
-      execution.guard({ kind: 'delete' });
-      execution.deleting();
-      this.storage.run('DELETE FROM engine_instances WHERE namespace = ? AND schema = ? AND id = ?', [namespace, schema, id]);
-      execution.afterChange({ kind: 'delete' });
-      appendEvent(this.storage, {
-        kind: 'delete',
-        namespace,
-        schema,
-        instanceId: id,
-        seq: Number(row.seq) + 1,
-        version: Number(row.version),
-        actor: principal.subject,
-        at: now,
-        change: null,
-      });
-      return true;
-    });
+    const chain = this.chain(principal, namespace);
+    return this.storage.transaction(() =>
+      chain.write(schema, id, () => {
+        const record = this.live(namespace, schema);
+        const runtime = this.catalog.runtimeOf(record);
+        const row = this.row(namespace, schema, id);
+        if (!row) {
+          return false;
+        }
+        matchSeq(row, options.expectedSeq);
+        const execution = this.execution(chain, runtime, record, id, JSON.parse(String(row.data)) as Record<string, unknown>, true);
+        execution.guard({ kind: 'delete' });
+        execution.deleting();
+        this.storage.run('DELETE FROM engine_instances WHERE namespace = ? AND schema = ? AND id = ?', [namespace, schema, id]);
+        execution.afterChange({ kind: 'delete' });
+        this.references.drop(namespace, schema, id);
+        appendEvent(this.storage, {
+          kind: 'delete',
+          namespace,
+          schema,
+          instanceId: id,
+          seq: Number(row.seq) + 1,
+          version: Number(row.version),
+          actor: principal.subject,
+          at: chain.now,
+          change: null,
+        });
+        this.referenced(chain, schema, id, { kind: 'delete' });
+        return true;
+      })
+    );
   }
 
   /**
@@ -314,8 +362,9 @@ export class InstanceStore {
    * does. It moves it even when no field changes, since the engine cannot
    * see what the operation changed in its behavior's own tables. A schema
    * or operation the namespace does not have is not_found to a principal
-   * that may read the schema, and forbidden to one that may not. With
-   * expectedSeq, the instance must still be at that sequence.
+   * that may read the schema, and forbidden to one that may not; so is a
+   * schema-level operation, which invokeSchema calls. With expectedSeq,
+   * the instance must still be at that sequence.
    */
   invoke(principal: Principal, schema: string, id: string, operation: string, params: unknown = {}, options: InvokeOptions = {}): unknown {
     return this.operate(principal, schema, id, operation, params, options).result;
@@ -330,6 +379,50 @@ export class InstanceStore {
     checkPrincipal(principal);
     const namespace = this.namespaces.resolve(options.namespace);
     checkSchemaName(schema);
+    const { record, runtime, spec } = this.operation(principal, namespace, schema, operation, 'instance');
+    this.access.require(principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
+    checkExpectedSeq(options.expectedSeq);
+    const checked = checkParams(spec, params);
+    const chain = this.chain(principal, namespace);
+    if (!spec.writes) {
+      const row = this.existing(namespace, schema, id);
+      matchSeq(row, options.expectedSeq);
+      const result = this.execution(chain, runtime, record, id, JSON.parse(String(row.data)) as Record<string, unknown>, false).invoke(spec, checked);
+      return { result, seq: Number(row.seq) };
+    }
+    return this.storage.transaction(() => this.runOperation(chain, record, runtime, spec, id, checked, options.expectedSeq));
+  }
+
+  /**
+   * invokeSchema calls a schema-level operation, which has no instance,
+   * and returns its result. It asks the policy as invoke does, runs the
+   * handler in a transaction when the operation writes, and appends no
+   * event: what it changes, it changes through the operations it invokes,
+   * whose events record it. An instance operation is not_found here, as
+   * one the schema does not have is.
+   */
+  invokeSchema(principal: Principal, schema: string, operation: string, params: unknown = {}, options: InvokeSchemaOptions = {}): unknown {
+    checkPrincipal(principal);
+    const namespace = this.namespaces.resolve(options.namespace);
+    checkSchemaName(schema);
+    const { record, runtime, spec } = this.operation(principal, namespace, schema, operation, 'schema');
+    this.access.require(principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
+    const checked = checkParams(spec, params);
+    const chain = this.chain(principal, namespace);
+    const run = () => new SchemaExecution(this.storage, runtime, chain, this.reach, record.name, record.version as number).invoke(spec, checked);
+    return spec.writes ? this.storage.transaction(run) : run();
+  }
+
+  // operation finds an operation of a schema's live version with a scope.
+  // Without one, a principal that may read the schema learns there is
+  // none, and one that may not is refused.
+  private operation(
+    principal: Principal,
+    namespace: string,
+    schema: string,
+    operation: string,
+    scope: 'instance' | 'schema'
+  ): { record: SchemaRecord; runtime: VersionRuntime; spec: OperationSpec } {
     const record = this.catalog.find(schema, namespace, 'live');
     if (!record) {
       this.access.require(principal, 'read', namespace, schema);
@@ -337,51 +430,62 @@ export class InstanceStore {
     }
     const runtime = this.catalog.runtimeOf(record);
     const spec = typeof operation === 'string' ? runtime.composition.operations.get(operation) : undefined;
-    if (!spec) {
+    if (!spec || spec.scope !== scope) {
       this.access.require(principal, 'read', namespace, schema);
-      const known = [...runtime.composition.operations.keys()];
+      if (spec) {
+        throw new EngineError(
+          'not_found',
+          scope === 'instance'
+            ? `${schema}'s ${spec.name} is a schema-level operation: call it on the schema, with no instance`
+            : `${schema}'s ${spec.name} is an instance operation: call it on an instance`
+        );
+      }
+      const known = [...runtime.composition.operations.values()].filter((candidate) => candidate.scope === scope).map((candidate) => candidate.name);
       throw new EngineError(
         'not_found',
-        `schema ${schema} has no operation ${String(operation)} (its behaviors' operations: ${known.length > 0 ? known.join(', ') : 'none'})`
+        `schema ${schema} has no ${scope === 'schema' ? 'schema-level ' : ''}operation ${String(operation)} (its behaviors' ${scope === 'schema' ? 'schema-level ' : ''}operations: ${known.length > 0 ? known.join(', ') : 'none'})`
       );
     }
-    this.access.require(principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
-    checkExpectedSeq(options.expectedSeq);
-    const checked = checkParams(spec, params);
-    const now = this.clock();
-    if (!spec.writes) {
+    return { record, runtime, spec };
+  }
+
+  // runOperation runs a writing operation on an instance inside the call's
+  // transaction: every guard, the handler, each afterChange, the next seq
+  // and the operation event, then the hooks of the behaviors that refer to
+  // the instance.
+  private runOperation(
+    chain: Chain,
+    record: SchemaRecord,
+    runtime: VersionRuntime,
+    spec: OperationSpec,
+    id: string,
+    checked: FrozenJSON,
+    expectedSeq: number | undefined
+  ): OperationOutcome {
+    const namespace = chain.namespace;
+    const schema = record.name;
+    return chain.write(schema, id, () => {
       const row = this.existing(namespace, schema, id);
-      matchSeq(row, options.expectedSeq);
-      const result = this.execution(runtime, record, namespace, principal, now, id, JSON.parse(String(row.data)) as Record<string, unknown>, false).invoke(
-        spec,
-        checked
-      );
-      return { result, seq: Number(row.seq) };
-    }
-    return this.storage.transaction(() => {
-      const row = this.existing(namespace, schema, id);
-      matchSeq(row, options.expectedSeq);
-      const execution = this.execution(runtime, record, namespace, principal, now, id, JSON.parse(String(row.data)) as Record<string, unknown>, true);
+      matchSeq(row, expectedSeq);
+      const execution = this.execution(chain, runtime, record, id, JSON.parse(String(row.data)) as Record<string, unknown>, true);
       const own = execution.current();
       const before = execution.fields();
       const result = execution.invoke(spec, checked);
       // An operation may change the instance's own fields through update();
       // afterChange gets them from before it, and the event carries the change.
       const ownAfter = execution.current();
-      const changed = !jsonEqual(own, ownAfter);
-      execution.afterChange(
-        changed
-          ? { kind: 'operation', behavior: spec.behavior.name, operation: spec.name, params: checked, before: own }
-          : { kind: 'operation', behavior: spec.behavior.name, operation: spec.name, params: checked }
-      );
+      const change: InstanceChange = jsonEqual(own, ownAfter)
+        ? { kind: 'operation', behavior: spec.behavior.name, operation: spec.name, params: checked }
+        : { kind: 'operation', behavior: spec.behavior.name, operation: spec.name, params: checked, before: own };
+      execution.afterChange(change);
       const after = execution.fields();
       const seq = Number(row.seq) + 1;
       this.storage.run(
         `UPDATE engine_instances SET version = ?, schema_namespace = ?, seq = ?, updated_at = ?, updated_by = ?
          WHERE namespace = ? AND schema = ? AND id = ?`,
-        [record.version as number, record.namespace, seq, now, principal.subject, namespace, schema, id]
+        [record.version as number, record.namespace, seq, chain.now, chain.principal.subject, namespace, schema, id]
       );
-      const change: OperationChange = {
+      const operationChange: OperationChange = {
         behavior: spec.behavior.name,
         operation: spec.name,
         params: checked,
@@ -394,12 +498,181 @@ export class InstanceStore {
         instanceId: id,
         seq,
         version: record.version as number,
-        actor: principal.subject,
-        at: now,
-        change: JSON.stringify(change),
+        actor: chain.principal.subject,
+        at: chain.now,
+        change: JSON.stringify(operationChange),
       });
+      this.referenced(chain, schema, id, change);
       return { result, seq };
     });
+  }
+
+  // readFor reads instances of a schema for a behavior, as the chain's
+  // principal: read is asked once for the read.
+  private readFor(chain: Chain, schema: string, ids: readonly string[], fields: readonly string[] | undefined): Map<string, InstanceRecord> {
+    const namespace = chain.namespace;
+    checkSchemaName(schema);
+    this.access.require(chain.principal, 'read', namespace, schema);
+    const record = this.live(namespace, schema);
+    const runtime = this.catalog.runtimeOf(record);
+    const found = new Map<string, InstanceRecord>();
+    if (ids.length === 0) {
+      return found;
+    }
+    const rows = this.storage.all(
+      `SELECT ${COLUMNS} FROM engine_instances WHERE namespace = ? AND schema = ? AND id IN (${ids.map(() => '?').join(', ')})`,
+      [namespace, schema, ...ids]
+    );
+    const byId = new Map(rows.map((row) => [String(row.id), row]));
+    for (const id of ids) {
+      const row = byId.get(id);
+      if (row) {
+        found.set(id, deepFreeze(this.read(chain, runtime, record, row, fields)));
+      }
+    }
+    return found;
+  }
+
+  // invokeFor runs an instance operation a behavior invokes, as the
+  // chain's principal, in the chain's transaction: a savepoint for a
+  // writing one, which a write running up the chain on the same instance
+  // refuses as a cycle.
+  private invokeFor(chain: Chain, from: string, schema: string, id: string, operation: string, params: unknown, writes: boolean): unknown {
+    const namespace = chain.namespace;
+    checkSchemaName(schema);
+    const { record, runtime, spec } = this.operation(chain.principal, namespace, schema, operation, 'instance');
+    if (spec.writes && !writes) {
+      throw new BehaviorError(
+        from,
+        `a read cannot invoke ${spec.name} of ${schema}, which writes; initialize, afterChange, afterReferenceChange and a writing operation can`
+      );
+    }
+    this.access.require(chain.principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
+    const checked = checkParams(spec, params);
+    if (!spec.writes) {
+      const row = this.existing(namespace, schema, id);
+      return this.execution(chain, runtime, record, id, JSON.parse(String(row.data)) as Record<string, unknown>, false).invoke(spec, checked);
+    }
+    if (chain.writing(schema, id)) {
+      throw new BehaviorError(from, `invoking ${spec.name} of ${schema} ${id} is a cycle: a write of ${schema} ${id} is still running up this call`);
+    }
+    return this.storage.transaction(() => this.runOperation(chain, record, runtime, spec, id, checked, undefined)).result;
+  }
+
+  // configFor returns the config a schema's live version gives a
+  // behavior, as the schema holds it; read is asked unless the schema is
+  // the call's own.
+  private configFor(chain: Chain, own: string, schema: string, behavior: string): unknown {
+    const namespace = chain.namespace;
+    checkSchemaName(schema);
+    if (schema !== own) {
+      this.access.require(chain.principal, 'read', namespace, schema);
+    }
+    const record = this.live(namespace, schema);
+    const ref = ((record.document.types ?? {})[record.instanceType]?.behaviors ?? []).find((candidate) => candidate.name === behavior);
+    return ref === undefined ? undefined : deepFreeze(ref.config === undefined ? {} : (JSON.parse(JSON.stringify(ref.config)) as unknown));
+  }
+
+  // addReference records a behavior's reference to an instance of the
+  // chain's namespace, which must exist as the principal reads it.
+  private addReference(chain: Chain, source: ReferenceSource, target: Reference): void {
+    checkSchemaName(target.schema);
+    this.access.require(chain.principal, 'read', chain.namespace, target.schema);
+    if (!this.row(chain.namespace, target.schema, target.id)) {
+      throw new EngineError('not_found', `${target.schema} ${target.id} does not exist in namespace ${chain.namespace}`);
+    }
+    this.references.add(chain.namespace, source, target);
+  }
+
+  // guardReferences asks the guardReference of each behavior that refers
+  // to an instance, on its own instance, whoever the caller.
+  private guardReferences(chain: Chain, schema: string, id: string, request: GuardRequest): void {
+    const action = request.kind === 'operation' ? request.operation : request.kind;
+    for (const incoming of this.references.to(chain.namespace, schema, id)) {
+      const source = this.source(chain, incoming);
+      const implementation = source?.bound.behavior.implementation;
+      if (!source || !implementation?.guardReference) {
+        continue;
+      }
+      const answer = chain.nest(incoming.behavior, 'guardReference', () => {
+        const answer: unknown = implementation.guardReference?.call(
+          implementation,
+          source.execution.view(source.bound),
+          deepFreeze({ schema, id, key: incoming.key }),
+          request
+        );
+        synchronous(incoming.behavior, 'guardReference', answer);
+        return answer;
+      });
+      const reason = vetoReason(incoming.behavior, 'guardReference', answer);
+      if (reason !== undefined) {
+        throw new BehaviorVetoError(incoming.behavior, action, schema, id, reason);
+      }
+    }
+  }
+
+  // referenced runs the afterReferenceChange of each behavior that refers
+  // to an instance, after the instance's change. After a delete, a
+  // reference left behind by a behavior its source still composes refuses
+  // the delete; one a behavior the source no longer composes left is
+  // dropped.
+  private referenced(chain: Chain, schema: string, id: string, change: InstanceChange): void {
+    const frozenChange = deepFreeze(change);
+    for (const incoming of this.references.to(chain.namespace, schema, id)) {
+      const target: Reference = deepFreeze({ schema, id, key: incoming.key });
+      // An earlier hook may have removed this reference.
+      if (!this.references.has(chain.namespace, incoming, target)) {
+        continue;
+      }
+      const source = this.source(chain, incoming);
+      const implementation = source?.bound.behavior.implementation;
+      if (!source || !implementation?.afterReferenceChange) {
+        continue;
+      }
+      chain.nest(incoming.behavior, 'afterReferenceChange', () => {
+        const result: unknown = implementation.afterReferenceChange?.call(
+          implementation,
+          source.execution.referenceContext(source.bound),
+          target,
+          frozenChange
+        );
+        synchronous(incoming.behavior, 'afterReferenceChange', result);
+      });
+    }
+    if (change.kind !== 'delete') {
+      return;
+    }
+    for (const incoming of this.references.to(chain.namespace, schema, id)) {
+      if (!this.source(chain, incoming)) {
+        this.references.dropOne(chain.namespace, schema, id, incoming);
+        continue;
+      }
+      throw new BehaviorError(
+        incoming.behavior,
+        `${incoming.schema} ${incoming.id} still refers to ${schema} ${id}, which is deleted: afterReferenceChange must remove the reference, through an operation of ${incoming.schema} it invokes`
+      );
+    }
+  }
+
+  // source is the instance a reference starts at, read for its behavior's
+  // guard or hook; undefined when its live version no longer composes the
+  // behavior.
+  private source(chain: Chain, incoming: IncomingReference): { bound: BoundBehavior; execution: Execution } | undefined {
+    const record = this.catalog.find(incoming.schema, chain.namespace, 'live');
+    if (!record) {
+      return undefined;
+    }
+    const runtime = this.catalog.runtimeOf(record);
+    const bound = runtime.composition.bound(incoming.behavior);
+    const row = bound ? this.row(chain.namespace, incoming.schema, incoming.id) : undefined;
+    if (!bound || !row) {
+      return undefined;
+    }
+    return { bound, execution: this.execution(chain, runtime, record, incoming.id, JSON.parse(String(row.data)) as Record<string, unknown>, false) };
+  }
+
+  private chain(principal: Principal, namespace: string): Chain {
+    return new Chain(principal, namespace, this.clock(), this.permissions);
   }
 
   private target(principal: Principal, action: Action, schema: string, options: InstanceTarget): string {
@@ -425,35 +698,18 @@ export class InstanceStore {
     }
   }
 
-  private execution(
-    runtime: VersionRuntime,
-    record: SchemaRecord,
-    namespace: string,
-    principal: Principal,
-    now: number,
-    id: string,
-    data: Record<string, unknown>,
-    writable: boolean
-  ): Execution {
-    return new Execution(
-      this.storage,
-      runtime.composition,
-      runtime.prefixes,
-      { namespace, schema: record.name, version: record.version as number, principal, now, permissions: this.permissions },
-      id,
-      data,
-      writable,
-      runtime.validator
-    );
+  private execution(chain: Chain, runtime: VersionRuntime, record: SchemaRecord, id: string, data: Record<string, unknown>, writable: boolean): Execution {
+    return new Execution(this.storage, runtime, chain, this.reach, { schema: record.name, version: record.version as number, id }, data, writable);
   }
 
-  // read returns a stored instance with its behaviors' fields.
-  private read(runtime: VersionRuntime, record: SchemaRecord, namespace: string, principal: Principal, now: number, row: Row): InstanceRecord {
-    if (runtime.composition.fields.size === 0) {
+  // read returns a stored instance with its behaviors' fields: every one,
+  // or the ones named.
+  private read(chain: Chain, runtime: VersionRuntime, record: SchemaRecord, row: Row, fields?: readonly string[]): InstanceRecord {
+    if (runtime.composition.fields.size === 0 || fields?.length === 0) {
       return toInstance(row, {});
     }
     const data = JSON.parse(String(row.data)) as Record<string, unknown>;
-    return toInstance(row, this.execution(runtime, record, namespace, principal, now, String(row.id), data, false).fields());
+    return toInstance(row, this.execution(chain, runtime, record, String(row.id), data, false).fields(fields));
   }
 
   private row(namespace: string, schema: string, id: string): Row | undefined {

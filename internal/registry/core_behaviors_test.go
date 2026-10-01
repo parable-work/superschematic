@@ -10,7 +10,7 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Comments", "Revisions", "Workflow"}
+var coreBehaviorNames = []string{"Comments", "Dependencies", "Links", "Revisions", "Workflow"}
 
 // A registry with no extension declares the behaviors the engine
 // implements, as the core's, under bare names, and holds each config to
@@ -29,9 +29,21 @@ func TestCoreBehaviors(t *testing.T) {
 	workflow, _ := reg.Behavior("Workflow")
 	comments, _ := reg.Behavior("Comments")
 	revisions, _ := reg.Behavior("Revisions")
-	if !workflow.ConfigRequired() || comments.ConfigRequired() || revisions.ConfigRequired() {
-		t.Errorf("ConfigRequired: Workflow %v, Comments %v, Revisions %v; want true, false, false",
-			workflow.ConfigRequired(), comments.ConfigRequired(), revisions.ConfigRequired())
+	dependencies, _ := reg.Behavior("Dependencies")
+	links, _ := reg.Behavior("Links")
+	if !workflow.ConfigRequired() || comments.ConfigRequired() || revisions.ConfigRequired() || dependencies.ConfigRequired() || !links.ConfigRequired() {
+		t.Errorf("ConfigRequired: Workflow %v, Comments %v, Revisions %v, Dependencies %v, Links %v; want true, false, false, false, true",
+			workflow.ConfigRequired(), comments.ConfigRequired(), revisions.ConfigRequired(), dependencies.ConfigRequired(), links.ConfigRequired())
+	}
+	if !slices.Equal(dependencies.Requires, []string{"Workflow"}) || len(links.Requires) != 0 {
+		t.Errorf("requires: Dependencies %v, Links %v; want [Workflow] and none", dependencies.Requires, links.Requires)
+	}
+	var scopes []string
+	for _, op := range links.Operations {
+		scopes = append(scopes, op.Name+":"+op.Scope)
+	}
+	if want := []string{"link:", "unlink:", "listLinked:schema"}; !slices.Equal(scopes, want) {
+		t.Errorf("Links operations and scopes = %v, want %v", scopes, want)
 	}
 
 	for _, test := range []struct {
@@ -57,6 +69,23 @@ func TestCoreBehaviors(t *testing.T) {
 		{revisions, `{"review": {}}`, "behavior Revisions config: "},
 		{revisions, `{"review": {"permission": "documents.review", "quorum": 2}}`, "behavior Revisions config: "},
 		{revisions, `{"reviewers": ["alice"]}`, "behavior Revisions config: "},
+		{dependencies, ``, ""},
+		{dependencies, `{"schemas": ["tasks", "milestones"], "gatedStates": ["done"]}`, ""},
+		{dependencies, `{"schemas": []}`, "behavior Dependencies config: "},
+		{dependencies, `{"schemas": ["task list"]}`, "behavior Dependencies config: "},
+		{dependencies, `{"schemas": ["tasks", "tasks"]}`, "behavior Dependencies config: "},
+		{dependencies, `{"gatedStates": []}`, "behavior Dependencies config: "},
+		{dependencies, `{"gatedStates": [""]}`, "behavior Dependencies config: "},
+		{dependencies, `{"blockers": ["tasks"]}`, "behavior Dependencies config: "},
+		{links, `{"links": {"spec": {"schema": "documents", "pinned": true}, "parent": {"schema": "tasks", "required": true}}}`, ""},
+		{links, ``, "behavior Links config: "},
+		{links, `{"links": {}}`, "behavior Links config: "},
+		{links, `{"links": {"Spec": {"schema": "documents"}}}`, "behavior Links config: "},
+		{links, `{"links": {"spec_doc": {"schema": "documents"}}}`, "behavior Links config: "},
+		{links, `{"links": {"spec": {}}}`, "behavior Links config: "},
+		{links, `{"links": {"spec": {"schema": "the documents"}}}`, "behavior Links config: "},
+		{links, `{"links": {"spec": {"schema": "documents", "weak": true}}}`, "behavior Links config: "},
+		{links, `{"links": {"spec": {"schema": "documents"}}, "cascade": true}`, "behavior Links config: "},
 	} {
 		err := test.behavior.ValidateConfig(json.RawMessage(test.config))
 		switch {

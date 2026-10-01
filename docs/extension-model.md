@@ -716,7 +716,13 @@ shape is `BehaviorDeclaration`:
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
 | `fields` | the fields it adds: `name` and `description` |
-| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+
+An operation's `scope` says what a call names: `instance`, one instance
+by id, or `schema`, the schema as a whole with no instance, which an
+engine serves at `POST /namespaces/{ns}/schemas/{name}/operations/{op}`
+and as a tool that takes its parameters and no `id` (D16, amended).
+`RegisterBehavior` refuses any other value, and the engine does too.
 
 A field carries only a name and a description. A field's type can depend
 on the behavior's config, and the loader needs only the name to refuse a
@@ -727,7 +733,8 @@ follows the bare-name rule (`^[A-Z][A-Za-z0-9]*$`), and the prefix is the
 registering extension's `Name()`; inside `Use` the spec's `Extension` must
 be the extension whose `Register` is running, so an extension cannot
 declare a core name. An operation may not be named `create`, `get`,
-`list`, `update` or `delete`, which every schema has (D16). `Finalize`
+`list`, `update` or `delete`, which every schema has (D16), or declare a
+scope other than `instance` or `schema`. `Finalize`
 checks `requires`, `conflicts` and the invocation policy values, since the
 policy is fixed only once every extension has registered.
 `Registry.Behavior(name)` returns a registered `Behavior`: the declaration,
@@ -814,26 +821,38 @@ No core generator sets the flag. `build --emit-ir`, `format` and
 
 The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`
-registers with no extension: `Workflow`, `Comments` and `Revisions`.
-Every binary therefore accepts a schema that composes them, the
-schema-file JSON Schema lists them, and `BehaviorConfigs` in
-`@superschematic/schema` types their configs. None names an invocation
-policy, since a distribution's policy need not have the core's values;
-each operation takes the policy's default. Every `paramsSchema` sets
-`additionalProperties: false`. A config a declaration's `configSchema`
-accepts can still fail in the engine, whose implementation checks what
-JSON Schema cannot (a Workflow transition that names a state the config
-does not list, say); `runtime/engine/README.md`, "Core behaviors", has
-each one's config, fields and operations. The engine registers its
-implementations of them when it opens, so a schema that composes them
-runs with no extension linked (D10), its operations served over HTTP and
-as MCP tools like any behavior's.
+registers with no extension: `Workflow`, `Comments`, `Revisions`,
+`Dependencies` and `Links`. Every binary therefore accepts a schema that
+composes them, the schema-file JSON Schema lists them, and
+`BehaviorConfigs` in `@superschematic/schema` types their configs. None
+names an invocation policy, since a distribution's policy need not have
+the core's values; each operation takes the policy's default. Every
+`paramsSchema` sets `additionalProperties: false`. A config a
+declaration's `configSchema` accepts can still fail in the engine, whose
+implementation checks what JSON Schema cannot (a Workflow transition
+that names a state the config does not list, or a gated state of
+`Dependencies` that is not a terminal state of the type's Workflow,
+say); `runtime/engine/README.md`, "Core behaviors", has each one's
+config, fields and operations. The engine registers its implementations
+of them when it opens, so a schema that composes them runs with no
+extension linked (D10), its operations served over HTTP and as MCP tools
+like any behavior's.
 
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |
 | `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`); required | `status` | `transition` |
 | `Comments` | none | `commentCount` | `comment`, `listComments` |
 | `Revisions` | `review` (`permission`), optional | `revision` | `listRevisions`, `propose`, `approve`, `reject`, `listProposals` |
+| `Dependencies` | `schemas`, `gatedStates`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
+| `Links` | `links` (by name: `schema`, `required`, `pinned`); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
+
+`Dependencies` and `Links` reach other instances (D16, amended): a
+blocker or a link target is an instance of the schema a config names,
+which the loader does not resolve; the engine looks the name up when an
+operation runs, in the instance's namespace and then the shared one.
+`make cli-smoke` loads `fixture-cross-instance-json`, whose type composes
+both, with the core binary, and its TypeScript twin in the tsreader
+fixtures loads to the same IR.
 
 acme declares `acme.Rating` and types its config in
 `packages/schema/src/behaviors.ts` (section 10);
@@ -1291,7 +1310,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | `Workflow`, `Comments`, `Revisions` (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links` (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |

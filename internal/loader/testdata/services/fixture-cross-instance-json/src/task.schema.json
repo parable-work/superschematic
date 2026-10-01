@@ -1,0 +1,38 @@
+{
+  "kind": "General",
+  "name": "tasks",
+  "description": "A task an engine runs with the core's behaviors and no extension: it moves from todo through doing to done, waits for its blockers, a task or a document, before it is done, and links to the document it implements, pinned to a revision, and to a parent task.",
+  "types": {
+    "Task": {
+      "name": "Task",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["todo", "doing", "done", "dropped"],
+            "transitions": [
+              { "from": "todo", "to": "doing" },
+              { "from": "doing", "to": "done" },
+              { "from": "todo", "to": "dropped" },
+              { "from": "doing", "to": "dropped" }
+            ]
+          }
+        },
+        { "name": "Dependencies", "config": { "schemas": ["tasks", "documents"], "gatedStates": ["done"] } },
+        {
+          "name": "Links",
+          "config": {
+            "links": {
+              "spec": { "schema": "documents", "pinned": true },
+              "parent": { "schema": "tasks", "required": true }
+            }
+          }
+        }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 }
+      ]
+    }
+  }
+}

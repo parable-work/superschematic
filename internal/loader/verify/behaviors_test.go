@@ -63,7 +63,7 @@ func TestBehaviorsVerify(t *testing.T) {
 		{"accepted", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Audit"}}, nil},
 		{"requirement listed first", []ir.BehaviorRef{{Name: "Audit"}, stock(`{"aisles":2}`)}, nil},
 		{"unknown", []ir.BehaviorRef{{Name: "Ghost"}},
-			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Audit, Clearance, Comments, Recount, Revisions, Shelved, Stock, Workflow)`}},
+			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Audit, Clearance, Comments, Dependencies, Links, Recount, Revisions, Shelved, Stock, Workflow)`}},
 		{"config rejected", []ir.BehaviorRef{stock(`{"aisles":0}`)},
 			[]string{"src/item.schema.json: type Item: behavior Stock config: "}},
 		{"config missing", []ir.BehaviorRef{{Name: "Stock"}},
@@ -141,7 +141,7 @@ func TestBehaviorsVerifyWithTheCore(t *testing.T) {
 	}
 
 	r = Run(behaviorSchema(ir.BehaviorRef{Name: "Stock"}), Input{Registry: core})
-	if want := `type Item: behavior "Stock" is not a registered behavior (registered: Comments, Revisions, Workflow)`; !hasError(r, want) {
+	if want := `type Item: behavior "Stock" is not a registered behavior (registered: Comments, Dependencies, Links, Revisions, Workflow)`; !hasError(r, want) {
 		t.Fatalf("errors = %v, want %q", errorStrings(r), want)
 	}
 

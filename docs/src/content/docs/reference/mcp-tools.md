@@ -318,12 +318,16 @@ a namespace, and `/namespaces/{namespace}/mcp` serves the tools over MCP.
 Its tools have no `@mcp` or `@docs`. A tool per operation of every live
 schema, behavior operations included, is named `<schema>.<operation>` as
 the generators name a method, with the schema name in kebab case, and its
-handle is the same two parts in snake case (`line_item_add_note`); three
-more list, describe and define schemas, and none publishes. The engine
+handle is the same two parts in snake case (`line_item_add_note`). A
+behavior operation's tool takes the instance `id`, `params` and
+`expectedSeq`; a schema-level one's (`scope: "schema"` in its
+declaration) takes `params` alone. Three more list, describe and define
+schemas, and none publishes. The engine
 writes empty guidance, takes the invocation policy and the vendor keys
 above as options, and takes a behavior operation's policy from its
 declaration, else the default: the core's behaviors (`Workflow`,
-`Comments` and `Revisions`), which every engine registers, name none.
+`Comments`, `Revisions`, `Dependencies` and `Links`), which every engine
+registers, name none.
 Its argument schemas are the generators':
 `runtime/engine/testdata/tool_parameters_parity.json` holds them to
 `toolsutil`. `runtime/engine/README.md` ("Tools", "MCP") has the rest.

@@ -10,7 +10,7 @@ import { cleanup, clone, drivers, openTestEngine } from './helpers.ts';
 afterEach(cleanup);
 
 // The core's behaviors, which every engine registers when it opens.
-const CORE = ['Comments', 'Revisions', 'Workflow'];
+const CORE = ['Comments', 'Dependencies', 'Links', 'Revisions', 'Workflow'];
 
 // refusal registers an implementation with a fresh engine and returns the message it is refused with.
 function refusal(implementation: AnyBehaviorImplementation): string {
@@ -72,6 +72,19 @@ describe('behavior registration refuses', () => {
     assert.match(refusal({ ...counter, operations: { ...counter.operations, history: 'nope' } } as never), /operations\.history is a function/);
   });
 
+  test('schema-level operations that are not exactly the declared ones, apart from the instance ones', () => {
+    // history declared schema-level: its handler belongs in schemaOperations.
+    const moved = withDeclaration((d) => ((d.operations as Array<Record<string, unknown>>)[1].scope = 'schema'));
+    const message = refusal(moved);
+    assert.match(message, /it implements operations its declaration does not name: history/);
+    assert.match(message, /its declaration names schemaOperations it does not implement: history/);
+    const { history, ...instanceOnly } = counter.operations ?? {};
+    assert.doesNotThrow(() => openBehaviorEngine({ behaviors: [{ ...moved, operations: instanceOnly, schemaOperations: { history } } as never] }));
+    assert.match(refusal({ ...counter, schemaOperations: { tally: () => 0 } }), /it implements schemaOperations its declaration does not name: tally/);
+    assert.match(refusal({ ...counter, guardReference: 'no' } as never), /guardReference is a function/);
+    assert.match(refusal({ ...counter, afterReferenceChange: 7 } as never), /afterReferenceChange is a function/);
+  });
+
   test('fields that are not exactly the declared ones', () => {
     assert.match(refusal({ ...counter, fields: {} }), /its declaration names fields it does not implement: count/);
     assert.match(refusal({ ...counter, fields: { ...counter.fields, total: () => 1 } }), /it implements fields its declaration does not name: total/);
@@ -96,6 +109,7 @@ describe('behavior registration refuses', () => {
       [(d) => ((d.operations as Array<Record<string, unknown>>)[0].paramsSchema = { type: 'array' }), /paramsSchema must be an object schema/],
       [(d) => delete (d.operations as Array<Record<string, unknown>>)[0].resultSchema, /operation increment has no resultSchema/],
       [(d) => ((d.operations as Array<Record<string, unknown>>)[0].writes = 'yes'), /operation increment writes is a boolean/],
+      [(d) => ((d.operations as Array<Record<string, unknown>>)[0].scope = 'type'), /operation increment scope "type" is not "instance" or "schema"/],
       [(d) => ((d.fields as Array<Record<string, unknown>>)[0].name = 'the count'), /fields\[0\]\.name "the count" is not an identifier/],
       [(d) => (d.fields = [{ name: 'count' }, { name: 'count' }]), /field count is declared twice/],
       [(d) => (d.requires = ['test.Counter']), /requires names the behavior itself/],

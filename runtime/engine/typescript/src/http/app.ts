@@ -13,6 +13,8 @@ instance, or a behavior operation's result, sends `ETag: "<seq>"`, and
 PATCH, DELETE and an operation honour `If-Match` inside the write
 transaction (expectedSeq), so a lost update answers 412.
 
+A schema-level behavior operation, which has no instance, has a route of
+its own under the schema; it sends no ETag, since it names no instance.
 Besides the instances and the event log, the routes serve a schema's
 describe document and the namespace's tools document (tools/catalog.ts);
 the MCP endpoint is the ./mcp entry point's.
@@ -73,6 +75,7 @@ const SCHEMA = `${SCHEMAS}/{name}`;
 const INSTANCES = `${SCHEMA}/instances`;
 const INSTANCE = `${INSTANCES}/{id}`;
 const OPERATION = `${INSTANCE}/operations/{operation}`;
+const SCHEMA_OPERATION = `${SCHEMA}/operations/{operation}`;
 const EVENTS = '/namespaces/{namespace}/events';
 const TOOLS = '/namespaces/{namespace}/tools';
 
@@ -233,6 +236,19 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     const outcome = engine.instances.operate(principal, name, id, operation, input ?? {}, { namespace, expectedSeq });
     return new OperationResult(outcome.result, 200, { etag: `"${outcome.seq}"` });
   });
+
+  // A schema-level behavior operation: the body is its parameters, {} when absent.
+  route(
+    spec('invokeSchemaOperation', 'POST', SCHEMA_OPERATION, { input: { parse: (value: unknown) => value, required: false } }),
+    (ctx, { path, input }) => {
+      if (input !== undefined) {
+        const refused = mediaTypeRefusal(ctx, JSON_MEDIA_TYPE);
+        if (refused) return refused;
+      }
+      const { namespace, name, operation } = path as { namespace: string; name: string; operation: string };
+      return new OperationResult(engine.instances.invokeSchema(principalOf(ctx), name, operation, input ?? {}, { namespace }), 200);
+    }
+  );
 
   route(spec('listTools', 'GET', TOOLS), (ctx, { path }) => engine.tools.manifest(principalOf(ctx), { namespace: path.namespace as string }));
 

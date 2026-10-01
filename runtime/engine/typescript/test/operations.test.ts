@@ -12,7 +12,8 @@ import type { Hono } from 'hono';
 import { EngineError, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { flag, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, thrown } from './helpers.ts';
+import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, tasksDocument, thrown } from './helpers.ts';
+import { reachBehaviors } from './reach-fixtures.ts';
 
 afterEach(cleanup);
 
@@ -186,6 +187,55 @@ describe('the operation route', () => {
   });
 });
 
+describe('the schema-level operation route', () => {
+  const schemaOperation = (name: string) => `/namespaces/default/schemas/Item/operations/${name}`;
+
+  function withHolders(): { engine: Engine; app: Hono } {
+    const served = serve({ behaviors: [...testBehaviors, ...reachBehaviors] });
+    publishItem(served.engine, [{ name: 'test.Holder' }]);
+    for (const id of ['i1', 'i2', 'i3']) {
+      served.engine.instances.create(alice, 'Item', { title: id }, { id });
+    }
+    served.engine.instances.invoke(alice, 'Item', 'i2', 'hold', { schema: 'Item', id: 'i1' });
+    served.engine.instances.invoke(alice, 'Item', 'i3', 'hold', { schema: 'Item', id: 'i1' });
+    return served;
+  }
+
+  test('runs a schema-level operation with the body as its parameters and answers its result, with no ETag', async () => {
+    const { app, engine } = withHolders();
+    assert.deepEqual(await data(call(app, 'POST', schemaOperation('holders'), { body: { schema: 'Item', id: 'i1' }, token: 'reader' })), {
+      data: ['i2', 'i3'],
+      etag: null,
+    });
+    const before = engine.events.read(alice, { limit: 500 }).events.length;
+    assert.deepEqual((await data(call(app, 'POST', schemaOperation('releaseAll'), { body: { schema: 'Item', id: 'i1' } }))).data, 2);
+    assert.deepEqual(
+      engine.events.read(alice, { limit: 500 }).events.slice(before).map((event) => [event.instanceId, (event.change as { operation: string }).operation]),
+      [
+        ['i2', 'release'],
+        ['i3', 'release'],
+      ]
+    );
+    assert.deepEqual((await data(call(app, 'POST', schemaOperation('holders'), { body: { schema: 'Item', id: 'i1' } }))).data, []);
+  });
+
+  test('answers each refusal with its status; each route refuses the other scope', async () => {
+    const { app } = withHolders();
+    assert.equal((await problem(call(app, 'POST', schemaOperation('holders'), { body: { schema: 'Item' } }), 400)).code, 'invalid_argument');
+    await problem(call(app, 'POST', schemaOperation('holders'), { body: '{}', type: 'text/plain' }), 415);
+    assert.equal((await problem(call(app, 'POST', schemaOperation('releaseAll'), { body: { schema: 'Item', id: 'i1' }, token: 'reader' }), 403)).code, 'forbidden');
+    await problem(call(app, 'POST', schemaOperation('holders'), { token: null }), 401);
+    const instanceRoute = await problem(call(app, 'POST', operation('i2', 'holders'), { body: { schema: 'Item', id: 'i1' } }), 404);
+    assert.equal(instanceRoute.detail, "Item's holders is a schema-level operation: call it on the schema, with no instance");
+    const schemaRoute = await problem(call(app, 'POST', schemaOperation('hold'), { body: { schema: 'Item', id: 'i1' } }), 404);
+    assert.equal(schemaRoute.detail, "Item's hold is an instance operation: call it on an instance");
+    assert.equal((await problem(call(app, 'POST', '/namespaces/default/schemas/Missing/operations/holders'), 404)).code, 'not_found');
+    assert.equal((await problem(call(app, 'POST', '/namespaces/nowhere/schemas/Item/operations/holders'), 404)).code, 'unknown_namespace');
+    const defect = await problem(call(app, 'POST', schemaOperation('scribble')), 500);
+    assert.equal(defect.code, 'internal_error');
+  });
+});
+
 describe('the describe and tools routes', () => {
   test('describe answers the document of the live version, to a reader', async () => {
     const { app, engine } = withItem();
@@ -261,6 +311,45 @@ describe("the core's behaviors over HTTP", () => {
       data: { from: 'review', to: 'published' },
       etag: '"3"',
     });
+  });
+
+  test('Dependencies and Links through the routes: a gated transition and a required target\'s delete are 409, listLinked is on the schema', async () => {
+    const { app, engine } = withDocument();
+    engine.schemas.define(alice, tasksDocument());
+    engine.schemas.publish(alice, 'tasks');
+    engine.instances.create(alice, 'tasks', { title: 'Plan' }, { id: 'plan' });
+    engine.instances.create(alice, 'tasks', { title: 'Build' }, { id: 'build' });
+    const TASKS = '/namespaces/default/schemas/tasks';
+    const build = (name: string) => `${TASKS}/instances/build/operations/${name}`;
+    assert.deepEqual(await data(call(app, 'POST', build('addBlocker'), { body: { id: 'plan' }, headers: { 'if-match': '"1"' } })), {
+      data: { schema: 'tasks', id: 'plan', status: 'todo', open: true },
+      etag: '"2"',
+    });
+    await data(call(app, 'POST', build('link'), { body: { name: 'parent', id: 'plan' } }));
+    assert.deepEqual((await data(call(app, 'POST', build('link'), { body: { name: 'spec', id: 'doc-1' } }))).data, {
+      name: 'spec',
+      schema: 'documents',
+      id: 'doc-1',
+      revision: 1,
+    });
+    await data(call(app, 'POST', build('transition'), { body: { to: 'doing' } }));
+    const gated = await problem(call(app, 'POST', build('transition'), { body: { to: 'done' } }), 409);
+    assert.deepEqual(
+      [gated.code, gated.details.behavior, gated.details.reason],
+      ['vetoed', 'Dependencies', 'tasks build cannot move to done while it is blocked by tasks plan (todo)']
+    );
+    assert.equal((await problem(call(app, 'POST', build('addBlocker'), { body: { id: 'build' } }), 400)).code, 'invalid_argument');
+    assert.deepEqual(await data(call(app, 'POST', `${TASKS}/operations/listLinked`, { token: 'reader', body: { name: 'spec', id: 'doc-1' } })), {
+      data: { items: [{ id: 'build', revision: 1, stale: false }], next: null },
+      etag: null,
+    });
+    const required = await problem(call(app, 'DELETE', `${TASKS}/instances/plan`), 409);
+    assert.deepEqual([required.code, required.details.behavior, required.details.action], ['vetoed', 'Links', 'delete']);
+    // A reader may not delete the design; alice may, and its delete clears build's edge and link.
+    assert.equal((await problem(call(app, 'DELETE', DOCUMENT, { token: 'reader' }), 403)).code, 'forbidden');
+    await data(call(app, 'DELETE', DOCUMENT));
+    const read = await data(call(app, 'GET', `${TASKS}/instances/build`));
+    assert.deepEqual([read.data.data.blocked, read.data.data.links], [true, { parent: { schema: 'tasks', id: 'plan' } }]);
   });
 
   test('listComments is a read: a reader may call it, and it answers the ETag it read', async () => {

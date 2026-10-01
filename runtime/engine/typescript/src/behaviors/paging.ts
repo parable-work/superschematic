@@ -1,14 +1,14 @@
 /*
-Paging for the core behaviors' list operations: the engine's page sizes
-(the paramsSchema bounds limit to 1-500) and an opaque cursor over a
-number the behavior gives each record of an instance: a comment's id, a
-revision's number, a proposal's id. Each page is one range read on the
-behavior's primary key.
+Paging for a behavior's list operations, the core's and an extension's:
+the engine's page sizes (a paramsSchema bounds limit to 1-500) and an
+opaque cursor over a number the behavior gives each record: a comment's
+id, a revision's number, a proposal's id, a row id. Each page is one
+range read on that number, with a limit of limit + 1.
 */
 
-import { OperationParamsError } from '../../errors.js';
-import { DEFAULT_PAGE_SIZE } from '../../paging.js';
-import type { FrozenJSON } from '../behavior.js';
+import { OperationParamsError } from '../errors.js';
+import { DEFAULT_PAGE_SIZE } from '../paging.js';
+import type { FrozenJSON } from './behavior.js';
 
 /** One page of a list operation's result. */
 export interface Page<T> {

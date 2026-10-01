@@ -10,8 +10,9 @@ compatibility rule, instances, the event log, the access policy, the
 HTTP API with the event stream (`@superschematic/engine/http`), the
 behavior plug-in interface, the describe and tools documents, the MCP
 endpoint (`@superschematic/engine/mcp`), and the core's behaviors:
-`Workflow`, `Comments` and `Revisions`. Not built yet: the other
-behaviors D16 lists.
+`Workflow`, `Comments`, `Revisions`, and `Dependencies` and `Links`,
+which reach other instances. Not built yet: derived fields, reactions,
+search, and the work-queue package D16 lists.
 
 ```ts
 import { allowAll, openEngine } from '@superschematic/engine';
@@ -408,7 +409,8 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 
 `metaSchema` is the `json-schema` output of the deployment's binary, which
 lists the behaviors it declares; the core's lists the core's own
-(`Workflow`, `Comments` and `Revisions`), so its loader refuses any other.
+(`Workflow`, `Comments`, `Revisions`, `Dependencies` and `Links`), so its
+loader refuses any other.
 
 ### The implementation
 
@@ -424,9 +426,12 @@ function is synchronous (D16): one that returns a promise is a
 | `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table and an `up(sql)` for its own tables |
 | `initialize(context)` | sets up its state for a new instance |
 | `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does |
-| `operations` | a handler per declared operation: `(context, params) => result`, with an `OperationContext` |
+| `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext` |
+| `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext` ("Schema-level operations") |
 | `fields` | a reader per declared field: `(view) => value` |
 | `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them |
+| `guardReference(view, reference, request)` | may veto an `update`, a `delete` or a writing `operation` of an instance this behavior's instance refers to ("References"); the view is the referencing instance's |
+| `afterReferenceChange(context, reference, change)` | runs after such a change, in the same transaction, on the referencing instance; after a delete it must remove the reference |
 
 Registration (`openEngine({ behaviors })` or `engine.behaviors.register`)
 refuses, naming every problem, an implementation whose `operations` or
@@ -458,16 +463,23 @@ a field reader's) has:
 - `data`: the instance's own fields, deep-frozen, without any behavior's;
 - `columns.get()`: its own columns on the instance, by its own names;
 - `sql`: `get` and `all` on its own tables, reads only, with
-  `sql.table(name)` for the SQL name of one of them.
+  `sql.table(name)` for the SQL name of one of them;
+- `instances` and `schemas`: other instances and other schemas' configs,
+  read as the principal ("Other instances"), and `instances.invoke` of
+  read-only operations;
+- `references.list()`: the references the behavior recorded from the
+  instance ("References").
 
 A context (initialize, afterChange, an operation) adds `columns.set()`,
-`sql.run()` and `call(behavior, operation, params)`. In a read-only
-operation `set` and `run` refuse and `call` reaches only read-only
-operations; after a delete, `columns.get()` returns what the instance
-had and `set` and `call` refuse. There is no handle on the instances
-table, the event log, another behavior's storage or the connection: a
-status one behavior owns changes at another's request only through its
-operations, whose guards run.
+`sql.run()`, `references.add()` and `remove()`, `call(behavior,
+operation, params)`, and `instances.invoke` of writing operations. In a
+read-only operation `set`, `run`, `add` and `remove` refuse, and `call`
+and `invoke` reach only read-only operations; after a delete,
+`columns.get()` returns what the instance had and `set`, `add`, `remove`
+and `call` refuse. There is no handle on the instances table, the event
+log, another behavior's storage or the connection: a status one behavior
+owns changes at another's request only through its operations, whose
+guards run, on this instance or another.
 
 An operation's context (`OperationContext`) adds two more, so a
 behavior that changes the instance on a caller's behalf, approving a
@@ -485,6 +497,111 @@ proposed change say, runs the checks an update runs:
   fields as the operation's updates leave them.
 - `validateUpdate(patch)` returns the issues `update(patch)` would refuse
   the patch for, without writing or asking a guard.
+
+### Other instances
+
+A behavior reaches the rest of its namespace as the call's principal
+(D16, amended). There is no system principal: every read and invoke asks
+the access policy, and a caller who may not read a schema cannot read it
+through a behavior either.
+
+```ts
+// In an operation of Task: read a milestone's status, then move it on.
+const milestone = context.instances.get('Milestone', params.milestone, { fields: ['status'] });
+const flow = context.schemas.config('Milestone', 'Workflow');          // as the schema holds it
+if (milestone && flow && !isTerminalState(flow, String(milestone.data.status))) {
+  context.instances.invoke('Milestone', milestone.id, 'transition', { to: 'done' });
+}
+```
+
+| Member | What it does | Asks the policy |
+| --- | --- | --- |
+| `instances.get(schema, id, { fields? })` | the instance's record, deep-frozen, with every behavior field, the ones `fields` names, or none for `[]`; `undefined` when there is none | `read` on the schema |
+| `instances.getMany(schema, ids, { fields? })` | a `Map` by id of the instances of one schema, at most 500, in one query; ids with none are left out | `read` on the schema, once |
+| `instances.invoke(schema, id, operation, params?)` | runs an instance operation of another instance, or of this one, as `engine.instances.invoke` would, and returns its result | `write` or `read` with the operation's name |
+| `schemas.config(schema, behavior)` | the config a schema's live version gives a behavior, as the schema holds it (`{}` when none); `undefined` when it does not compose it | `read`, unless the schema is the call's own |
+| `schemas.readable(schema)` | whether the principal may read a schema | `read` |
+
+- A schema name is looked up in the namespace, then in the shared one; an
+  instance, a reference and an invoke are always the call's namespace's.
+- An invoked operation runs its parameter check, every guard of its
+  instance, its handler and its result check; a writing one then runs
+  that instance's `afterChange`, takes its next `seq` and appends its own
+  operation event, whose actor is the caller. It runs in the caller's
+  transaction, in a savepoint: a failure the behavior catches leaves
+  nothing of it, and one it does not rolls back every instance the call
+  changed. Its event comes before the calling operation's, which finishes
+  after it.
+- A guard, a field reader and a read-only operation invoke read-only
+  operations only; initialize, afterChange, `afterReferenceChange` and a
+  writing operation invoke writing ones too.
+- `call()`, invokes and reads that compute fields nest at most 16 deep
+  together (`MAX_CALL_DEPTH`). Invoking a writing operation of an instance
+  whose own write is still running up the call is refused as a cycle
+  (`BehaviorError`); a read of it sees what the call has written so far.
+  A cycle of field reads ends at the depth limit, so a behavior names the
+  fields it needs.
+- A field that reads another instance is computed at each read. The log
+  records each instance's own changes, so a change of an instance that
+  another's field reads shows at the reader's next read, with no event on
+  the reader.
+
+`parseConfig(config, target)` gets `target.configs`, the config of every
+behavior the type lists as the schema holds it, so a behavior that builds
+on another checks its config against that one's when the schema is
+defined.
+
+### References
+
+A behavior that holds a reference to another instance records it with
+the engine, so it hears when that instance changes or goes:
+
+```ts
+context.references.add('Spec', params.id, 'spec');   // asks read on Spec; not_found without the instance
+context.references.remove('Spec', old, 'spec');      // true when there was one
+context.references.list();                           // [{ schema, id, key }], in the order recorded
+```
+
+A reference is the behavior's, from its instance, to an instance of the
+same namespace, under a key of its choosing (`''` by default); recording
+one twice records one. Before an `update`, a `delete` or a writing
+operation of a referenced instance, the engine asks each referencing
+behavior's `guardReference(view, reference, request)` after the
+instance's own guards, whoever the caller; a reason vetoes
+(`BehaviorVetoError`, naming the referencing behavior). After the change
+and its event, it runs each `afterReferenceChange(context, reference,
+change)`, in the same transaction. That context is a view of the
+referencing instance whose `instances.invoke` also runs writing
+operations: the referencing instance changes only through an operation
+invoked on it, so its guards run and it gets its own event.
+
+After a delete no guard vetoes, no reference to the deleted instance may
+remain: each hook removes its reference through such an operation. A
+reference left behind is a `BehaviorError`, which rolls the delete back,
+the hooks' work with it. Deleting the referencing instance drops its
+references. A reference from an instance to itself is never asked about,
+since the behavior's own guard and `afterChange` see that instance's
+changes. The hooks act as the caller: one who may not write the
+referencing schema cannot delete an instance a hook must clear.
+
+### Schema-level operations
+
+An operation declared with `scope: "schema"` has no instance: it runs on
+the schema as a whole, from `schemaOperations`, with a `SchemaContext`:
+the behavior, its config, the call, `can`, `instances`, `schemas`, and
+`sql` that reads the behavior's tables and writes nothing. No instance
+guard runs and no event is appended for it; a writing one changes state
+only through the instance operations it invokes, each with its own event.
+
+```ts
+engine.instances.invokeSchema(me, 'Order', 'summarize', { since: 0 });   // a schema-level operation of Order
+```
+
+`invokeSchema` asks the policy for `write` or `read` with the
+operation's name, as `invoke` does, and runs a writing one in a
+transaction. An instance operation is `not_found` there, and a
+schema-level one is `not_found` to `invoke`, `call()` and
+`instances.invoke`, each naming the other scope.
 
 ### Storage
 
@@ -535,16 +652,21 @@ every call on the schema `unavailable` until one registers.
 | `create` | validate (a behavior field is `readOnly`) -> insert -> each `initialize` -> each `afterChange` -> event |
 | `get`, `list` | each field reader |
 | `update` | refuse a behavior field (`readOnly`) -> check `expectedSeq` -> merge and validate -> nothing more if nothing changed -> every guard -> write -> each `afterChange` -> event |
-| `delete` | check `expectedSeq` -> every guard -> the row goes -> each `afterChange` -> event |
-| `invoke` | policy -> parameters against `paramsSchema` -> check `expectedSeq` -> every guard -> the handler -> its result against `resultSchema` -> for a writing operation, each `afterChange`, the next `seq` and the event |
+| `delete` | check `expectedSeq` -> every guard, then each referencing behavior's `guardReference` -> the row goes -> each `afterChange` -> its references go -> event -> each `afterReferenceChange` -> no reference to it may remain |
+| `invoke` | policy -> parameters against `paramsSchema` -> check `expectedSeq` -> every guard (and, for a writing operation, each `guardReference`) -> the handler -> its result against `resultSchema` -> for a writing operation, each `afterChange`, the next `seq`, the event and each `afterReferenceChange` |
+| `invokeSchema` | policy -> parameters against `paramsSchema` -> the handler -> its result against `resultSchema`; no guard, no event |
+
+An `update` asks each `guardReference` after the guards and runs each
+`afterReferenceChange` after its event, as a writing operation does.
 
 Functions of several behaviors run in the type's list order, and the
 first veto wins: `BehaviorVetoError` (`vetoed`). `call(behavior,
 operation, params)` checks the parameters and runs every guard and the
 handler in a savepoint, which rolls back alone if the caller catches its
 failure; it does not run `afterChange` or append an event of its own, and
-calls nest at most 16 deep. `afterChange` sees the caller's change only.
-Anything that throws out of a call rolls the whole call back.
+calls nest at most 16 deep, with invokes and reads of other instances.
+`afterChange` sees the caller's change only. Anything that throws out of
+a call rolls the whole call back, on every instance it reached.
 
 ### Instances and events
 
@@ -574,7 +696,7 @@ operation that expects the sequence from before the operation is refused
 
 ### Core behaviors
 
-The core declares three behaviors (`internal/registry/behaviors`, section
+The core declares five behaviors (`internal/registry/behaviors`, section
 3.16 of `docs/extension-model.md`), so every binary's meta-schema admits
 them, and the engine implements them in `src/behaviors/core` and
 registers them when it opens, before `behaviors`: a schema that composes
@@ -594,6 +716,20 @@ deployment cannot register another implementation under their names.
       ] } },
   { "name": "Comments" },
   { "name": "Revisions", "config": { "review": { "permission": "documents.review" } } }
+]
+```
+
+`Dependencies` and `Links` reach other instances through the interface
+("Other instances", "References"), always as the caller, with this on a
+`tasks` schema whose tasks wait on tasks and documents:
+
+```json
+"behaviors": [
+  { "name": "Workflow", "config": { "states": ["todo", "doing", "done", "dropped"], "transitions": [...] } },
+  { "name": "Dependencies", "config": { "schemas": ["tasks", "documents"], "gatedStates": ["done"] } },
+  { "name": "Links", "config": { "links": {
+      "spec": { "schema": "documents", "pinned": true },
+      "parent": { "schema": "tasks", "required": true } } } }
 ]
 ```
 
@@ -701,6 +837,73 @@ reviewedAt?, reason?, revision? }`, `state` one of `pending`, `approved`
 and `rejected`; approving or rejecting one that is not pending is
 `vetoed`, and naming none is `invalid_argument`.
 
+#### Dependencies
+
+Blockers between instances, which hold up the type's Workflow.
+
+| | |
+| --- | --- |
+| Config | `schemas`: the schemas a blocker may be an instance of, each composing Workflow (the type's own when absent); `gatedStates`: the terminal states of the type's Workflow a transition into waits for every blocker (every terminal state when absent). Requires `Workflow` |
+| Fields | `blocked`: whether a blocker's status is not a terminal state of its own schema's Workflow |
+| Operations | `addBlocker({ schema?, id })` -> `{ schema, id, status?, open }`, writes; `removeBlocker({ schema?, id })` -> `{ schema, id }`, writes; `listBlockers({ limit?, cursor? })` -> a page of `{ schema, id, status?, open }`, read-only; `listDependents({ limit?, cursor? })` -> a page of `{ schema, id }`, read-only |
+| Guards | a Workflow `transition` of the instance into a gated state, whoever asks, while `blocked`: `vetoed`, naming the open blockers |
+| Refusals | `addBlocker`: the instance itself, a schema the config does not list, one without Workflow, an instance that does not exist (`invalid_argument`); a blocker already added, an edge that would close a cycle, an open blocker of an instance in a gated state (`vetoed`). `removeBlocker` of an instance that does not block it (`invalid_argument`) |
+| Deletes | deleting a blocker removes its edges: its reference hook invokes `removeBlocker` on each dependent, as the caller, each with its own event. Deleting a dependent deletes its edges |
+| Events | `addBlocker`'s and `removeBlocker`'s operation events carry `blocked` when it changes |
+| `configChange` | `schemas` and `gatedStates` may change (edges made before stay); added to a schema with instances, which start with none; not removed from one, since its edges and references would stay behind |
+
+A blocker is open while its status is not a terminal state of its own
+schema's Workflow config (`isTerminalState` over what `schemas.config`
+returns), whatever the gated states say. One function answers that for
+the `blocked` field and the guard, over every blocker in every schema, so
+they cannot disagree. The guard reads the state a transition moves to
+from its `to`, the one parameter Workflow's closed `paramsSchema` takes,
+and it runs before any handler for a caller's transition, another
+behavior's `call()` and another instance's invoke alike. `parseConfig`
+holds `gatedStates` to the terminal states of the type's Workflow, which
+it reads in `target.configs`.
+
+Blockers are read as the caller: a caller who may not read a blocker's
+schema cannot read `blocked` on the instances it blocks, or list them.
+`blocked` is computed at each read, so a blocker's transition shows in
+its dependents' next read, with no event on them. `listDependents`
+leaves out dependents of schemas the caller may not read, so a page can
+hold fewer than its limit while more follow.
+
+#### Links
+
+Typed links from the instance to instances of other schemas, or its own.
+
+| | |
+| --- | --- |
+| Config | `links`: by camelCase name, `{ schema, required?, pinned? }`; at least one |
+| Fields | `links`: `{ <name>: { schema, id, revision?, stale? } }`, the links the instance holds; absent when it holds none |
+| Operations | `link({ name, id, revision? })` -> `{ name, schema, id, revision? }`, writes; `unlink({ name })` -> the link as it was, writes; schema-level `listLinked({ name, id, stale?, limit?, cursor? })` -> a page of `{ id, revision?, stale? }`, read-only |
+| Guards | the delete of an instance a required link points at, whoever the caller: `vetoed` (`guardReference`) |
+| Refusals | a name the config does not give, a target that does not exist, a `revision` for a link that is not pinned or past the target's latest, a pinned link whose schema does not compose Revisions (`invalid_argument`); a target with no revision yet, unlinking a required link (`vetoed`); unlinking a link the instance does not hold (`invalid_argument`) |
+| Deletes | an optional link's target's delete unlinks it: its reference hook invokes `unlink` on each instance that points at it, as the caller, each with its own event. Deleting an instance deletes its links |
+| Events | `link`'s and `unlink`'s operation events carry `links` |
+| `configChange` | every link keeps its name and schema; `required` and `pinned` may change, and links may be added; added to a schema with instances, which start with none; not removed from one |
+
+A link holds one target, an instance of its schema in the same namespace
+(the schema looked up as any name is: the namespace, then the shared
+one); `link` again moves it. A pinned link records the target's latest
+revision, read through its `revision` field, or the earlier one `link`
+names, and `links` reports `stale` when the target's latest revision has
+moved past it. `listLinked` answers the other way round, on the schema:
+which instances point a link at a target, and with `stale: true` only the
+pinned ones the target has moved past, which is how to find the
+instances that point at a superseded revision.
+
+A required link can be moved, never unlinked, and its target cannot be
+deleted while it points there; the refusal names the linking schema, not
+the instance, which the caller may not be able to read. A pinned link is
+read as the caller: without read on its target's schema, `links` cannot
+be read. `stale` is computed at each read, so a target's new revision
+shows in the next read of the instances that link to it, with no event on
+them. A link made before its spec was pinned records no revision until it
+is linked again.
+
 ## Namespaces
 
 Schemas and instances live in namespaces. There is one, `default`, unless the
@@ -761,6 +964,7 @@ engine does not raise.
 | PATCH | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.update`, body: a merge patch; `If-Match` | 200, the instance, `ETag` |
 | DELETE | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.delete`; `If-Match` | 200, `null` |
 | POST | `/namespaces/{namespace}/schemas/{name}/instances/{id}/operations/{operation}` | `instances.operate`, body: the parameters; `If-Match` | 200, the result, `ETag` |
+| POST | `/namespaces/{namespace}/schemas/{name}/operations/{operation}` | `instances.invokeSchema`, body: the parameters of a schema-level operation | 200, the result |
 | GET | `/namespaces/{namespace}/schemas/{name}/describe` | `tools.describe` | 200, the describe document ("Tools") |
 | GET | `/namespaces/{namespace}/tools` | `tools.manifest` | 200, the tools document ("Tools") |
 | GET | `/namespaces/{namespace}/events?after=&limit=&schema=&instanceId=` | `events.read` | 200, `{events, next, more}`; with `Accept: text/event-stream`, the stream |
@@ -775,7 +979,10 @@ behaviors' fields, which a create or an update may not set (422,
 with `Accept-Patch` on PATCH. An operation's body is its parameters, and
 no body is `{}`; its result, whatever JSON it is, is the envelope's
 `data`, and the instance's sequence after the call its `ETag`, which a
-read-only operation leaves where it was.
+read-only operation leaves where it was. A schema-level operation's route
+takes its parameters the same way and answers its result with no `ETag`,
+since it names no instance; each operation route answers 404 for an
+operation of the other scope.
 
 ### Statuses
 
@@ -899,7 +1106,7 @@ a schema's live version:
     {"name": "create", "description": "Creates an Item: ...", "writes": true, "invocationPolicy": "auto",
      "params": {"type": "object", "additionalProperties": false, "properties": {"data": {...}, "id": {...}}, "required": ["data"]},
      "result": {...}, "tool": "item.create"},
-    {"name": "increment", "behavior": "test.Counter", "description": "Adds to the count.", "writes": true,
+    {"name": "increment", "behavior": "test.Counter", "scope": "instance", "description": "Adds to the count.", "writes": true,
      "invocationPolicy": "auto", "params": {...}, "result": {...}, "tool": "item.increment"}
   ]
 }
@@ -913,6 +1120,8 @@ a schema's live version:
   operation's tool arguments (below), `result` the JSON Schema of what it
   returns (an instance, a page, `null` for a delete, a behavior operation's
   `resultSchema`), and the invocation policy sits under the policy's key.
+  A behavior's operation carries `behavior` and `scope`, `instance` or
+  `schema`.
 
 A field's JSON Schema is what the SDK generators write for the same field
 as a tool argument (`internal/generator/toolsutil`), keyed by the field's
@@ -946,6 +1155,7 @@ reaches that the principal may read, by name, after three schema tools.
 | update | `<schema>.update` | `<schema>_update` | `id`, `patch` (a merge patch; nothing required), `expectedSeq` |
 | delete | `<schema>.delete` | `<schema>_delete` | `id`, `expectedSeq` |
 | a behavior operation | `<schema>.<operation>` | `<schema>_<operation>` | `id`, `params` (its `paramsSchema`), `expectedSeq` |
+| a schema-level behavior operation | `<schema>.<operation>` | `<schema>_<operation>` | `params` (its `paramsSchema`) |
 | list schemas | `engine.listSchemas` | `list_schemas` | none |
 | describe a schema | `engine.describeSchema` | `describe_schema` | `name` |
 | define a draft | `engine.defineSchema` | `define_schema` | `document` |
@@ -1040,7 +1250,10 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   as the name, the title, the description, the arguments as `inputSchema`,
   `annotations.readOnlyHint`, and `_meta` with the tool's guidance and its
   invocation policy under the policy's key. The list is the caller's: a
-  tool the policy refuses is not in it.
+  tool the policy refuses is not in it. The schema tools
+  (`list_schemas`, `describe_schema`, `define_schema`) are in every
+  caller's list, since they name no schema until they are called: the
+  access policy answers the call, not the listing.
 - `tools/call` returns the result as JSON text and, when it is an object,
   as `structuredContent`. A call the engine refuses is a tool error:
   `isError`, with the problem document the HTTP API answers with as text
