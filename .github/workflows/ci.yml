@@ -5,11 +5,12 @@ name: ci
 # gofmt, golangci-lint, scalar catalog, schema-file types and core behavior
 # declarations drift, CLI smoke over the fixture corpus), the acme example
 # extension (smoke plus the no-core-edits check), the TypeScript authoring
-# packages, schema runtime, http runtime and engine, the Python schema
-# runtime, the Rust http runtime, the version graph (the core crate, its Go
-# binding, the TypeScript package over its wasm build and the Python package
-# over its PyO3 build, and the Go, TypeScript, Rust and Python engines
-# against Postgres), the Starlight docs build, and the extraction scrub.
+# packages, schema runtime, http runtime, engine and engine example, the
+# Python schema runtime, the Rust http runtime, the version graph (the core
+# crate, its Go binding, the TypeScript package over its wasm build and the
+# Python package over its PyO3 build, and the Go, TypeScript, Rust and
+# Python engines against Postgres), the Starlight docs build, and the
+# extraction scrub.
 # `ci-pass` is the single aggregating job the branch ruleset requires; every
 # other job must be listed in its `needs`. The docs job on pull requests is a
 # recorded deviation from superscalar (D9); superscalar only builds docs in
@@ -457,6 +458,14 @@ jobs:
           bun run typecheck
           bun run build
           bun run test
+
+      - name: examples/engine-notes type-check + end to end (Node.js and Bun)
+        # The engine guide's example: the runtimes and the engine rebuilt
+        # from the installs above, linked into the example, and its test run
+        # against a listening server under each runtime. A step of this job
+        # rather than a job of its own: it needs only what this job installs,
+        # and takes seconds.
+        run: examples/engine-notes/scripts/check.sh
 
   python:
     name: python (schema runtime)

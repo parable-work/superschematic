@@ -276,8 +276,8 @@ acme-schematic behaviors --extension acme --out packages/behaviors/declarations 
 It is a command of the binary, not a tool in the core module, because an
 extension's declarations are registered only in its own binary: acme's
 copy comes from `acme-schematic`, and its smoke runs `--check`. The core
-binary writes the behaviors the core declares, `Workflow`, `Comments` and
-`Revisions`, which `@superschematic/engine` implements over its copy
+binary writes the behaviors the core declares, `Workflow`, `Comments`,
+`Revisions`, `Dependencies` and `Links`, which `@superschematic/engine` implements over its copy
 (`make behaviors`; `make behaviors-check` in CI). Without `--extension`,
 an extension's binary writes the core's declarations beside its own.
 

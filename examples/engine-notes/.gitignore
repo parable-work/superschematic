@@ -1,0 +1,3 @@
+# The database node src/main.ts and bun src/main.ts open by default.
+/notes.db
+/notes.db-*

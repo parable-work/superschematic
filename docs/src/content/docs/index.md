@@ -69,10 +69,11 @@ tree of such tables can be branched, committed and merged as a whole
    [API routes](/superschematic/guides/api-routes/),
    [auth and permissions](/superschematic/guides/auth-and-permissions/) and
    [client SDKs](/superschematic/guides/client-sdks/) in Go, TypeScript,
-   Python and Rust.
+   Python and Rust, and [the engine](/superschematic/guides/engine/), which
+   runs a schema with no generated code.
 
-The tutorial's code is `examples/acme-shop`, which CI builds and tests on
-every pull request.
+The tutorial's code is `examples/acme-shop`, and the engine guide's is
+`examples/engine-notes`. CI builds and tests both on every pull request.
 
 For what the generated code offers in one language, see the language
 pages: [Go](/superschematic/install/go/),
