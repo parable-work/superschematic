@@ -1,0 +1,32 @@
+[package]
+name = "superschematic-versiongraph-python"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.95.0"
+description = "PyO3 binding of the version-graph core; maturin builds it into the superschematic-versiongraph wheel"
+license = "Apache-2.0"
+repository = "https://github.com/parable-work/superschematic"
+# maturin builds the extension module from this crate (pyproject.toml beside
+# it); nothing consumes the crate from a registry.
+publish = false
+
+# It carries its own dependency versions and lock file, as the core and the
+# engine do, and calls the core natively through a path dependency. PyO3
+# lives here, not in the core.
+
+[lib]
+name = "superschematic_versiongraph_native"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+# abi3-py39: one wheel per platform for CPython 3.9 and newer, the floor
+# pyproject.toml declares. extension-module is added by maturin (see
+# pyproject.toml [tool.maturin]) so `cargo clippy` on the host does not try
+# to link libpython.
+pyo3 = { version = "0.29", features = ["abi3-py39"] }
+superschematic-versiongraph = { path = "../rust" }
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+cognitive_complexity = "warn"

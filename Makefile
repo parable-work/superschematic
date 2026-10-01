@@ -30,7 +30,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check ts python rust \
-        versiongraph versiongraph-scenarios versiongraph-scenarios-ts docs cli-smoke scrub versions clean
+        versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust docs cli-smoke scrub versions clean
 
 all: build test lint
 
@@ -45,6 +45,7 @@ setup:
 	cd runtime/versiongraph/typescript && bun install
 	cd runtime/engine/typescript && bun install
 	cd runtime/schema/python && uv sync
+	cd runtime/versiongraph/python && uv sync
 
 build: go-build $(BIN)
 
@@ -106,13 +107,27 @@ ts:
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
 
+# The version-graph core's Python binding: uv builds the PyO3 extension with
+# maturin into the package's environment, then pytest runs every core vector
+# through it, under the default Python and under 3.9, the floor its
+# pyproject.toml declares.
 python:
 	cd runtime/schema/python && uv run pytest -q
+	cd runtime/versiongraph/python && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+		&& uv run pytest -q && uv run --python 3.9 --isolated pytest -q
 
+# The version-graph crates' tests run again with serde_json's preserve_order
+# on, which superscalar turns on and Cargo unifies into every crate of a
+# build that uses it: a content hash and a canonical row must not depend on
+# the order a serde_json map keeps.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
-		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test
+		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test \
+		&& cargo test --features serde_json/preserve_order
+	cd runtime/versiongraph/rust-engine && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+		&& cargo clippy --no-default-features -- -D warnings && cargo test \
+		&& cargo test --features serde_json/preserve_order
 
 # The version-graph core's static archive, staged where the Go binding links
 # it (runtime/versiongraph/go/lib/<goos>_<goarch>).
@@ -137,6 +152,15 @@ versiongraph-scenarios-ts:
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build && \
 		bun test test/scenarios.test.ts test/canonical.test.ts test/adapter.test.ts test/sweeper.test.ts \
 		test/facade.test.ts
+
+# Every version-graph scenario through the Rust engine and its Postgres
+# adapter, and the crate's other Postgres tests (every canonical vector's
+# rendering, the adapter, the sweeper), against the Postgres that
+# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
+versiongraph-scenarios-rust:
+	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
+		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
+	cd runtime/versiongraph/rust-engine && cargo test --tests -- --nocapture
 
 # Starlight site. CI runs this as the docs job (D9); release.yml deploys it.
 docs:
@@ -184,6 +208,8 @@ fmt:
 	gofmt -w $$(git ls-files '*.go')
 	cd runtime/http/rust && cargo fmt
 	cd runtime/versiongraph/rust && cargo fmt
+	cd runtime/versiongraph/rust-engine && cargo fmt
+	cd runtime/versiongraph/python && cargo fmt
 
 clean:
 	rm -rf bin

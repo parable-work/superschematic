@@ -484,7 +484,11 @@ func (r *runner) run(t *testing.T, st step) {
 		for i, arg := range st.Args {
 			args[i] = r.sqlArg(t, arg)
 		}
-		_, err = r.conn.Exec(ctx, st.Statement, args...)
+		if st.Expect.Rows != nil {
+			rows, err = r.queryRows(ctx, st.Statement, args)
+		} else {
+			_, err = r.conn.Exec(ctx, st.Statement, args...)
+		}
 	default:
 		r.fatalf(t, "unknown op %q", st.Op)
 	}
@@ -554,7 +558,9 @@ func (r *runner) run(t *testing.T, st step) {
 		}
 	}
 	if x.Rows != nil {
-		sortRows(t, rows, "entity_key")
+		if st.Op != "sql" {
+			sortRows(t, rows, "entity_key")
+		}
 		r.checkList(t, "rows", rows, *x.Rows)
 	}
 	if x.Snapshot != nil {
@@ -600,6 +606,39 @@ func (r *runner) run(t *testing.T, st step) {
 		}
 		r.checkList(t, "patches", got, *x.Patches)
 	}
+}
+
+// queryRows runs an sql step's statement and returns its rows in the order
+// the statement returns them, each a JSON object of its columns. Every
+// column is read as text, so the statement casts what it selects.
+func (r *runner) queryRows(ctx context.Context, statement string, args []any) ([]json.RawMessage, error) {
+	result, err := r.conn.Query(ctx, statement, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+	var out []json.RawMessage
+	for result.Next() {
+		fields := result.FieldDescriptions()
+		texts := make([]*string, len(fields))
+		dest := make([]any, len(fields))
+		for i := range texts {
+			dest[i] = &texts[i]
+		}
+		if err := result.Scan(dest...); err != nil {
+			return nil, fmt.Errorf("read a row as text (cast every column in the statement): %w", err)
+		}
+		row := map[string]*string{}
+		for i, field := range fields {
+			row[field.Name] = texts[i]
+		}
+		text, err := json.Marshal(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, text)
+	}
+	return out, result.Err()
 }
 
 // holdSweepLock takes the graph's sweep lock through the adapter in a
