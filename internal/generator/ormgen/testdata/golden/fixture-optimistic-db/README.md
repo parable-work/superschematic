@@ -33,7 +33,13 @@ record, err := db.Shelf.GetOne(ctx, id, nil)
 
 Repositories expose `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,
 `CreateOne`, `CreateMany`, `UpdateOne`, `UpdateMany`, `DeleteOne`, and
-`DeleteMany`. Tables with soft deletes additionally expose `HardDeleteOne`.
+`DeleteMany`. Versioned tables also expose `GetVersion`, `ListVersions`,
+`GetAsOf`, `UpdateOneIfVersion`, and `DeleteOneIfVersion`, which soft-deletes
+a table with soft deletes and hard-deletes one without. Tables with soft
+deletes additionally expose `HardDeleteOne`.
+Optimistic tables expose `UpdateOneIfVersion` and `DeleteOneIfVersion` too,
+but keep no history, so they have no `GetVersion`, `ListVersions`, or
+`GetAsOf`.
 
 Each `*Update` type has `ApplyTo(*types.T)` to project set and `SetNull`
 fields onto a stored row, and `New*SnapshotUpdate` to build a full

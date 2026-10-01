@@ -119,6 +119,61 @@ func TestWriteORMGolden(t *testing.T) {
 	}
 }
 
+// repositoryMethodsParagraph is the README paragraph that lists the
+// repository methods, the fenced and history methods of a versioned table
+// among them. It is the same for every schema without an @optimistic table.
+const repositoryMethodsParagraph = "Repositories expose `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,\n" +
+	"`CreateOne`, `CreateMany`, `UpdateOne`, `UpdateMany`, `DeleteOne`, and\n" +
+	"`DeleteMany`. Versioned tables also expose `GetVersion`, `ListVersions`,\n" +
+	"`GetAsOf`, `UpdateOneIfVersion`, and `DeleteOneIfVersion`, which soft-deletes\n" +
+	"a table with soft deletes and hard-deletes one without. Tables with soft\n" +
+	"deletes additionally expose `HardDeleteOne`.\n\n"
+
+// optimisticMethodsSentence follows repositoryMethodsParagraph's last
+// sentence, in the same paragraph, when a table is @optimistic: such a table
+// has the fenced methods and no history.
+const optimisticMethodsSentence = "deletes additionally expose `HardDeleteOne`.\n" +
+	"Optimistic tables expose `UpdateOneIfVersion` and `DeleteOneIfVersion` too,\n" +
+	"but keep no history, so they have no `GetVersion`, `ListVersions`, or\n" +
+	"`GetAsOf`.\n\n"
+
+// TestREADMEListsVersionFencedMethods: the README names the methods a
+// versioned table adds, in the same words for every schema, and says what an
+// @optimistic table has only when the schema declares one.
+func TestREADMEListsVersionFencedMethods(t *testing.T) {
+	for _, tc := range []struct {
+		svc        string
+		optimistic bool
+	}{
+		{"fixture-db", false},
+		{"fixture-nested-arrays-db", false},
+		{"fixture-version-graph-db", false},
+		{"fixture-optimistic-db", true},
+	} {
+		t.Run(tc.svc, func(t *testing.T) {
+			outDir := t.TempDir()
+			if err := WriteORM(generateFixture(t, tc.svc), outDir); err != nil {
+				t.Fatalf("write orm: %v", err)
+			}
+			raw, err := os.ReadFile(filepath.Join(outDir, "README.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			readme := string(raw)
+			want := repositoryMethodsParagraph
+			if tc.optimistic {
+				want = strings.TrimSuffix(repositoryMethodsParagraph, "deletes additionally expose `HardDeleteOne`.\n\n") + optimisticMethodsSentence
+			}
+			if !strings.Contains(readme, want) {
+				t.Errorf("README.md does not contain\n%s\ngot\n%s", want, readme)
+			}
+			if !tc.optimistic && strings.Contains(readme, "Optimistic tables") {
+				t.Error("README.md describes optimistic tables for a schema without one")
+			}
+		})
+	}
+}
+
 // TestGenerateFixtureDBShape verifies the extracted repository model against
 // the fixture-db schema: UUID plumbing type, relationship wiring, ordered
 // members, and audit classification.
