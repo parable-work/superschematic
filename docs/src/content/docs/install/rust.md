@@ -146,10 +146,21 @@ axum server crate `schemas-<name>-api` under `schemas/dist/api/<name>`. It
 needs `outputs.types` for Rust too: the crate depends on the types crate,
 and the build refuses the config without it.
 
+`build_router` mounts every operation except those declared
+`@manualRouteRegistration`, as the Go server's `RegisterRoutes` leaves
+them out. Such an operation has no method on its namespace's trait and no
+scaffold. `build_router`'s doc lists each one's method and path, and the
+service adds its route to the router `build_router` returns:
+
+```rust
+let router = build_router(implementations)
+    .route("/api/grid-imports", post(import_grid));
+```
+
 The router hands each implementation the request body as a
 `serde_json::Value` and has no step that decrypts one. The build refuses
 an encrypted operation
 ([Encrypted payloads](/superschematic/guides/api-routes/#encrypted-payloads))
-unless it is `@manualRouteRegistration`. Such an operation's
-implementation receives the envelope as its body and decrypts it, as the
-Go server's `PayloadDecryptor` does.
+unless it is `@manualRouteRegistration`. The service's own handler for
+such an operation receives the envelope as its body and decrypts it, as
+the Go server's `PayloadDecryptor` does.

@@ -1,6 +1,6 @@
 ---
 title: Version graphs
-description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine and the generated facade from TypeScript, the Rust engine and facade, and the core from Python.
+description: Declare a version graph over versioned DB tables with @versionGraph, @graphMember and @conflictUnit; the tables the loader adds, the merge core and its JSON contract, the Go engine and its Postgres adapter with merge-only primary lines, releases, rebase, snapshots and the sweep, the generated Go facade, how a consumer links the core, the core, the engine and the generated facade from TypeScript, the Rust engine and facade, and the core, the engine and the generated facade from Python.
 sidebar:
   order: 8
 ---
@@ -13,8 +13,8 @@ Each ref holds only the rows it overrides. A commit records the exact row
 versions a ref sealed. Work happens on change sets; a primary line takes
 writes only from merges, and each root's release pointer names the tagged
 commit readers see. One core composes, merges, diffs, hashes and
-validates trees. The Go, TypeScript and Rust engines run every graph
-operation on the core over a storage adapter, and a generated facade in
+validates trees. The Go, TypeScript, Rust and Python engines run every
+graph operation on the core over a storage adapter, and a generated facade in
 each language gives each graph typed methods over its engine.
 
 The design and the alternatives not taken are D17 and D19 in
@@ -408,8 +408,8 @@ shares (`version_conflict`, `ref_sealed`, `primary_merge_only`,
 scenarios in `runtime/versiongraph/testdata/scenarios` run sequences of
 operations over canonical rows, with the expected trees, content hashes,
 conflicts and errors, against the fixture in
-`runtime/versiongraph/testdata/fixture`; the Go and Rust engines run
-every one against Postgres. Their format is in
+`runtime/versiongraph/testdata/fixture`; the Go, TypeScript, Rust and
+Python engines run every one against Postgres. Their format is in
 [runtime/versiongraph/README.md](https://github.com/parable-work/superschematic/blob/main/runtime/versiongraph/README.md#scenarios).
 
 ## The generated facade
@@ -782,6 +782,113 @@ check each vector's input and output against the types
 and fail when a member or literal of the types appears in no vector. `make
 python` runs them under the default Python and under 3.9, and CI's python
 job runs them too.
+
+## Use the engine from Python
+
+The same package carries the Python engine, its Postgres adapter and the
+base of the generated Python facade. They port the Go engine and adapter
+rule for rule, pass the same
+[scenarios](https://github.com/parable-work/superschematic/tree/main/runtime/versiongraph/testdata/scenarios)
+against Postgres, and fail with the same error codes:
+
+| Module | Holds |
+| --- | --- |
+| `superschematic_versiongraph.engine` | `Engine`, its options, results and `SweepOptions`, and `run_sweeper`. |
+| `superschematic_versiongraph.storage` | The storage protocol (`Storage`, `Tx`) and the values it takes and returns. |
+| `superschematic_versiongraph.errors` | The named errors and `error_code`. |
+| `superschematic_versiongraph.canonical` | The canonical rules (`canonical_row`, `canonical_value`), over the exact JSON codec in `superschematic_versiongraph.exactjson`. |
+| `superschematic_versiongraph.postgres` | `PostgresAdapter`, its `Client` protocol, and `psycopg_client`, which binds psycopg 3. |
+| `superschematic_versiongraph.facade` | `VersionGraphFacade`, which each generated `<Name>Graph` extends, and the types it returns. |
+
+The operations are synchronous: each runs in one transaction and returns
+when it commits. psycopg 3 is the `postgres` extra
+(`superschematic-versiongraph[postgres]`); no module imports it until
+`psycopg_client` is called, so the core and the engine load without it. A
+`Client` runs a transaction, and a `query` inside it that takes Postgres's
+own `$1` placeholders and returns every column as the text Postgres
+writes, so no driver's type adaptation touches a date, a time, an
+interval, a numeric or a bigint. `psycopg_client` runs each statement
+through a raw cursor and reads the libpq result as text. Over a
+`psycopg.Connection` it runs transactions one at a time; when the caller
+already holds a transaction on the connection, the adapter's is a
+savepoint of it. Over a `psycopg_pool.ConnectionPool` each transaction
+takes a connection of its own. Another driver implements `Client` itself.
+
+```python
+import psycopg
+from superschematic_versiongraph.engine import Engine, KindEdits
+from superschematic_versiongraph.postgres import PostgresAdapter, psycopg_client
+
+connection = psycopg.connect(url, autocommit=True)
+adapter = PostgresAdapter(descriptor, history_actor_setting="superschematic.history_actor_id")
+engine = Engine(descriptor, adapter.storage(psycopg_client(connection)), schema_epoch=1, snapshot_every=32)
+
+main = engine.create_primary(actor, root, "main")
+draft = engine.branch(actor, main.id, "draft")
+saved = engine.save(actor, draft.id, draft.version, {
+    "step": KindEdits(upsert=['{"entity_key": null, "position": 1, "instruction": "Mix", "timings": {}}']),
+})
+```
+
+The engine's methods take the Go engine's arguments in the same order,
+spelled in snake case, with the actor first on every write. A canonical
+row is JSON text, as Go's `json.RawMessage` is, so a wide integer or
+numeric keeps its digits: a tree is `Dict[str, List[str]]`, and a
+conflict's values, a change's row and a resolution's `value` are JSON text.
+Durations are `datetime.timedelta`. `run_sweeper(interval, options,
+on_pass, stop)` runs until its `threading.Event` is set and then returns.
+It runs no pass when the event is already set, and a pass under way when
+it is set finishes first, where Go's `RunSweeper` cancels that pass through
+its context. The named errors are exception classes with the stable `code`
+the scenario files name (`VersionConflictError` is a `NotFoundError`, as
+in Go); `error_code(err)` returns it, or the core's code for an input the
+core refused.
+
+When a schema declares a graph and its Python types are on, pygen writes
+`<module>/versiongraph_<name>.py` beside the types, and the package
+depends on the distribution the naming key
+[`versiongraph_pypi_dist`](/superschematic/reference/naming/#versiongraph_pypi_dist)
+names and imports the module
+[`versiongraph_python_module`](/superschematic/reference/naming/#versiongraph_python_module)
+names, from a uv path source at
+[`[paths] versiongraph_python`](/superschematic/reference/naming/#pathsversiongraph_python)
+when that is set. The file holds `RECIPE_GRAPH_DESCRIPTOR`, the schema
+epoch and snapshot interval, the typed `RecipeTree` and `RecipeEdits`, and
+`RecipeGraph`:
+
+```python
+from schemas_types_recipes_db.types import Step
+from schemas_types_recipes_db.versiongraph_recipe import RecipeEdits, RecipeGraph
+from superschematic_versiongraph.facade import CommitOptions, TypedKindEdits, psycopg_client
+
+graph = RecipeGraph(psycopg_client(pool), actor=user_id)
+draft = graph.branch(main_id, "rest longer")
+saved = graph.save(draft.id, draft.version, RecipeEdits(step=TypedKindEdits(upsert=[mix])))
+committed = graph.commit(draft.id, saved.ref.version)
+merged = graph.merge(draft.id, main_id, main_version, options=CommitOptions("rest longer", True))
+released = graph.released(recipe_id).tree
+```
+
+`RecipeGraph` has the Go facade's operations, from `create_primary` to
+`run_sweeper`, plus `with_actor` and `with_walk_ceiling`. Every write
+records the facade's `actor` and fails with `NoActorError` without one; a
+sweep writes as its options' `actor`. It turns a typed value into a
+canonical row through the model's JSON (`model_dump(mode="json",
+by_alias=True)`) and back through the model's `model_validate_json`, so a
+field comes back in its canonical form: an instant as a `datetime` in UTC,
+a time of day as `HH:MM:SS`, a duration in the scalar core's form and a
+UUID in base62. A typed row read back leaves its to-one relations (the
+root, the ref) `None`, since a canonical row holds only their keys. There
+is no Python ORM, so refs, commits and release pointers come back as the
+engine's `Ref`, `Commit` and `Release`.
+
+```
+make versiongraph-scenarios-python   # every scenario, the canonical vectors against Postgres, the adapter's, the sweeper's and the facade's tests
+```
+
+The target needs `SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL` and fails
+without it; CI runs it in the versiongraph job. `make python` runs the
+engine's tests that need no database, on the default Python and on 3.9.
 
 ## Limits
 

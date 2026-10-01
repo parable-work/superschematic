@@ -330,6 +330,9 @@ func (r run) generatePyTypes() error {
 	}
 
 	dir := TypesDir(r.Options.OutputRoot, "python", r.Config.Name)
+	if err := pygen.SetVersionGraphPath(output, r.Options.Paths, dir); err != nil {
+		return fmt.Errorf("generator: python types for %s: %w", r.Config.Name, err)
+	}
 	if err := pygen.WriteTypes(output, dir); err != nil {
 		return fmt.Errorf("generator: python types for %s: %w", r.Config.Name, err)
 	}

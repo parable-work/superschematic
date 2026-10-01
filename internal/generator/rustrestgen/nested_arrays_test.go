@@ -100,15 +100,41 @@ func TestWriteRustAPIGoldenNestedArrays(t *testing.T) {
 	}
 }
 
+// addImportOperation adds grid.importGrid to the loaded
+// fixture-nested-arrays-api schema: an encrypted POST to grid-imports
+// declared @manualRouteRegistration, which the service mounts itself.
+func addImportOperation(t *testing.T, schema *ir.Schema) {
+	t.Helper()
+	for _, set := range schema.OperationSets {
+		if set.Name != "GridMutations" {
+			continue
+		}
+		set.Operations = append(set.Operations, &ir.FieldDef{
+			Name:                    "importGrid",
+			Comment:                 "Import a grid sent encrypted; the service mounts the route.",
+			TypeRef:                 ir.TypeRef{Name: "boolean"},
+			Required:                true,
+			Arguments:               []*ir.ArgumentDef{{Name: "source", TypeRef: ir.TypeRef{Name: "string"}, Required: true}},
+			HTTPMethod:              "POST",
+			RestPath:                "grid-imports",
+			Encrypted:               true,
+			ManualRouteRegistration: true,
+		})
+		return
+	}
+	t.Fatalf("schema %s has no GridMutations operation set", schema.Name)
+}
+
 // TestNestedArraysAPICrateBuildsAndRoutes generates the Rust types crate
-// and the Rust API crate of fixture-nested-arrays-api, with grid.paint
-// added, into a temp tree laid out as a build writes it, and runs cargo
-// test on the API crate with nestedArraysRouterTest: a list-of-lists body
-// reaches the implementation as nested JSON arrays, a list-of-lists result
-// comes back in the success envelope, and a path parameter reaches it
-// decoded exactly once. The types crate resolves
-// superscalar from the checkout scripts/superscalar-dep.sh stands up.
-// CARGO_TARGET_DIR is honored when set.
+// and the Rust API crate of fixture-nested-arrays-api, with grid.paint and
+// grid.importGrid added, into a temp tree laid out as a build writes it,
+// and runs cargo test on the API crate with nestedArraysRouterTest: a
+// list-of-lists body reaches the implementation as nested JSON arrays, a
+// list-of-lists result comes back in the success envelope, a path
+// parameter reaches it decoded exactly once, and the manual grid.importGrid
+// has no trait method and no route until the service adds one. The types
+// crate resolves superscalar from the checkout scripts/superscalar-dep.sh
+// stands up. CARGO_TARGET_DIR is honored when set.
 func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
@@ -119,6 +145,7 @@ func TestNestedArraysAPICrateBuildsAndRoutes(t *testing.T) {
 	}
 	paths := testpaths.Local(t)
 	schema := loadNestedArraysSchema(t, true)
+	addImportOperation(t, schema)
 
 	// The http-runtime dependency is a path relative to the crate, which
 	// cargo resolves from the real directory (macOS /var is /private/var).
@@ -187,6 +214,8 @@ use RUNTIME_CRATE::{ApiError, RequestContext};
 use async_trait::async_trait;
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
+use axum::routing::post;
+use axum::{Json, Router};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -215,8 +244,16 @@ impl GridImplementation for Echo {
     }
 }
 
+fn router() -> Router {
+    build_router(Implementations { grid: Arc::new(Echo) })
+}
+
 async fn call(method: &str, uri: String, body: Option<Value>) -> (StatusCode, Value) {
-    let router = build_router(Implementations { grid: Arc::new(Echo) });
+    send(router(), method, uri, body).await
+}
+
+// send answers the status and the JSON body, or null for an empty body.
+async fn send(router: Router, method: &str, uri: String, body: Option<Value>) -> (StatusCode, Value) {
     let request = Request::builder().method(method).uri(uri).header("content-type", "application/json");
     let request = match body {
         Some(body) => request.body(Body::from(body.to_string())).unwrap(),
@@ -225,7 +262,26 @@ async fn call(method: &str, uri: String, body: Option<Value>) -> (StatusCode, Va
     let response = router.oneshot(request).await.unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    if bytes.is_empty() {
+        return (status, Value::Null);
+    }
     (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+// grid.importGrid is encrypted and @manualRouteRegistration, so Echo has no
+// method for it and the generated router answers 404 at its path. The
+// service adds the route to the router build_router returns, and its handler
+// receives the envelope as sent, to decrypt.
+#[tokio::test]
+async fn a_manual_operation_is_left_to_the_service() {
+    let envelope = json!({"algorithm": "RSA-OAEP-256", "payload": "Y2lwaGVydGV4dA==", "keyId": "k1"});
+    let (status, _) = send(router(), "POST", "/api/grid-imports".to_string(), Some(envelope.clone())).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let mounted = router().route("/api/grid-imports", post(|Json(body): Json<Value>| async move { Json(body) }));
+    let (status, received) = send(mounted, "POST", "/api/grid-imports".to_string(), Some(envelope.clone())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(received, envelope);
 }
 
 #[tokio::test]

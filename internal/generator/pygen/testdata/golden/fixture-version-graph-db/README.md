@@ -26,6 +26,7 @@ uv pip install schemas_types_fixture_version_graph_db
 - Pydantic >= 2.12.0
 - PyYAML >= 6.0.0
 - superscalar >= 1.0.0
+- superschematic-versiongraph >= 0.0.0
 
 ## Usage
 
@@ -56,6 +57,10 @@ This package includes custom scalar types with built-in validation:
 - `TemporalDateTime` (canonical: `Temporal.DateTime`): ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
 - `TemporalDuration` (canonical: `Temporal.Duration`): Duration for timeouts and intervals
 - `TemporalTime` (canonical: `Temporal.Time`): Time of day. 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and required AM/PM suffix (hours 1-12). Seconds and the AM/PM separator space are optional.
+
+## Version graphs
+
+- `schemas_types_fixture_version_graph_db/versiongraph_recipe.py` - the Recipe version graph's typed facade, `RecipeGraph`, over `superschematic_versiongraph`
 
 
 ## Enums

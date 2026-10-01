@@ -40,7 +40,11 @@ type EndpointInfo struct {
 // APIOutput contains generated Rust REST API metadata.
 type APIOutput struct {
 	rustapigen.APIOutputBase
+	// Endpoints are the operations the router mounts.
 	Endpoints []EndpointInfo
+	// ManualEndpoints are the @manualRouteRegistration operations, which the
+	// service mounts itself.
+	ManualEndpoints []EndpointInfo
 }
 
 // NamespaceOutput contains data for generating namespace scaffold files.
@@ -79,7 +83,13 @@ type Options struct {
 // Generate produces Rust REST API metadata from an IR schema. Handlers take
 // the request body and return the response as serde_json::Value, so a body
 // argument or response that is an array of arrays (T[][]) passes through as
-// nested JSON arrays; the implementation decodes it. The router has no step
+// nested JSON arrays; the implementation decodes it.
+//
+// An operation declared @manualRouteRegistration is left to the service, as
+// the Go server leaves it out of RegisterRoutes and the TypeScript server
+// out of its implementation interfaces: the router does not mount it, its
+// namespace trait has no method for it, and it gets no scaffold. The service
+// adds its route to the router build_router returns. The router has no step
 // that decrypts a request body, so an encrypted operation that is not
 // @manualRouteRegistration is refused.
 func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
@@ -112,16 +122,16 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		// The Go router decrypts an encrypted operation's body with the
 		// configured PayloadDecryptor before it parses it. The Rust router
 		// has no such step and would hand the envelope to the implementation
-		// as the body. An operation declared @manualRouteRegistration is the
-		// service's to decrypt: its implementation receives the envelope.
+		// as the body. An operation declared @manualRouteRegistration is not
+		// mounted: the service's own route receives the envelope and
+		// decrypts it.
 		if endpoint.Encrypted && !endpoint.ManualRouteRegistration {
-			return nil, fmt.Errorf("rustrestgen: operation %s.%s is encrypted (an Encrypted operation set, @encrypted, or an EncryptedField<T> result or argument); the Rust router has no decryption step, declare it @manualRouteRegistration and decrypt the payload in the service's implementation", endpoint.Namespace, endpoint.Name)
+			return nil, fmt.Errorf("rustrestgen: operation %s.%s is encrypted (an Encrypted operation set, @encrypted, or an EncryptedField<T> result or argument); the Rust router has no decryption step, declare it @manualRouteRegistration and add its route in the service, which decrypts the payload", endpoint.Namespace, endpoint.Name)
 		}
 		ns := endpoint.Namespace
 		if ns == "" {
 			ns = "root"
 		}
-		namespaceSet[ns] = struct{}{}
 
 		fnName := rustutil.ToSnakeCase(endpoint.ShortImplName)
 		if fnName == "" {
@@ -136,7 +146,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 			pathParams = append(pathParams, param.Name)
 		}
 
-		output.Endpoints = append(output.Endpoints, EndpointInfo{
+		info := EndpointInfo{
 			Name:         endpoint.Name,
 			Namespace:    ns,
 			FunctionName: fnName,
@@ -150,21 +160,33 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 			InputType:   endpoint.InputType,
 			OutputType:  endpoint.OutputType,
 			PathParams:  pathParams,
-		})
+		}
+		if endpoint.ManualRouteRegistration {
+			output.ManualEndpoints = append(output.ManualEndpoints, info)
+			continue
+		}
+		namespaceSet[ns] = struct{}{}
+		output.Endpoints = append(output.Endpoints, info)
 	}
 
 	output.Namespaces = rustapigen.SortedNamespaces(namespaceSet)
-	sort.Slice(output.Endpoints, func(i, j int) bool {
-		if output.Endpoints[i].Namespace == output.Endpoints[j].Namespace {
-			if output.Endpoints[i].Path == output.Endpoints[j].Path {
-				return output.Endpoints[i].Method < output.Endpoints[j].Method
-			}
-			return output.Endpoints[i].Path < output.Endpoints[j].Path
-		}
-		return output.Endpoints[i].Namespace < output.Endpoints[j].Namespace
-	})
+	sortEndpoints(output.Endpoints)
+	sortEndpoints(output.ManualEndpoints)
 
 	return output, nil
+}
+
+// sortEndpoints orders endpoints by namespace, then path, then method.
+func sortEndpoints(endpoints []EndpointInfo) {
+	sort.Slice(endpoints, func(i, j int) bool {
+		if endpoints[i].Namespace == endpoints[j].Namespace {
+			if endpoints[i].Path == endpoints[j].Path {
+				return endpoints[i].Method < endpoints[j].Method
+			}
+			return endpoints[i].Path < endpoints[j].Path
+		}
+		return endpoints[i].Namespace < endpoints[j].Namespace
+	})
 }
 
 // WriteAPI writes generated Rust REST API module files.
@@ -236,6 +258,7 @@ func generateFile(templateName, outputPath string, data any) error {
 func templateFuncs() template.FuncMap {
 	return rustapigen.TemplateFuncs(template.FuncMap{
 		"isGetMethod": func(m string) bool { return strings.EqualFold(m, "get") },
+		"toUpper":     strings.ToUpper,
 	})
 }
 

@@ -30,7 +30,8 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check ts python rust \
-        versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust docs cli-smoke scrub versions clean
+        versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
+        versiongraph-scenarios-python docs cli-smoke scrub versions clean
 
 all: build test lint
 
@@ -107,14 +108,16 @@ ts:
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
 
-# The version-graph core's Python binding: uv builds the PyO3 extension with
-# maturin into the package's environment, then pytest runs every core vector
-# through it, under the default Python and under 3.9, the floor its
-# pyproject.toml declares.
+# The version-graph core's Python binding: cargo test runs the binding's own
+# unit tests, uv builds the PyO3 extension with maturin into the package's
+# environment, then pytest runs every core vector through it and the
+# engine's tests that need no database, under the default Python and under
+# 3.9, the floor its pyproject.toml declares. The Postgres tests skip here;
+# versiongraph-scenarios-python runs them.
 python:
 	cd runtime/schema/python && uv run pytest -q
 	cd runtime/versiongraph/python && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
-		&& uv run pytest -q && uv run --python 3.9 --isolated pytest -q
+		&& cargo test && uv run pytest -q && uv run --python 3.9 --isolated pytest -q
 
 # The version-graph crates' tests run again with serde_json's preserve_order
 # on, which superscalar turns on and Cargo unifies into every crate of a
@@ -161,6 +164,16 @@ versiongraph-scenarios-rust:
 	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
 		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
 	cd runtime/versiongraph/rust-engine && cargo test --tests -- --nocapture
+
+# Every version-graph scenario through the Python engine and its Postgres
+# adapter, and the package's other Postgres tests (every canonical vector's
+# rendering, the adapter, the sweeper, the facade), against the Postgres that
+# SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL names.
+versiongraph-scenarios-python:
+	@test -n "$$SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL" || \
+		{ echo "set SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL to the Postgres the scenarios run against" >&2; exit 1; }
+	cd runtime/versiongraph/python && uv run pytest -v -rs tests/test_scenarios.py tests/test_canonical.py \
+		tests/test_adapter.py tests/test_sweeper.py tests/test_facade.py
 
 # Starlight site. CI runs this as the docs job (D9); release.yml deploys it.
 docs:

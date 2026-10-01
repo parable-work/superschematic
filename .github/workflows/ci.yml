@@ -6,9 +6,10 @@ name: ci
 # declarations drift, CLI smoke over the fixture corpus), the acme example
 # extension (smoke plus the no-core-edits check), the TypeScript authoring
 # packages, schema runtime, http runtime and engine, the Python schema
-# runtime, the Rust http runtime, the version-graph core (crate, Go binding,
-# and the TypeScript package over its wasm build), the Starlight docs build,
-# and the extraction scrub.
+# runtime, the Rust http runtime, the version graph (the core crate, its Go
+# binding, the TypeScript package over its wasm build and the Python package
+# over its PyO3 build, and the Go, TypeScript, Rust and Python engines
+# against Postgres), the Starlight docs build, and the extraction scrub.
 # `ci-pass` is the single aggregating job the branch ruleset requires; every
 # other job must be listed in its `needs`. The docs job on pull requests is a
 # recorded deviation from superscalar (D9); superscalar only builds docs in
@@ -171,6 +172,14 @@ jobs:
           test -n "$version"
           python -m pip install "pydantic==$version"
 
+      - name: Install uv
+        # pygen's TestVersionGraphFacadeOnPostgres runs the generated Python
+        # facade in runtime/versiongraph/python's uv environment, which uv
+        # builds with maturin.
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+
       - name: Start Postgres
         # The ORM and SQL tests that read SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL
         # and SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL skip without a database.
@@ -204,8 +213,9 @@ jobs:
           SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           # tsgen's TestVersionGraphFacadeOnPostgres runs the generated
-          # TypeScript facade against it, and rustgen's version-graph facade
-          # test builds the generated crate and runs it on it.
+          # TypeScript facade against it, rustgen's version-graph facade test
+          # builds the generated crate and runs it on it, and pygen's runs the
+          # generated Python package on it.
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
@@ -506,11 +516,12 @@ jobs:
         working-directory: runtime/schema/python
         run: uv run pytest -q
 
-      - name: Version-graph core binding (fmt / clippy / every vector through the package, also on Python 3.9)
+      - name: Version-graph package (fmt / clippy / the binding's unit tests / every vector and the engine's tests that need no database, also on Python 3.9)
         working-directory: runtime/versiongraph/python
         run: |
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
+          cargo test
           uv run pytest -q
           uv run --python 3.9 --isolated pytest -q
 
@@ -542,7 +553,7 @@ jobs:
           cargo test
 
   versiongraph:
-    name: versiongraph (core crate / Go binding / Rust engine / TypeScript package)
+    name: versiongraph (core crate / Go binding / Rust engine / TypeScript package / Python engine)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -651,6 +662,23 @@ jobs:
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: make versiongraph-scenarios-ts
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Scenarios through the Python engine (every scenario, the canonical vectors against Postgres, the adapter, the sweeper and the facade)
+        # uv builds the package's PyO3 extension with maturin. Fails, rather
+        # than skips, without the database.
+        env:
+          SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+        run: make versiongraph-scenarios-python
 
   docs:
     # Cheap PR gate: npm ci + astro build. superscalar only builds docs in

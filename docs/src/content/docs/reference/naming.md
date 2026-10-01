@@ -160,6 +160,23 @@ TypeScript types package whose schema declares a version graph imports
 the facade base from its `/facade` entry point and lists the package as a
 dependency ([Use the engine from TypeScript](/superschematic/reference/version-graphs/#use-the-engine-from-typescript)).
 
+### `versiongraph_pypi_dist`
+
+Default: `superschematic-versiongraph`
+
+PyPI distribution name of the Python version-graph runtime: the core's
+PyO3 binding, the engine, its Postgres adapter and the facade base. A
+generated Python types package whose schema declares a version graph lists
+it as a dependency ([Use the engine from Python](/superschematic/reference/version-graphs/#use-the-engine-from-python)).
+
+### `versiongraph_python_module`
+
+Default: `superschematic_versiongraph`
+
+Python import name of the Python version-graph runtime. A generated
+facade (`<module>/versiongraph_<name>.py`) imports the facade base from
+its `facade` module.
+
 ### `ptr_go_module`
 
 Default: `github.com/parable-work/superschematic/runtime/schema/go/ptr`
@@ -329,7 +346,8 @@ In-tree locations generated modules point path dependencies at (`go.mod`
 replace, Cargo `path`, npm `file:`). Every key is optional and
 repo-relative. The repository root is the parent of the schemas root. An
 absolute value is an error that names the key. An unset key emits no path
-dependency, so the generated manifest resolves the published module.
+dependency, so the generated manifest resolves the published module; set
+the key until that module is published.
 
 ### `paths.scalar_go`
 
@@ -343,7 +361,10 @@ Directory of the scalar library's Go module (`go.mod`).
 Default: unset. This repository's own file sets
 `third_party/superscalar/bindings/typescript`.
 
-Directory of the scalar library's npm package (`package.json`).
+Directory of the scalar library's npm package (`package.json`). Unset, a
+generated TypeScript types package depends on `superscalar` with `*`,
+which fails `bun install` with a 404 until superscalar publishes the
+package.
 
 ### `paths.scalar_rust`
 
@@ -377,7 +398,11 @@ Default: unset. This repository's own file sets
 
 Directory of the TypeScript version-graph runtime's npm package
 (`package.json`). A generated TypeScript types package whose schema
-declares a version graph depends on it with a `file:` spec.
+declares a version graph depends on it with a `file:` spec. Unset, the
+dependency is `*`, and `@superschematic/versiongraph` is unpublished until
+the first tag, so until then set this key whenever a schema declares a
+graph. Without it `bun install` fails with a 404, and since the generated
+types packages form one Bun workspace, it fails for every package in it.
 
 ### `paths.versiongraph_rust`
 
@@ -386,6 +411,16 @@ Default: unset. This repository's own file sets
 
 Directory of the version graph's Rust engine crate. Unset, a generated
 Rust types crate names the crate's version instead of a path.
+
+### `paths.versiongraph_python`
+
+Default: unset. This repository's own file sets
+`runtime/versiongraph/python`.
+
+Directory of the Python version-graph runtime (`pyproject.toml`). A
+generated Python types package whose schema declares a version graph
+names it as a uv path source (`[tool.uv.sources]`); unset, the dependency
+has no source and resolves from the index.
 
 ### `paths.http_runtime_go`
 

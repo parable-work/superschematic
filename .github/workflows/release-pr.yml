@@ -2,7 +2,7 @@ name: release-pr
 
 # Opens the release pull request for one version: runs
 # scripts/bump_version.py, which writes the version into versions.env, every
-# npm package, the PyPI distribution, the crate and the Go modules' sibling
+# npm package, the PyPI distributions, the crates and the Go modules' sibling
 # requires, then pushes a branch and opens the pull request. Review it, close
 # and reopen it once so ci-pass runs (a pull request opened with the workflow
 # token does not start ci.yml), merge it, then cut the tag with
@@ -83,7 +83,7 @@ jobs:
           git checkout -b "$branch"
           git add -A
           git commit -s -m "chore(release): v$VERSION" \
-            -m "Set by scripts/bump_version.py; versions.env, every npm package, the PyPI distribution, the crate and the Go modules' sibling requires now carry v$VERSION."
+            -m "Set by scripts/bump_version.py; versions.env, every npm package, the PyPI distributions, the crates and the Go modules' sibling requires now carry v$VERSION."
           git push origin "$branch"
           gh pr create --base main --head "$branch" \
             --title "chore(release): v$VERSION" \

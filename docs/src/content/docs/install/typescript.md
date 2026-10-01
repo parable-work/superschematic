@@ -87,12 +87,24 @@ packages next to it. A types package whose schema declares a
 [version graph](/superschematic/reference/version-graphs/) depends on
 `@superschematic/versiongraph`, with a `file:` path when
 [`paths.versiongraph_typescript`](/superschematic/reference/naming/#pathsversiongraph_typescript)
-is set and `*` otherwise. A types package depends on the scalar library with a
-`file:` path when
-[`paths.scalar_typescript`](/superschematic/reference/naming/#pathsscalar_typescript)
-is set, and on another schema's types package with `workspace:*`. Run
-`bun install` in that directory or in any package under it, and again
-after each build. Every install writes the one `bun.lock` at the root.
+is set and `*` otherwise. A types package depends on the scalar library
+(`superscalar`) the same way, through
+[`paths.scalar_typescript`](/superschematic/reference/naming/#pathsscalar_typescript),
+and on another schema's types package with `workspace:*`.
+
+`@superschematic/versiongraph` is unpublished until the first tag, and
+`superscalar` until superscalar's first release. Until then a `*`
+dependency fails `bun install` with a 404, so set both paths to a
+checkout. The install resolves the whole workspace, so one schema with a
+version graph and no path breaks the install of every types package
+beside it. The version-graph package loads from its `dist/`: build it in
+the checkout first (`bun install && bun run build` in
+`runtime/versiongraph/typescript`, which needs cargo with the
+`wasm32-unknown-unknown` target).
+
+Run `bun install` in `schemas/dist/types/typescript` or in any package
+under it, and again after each build. Every install writes the one
+`bun.lock` at the root.
 Install with Bun: npm rejects the `workspace:` protocol.
 
 ## Consume generated types
