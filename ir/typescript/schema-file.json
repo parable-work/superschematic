@@ -339,6 +339,54 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Search"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "fields": {
+                    "description": "The type's own top-level fields to index, by JSON key, each a string or a scalar whose values are strings; at most 16. Their order is the order a snippet's field is chosen in when two match equally.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 16,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "weights": {
+                    "additionalProperties": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 1000,
+                      "type": "number"
+                    },
+                    "description": "A weight per indexed field, which multiplies that field's part of a match's score; 1 for a field it does not name.",
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "fields"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Workflow"
               }
             }
@@ -415,6 +463,7 @@
             "Links",
             "Revisions",
             "Rollups",
+            "Search",
             "Workflow"
           ],
           "type": "string"

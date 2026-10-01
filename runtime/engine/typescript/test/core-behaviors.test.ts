@@ -3,13 +3,14 @@
 // core binary builds in the CLI smoke: fixture-behaviors-json, whose type
 // composes Workflow, Comments and Revisions, fixture-cross-instance-json,
 // whose tasks wait on tasks and documents and link to both and to a
-// project, and fixture-rollups-json, whose projects roll their tasks up.
-// They register when the engine opens, under names no deployment can take.
+// project, fixture-rollups-json, whose projects roll their tasks up, and
+// fixture-search-json, whose notes are searched. They register when the
+// engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import { EngineError, defineBehavior, type Principal } from '../dist/index.js';
-import { alice, cleanup, documentsDocument, drivers, openTestEngine, projectsDocument, tasksDocument } from './helpers.ts';
+import { alice, cleanup, documentsDocument, drivers, notesDocument, openTestEngine, projectsDocument, tasksDocument } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -18,6 +19,7 @@ afterEach(cleanup);
 const documents = documentsDocument();
 const tasks = tasksDocument();
 const projects = projectsDocument();
+const notes = notesDocument();
 
 const writer: Principal = { subject: 'wes', permissions: [] };
 const reviewer: Principal = { subject: 'rae', permissions: ['documents.review'] };
@@ -27,7 +29,7 @@ for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Dependencies', 'Links', 'Revisions', 'Rollups', 'Workflow']);
+      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Dependencies', 'Links', 'Revisions', 'Rollups', 'Search', 'Workflow']);
       assert.deepEqual(engine.behaviors.declaration('Workflow')?.fields, [{ name: 'status', description: 'The state the instance is in.' }]);
       const impostor = defineBehavior({ declaration: { name: 'Workflow' } });
       assert.throws(() => engine.behaviors.register(impostor), /behavior Workflow is already registered with this engine/);
@@ -115,6 +117,28 @@ for (const driver of drivers) {
         commentCount: 2,
         revision: 3,
       });
+    });
+
+    test('it runs the notes document: its title and body are searched, the title weighing more', () => {
+      const engine = openTestEngine({ driver });
+      engine.schemas.define(alice, notes);
+      engine.schemas.publish(alice, 'notes');
+      assert.deepEqual(engine.schemas.behaviors(alice, 'notes'), [
+        { name: 'Search', config: { fields: ['title', 'body'], weights: { title: 3 } }, declaration: engine.behaviors.declaration('Search') },
+      ]);
+      engine.instances.create(writer, 'notes', { title: 'Standup', body: 'The release slips a week.' }, { id: 'n1' });
+      engine.instances.create(writer, 'notes', { title: 'Release plan', body: 'Dates and owners.' }, { id: 'n2' });
+      engine.instances.create(writer, 'notes', { title: 'Lunch', body: 'Tacos.' }, { id: 'n3' });
+      const found = engine.instances.invokeSchema(writer, 'notes', 'search', { query: 'release' }) as { items: Array<{ id: string; field: string }> };
+      assert.deepEqual(
+        found.items.map((hit) => [hit.id, hit.field]),
+        [
+          ['n2', 'title'],
+          ['n1', 'body'],
+        ]
+      );
+      engine.instances.delete(writer, 'notes', 'n2');
+      assert.deepEqual(engine.instances.invokeSchema(writer, 'notes', 'search', { query: 'release plan' }), { items: [], next: null });
     });
 
     test('it runs the tasks document beside the documents one: blockers of both schemas, and links to both', () => {

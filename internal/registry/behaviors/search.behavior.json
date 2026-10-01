@@ -1,0 +1,77 @@
+{
+  "name": "Search",
+  "description": "Full-text search over the instance's own text fields, which the config names. The index is kept in the transaction of each create, update and delete, and the schema-level search operation returns the matching ids in rank order, each with a snippet of the field it matched best, from the instances of the caller's namespace only.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["fields"],
+    "properties": {
+      "fields": {
+        "description": "The type's own top-level fields to index, by JSON key, each a string or a scalar whose values are strings; at most 16. Their order is the order a snippet's field is chosen in when two match equally.",
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 16,
+        "uniqueItems": true,
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "weights": {
+        "description": "A weight per indexed field, which multiplies that field's part of a match's score; 1 for a field it does not name.",
+        "type": "object",
+        "propertyNames": { "minLength": 1 },
+        "additionalProperties": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 }
+      }
+    }
+  },
+  "operations": [
+    {
+      "name": "search",
+      "description": "Searches the indexed fields of the schema's instances in the caller's namespace and returns the matching ids, best match first, one page at a time. A query is plain words by default: an instance matches when its indexed fields hold every word, and quotes and operators in the query are text. With syntax fts5 the query is an SQLite FTS5 expression (phrases, AND, OR, NOT, NEAR, prefix*), without column filters.",
+      "scope": "schema",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query"],
+        "properties": {
+          "query": { "description": "What to search for.", "type": "string", "minLength": 1, "maxLength": 1000 },
+          "syntax": { "description": "How to read the query: words (the default), each word as text, or fts5, an SQLite FTS5 expression.", "type": "string", "enum": ["words", "fts5"] },
+          "limit": { "description": "At most this many instances; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 500 },
+          "cursor": { "description": "The next of the previous page.", "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "rank"],
+              "properties": {
+                "id": { "description": "The matching instance's id.", "type": "string" },
+                "rank": { "description": "The instance's place in the ranking, from 1 for the best match, across pages.", "type": "integer", "minimum": 1 },
+                "field": { "description": "The indexed field the snippet is from.", "type": "string" },
+                "snippet": {
+                  "description": "A few words of that field around its matches, in parts; each part says whether it is a match.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["text", "match"],
+                    "properties": {
+                      "text": { "type": "string" },
+                      "match": { "type": "boolean" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "next": { "description": "The cursor of the next page; null after the last.", "type": ["string", "null"] }
+        }
+      }
+    }
+  ]
+}

@@ -822,11 +822,12 @@ No core generator sets the flag. `build --emit-ir`, `format` and
 The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`
 registers with no extension: `Workflow`, `Comments`, `Revisions`,
-`Dependencies`, `Links` and `Rollups`. Every binary therefore accepts a
-schema that composes them, the schema-file JSON Schema lists them, and
-`BehaviorConfigs` in `@superschematic/schema` types their configs. None
-names an invocation policy, since a distribution's policy need not have
-the core's values; each operation takes the policy's default. Every
+`Dependencies`, `Links`, `Rollups` and `Search`. Every binary therefore
+accepts a schema that composes them, the schema-file JSON Schema lists
+them, and `BehaviorConfigs` in `@superschematic/schema` types their
+configs. None names an invocation policy, since a distribution's policy
+need not have the core's values; each operation takes the policy's
+default. Every
 `paramsSchema` sets `additionalProperties: false`. A config a
 declaration's `configSchema` accepts can still fail in the engine, whose
 implementation checks what JSON Schema cannot (a Workflow transition
@@ -847,6 +848,7 @@ like any behavior's.
 | `Dependencies` | `schemas`, `gatedStates`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
 | `Links` | `links` (by name: `schema`, `required`, `pinned`); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
 | `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`); required | `rollups` | none |
+| `Search` | `fields`, `weights`; required | none | `search`, of scope `schema` |
 
 `Dependencies`, `Links` and `Rollups` reach other instances (D16,
 amended): a blocker, a link target or the instances a rollup reads are
@@ -858,6 +860,12 @@ loads `fixture-cross-instance-json`, whose type composes the first two,
 and `fixture-rollups-json`, whose type rolls up its tasks, with the core
 binary, and their TypeScript twins in the tsreader fixtures load to the
 same IR.
+
+`Search` indexes the type's own text fields that its config names, which
+the loader does not check against the type: the engine refuses a field
+the type does not declare or whose values are not strings when the schema
+is defined. `make cli-smoke` loads `fixture-search-json` and its
+TypeScript twin to the same IR as well.
 
 acme declares `acme.Rating` and types its config in
 `packages/schema/src/behaviors.ts` (section 10);
@@ -1315,7 +1323,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups` (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search` (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |

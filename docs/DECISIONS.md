@@ -1067,18 +1067,22 @@ and the `@behavior` decorator (section 3.16 of `docs/extension-model.md`),
 and `@superschematic/engine` (`runtime/engine/README.md`): storage, the
 schema registry, instances, the event log, the access policy, the
 behavior plug-in interface with its reach into other instances (the
-amendment below), the HTTP API with its event stream and operation
+amendment below) and the hook a publish runs when it changes a
+behavior's config, the HTTP API with its event stream and operation
 routes, and the describe and tools documents and MCP tools. The core
-declares `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links` and
-`Rollups` (fields derived from linked instances, computed when read), and
-the engine registers its implementations of them when it opens, so D10's
-done criterion is met: the core binary with no extension linked loads
-schemas that compose them (`make cli-smoke`), an engine with only its own
-behaviors runs them (`test/core-behaviors.test.ts`), and acme's
-`acme.Rating` runs with no core edit (`scripts/smoke.sh`). Not built:
-reactions, search, and the work-queue package. Each change that lands a
-piece updates this paragraph, the README layout table and the pages that
-describe it. The names and rules are reversible until the first release.
+declares `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`,
+`Rollups` (fields derived from linked instances, computed when read) and
+`Search` (full-text, on FTS5), and the engine registers its
+implementations of them when it opens, so D10's done criterion is met:
+the core binary with no extension linked loads schemas that compose them
+(`make cli-smoke`), an engine with only its own behaviors runs them
+(`test/core-behaviors.test.ts`), and acme's `acme.Rating` runs with no
+core edit (`scripts/smoke.sh`). Not built: reactions, search's optional
+vectors, which need a SQLite extension the engine refuses to load and an
+embedding provider called outside the synchronous write transaction, and
+the work-queue package. Each change that lands a piece updates this
+paragraph, the README layout table and the pages that describe it. The
+names and rules are reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
 

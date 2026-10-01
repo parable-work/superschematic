@@ -710,9 +710,10 @@ engine.instances.invoke(me, "Product", id, "rate", { stars: 4 });
 
 An engine without the implementation refuses a schema that composes the
 behavior. The engine registers the core's own behaviors, `Workflow`,
-`Comments`, `Revisions`, `Dependencies`, `Links` and `Rollups`, when it opens; `behaviors` adds yours beside
-them. No core operation names an invocation policy, so their tools take
-the default of the policy you pass. acme's `packages/behaviors` is the
+`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups` and `Search`,
+when it opens; `behaviors` adds yours beside them. No core operation
+names an invocation policy, so their tools take the default of the
+policy you pass. acme's `packages/behaviors` is the
 whole example, and its smoke runs it. The
 [engine guide](/superschematic/guides/engine/) serves three of the core's
 behaviors in `examples/engine-notes`.
