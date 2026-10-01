@@ -10,6 +10,26 @@ func (o ModuleOutput) JSONFieldAdapter() string {
 	return o.Naming.ScalarRustCrateIdent() + "::scalars::json_scalar::serde::deserialize"
 }
 
+// OptionalJSONFieldAdapter is the name of the function types.rs defines for
+// an optional single Generic.JSON field (FieldInfo.KeepsJSONNull). It reads
+// a present value, JSON null included, through JSONFieldAdapter as Some, so
+// null stays apart from an absent field.
+func (o ModuleOutput) OptionalJSONFieldAdapter() string {
+	return "deserialize_optional_generic_json"
+}
+
+// hasOptionalJSONFields reports whether any field keeps JSON null.
+func hasOptionalJSONFields(types []TypeInfo) bool {
+	for _, typ := range types {
+		for _, field := range typ.Fields {
+			if field.KeepsJSONNull {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // containsGenericJSON reports whether the type, union or scalar named name
 // reaches a Generic.JSON field, following member and field types through
 // the schema and its dependencies (imported members and recursive types

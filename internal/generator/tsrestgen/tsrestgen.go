@@ -49,7 +49,8 @@ type ParamInfo struct {
 	// Kind is the runtime ParamKind. A body argument of an object type (T,
 	// T[] or T[][]) has Kind "object": the runtime parses each value with
 	// the generated strict parser of T. A body argument of a JSON-valued
-	// scalar (Generic.JSON) has Kind "json": any JSON value but null. One of
+	// scalar (Generic.JSON) has Kind "json": any JSON value but null, and
+	// null too for an optional single one, apart from absent. One of
 	// a JSON object or array scalar (Generic.StringMap, Embedding.Vector) has
 	// Kind "jsonObject" or "jsonArray". The runtime reads every body argument
 	// from its JSON value.

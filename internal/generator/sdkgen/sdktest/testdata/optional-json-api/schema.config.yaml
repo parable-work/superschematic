@@ -1,0 +1,5 @@
+# Test-local to the SDK generators (sdktest), so no other generator's
+# goldens read it.
+name: optional-json-api
+kind: API
+outputs: {}

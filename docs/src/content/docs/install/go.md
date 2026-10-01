@@ -144,6 +144,13 @@ Decoding refuses a null list element, since a list element is never null:
 type's zero value in its place. A null list itself still decodes, to a nil
 list or a null `InputField`.
 
+An optional `Generic.JSON` field keeps null apart from absent. In an input
+type it is an `InputField[GenericJSON]`, which already does. In any other
+type it is a `*GenericJSON`: `nil` when the key is absent, and a pointer to
+`GenericJSON("null")` when it is null, which `encoding/json` alone would
+also leave `nil`. Encoding writes the pointer back as `null` and leaves out
+a `nil` one. `To<Type>` carries an input's null over as the pointer.
+
 A union field decodes through its `<Union>Wrapper`. When every member
 marks the same field `@internalMetadata`, the wrapper picks the member by
 that field's value. Otherwise it picks by shape, because a member's decoder
@@ -186,7 +193,10 @@ from the query string (below). In the body:
   or `false`. Any other JSON type is `type`: `"5"` is not a number, and
   `5` is not a string.
 - A `Generic.JSON` argument takes any JSON value but null, and the
-  implementation receives that value.
+  implementation receives that value. An optional one also takes null:
+  the implementation receives `GenericJSON("null")`, the JSON null token,
+  apart from an absent one, which is `nil`
+  ([null in an optional Generic.JSON](/superschematic/reference/json-scalars/#null-in-an-optional-genericjson)).
 - A `Generic.StringMap` argument takes a JSON object and an
   `Embedding.Vector` argument a JSON array; any other JSON type, the
   value's JSON text included, is `type`. See
@@ -208,9 +218,10 @@ from the query string (below). In the body:
   `pattern`, `min`, `max`). An enum value outside the enum is `enum`.
 
 A required argument that is absent or null is `required`; an optional one
-is its zero value. The body must be one JSON object, and its keys match
-the argument names exactly. The route answers 400 with every error at
-once, keyed by path, as it does for an input type's fields:
+is its zero value, but for the null of an optional `Generic.JSON`. The body
+must be one JSON object, and its keys match the argument names exactly.
+The route answers 400 with every error at once, keyed by path, as it does
+for an input type's fields:
 
 ```json
 {

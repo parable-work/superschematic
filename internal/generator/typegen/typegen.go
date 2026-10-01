@@ -195,6 +195,11 @@ type TypePairField struct {
 	// serializes its zero value.
 	KeepsZeroValue bool
 	DefaultLiteral string
+
+	// KeepsJSONNull is set when the output field is an optional
+	// Generic.JSON pointer (KeptNullJSONFields): a null input converts to
+	// the JSON null token, apart from an unset one.
+	KeepsJSONNull bool
 }
 
 // TypePair describes a matched input/output type pair for ToType() generation.
@@ -992,6 +997,7 @@ func buildTypePairs(types []TypeInfo, importedTypes []ImportedTypeInfo) []TypePa
 				pf.TakesAddress = objectField.GoType == "*"+inner
 				pf.KeepsZeroValue = objectField.KeepsZeroValue
 				pf.DefaultLiteral = objectField.DefaultLiteral
+				pf.KeepsJSONNull = pf.TakesAddress && keepsJSONNull(*objectField)
 			}
 
 			innerInputType := unwrapGoType(inputField.GoType)

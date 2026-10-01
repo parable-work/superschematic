@@ -1,0 +1,51 @@
+# An optional Generic.JSON value as a body argument and as a field of an
+# input type, each beside a required one. Null is a value of the optional
+# one, apart from absent. The SDK tests of every language load it through
+# sdktest.LoadOptionalJSONService.
+name: optional-json-api
+kind: API
+scalars:
+  Generic.JSON:
+    name: Generic.JSON
+    languagePrimitive: object
+types:
+  # A revision of a note.
+  NoteRevision:
+    name: NoteRevision
+    role: APIInput
+    fields:
+      - name: body
+        typeRef: { name: Generic.JSON }
+        required: true
+      # Null clears the extra; left out, the extra is kept.
+      - name: extra
+        typeRef: { name: Generic.JSON }
+operationSets:
+  - name: NoteMutations
+    operations:
+      # Annotate a note; returns whether it changed.
+      - name: annotate
+        typeRef: { name: boolean }
+        required: true
+        httpMethod: PUT
+        restPath: "notes/{id}"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: body
+            typeRef: { name: Generic.JSON }
+            required: true
+          # Null clears the extra; left out, the extra is kept.
+          - name: extra
+            typeRef: { name: Generic.JSON }
+      # Revise a note; returns whether it changed.
+      - name: revise
+        typeRef: { name: boolean }
+        required: true
+        httpMethod: POST
+        restPath: "notes"
+        arguments:
+          - name: revision
+            typeRef: { name: NoteRevision }
+            required: true

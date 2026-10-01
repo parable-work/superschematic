@@ -47,8 +47,12 @@ type SDKOutput struct {
 	HasAuth                bool
 	HasFilterableEndpoints bool // Gates FilterSpec in client.py to avoid dead code in non-filterable SDKs.
 	HasPathParams          bool // Gates path_segment in client.py, which encodes a path parameter value.
-	Timestamp              string
-	Version                string
+	// HasUnsetArgs gates the Unset type and its UNSET sentinel in client.py
+	// and __init__.py, the default of an argument that keeps null
+	// (ScalarArg.KeepsNull).
+	HasUnsetArgs bool
+	Timestamp    string
+	Version      string
 }
 
 // NamespaceInfo represents a namespace with its endpoints for the Python SDK.
@@ -79,6 +83,9 @@ type NamespaceInfo struct {
 	// HasPathParams gates the path_segment import, for an endpoint whose
 	// path takes a value.
 	HasPathParams bool
+	// HasUnsetArgs gates the UNSET and Unset imports, for an argument that
+	// keeps null (ScalarArg.KeepsNull).
+	HasUnsetArgs bool
 }
 
 // EndpointInfo represents a single API endpoint for the Python SDK.
@@ -158,6 +165,11 @@ type ScalarArg struct {
 	// IsArray is also set): each inner list must be a list, and each
 	// element is validated as PyElementType.
 	IsArrayOfArrays bool
+
+	// KeepsNull marks an optional single Generic.JSON body argument, whose
+	// null is a value apart from absent (apigen.BodyArg.KeepNull). Its
+	// default is UNSET: left out, it is not sent, and None sends null.
+	KeepsNull bool
 }
 
 // FileUploadField represents file upload field metadata for the Python SDK.
@@ -270,6 +282,10 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 			if arg.IsArrayOfArrays {
 				namespace.HasListOfListsArgs = true
 			}
+			if arg.KeepsNull {
+				namespace.HasUnsetArgs = true
+				output.HasUnsetArgs = true
+			}
 		}
 		for _, param := range converted.QueryParams {
 			if param.IsArray {
@@ -365,6 +381,10 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		})
 	}
 
+	keepsNull := map[string]bool{}
+	for _, arg := range endpoint.BodyArgs {
+		keepsNull[arg.Name] = arg.KeepNull
+	}
 	scalarArgs := make([]ScalarArg, 0, len(endpoint.ScalarArgs))
 	for _, arg := range endpoint.ScalarArgs {
 		pyElementType := ""
@@ -381,6 +401,7 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 			Required:        arg.Required,
 			IsArray:         arg.IsArray,
 			IsArrayOfArrays: arg.IsArrayOfArrays,
+			KeepsNull:       keepsNull[arg.Name],
 		})
 	}
 
@@ -520,9 +541,11 @@ func buildMethodParams(
 		if arg.Required {
 			continue
 		}
-		methodParams = append(methodParams, MethodParam{
-			Declaration: fmt.Sprintf("%s: %s | None = None", arg.PyName, arg.PyType),
-		})
+		declaration := fmt.Sprintf("%s: %s | None = None", arg.PyName, arg.PyType)
+		if arg.KeepsNull {
+			declaration = fmt.Sprintf("%s: %s | None | Unset = UNSET", arg.PyName, arg.PyType)
+		}
+		methodParams = append(methodParams, MethodParam{Declaration: declaration})
 	}
 
 	for _, param := range queryParams {

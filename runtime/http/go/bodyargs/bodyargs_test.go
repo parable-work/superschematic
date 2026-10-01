@@ -180,6 +180,50 @@ func TestAnyTakesEveryJSONValueButNull(t *testing.T) {
 	}
 }
 
+// An optional JSON value built with KeepNull takes null as a value: a
+// present null reaches the caller as the JSON null token, and an absent
+// one as nil. A required one still refuses null.
+func TestKeepNullKeepsAPresentNullApartFromAbsent(t *testing.T) {
+	note := NewArg("note", Any, KeepNull())
+	for _, tc := range []struct {
+		body string
+		want json.RawMessage
+	}{
+		{`{}`, nil},
+		{`{"note": null}`, json.RawMessage(`null`)},
+		{`{"note": {"a": null}}`, json.RawMessage(`{"a": null}`)},
+		{`{"note": false}`, json.RawMessage(`false`)},
+	} {
+		got := errorsOf(t, tc.body, func(errs validate.ValidationErrors, b Body) {
+			value := Value[json.RawMessage](errs, b, note)
+			if (value == nil) != (tc.want == nil) || string(value) != string(tc.want) {
+				t.Errorf("%s: note = %#v, want %#v", tc.body, value, tc.want)
+			}
+		})
+		if len(got) != 0 {
+			t.Errorf("%s: errors = %v", tc.body, got)
+		}
+	}
+
+	// Without KeepNull a present null is the zero value, as for every other
+	// optional argument.
+	got := errorsOf(t, `{"note": null}`, func(errs validate.ValidationErrors, b Body) {
+		if value := Value[json.RawMessage](errs, b, NewArg("note", Any)); value != nil {
+			t.Errorf("note without KeepNull = %s, want nil", value)
+		}
+	})
+	if len(got) != 0 {
+		t.Errorf("errors = %v", got)
+	}
+
+	got = errorsOf(t, `{"doc": null}`, func(errs validate.ValidationErrors, b Body) {
+		Value[json.RawMessage](errs, b, NewArg("doc", Any, Required(), KeepNull()))
+	})
+	if want := map[string]string{"doc": "required: required field"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("a required null: errors = %v, want %v", got, want)
+	}
+}
+
 func TestListRules(t *testing.T) {
 	labels := NewArg("labels", String, Required(), ListMin(1), ListMax(2))
 	run := func(errs validate.ValidationErrors, b Body) { List[string](errs, b, labels) }

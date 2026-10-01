@@ -32,7 +32,8 @@ parsed by the generated strict parser the spec carries.
 /**
  * 'object' is an object type of a body parameter (T, T[] or T[][]), parsed
  * by ParamSpec.parse; 'json' is a body parameter of a JSON-valued scalar
- * (Generic.JSON), any JSON value but null; 'jsonObject' and 'jsonArray' are
+ * (Generic.JSON), any JSON value but null, and null too when it is optional
+ * and single-valued; 'jsonObject' and 'jsonArray' are
  * body parameters of a scalar whose value is a JSON object
  * (Generic.StringMap) or a JSON array (Embedding.Vector), as the generated
  * types send it. None is read from a string.
@@ -436,20 +437,23 @@ export function decodeMap(location: ParamLocation, spec: ParamSpec, value: unkno
  *   listMax bound it), and each element is never null (`required`,
  *   "required field") and passes the checks of its kind, both at name[i];
  * - T is refused when required and absent or null, and otherwise passes
- *   the checks of its kind.
+ *   the checks of its kind. An optional 'json' T (Generic.JSON) takes null
+ *   as a value: it decodes to null, apart from an absent one, which is
+ *   undefined.
  *
  * A value must arrive as the JSON type of its kind: a string for a string,
  * enum, UUID or timestamp, a number for a number or an integer, a boolean
  * for a boolean (`type`, "expected a string", ...). An object value must be
  * a JSON object (`type`, "expected an object") and pass the spec's parser
  * ("does not match the declared type"). A 'json' value is any JSON value
- * but null; a 'jsonObject' value is a JSON object and a 'jsonArray' value a
+ * but null, or null itself for an optional T; a 'jsonObject' value is a JSON object and a 'jsonArray' value a
  * JSON array (`type` otherwise), taken as they are. A parameter of any
  * other kind with a default that is absent or null decodes the default as a
  * path or query value would.
  */
 export function decodeJsonParam(location: ParamLocation, spec: ParamSpec, value: unknown): unknown {
   if (spec.isMap) return decodeMap(location, spec, value);
+  if (value === null && spec.kind === 'json' && !spec.required && !spec.isArray) return null;
   if ((value === undefined || value === null) && spec.defaultValue !== undefined && !spec.isArrayOfArrays && spec.kind !== 'object') {
     return decodeParam(location, spec, undefined);
   }

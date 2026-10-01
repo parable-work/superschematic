@@ -27,6 +27,25 @@ func LoadQueryListsService() (*ir.Schema, error) {
 	return loader.LoadService(filepath.Join(filepath.Dir(file), "testdata", QueryListsService))
 }
 
+// OptionalJSONService is the name of the schema LoadOptionalJSONService
+// loads.
+const OptionalJSONService = "optional-json-api"
+
+// LoadOptionalJSONService loads optional-json-api from this package's
+// testdata: note.annotate, a PUT whose body arguments are a required and an
+// optional Generic.JSON, and note.revise, a POST whose input type has a
+// required and an optional Generic.JSON field. An SDK sends the optional
+// one as null when the caller sets it to null and leaves it out when the
+// caller does not set it. It is local to the SDK generator tests, so no
+// other generator's goldens read it.
+func LoadOptionalJSONService() (*ir.Schema, error) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return nil, fmt.Errorf("locate package sdktest")
+	}
+	return loader.LoadService(filepath.Join(filepath.Dir(file), "testdata", OptionalJSONService))
+}
+
 // AddPaintOperation adds grid.paint to the loaded fixture-nested-arrays-api
 // schema: a PUT whose body arguments are a required list of lists of the
 // Shade enum and an optional list of lists of the Point object, and whose

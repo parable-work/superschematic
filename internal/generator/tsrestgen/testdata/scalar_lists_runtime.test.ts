@@ -8,7 +8,8 @@ stays inside its element, an empty string is kept), a null element is
 refused at name[i] as required and a wrong-type one as type, "5" is not a
 number, [] satisfies a required list, list bounds and the scalar's own
 pattern, lengths and range apply to each element, and a Generic.JSON
-argument is any JSON value but null. A GET list is still read from
+argument is any JSON value but null, except that an optional one takes null
+as a value, apart from absent. A GET list is still read from
 comma-separated query values; each item is read as its JSON type and
 checked at name[i], a GET argument and a query parameter (@query) alike,
 as the Go router does.
@@ -204,9 +205,15 @@ describe('generated scalar-lists-api router', () => {
       const body = await refused(storeDocument, { document });
       expect(body.details).toEqual({ location: 'body', parameter: 'document', reason: 'required' });
     }
-    const noNote = await storeDocument({ document: 1, note: null });
-    expect(noNote.status).toBe(200);
-    expect(received.at(-1)).toEqual({ document: 1 });
+  });
+
+  test('an optional Generic.JSON argument takes null as a value, apart from absent', async () => {
+    const absent = await storeDocument({ document: 1 });
+    expect(absent.status).toBe(200);
+    expect(received.at(-1)?.note).toBeUndefined();
+    const nulled = await storeDocument({ document: 1, note: null });
+    expect(nulled.status).toBe(200);
+    expect(received.at(-1)?.note).toBeNull();
   });
 
   test('a Generic.JSON list takes any JSON element but null, at both list depths', async () => {

@@ -61,6 +61,9 @@ scalars the shop uses become:
 
 A field is required unless it is `Nullable<T>` or declared optional with
 `name?: T`. The two mean the same thing: the field may be absent or null.
+For most types the two are the same missing value. For `Generic.JSON`,
+null is a value of an optional field, apart from absent
+([null in an optional Generic.JSON](/superschematic/reference/json-scalars/#null-in-an-optional-genericjson)).
 
 | Language | A nullable field |
 | --- | --- |

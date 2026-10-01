@@ -19,10 +19,14 @@ type BodyArg struct {
 	// Kind is the bodyargs Kind of each value: String, Number, Integer,
 	// Boolean, Object, Array or Any.
 	Kind string
-	// Options are the bodyargs options after the kind: Required, the list
-	// bounds, then the rules of the value's scalar type and the argument's
-	// own rules, in the order the runtime checks them.
+	// Options are the bodyargs options after the kind: Required or
+	// KeepNull, the list bounds, then the rules of the value's scalar type
+	// and the argument's own rules, in the order the runtime checks them.
 	Options []string
+	// KeepNull is true for an optional single Generic.JSON argument, whose
+	// null is a value apart from absent: the route keeps it, and an SDK
+	// sends it when the caller sets it.
+	KeepNull bool
 }
 
 // Decoder is the bodyargs function that decodes the argument: Value, List,
@@ -59,8 +63,14 @@ func (m *typeMapper) bodyArgs(args []Param) []BodyArg {
 	for _, arg := range args {
 		kind := m.bodyArgKind(arg)
 		var options []string
+		scalarDef, isScalar := m.findScalarDef(arg.Type)
+		// An optional Generic.JSON takes null as a value, apart from absent:
+		// the implementation receives the JSON null token.
+		keepNull := !arg.Required && isScalar && scalarDef.IsAnyJSON() && !arg.IsArray && !arg.IsMap
 		if arg.Required {
 			options = append(options, "bodyargs.Required()")
+		} else if keepNull {
+			options = append(options, "bodyargs.KeepNull()")
 		}
 		// List bounds bound a list argument; as in the generated types, a
 		// map has none.
@@ -70,11 +80,11 @@ func (m *typeMapper) bodyArgs(args []Param) []BodyArg {
 		if arg.IsArray && !arg.IsMap && arg.ValidateListMax != nil {
 			options = append(options, fmt.Sprintf("bodyargs.ListMax(%d)", *arg.ValidateListMax))
 		}
-		if scalarDef, ok := m.findScalarDef(arg.Type); ok {
+		if isScalar {
 			options = append(options, scalarRuleOptions(scalarDef, kind)...)
 		}
 		options = append(options, argRuleOptions(arg, kind)...)
-		out = append(out, BodyArg{Param: arg, Kind: kind, Options: options})
+		out = append(out, BodyArg{Param: arg, Kind: kind, Options: options, KeepNull: keepNull})
 	}
 	return out
 }

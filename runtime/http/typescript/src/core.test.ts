@@ -366,7 +366,9 @@ describe('JSON body parameters of a scalar, enum or JSON type', () => {
       expect(decodeJsonParam('body', json, value)).toEqual(value);
     }
     expect(() => decodeJsonParam('body', json, null)).toThrow(expect.objectContaining({ details: { location: 'body', parameter: 'x', reason: 'required' } }));
-    expect(decodeJsonParam('body', p({ kind: 'json', required: false }), null)).toBeUndefined();
+    // An optional one takes null as a value, apart from absent.
+    expect(decodeJsonParam('body', p({ kind: 'json', required: false }), null)).toBeNull();
+    expect(decodeJsonParam('body', p({ kind: 'json', required: false }), undefined)).toBeUndefined();
     const list = p({ kind: 'json', isArray: true });
     expect(decodeJsonParam('body', list, [1, 'a', { b: 2 }, [3, null], true])).toEqual([1, 'a', { b: 2 }, [3, null], true]);
     refusedAt(list, [1, null], 'x[1]', 'required', 'required field');

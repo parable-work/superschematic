@@ -104,7 +104,11 @@ superscalar's lossless adapter
 (`superscalar::scalars::json_scalar::serde::deserialize`), so a number
 keeps the digits it was written with. For that, the superscalar crate turns
 on serde_json's `arbitrary_precision` feature, which Cargo applies to every
-crate in the build that uses serde_json.
+crate in the build that uses serde_json. An optional one is an
+`Option<serde_json::Value>` that keeps null apart from absent: a null
+reads as `Some(Value::Null)` and is written back as `null`, and an absent
+key is `None`, which is left out
+([null in an optional Generic.JSON](/superschematic/reference/json-scalars/#null-in-an-optional-genericjson)).
 
 A union is an enum with one variant per member. When every member marks
 the same field `@internalMetadata`, serde reads that field as the enum's

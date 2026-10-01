@@ -5,7 +5,8 @@
 # a string scalar and of an object type. searchPosts takes the arguments of
 # a GET operation, which travel in the query string: lists of numbers, an
 # integer scalar, booleans, UUIDs, timestamps and strings, optional single
-# values of each, and a @query list. The Go route tests in apigen load it.
+# values of each, and a @query list. reviseDocument takes an input type
+# with an optional Generic.JSON field. The Go route tests in apigen load it.
 # saveTags, storeDocument and findTags match the TypeScript server's scalar
 # list fixture, so both servers answer the same vectors.
 name: body-args-api
@@ -48,6 +49,17 @@ types:
       - name: y
         typeRef: { name: number }
         required: true
+  # A revision of a stored document.
+  DocumentRevision:
+    name: DocumentRevision
+    role: APIInput
+    fields:
+      - name: document
+        typeRef: { name: Generic.JSON }
+        required: true
+      # Null clears the note; left out, the note is kept.
+      - name: note
+        typeRef: { name: Generic.JSON }
 operationSets:
   - name: TagMutations
     operations:
@@ -129,12 +141,23 @@ operationSets:
           - name: document
             typeRef: { name: Generic.JSON }
             required: true
+          # Any JSON value; null is a value, apart from absent.
           - name: note
             typeRef: { name: Generic.JSON }
           - name: extras
             typeRef: { name: Generic.JSON, isArray: true }
           - name: grid
             typeRef: { name: Generic.JSON, isArray: true, isArrayOfArrays: true }
+      # Revise a stored document; returns the document.
+      - name: reviseDocument
+        typeRef: { name: Generic.JSON }
+        required: true
+        httpMethod: PUT
+        restPath: "documents"
+        arguments:
+          - name: revision
+            typeRef: { name: DocumentRevision }
+            required: true
       # Name the shades and links of a post: maps of an enum and of lists.
       - name: nameShades
         typeRef: { name: boolean }

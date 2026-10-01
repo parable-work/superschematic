@@ -9,7 +9,7 @@ from enum import Enum
 {{- end}}
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilterableEndpoints}} FilterSpec,{{end}} SyncHTTPClient{{if .Namespace.HasPathParams}}, path_segment{{end}}
+from ..client import EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilterableEndpoints}} FilterSpec,{{end}} SyncHTTPClient{{if .Namespace.HasUnsetArgs}}, UNSET, Unset{{end}}{{if .Namespace.HasPathParams}}, path_segment{{end}}
 from ..errors import ValidationError
 
 _BUILTIN_VALIDATION_TYPES: dict[str, Any] = {
@@ -624,6 +624,15 @@ class {{.Namespace.ClassName}}:
             "{{.PyType}}",
             "{{.PyName}}",
         )
+{{- else if .KeepsNull}}
+        if {{.PyName}} is None:
+            payload["{{.Name}}"] = None
+        elif {{.PyName}} is not UNSET:
+            payload["{{.Name}}"] = self._validate_scalar_argument(
+                {{.PyName}},
+                "{{.PyType}}",
+                "{{.PyName}}",
+            )
 {{- else}}
         if {{.PyName}} is not None:
             payload["{{.Name}}"] = self._validate_scalar_argument(
@@ -689,6 +698,15 @@ class {{.Namespace.ClassName}}:
             "{{.PyType}}",
             "{{.PyName}}",
         )
+{{- else if .KeepsNull}}
+        if {{.PyName}} is None:
+            payload["{{.Name}}"] = None
+        elif {{.PyName}} is not UNSET:
+            payload["{{.Name}}"] = self._validate_scalar_argument(
+                {{.PyName}},
+                "{{.PyType}}",
+                "{{.PyName}}",
+            )
 {{- else}}
         if {{.PyName}} is not None:
             payload["{{.Name}}"] = self._validate_scalar_argument(

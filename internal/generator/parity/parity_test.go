@@ -113,8 +113,9 @@ const schemaConfigJSON = `{
 // JsonMatrix holds Generic.JSON, whose value is any JSON value but null: an
 // object, an array, a string (JSON text or not), a number or a boolean, with
 // no type or pattern check on it. A null or missing required one is
-// "required", a null optional one is absent, and a null element of
-// Generic.JSON[] or Generic.JSON[][] is "required" at its index (D12).
+// "required", a null optional one passes as an absent one does (the
+// decoders keep the two apart, which no verdict shows), and a null element
+// of Generic.JSON[] or Generic.JSON[][] is "required" at its index (D12).
 //
 // StructuredMatrix holds Generic.StringMap and Embedding.Vector, whose value
 // is a JSON object and a JSON array (D14, amended): the object or array, or

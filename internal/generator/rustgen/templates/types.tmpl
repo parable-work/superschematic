@@ -75,7 +75,9 @@ pub struct {{.Name}} {
 {{- else if .SkipSerializing}}
     #[serde(skip_serializing)]
 {{- end}}
-{{- if .PreserveJSON}}
+{{- if .KeepsJSONNull}}
+    #[serde(deserialize_with = "{{$.OptionalJSONFieldAdapter}}")]
+{{- else if .PreserveJSON}}
     #[serde(deserialize_with = "{{$.JSONFieldAdapter}}")]
 {{- end}}
     pub {{.RustName}}: {{.RustType}},
@@ -96,7 +98,19 @@ impl Default for {{.Name}} {
 {{end}}
 {{- end -}}
 
-{{range .CompositeDefaults}}
+{{- if .HasOptionalJSONFields}}
+/// Reads a present optional Generic.JSON field through the lossless adapter.
+/// JSON null is a value there, `Some(Value::Null)`, apart from an absent
+/// field, which `default` leaves `None`.
+fn {{.OptionalJSONFieldAdapter}}<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    {{.JSONFieldAdapter}}(deserializer).map(Some)
+}
+
+{{end}}
+{{- range .CompositeDefaults}}
 /// Returns a fresh [`{{.Type}}`] platform default.
 pub fn {{.FunctionName}}() -> {{.Type}} {
     serde_json::from_str({{.JSONLiteral}})
