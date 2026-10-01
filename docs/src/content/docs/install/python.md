@@ -137,6 +137,15 @@ input and on every object it holds. A failure raises `ValidationError`,
 whose `errors` maps each path (`lines`, `lines[0].quantity`) to its rule
 and message, as the Go and TypeScript SDKs report them.
 
+A `Generic.JSON` argument of a `POST`, `PUT` or `PATCH` operation is typed
+as the types package's `GenericJSON`, the type of a `Generic.JSON` field,
+and is sent as the JSON value it holds: a `dict`, a `list`, a `str`, a
+number or a `bool`. `None` for a required one or a list element raises
+`ValidationError`, and so, with the types package installed, does a value
+JSON cannot hold (`NaN`, a `set`, a key that is not a string). In the
+query string, a `GET` argument or a `@query` parameter, a `Generic.JSON`
+stays a `str`.
+
 An optional argument left as `None` is not sent, but for an optional
 `Generic.JSON`, whose null is a value: its default is the SDK's `UNSET`,
 so leaving it out sends nothing and passing `None` sends `null`. An input

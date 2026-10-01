@@ -86,6 +86,11 @@ type NamespaceInfo struct {
 	// HasUnsetArgs gates the UNSET and Unset imports, for an argument that
 	// keeps null (ScalarArg.KeepsNull).
 	HasUnsetArgs bool
+	// JSONValueTypes are the types of the values of the namespace's
+	// Generic.JSON body arguments (ScalarArg.IsAnyJSON), sorted. They gate
+	// _JSON_VALUE_TYPES, whose values _validate_scalar_argument refuses as
+	// None.
+	JSONValueTypes []string
 }
 
 // EndpointInfo represents a single API endpoint for the Python SDK.
@@ -170,6 +175,22 @@ type ScalarArg struct {
 	// null is a value apart from absent (apigen.BodyArg.KeepNull). Its
 	// default is UNSET: left out, it is not sent, and None sends null.
 	KeepsNull bool
+
+	// IsAnyJSON marks a Generic.JSON body argument (apigen.BodyArg.AnyJSON),
+	// alone or in a list. Each value is any JSON value but null, typed as
+	// the types package's alias of the scalar (GenericJSON) and sent as
+	// that value. None is refused where null is not a value: a required
+	// one and a list element.
+	IsAnyJSON bool
+}
+
+// valueType is the Python type of one value of the argument: the element
+// type of a list, and the argument's type otherwise.
+func (a ScalarArg) valueType() string {
+	if a.IsArray {
+		return a.PyElementType
+	}
+	return a.PyType
 }
 
 // FileUploadField represents file upload field metadata for the Python SDK.
@@ -229,6 +250,7 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 
 	namespaceMap := make(map[string]*NamespaceInfo)
 	importsByNamespace := make(map[string]map[string]struct{})
+	jsonTypesByNamespace := make(map[string]map[string]struct{})
 
 	for _, endpoint := range apiOutput.Endpoints {
 		namespaceName := endpoint.Namespace
@@ -248,6 +270,7 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 			}
 			namespaceMap[namespaceName] = namespace
 			importsByNamespace[namespaceName] = make(map[string]struct{})
+			jsonTypesByNamespace[namespaceName] = make(map[string]struct{})
 		}
 
 		if endpoint.IsScopedEndpoint {
@@ -286,6 +309,10 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 				namespace.HasUnsetArgs = true
 				output.HasUnsetArgs = true
 			}
+			if arg.IsAnyJSON {
+				importsByNamespace[namespaceName][arg.valueType()] = struct{}{}
+				jsonTypesByNamespace[namespaceName][arg.valueType()] = struct{}{}
+			}
 		}
 		for _, param := range converted.QueryParams {
 			if param.IsArray {
@@ -304,12 +331,12 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 	}
 
 	for name, importSet := range importsByNamespace {
-		imports := make([]string, 0, len(importSet))
-		for typeName := range importSet {
-			imports = append(imports, typeName)
+		namespaceMap[name].Imports = sortedKeys(importSet)
+	}
+	for name, jsonTypes := range jsonTypesByNamespace {
+		if len(jsonTypes) > 0 {
+			namespaceMap[name].JSONValueTypes = sortedKeys(jsonTypes)
 		}
-		sort.Strings(imports)
-		namespaceMap[name].Imports = imports
 	}
 
 	namespaces := make([]NamespaceInfo, 0, len(namespaceMap))
@@ -325,6 +352,16 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 	output.Namespaces = namespaces
 
 	return output, nil
+}
+
+// sortedKeys returns the keys of set, sorted.
+func sortedKeys(set map[string]struct{}) []string {
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func collectNamespaceImports(target map[string]struct{}, endpoint apigen.EndpointInfo) {
@@ -382,13 +419,23 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 	}
 
 	keepsNull := map[string]bool{}
+	anyJSON := map[string]bool{}
 	for _, arg := range endpoint.BodyArgs {
 		keepsNull[arg.Name] = arg.KeepNull
+		anyJSON[arg.Name] = arg.AnyJSON
 	}
+	// The SDK sends the scalar arguments of a POST, PUT or PATCH in the
+	// body, where a Generic.JSON one is any JSON value. In the query string
+	// it stays the parameter's text.
+	inBody := isBodyMethod(endpoint.Method)
 	scalarArgs := make([]ScalarArg, 0, len(endpoint.ScalarArgs))
 	for _, arg := range endpoint.ScalarArgs {
 		pyElementType := ""
 		pyType := pythonParamType(arg)
+		isAnyJSON := inBody && anyJSON[arg.Name]
+		if isAnyJSON {
+			pyType = pythonJSONType(arg.Type)
+		}
 		if arg.IsArray {
 			pyElementType = pyType
 			pyType = pythonListType(pyType, arg.ArrayDepth())
@@ -402,6 +449,7 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 			IsArray:         arg.IsArray,
 			IsArrayOfArrays: arg.IsArrayOfArrays,
 			KeepsNull:       keepsNull[arg.Name],
+			IsAnyJSON:       isAnyJSON,
 		})
 	}
 
@@ -633,6 +681,15 @@ func pythonParamType(param apigen.Param) string {
 	default:
 		return mapIRTypeToPython(param.Type)
 	}
+}
+
+// pythonJSONType is the Python type of a value of a scalar whose value is
+// any JSON value (Generic.JSON): the types package's alias of the scalar,
+// GenericJSON, which pygen gives a field of it. It is Annotated[Any, ...],
+// so a dict, a list, a str, a number and a bool are values, and its
+// validator refuses what JSON cannot hold.
+func pythonJSONType(typeName string) string {
+	return codegen.BuildScalarTokens(typeName).Symbol
 }
 
 // mapIRTypeToPython maps a schema type name to a Python type by name

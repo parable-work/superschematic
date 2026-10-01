@@ -27,6 +27,10 @@ type BodyArg struct {
 	// null is a value apart from absent: the route keeps it, and an SDK
 	// sends it when the caller sets it.
 	KeepNull bool
+	// AnyJSON is true for a Generic.JSON argument (its scalar's json_schema
+	// type mapping is "any"), alone or in a list: each value is any JSON
+	// value but null, and an SDK sends it as that value.
+	AnyJSON bool
 }
 
 // Decoder is the bodyargs function that decodes the argument: Value, List,
@@ -64,9 +68,10 @@ func (m *typeMapper) bodyArgs(args []Param) []BodyArg {
 		kind := m.bodyArgKind(arg)
 		var options []string
 		scalarDef, isScalar := m.findScalarDef(arg.Type)
+		anyJSON := isScalar && scalarDef.IsAnyJSON()
 		// An optional Generic.JSON takes null as a value, apart from absent:
 		// the implementation receives the JSON null token.
-		keepNull := !arg.Required && isScalar && scalarDef.IsAnyJSON() && !arg.IsArray && !arg.IsMap
+		keepNull := !arg.Required && anyJSON && !arg.IsArray && !arg.IsMap
 		if arg.Required {
 			options = append(options, "bodyargs.Required()")
 		} else if keepNull {
@@ -84,7 +89,7 @@ func (m *typeMapper) bodyArgs(args []Param) []BodyArg {
 			options = append(options, scalarRuleOptions(scalarDef, kind)...)
 		}
 		options = append(options, argRuleOptions(arg, kind)...)
-		out = append(out, BodyArg{Param: arg, Kind: kind, Options: options, KeepNull: keepNull})
+		out = append(out, BodyArg{Param: arg, Kind: kind, Options: options, KeepNull: keepNull, AnyJSON: anyJSON})
 	}
 	return out
 }
