@@ -1355,85 +1355,78 @@ func (r *TenantRepository) CreateMany(ctx context.Context, inputs []*types.Tenan
 
 	// Set audit fields
 
-	// Build batch INSERT query - collect field names from first input
-	var fieldNames []string
-	// Schema-owned identities may supply stable UUIDs, matching CreateOne. One
-	// INSERT has one column set, so a batch must supply ids for every row or
-	// none; mixing is refused rather than silently dropping the supplied ids.
-	explicitPrimaryKey := false
-	{
-		var zeroPrimaryKey types.IdentityUUID
-		if primaryKey, ok := tenantUUIDValue(inputs[0].Id); ok && primaryKey != zeroPrimaryKey {
-			explicitPrimaryKey = true
-		}
-		for _, input := range inputs {
-			primaryKey, ok := tenantUUIDValue(input.Id)
-			if (ok && primaryKey != zeroPrimaryKey) != explicitPrimaryKey {
-				return nil, fmt.Errorf("inputs mix explicit and default primary keys; a batch must supply ids for every row or none")
-			}
-		}
-	}
-	if explicitPrimaryKey {
-		fieldNames = append(fieldNames, `id`)
-	}
-	fieldNames = append(fieldNames, `"name"`)
-	fieldNames = append(fieldNames, `slug`)
-	fieldNames = append(fieldNames, `email`)
-	fieldNames = append(fieldNames, `status`)
-	fieldNames = append(fieldNames, `is_active`)
-	fieldNames = append(fieldNames, `seat_count`)
-	fieldNames = append(fieldNames, `metadata`)
-
-	// Add optional/auto-generated fields that are set in first input
-
-	// Add relationship foreign key columns present in first input (matches CreateOne's column set)
-
-	var valuePlaceholders []string
-	var values []interface{}
-	paramNum := 0
-
+	// Build the batch INSERT in one pass over the fields. Each row records every
+	// candidate column in the same order, with the value it binds or no value
+	// when it leaves an optional column unset; buildBatchInsert inserts the
+	// columns any row sets and writes DEFAULT for a row that leaves one unset.
+	batch := make([][]batchInsertCell, 0, len(inputs))
 	for _, input := range inputs {
-		var placeholders []string
-		if explicitPrimaryKey {
-			paramNum++
-			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-			primaryKey, _ := tenantUUIDValue(input.Id)
-			values = append(values, primaryKey.ToUUID())
+		var row []batchInsertCell
+		// Primary key: id. Schema-owned identities may supply a stable
+		// UUID, matching CreateOne; a row without one takes the generated default.
+		{
+			cell := batchInsertCell{column: `id`}
+			var zeroPrimaryKey types.IdentityUUID
+			if primaryKey, ok := tenantUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+				cell.value, cell.set = primaryKey.ToUUID(), true
+			}
+			row = append(row, cell)
 		}
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Name)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Slug)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Email)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		// An unset enum takes its schema default; "" is never a member.
-		if input.Status == "" {
-			values = append(values, types.TenantStatus("active"))
-		} else {
-			values = append(values, input.Status)
+		// Required field: name
+		{
+			cell := batchInsertCell{column: `"name"`, set: true}
+			cell.value = input.Name
+			row = append(row, cell)
 		}
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.IsActive)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.SeatCount)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		jsonValueMetadata, err := marshalJSONFieldValue(input.Metadata)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal JSON field metadata: %w", err)
+		// Required field: slug
+		{
+			cell := batchInsertCell{column: `slug`, set: true}
+			cell.value = input.Slug
+			row = append(row, cell)
 		}
-		values = append(values, jsonValueMetadata)
+		// Required field: email
+		{
+			cell := batchInsertCell{column: `email`, set: true}
+			cell.value = input.Email
+			row = append(row, cell)
+		}
+		// Required field: status
+		{
+			cell := batchInsertCell{column: `status`, set: true}
+			// An unset enum takes its schema default; "" is never a member.
+			cell.value = input.Status
+			if input.Status == "" {
+				cell.value = types.TenantStatus("active")
+			}
+			row = append(row, cell)
+		}
+		// Required field: isActive
+		{
+			cell := batchInsertCell{column: `is_active`, set: true}
+			cell.value = input.IsActive
+			row = append(row, cell)
+		}
+		// Required field: seatCount
+		{
+			cell := batchInsertCell{column: `seat_count`, set: true}
+			cell.value = input.SeatCount
+			row = append(row, cell)
+		}
+		// Required field: metadata
+		{
+			cell := batchInsertCell{column: `metadata`, set: true}
+			jsonValue, err := marshalJSONFieldValue(input.Metadata)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field metadata: %w", err)
+			}
+			cell.value = jsonValue
+			row = append(row, cell)
+		}
 
-		// Handle relationship foreign key columns (per-row, matches CreateOne)
-		valuePlaceholders = append(valuePlaceholders, "("+strings.Join(placeholders, ", ")+")")
+		// Relationship foreign key columns, matching CreateOne
+		batch = append(batch, row)
 	}
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
 	returningClauseMany := `"created_at", "updated_at", "id", "name", "slug", "email", "status", "is_active", "seat_count", "metadata", "_version"`

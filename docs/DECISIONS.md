@@ -936,6 +936,25 @@ a composite default. An empty string is checked like any other value, so a
 `""` default for a scalar with a `minLength` fails the build, although a
 runtime reads `""` in an optional string scalar field as absent.
 
+### D14, amended: a tool argument schema writes `Generic.JSON` without null
+
+The tool argument schemas (`internal/generator/toolsutil`, which the
+TypeScript, Go and Rust SDK generators write into `tools/schema.json`, and
+the engine's MCP tools, which match them) wrote `Generic.JSON` as every
+JSON type, null included, for a required argument, an optional one and a
+list element alike. A caller that followed the schema could send a null
+that every validator refuses as `required`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A `Generic.JSON` argument's type lists every JSON type but null: `["object", "array", "string", "number", "boolean"]`. An optional body argument adds `"null"`, as every optional body argument's type does, and a null there is absent (amended below: it is a value, apart from absent). A required argument, a query argument (never nullable in a tool schema), a list element and a map value take no null. | Every JSON type, null included, for every argument |
+| A map value takes no null, although every generated validator still accepts a null `Generic.JSON` map value (above). The schema states the rule; a caller that follows it sends nothing a validator refuses. | Listing null in a map value's type, to match the validators' gap |
+| `inputSchemaDigest` hashes the type as written, not the internal `any` type of the scalar table, so the digest of every argument schema with a `Generic.JSON` argument changed. | Hashing the internal type, which would keep a required argument's digest while its schema changed |
+
+A tool's `returns` is unchanged and still lists null for a `Generic.JSON`
+result. The scalar's description, which superscalar's catalog supplies,
+still says null is a value.
+
 ### D14, amended: an optional `Generic.JSON` takes null as a value
 
 The rule above made null a missing value of every `Generic.JSON` field and
@@ -958,6 +977,9 @@ or an input type's field set to `None`.
 | TypeScript: the server hands the implementation `null` for a null optional argument and `undefined` for an absent one. The argument's type, `GenericJSON` (`JSONValue`), already includes null, and the input type's parsers and the SDK already kept it. | |
 | Rust: an optional single `Generic.JSON` field decodes through `deserialize_optional_generic_json`, which types.rs defines over the lossless adapter: a present value, null included, is `Some`, and an absent one is `None`. `Some(Value::Null)` is written as null. The SDK already sent it, and the router hands the body over as a `Value`. | `Option<Option<Value>>`, which changes the field's type |
 | Python: an optional single `Generic.JSON` argument of the SDK defaults to `UNSET` (`Unset`, in the SDK's client module); left out it is not sent, and `None` sends null. A model records a field given `None` in `model_fields_set`, and a model with an optional `Generic.JSON` field has a serializer that writes such a field as null in a dump that leaves out `None`, as the SDK sends an input type; a field the model was not given stays out. | A sentinel for every optional argument, or dumping with `exclude_unset`, either of which changes how every optional value is sent |
+
+The tool argument schemas (amended above) already list `"null"` in an
+optional `Generic.JSON` body argument's type; that null is now this value.
 
 Not changed: the Python types' `to_dict` and `to_json` write every field,
 `None` included, so they do not tell an unset optional field from a null

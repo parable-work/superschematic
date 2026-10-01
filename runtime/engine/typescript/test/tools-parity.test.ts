@@ -76,7 +76,10 @@ describe('the Go vectors', () => {
     assert.equal(corpus.cases.length, 3);
     const properties = Object.values(corpus.cases[0].parameters.properties) as Array<{ type: unknown; items?: { items?: unknown } }>;
     assert.ok(properties.length > 70, 'the fixture has a field per catalog scalar');
-    assert.ok(properties.some((property) => Array.isArray(property.type) && property.type.length === 6), 'Generic.JSON');
+    // Generic.JSON is any JSON value but null; an optional one also takes null.
+    const anyJSON = (types: string[]) => properties.some((property) => JSON.stringify(property.type) === JSON.stringify(types));
+    assert.ok(anyJSON(['object', 'array', 'string', 'number', 'boolean']), 'a required Generic.JSON');
+    assert.ok(anyJSON(['object', 'array', 'string', 'number', 'boolean', 'null']), 'an optional Generic.JSON');
     assert.ok(properties.some((property) => property.items?.items !== undefined), 'a list of lists');
   });
 

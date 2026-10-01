@@ -921,8 +921,9 @@ mapping), format, description, pattern, lengths and range and its name
 under `x-superschematic-scalar`, an enum's values, a nested type as a
 closed object (a type already being expanded as a plain reference), `items`
 for a list and `items` of `items` for a list of lists, and a field that is
-not required nullable. `Generic.JSON` allows every JSON type, as the Go
-side writes it, null included. The schema runtime's GraphQL primitive
+not required nullable. `Generic.JSON` allows every JSON type but null, and
+an optional one null too, as the Go side writes it (D14, amended). The
+schema runtime's GraphQL primitive
 names, which the Go loader does not read, are the primitive they name,
 `Int` an integer. `runtime/engine/testdata/tool_parameters_parity.json`,
 which `go test ./internal/generator/toolsutil -run

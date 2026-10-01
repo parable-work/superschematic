@@ -827,88 +827,71 @@ func (r *BoardRepository) CreateMany(ctx context.Context, inputs []*types.Board)
 
 	// Set audit fields
 
-	// Build batch INSERT query - collect field names from first input
-	var fieldNames []string
-	// Schema-owned identities may supply stable UUIDs, matching CreateOne. One
-	// INSERT has one column set, so a batch must supply ids for every row or
-	// none; mixing is refused rather than silently dropping the supplied ids.
-	explicitPrimaryKey := false
-	{
-		var zeroPrimaryKey types.IdentityUUID
-		if primaryKey, ok := boardUUIDValue(inputs[0].Id); ok && primaryKey != zeroPrimaryKey {
-			explicitPrimaryKey = true
-		}
-		for _, input := range inputs {
-			primaryKey, ok := boardUUIDValue(input.Id)
-			if (ok && primaryKey != zeroPrimaryKey) != explicitPrimaryKey {
-				return nil, fmt.Errorf("inputs mix explicit and default primary keys; a batch must supply ids for every row or none")
-			}
-		}
-	}
-	if explicitPrimaryKey {
-		fieldNames = append(fieldNames, `id`)
-	}
-	fieldNames = append(fieldNames, `labels`)
-	fieldNames = append(fieldNames, `states`)
-	fieldNames = append(fieldNames, `walls`)
-
-	// Add optional/auto-generated fields that are set in first input
-	{
-		if !reflect.ValueOf(inputs[0].Scores).IsZero() {
-			fieldNames = append(fieldNames, `scores`)
-		}
-	}
-
-	// Add relationship foreign key columns present in first input (matches CreateOne's column set)
-
-	var valuePlaceholders []string
-	var values []interface{}
-	paramNum := 0
-
+	// Build the batch INSERT in one pass over the fields. Each row records every
+	// candidate column in the same order, with the value it binds or no value
+	// when it leaves an optional column unset; buildBatchInsert inserts the
+	// columns any row sets and writes DEFAULT for a row that leaves one unset.
+	batch := make([][]batchInsertCell, 0, len(inputs))
 	for _, input := range inputs {
-		var placeholders []string
-		if explicitPrimaryKey {
-			paramNum++
-			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-			primaryKey, _ := boardUUIDValue(input.Id)
-			values = append(values, primaryKey.ToUUID())
-		}
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		jsonValueLabels, err := marshalArrayOfArraysFieldValue(input.Labels)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal JSON field labels: %w", err)
-		}
-		values = append(values, jsonValueLabels)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		jsonValueStates, err := marshalArrayOfArraysFieldValue(input.States)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal JSON field states: %w", err)
-		}
-		values = append(values, jsonValueStates)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		jsonValueWalls, err := marshalArrayOfArraysFieldValue(input.Walls)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal JSON field walls: %w", err)
-		}
-		values = append(values, jsonValueWalls)
+		var row []batchInsertCell
+		// Primary key: id. Schema-owned identities may supply a stable
+		// UUID, matching CreateOne; a row without one takes the generated default.
 		{
+			cell := batchInsertCell{column: `id`}
+			var zeroPrimaryKey types.IdentityUUID
+			if primaryKey, ok := boardUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+				cell.value, cell.set = primaryKey.ToUUID(), true
+			}
+			row = append(row, cell)
+		}
+		// Required field: labels
+		{
+			cell := batchInsertCell{column: `labels`, set: true}
+			jsonValue, err := marshalArrayOfArraysFieldValue(input.Labels)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field labels: %w", err)
+			}
+			cell.value = jsonValue
+			row = append(row, cell)
+		}
+		// Required field: states
+		{
+			cell := batchInsertCell{column: `states`, set: true}
+			jsonValue, err := marshalArrayOfArraysFieldValue(input.States)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field states: %w", err)
+			}
+			cell.value = jsonValue
+			row = append(row, cell)
+		}
+		// Required field: walls
+		{
+			cell := batchInsertCell{column: `walls`, set: true}
+			jsonValue, err := marshalArrayOfArraysFieldValue(input.Walls)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field walls: %w", err)
+			}
+			cell.value = jsonValue
+			row = append(row, cell)
+		}
+		// Optional field: scores
+		{
+			cell := batchInsertCell{column: `scores`}
 			if !reflect.ValueOf(input.Scores).IsZero() {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				jsonValueScores, err := marshalArrayOfArraysFieldValue(input.Scores)
+				jsonValue, err := marshalArrayOfArraysFieldValue(input.Scores)
 				if err != nil {
 					return nil, fmt.Errorf("failed to marshal JSON field scores: %w", err)
 				}
-				values = append(values, jsonValueScores)
+				cell.value = jsonValue
+				cell.set = true
 			}
+			row = append(row, cell)
 		}
 
-		// Handle relationship foreign key columns (per-row, matches CreateOne)
-		valuePlaceholders = append(valuePlaceholders, "("+strings.Join(placeholders, ", ")+")")
+		// Relationship foreign key columns, matching CreateOne
+		batch = append(batch, row)
 	}
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
 	returningClauseMany := `"id", "labels", "states", "walls", "scores"`

@@ -1964,156 +1964,147 @@ func (r *TastingRepository) CreateMany(ctx context.Context, inputs []*types.Tast
 
 	// Set audit fields
 
-	// Build batch INSERT query - collect field names from first input
-	var fieldNames []string
-	// Schema-owned identities may supply stable UUIDs, matching CreateOne. One
-	// INSERT has one column set, so a batch must supply ids for every row or
-	// none; mixing is refused rather than silently dropping the supplied ids.
-	explicitPrimaryKey := false
-	{
-		var zeroPrimaryKey types.IdentityUUID
-		if primaryKey, ok := tastingUUIDValue(inputs[0].Id); ok && primaryKey != zeroPrimaryKey {
-			explicitPrimaryKey = true
-		}
-		for _, input := range inputs {
-			primaryKey, ok := tastingUUIDValue(input.Id)
-			if (ok && primaryKey != zeroPrimaryKey) != explicitPrimaryKey {
-				return nil, fmt.Errorf("inputs mix explicit and default primary keys; a batch must supply ids for every row or none")
-			}
-		}
-	}
-	if explicitPrimaryKey {
-		fieldNames = append(fieldNames, `id`)
-	}
-	fieldNames = append(fieldNames, `taster`)
-	fieldNames = append(fieldNames, `salty`)
-	fieldNames = append(fieldNames, `score`)
-	fieldNames = append(fieldNames, `servings`)
-	fieldNames = append(fieldNames, `tasted_on`)
-	fieldNames = append(fieldNames, `tasted_at`)
-	fieldNames = append(fieldNames, `served_at`)
-	fieldNames = append(fieldNames, `rested`)
-	fieldNames = append(fieldNames, `verdict`)
-	fieldNames = append(fieldNames, `remarks`)
-	fieldNames = append(fieldNames, `tags`)
-	fieldNames = append(fieldNames, `helpers`)
-	fieldNames = append(fieldNames, `bites`)
-	fieldNames = append(fieldNames, `deleted_on_ref`)
-
-	// Add optional/auto-generated fields that are set in first input
-	{
-		if !reflect.ValueOf(inputs[0].EntityKey).IsZero() {
-			fieldNames = append(fieldNames, `entity_key`)
-		}
-	}
-
-	// Add relationship foreign key columns present in first input (matches CreateOne's column set)
-	// Relationship: recipe (FK: recipe_id)
-	{
-		var zeroId types.IdentityUUID
-		if relID, ok := tastingUUIDValue(inputs[0].Recipe.Id); ok && relID != zeroId {
-			fieldNames = append(fieldNames, "recipe_id")
-		}
-	}
-	// Relationship: ref (FK: ref_id)
-	{
-		var zeroId types.IdentityUUID
-		if relID, ok := tastingUUIDValue(inputs[0].Ref.Id); ok && relID != zeroId {
-			fieldNames = append(fieldNames, "ref_id")
-		}
-	}
-
-	var valuePlaceholders []string
-	var values []interface{}
-	paramNum := 0
-
+	// Build the batch INSERT in one pass over the fields. Each row records every
+	// candidate column in the same order, with the value it binds or no value
+	// when it leaves an optional column unset; buildBatchInsert inserts the
+	// columns any row sets and writes DEFAULT for a row that leaves one unset.
+	batch := make([][]batchInsertCell, 0, len(inputs))
 	for _, input := range inputs {
-		var placeholders []string
-		if explicitPrimaryKey {
-			paramNum++
-			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-			primaryKey, _ := tastingUUIDValue(input.Id)
-			values = append(values, primaryKey.ToUUID())
-		}
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Taster.ToUUID())
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Salty)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Score)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Servings)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.TastedOn)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, time.Time(input.TastedAt))
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.ServedAt)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Rested)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Verdict)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		jsonValueRemarks, err := marshalJSONFieldValue(input.Remarks)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal JSON field remarks: %w", err)
-		}
-		values = append(values, jsonValueRemarks)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Tags)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.Helpers)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		jsonValueBites, err := marshalArrayOfArraysFieldValue(input.Bites)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal JSON field bites: %w", err)
-		}
-		values = append(values, jsonValueBites)
+		var row []batchInsertCell
+		// Primary key: id. Schema-owned identities may supply a stable
+		// UUID, matching CreateOne; a row without one takes the generated default.
 		{
-			if !reflect.ValueOf(input.EntityKey).IsZero() {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, input.EntityKey.ToUUID())
+			cell := batchInsertCell{column: `id`}
+			var zeroPrimaryKey types.IdentityUUID
+			if primaryKey, ok := tastingUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+				cell.value, cell.set = primaryKey.ToUUID(), true
 			}
+			row = append(row, cell)
 		}
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.DeletedOnRef)
+		// Required field: taster
+		{
+			cell := batchInsertCell{column: `taster`, set: true}
+			cell.value = input.Taster.ToUUID()
+			row = append(row, cell)
+		}
+		// Required field: salty
+		{
+			cell := batchInsertCell{column: `salty`, set: true}
+			cell.value = input.Salty
+			row = append(row, cell)
+		}
+		// Required field: score
+		{
+			cell := batchInsertCell{column: `score`, set: true}
+			cell.value = input.Score
+			row = append(row, cell)
+		}
+		// Required field: servings
+		{
+			cell := batchInsertCell{column: `servings`, set: true}
+			cell.value = input.Servings
+			row = append(row, cell)
+		}
+		// Required field: tastedOn
+		{
+			cell := batchInsertCell{column: `tasted_on`, set: true}
+			cell.value = input.TastedOn
+			row = append(row, cell)
+		}
+		// Required field: tastedAt
+		{
+			cell := batchInsertCell{column: `tasted_at`, set: true}
+			cell.value = time.Time(input.TastedAt)
+			row = append(row, cell)
+		}
+		// Required field: servedAt
+		{
+			cell := batchInsertCell{column: `served_at`, set: true}
+			cell.value = input.ServedAt
+			row = append(row, cell)
+		}
+		// Required field: rested
+		{
+			cell := batchInsertCell{column: `rested`, set: true}
+			cell.value = input.Rested
+			row = append(row, cell)
+		}
+		// Required field: verdict
+		{
+			cell := batchInsertCell{column: `verdict`, set: true}
+			cell.value = input.Verdict
+			row = append(row, cell)
+		}
+		// Required field: remarks
+		{
+			cell := batchInsertCell{column: `remarks`, set: true}
+			jsonValue, err := marshalJSONFieldValue(input.Remarks)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field remarks: %w", err)
+			}
+			cell.value = jsonValue
+			row = append(row, cell)
+		}
+		// Required field: tags
+		{
+			cell := batchInsertCell{column: `tags`, set: true}
+			cell.value = input.Tags
+			row = append(row, cell)
+		}
+		// Required field: helpers
+		{
+			cell := batchInsertCell{column: `helpers`, set: true}
+			cell.value = input.Helpers
+			row = append(row, cell)
+		}
+		// Required field: bites
+		{
+			cell := batchInsertCell{column: `bites`, set: true}
+			jsonValue, err := marshalArrayOfArraysFieldValue(input.Bites)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field bites: %w", err)
+			}
+			cell.value = jsonValue
+			row = append(row, cell)
+		}
+		// Auto-generated field: entityKey
+		{
+			cell := batchInsertCell{column: `entity_key`}
+			if !reflect.ValueOf(input.EntityKey).IsZero() {
+				cell.value = input.EntityKey.ToUUID()
+				cell.set = true
+			}
+			row = append(row, cell)
+		}
+		// Required field: deletedOnRef
+		{
+			cell := batchInsertCell{column: `deleted_on_ref`, set: true}
+			cell.value = input.DeletedOnRef
+			row = append(row, cell)
+		}
 
-		// Handle relationship foreign key columns (per-row, matches CreateOne)
+		// Relationship foreign key columns, matching CreateOne
 		// Relationship: recipe (FK: recipe_id)
 		{
+			cell := batchInsertCell{column: "recipe_id"}
 			var zeroId types.IdentityUUID
 			if relID, ok := tastingUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, relID.ToUUID())
+				cell.value, cell.set = relID.ToUUID(), true
 			}
+			row = append(row, cell)
 		}
 		// Relationship: ref (FK: ref_id)
 		{
+			cell := batchInsertCell{column: "ref_id"}
 			var zeroId types.IdentityUUID
 			if relID, ok := tastingUUIDValue(input.Ref.Id); ok && relID != zeroId {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, relID.ToUUID())
+				cell.value, cell.set = relID.ToUUID(), true
 			}
+			row = append(row, cell)
 		}
-		valuePlaceholders = append(valuePlaceholders, "("+strings.Join(placeholders, ", ")+")")
+		batch = append(batch, row)
 	}
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
 	returningClauseMany := `"id", "recipe_id", "taster", "salty", "score", "servings", "tasted_on", "tasted_at", "served_at", "rested", "verdict", "remarks", "tags", "helpers", "bites", "entity_key", "ref_id", "deleted_on_ref", "_version"`

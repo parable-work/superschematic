@@ -84,6 +84,12 @@ func (additional JSONSchemaAdditionalProperties) MarshalJSON() ([]byte, error) {
 	return json.Marshal(true)
 }
 
+// jsonValueTypes is the type a property of the internal `any` type (a
+// scalar whose json_schema type mapping is "any", Generic.JSON) writes:
+// every JSON type but null (D14, amended). A nullable one adds null, as
+// any other nullable type does.
+var jsonValueTypes = []string{"object", "array", "string", "number", "boolean"}
+
 // MarshalJSON preserves body-field nullability independently from whether the
 // containing object requires the field. Array items retain their own contract.
 func (property JSONSchemaProperty) MarshalJSON() ([]byte, error) {
@@ -99,7 +105,17 @@ func (property JSONSchemaProperty) MarshalJSON() ([]byte, error) {
 
 func (property JSONSchemaProperty) marshalShape() ([]byte, error) {
 	type plain JSONSchemaProperty
-	if !property.Nullable || property.Type == "any" || property.Type == "null" {
+	if property.Type == "any" {
+		types := append([]string(nil), jsonValueTypes...)
+		if property.Nullable {
+			types = append(types, "null")
+		}
+		return json.Marshal(struct {
+			plain
+			Type []string `json:"type"`
+		}{plain(property), types})
+	}
+	if !property.Nullable || property.Type == "null" {
 		return json.Marshal(plain(property))
 	}
 	oneOf := property.OneOf
@@ -591,8 +607,8 @@ func GetReturnTypeSchema(typeName string, scalars map[string]apigen.ScalarJSONSc
 }
 
 // JSONSchemaPropertyLiteral renders a complete nested property as JSON with
-// sorted keys. The internal `any` type becomes the JSON Schema union every
-// value satisfies.
+// sorted keys. A property that does not encode renders as the schema every
+// JSON value satisfies.
 func JSONSchemaPropertyLiteral(property JSONSchemaProperty) string {
 	encoded, err := json.Marshal(property)
 	if err != nil {
@@ -602,24 +618,7 @@ func JSONSchemaPropertyLiteral(property JSONSchemaProperty) string {
 	if err := json.Unmarshal(encoded, &value); err != nil {
 		return string(encoded)
 	}
-	var normalize func(any) any
-	normalize = func(current any) any {
-		switch typed := current.(type) {
-		case map[string]any:
-			if typed["type"] == "any" {
-				typed["type"] = []string{"object", "array", "string", "number", "boolean", "null"}
-			}
-			for key, child := range typed {
-				typed[key] = normalize(child)
-			}
-		case []any:
-			for index, child := range typed {
-				typed[index] = normalize(child)
-			}
-		}
-		return current
-	}
-	normalized, err := json.Marshal(normalize(value))
+	normalized, err := json.Marshal(value)
 	if err != nil {
 		return string(encoded)
 	}

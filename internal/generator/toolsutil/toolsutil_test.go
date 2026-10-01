@@ -135,20 +135,56 @@ func TestParametersSchemaIncludesRequiredAndArrayQueryArguments(t *testing.T) {
 	}
 }
 
-func TestArbitraryJSONScalarPreservesAnyTypeSentinel(t *testing.T) {
-	property := ScalarToJSONSchemaProperty("Generic.JSON", map[string]apigen.ScalarJSONSchemaInfo{
-		"Generic.JSON": {Type: "any", Description: "Any valid JSON root"},
-	})
-	encoded, err := json.Marshal(property)
+// A Generic.JSON value is any JSON value but null (D14, amended): a
+// required argument, a query argument, a list element and a map value take
+// every JSON type but null, and an optional body argument also takes null,
+// as every optional body argument does. The digest's encoding and the
+// tools/schema.json literal say the same.
+func TestArbitraryJSONScalarIsAnyJSONValueButNull(t *testing.T) {
+	const value = `["object","array","string","number","boolean"]`
+	const nullable = `["object","array","string","number","boolean","null"]`
+	const item = `{"x-superschematic-scalar":"Generic.JSON","description":"Any valid JSON root","type":` + value + `}`
+	scalars := map[string]apigen.ScalarJSONSchemaInfo{
+		"Generic.JSON": {CanonicalName: "Generic.JSON", Type: "any", Description: "Any valid JSON root"},
+	}
+	fields := map[string][]apigen.Param{
+		"Input": {
+			{Name: "payload", Type: "Generic.JSON", Required: true},
+			{Name: "maybePayload", Type: "Generic.JSON"},
+			{Name: "payloads", Type: "Generic.JSON", IsArray: true},
+			{Name: "payloadRows", Type: "Generic.JSON", IsArray: true, IsArrayOfArrays: true, Required: true},
+			{Name: "payloadByName", Type: "Generic.JSON", IsMap: true, Required: true},
+		},
+	}
+	schema := BuildParametersSchema(nil, []ToolQueryArg{{Name: "filter", Type: "Generic.JSON"}}, true, "Input", fields,
+		nil, nil, nil, false, scalars, byName, apigen.DefaultToolKeys())
+	encoded, err := json.Marshal(schema)
 	if err != nil {
-		t.Fatalf("marshal property: %v", err)
+		t.Fatalf("marshal the schema: %v", err)
 	}
-	if !strings.Contains(string(encoded), `"type":"any"`) || !strings.Contains(string(encoded), `"description":"Any valid JSON root"`) {
-		t.Fatalf("property = %s", encoded)
+	if strings.Contains(string(encoded), `"any"`) {
+		t.Fatalf("the digest's encoding kept the internal any type: %s", encoded)
 	}
-	literal := JSONSchemaPropertyLiteral(property)
-	if !strings.Contains(literal, `"type":["object","array","string","number","boolean","null"]`) {
-		t.Fatalf("any sentinel was not expanded: %s", literal)
+	for name, want := range map[string]string{
+		"payload":       item,
+		"filter":        item,
+		"maybePayload":  `{"x-superschematic-scalar":"Generic.JSON","description":"Any valid JSON root","type":` + nullable + `}`,
+		"payloads":      `{"description":"Array of Generic.JSON values","items":` + item + `,"type":["array","null"]}`,
+		"payloadRows":   `{"type":"array","description":"Array of arrays of Generic.JSON values","items":{"type":"array","description":"Array of Generic.JSON values","items":` + item + `}}`,
+		"payloadByName": `{"additionalProperties":` + item + `,"type":"object","description":"Map of Generic.JSON values"}`,
+	} {
+		got, err := json.Marshal(schema.Properties[name])
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if string(got) != want {
+			t.Errorf("%s encodes as\n%s\nwant\n%s", name, got, want)
+		}
+	}
+	for name, want := range map[string]string{"payload": value, "filter": value, "maybePayload": nullable} {
+		if literal := JSONSchemaPropertyLiteral(schema.Properties[name]); !strings.Contains(literal, `"type":`+want+`,`) {
+			t.Errorf("%s literal = %s, want type %s", name, literal, want)
+		}
 	}
 }
 

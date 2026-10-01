@@ -1508,137 +1508,94 @@ func (r *RecipeCommitRepository) CreateMany(ctx context.Context, inputs []*types
 		input.CreatedBy = GetUserID(ctx)
 	}
 
-	// Build batch INSERT query - collect field names from first input
-	var fieldNames []string
-	// Schema-owned identities may supply stable UUIDs, matching CreateOne. One
-	// INSERT has one column set, so a batch must supply ids for every row or
-	// none; mixing is refused rather than silently dropping the supplied ids.
-	explicitPrimaryKey := false
-	{
-		var zeroPrimaryKey types.IdentityUUID
-		if primaryKey, ok := recipeCommitUUIDValue(inputs[0].Id); ok && primaryKey != zeroPrimaryKey {
-			explicitPrimaryKey = true
-		}
-		for _, input := range inputs {
-			primaryKey, ok := recipeCommitUUIDValue(input.Id)
-			if (ok && primaryKey != zeroPrimaryKey) != explicitPrimaryKey {
-				return nil, fmt.Errorf("inputs mix explicit and default primary keys; a batch must supply ids for every row or none")
-			}
-		}
-	}
-	if explicitPrimaryKey {
-		fieldNames = append(fieldNames, `id`)
-	}
-	fieldNames = append(fieldNames, `schema_epoch`)
-	fieldNames = append(fieldNames, `content_hash`)
-	fieldNames = append(fieldNames, `created_by`)
-
-	// Add optional/auto-generated fields that are set in first input
-	{
-		if !reflect.ValueOf(inputs[0].Message).IsZero() {
-			fieldNames = append(fieldNames, `message`)
-		}
-	}
-	{
-		if inputs[0].Sequence != nil {
-			fieldNames = append(fieldNames, `"sequence"`)
-		}
-	}
-
-	// Add relationship foreign key columns present in first input (matches CreateOne's column set)
-	// Relationship: root (FK: root_id)
-	{
-		var zeroId types.IdentityUUID
-		if relID, ok := recipeCommitUUIDValue(inputs[0].Root.Id); ok && relID != zeroId {
-			fieldNames = append(fieldNames, "root_id")
-		}
-	}
-	// Relationship: ref (FK: ref_id)
-	{
-		var zeroId types.IdentityUUID
-		if relID, ok := recipeCommitUUIDValue(inputs[0].Ref.Id); ok && relID != zeroId {
-			fieldNames = append(fieldNames, "ref_id")
-		}
-	}
-	// Relationship: parentCommit (FK: parent_commit_id)
-	{
-		var zeroId types.IdentityUUID
-		if inputs[0].ParentCommit != nil {
-			if relID, ok := recipeCommitUUIDValue(inputs[0].ParentCommit.Id); ok && relID != zeroId {
-				fieldNames = append(fieldNames, "parent_commit_id")
-			}
-		}
-	}
-
-	var valuePlaceholders []string
-	var values []interface{}
-	paramNum := 0
-
+	// Build the batch INSERT in one pass over the fields. Each row records every
+	// candidate column in the same order, with the value it binds or no value
+	// when it leaves an optional column unset; buildBatchInsert inserts the
+	// columns any row sets and writes DEFAULT for a row that leaves one unset.
+	batch := make([][]batchInsertCell, 0, len(inputs))
 	for _, input := range inputs {
-		var placeholders []string
-		if explicitPrimaryKey {
-			paramNum++
-			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-			primaryKey, _ := recipeCommitUUIDValue(input.Id)
-			values = append(values, primaryKey.ToUUID())
-		}
+		var row []batchInsertCell
+		// Primary key: id. Schema-owned identities may supply a stable
+		// UUID, matching CreateOne; a row without one takes the generated default.
 		{
+			cell := batchInsertCell{column: `id`}
+			var zeroPrimaryKey types.IdentityUUID
+			if primaryKey, ok := recipeCommitUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+				cell.value, cell.set = primaryKey.ToUUID(), true
+			}
+			row = append(row, cell)
+		}
+		// Optional field: message
+		{
+			cell := batchInsertCell{column: `message`}
 			if !reflect.ValueOf(input.Message).IsZero() {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, input.Message)
+				cell.value = input.Message
+				cell.set = true
 			}
+			row = append(row, cell)
 		}
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.SchemaEpoch)
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.ContentHash)
+		// Required field: schemaEpoch
 		{
-			if input.Sequence != nil {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
-				values = append(values, *input.Sequence)
-			}
+			cell := batchInsertCell{column: `schema_epoch`, set: true}
+			cell.value = input.SchemaEpoch
+			row = append(row, cell)
 		}
-		paramNum++
-		placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-		values = append(values, input.CreatedBy.ToUUID())
+		// Required field: contentHash
+		{
+			cell := batchInsertCell{column: `content_hash`, set: true}
+			cell.value = input.ContentHash
+			row = append(row, cell)
+		}
+		// Optional field: sequence
+		{
+			cell := batchInsertCell{column: `"sequence"`}
+			if input.Sequence != nil {
+				// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+				cell.value = *input.Sequence
+				cell.set = true
+			}
+			row = append(row, cell)
+		}
+		// Required field: createdBy
+		{
+			cell := batchInsertCell{column: `created_by`, set: true}
+			cell.value = input.CreatedBy.ToUUID()
+			row = append(row, cell)
+		}
 
-		// Handle relationship foreign key columns (per-row, matches CreateOne)
+		// Relationship foreign key columns, matching CreateOne
 		// Relationship: root (FK: root_id)
 		{
+			cell := batchInsertCell{column: "root_id"}
 			var zeroId types.IdentityUUID
 			if relID, ok := recipeCommitUUIDValue(input.Root.Id); ok && relID != zeroId {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, relID.ToUUID())
+				cell.value, cell.set = relID.ToUUID(), true
 			}
+			row = append(row, cell)
 		}
 		// Relationship: ref (FK: ref_id)
 		{
+			cell := batchInsertCell{column: "ref_id"}
 			var zeroId types.IdentityUUID
 			if relID, ok := recipeCommitUUIDValue(input.Ref.Id); ok && relID != zeroId {
-				paramNum++
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-				values = append(values, relID.ToUUID())
+				cell.value, cell.set = relID.ToUUID(), true
 			}
+			row = append(row, cell)
 		}
 		// Relationship: parentCommit (FK: parent_commit_id)
 		{
+			cell := batchInsertCell{column: "parent_commit_id"}
 			var zeroId types.IdentityUUID
 			if input.ParentCommit != nil {
 				if relID, ok := recipeCommitUUIDValue(input.ParentCommit.Id); ok && relID != zeroId {
-					paramNum++
-					placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-					values = append(values, relID.ToUUID())
+					cell.value, cell.set = relID.ToUUID(), true
 				}
 			}
+			row = append(row, cell)
 		}
-		valuePlaceholders = append(valuePlaceholders, "("+strings.Join(placeholders, ", ")+")")
+		batch = append(batch, row)
 	}
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
 	returningClauseMany := `"id", "root_id", "ref_id", "parent_commit_id", "message", "schema_epoch", "content_hash", "sequence", "created_at", "created_by"`
