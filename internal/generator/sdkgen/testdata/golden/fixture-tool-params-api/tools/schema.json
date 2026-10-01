@@ -60,14 +60,14 @@
       "requiredPermissions": [],
       "isScoped": false,
       "bindingStatus": "ready",
-      "inputSchemaDigest": "sha256:873b26d3f3d38089b92b813633d44c83e8585adf2e09ab757996dba46359a0bb",
+      "inputSchemaDigest": "sha256:69a828b69aa94ed3c153dc880456a06fda632066d282ed8ffa2b76b0b6fe1cdf",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "at": {"description":"ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.","format":"date-time","type":"string","x-superschematic-scalar":"Temporal.DateTime"},
           "count": {"description":"A numeric value","type":"number"},
-          "extra": {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
+          "extra": {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean"],"x-superschematic-scalar":"Generic.JSON"},
           "fill": {"description":"A swatch or a palette.","oneOf":[{"additionalProperties":false,"description":"Swatch object","properties":{"alternates":{"description":"Array of Tone values","items":{"description":"A Tone value","enum":["warm","cool"],"type":"string"},"type":"array"},"label":{"description":"A string value","type":["string","null"]},"tone":{"description":"A Tone value","enum":["warm","cool"],"type":"string"}},"required":["alternates","tone"],"type":"object"},{"additionalProperties":false,"description":"Palette object","properties":{"name":{"description":"A string value","type":"string"},"parent":{"description":"A Palette value","type":["string","null"]}},"required":["name"],"type":"object"}],"type":"object"},
           "labels": {"additionalProperties":{"description":"A string value","type":"string"},"description":"Map of string values","type":"object"},
           "maybeAt": {"description":"ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.","format":"date-time","type":["string","null"],"x-superschematic-scalar":"Temporal.DateTime"},

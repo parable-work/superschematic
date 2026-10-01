@@ -276,13 +276,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:88e6e3df83ae32d0fe93ecc983db1a0e2e3c26b70b94c9ec84b01e9288bdb19f',
+    inputSchemaDigest: 'sha256:5c44fa2e96929398d72971ae450434c3e5afb73a1ce272de364871d5a4e75fd4',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         reason: {"description":"A string value","type":"string"},
-        settings: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
+        settings: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean"],"x-superschematic-scalar":"Generic.JSON"},
       },
       required: ['reason', 'settings']
     },
@@ -437,7 +437,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       additionalProperties: false,
       properties: {
         reason: {"description":"A string value","type":"string"},
-        settings: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
+        settings: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean"],"x-superschematic-scalar":"Generic.JSON"},
       },
       required: ['reason', 'settings']
     }
@@ -528,7 +528,7 @@ export const anthropicTools: AnthropicTool[] = [
       additionalProperties: false,
       properties: {
         reason: {"description":"A string value","type":"string"},
-        settings: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
+        settings: {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean"],"x-superschematic-scalar":"Generic.JSON"},
       },
       required: ['reason', 'settings']
     }
