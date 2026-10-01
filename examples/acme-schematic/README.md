@@ -710,9 +710,9 @@ may not lower it; a rating above a type's `maxStars` is refused as an
 invalid argument.
 
 ```ts
-import { behaviors } from "@acme/behaviors";
+import { behaviors, tools } from "@acme/behaviors";
 
-const engine = openEngine({ path, policy, metaSchema: acmeJSONSchema, behaviors });
+const engine = openEngine({ path, policy, metaSchema: acmeJSONSchema, behaviors, tools });
 engine.schemas.define(me, { kind: "General", name: "Product", ...productSchemaJSON });
 engine.schemas.publish(me, "Product");
 engine.instances.create(me, "Product", { sku: "walnut-desk", name: "Walnut desk" }, { id: "p1" });
@@ -721,11 +721,15 @@ engine.instances.get(me, "Product", "p1")?.data;                     // ..., rat
 ```
 
 `metaSchema` is `acme-schematic json-schema`'s output, which declares
-`acme.Rating`. The smoke's last step builds the schema runtime and the
+`acme.Rating`. `tools` is the invocation policy and the vendor keys acme's
+binary registers (`ext/mcp.go`), which the engine writes its tools with:
+`rate` asks `confirm: "always"`, which an engine left with the core's
+policy refuses to register. The smoke's last step builds the schema runtime and the
 engine, type-checks the package and runs `test/rating.test.ts` under
 Node.js and Bun: an engine with the implementation publishes
 `shop-ratings`' `Product`, creates one, rates it and reads the rating
-fields and events, and an engine without it refuses the schema. Nothing
+fields and events, its tools carry acme's policy (which the test holds to
+the meta-schema's), and an engine without it refuses the schema. Nothing
 in this is a core edit: the engine runs any implementation a deployment
 registers, and names none.
 

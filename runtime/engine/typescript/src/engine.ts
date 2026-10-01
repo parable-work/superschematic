@@ -3,7 +3,7 @@ The engine: one SQLite file, brought up to the engine's migrations when it
 opens, the namespaces the deployment configures, the access policy it
 supplies, the behavior implementations it registers, and the schema
 registry, instance store and event log, each of which asks that policy on
-every call.
+every call, and the tool catalog, which reads and calls through them.
 */
 
 import { SchemaFileLoader } from '@superschematic/schema-runtime';
@@ -19,6 +19,8 @@ import { SchemaCatalog } from './registry/catalog.js';
 import { SchemaRegistry } from './registry/registry.js';
 import { migrate } from './storage/migrations.js';
 import { Storage, type StorageOptions } from './storage/storage.js';
+import { ToolCatalog } from './tools/catalog.js';
+import { resolveToolOptions, type ToolOptions } from './tools/options.js';
 
 export interface EngineOptions extends StorageOptions {
   /** The SQLite file. One process writes it. */
@@ -45,6 +47,13 @@ export interface EngineOptions extends StorageOptions {
    * composes a behavior without one is refused.
    */
   behaviors?: readonly AnyBehaviorImplementation[];
+  /**
+   * The invocation policy and the vendor-extension keys the describe and
+   * tools documents and the MCP tools are written with: the deployment's
+   * binary's registrations, the core's by default (runtime/engine/README.md,
+   * "Tools").
+   */
+  tools?: ToolOptions;
 }
 
 export class Engine {
@@ -54,6 +63,7 @@ export class Engine {
   readonly schemas: SchemaRegistry;
   readonly instances: InstanceStore;
   readonly events: EventLog;
+  readonly tools: ToolCatalog;
 
   private constructor(
     storage: Storage,
@@ -61,7 +71,8 @@ export class Engine {
     behaviors: BehaviorRegistry,
     schemas: SchemaRegistry,
     instances: InstanceStore,
-    events: EventLog
+    events: EventLog,
+    tools: ToolCatalog
   ) {
     this.storage = storage;
     this.namespaces = namespaces;
@@ -69,16 +80,18 @@ export class Engine {
     this.schemas = schemas;
     this.instances = instances;
     this.events = events;
+    this.tools = tools;
   }
 
   /** open opens the engine's file, creating it if absent, and applies the engine's migrations. */
   static open(options: EngineOptions): Engine {
     const access = new Access(options.policy);
     const namespaces = new Namespaces(options.namespaces);
+    const tools = resolveToolOptions(options.tools);
     const loader = new SchemaFileLoader({ metaSchema: options.metaSchema });
     const clock = options.clock ?? Date.now;
     const storage = Storage.open(options.path, options);
-    const behaviors = new BehaviorRegistry(storage, clock);
+    const behaviors = new BehaviorRegistry(storage, clock, tools.invocationPolicy);
     try {
       migrate(storage, engineMigrations, clock());
       for (const implementation of options.behaviors ?? []) {
@@ -89,13 +102,16 @@ export class Engine {
       throw error;
     }
     const catalog = new SchemaCatalog(storage, namespaces, loader, behaviors, clock);
+    const schemas = new SchemaRegistry(catalog, namespaces, access);
+    const instances = new InstanceStore(storage, namespaces, catalog, access, options.ids ?? defaultIds, clock);
     return new Engine(
       storage,
       namespaces,
       behaviors,
-      new SchemaRegistry(catalog, namespaces, access),
-      new InstanceStore(storage, namespaces, catalog, access, options.ids ?? defaultIds, clock),
-      new EventLog(storage, namespaces, access)
+      schemas,
+      instances,
+      new EventLog(storage, namespaces, access),
+      new ToolCatalog(namespaces, access, schemas, instances, tools)
     );
   }
 

@@ -7,9 +7,10 @@ instances and an event log in one SQLite file.
 
 Built: the storage layer and its migrations, the schema registry with its
 compatibility rule, instances, the event log, the access policy, the
-HTTP API with the event stream (`@superschematic/engine/http`) and the
-behavior plug-in interface. Not built yet: the MCP tools, the HTTP route
-for behavior operations and the behaviors the engine packages ship.
+HTTP API with the event stream (`@superschematic/engine/http`), the
+behavior plug-in interface, the describe and tools documents and the MCP
+endpoint (`@superschematic/engine/mcp`). Not built yet: the behaviors the
+engine packages ship.
 
 ```ts
 import { allowAll, openEngine } from '@superschematic/engine';
@@ -37,7 +38,9 @@ does not strip types from files under `node_modules`. It runs on Node.js
 consumer declares all three itself (D3), and this package's own build and
 tests get them from `typescript/scripts/link-local-deps.mjs`. The
 `./http` entry point also needs `hono` and `@superschematic/http-runtime`,
-its optional peer dependencies; the main entry point imports neither.
+its optional peer dependencies, and the `./mcp` entry point those and
+`@modelcontextprotocol/server`; the main entry point imports none of
+them.
 
 ## Storage
 
@@ -252,12 +255,15 @@ holds instances in the namespace that creates them.
   changes nothing writes nothing. The behaviors' guards may veto it.
 - `delete` removes the instance and returns whether there was one. The
   behaviors' guards may veto it.
-- `update` and `delete` take `expectedSeq`, the sequence the caller last
-  read. Inside the write transaction the engine refuses the call
-  (`seq_mismatch`) unless the instance is still at it; an instance that
-  does not exist is still `not_found` for `update` and `false` for
-  `delete`. This is optimistic concurrency, the HTTP API's `If-Match`.
-- `invoke` calls a behavior operation on the instance (see "Behaviors").
+- `update`, `delete` and `invoke` take `expectedSeq`, the sequence the
+  caller last read. Inside the write transaction the engine refuses the
+  call (`seq_mismatch`) unless the instance is still at it; an instance
+  that does not exist is still `not_found` for `update` and `invoke` and
+  `false` for `delete`. This is optimistic concurrency, the HTTP API's
+  `If-Match`.
+- `invoke` calls a behavior operation on the instance (see "Behaviors")
+  and returns its result; `operate` returns `{ result, seq }`, the result
+  and the instance's sequence after the call.
 
 An instance's `data` holds its own fields as stored, then each field its
 behaviors add that has a value. The row stores only its own fields; the
@@ -498,7 +504,7 @@ every call on the schema `unavailable` until one registers.
 | `get`, `list` | each field reader |
 | `update` | refuse a behavior field (`readOnly`) -> check `expectedSeq` -> merge and validate -> nothing more if nothing changed -> every guard -> write -> each `afterChange` -> event |
 | `delete` | check `expectedSeq` -> every guard -> the row goes -> each `afterChange` -> event |
-| `invoke` | policy -> parameters against `paramsSchema` -> every guard -> the handler -> its result against `resultSchema` -> for a writing operation, each `afterChange`, the next `seq` and the event |
+| `invoke` | policy -> parameters against `paramsSchema` -> check `expectedSeq` -> every guard -> the handler -> its result against `resultSchema` -> for a writing operation, each `afterChange`, the next `seq` and the event |
 
 Functions of several behaviors run in the type's list order, and the
 first veto wins: `BehaviorVetoError` (`vetoed`). `call(behavior,
@@ -528,10 +534,10 @@ An operation event is a change to the instance a read returns, so a
 writing operation takes the instance's next sequence and moves its
 `seq`, and with it the HTTP API's `ETag`, as an update does. It does so
 even when its `patch` is empty: the engine cannot see what the operation
-changed in its behavior's own tables. An `update` or `delete` that
-expects the sequence from before the operation is refused
-(`seq_mismatch`) before any guard is asked. `invoke` takes no
-`expectedSeq`.
+changed in its behavior's own tables. An `update`, `delete` or
+operation that expects the sequence from before the operation is refused
+(`seq_mismatch`) before any guard is asked. A read-only operation checks
+`expectedSeq` against the sequence it reads and moves nothing.
 
 ## Namespaces
 
@@ -592,6 +598,9 @@ engine does not raise.
 | GET | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.get` | 200, the instance, `ETag` |
 | PATCH | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.update`, body: a merge patch; `If-Match` | 200, the instance, `ETag` |
 | DELETE | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.delete`; `If-Match` | 200, `null` |
+| POST | `/namespaces/{namespace}/schemas/{name}/instances/{id}/operations/{operation}` | `instances.operate`, body: the parameters; `If-Match` | 200, the result, `ETag` |
+| GET | `/namespaces/{namespace}/schemas/{name}/describe` | `tools.describe` | 200, the describe document ("Tools") |
+| GET | `/namespaces/{namespace}/tools` | `tools.manifest` | 200, the tools document ("Tools") |
 | GET | `/namespaces/{namespace}/events?after=&limit=&schema=&instanceId=` | `events.read` | 200, `{events, next, more}`; with `Accept: text/event-stream`, the stream |
 
 A schema version is the stored record without its canonical text, which
@@ -601,8 +610,10 @@ created and last updated it, and when); its `data` carries its
 behaviors' fields, which a create or an update may not set (422,
 `readOnly`). A request body is `application/json`, and an update's
 `application/merge-patch+json` (RFC 7386); another media type is 415,
-with `Accept-Patch` on PATCH. Behavior operations have no route yet:
-`instances.invoke` is reached from code only.
+with `Accept-Patch` on PATCH. An operation's body is its parameters, and
+no body is `{}`; its result, whatever JSON it is, is the envelope's
+`data`, and the instance's sequence after the call its `ETag`, which a
+read-only operation leaves where it was.
 
 ### Statuses
 
@@ -617,7 +628,7 @@ with `Accept-Patch` on PATCH. Behavior operations have no route yet:
 | 409 | `conflict` | an instance with the id exists |
 | 409 | `name_taken` | the name is defined on the other side of the shared lookup |
 | 409 | `incompatible_change` | the version breaks the compatibility rule; `details.changes` |
-| 409 | `vetoed` | a behavior's guard refused the update or delete; `details` is `{behavior, action, reason}` |
+| 409 | `vetoed` | a behavior's guard refused the update, the delete or the operation; `details` is `{behavior, action, reason}` |
 | 412 | `seq_mismatch` | `If-Match` names a sequence the instance is no longer at |
 | 413 | `payload_too_large` | the body exceeds `bodyLimitBytes` |
 | 415 | `unsupported_media_type` | the body is not of the route's media type |
@@ -645,11 +656,11 @@ asks its access policy (403). The routes name no permissions, so
 
 ### Concurrency
 
-An instance's `seq` is its entity tag (`ETag: "3"`). PATCH and DELETE pass
-the sequence `If-Match` names to `update` and `delete` as `expectedSeq`,
-which the engine checks inside the write transaction, so a lost update
-answers 412 and writes nothing. `*` asks only that the instance exist; a
-weak tag never matches. An instance that does not exist is 404 whatever
+An instance's `seq` is its entity tag (`ETag: "3"`). PATCH, DELETE and an
+operation's POST pass the sequence `If-Match` names to `update`, `delete`
+and `operate` as `expectedSeq`, which the engine checks inside the write
+transaction, so a lost update answers 412 and writes nothing. `*` asks
+only that the instance exist; a weak tag never matches. An instance that does not exist is 404 whatever
 `If-Match` says: RFC 9110 evaluates a precondition only where the request
 would otherwise succeed. A writing behavior operation moves `seq` too
 ("Instances and events" under "Behaviors"), so a tag read before it no
@@ -696,6 +707,190 @@ data: {"cursor":41,"kind":"create","namespace":"default","schema":"Order","insta
   when the engine closes. `timeoutSeconds` covers the first page, not the
   stream.
 
+## Tools
+
+`engine.tools` holds a describe document per schema, the tools document
+of a namespace, and the calls the MCP tools make. Each reads and calls
+through the schema registry and the instance store, so the access policy
+answers every one.
+
+### The describe document
+
+`tools.describe(principal, name, { namespace })` (asks `read`) describes
+a schema's live version:
+
+```json
+{
+  "namespace": "default", "name": "Item", "schemaNamespace": "default",
+  "version": 1, "hash": "9f2c...", "instanceType": "Item",
+  "instance": {
+    "type": "object", "additionalProperties": false,
+    "properties": {
+      "count": {"description": "The count.", "readOnly": true},
+      "title": {"description": "A string value", "type": "string"}
+    },
+    "required": ["title"]
+  },
+  "behaviors": [{"name": "test.Counter", "description": "Counts up.", "config": {"start": 0},
+                 "fields": [{"name": "count", "description": "The count."}], "operations": ["increment"]}],
+  "operations": [
+    {"name": "create", "description": "Creates an Item: ...", "writes": true, "invocationPolicy": "auto",
+     "params": {"type": "object", "additionalProperties": false, "properties": {"data": {...}, "id": {...}}, "required": ["data"]},
+     "result": {...}, "tool": "item.create"},
+    {"name": "increment", "behavior": "test.Counter", "description": "Adds to the count.", "writes": true,
+     "invocationPolicy": "auto", "params": {...}, "result": {...}, "tool": "item.increment"}
+  ]
+}
+```
+
+- `instance` is the JSON Schema of an instance's `data`: closed, its own
+  fields, then its behaviors' fields, `readOnly` and without a type, since
+  a declaration gives a field only a name and a description.
+- `operations` lists `create`, `get`, `list`, `update`, `delete`, then each
+  behavior's operations in the type's list order. `params` is the
+  operation's tool arguments (below), `result` the JSON Schema of what it
+  returns (an instance, a page, `null` for a delete, a behavior operation's
+  `resultSchema`), and the invocation policy sits under the policy's key.
+
+A field's JSON Schema is what the SDK generators write for the same field
+as a tool argument (`internal/generator/toolsutil`), keyed by the field's
+JSON key: a primitive, a scalar with its type (from its `json_schema`
+mapping), format, description, pattern, lengths and range and its name
+under `x-superschematic-scalar`, an enum's values, a nested type as a
+closed object (a type already being expanded as a plain reference), `items`
+for a list and `items` of `items` for a list of lists, and a field that is
+not required nullable. `Generic.JSON` allows every JSON type, as the Go
+side writes it, null included. The schema runtime's GraphQL primitive
+names, which the Go loader does not read, are the primitive they name,
+`Int` an integer. `runtime/engine/testdata/tool_parameters_parity.json`,
+which `go test ./internal/generator/toolsutil -run
+TestEngineToolParametersParity -update` writes, holds this to the Go
+output for a document with a field of every catalog scalar, digests
+included; `typeArguments(document, type, keys)` returns it for any type.
+
+### The tools document
+
+`tools.manifest(principal, { namespace })` is `tools/schema.json`'s shape
+(`ir.ToolManifest`, section "The tool documents" of the MCP tools
+reference): a tool per operation of every live schema the namespace
+reaches that the principal may read, by name, after three schema tools.
+
+| Tool | Name | MCP handle | Arguments |
+| --- | --- | --- | --- |
+| create | `<schema>.create` | `<schema>_create` | `id` (optional), `data` |
+| get | `<schema>.get` | `<schema>_get` | `id` |
+| list | `<schema>.list` | `<schema>_list` | `limit`, `cursor` |
+| update | `<schema>.update` | `<schema>_update` | `id`, `patch` (a merge patch; nothing required), `expectedSeq` |
+| delete | `<schema>.delete` | `<schema>_delete` | `id`, `expectedSeq` |
+| a behavior operation | `<schema>.<operation>` | `<schema>_<operation>` | `id`, `params` (its `paramsSchema`), `expectedSeq` |
+| list schemas | `engine.listSchemas` | `list_schemas` | none |
+| describe a schema | `engine.describeSchema` | `describe_schema` | `name` |
+| define a draft | `engine.defineSchema` | `define_schema` | `document` |
+
+A name follows the SDK generators, `<namespace>.<method>`, with the schema
+name in kebab case as the namespace (`LineItem` is `line-item`). An SDK
+tool's handle is authored with `@mcp`; the engine derives one from the
+same parts in snake case (`line_item_add_note`). A handle `@mcp` would
+refuse (not lowercase snake case, longer than 48 characters), one two
+tools derive, or a schema tool's hides the tool with its reason in
+`hiddenReason`; the schema tools keep theirs. A tool the access policy
+refuses the principal is hidden too, with that reason. `requiresAuth` is
+true, `httpMethod` and `httpPath` name the HTTP route, a read-only tool's
+`replay` is `read_only`, and `inputSchemaDigest` hashes the arguments as
+the Go encoder writes them.
+
+No tool publishes. `define_schema` stores a draft as `schemas.define`
+does; the draft goes live only through the HTTP publish route, which the
+access policy governs, so an MCP client cannot put a schema live on its
+own (D16).
+
+`tools.call(principal, handle, args, { namespace })` runs a tool: the
+engine call its handle names, with its arguments checked (an unknown or
+mistyped argument is `invalid_argument`). A handle the namespace has no
+visible tool for, among the schemas the principal may read, throws
+`UnknownToolError` (`not_found`).
+
+### The invocation policy and the vendor keys
+
+They are the deployment's binary's registrations in the compiler, which
+the engine cannot read, so they are `openEngine` options, the core's by
+default:
+
+```ts
+openEngine({
+  path, policy,
+  tools: {
+    invocationPolicy: { key: 'confirm', values: ['never', 'always'], default: 'never' },
+    invocation: { delete: 'always', defineSchema: 'always' },
+    keys: { scalar: 'x-acme-scalar', guidance: 'acme/operation-guidance', parameters: [{ key: 'x-acme-arguments', value: 1 }] },
+  },
+});
+```
+
+- `invocationPolicy` is D11's key, values and default. A built-in
+  operation or schema tool takes `invocation`'s value for it, else the
+  default; a behavior operation takes its declaration's `invocationPolicy`,
+  else the default. Registration refuses a declaration whose value is not
+  one of the values, as the compiler's `Finalize` does.
+- `keys` are `apigen.ToolKeys` (section 3.14 of `docs/extension-model.md`):
+  the key a property names its scalar under, the `_meta` key of a tool's
+  guidance, and keys written at the root of every argument schema.
+
+`openEngine` refuses, with a `TypeError` naming every problem, what the
+registry refuses: a key `@mcp` already uses or not a letter followed by
+letters, digits or underscores, no values, a value that is not lowercase
+letters, digits, `_` and `-` starting with a letter, a value listed twice,
+a default or an `invocation` value outside the values, and a parameter
+key that is empty, repeated, the scalar key or one the core writes.
+
+## MCP
+
+`@superschematic/engine/mcp` serves the tools over MCP (D16):
+`engineMcp(engine, options)` returns a Hono app with
+`/namespaces/{namespace}/mcp`, mounted beside the HTTP API with the same
+options.
+
+```ts
+import { engineApp } from '@superschematic/engine/http';
+import { engineMcp } from '@superschematic/engine/mcp';
+
+const app = new Hono();
+app.route('/api', engineApp(engine, options));
+app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default/mcp
+```
+
+- The route goes through the HTTP runtime like every other: the request
+  id, the rate limit, the timeout, the body limit and the authentication
+  gate with the deployment's `Authenticator`. Its caller is the principal
+  of every call, so the access policy answers each. An unknown namespace
+  is the HTTP API's 404 problem; a request without a caller is 401.
+- The protocol is the official TypeScript SDK's
+  (`@modelcontextprotocol/server`, pinned): its web-standard handler
+  answers each request with a fresh server, statelessly, on the 2025
+  revisions (`initialize`, `tools/list`, `tools/call`; GET and DELETE
+  answer 405, since there is no session) and on 2026-07-28
+  (`server/discover`). It runs on Hono under Node.js and Bun and brings no
+  HTTP server of its own; its dependencies are `zod` and
+  `@modelcontextprotocol/core`.
+- `tools/list` lists the visible tools of the tools document: the handle
+  as the name, the title, the description, the arguments as `inputSchema`,
+  `annotations.readOnlyHint`, and `_meta` with the tool's guidance and its
+  invocation policy under the policy's key. The list is the caller's: a
+  tool the policy refuses is not in it.
+- `tools/call` returns the result as JSON text and, when it is an object,
+  as `structuredContent`. A call the engine refuses is a tool error:
+  `isError`, with the problem document the HTTP API answers with as text
+  and as `structuredContent` (a behavior's defect is the 500 problem, its
+  failure off the wire). A tool the namespace does not have, or one of a
+  schema the caller may not read, is a JSON-RPC invalid-params error
+  (-32602); a malformed message is the SDK's JSON-RPC error.
+- `serverInfo` (the package's name and version by default) and
+  `instructions` are what `initialize` reports.
+
+The route validates no `Origin` header: it requires a caller, and a
+deployment that serves it to a browser on a local address puts the SDK's
+`originValidationResponse` in front of it.
+
 ## Development
 
 ```
@@ -710,6 +905,9 @@ bun run test        # build, then test:node (node --test) and test:bun (bun test
 The tests are TypeScript that Node.js runs with type stripping and Bun
 runs as is; they import the built package from `dist/` and open real
 SQLite files in temporary directories. On Bun most cases run against both
-adapters. `test/http.test.ts` drives the routes through Hono's
-`app.request`; `test/stream.test.ts` reads the event stream from a
-listening server, `@hono/node-server` on Node.js and `Bun.serve` on Bun.
+adapters. `test/http.test.ts` and `test/operations.test.ts` drive the
+routes through Hono's `app.request`; `test/stream.test.ts` reads the event
+stream and `test/mcp.test.ts` speaks MCP with the official client
+(`@modelcontextprotocol/client`) to a listening server,
+`@hono/node-server` on Node.js and `Bun.serve` on Bun.
+`test/tools-parity.test.ts` asserts the Go vectors.

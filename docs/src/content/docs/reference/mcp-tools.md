@@ -309,6 +309,23 @@ expected revision a number. Otherwise the build fails:
 operation OrderOpenReturnHandler replay contract: idempotency pointer "/pickup/postalCode": segment "postalCode" is optional
 ```
 
+## The engine
+
+`@superschematic/engine` runs schemas with no generated code (D16) and
+writes the same tools document from them while it runs:
+`GET /namespaces/{namespace}/tools` answers `tools/schema.json`'s shape for
+a namespace, and `/namespaces/{namespace}/mcp` serves the tools over MCP.
+Its tools have no `@mcp` or `@docs`. A tool per operation of every live
+schema, behavior operations included, is named `<schema>.<operation>` as
+the generators name a method, with the schema name in kebab case, and its
+handle is the same two parts in snake case (`line_item_add_note`); three
+more list, describe and define schemas, and none publishes. The engine
+writes empty guidance, takes the invocation policy and the vendor keys
+above as options, and takes a behavior operation's policy from its
+declaration. Its argument schemas are the generators':
+`runtime/engine/testdata/tool_parameters_parity.json` holds them to
+`toolsutil`. `runtime/engine/README.md` ("Tools", "MCP") has the rest.
+
 ## Rules an extension adds
 
 The core checks shapes. Which schemas must classify their operations,

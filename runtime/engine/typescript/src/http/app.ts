@@ -9,8 +9,13 @@ access policy, asked on every call with the principal the deployment's
 Authenticator returned.
 
 An instance's sequence is its entity tag. A response that carries an
-instance sends `ETag: "<seq>"`, and PATCH and DELETE honour `If-Match`
-inside the write transaction (expectedSeq), so a lost update answers 412.
+instance, or a behavior operation's result, sends `ETag: "<seq>"`, and
+PATCH, DELETE and an operation honour `If-Match` inside the write
+transaction (expectedSeq), so a lost update answers 412.
+
+Besides the instances and the event log, the routes serve a schema's
+describe document and the namespace's tools document (tools/catalog.ts);
+the MCP endpoint is the ./mcp entry point's.
 */
 
 import { Hono } from 'hono';
@@ -67,13 +72,16 @@ const SCHEMAS = '/namespaces/{namespace}/schemas';
 const SCHEMA = `${SCHEMAS}/{name}`;
 const INSTANCES = `${SCHEMA}/instances`;
 const INSTANCE = `${INSTANCES}/{id}`;
+const OPERATION = `${INSTANCE}/operations/{operation}`;
 const EVENTS = '/namespaces/{namespace}/events';
+const TOOLS = '/namespaces/{namespace}/tools';
 
 const PATH_PARAMS: Record<string, ParamSpec> = {
   namespace: { name: 'namespace', kind: 'string', required: true },
   name: { name: 'name', kind: 'string', required: true },
   version: { name: 'version', kind: 'integer', required: true },
   id: { name: 'id', kind: 'string', required: true },
+  operation: { name: 'operation', kind: 'string', required: true },
 };
 
 const EVENT_QUERY: readonly ParamSpec[] = [
@@ -150,6 +158,11 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     return schemaView(record);
   });
 
+  route(spec('describeSchema', 'GET', `${SCHEMA}/describe`), (ctx, { path }) => {
+    const { namespace, name } = path as { namespace: string; name: string };
+    return engine.tools.describe(principalOf(ctx), name, { namespace });
+  });
+
   route(spec('publishSchema', 'POST', `${SCHEMA}/publish`), (ctx, { path }) => {
     const { namespace, name } = path as { namespace: string; name: string };
     return engine.schemas.publish(principalOf(ctx), name, { namespace });
@@ -207,6 +220,21 @@ export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono
     }
     return null;
   });
+
+  // A behavior operation: the body is its parameters, {} when absent.
+  route(spec('invokeOperation', 'POST', OPERATION, { input: { parse: (value: unknown) => value, required: false } }), (ctx, { path, input }) => {
+    if (input !== undefined) {
+      const refused = mediaTypeRefusal(ctx, JSON_MEDIA_TYPE);
+      if (refused) return refused;
+    }
+    const { namespace, name, id, operation } = path as { namespace: string; name: string; id: string; operation: string };
+    const principal = principalOf(ctx);
+    const expectedSeq = expectedSeqOf(ctx, () => engine.instances.get(principal, name, id, { namespace }));
+    const outcome = engine.instances.operate(principal, name, id, operation, input ?? {}, { namespace, expectedSeq });
+    return new OperationResult(outcome.result, 200, { etag: `"${outcome.seq}"` });
+  });
+
+  route(spec('listTools', 'GET', TOOLS), (ctx, { path }) => engine.tools.manifest(principalOf(ctx), { namespace: path.namespace as string }));
 
   // The event log: a JSON page, or with Accept: text/event-stream the
   // stream. A manual route, so the handler owns the streaming response;

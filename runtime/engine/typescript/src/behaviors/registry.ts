@@ -71,7 +71,9 @@ export class BehaviorRegistry {
 
   constructor(
     private readonly storage: Storage,
-    private readonly clock: () => number
+    private readonly clock: () => number,
+    /** The deployment's invocation policy; an operation's invocationPolicy is one of its values. */
+    private readonly invocation?: { readonly key: string; readonly values: readonly string[] }
   ) {}
 
   /**
@@ -140,6 +142,13 @@ export class BehaviorRegistry {
     const config = declaration.configSchema === undefined ? undefined : this.schema(declaration.configSchema, 'configSchema', problems);
 
     const handlers = ownFunctions(implementation.operations, 'operations', problems);
+    for (const operation of declaration.operations ?? []) {
+      if (operation.invocationPolicy !== undefined && this.invocation && !this.invocation.values.includes(operation.invocationPolicy)) {
+        problems.push(
+          `operation ${operation.name} invocationPolicy ${JSON.stringify(operation.invocationPolicy)} is not one of the ${this.invocation.key} values (${this.invocation.values.join(', ')})`
+        );
+      }
+    }
     const operations = (declaration.operations ?? []).map((operation) => ({
       name: operation.name,
       declaration: operation,
