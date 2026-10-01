@@ -465,14 +465,15 @@ a field reader's) has:
 - `sql`: `get` and `all` on its own tables, reads only, with
   `sql.table(name)` for the SQL name of one of them;
 - `instances` and `schemas`: other instances and other schemas' configs,
-  read as the principal ("Other instances"), and `instances.invoke` of
-  read-only operations;
+  read as the principal ("Other instances"), and `instances.invoke` and
+  `instances.invokeSchema` of read-only operations;
 - `references.list()`: the references the behavior recorded from the
   instance ("References").
 
 A context (initialize, afterChange, an operation) adds `columns.set()`,
 `sql.run()`, `references.add()` and `remove()`, `call(behavior,
-operation, params)`, and `instances.invoke` of writing operations. In a
+operation, params)`, and `instances.invoke` and `instances.invokeSchema`
+of writing operations. In a
 read-only operation `set`, `run`, `add` and `remove` refuse, and `call`
 and `invoke` reach only read-only operations; after a delete,
 `columns.get()` returns what the instance had and `set`, `add`, `remove`
@@ -519,6 +520,7 @@ if (milestone && flow && !isTerminalState(flow, String(milestone.data.status))) 
 | `instances.get(schema, id, { fields? })` | the instance's record, deep-frozen, with every behavior field, the ones `fields` names, or none for `[]`; `undefined` when there is none | `read` on the schema |
 | `instances.getMany(schema, ids, { fields? })` | a `Map` by id of the instances of one schema, at most 500, in one query; ids with none are left out | `read` on the schema, once |
 | `instances.invoke(schema, id, operation, params?)` | runs an instance operation of another instance, or of this one, as `engine.instances.invoke` would, and returns its result | `write` or `read` with the operation's name |
+| `instances.invokeSchema(schema, operation, params?)` | runs a schema-level operation of a schema, its own or another, as `engine.instances.invokeSchema` would, a writing one in a savepoint, and returns its result | `write` or `read` with the operation's name |
 | `schemas.config(schema, behavior)` | the config a schema's live version gives a behavior, as the schema holds it (`{}` when none); `undefined` when it does not compose it | `read`, unless the schema is the call's own |
 | `schemas.readable(schema)` | whether the principal may read a schema | `read` |
 
@@ -549,7 +551,27 @@ if (milestone && flow && !isTerminalState(flow, String(milestone.data.status))) 
 `parseConfig(config, target)` gets `target.configs`, the config of every
 behavior the type lists as the schema holds it, so a behavior that builds
 on another checks its config against that one's when the schema is
-defined.
+defined. When the schema is defined or published it also gets
+`target.schemas`, so a config that names another schema is checked
+against it then:
+
+```ts
+const tasks = target.schemas?.get('Task');   // asks read on Task, as the caller who defines
+// { schema: 'Task', type: 'Task', fields: { title: 'string', estimate: 'number', ... },
+//   behaviors: ['Workflow', 'Links'], configs: { Workflow: {...}, Links: {...} } }
+```
+
+`get(name)` returns another schema's live version, looked up in the
+namespace and then the shared one, or `undefined` when it has none:
+`fields` holds the JSON type of each of its type's own fields by JSON key
+(`string`, an enum's too, `number`, `integer`, `boolean`, `object`,
+`array`, or `any` for `Generic.JSON`), with its behaviors and their
+configs as the schema holds them. It asks `read` on the schema as the
+caller who defines or publishes, and a refusal refuses the call
+(`forbidden`); the schema's own name returns the version being defined,
+without asking. `target.schemas` is absent when a published version is
+composed again to run it, so a version is never refused later because
+another schema changed.
 
 ### References
 
@@ -599,9 +621,10 @@ engine.instances.invokeSchema(me, 'Order', 'summarize', { since: 0 });   // a sc
 
 `invokeSchema` asks the policy for `write` or `read` with the
 operation's name, as `invoke` does, and runs a writing one in a
-transaction. An instance operation is `not_found` there, and a
-schema-level one is `not_found` to `invoke`, `call()` and
-`instances.invoke`, each naming the other scope.
+transaction; a behavior runs one with `instances.invokeSchema` ("Other
+instances"). An instance operation is `not_found` there and to
+`instances.invokeSchema`, and a schema-level one is `not_found` to
+`invoke`, `call()` and `instances.invoke`, each naming the other scope.
 
 ### Storage
 

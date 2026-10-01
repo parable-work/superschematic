@@ -13,8 +13,9 @@ and gets a context that reaches only what the behavior may touch:
   the principal holds a permission the behavior's config names (D16);
 - instances and schemas: other instances of the namespace and the configs
   of other schemas' behaviors, read as the principal, with the access
-  policy asked at each read, and in a write another instance's operation,
-  which runs as a caller's would (D16, amended);
+  policy asked at each read, and another instance's operation or a
+  schema's schema-level one, which runs as a caller's would, a writing
+  one only in a write (D16, amended);
 - references: the instances this one refers to, recorded with the engine
   so the behavior hears when one of them changes or goes;
 - in a write, call(), which runs another behavior's operation on the same
@@ -145,6 +146,15 @@ export interface Instances {
    * a cycle, and refused (BehaviorError).
    */
   invoke(schema: string, id: string, operation: string, params?: FrozenJSON): unknown;
+  /**
+   * Runs a schema-level operation of a schema, its own or another, as
+   * engine.instances.invokeSchema would: the parameters against its
+   * paramsSchema, its handler and its result, in this call's transaction,
+   * a writing one in a savepoint that rolls back alone when it throws.
+   * From a guard, a field reader and a read-only operation it reaches
+   * read-only operations only.
+   */
+  invokeSchema(schema: string, operation: string, params?: FrozenJSON): unknown;
 }
 
 /** The schemas the namespace reaches, as the call's principal may read them. */
@@ -348,6 +358,43 @@ export interface ConfigTarget {
   /** Every behavior the type lists, in order. */
   readonly behaviors: readonly string[];
   /** The config of each behavior the type lists, as the schema holds it ({} when it gives none). */
+  readonly configs: Readonly<Record<string, unknown>>;
+  /**
+   * The other schemas of the namespace the schema is defined in, present
+   * when it is defined or published, so a config that names another
+   * schema is checked against it then. Absent when a published version is
+   * composed again to run it: a version checked when it was published is
+   * not refused later because another schema changed.
+   */
+  readonly schemas?: ConfigSchemas;
+}
+
+/** The schemas parseConfig reaches when a schema is defined or published (ConfigTarget.schemas). */
+export interface ConfigSchemas {
+  /**
+   * A schema's live version, looked up in the namespace, then in the
+   * shared one; for the schema's own name, the version being defined or
+   * published. It asks the access policy for read on the schema as the
+   * caller who defines or publishes, unless the name is the schema's own,
+   * and the define or publish is forbidden when the policy says no.
+   * undefined when the schema has no live version.
+   */
+  get(name: string): ConfigSchema | undefined;
+}
+
+/** Another schema as parseConfig sees it: its instance type and the behaviors it composes. */
+export interface ConfigSchema {
+  readonly schema: string;
+  readonly type: string;
+  /**
+   * The JSON type of each of the type's own fields' values, by JSON key, as
+   * the describe document gives it: string (an enum's too), number,
+   * integer, boolean, object, array, or any for Generic.JSON.
+   */
+  readonly fields: Readonly<Record<string, string>>;
+  /** Every behavior the type lists, in order. */
+  readonly behaviors: readonly string[];
+  /** The config of each, as the schema holds it ({} when it gives none). */
   readonly configs: Readonly<Record<string, unknown>>;
 }
 

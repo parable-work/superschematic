@@ -52,6 +52,8 @@ export type {
   BehaviorScope,
   ColumnSpec,
   Columns,
+  ConfigSchema,
+  ConfigSchemas,
   ConfigTarget,
   FieldReader,
   FrozenJSON,
