@@ -92,6 +92,160 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Blueprint"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "oneOf": [
+                  {
+                    "required": [
+                      "steps"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "from"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "copyFields": {
+                    "description": "Fields of this type copied to every child, a field of the child's type of the same name.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "copyLinks": {
+                    "description": "Links of this type copied to every child, a link of the child's Links config of the same name to the same schema, keeping the revision a pinned one records. Only with from: an instance holds no link when it is created.",
+                    "items": {
+                      "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "from": {
+                    "additionalProperties": false,
+                    "description": "Where the steps are kept as an instance: a pinned link of this type's Links config, and the field of the linked instance that holds a map of steps of the same form as steps. The steps are read from the revision the link pins and stamped when the link is first set.",
+                    "properties": {
+                      "field": {
+                        "description": "The field of the linked instance's type that holds the steps.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "link": {
+                        "description": "A pinned link of this type's Links config.",
+                        "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "link",
+                      "field"
+                    ],
+                    "type": "object"
+                  },
+                  "keyField": {
+                    "description": "A string field of the child schema's type that each child gets its step's key in.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "parentLink": {
+                    "description": "The link of the child schema's Links config that points at this schema; each child is linked to its parent through it.",
+                    "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                    "type": "string"
+                  },
+                  "schema": {
+                    "description": "The child schema. It composes Links with parentLink, Dependencies when a step comes after another, and not Blueprint.",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
+                    "type": "string"
+                  },
+                  "steps": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "after": {
+                          "description": "The keys of the steps whose children block this step's child.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "data": {
+                          "description": "Fields of the child, beside its key and the copied fields.",
+                          "type": "object"
+                        },
+                        "when": {
+                          "additionalProperties": false,
+                          "description": "Stamps the step only when the instance's field equals a value, or is a list that includes one; absent, always.",
+                          "oneOf": [
+                            {
+                              "required": [
+                                "equals"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "includes"
+                              ]
+                            }
+                          ],
+                          "properties": {
+                            "equals": {
+                              "description": "The value the field must equal, as JSON."
+                            },
+                            "field": {
+                              "description": "A field of this schema's type.",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "includes": {
+                              "description": "A value the field, a list, must include, as JSON."
+                            }
+                          },
+                          "required": [
+                            "field"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "description": "The steps, by key, stamped when the instance is created.",
+                    "maxProperties": 500,
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "schema",
+                  "parentLink",
+                  "keyField"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Comments"
               }
             }
@@ -878,6 +1032,7 @@
         "name": {
           "enum": [
             "Assignment",
+            "Blueprint",
             "Comments",
             "Dependencies",
             "Lease",

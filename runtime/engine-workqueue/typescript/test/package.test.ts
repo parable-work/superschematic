@@ -4,15 +4,16 @@
 // smoke (fixture-workqueue-json), whose jobs compose Workflow, Lease,
 // Assignment and Queue: workers claim them in order, hold and renew their
 // leases, and the runner puts a job whose time ran out back in the queue.
-// The fixture's worker file holds one type, a worker with Presence, which
-// runs as a schema of its own and releases its principal's leases on jobs.
+// The fixture's other files hold one type each, which run as schemas of
+// their own: a worker with Presence, which releases its principal's leases
+// on jobs, and a batch whose Blueprint stamps steps.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, test } from 'node:test';
 
 import type { Principal } from '@superschematic/engine';
 
-import { DEFAULT_TTL_MS, assignment, lease, presence, queue, workQueueBehaviors } from '../dist/index.js';
+import { DEFAULT_TTL_MS, assignment, blueprint, lease, presence, queue, workQueueBehaviors } from '../dist/index.js';
 import { Clock, alice, cleanup, drivers, jobsFixture, openTestEngine } from './helpers.ts';
 
 afterEach(cleanup);
@@ -37,15 +38,17 @@ function declarationFile(name: string): unknown {
 for (const driver of drivers) {
   describe(`the work-queue package (${driver})`, () => {
     test('its behaviors carry the core declarations and register with an engine, beside the core behaviors', () => {
-      assert.deepEqual(workQueueBehaviors, [lease, assignment, queue, presence]);
+      assert.deepEqual(workQueueBehaviors, [lease, assignment, queue, presence, blueprint]);
       assert.deepEqual(lease.declaration, declarationFile('Lease'));
       assert.deepEqual(assignment.declaration, declarationFile('Assignment'));
       assert.deepEqual(queue.declaration, declarationFile('Queue'));
       assert.deepEqual(presence.declaration, declarationFile('Presence'));
+      assert.deepEqual(blueprint.declaration, declarationFile('Blueprint'));
       assert.equal(DEFAULT_TTL_MS, 60000);
       const engine = openTestEngine({ driver });
       assert.deepEqual(engine.behaviors.names(), [
         'Assignment',
+        'Blueprint',
         'Comments',
         'Dependencies',
         'Lease',
@@ -151,6 +154,33 @@ for (const driver of drivers) {
       assert.equal(engine.instances.get(alice, 'jobs', 'index')?.data.status, 'queued');
       // Queue's copies followed the expiry, so claimNext finds the job again.
       assert.equal(claimNext(other), 'index');
+    });
+
+    test("it runs the fixture's batch and step types, each as a schema of its own: a batch stamps its steps", () => {
+      const engine = openTestEngine({ driver });
+      for (const [name, file] of [
+        ['steps', 'step'],
+        ['batches', 'batch'],
+      ]) {
+        engine.schemas.define(alice, fixtureType(name, file));
+        engine.schemas.publish(alice, name);
+      }
+      engine.instances.create(alice, 'batches', { title: 'Search the archive', topic: 'search' }, { id: 'b1' });
+      engine.instances.create(alice, 'batches', { title: 'Copy the archive', topic: 'copy' }, { id: 'b2' });
+      const stamped = (id: string) =>
+        (engine.instances.get(alice, 'batches', id)?.data.blueprint as { children: Array<{ key: string; id: string }> }).children.map((child) => {
+          const step = engine.instances.get(alice, 'steps', child.id)?.data as { step: string; topic: string; blocked: boolean };
+          return [step.step, step.topic, step.blocked];
+        });
+      assert.deepEqual(stamped('b1'), [
+        ['fetch', 'search', false],
+        ['check', 'search', true],
+        ['index', 'search', true],
+      ]);
+      assert.deepEqual(stamped('b2'), [
+        ['fetch', 'copy', false],
+        ['index', 'copy', true],
+      ]);
     });
   });
 }

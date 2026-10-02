@@ -13,9 +13,10 @@ no implementation for.
 
 Built: `Lease`, an exclusive lease with a fencing token, heartbeats,
 expiry on the engine's runner and directives to its holder;
-`Assignment`; `Queue`, the claim and `claimNext`; and `Presence`, a
-heartbeat on an instance that stands for a worker. Not built yet: the
-budgets, retries and blueprints D16 lists.
+`Assignment`; `Queue`, the claim and `claimNext`; `Presence`, a
+heartbeat on an instance that stands for a worker; and `Blueprint`,
+children created with their parent. Not built yet: the budgets and
+retries D16 lists.
 
 ```ts
 import { openEngine } from '@superschematic/engine';
@@ -33,10 +34,11 @@ engine.instances.invoke(worker, 'jobs', claimed.id, 'heartbeat', { token: claime
 A deployment passes the implementations as the engine's `behaviors`
 option when it opens the engine, after the core's, which the engine
 registers itself: `workQueueBehaviors` is every one, and `lease`,
-`assignment`, `queue` and `presence` are exported one by one for a
-deployment that runs only some. `engine.behaviors.register(lease)`
-registers one later; a published version that composes a behavior the
-engine cannot run is `unavailable` until it does. Registering one whose storage already
+`assignment`, `queue`, `presence` and `blueprint` are exported one by
+one for a deployment that runs only some.
+`engine.behaviors.register(lease)` registers one later; a published
+version that composes a behavior the engine cannot run is `unavailable`
+until it does. Registering one whose storage already
 exists in the file brings it up to date, as for any behavior
 (`runtime/engine/README.md`, "Behaviors").
 
@@ -363,6 +365,104 @@ error, and the runner tries again with its backoff.
 Not ported from the source implementation: directives delivered on a
 beat, which belong to Lease's holder, and a worker's heartbeat stored in
 Lease's columns; Presence keeps its own.
+
+## Blueprint
+
+Children created with their parent: a map of steps, by key, says which
+instances of the child schema an instance has and which of them block
+which.
+
+| | |
+| --- | --- |
+| Config | `schema` (the child schema), `parentLink` (a link of its Links config to this schema) and `keyField` (a string field of its type), required; one of `steps` (inline) and `from` (`{ link, field }`); `copyFields`, `copyLinks` |
+| Steps | by key (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`, at most 500): `{ after?, when?, data? }`; `after`, the keys of the steps whose children block this one's; `when`, `{ field, equals }` or `{ field, includes }`; `data`, more fields of the child |
+| Fields | `blueprint`: `{ children: [{ key, id }] }`, in the order they were created; absent until the instance is stamped |
+| Operations | none |
+| Guards | with `from`, once stamped, Links' `link` of the `from` link: `vetoed` |
+| Refusals | with `from`, a map the pinned revision holds that breaks a rule (`vetoed`, on the link); whatever a child's create, link or edge is refused for (its own error), which refuses the change that stamps |
+| `configChange` | any config may change; it applies to the stamps that come after. Added to a schema with instances; not removed from one, since the record of what was stamped would stay behind |
+
+```json
+{ "name": "Blueprint", "config": {
+    "schema": "steps",
+    "parentLink": "batch",
+    "keyField": "step",
+    "steps": {
+      "fetch": {},
+      "check": { "after": ["fetch"], "when": { "field": "topic", "equals": "search" } },
+      "index": { "after": ["check"], "data": { "title": "Index what was fetched" } } },
+    "copyFields": ["topic"] } }
+```
+
+### Stamping
+
+Stamping creates a child per step with `instances.create`, its fields its
+key in `keyField`, the `copyFields` this instance holds, then the step's
+`data`; links it to this instance through the child's own `Links.link`
+for `parentLink`, and for each `copyLinks` link this instance holds, with
+the revision a pinned one records when the child's link is pinned too;
+and adds its edges with the child's own `Dependencies.addBlocker`. Each
+child runs its behaviors' `initialize` and `afterChange`, its guards and
+its events. Everything runs in one transaction, as the principal that
+made the change, who therefore needs `write` on the child schema and
+`read` on this one: a failure at any child refuses the change, and the
+parent, every child, link and edge roll back together. Children come in
+an order where each follows its blockers, ties in the map's order. A
+child schema that composes `Queue` makes the children claimable work:
+`claimNext` claims each once its blockers are in a terminal state, so the
+steps are claimed in the order their edges give.
+
+Inline `steps` are stamped in the instance's create. A create sets no
+link, since a link is set by `Links.link` on an instance that exists, so
+`from` steps are stamped when the `from` link is first set, in that
+link's transaction: the link and the children commit together, or
+neither does. The map is read from the revision the link pins, through
+`Revisions`' `listRevisions` on the definition, as the principal (who
+needs `read` on its schema): a later revision of the definition changes
+only what is stamped from then on, and `link` with a `revision` stamps
+an earlier one. `copyLinks` needs `from`, since an instance holds no
+link at its create.
+
+### when
+
+A step's `when` holds when this instance's field equals the value, or is
+a list that includes it, both compared as JSON, without coercion: `1`
+does not equal `"1"`, and a field the instance does not hold equals
+nothing. A step whose `when` does not hold is left out, and the steps
+that come after it come after the steps it came after instead,
+transitively, so the chain stays connected: with `check` left out,
+`index` comes after `fetch`. An included step keeps the edges it had to
+other included steps.
+
+### The checks
+
+When the schema is defined or published, `parseConfig` checks the child
+schema's live version as the definer may read it: it composes Links with
+`parentLink` pointing at this schema (and this type lists Revisions
+before Blueprint when that link is pinned, so the parent has a revision
+to pin), Dependencies with its own schema among its
+blockers' schemas when a step has `after`, and not Blueprint; `keyField`
+is a string field of its type, `copyFields` are fields of both types of
+one JSON type, and `data` sets fields of its type. `when` names a field
+of this type, a list for `includes`; `data` does not set `keyField`;
+inline steps name only steps the map has in `after` and form no cycle,
+which the refusal names, whatever their `when`. `from` names a pinned
+link of this type's Links to a schema that composes Revisions and has
+the field, an object or JSON; `copyLinks` are links of both Links
+configs to one schema. A map read through `from` is held to the same
+rules against this type when it is stamped.
+
+### What was stamped
+
+Blueprint keeps what it stamped in its own table, so `blueprint` lists
+each step's key and its child's id from that record and not from the
+links that point here: a child linked to the instance later is not among
+them, and one deleted later still is.
+
+Not ported from the source implementation: create governance, which
+checked the child schema's own creates for a parent link and an edge,
+and the trial flag. A step map is checked when it is stamped, not when
+the definition is written.
 
 ## Development
 

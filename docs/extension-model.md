@@ -830,7 +830,7 @@ registers with no extension: `Workflow`, `Comments`, `Revisions`,
 `Dependencies`, `Links`, `Rollups`, `Search` and `Reactions`. It
 declares the work-queue behaviors the optional
 `@superschematic/engine-workqueue` package implements the same way:
-`Lease`, `Assignment`, `Queue` and `Presence`. Each spec names its package
+`Lease`, `Assignment`, `Queue`, `Presence` and `Blueprint`. Each spec names its package
 (`registry.EnginePackage` or `registry.WorkQueuePackage`). Every binary
 therefore accepts a schema that composes them, the schema-file JSON
 Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
@@ -866,6 +866,7 @@ engine; without them the engine refuses a schema that composes one.
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
 | `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext`, of scope `schema` |
 | `Presence` | `ttlMs`, `principalField`, `onMissed` and `onBeat` (`transition`, `from`), `releaseLeases`, `sweepMs`; required; `@superschematic/engine-workqueue` | `presence` | `beat`, `miss` |
+| `Blueprint` | `schema`, `parentLink`, `keyField`, one of `steps` (by key: `after`, `when`, `data`) and `from` (`link`, `field`), `copyFields`, `copyLinks`; required; `@superschematic/engine-workqueue` | `blueprint` | none |
 
 `Dependencies`, `Links` and `Rollups` reach other instances (D16,
 amended): a blocker, a link target or the instances a rollup reads are
@@ -895,10 +896,12 @@ and its TypeScript twin loads to the same IR.
 `priorityField`, `match`), its Workflow states (`onExpiry`, `escalate`,
 `claim`) and its other behaviors' operations (`exempt`), which the loader
 does not check: the work-queue package does, when the schema is defined.
-So does `Presence` (`principalField`, its states, and the schemas of
-`releaseLeases`). `make cli-smoke` loads `fixture-workqueue-json`, whose
-jobs compose the first three and whose workers, a type in a file of its
-own, compose `Presence`, and its TypeScript twin loads to the same IR.
+So do `Presence` (`principalField`, its states, and the schemas of
+`releaseLeases`) and `Blueprint` (the child schema, its links and
+fields, and this type's fields its steps read). `make cli-smoke` loads
+`fixture-workqueue-json`, whose jobs compose the first three and whose
+workers, batches and steps, one type a file, compose the other two, and
+its TypeScript twin loads to the same IR.
 
 acme declares `acme.Rating` and types its config in
 `packages/schema/src/behaviors.ts` (section 10);

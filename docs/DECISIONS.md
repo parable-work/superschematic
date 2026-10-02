@@ -1070,16 +1070,16 @@ amendment below and the runner of the second. The core declares
 `Search` (full-text, on FTS5) and `Reactions`, and the engine registers
 them when it opens, which meets D10's done criterion (`make cli-smoke`,
 `test/core-behaviors.test.ts`, acme's `scripts/smoke.sh`). The core also
-declares the work-queue behaviors `Lease`, `Assignment`, `Queue` and
-`Presence`, each registered with the npm package that implements it,
-and `superschematic behaviors --package` writes each package only its
-own copies; `@superschematic/engine-workqueue`
+declares the work-queue behaviors `Lease`, `Assignment`, `Queue`,
+`Presence` and `Blueprint`, each registered with the npm package that
+implements it, and `superschematic behaviors --package` writes each
+package only its own copies; `@superschematic/engine-workqueue`
 (`runtime/engine-workqueue/README.md`) implements `Lease`, `Assignment`,
-`Queue` and `Presence` (worker presence), which a deployment registers
-with the engine. Not built: search's vectors, which need a SQLite
-extension the engine refuses to load and an embedding provider called
-outside the write transaction, and the rest of the work-queue package:
-budgets, retries and blueprints. Each change that
+`Queue`, `Presence` (worker presence) and `Blueprint` (blueprints),
+which a deployment registers with the engine. Not built: search's
+vectors, which need a SQLite extension the engine refuses to load and an
+embedding provider called outside the write transaction, and the rest of
+the work-queue package: budgets and retries. Each change that
 lands a piece updates this paragraph. The names and rules are reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances

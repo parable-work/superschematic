@@ -14,6 +14,7 @@ extension's behavior uses. See runtime/engine-workqueue/README.md.
 import type { AnyBehaviorImplementation } from '@superschematic/engine';
 
 import { assignment } from './assignment.js';
+import { blueprint } from './blueprint.js';
 import { lease } from './lease.js';
 import { presence } from './presence.js';
 import { queue } from './queue.js';
@@ -26,6 +27,8 @@ export { presence } from './presence.js';
 export type { PresenceConfig, PresenceRecord, PresenceTransition } from './presence.js';
 export { DEFAULT_MAX_CANDIDATES, queue } from './queue.js';
 export type { ClaimRecord, QueueConfig } from './queue.js';
+export { MAX_STEPS, blueprint } from './blueprint.js';
+export type { BlueprintConfig, BlueprintRecord, BlueprintStep, BlueprintWhen } from './blueprint.js';
 
 /** Every behavior this package implements, in the order a deployment registers them. */
-export const workQueueBehaviors: readonly AnyBehaviorImplementation[] = Object.freeze([lease, assignment, queue, presence]);
+export const workQueueBehaviors: readonly AnyBehaviorImplementation[] = Object.freeze([lease, assignment, queue, presence, blueprint]);

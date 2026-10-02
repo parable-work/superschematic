@@ -10,11 +10,11 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Assignment", "Comments", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Revisions", "Rollups", "Search", "Workflow"}
+var coreBehaviorNames = []string{"Assignment", "Blueprint", "Comments", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Revisions", "Rollups", "Search", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements; the engine implements the rest.
-var workQueueBehaviorNames = []string{"Assignment", "Lease", "Presence", "Queue"}
+var workQueueBehaviorNames = []string{"Assignment", "Blueprint", "Lease", "Presence", "Queue"}
 
 // A registry with no extension declares the behaviors the engine and the
 // work-queue package implement, as the core's, under bare names, each with
@@ -84,8 +84,13 @@ func TestCoreBehaviors(t *testing.T) {
 		t.Errorf("requires: Lease %v, Assignment %v, Queue %v; want none, none and [Workflow Lease]", lease.Requires, assignment.Requires, queue.Requires)
 	}
 	presence, _ := reg.Behavior("Presence")
-	if !presence.ConfigRequired() || len(presence.Requires) != 0 {
-		t.Errorf("Presence: config required %v, requires %v; want true and none", presence.ConfigRequired(), presence.Requires)
+	blueprint, _ := reg.Behavior("Blueprint")
+	if !presence.ConfigRequired() || !blueprint.ConfigRequired() || len(presence.Requires) != 0 || len(blueprint.Requires) != 0 {
+		t.Errorf("Presence and Blueprint: config required %v, %v, requires %v, %v; want true, true, none, none",
+			presence.ConfigRequired(), blueprint.ConfigRequired(), presence.Requires, blueprint.Requires)
+	}
+	if len(blueprint.Operations) != 0 || len(blueprint.Fields) != 1 || blueprint.Fields[0].Name != "blueprint" {
+		t.Errorf("Blueprint = %+v, want no operation and one field, blueprint", blueprint)
 	}
 	// Every work-queue operation writes; claimNext and expireHolder are schema-level.
 	for _, b := range []Behavior{lease, assignment, queue, presence} {
@@ -217,6 +222,17 @@ func TestCoreBehaviors(t *testing.T) {
 		{presence, `{"ttlMs": 30000, "principalField": "subject", "sweepMs": 500}`, "behavior Presence config: "},
 		{presence, `{"ttlMs": 30000, "principalField": "subject", "releaseLeases": ["the jobs"]}`, "behavior Presence config: "},
 		{presence, `{"ttlMs": 30000, "actorField": "subject"}`, "behavior Presence config: "},
+		{blueprint, `{"schema": "steps", "parentLink": "run", "keyField": "step", "steps": {"a": {}, "b": {"after": ["a"], "when": {"field": "flags", "includes": "x"}, "data": {"title": "B"}}},
+			"copyFields": ["topic"]}`, ""},
+		{blueprint, `{"schema": "steps", "parentLink": "run", "keyField": "step", "from": {"link": "plan", "field": "steps"}, "copyLinks": ["area"]}`, ""},
+		{blueprint, ``, "behavior Blueprint config: "},
+		{blueprint, `{"schema": "steps", "parentLink": "run", "keyField": "step"}`, "behavior Blueprint config: "},
+		{blueprint, `{"schema": "steps", "parentLink": "run", "keyField": "step", "steps": {"a": {}}, "from": {"link": "plan", "field": "steps"}}`, "behavior Blueprint config: "},
+		{blueprint, `{"schema": "steps", "parentLink": "run", "keyField": "step", "steps": {}}`, "behavior Blueprint config: "},
+		{blueprint, `{"schema": "steps", "parentLink": "run", "keyField": "step", "steps": {"a": {"when": {"field": "x", "equals": 1, "includes": 1}}}}`, "behavior Blueprint config: "},
+		{blueprint, `{"schema": "steps", "parentLink": "run", "keyField": "step", "steps": {"a": {"kind": "build"}}}`, "behavior Blueprint config: "},
+		{blueprint, `{"schema": "steps", "parentLink": "Run", "keyField": "step", "steps": {"a": {}}}`, "behavior Blueprint config: "},
+		{blueprint, `{"schema": "steps", "parentLink": "run", "keyField": "step", "steps": {"a": {}}, "stamp": "steps"}`, "behavior Blueprint config: "},
 	} {
 		err := test.behavior.ValidateConfig(json.RawMessage(test.config))
 		switch {
