@@ -181,6 +181,19 @@ as `Authorization: Bearer <token>`. Each namespace is a camelCase field,
 and operation sets that share a namespace share it: `ProductQueries` and
 `ProductMutations` are both `sdk.product`.
 
+An operation without an input type takes its arguments one by one, or
+all of them as one object in the first one's place
+(`sdk.tag.nameShades(id, { shadeByName, linksByLocale })`). A plain object
+there is always read as that object, so when the first argument is a map
+or another object, pass them as one object. A map argument
+(`Record<string, T>`) is a plain object, sent as a JSON object; `{}` is a
+value. Before the request, a missing required map is `required` and one
+that is not an object is `type`. Each value, or each element of a list
+value, runs its type's validation at `name[key]` or `name[key][i]`, where
+null is `required`, and a list value that is not an array is `type` at
+`name[key]`. A failure throws `ValidationError`, whose `errors` map each
+path to its rules, as the route reports them.
+
 ## Serve a generated API
 
 An API schema can be served by a generated TypeScript router instead of the

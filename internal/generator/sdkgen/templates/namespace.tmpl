@@ -295,7 +295,47 @@ export class {{.Namespace.ClassName}} {
     // Validate scalar arguments before sending request
     const errors = newValidationErrors();
     {{- range .ScalarArgs}}
-    {{- if .IsArrayOfArrays}}
+    {{- if .IsMap}}
+    {
+      // {{toCamelCase .Name}} is a map, sent as a JSON object; {} is a value.
+      {{- if .IsArray}}
+      // A list value must be an array, reported at {{toCamelCase .Name}}[key].
+      {{- end}}
+      // Each {{if .IsArray}}element{{else}}value{{end}} must be present{{if scalar_needs_validation .Type}} and runs its own validation{{end}}, reported at {{toCamelCase .Name}}[key]{{if .IsArray}}[i]{{end}}.
+      const map: unknown = scalarInput.{{toCamelCase .Name}};
+      if (typeof map === "object" && map !== null && !Array.isArray(map)) {
+        const checkValue = (value: unknown, path: string) => {
+          {{- if scalar_needs_validation .Type}}
+          const [valid, fieldErrors] = validate{{scalar_validator_symbol .Type}}Required(value as {{type_ref .Type}});
+          if (!valid && fieldErrors) {
+            setFieldErrors(errors, path, fieldErrors);
+          }
+          {{- else}}
+          if (value === undefined || value === null) {
+            setFieldErrors(errors, path, [{ validator: "required", message: "required field" }]);
+          }
+          {{- end}}
+        };
+        for (const [key, value] of Object.entries(map)) {
+          {{- if .IsArray}}
+          if (value === undefined || value === null) {
+            setFieldErrors(errors, `{{toCamelCase .Name}}[${key}]`, [{ validator: "required", message: "required field" }]);
+          } else if (!Array.isArray(value)) {
+            setFieldErrors(errors, `{{toCamelCase .Name}}[${key}]`, [{ validator: "type", message: "expected an array" }]);
+          } else {
+            value.forEach((elem: unknown, index: number) => checkValue(elem, `{{toCamelCase .Name}}[${key}][${index}]`));
+          }
+          {{- else}}
+          checkValue(value, `{{toCamelCase .Name}}[${key}]`);
+          {{- end}}
+        }
+      } else if (map !== undefined && map !== null) {
+        setFieldErrors(errors, "{{toCamelCase .Name}}", [{ validator: "type", message: "expected an object" }]);
+      }{{if .Required}} else {
+        setFieldErrors(errors, "{{toCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
+      }{{end}}
+    }
+    {{- else if .IsArrayOfArrays}}
     {
       // An array of arrays: each inner list must be an array (an empty one
       // is valid){{if scalar_needs_validation .Type}} and each element runs its own validation{{end}}.

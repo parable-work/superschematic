@@ -16,14 +16,23 @@ import (
 
 // bodyArgsService is apigen's body-args-api, whose removeTags is a DELETE
 // with a required string, a list, maps and JSON-valued arguments, which
-// its route reads from the JSON body.
+// its route reads from the JSON body, and whose nameShades and placePoints
+// take maps of an enum, of lists of a string scalar and of an object type.
 const bodyArgsService = "body-args-api"
 
-// TestDELETESDKSendsItsArgumentsInTheBody type-checks the TypeScript SDK of
-// body-args-api against its generated types package, then runs
-// test_delete_args.js: removeTags sends its arguments in the DELETE's JSON
-// body, as the route reads them, and none in the query string.
+// TestDELETESDKSendsItsArgumentsInTheBody runs test_delete_args.js on the
+// TypeScript SDK of body-args-api (runBodyArgsSDKScript): removeTags sends
+// its arguments in the DELETE's JSON body, as the route reads them, and
+// none in the query string.
 func TestDELETESDKSendsItsArgumentsInTheBody(t *testing.T) {
+	runBodyArgsSDKScript(t, "test_delete_args.js")
+}
+
+// runBodyArgsSDKScript type-checks the TypeScript SDK of body-args-api
+// against its generated types package, then runs script, a bun test file
+// beside this one, with SDK_DIR set to the SDK package.
+func runBodyArgsSDKScript(t *testing.T, script string) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
@@ -68,9 +77,9 @@ func TestDELETESDKSendsItsArgumentsInTheBody(t *testing.T) {
 	if !ok {
 		t.Fatal("resolve current test file path")
 	}
-	run := exec.Command(bunPath, "test", filepath.Join(filepath.Dir(currentFile), "test_delete_args.js"))
+	run := exec.Command(bunPath, "test", filepath.Join(filepath.Dir(currentFile), script))
 	run.Env = append(os.Environ(), "SDK_DIR="+sdkDir)
 	if out, err := run.CombinedOutput(); err != nil {
-		t.Fatalf("DELETE arguments SDK runtime test failed: %v\n%s", err, out)
+		t.Fatalf("%s failed: %v\n%s", script, err, out)
 	}
 }

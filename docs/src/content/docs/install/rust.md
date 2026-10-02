@@ -143,6 +143,16 @@ let sdk = CatalogSdk::new(ClientConfig {
 per-request tokens and a one-shot refresh on 401. Operation sets become
 fields on the SDK struct.
 
+An operation without an input type takes its arguments as one input
+struct, `<Operation>Input` (`NameShadesInput`), whose fields are sent
+under the argument names the route reads (`shade_by_name` as
+`shadeByName`). A map argument is a `HashMap<String, T>` field
+(`HashMap<String, Vec<T>>` for a map of lists), as the types crate types a
+map field, and is sent as a JSON object; `{}` is a value, and an optional
+one is an `Option`, left out when it is `None`. Before the request the SDK
+checks a single argument's rules and a list's bounds; the route checks
+each list element and map value.
+
 ## Serve a generated API
 
 An API schema with `outputs.api` set to `language: "RUST"` writes the

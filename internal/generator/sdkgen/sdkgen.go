@@ -267,10 +267,10 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 				// Import the scalar type itself (e.g., Email, JWT)
 				importsMap[ns][scalarSymbol] = true
 				// Import validation functions for the scalar.
-				// Array args always need the Required variant because each element
-				// is validated with validateXRequired regardless of whether the
-				// array itself is required or optional.
-				if arg.IsArray || arg.Required {
+				// Array and map args always need the Required variant because
+				// each element or value is validated with validateXRequired
+				// regardless of whether the argument itself is required.
+				if arg.IsArray || arg.IsMap || arg.Required {
 					importsMap[ns]["validate"+scalarSymbol+"Required"] = true
 				} else {
 					importsMap[ns]["validate"+scalarSymbol] = true

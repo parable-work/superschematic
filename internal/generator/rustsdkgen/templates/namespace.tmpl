@@ -22,7 +22,11 @@ pub struct {{.Namespace.StructName}} {
 #[derive(Debug, Clone, Serialize)]
 pub struct {{.ScalarInputStructName}} {
 {{- range .ScalarArgs}}
-{{- if not .Required}}
+{{- if and .SerdeRename (not .Required)}}
+    #[serde(rename = "{{.SerdeRename}}", skip_serializing_if = "Option::is_none")]
+{{- else if .SerdeRename}}
+    #[serde(rename = "{{.SerdeRename}}")]
+{{- else if not .Required}}
     #[serde(skip_serializing_if = "Option::is_none")]
 {{- end}}
     pub {{.RustName}}: {{.RustType}},

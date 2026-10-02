@@ -156,11 +156,21 @@ func (p QueryParam) ChecksListMin() bool {
 
 // ScalarArg represents a scalar input argument for an endpoint.
 type ScalarArg struct {
-	Name              string
-	RustName          string
-	RustType          string
-	Required          bool
-	IsArray           bool
+	Name     string
+	RustName string
+	// SerdeRename is Name when RustName, without its r# prefix, differs
+	// from it (shade_by_name for shadeByName), so the field is sent under
+	// the name the route reads, as the types crate renames a field.
+	SerdeRename string
+	RustType    string
+	Required    bool
+	IsArray     bool
+	// IsMap marks a map argument (Record<string, T>): RustType is
+	// HashMap<String, T>, or HashMap<String, Vec<T>> when IsArray is also
+	// set, so a value or a list value is never null. The rules check no
+	// value, as they check no list element, and list bounds do not bound a
+	// map.
+	IsMap             bool
 	ValidateMin       *float64
 	ValidateMax       *float64
 	ValidateMinLength *int
@@ -197,7 +207,7 @@ func (endpoint EndpointInfo) NeedsRegex() bool {
 
 // NeedsRegex reports whether this scalar arg emits Regex-based validation.
 func (arg ScalarArg) NeedsRegex() bool {
-	return !arg.IsArray && arg.ValidatePattern != ""
+	return !arg.IsArray && !arg.IsMap && arg.ValidatePattern != ""
 }
 
 // ListMinIsOne reports whether listMin only refuses an empty list, which
@@ -208,6 +218,9 @@ func (arg ScalarArg) ListMinIsOne() bool {
 
 // NeedsGeneratedValidation reports whether the namespace template emits scalar validation for this arg.
 func (arg ScalarArg) NeedsGeneratedValidation() bool {
+	if arg.IsMap {
+		return false
+	}
 	if arg.IsArray {
 		return arg.ValidateListMin != nil || arg.ValidateListMax != nil
 	}
@@ -511,15 +524,25 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		if isArray {
 			rustType = rustListType(rustType, arg.ArrayDepth())
 		}
+		if arg.IsMap {
+			rustType = rustMapType(rustType)
+		}
 		if !arg.Required {
 			rustType = rustutil.WrapOptionalType(rustType)
 		}
+		rustName := toRustFieldName(arg.Name)
+		serdeRename := ""
+		if strings.TrimPrefix(rustName, "r#") != arg.Name {
+			serdeRename = arg.Name
+		}
 		scalarArgs = append(scalarArgs, ScalarArg{
 			Name:              arg.Name,
-			RustName:          toRustFieldName(arg.Name),
+			RustName:          rustName,
+			SerdeRename:       serdeRename,
 			RustType:          rustType,
 			Required:          arg.Required,
 			IsArray:           isArray,
+			IsMap:             arg.IsMap,
 			ValidateMin:       arg.ValidateMin,
 			ValidateMax:       arg.ValidateMax,
 			ValidateMinLength: arg.ValidateMinLength,
@@ -637,6 +660,13 @@ func outputType(typeName string, arrayDepth int) string {
 // "Vec<T>" or "Vec<Vec<T>>".
 func rustListType(elem string, depth int) string {
 	return codegen.WrapArray(elem, depth, func(inner string) string { return "Vec<" + inner + ">" })
+}
+
+// rustMapType is the Rust type of a map whose values are value, as the
+// types crate spells a map field: HashMap<String, T>, serialized as the
+// JSON object the route reads.
+func rustMapType(value string) string {
+	return "std::collections::HashMap<String, " + value + ">"
 }
 
 func isBodyMethod(method string) bool {
