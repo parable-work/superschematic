@@ -251,12 +251,12 @@ func (m *bodyArgsModules) writePython(t *testing.T, schema *ir.Schema, apiOutput
 }
 
 // runPythonProbe runs probe, after probeHeader, with no server behind the
-// SDK's base URL, and the types package's name as its second argument. A
-// probe that calls an operation stubs the client's request.
+// SDK's base URL. A probe that calls an operation stubs the client's
+// request.
 func (m bodyArgsModules) runPythonProbe(t *testing.T, probe string) {
 	t.Helper()
-	header := fmt.Sprintf(probeHeader, m.pyTypesDir, m.pySDKDir, m.sdk.PackageName, m.sdk.SDKClassName)
-	cmd := exec.Command(m.python, "-B", "-c", header+probe, "http://127.0.0.1:1", m.sdk.TypesPackage)
+	header := fmt.Sprintf(probeHeader, m.pyTypesDir, m.pySDKDir, m.sdk.PackageName, m.sdk.SDKClassName, m.sdk.TypesPackage)
+	cmd := exec.Command(m.python, "-B", "-c", header+probe, "http://127.0.0.1:1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Python SDK probe failed: %v\n%s", err, out)
 	}
@@ -281,7 +281,7 @@ func (m bodyArgsModules) runPythonSDK(t *testing.T, probe, arg string, want []ma
 	if err != nil {
 		t.Fatal(err)
 	}
-	header := fmt.Sprintf(probeHeader, m.pyTypesDir, m.pySDKDir, m.sdk.PackageName, m.sdk.SDKClassName)
+	header := fmt.Sprintf(probeHeader, m.pyTypesDir, m.pySDKDir, m.sdk.PackageName, m.sdk.SDKClassName, m.sdk.TypesPackage)
 	serverTest := fmt.Sprintf(pythonSDKServerTest, m.python, header+probe, arg, string(wantJSON))
 	if err := os.WriteFile(filepath.Join(m.apiDir, "python_sdk_test.go"), []byte(serverTest), 0o644); err != nil {
 		t.Fatal(err)
@@ -372,9 +372,9 @@ func TestThePythonSDKSendsEachArgumentAsItsJSONValue(t *testing.T) {
 `
 
 // probeHeader starts every probe. It is formatted with the Python types
-// and SDK directories, the SDK package and the SDK class, and binds
-// sdk_package and sdk, a client of the server whose URL is the probe's
-// first argument.
+// and SDK directories, the SDK package, the SDK class and the types
+// package, and binds sdk_package, types_package and sdk, a client of the
+// server whose URL is the probe's first argument.
 const probeHeader = `
 import json
 import sys
@@ -382,6 +382,7 @@ import sys
 sys.path.insert(0, %[1]q)
 sys.path.insert(0, %[2]q)
 sdk_package = __import__(%[3]q)
+types_package = __import__(%[5]q)
 SDK = getattr(sdk_package, %[4]q)
 sdk = SDK(sdk_package.ClientConfig(base_url=sys.argv[1]))
 `

@@ -32,7 +32,7 @@ func TestObjectArgumentsReachTheGoServer(t *testing.T) {
 // objectArgsUnitProbe stubs the request of sdk.tag's client, recording
 // each body as the client would send it.
 const objectArgsUnitProbe = `
-Point = __import__(sys.argv[2]).Point
+Point = types_package.Point
 sent = []
 
 

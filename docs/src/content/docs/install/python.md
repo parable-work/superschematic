@@ -137,9 +137,10 @@ input and on every object it holds. A failure raises `ValidationError`,
 whose `errors` maps each path (`lines`, `lines[0].quantity`) to its rule
 and message, as the Go and TypeScript SDKs report them.
 
-An object-type argument of a `POST`, `PUT` or `PATCH` operation, in a list
-or a list of lists, is checked the same way, with each failure under the
-argument's path (`points[0].x`, `grid[0][1].pinLabel`). It is sent as
+An object-type argument of a `POST`, `PUT` or `PATCH` operation, in a
+list, a list of lists or a map, is checked the same way, with each failure
+under the argument's path (`points[0].x`, `grid[0][1].pinLabel`,
+`point_by_name[a].x`). It is sent as
 pydantic read it, by wire name, so a value pydantic coerces, such as the
 text `"1"` for a number, reaches the route as the number. Each value of an
 argument is checked at its own path, and `None` there, as a required
@@ -162,6 +163,15 @@ as `'{"region": "eu"}'` is read into that object or array, as the types
 package reads a field, and a value of another shape raises
 `ValidationError` at the argument. `None` for a required one or a list
 element raises `ValidationError`. In the query string each stays a `str`.
+
+A map argument is typed `dict[str, T]` (`dict[str, list[T]]` for a map of
+lists), as the route takes it, and is sent as a JSON object of its values
+as validated; an optional one is left out when it is `None`. Before the
+request, `None` for a required map is `required`, a key that is not a
+`str` fails the argument, `None` as a value or a list element is
+`required` at `name[key]` or `name[key][i]`, and with the types package
+installed each value or list element is validated as `T` there, a failure
+inside an object at `name[key].field`. Every failure is raised at once.
 
 An operation that returns a `Generic.JSON`, `Generic.StringMap` or
 `Embedding.Vector` is typed as returning the same alias, and returns the
