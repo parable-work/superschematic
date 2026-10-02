@@ -1071,9 +1071,9 @@ amendment below and the runner of the second. The core declares
 them when it opens, which meets D10's done criterion (`make cli-smoke`,
 `test/core-behaviors.test.ts`, acme's `scripts/smoke.sh`). The core also
 declares the work-queue behaviors `Lease`, `Assignment`, `Queue`,
-`Presence` and `Blueprint`, each registered with the npm package that
-implements it, and `superschematic behaviors --package` writes each
-package only its own copies; `@superschematic/engine-workqueue`
+`Presence`, `Blueprint`, `Budget` and `Retries`, each registered with the
+npm package that implements it, and `superschematic behaviors --package`
+writes each package only its own copies; `@superschematic/engine-workqueue`
 (`runtime/engine-workqueue/README.md`) implements `Lease`, `Assignment`,
 `Queue`, `Presence` (worker presence) and `Blueprint` (blueprints),
 which a deployment registers with the engine. Not built: search's

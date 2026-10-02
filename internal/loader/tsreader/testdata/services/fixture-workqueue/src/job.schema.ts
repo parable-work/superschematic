@@ -21,6 +21,12 @@ import { Validate, behavior } from "@superschematic/schema";
 })
 @behavior("Assignment", { permission: "jobs.assign" })
 @behavior("Queue", { claim: { from: ["queued"], to: "running" }, priorityField: "priority", match: ["topic"] })
+@behavior("Budget", { meters: { cpuSeconds: { limit: 3600, reserve: 600, reset: "daily" } }, limitPermission: "jobs.budget" })
+@behavior("Retries", {
+  classes: { timeout: { attempts: 3 }, invalidOutput: { attempts: 2 }, rejected: "terminal" },
+  totalAttempts: 4,
+  exhaustedState: "failed",
+})
 export abstract class Job {
   title: Validate<string, { maxLength: 200 }>;
   topic?: string;

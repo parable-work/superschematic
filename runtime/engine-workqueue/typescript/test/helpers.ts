@@ -122,7 +122,8 @@ export function publish(engine: Engine, document: Record<string, unknown>): void
 /**
  * jobsFixture is the General schema-file document the core binary loads
  * with no extension linked (make cli-smoke, fixture-workqueue-json): its
- * Job type composes Workflow, Lease, Assignment and Queue.
+ * Job type composes Workflow, Lease, Assignment, Queue, Budget and
+ * Retries.
  */
 export function jobsFixture(): Record<string, unknown> {
   return JSON.parse(

@@ -1,0 +1,205 @@
+{
+  "name": "Retries",
+  "description": "Retries per failure class. Each attempt is recorded with recordAttempt: a success, or a failure of a class the config names, which counts against that class's cap and a total cap. A terminal class, a failure past a cap, or the same failure signature repeated stuckAfter times exhausts the instance, and its Workflow status moves to exhaustedState from the config's from states through Workflow's transition. Once exhausted, its status moves only to exhaustedState and its lease cannot be taken. A kept result, the best scoring one when keepBest is given, is written to resultField with the checks of an update. There is no backoff in time. Requires Workflow.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "classes": {
+        "additionalProperties": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "attempts": {
+                  "description": "How many failures of the class an instance may have.",
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "attempts"
+              ],
+              "type": "object"
+            },
+            {
+              "const": "terminal"
+            }
+          ]
+        },
+        "description": "The failure classes, by name: each its own cap of attempts, or terminal, which exhausts the instance at its first failure.",
+        "minProperties": 1,
+        "propertyNames": {
+          "not": {
+            "const": "totalAttempts"
+          },
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$"
+        },
+        "type": "object"
+      },
+      "exhaustedState": {
+        "description": "The state of the type's Workflow an exhausted instance moves to.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "from": {
+        "description": "The states exhaustion moves the status from; every state but the terminal ones and exhaustedState when absent. A transition from each to exhaustedState must exist.",
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array",
+        "uniqueItems": true
+      },
+      "keepBest": {
+        "additionalProperties": false,
+        "description": "Keeps the best scoring result rather than only a success's: a failed attempt's result is kept when its score beats the best kept one by at least minDelta and no neverRegress predicate that held for the kept one fails.",
+        "properties": {
+          "minDelta": {
+            "description": "How much a score must beat the best kept one by; any amount above it when absent.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "neverRegress": {
+            "description": "Predicates an attempt reports that a kept result never loses: one true for the kept result must be true for the next one kept.",
+            "items": {
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$",
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "type": "object"
+      },
+      "limitsField": {
+        "description": "An object field of the type with the instance's own caps: a class's name to a cap of at least 0, and totalAttempts to a total of at least 1. An unknown or terminal class, and a value that is not such an integer, is ignored.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "permission": {
+        "description": "The permission a principal needs to record an attempt. Absent, any principal who may write the instance can.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "resultField": {
+        "description": "A field of the type a kept result is written to, with the checks of an update.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "stuckAfter": {
+        "description": "How many failures in a row, none of them kept, with the same signature exhaust the instance as stuck.",
+        "minimum": 1,
+        "type": "integer"
+      },
+      "totalAttempts": {
+        "description": "How many failures of every class together an instance may have.",
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "classes",
+      "totalAttempts",
+      "exhaustedState"
+    ],
+    "type": "object"
+  },
+  "requires": [
+    "Workflow"
+  ],
+  "fields": [
+    {
+      "name": "retries",
+      "description": "The instance's retries: total (failures counted), classAttempts (failures counted by class), bestScore (null when no scored result is kept), exhausted and stuck."
+    }
+  ],
+  "operations": [
+    {
+      "name": "recordAttempt",
+      "description": "Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "failure": {
+            "description": "The failure class; a success when absent.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "predicates": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "Named checks the attempt passed or failed, for keepBest's neverRegress; a predicate absent here counts as failed.",
+            "type": "object"
+          },
+          "result": {
+            "description": "The attempt's result, written to resultField when it is kept; needs resultField."
+          },
+          "score": {
+            "description": "The attempt's score; higher is better.",
+            "type": "number"
+          },
+          "signature": {
+            "description": "What identifies the failure, for stuckAfter: the same signature in a row is the same failure.",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "classAttempts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Failures counted so far, by class.",
+            "type": "object"
+          },
+          "exhausted": {
+            "type": "boolean"
+          },
+          "failure": {
+            "description": "The failure class; null for a success.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kept": {
+            "description": "Whether the attempt's result was kept.",
+            "type": "boolean"
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "stuck": {
+            "description": "Whether a repeated signature exhausted the instance.",
+            "type": "boolean"
+          },
+          "total": {
+            "description": "Failures counted so far.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "failure",
+          "score",
+          "kept",
+          "total",
+          "classAttempts",
+          "exhausted",
+          "stuck"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    }
+  ]
+}

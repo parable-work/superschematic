@@ -15,8 +15,9 @@ Built: `Lease`, an exclusive lease with a fencing token, heartbeats,
 expiry on the engine's runner and directives to its holder;
 `Assignment`; `Queue`, the claim and `claimNext`; `Presence`, a
 heartbeat on an instance that stands for a worker; and `Blueprint`,
-children created with their parent. Not built yet: the budgets and
-retries D16 lists.
+children created with their parent. Not built yet: `Budget` and
+`Retries`, the budgets and retries D16 lists, whose declarations the core
+already carries.
 
 ```ts
 import { openEngine } from '@superschematic/engine';
