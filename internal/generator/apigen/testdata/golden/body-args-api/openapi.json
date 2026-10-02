@@ -1081,6 +1081,13 @@
                   "reason": {
                     "description": "Any valid JSON value: object, array, primitive, or null",
                     "nullable": true
+                  },
+                  "shadeByLabel": {
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/Shade"
+                    },
+                    "nullable": true,
+                    "type": "object"
                   }
                 },
                 "required": [

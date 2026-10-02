@@ -46,7 +46,7 @@ func TestConvertEndpointBindsQueryEmbeddedPathParams(t *testing.T) {
 		},
 	}
 
-	converted := convertEndpoint(ep, false, "")
+	converted := convertEndpoint(ep, false, "", nil)
 
 	if converted.PathFormat != "/api/connector-requests/{}/research/{}/actions/complete" {
 		t.Fatalf("unexpected path format: %s", converted.PathFormat)
@@ -70,7 +70,7 @@ func TestConvertEndpointPreservesArrayQueryType(t *testing.T) {
 		Name: "listItems", Path: "/api/items", Method: "GET",
 		QueryParams: []apigen.Param{{Name: "stage", Type: "string", IsArray: true}},
 	}
-	converted := convertEndpoint(ep, false, "")
+	converted := convertEndpoint(ep, false, "", nil)
 	if len(converted.QueryParams) != 1 || converted.QueryParams[0].RustType != "Vec<String>" ||
 		!converted.QueryParams[0].IsArray {
 		t.Fatalf("array query type = %#v", converted.QueryParams)
@@ -100,7 +100,7 @@ func TestConvertEndpointPathParamsTakePrecedenceOverQuery(t *testing.T) {
 		},
 	}
 
-	converted := convertEndpoint(ep, false, "")
+	converted := convertEndpoint(ep, false, "", nil)
 
 	if len(converted.PathArgs) != 1 || converted.PathArgs[0] != "tenant_id" {
 		t.Fatalf("unexpected path args: %v", converted.PathArgs)
@@ -131,7 +131,7 @@ func paginatedListEndpoint() apigen.EndpointInfo {
 }
 
 func TestConvertEndpointComputesListAllPagination(t *testing.T) {
-	converted := convertEndpoint(paginatedListEndpoint(), false, "")
+	converted := convertEndpoint(paginatedListEndpoint(), false, "", nil)
 
 	if !converted.SupportsListAll {
 		t.Fatal("expected paginated list endpoint to support a _all variant")
@@ -145,7 +145,7 @@ func TestConvertEndpointListAllRequiresDeclaredLimitMax(t *testing.T) {
 	ep := paginatedListEndpoint()
 	ep.QueryParams[1].ValidateMax = nil
 
-	converted := convertEndpoint(ep, false, "")
+	converted := convertEndpoint(ep, false, "", nil)
 
 	if converted.SupportsListAll {
 		t.Fatal("a list endpoint without a schema-declared limit max must not emit a _all variant")
@@ -156,7 +156,7 @@ func TestConvertEndpointListAllSkipsRequiredQueryParams(t *testing.T) {
 	ep := paginatedListEndpoint()
 	ep.QueryParams[0].Required = true
 
-	converted := convertEndpoint(ep, false, "")
+	converted := convertEndpoint(ep, false, "", nil)
 
 	if converted.SupportsListAll {
 		t.Fatal("a list endpoint with required query params must not emit a _all variant")
@@ -167,7 +167,7 @@ func TestConvertEndpointListAllSkipsNonArrayOutput(t *testing.T) {
 	ep := paginatedListEndpoint()
 	ep.OutputIsArray = false
 
-	converted := convertEndpoint(ep, false, "")
+	converted := convertEndpoint(ep, false, "", nil)
 
 	if converted.SupportsListAll {
 		t.Fatal("a non-list endpoint must not emit a _all variant")

@@ -278,6 +278,33 @@ pub fn validate_input(schema_name: &str, value: &Value) -> Result<(), SDKError> 
     Ok(())
 {{- end}}
 }
+{{- if .ValidatesMapValues}}
+
+/// Validates each value of the map argument `name` against `schema_name`,
+/// the route's own schema for it, adding each failure to `errors` under its
+/// path: name[key], or name[key][i] for an element of a list value, in the
+/// order of the keys.
+pub fn validate_map_values<T: Serialize>(
+    schema_name: &str,
+    name: &str,
+    values: &std::collections::HashMap<String, T>,
+    errors: &mut Vec<String>,
+) -> Result<(), SDKError> {
+    let schemas = input_schemas()?;
+    let Some(schema) = schemas.get(schema_name) else {
+        return Err(SDKError::config(format!(
+            "missing validation schema for {schema_name}"
+        )));
+    };
+    let mut entries: Vec<(&String, &T)> = values.iter().collect();
+    entries.sort_by_key(|(key, _)| *key);
+    for (key, value) in entries {
+        let value = serde_json::to_value(value)?;
+        validate_schema_value(&value, schema, schemas, &format!("{name}[{key}]"), errors);
+    }
+    Ok(())
+}
+{{- end}}
 
 {{- if .HasInputSchemas}}
 const INPUT_SCHEMAS_JSON: &str = r###"{{.InputSchemasJSON}}"###;

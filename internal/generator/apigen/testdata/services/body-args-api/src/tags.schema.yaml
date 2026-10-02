@@ -8,8 +8,9 @@
 # integer scalar, booleans, UUIDs, timestamps and strings, optional single
 # values of each, and a @query list. reviseDocument takes an input type
 # with an optional Generic.JSON field. removeTags is a DELETE, whose
-# arguments the route reads from the JSON body, as it does a PUT's. The Go
-# route tests in apigen and the Python SDK round trips in pysdkgen load it.
+# arguments, an optional map of an enum among them, the route reads from
+# the JSON body, as it does a PUT's. The Go route tests in apigen and the
+# Python, TypeScript and Rust SDK round trips load it.
 # saveTags, storeDocument and findTags match the TypeScript server's scalar
 # list fixture, so both servers answer the same vectors.
 name: body-args-api
@@ -238,6 +239,9 @@ operationSets:
           # Why they were removed: any JSON value.
           - name: reason
             typeRef: { name: Generic.JSON }
+          # The shade a label must have to be removed, per label.
+          - name: shadeByLabel
+            typeRef: { name: Shade, isMap: true }
   - name: TagQueries
     operations:
       # Find posts by label, rank, code and page, all in the query string.

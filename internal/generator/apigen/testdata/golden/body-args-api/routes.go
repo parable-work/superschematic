@@ -851,6 +851,7 @@ func createTagRemoveTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 	bodyLabelsArg := bodyargs.NewArg("labels", bodyargs.String, bodyargs.Required())
 	bodyPurgeArg := bodyargs.NewArg("purge", bodyargs.Boolean)
 	bodyReasonArg := bodyargs.NewArg("reason", bodyargs.Any, bodyargs.KeepNull())
+	bodyShadeByLabelArg := bodyargs.NewArg("shadeByLabel", bodyargs.String)
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -873,14 +874,16 @@ func createTagRemoveTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 			return
 		}
 		var requestBody struct {
-			Labels []string
-			Purge  bool
-			Reason types.GenericJSON
+			Labels       []string
+			Purge        bool
+			Reason       types.GenericJSON
+			ShadeByLabel map[string]types.Shade
 		}
 		validationErrors := types.NewValidationErrors()
 		requestBody.Labels = bodyargs.List[string](validationErrors, body, bodyLabelsArg)
 		requestBody.Purge = bodyargs.Value[bool](validationErrors, body, bodyPurgeArg)
 		requestBody.Reason = bodyargs.Value[types.GenericJSON](validationErrors, body, bodyReasonArg)
+		requestBody.ShadeByLabel = bodyargs.Map[types.Shade](validationErrors, body, bodyShadeByLabelArg)
 		if validationErrors.HasErrors() {
 			RespondValidationErrors(w, r, validationErrors)
 			return
@@ -894,7 +897,7 @@ func createTagRemoveTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.RemoveTags(r.Context(), Id, requestBody.Labels, requestBody.Purge, requestBody.Reason)
+		result, err := impl.RemoveTags(r.Context(), Id, requestBody.Labels, requestBody.Purge, requestBody.Reason, requestBody.ShadeByLabel)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

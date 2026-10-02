@@ -44,6 +44,10 @@ type SDKOutput struct {
 	HasPathParams bool
 	Timestamp     string
 	Version       string
+	// ValidatesMapValues reports whether a map argument's values are
+	// validated (ScalarArg.ValueSchema); src/runtime.rs then carries
+	// validate_map_values.
+	ValidatesMapValues bool
 }
 
 // NamespaceInfo represents a namespace with its endpoints.
@@ -92,6 +96,9 @@ type EndpointInfo struct {
 	// server's clamp (a mismatched hand-picked constant silently truncates).
 	SupportsListAll bool
 	ListAllPageSize int
+	// ValidatesMapValues reports whether a map argument's values are
+	// validated (ScalarArg.ValueSchema), every failure reported at once.
+	ValidatesMapValues bool
 }
 
 // PathParam represents a path parameter.
@@ -168,6 +175,14 @@ type ScalarArg struct {
 	ValidateListMin   *int
 	ValidateListMax   *int
 	ValidatePattern   string
+	// IsMap marks a map argument (Record<string, T>; with IsArray,
+	// Record<string, T[]>), a HashMap of its values as the route takes it,
+	// sent as a JSON object. ValueSchema names the schema each value is
+	// validated against, at name[key] and, for a list value, each element at
+	// name[key][i]: the route's own, the map's additionalProperties in the
+	// API's OpenAPI document. It is "" when the document has none.
+	IsMap       bool
+	ValueSchema string
 }
 
 // NeedsRegex reports whether this namespace emits Regex-based validation.
@@ -196,8 +211,9 @@ func (endpoint EndpointInfo) NeedsRegex() bool {
 }
 
 // NeedsRegex reports whether this scalar arg emits Regex-based validation.
+// A map's values are validated against their schema in src/runtime.rs.
 func (arg ScalarArg) NeedsRegex() bool {
-	return !arg.IsArray && arg.ValidatePattern != ""
+	return !arg.IsArray && !arg.IsMap && arg.ValidatePattern != ""
 }
 
 // ListMinIsOne reports whether listMin only refuses an empty list, which
@@ -207,7 +223,11 @@ func (arg ScalarArg) ListMinIsOne() bool {
 }
 
 // NeedsGeneratedValidation reports whether the namespace template emits scalar validation for this arg.
+// A map's values are validated against their schema instead (ValueSchema).
 func (arg ScalarArg) NeedsGeneratedValidation() bool {
+	if arg.IsMap {
+		return false
+	}
 	if arg.IsArray {
 		return arg.ValidateListMin != nil || arg.ValidateListMax != nil
 	}
@@ -257,6 +277,13 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 		Version:          "1.0.0",
 	}
 
+	inputSchemasJSON, mapValueSchemas, err := extractInputSchemasForValidation(apiOutput)
+	if err != nil {
+		return nil, fmt.Errorf("extract input validation schemas: %w", err)
+	}
+	output.HasInputSchemas = inputSchemasJSON != ""
+	output.InputSchemasJSON = inputSchemasJSON
+
 	namespaceMap := make(map[string]*NamespaceInfo)
 	for _, endpoint := range apiOutput.Endpoints {
 		nsName := endpoint.Namespace
@@ -281,11 +308,14 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 			ns.ScopeFieldName = toRustFieldName(endpoint.ScopeParamName)
 		}
 
-		converted := convertEndpoint(endpoint, ns.IsScopedNS, ns.ScopeParamName)
+		converted := convertEndpoint(endpoint, ns.IsScopedNS, ns.ScopeParamName, mapValueSchemas)
 		for _, param := range converted.QueryParams {
 			if param.ItemIsText {
 				output.ChecksQueryListItems = true
 			}
+		}
+		if converted.ValidatesMapValues {
+			output.ValidatesMapValues = true
 		}
 		if len(converted.PathArgs) > 0 {
 			output.HasPathParams = true
@@ -311,60 +341,61 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 	})
 	output.Namespaces = namespaces
 
-	inputSchemasJSON, hasInputSchemas, err := extractInputSchemasForValidation(apiOutput)
-	if err != nil {
-		return nil, fmt.Errorf("extract input validation schemas: %w", err)
-	}
-	output.HasInputSchemas = hasInputSchemas
-	output.InputSchemasJSON = inputSchemasJSON
-
 	return output, nil
 }
 
 const openAPISchemaRefPrefix = "#/components/schemas/"
 
-func extractInputSchemasForValidation(apiOutput *apigen.APIOutput) (string, bool, error) {
+// extractInputSchemasForValidation returns, as one JSON object, the OpenAPI
+// schemas the SDK validates with before a request: each input type's, and
+// each map argument's value schema (the additionalProperties of its request
+// body property) under mapValueSchemaName, with every component they
+// reference. It returns "" when there is none, and the names of the map
+// value schemas it holds.
+func extractInputSchemasForValidation(apiOutput *apigen.APIOutput) (string, map[string]bool, error) {
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
-		return "", false, nil
+		return "", nil, nil
 	}
 
 	inputTypes := make(map[string]struct{})
+	hasMapArgs := false
 	for _, endpoint := range apiOutput.Endpoints {
 		// File upload endpoints split payload fields and files separately.
 		// Skip strict input-schema validation to avoid requiring file placeholders.
 		if endpoint.HasFileUpload {
 			continue
 		}
+		for _, arg := range endpoint.BodyArgs {
+			hasMapArgs = hasMapArgs || arg.IsMap
+		}
 		if !endpoint.HasInput || strings.TrimSpace(endpoint.InputType) == "" {
 			continue
 		}
 		inputTypes[endpoint.InputType] = struct{}{}
 	}
-	if len(inputTypes) == 0 {
-		return "", false, nil
+	if len(inputTypes) == 0 && !hasMapArgs {
+		return "", nil, nil
 	}
 
 	if strings.TrimSpace(apiOutput.OpenAPISpecRaw) == "" {
-		return "", false, nil
+		return "", nil, nil
 	}
 
 	var openapi struct {
+		Paths      map[string]map[string]json.RawMessage `json:"paths"`
 		Components struct {
 			Schemas map[string]json.RawMessage `json:"schemas"`
 		} `json:"components"`
 	}
 	if err := json.Unmarshal([]byte(apiOutput.OpenAPISpecRaw), &openapi); err != nil {
-		return "", false, fmt.Errorf("parse OpenAPI spec: %w", err)
-	}
-	if len(openapi.Components.Schemas) == 0 {
-		return "", false, nil
+		return "", nil, fmt.Errorf("parse OpenAPI spec: %w", err)
 	}
 
 	includedSchemas := make(map[string]json.RawMessage)
 	visited := make(map[string]struct{})
 
-	var includeSchema func(schemaName string) error
-	includeSchema = func(schemaName string) error {
+	var includeRefs func(name string, rawSchema json.RawMessage) error
+	includeSchema := func(schemaName string) error {
 		schemaName = strings.TrimSpace(schemaName)
 		if schemaName == "" {
 			return nil
@@ -379,10 +410,12 @@ func extractInputSchemasForValidation(apiOutput *apigen.APIOutput) (string, bool
 			return fmt.Errorf("missing OpenAPI schema %q", schemaName)
 		}
 		includedSchemas[schemaName] = rawSchema
-
+		return includeRefs(schemaName, rawSchema)
+	}
+	includeRefs = func(name string, rawSchema json.RawMessage) error {
 		refSchemas, err := collectSchemaRefs(rawSchema)
 		if err != nil {
-			return fmt.Errorf("collect refs for schema %q: %w", schemaName, err)
+			return fmt.Errorf("collect refs for schema %q: %w", name, err)
 		}
 		for _, refSchema := range refSchemas {
 			if err := includeSchema(refSchema); err != nil {
@@ -400,20 +433,82 @@ func extractInputSchemasForValidation(apiOutput *apigen.APIOutput) (string, bool
 
 	for _, inputName := range inputNames {
 		if err := includeSchema(inputName); err != nil {
-			return "", false, err
+			return "", nil, err
+		}
+	}
+
+	mapValueSchemas := make(map[string]bool)
+	for _, endpoint := range apiOutput.Endpoints {
+		if endpoint.HasFileUpload {
+			continue
+		}
+		for _, arg := range endpoint.BodyArgs {
+			if !arg.IsMap {
+				continue
+			}
+			valueSchema, err := requestBodyMapValueSchema(openapi.Paths, endpoint, arg.Name)
+			if err != nil {
+				return "", nil, err
+			}
+			if valueSchema == nil {
+				continue
+			}
+			name := mapValueSchemaName(endpoint, arg.Name)
+			includedSchemas[name] = valueSchema
+			mapValueSchemas[name] = true
+			if err := includeRefs(name, valueSchema); err != nil {
+				return "", nil, err
+			}
 		}
 	}
 
 	if len(includedSchemas) == 0 {
-		return "", false, nil
+		return "", nil, nil
 	}
 
 	serialized, err := json.Marshal(includedSchemas)
 	if err != nil {
-		return "", false, fmt.Errorf("serialize input schemas: %w", err)
+		return "", nil, fmt.Errorf("serialize input schemas: %w", err)
 	}
 
-	return string(serialized), true, nil
+	return string(serialized), mapValueSchemas, nil
+}
+
+// mapValueSchemaName is the name of a map argument's value schema among the
+// SDK's validation schemas: the operation's id and the argument's name,
+// which no component name can be.
+func mapValueSchemaName(endpoint apigen.EndpointInfo, argName string) string {
+	return endpoint.HandlerName + "." + argName
+}
+
+// requestBodyMapValueSchema is the value schema of the map argument argName
+// of endpoint in the OpenAPI paths: the additionalProperties of its
+// property in the JSON request body, which the route validates each value
+// against. It is nil when the document has none.
+func requestBodyMapValueSchema(paths map[string]map[string]json.RawMessage, endpoint apigen.EndpointInfo, argName string) (json.RawMessage, error) {
+	rawOperation, ok := paths[endpoint.Path][strings.ToLower(endpoint.Method)]
+	if !ok {
+		return nil, nil
+	}
+	var operation struct {
+		RequestBody struct {
+			Content map[string]struct {
+				Schema struct {
+					Properties map[string]struct {
+						AdditionalProperties json.RawMessage `json:"additionalProperties"`
+					} `json:"properties"`
+				} `json:"schema"`
+			} `json:"content"`
+		} `json:"requestBody"`
+	}
+	if err := json.Unmarshal(rawOperation, &operation); err != nil {
+		return nil, fmt.Errorf("parse OpenAPI operation %s %s: %w", endpoint.Method, endpoint.Path, err)
+	}
+	valueSchema := operation.RequestBody.Content["application/json"].Schema.Properties[argName].AdditionalProperties
+	if len(valueSchema) == 0 {
+		return nil, nil
+	}
+	return valueSchema, nil
 }
 
 func collectSchemaRefs(rawSchema json.RawMessage) ([]string, error) {
@@ -462,7 +557,7 @@ func schemaNameFromRef(reference string) (string, bool) {
 	return schemaName, true
 }
 
-func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName string) EndpointInfo {
+func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName string, mapValueSchemas map[string]bool) EndpointInfo {
 	pathFormat, pathArgs, pathQueryBindings := convertPathToRustFormat(ep, isScopedNS, scopeParamName)
 
 	pathParams := make([]PathParam, 0, len(ep.PathParams))
@@ -504,12 +599,23 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		}
 	}
 
+	// A map argument is a HashMap of its values, each a Vec for a map of
+	// lists, as the route takes it (bodyargs.Map, bodyargs.MapOfLists).
 	scalarArgs := make([]ScalarArg, 0, len(ep.ScalarArgs))
+	validatesMapValues := false
 	for _, arg := range ep.ScalarArgs {
 		rustType := qualifyType(arg.Type)
 		isArray := arg.IsArray
 		if isArray {
 			rustType = rustListType(rustType, arg.ArrayDepth())
+		}
+		valueSchema := ""
+		if arg.IsMap {
+			rustType = "std::collections::HashMap<String, " + rustType + ">"
+			if name := mapValueSchemaName(ep, arg.Name); mapValueSchemas[name] {
+				valueSchema = name
+				validatesMapValues = true
+			}
 		}
 		if !arg.Required {
 			rustType = rustutil.WrapOptionalType(rustType)
@@ -527,6 +633,8 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			ValidateListMin:   runtimeListMinimum(arg.ValidateListMin),
 			ValidateListMax:   arg.ValidateListMax,
 			ValidatePattern:   arg.ValidatePattern,
+			IsMap:             arg.IsMap,
+			ValueSchema:       valueSchema,
 		})
 	}
 
@@ -560,6 +668,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		QueryParams:            queryParams,
 		ScalarArgs:             scalarArgs,
 		HasScalarArgs:          len(scalarArgs) > 0,
+		ValidatesMapValues:     validatesMapValues,
 		ScalarInputStructName:  methodPrefix + "Input",
 		QueryStructName:        methodPrefix + "QueryParams",
 		HasQueryParams:         len(queryParams) > 0,

@@ -76,8 +76,8 @@ func (s *tags) PlacePoints(_ context.Context, id string, pointByName map[string]
 	return &placed, nil
 }
 
-func (s *tags) RemoveTags(_ context.Context, id string, labels []string, purge bool, reason types.GenericJSON) ([]string, error) {
-	s.record(map[string]any{"id": id, "labels": labels, "purge": purge, "reason": reason})
+func (s *tags) RemoveTags(_ context.Context, id string, labels []string, purge bool, reason types.GenericJSON, shadeByLabel map[string]types.Shade) ([]string, error) {
+	s.record(map[string]any{"id": id, "labels": labels, "purge": purge, "reason": reason, "shadeByLabel": shadeByLabel})
 	return labels, nil
 }
 
@@ -611,17 +611,25 @@ func TestAMapOfAnObjectTypeIsABodyArgument(t *testing.T) {
 	refusedWith(t, server, impl, http.MethodPut, placePointsPath, `{"x": 1, "y": 2}`, fieldError{"pointByName", "required", "required field"})
 }
 
-// A DELETE reads its arguments from the JSON body, as a PUT does; the query
-// string carries none of them, and a DELETE without a body is refused.
+// A DELETE reads its arguments from the JSON body, as a PUT does, a map
+// among them; the query string carries none of them, and a DELETE without
+// a body is refused.
 func TestADELETEReadsItsArgumentsFromTheBody(t *testing.T) {
 	server, impl := serve(t)
-	accepted(t, server, impl, http.MethodDelete, removeTagsPath, `{"labels": ["a", "b"], "purge": true, "reason": {"by": ["editor"]}}`)
+	accepted(t, server, impl, http.MethodDelete, removeTagsPath, `{"labels": ["a", "b"], "purge": true, "reason": {"by": ["editor"]}, "shadeByLabel": {"a": "dark"}}`)
 	if want := []string{"a", "b"}; !reflect.DeepEqual(impl.last["labels"], want) || impl.last["purge"] != true {
 		t.Errorf("labels, purge = %#v, %#v; want %#v, true", impl.last["labels"], impl.last["purge"], want)
 	}
 	if !jsonEqual(t, impl.last["reason"], `{"by": ["editor"]}`) {
 		t.Errorf("reason = %#v, want {\"by\": [\"editor\"]}", impl.last["reason"])
 	}
+	if want := map[string]types.Shade{"a": types.Shade_Dark}; !reflect.DeepEqual(impl.last["shadeByLabel"], want) {
+		t.Errorf("shadeByLabel = %#v, want %#v", impl.last["shadeByLabel"], want)
+	}
+	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath, `{"labels": [], "shadeByLabel": {"a": "dim", "b": null}}`,
+		fieldError{"shadeByLabel[a]", "enum", ""},
+		fieldError{"shadeByLabel[b]", "required", "required field"},
+	)
 	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath+"?labels=a", `{}`, fieldError{"labels", "required", "required field"})
 	refused(t, server, impl, http.MethodDelete, removeTagsPath+"?labels=a", "")
 }

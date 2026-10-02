@@ -308,9 +308,9 @@ func TestNamespaceScalarGetArgsStayPositional(t *testing.T) {
 				TSPath:     "/api/vendors/acme-vendor-grouping",
 				Method:     "GET",
 				OutputType: "AcmeVendorGrouping",
-				ScalarArgs: []apigen.ScalarArg{
-					{Name: "vendorSlug", Type: "Acme.Slug", Required: true},
-					{Name: "groupingPath", Type: "string", Required: true},
+				ScalarArgs: []ScalarArg{
+					{ScalarArg: apigen.ScalarArg{Name: "vendorSlug", Type: "Acme.Slug", Required: true}},
+					{ScalarArg: apigen.ScalarArg{Name: "groupingPath", Type: "string", Required: true}},
 				},
 			}},
 		},
