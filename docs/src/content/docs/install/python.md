@@ -158,12 +158,14 @@ of another shape raises `ValidationError` at the argument. `None` for a
 required one or a list element raises `ValidationError`. In the query
 string each stays a `str`.
 
-A map argument (`Record<string, T>`) is typed as `dict[str, T]`, or
-`dict[str, list[T]]` for a map of lists, and is sent as a JSON object;
-`{}` is a value. Each value, or each element of a list value, is checked
-as `T` before the request, and a failure raises `ValidationError` at
-`name[key]` or `name[key][i]`, `name` being the Python parameter. A `None`
-value or element is required.
+A map argument is typed `dict[str, T]` (`dict[str, list[T]]` for a map of
+lists), as the route takes it, and is sent as a JSON object of its values
+as validated; an optional one is left out when it is `None`. Before the
+request, `None` for a required map is `required`, a key that is not a
+`str` fails the argument, `None` as a value or a list element is
+`required` at `name[key]` or `name[key][i]`, and with the types package
+installed each value or list element is validated as `T` there, a failure
+inside an object at `name[key].field`. Every failure is raised at once.
 
 An operation that returns a `Generic.JSON`, `Generic.StringMap` or
 `Embedding.Vector` is typed as returning the same alias, and returns the

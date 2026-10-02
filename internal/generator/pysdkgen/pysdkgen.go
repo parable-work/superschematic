@@ -71,13 +71,14 @@ type NamespaceInfo struct {
 	HasEncryptedPayload    bool
 	HasFilterableEndpoints bool
 
-	// HasListOfListsArgs gates the _validate_list_of_lists_argument helper,
-	// HasMapArgs the _validate_map_argument helper and
-	// HasListOfListsModelOutput the _coerce_list_of_lists_response helper
-	// of the namespace class.
+	// HasListOfListsArgs gates the _validate_list_of_lists_argument helper
+	// and HasListOfListsModelOutput the _coerce_list_of_lists_response
+	// helper of the namespace class.
 	HasListOfListsArgs        bool
-	HasMapArgs                bool
 	HasListOfListsModelOutput bool
+	// HasMapArgs gates the _validate_map_argument helper, for a map body
+	// argument (ScalarArg.IsMap).
+	HasMapArgs bool
 	// HasQueryLists gates the _validate_query_list, _query_list_value and
 	// _query_list_item helpers of the namespace class, and their Enum
 	// import, for a list query parameter.
@@ -164,7 +165,7 @@ type QueryParam struct {
 type ScalarArg struct {
 	Name          string
 	PyName        string
-	PyType        string // Full type including list[] and dict[str, ...] wrappers when IsArray or IsMap is true
+	PyType        string // Full type including the list[] and dict[str, ] wrappers
 	PyElementType string // Element type for per-element validation (only set when IsArray or IsMap is true)
 	Required      bool
 	IsArray       bool
@@ -174,10 +175,11 @@ type ScalarArg struct {
 	// element is validated as PyElementType.
 	IsArrayOfArrays bool
 
-	// IsMap marks a map body argument (Record<string, T>), sent as a JSON
-	// object: PyType is dict[str, T], or dict[str, list[T]] when IsArray is
-	// also set. Each value, or each element of a list value, is validated
-	// as PyElementType at name[key] or name[key][i]; {} is a value.
+	// IsMap marks a map body argument (apigen.Param.IsMap), typed
+	// dict[str, T], or dict[str, list[T]] with IsArray, as the Go route
+	// decodes it (bodyargs.Map, bodyargs.MapOfLists). It is sent as a JSON
+	// object of its validated values: each value, or each element of a
+	// value, is validated as PyElementType at name[key] or name[key][i].
 	IsMap bool
 
 	// KeepsNull marks an optional single Generic.JSON body argument, whose
@@ -459,9 +461,10 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 	// The route reads the scalar arguments of a GET from the query string
 	// and those of every other method, DELETE too, from the JSON body
 	// (apigen's BodyArgs), so the SDK sends them there. In the body a
-	// Generic.JSON one is any JSON value, a JSON object or array scalar one
-	// that object or array, and a map a dict. In the query string each
-	// stays the parameter's text.
+	// Generic.JSON one is any JSON value and a JSON object or array scalar
+	// one that object or array. In the query string each stays the
+	// parameter's text. A map, which only a body carries, is a dict of its
+	// values, each a list for a map of lists.
 	inBody := sendsArgumentsInBody(endpoint.Method)
 	scalarArgs := make([]ScalarArg, 0, len(endpoint.ScalarArgs))
 	for _, arg := range endpoint.ScalarArgs {
@@ -474,8 +477,6 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		}
 		if arg.IsArray || arg.IsMap {
 			pyElementType = pyType
-		}
-		if arg.IsArray {
 			pyType = pythonListType(pyType, arg.ArrayDepth())
 		}
 		if arg.IsMap {
