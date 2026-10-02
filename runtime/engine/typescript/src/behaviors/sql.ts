@@ -18,7 +18,11 @@ Before a behavior's statement reaches SQLite, the engine reads its tokens
   WITH ... SELECT; a write adds INSERT, UPDATE, DELETE and REPLACE; a
   migration adds CREATE TABLE, CREATE [UNIQUE] INDEX, CREATE VIRTUAL TABLE,
   ALTER TABLE, DROP TABLE and DROP INDEX. PRAGMA, ATTACH, transaction
-  control, triggers, views and temporary objects are never allowed.
+  control, triggers, views and temporary objects are never allowed;
+- a virtual table of any module but fts5, or under a name that is not the
+  behavior's own. Another module can reach past the behavior's tables
+  (dbstat reports on every table in the file), and fts5 is the one
+  full-text search needs.
 
 A name without a reserved prefix passes (it may be a column or an alias),
 so the objects a migration leaves are checked again against sqlite_master
@@ -74,10 +78,10 @@ export function sqlRefusal(sql: string, prefix: string, mode: SqlMode): string |
       return 'it calls load_extension';
     }
   }
-  return verbRefusal(statement, mode);
+  return verbRefusal(statement, prefix, mode);
 }
 
-function verbRefusal(statement: Token[], mode: SqlMode): string | undefined {
+function verbRefusal(statement: Token[], prefix: string, mode: SqlMode): string | undefined {
   const first = statement[0];
   const verb = first.kind === 'word' ? first.text.toUpperCase() : '';
   if (verb === 'WITH') {
@@ -94,7 +98,7 @@ function verbRefusal(statement: Token[], mode: SqlMode): string | undefined {
     return mode === 'read' ? `a read runs SELECT, VALUES or WITH ... SELECT, not ${verb}` : undefined;
   }
   if (mode === 'migrate' && (verb === 'CREATE' || verb === 'DROP' || verb === 'ALTER')) {
-    return ddlRefusal(verb, statement);
+    return ddlRefusal(verb, statement, prefix);
   }
   const allowed =
     mode === 'read'
@@ -123,9 +127,12 @@ function mainVerb(statement: Token[]): string | undefined {
   return undefined;
 }
 
-function ddlRefusal(verb: string, statement: Token[]): string | undefined {
+function ddlRefusal(verb: string, statement: Token[], prefix: string): string | undefined {
   const words = statement.slice(1, 3).map((token) => (token.kind === 'word' ? token.text.toUpperCase() : ''));
   const [second, third] = words;
+  if (verb === 'CREATE' && second === 'VIRTUAL' && third === 'TABLE') {
+    return virtualTableRefusal(statement.slice(3), prefix);
+  }
   const ok =
     verb === 'CREATE'
       ? second === 'TABLE' ||
@@ -139,6 +146,27 @@ function ddlRefusal(verb: string, statement: Token[]): string | undefined {
     return undefined;
   }
   return `a migration may ${verb} only tables and indexes of its own, not ${[verb, second, third].filter(Boolean).join(' ')}`;
+}
+
+// virtualTableRefusal holds CREATE VIRTUAL TABLE to `[IF NOT EXISTS] <own
+// name> USING fts5`: one of the behavior's own names, unqualified, and the
+// fts5 module. rest is what follows CREATE VIRTUAL TABLE.
+function virtualTableRefusal(rest: Token[], prefix: string): string | undefined {
+  const upper = (token: Token | undefined): string => (token?.kind === 'word' ? token.text.toUpperCase() : '');
+  let at = 0;
+  if (upper(rest[0]) === 'IF' && upper(rest[1]) === 'NOT' && upper(rest[2]) === 'EXISTS') {
+    at = 3;
+  }
+  const name = rest[at];
+  const own = name !== undefined && (name.kind === 'word' || name.kind === 'quoted') && name.text.toLowerCase().startsWith(prefix);
+  if (!own || upper(rest[at + 1]) !== 'USING') {
+    return `a migration creates a virtual table only under a name of its own (${prefix}*, unqualified), with sql.table(name)`;
+  }
+  const module = rest[at + 2];
+  if (module?.kind !== 'word' || module.text.toLowerCase() !== 'fts5') {
+    return `a migration creates a virtual table only with the fts5 module, not ${module?.text ?? 'none'}`;
+  }
+  return undefined;
 }
 
 // tokenize splits SQL into the tokens the checks read. Blob and number

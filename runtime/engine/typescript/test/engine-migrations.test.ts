@@ -20,9 +20,13 @@ import {
 } from '../dist/index.js';
 import { counter, itemDocument, openMetaSchema, publishItem } from './behavior-fixtures.ts';
 import { holder } from './reach-fixtures.ts';
+import { ledger, ledgerDocument, mark, probe, resetProbe, runnerPrincipal } from './runner-fixtures.ts';
 import { alice, cleanup, drivers, freshPath, orderDocument, schemaDocument, track } from './helpers.ts';
 
-afterEach(cleanup);
+afterEach(() => {
+  resetProbe();
+  cleanup();
+});
 
 interface Seed {
   /** Writes rows into a file at this version, as that version wrote them. */
@@ -184,6 +188,53 @@ const seeds: Record<number, Seed> = {
       assert.deepEqual(engine.instances.invoke(alice, 'Item', 'i1', 'notes'), ['delete Order o1']);
     },
   },
+  // Version 5 added references between instances. Its events record no
+  // cause, and it has no subscriptions or schedules.
+  5: {
+    write(storage) {
+      const order = canonical(orderDocument());
+      storage.run(
+        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
+      );
+      storage.run(
+        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['default', 'Order', 'o1', 'default', 1, 1, '{"title":"Desk"}', 300, 'alice', 300, 'alice']
+      );
+      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+      storage.run(insert, ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text]);
+      storage.run(insert, ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}']);
+    },
+    check(engine) {
+      // The seed's events read with no cause. A reaction on the migrated
+      // file hears the events after its schema's publish, not the seed's,
+      // and the event it writes records its cause.
+      assert.deepEqual(
+        engine.events.read(alice).events.map((event) => [event.kind, event.cause]),
+        [
+          ['publish', undefined],
+          ['create', undefined],
+        ]
+      );
+      engine.schemas.define(alice, ledgerDocument('Ledgered'));
+      engine.schemas.publish(alice, 'Ledgered');
+      probe.react = (context, event) => {
+        if (event.cause === undefined) {
+          mark(context, event);
+        }
+      };
+      engine.instances.create(alice, 'Ledgered', { title: 'Lamp' }, { id: 'l1' });
+      assert.equal(engine.runner.runDue().handled, 2);
+      const [created, marked] = engine.events.read(alice, { schema: 'Ledgered', instanceId: 'l1' }).events;
+      assert.deepEqual(marked.cause, { behavior: 'test.Ledger', event: created.cursor, depth: 1 });
+      assert.deepEqual(
+        engine.runner.status().subscriptions.map((status) => [status.schema, status.cursor]),
+        [['Ledgered', marked.cursor]]
+      );
+    },
+  },
 };
 
 // checkOperationEvents publishes a schema with a behavior on a migrated file,
@@ -239,7 +290,9 @@ for (const driver of drivers) {
         seed.write(storage);
         storage.close();
 
-        const engine = track(openEngine({ path, driver, policy: allowAll, metaSchema: openMetaSchema(), behaviors: [counter, holder] }));
+        const engine = track(
+          openEngine({ path, driver, policy: allowAll, metaSchema: openMetaSchema(), behaviors: [counter, holder, ledger], runner: { principal: runnerPrincipal } })
+        );
         assert.deepEqual(
           appliedMigrations(engine.storage, ENGINE_OWNER).map((row) => row.version),
           engineMigrations.migrations.map((migration) => migration.version)

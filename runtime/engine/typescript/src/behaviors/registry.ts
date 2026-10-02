@@ -4,8 +4,8 @@ The behaviors an engine can run: implementations registered when it opens
 checks the declaration (declaration.ts), compiles its config, parameter
 and result schemas, and refuses an implementation whose operations,
 schema-level operations or fields are not exactly the ones its
-declaration names, or whose migrations are malformed. A name registers
-once.
+declaration names, whose migrations are malformed, or whose reactions or
+schedules are not functions the runner can call. A name registers once.
 
 A behavior whose storage already exists in the file (a schema that
 composes it was published before) has its storage brought up to its
@@ -187,13 +187,15 @@ export class BehaviorRegistry {
       problems
     );
 
-    for (const hook of ['parseConfig', 'configChange', 'initialize', 'guard', 'afterChange', 'guardReference', 'afterReferenceChange'] as const) {
+    for (const hook of ['parseConfig', 'configChange', 'afterConfigChange', 'initialize', 'guard', 'afterChange', 'guardReference', 'afterReferenceChange'] as const) {
       if (implementation[hook] !== undefined && typeof implementation[hook] !== 'function') {
         problems.push(`${hook} is a function`);
       }
     }
     const migrations = implementation.migrations ?? [];
     const columns = checkMigrations(migrations, problems);
+    checkReactions(implementation.reactions, problems);
+    checkSchedules(implementation.schedules, problems);
 
     if (problems.length > 0) {
       throw new TypeError(`behavior ${declaration.name} cannot register: ${problems.join('; ')}`);
@@ -248,6 +250,59 @@ function matchNames(key: string, implemented: Map<string, unknown>, declared: st
   }
   if (extra.length > 0) {
     problems.push(`it implements ${key} its declaration does not name: ${extra.join(', ')}`);
+  }
+}
+
+/** The shortest interval a schedule takes, in milliseconds. */
+export const MIN_SCHEDULE_MS = 1000;
+
+const SCHEDULE_NAME = /^[a-z][A-Za-z0-9]*$/;
+
+// checkReactions holds reactions to a react function and an optional
+// watches function.
+function checkReactions(reactions: unknown, problems: string[]): void {
+  if (reactions === undefined) {
+    return;
+  }
+  if (typeof reactions !== 'object' || reactions === null) {
+    problems.push('reactions is an object with react and an optional watches');
+    return;
+  }
+  const { react, watches } = reactions as { react?: unknown; watches?: unknown };
+  if (typeof react !== 'function') {
+    problems.push('reactions.react is a function');
+  }
+  if (watches !== undefined && typeof watches !== 'function') {
+    problems.push('reactions.watches is a function');
+  }
+}
+
+// checkSchedules holds schedules to camelCase names, each with an interval
+// of at least MIN_SCHEDULE_MS and a run function.
+function checkSchedules(schedules: unknown, problems: string[]): void {
+  if (schedules === undefined) {
+    return;
+  }
+  if (typeof schedules !== 'object' || schedules === null || Array.isArray(schedules)) {
+    problems.push('schedules is an object of schedules by name');
+    return;
+  }
+  for (const [name, schedule] of Object.entries(schedules)) {
+    const at = `schedule ${name}`;
+    if (!SCHEDULE_NAME.test(name)) {
+      problems.push(`${at}: a schedule name is camelCase (${SCHEDULE_NAME.source})`);
+    }
+    if (typeof schedule !== 'object' || schedule === null) {
+      problems.push(`${at} is { everyMs, run }`);
+      continue;
+    }
+    const { everyMs, run } = schedule as { everyMs?: unknown; run?: unknown };
+    if (typeof everyMs !== 'number' || !Number.isSafeInteger(everyMs) || everyMs < MIN_SCHEDULE_MS) {
+      problems.push(`${at}: everyMs is an integer of at least ${MIN_SCHEDULE_MS}, got ${String(everyMs)}`);
+    }
+    if (typeof run !== 'function') {
+      problems.push(`${at}: run is a function`);
+    }
   }
 }
 

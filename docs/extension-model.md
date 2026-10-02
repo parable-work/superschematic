@@ -822,11 +822,12 @@ No core generator sets the flag. `build --emit-ir`, `format` and
 The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`
 registers with no extension: `Workflow`, `Comments`, `Revisions`,
-`Dependencies`, `Links` and `Rollups`. Every binary therefore accepts a
-schema that composes them, the schema-file JSON Schema lists them, and
-`BehaviorConfigs` in `@superschematic/schema` types their configs. None
-names an invocation policy, since a distribution's policy need not have
-the core's values; each operation takes the policy's default. Every
+`Dependencies`, `Links`, `Rollups`, `Search` and `Reactions`. Every
+binary therefore accepts a schema that composes them, the schema-file
+JSON Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
+types their configs. None names an invocation policy, since a
+distribution's policy need not have the core's values; each operation
+takes the policy's default. Every
 `paramsSchema` sets `additionalProperties: false`. A config a
 declaration's `configSchema` accepts can still fail in the engine, whose
 implementation checks what JSON Schema cannot (a Workflow transition
@@ -847,6 +848,8 @@ like any behavior's.
 | `Dependencies` | `schemas`, `gatedStates`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
 | `Links` | `links` (by name: `schema`, `required`, `pinned`); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
 | `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`); required | `rollups` | none |
+| `Search` | `fields`, `weights`; required | none | `search`, of scope `schema` |
+| `Reactions` | `rules` (each a `when`, `enters` or `allTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
 
 `Dependencies`, `Links` and `Rollups` reach other instances (D16,
 amended): a blocker, a link target or the instances a rollup reads are
@@ -859,6 +862,19 @@ and `fixture-rollups-json`, whose type rolls up its tasks, with the core
 binary, and their TypeScript twins in the tsreader fixtures load to the
 same IR.
 
+`Search` indexes the type's own text fields that its config names, which
+the loader does not check against the type: the engine refuses a field
+the type does not declare or whose values are not strings when the schema
+is defined. `make cli-smoke` loads `fixture-search-json` and its
+TypeScript twin to the same IR as well.
+
+`Reactions` declares a config and nothing else: the engine's runner
+applies its rules after a change commits (D16, amended), and a rule's
+links and states are checked by the engine, which sees the type's
+Workflow and Links configs. `make cli-smoke` loads
+`fixture-reactions-json`, whose projects start and finish their parent,
+and its TypeScript twin loads to the same IR.
+
 acme declares `acme.Rating` and types its config in
 `packages/schema/src/behaviors.ts` (section 10);
 `internal/registry/registrytest` declares two, `acme.Stock` and
@@ -867,9 +883,17 @@ and YAML twins.
 
 The code that runs a behavior is TypeScript: an implementation for
 `@superschematic/engine` (`runtime/engine/README.md`, "Behaviors") that
-carries the same declaration. `superschematic behaviors --out <dir>`
-copies it there: one canonical `<name>.behavior.json` per behavior the
-binary registers (`--extension <name>` keeps one extension's), and
+carries the same declaration. Some of its members have no part in the
+declaration, since a client never calls them: `reactions`, which the
+engine's runner hands committed events after the commit, as the
+principal the deployment names for it, and `schedules`, named timed work
+with an interval (`runtime/engine/README.md`, "Reactions and schedules"
+and "The runner"). The compiler neither sees nor checks them; the engine
+checks them when the implementation registers.
+
+`superschematic behaviors --out <dir>` copies the declaration there: one
+canonical `<name>.behavior.json` per behavior the binary registers
+(`--extension <name>` keeps one extension's), and
 `--check` fails, naming each file, on a copy that differs, is missing or
 has no behavior. It is a command of the binary rather than a tool in the
 core module, as `internal/tools/scalarcatalog` is, because an extension's
@@ -1315,7 +1339,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups` (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions` (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |
