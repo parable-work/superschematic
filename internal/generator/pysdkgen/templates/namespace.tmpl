@@ -327,6 +327,63 @@ class {{.Namespace.ClassName}}:
             rows.append(items)
         return rows
 {{- end}}
+{{- if .Namespace.HasMapArgs}}
+
+    def _validate_map_argument(
+        self,
+        value: Any,
+        value_type_name: str,
+        field_name: str,
+        *,
+        of_lists: bool = False,
+    ) -> dict[str, Any]:
+        """Validate a map argument and return it with each value validated.
+
+        The map is a dict with str keys, sent as one JSON object. Each value
+        is validated as value_type_name at field[key]; for a map of lists,
+        each value is a list and each element is validated at
+        field[key][i]. None is required where it stands, and a field of an
+        object value is named field[key].name, as the API names them. Every
+        failure is raised at once.
+        """
+        if value is None:
+            raise ValidationError(
+                {field_name: [{"validator": "required", "message": f"{field_name} is required"}]},
+            )
+        if not isinstance(value, dict):
+            raise ValidationError(
+                {field_name: [{"validator": "type", "message": f"{field_name} must be a dict"}]},
+            )
+
+        validation_errors: dict[str, list[dict[str, str]]] = {}
+
+        def validate_value(item: Any, path: str) -> Any:
+            if item is None:
+                validation_errors[path] = [{"validator": "required", "message": f"{path} is required"}]
+                return None
+            try:
+                return self._validate_scalar_argument(item, value_type_name, path)
+            except ValidationError as err:
+                for key, errors in err.errors.items():
+                    validation_errors[key if key == path else f"{path}.{key}"] = errors
+                return None
+
+        validated: dict[str, Any] = {}
+        for key, entry in value.items():
+            path = f"{field_name}[{key}]"
+            if not isinstance(key, str):
+                validation_errors[path] = [{"validator": "type", "message": f"{path} must have a str key"}]
+            elif not of_lists or entry is None:
+                validated[key] = validate_value(entry, path)
+            elif not isinstance(entry, (list, tuple)):
+                validation_errors[path] = [{"validator": "type", "message": f"{path} must be a list"}]
+            else:
+                validated[key] = [validate_value(item, f"{path}[{index}]") for index, item in enumerate(entry)]
+
+        if validation_errors:
+            raise ValidationError(validation_errors)
+        return validated
+{{- end}}
 {{- if .Namespace.HasListOfListsModelOutput}}
 
     def _coerce_list_of_lists_response(self, raw: Any, output_type_name: str) -> Any:
@@ -728,12 +785,20 @@ scalarArgsPayload builds the JSON body of an endpoint's scalar arguments,
 each validated before it is set. A single value is sent as validated. A
 list of a JSON object or array scalar (IsStructuredJSON) is sent as
 validated too, since its alias reads JSON text into the object or array it
-holds; any other list is sent as given.
+holds; any other list is sent as given. A map is sent as validated, each
+value checked at name[key] (_validate_map_argument).
 */ -}}
 {{- define "scalarArgsPayload"}}
         payload: dict[str, Any] = {}
 {{- range .ScalarArgs}}
-{{- if .IsArrayOfArrays}}
+{{- if .IsMap}}
+{{- if .Required}}
+        payload["{{.Name}}"] = self._validate_map_argument({{template "mapArgs" .}})
+{{- else}}
+        if {{.PyName}} is not None:
+            payload["{{.Name}}"] = self._validate_map_argument({{template "mapArgs" .}})
+{{- end}}
+{{- else if .IsArrayOfArrays}}
 {{- if .Required}}
         if {{.PyName}} is None:
             raise ValidationError(
@@ -791,6 +856,10 @@ holds; any other list is sent as given.
 {{- end}}
 {{- end}}
 {{- end}}
+{{- end}}
+
+{{- define "mapArgs" -}}
+{{.PyName}}, "{{.PyElementType}}", "{{.PyName}}"{{if .IsArray}}, of_lists=True{{end}}
 {{- end}}
 
 {{- define "queryListArgs" -}}

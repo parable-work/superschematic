@@ -356,7 +356,7 @@ func TestMapArgumentOutsideTheBodyIsRefused(t *testing.T) {
 // present, a Generic.JSON argument is any JSON value but null, except that
 // an optional one, alone or as an input type's field, keeps null apart from
 // absent, and a JSON object or array scalar takes that object or array, not
-// its JSON text.
+// its JSON text. A DELETE reads its arguments from the body, as a PUT does.
 func TestBodyArgsRoutesApplyTheListRules(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")

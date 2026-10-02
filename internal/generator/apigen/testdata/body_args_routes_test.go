@@ -4,8 +4,8 @@
 // received, and drives them over httptest with the vectors the TypeScript
 // server's scalar list test uses, plus required single values of every
 // builtin type, a UUID list and a list of objects, Generic.JSON values and
-// JSON object and array scalars, the query string of a GET operation, and a
-// path parameter in each encoding of its value.
+// JSON object and array scalars, the query string of a GET operation, a
+// DELETE's body, and a path parameter in each encoding of its value.
 package bodyargsapi_test
 
 import (
@@ -76,6 +76,11 @@ func (s *tags) PlacePoints(_ context.Context, id string, pointByName map[string]
 	return &placed, nil
 }
 
+func (s *tags) RemoveTags(_ context.Context, id string, labels []string, purge bool, reason types.GenericJSON) ([]string, error) {
+	s.record(map[string]any{"id": id, "labels": labels, "purge": purge, "reason": reason})
+	return labels, nil
+}
+
 func (s *tags) FindTags(_ context.Context, codes []string, pages []int64, labels []string, ranks []int64) ([]string, error) {
 	s.record(map[string]any{"codes": codes, "pages": pages, "labels": labels, "ranks": ranks})
 	return labels, nil
@@ -140,6 +145,7 @@ const (
 	embeddingsPath    = "/api/embeddings"
 	nameShadesPath    = "/api/posts/p1/shade-names"
 	placePointsPath   = "/api/posts/p1/points"
+	removeTagsPath    = "/api/posts/p1/tags"
 	findTagsPath      = "/api/posts/tags"
 	searchPostsPath   = "/api/posts/search"
 )
@@ -603,6 +609,21 @@ func TestAMapOfAnObjectTypeIsABodyArgument(t *testing.T) {
 	)
 	// The body is not a Point: the map is the argument named pointByName.
 	refusedWith(t, server, impl, http.MethodPut, placePointsPath, `{"x": 1, "y": 2}`, fieldError{"pointByName", "required", "required field"})
+}
+
+// A DELETE reads its arguments from the JSON body, as a PUT does; the query
+// string carries none of them, and a DELETE without a body is refused.
+func TestADELETEReadsItsArgumentsFromTheBody(t *testing.T) {
+	server, impl := serve(t)
+	accepted(t, server, impl, http.MethodDelete, removeTagsPath, `{"labels": ["a", "b"], "purge": true, "reason": {"by": ["editor"]}}`)
+	if want := []string{"a", "b"}; !reflect.DeepEqual(impl.last["labels"], want) || impl.last["purge"] != true {
+		t.Errorf("labels, purge = %#v, %#v; want %#v, true", impl.last["labels"], impl.last["purge"], want)
+	}
+	if !jsonEqual(t, impl.last["reason"], `{"by": ["editor"]}`) {
+		t.Errorf("reason = %#v, want {\"by\": [\"editor\"]}", impl.last["reason"])
+	}
+	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath+"?labels=a", `{}`, fieldError{"labels", "required", "required field"})
+	refused(t, server, impl, http.MethodDelete, removeTagsPath+"?labels=a", "")
 }
 
 func TestAGETListReadsEveryQueryKey(t *testing.T) {
