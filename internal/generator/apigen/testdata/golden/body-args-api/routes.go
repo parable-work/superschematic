@@ -126,6 +126,13 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/documents",
 			Handler: createTagReviseDocumentHandler(cfg.Implementations.Tag),
 		},
+		// Store a post's labels and embedding, JSON object and array scalars
+		// alone, in a list and in a list of lists; returns the labels.
+		{
+			Method:  "POST",
+			Path:    "/embeddings",
+			Handler: createTagStoreEmbeddingHandler(cfg.Implementations.Tag),
+		},
 		// Search posts by score, rank, flag, related post, date and code.
 		{
 			Method:  "GET",
@@ -269,6 +276,64 @@ func createTagReviseDocumentHandler(impl TagImplementation) gohttp.HandlerFunc {
 
 		// Call implementation
 		result, err := impl.ReviseDocument(r.Context(), &input)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createTagStoreEmbeddingHandler creates a handler for POST /api/embeddings
+//
+// Store a post's labels and embedding, JSON object and array scalars
+// alone, in a list and in a list of lists; returns the labels.
+func createTagStoreEmbeddingHandler(impl TagImplementation) gohttp.HandlerFunc {
+	// Body arguments: the JSON type of each value, then its rules in the
+	// order they are checked (the scalar type's own, then the argument's).
+	bodyLabelsArg := bodyargs.NewArg("labels", bodyargs.Object, bodyargs.Required())
+	bodyVectorArg := bodyargs.NewArg("vector", bodyargs.Array)
+	bodyLabelSetsArg := bodyargs.NewArg("labelSets", bodyargs.Object)
+	bodyVectorGridArg := bodyargs.NewArg("vectorGrid", bodyargs.Array)
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Parse body arguments (non-GET endpoints). The body is one JSON
+		// object; each argument is decoded from its own JSON value and
+		// checked by the list and value rules, and every failure is reported
+		// at the argument's path (name, name[i], name[i][j], name[key]).
+		body, err := bodyargs.ReadObject(r.Body)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+			return
+		}
+		var requestBody struct {
+			Labels     types.GenericStringMap
+			Vector     types.EmbeddingVector
+			LabelSets  []types.GenericStringMap
+			VectorGrid [][]types.EmbeddingVector
+		}
+		validationErrors := types.NewValidationErrors()
+		requestBody.Labels = bodyargs.Value[types.GenericStringMap](validationErrors, body, bodyLabelsArg)
+		requestBody.Vector = bodyargs.Value[types.EmbeddingVector](validationErrors, body, bodyVectorArg)
+		requestBody.LabelSets = bodyargs.List[types.GenericStringMap](validationErrors, body, bodyLabelSetsArg)
+		requestBody.VectorGrid = bodyargs.ListOfLists[types.EmbeddingVector](validationErrors, body, bodyVectorGridArg)
+		if validationErrors.HasErrors() {
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.StoreEmbedding(r.Context(), requestBody.Labels, requestBody.Vector, requestBody.LabelSets, requestBody.VectorGrid)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

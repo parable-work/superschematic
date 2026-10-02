@@ -31,6 +31,12 @@ type BodyArg struct {
 	// type mapping is "any"), alone or in a list: each value is any JSON
 	// value but null, and an SDK sends it as that value.
 	AnyJSON bool
+	// StructuredJSON is "object" or "array" for an argument of a JSON object
+	// or array scalar (ir.ScalarDef.StructuredJSONType; Generic.StringMap,
+	// Embedding.Vector), alone or in a list, and "" otherwise: each value is
+	// that object or array, not its JSON text, and an SDK sends it as that
+	// value.
+	StructuredJSON string
 }
 
 // Decoder is the bodyargs function that decodes the argument: Value, List,
@@ -89,7 +95,14 @@ func (m *typeMapper) bodyArgs(args []Param) []BodyArg {
 			options = append(options, scalarRuleOptions(scalarDef, kind)...)
 		}
 		options = append(options, argRuleOptions(arg, kind)...)
-		out = append(out, BodyArg{Param: arg, Kind: kind, Options: options, KeepNull: keepNull, AnyJSON: anyJSON})
+		out = append(out, BodyArg{
+			Param:          arg,
+			Kind:           kind,
+			Options:        options,
+			KeepNull:       keepNull,
+			AnyJSON:        anyJSON,
+			StructuredJSON: scalarDef.StructuredJSONType(),
+		})
 	}
 	return out
 }

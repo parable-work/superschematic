@@ -146,6 +146,19 @@ JSON cannot hold (`NaN`, a `set`, a key that is not a string). In the
 query string, a `GET` argument or a `@query` parameter, a `Generic.JSON`
 stays a `str`.
 
+A `Generic.StringMap` or `Embedding.Vector` argument of a `POST`, `PUT` or
+`PATCH` operation is typed as the types package's `GenericStringMap` or
+`EmbeddingVector`, the type of a field of it, and is sent as the JSON
+object or array it holds. With the types package installed, JSON text such
+as `'{"region": "eu"}'` is read into that object or array, as the types
+package reads a field, and a value of another shape raises
+`ValidationError` at the argument. `None` for a required one or a list
+element raises `ValidationError`. In the query string each stays a `str`.
+
+An operation that returns a `Generic.JSON`, `Generic.StringMap` or
+`Embedding.Vector` is typed as returning the same alias, and returns the
+JSON value as decoded.
+
 An optional argument left as `None` is not sent, but for an optional
 `Generic.JSON`, whose null is a value: its default is the SDK's `UNSET`,
 so leaving it out sends nothing and passing `None` sends `null`. An input

@@ -267,6 +267,119 @@
         ]
       }
     },
+    "/api/embeddings": {
+      "post": {
+        "description": "Store a post's labels and embedding, JSON object and array scalars\nalone, in a list and in a list of lists; returns the labels.",
+        "operationId": "TagStoreEmbeddingHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "labelSets": {
+                    "items": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "A string-to-string map stored as JSON",
+                      "type": "object"
+                    },
+                    "nullable": true,
+                    "type": "array"
+                  },
+                  "labels": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "A string-to-string map stored as JSON",
+                    "type": "object"
+                  },
+                  "vector": {
+                    "description": "Fixed-dimensional float32 vector",
+                    "items": {
+                      "type": "number"
+                    },
+                    "nullable": true,
+                    "type": "array"
+                  },
+                  "vectorGrid": {
+                    "items": {
+                      "items": {
+                        "description": "Fixed-dimensional float32 vector",
+                        "items": {
+                          "type": "number"
+                        },
+                        "type": "array"
+                      },
+                      "type": "array"
+                    },
+                    "nullable": true,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "labels"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "description": "A string-to-string map stored as JSON",
+                      "type": "object"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "storeEmbedding",
+        "tags": [
+          "tag"
+        ]
+      }
+    },
     "/api/posts/search": {
       "get": {
         "description": "Search posts by score, rank, flag, related post, date and code.",

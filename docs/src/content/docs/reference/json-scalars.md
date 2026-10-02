@@ -58,7 +58,9 @@ Python validators) follows one rule:
 The typed decoders take only the object or array: the generated Go types,
 the Go API routes and the TypeScript API server answer the JSON text with
 `type`, or fail to decode it. The generated Python types read the JSON text
-into the value.
+into the value, and so does the Python SDK, which types a body argument of
+either scalar as the types package's alias and sends the object or array
+the text holds.
 
 `Generic.JSON` takes any JSON value but null: an object, an array, a
 string, a number or a boolean, with no type check. A null or missing

@@ -353,9 +353,10 @@ func TestMapArgumentOutsideTheBodyIsRefused(t *testing.T) {
 // required, listMin and listMax bound the list, the scalar's own rules and
 // the argument's apply to each element named by the rule (D14), an enum
 // element outside the enum is enum, a required builtin value must be
-// present, and a Generic.JSON argument is any JSON value but null, except
-// that an optional one, alone or as an input type's field, keeps null apart
-// from absent.
+// present, a Generic.JSON argument is any JSON value but null, except that
+// an optional one, alone or as an input type's field, keeps null apart from
+// absent, and a JSON object or array scalar takes that object or array, not
+// its JSON text.
 func TestBodyArgsRoutesApplyTheListRules(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
