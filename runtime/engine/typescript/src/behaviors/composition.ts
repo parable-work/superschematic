@@ -33,7 +33,7 @@ import type { Document, TypeDef } from '@superschematic/schema-ir/schema-file';
 import { BehaviorError, type SchemaChange, type SchemaIssue } from '../errors.js';
 import { isPlainObject, jsonEqual } from '../instances/patch.js';
 import { jsonKey, pointer } from '../registry/document.js';
-import { FieldSchemas } from '../tools/schema.js';
+import { FieldSchemas, renderProperty } from '../tools/schema.js';
 import { BehaviorConfigError, type ConfigSchema, type ConfigSchemas, type ConfigTarget } from './behavior.js';
 import { deepFreeze } from './json.js';
 import { BehaviorRegistry, type OperationSpec, type RegisteredBehavior } from './registry.js';
@@ -257,17 +257,70 @@ export function configChanges(
   return changes;
 }
 
+/** A behavior whose config a published version adds, removes or changes. */
+export interface ConfigTransition {
+  readonly behavior: RegisteredBehavior;
+  /** The parsed config of the version replaced; undefined when it did not compose the behavior. */
+  readonly before: unknown;
+  /** The parsed config of the version published; undefined when it no longer composes the behavior. */
+  readonly after: unknown;
+}
+
+/**
+ * configTransitions lists the instance type's behaviors whose config a
+ * published version adds, removes or changes against the version it
+ * replaces (none for a schema's first version), in the new version's list
+ * order, then the removed ones in the old order. A removed behavior with
+ * no implementation registered is left out, since there is no code to
+ * run; an old config its implementation no longer parses counts as none.
+ */
+export function configTransitions(before: ComposeTarget | undefined, after: ComposeTarget, registry: BehaviorRegistry): ConfigTransition[] {
+  const beforeRefs = before === undefined ? [] : ((before.document.types ?? {})[before.instanceType]?.behaviors ?? []);
+  const afterRefs = (after.document.types ?? {})[after.instanceType]?.behaviors ?? [];
+  const parsed = (behavior: RegisteredBehavior, json: unknown, target: ComposeTarget): unknown => {
+    const result = parseConfig(behavior, json, targetOf(target));
+    return 'problem' in result ? undefined : result.config;
+  };
+  const transitions: ConfigTransition[] = [];
+  for (const ref of afterRefs) {
+    const behavior = registry.lookup(ref.name);
+    const earlier = beforeRefs.find((candidate) => candidate.name === ref.name);
+    if (!behavior || (earlier !== undefined && jsonEqual(earlier.config ?? {}, ref.config ?? {}))) {
+      continue;
+    }
+    transitions.push({
+      behavior,
+      before: earlier === undefined || before === undefined ? undefined : parsed(behavior, earlier.config, before),
+      after: parsed(behavior, ref.config, after),
+    });
+  }
+  for (const ref of beforeRefs) {
+    const behavior = registry.lookup(ref.name);
+    if (!behavior || before === undefined || afterRefs.some((candidate) => candidate.name === ref.name)) {
+      continue;
+    }
+    transitions.push({ behavior, before: parsed(behavior, ref.config, before), after: undefined });
+  }
+  return transitions;
+}
+
 // targetOf is what parseConfig is told about the type a config is given
-// on: its schema, its fields, every behavior it lists with its config as
-// the schema holds it, and, when given, the other schemas it reaches. A
-// behavior listed twice keeps its first config; compose refuses the list.
+// on: its schema, its fields with their JSON Schemas, every behavior it
+// lists with its config as the schema holds it, and, when given, the other
+// schemas it reaches. A behavior listed twice keeps its first config;
+// compose refuses the list.
 function targetOf(target: ComposeTarget, schemas?: ConfigSchemas): ConfigTarget {
   const typeDef = (target.document.types ?? {})[target.instanceType] as TypeDef;
   const refs = typeDef.behaviors ?? [];
+  const fieldSchemas: Record<string, unknown> = {};
+  for (const [key, property] of new FieldSchemas(target.document).object(target.instanceType).properties) {
+    fieldSchemas[key] = renderProperty(property, '');
+  }
   return deepFreeze({
     schema: target.name,
     type: target.instanceType,
     fields: (typeDef.fields ?? []).map(jsonKey),
+    fieldSchemas,
     behaviors: refs.map((ref) => ref.name),
     configs: configsOf(refs),
     ...(schemas === undefined ? {} : { schemas }),

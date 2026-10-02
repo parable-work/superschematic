@@ -10,7 +10,7 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Comments", "Dependencies", "Links", "Revisions", "Rollups", "Workflow"}
+var coreBehaviorNames = []string{"Comments", "Dependencies", "Links", "Reactions", "Revisions", "Rollups", "Search", "Workflow"}
 
 // A registry with no extension declares the behaviors the engine
 // implements, as the core's, under bare names, and holds each config to
@@ -32,15 +32,24 @@ func TestCoreBehaviors(t *testing.T) {
 	dependencies, _ := reg.Behavior("Dependencies")
 	links, _ := reg.Behavior("Links")
 	rollups, _ := reg.Behavior("Rollups")
-	if !workflow.ConfigRequired() || comments.ConfigRequired() || revisions.ConfigRequired() || dependencies.ConfigRequired() || !links.ConfigRequired() || !rollups.ConfigRequired() {
-		t.Errorf("ConfigRequired: Workflow %v, Comments %v, Revisions %v, Dependencies %v, Links %v, Rollups %v; want true, false, false, false, true, true",
-			workflow.ConfigRequired(), comments.ConfigRequired(), revisions.ConfigRequired(), dependencies.ConfigRequired(), links.ConfigRequired(), rollups.ConfigRequired())
+	search, _ := reg.Behavior("Search")
+	reactions, _ := reg.Behavior("Reactions")
+	if !workflow.ConfigRequired() || comments.ConfigRequired() || revisions.ConfigRequired() || dependencies.ConfigRequired() || !links.ConfigRequired() ||
+		!rollups.ConfigRequired() || !search.ConfigRequired() || !reactions.ConfigRequired() {
+		t.Errorf("ConfigRequired: Workflow %v, Comments %v, Revisions %v, Dependencies %v, Links %v, Rollups %v, Search %v, Reactions %v; want true, false, false, false, true, true, true, true",
+			workflow.ConfigRequired(), comments.ConfigRequired(), revisions.ConfigRequired(), dependencies.ConfigRequired(), links.ConfigRequired(),
+			rollups.ConfigRequired(), search.ConfigRequired(), reactions.ConfigRequired())
 	}
-	if !slices.Equal(dependencies.Requires, []string{"Workflow"}) || len(links.Requires) != 0 || len(rollups.Requires) != 0 {
-		t.Errorf("requires: Dependencies %v, Links %v, Rollups %v; want [Workflow], none and none", dependencies.Requires, links.Requires, rollups.Requires)
+	if !slices.Equal(dependencies.Requires, []string{"Workflow"}) || len(links.Requires) != 0 || len(rollups.Requires) != 0 || !slices.Equal(reactions.Requires, []string{"Workflow"}) {
+		t.Errorf("requires: Dependencies %v, Links %v, Rollups %v, Reactions %v; want [Workflow], none, none and [Workflow]",
+			dependencies.Requires, links.Requires, rollups.Requires, reactions.Requires)
 	}
 	if len(rollups.Operations) != 0 || len(rollups.Fields) != 1 || rollups.Fields[0].Name != "rollups" {
 		t.Errorf("Rollups: operations %v, fields %v; want none and rollups", rollups.Operations, rollups.Fields)
+	}
+	// Reactions adds no field and no operation: the engine's runner runs it.
+	if len(reactions.Fields) != 0 || len(reactions.Operations) != 0 {
+		t.Errorf("Reactions fields %v and operations %v, want none", reactions.Fields, reactions.Operations)
 	}
 	var scopes []string
 	for _, op := range links.Operations {
@@ -48,6 +57,10 @@ func TestCoreBehaviors(t *testing.T) {
 	}
 	if want := []string{"link:", "unlink:", "listLinked:schema"}; !slices.Equal(scopes, want) {
 		t.Errorf("Links operations and scopes = %v, want %v", scopes, want)
+	}
+	if len(search.Operations) != 1 || search.Operations[0].Name != "search" || search.Operations[0].Scope != OperationScopeSchema ||
+		search.Operations[0].Writes || len(search.Fields) != 0 {
+		t.Errorf("Search = %+v, want one read-only schema-level operation, search, and no field", search)
 	}
 
 	for _, test := range []struct {
@@ -111,6 +124,27 @@ func TestCoreBehaviors(t *testing.T) {
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "gatedStates": ["done"]}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "all", "gatedStates": []}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "filter": "open"}}}`, "behavior Rollups config: "},
+		{search, `{"fields": ["title", "body"], "weights": {"title": 3, "body": 0.5}}`, ""},
+		{search, `{"fields": ["title"]}`, ""},
+		{search, ``, "behavior Search config: "},
+		{search, `{"fields": []}`, "behavior Search config: "},
+		{search, `{"fields": ["title", "title"]}`, "behavior Search config: "},
+		{search, `{"fields": [""]}`, "behavior Search config: "},
+		{search, `{"fields": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15", "f16", "f17"]}`, "behavior Search config: "},
+		{search, `{"fields": ["title"], "weights": {"title": 0}}`, "behavior Search config: "},
+		{search, `{"fields": ["title"], "weights": {"title": "high"}}`, "behavior Search config: "},
+		{search, `{"fields": ["title"], "vectors": true}`, "behavior Search config: "},
+		{reactions, `{"rules": [{"when": {"enters": "doing"}, "then": {"link": "project", "transition": "active"}}, {"when": {"allTerminal": {"schema": "tasks", "link": "project"}}, "then": {"transition": "done"}}]}`, ""},
+		{reactions, ``, "behavior Reactions config: "},
+		{reactions, `{"rules": []}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"enters": "doing", "allTerminal": {"schema": "tasks", "link": "project"}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"enters": "doing"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"enters": "doing"}, "then": {"link": "project"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"leaves": "doing"}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "the tasks", "link": "project"}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "tasks", "link": "Project"}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
+		{reactions, `{"rules": [{"when": {"enters": "doing"}, "then": {"transition": "done", "invoke": "comment"}}]}`, "behavior Reactions config: "},
 	} {
 		err := test.behavior.ValidateConfig(json.RawMessage(test.config))
 		switch {

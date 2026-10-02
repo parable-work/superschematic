@@ -2,7 +2,7 @@
 // operation route (the body as its parameters, If-Match, the result with
 // the instance's new ETag, every refusal's status), invoke's and
 // operate's expectedSeq, the describe and tools routes, and the core's
-// behaviors through the route.
+// behaviors through the route, Search's schema-level search among them.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -12,7 +12,7 @@ import type { Hono } from 'hono';
 import { EngineError, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { flag, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, projectsDocument, tasksDocument, thrown } from './helpers.ts';
+import { alice, cleanup, documentsDocument, freshPath, notesDocument, openTestEngine, orderDocument, projectsDocument, tasksDocument, thrown } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 
 afterEach(cleanup);
@@ -384,6 +384,25 @@ describe("the core's behaviors over HTTP", () => {
       data: { from: 'active', to: 'done' },
       etag: '"2"',
     });
+  });
+
+  test('Search through the route: search is on the schema, a reader pages through it, and a query FTS5 cannot parse is 400', async () => {
+    const { app, engine } = withDocument();
+    engine.schemas.define(alice, notesDocument());
+    engine.schemas.publish(alice, 'notes');
+    engine.instances.create(alice, 'notes', { title: 'Walnut desk', body: 'Solid wood.' }, { id: 'n1' });
+    engine.instances.create(alice, 'notes', { title: 'Oak chair', body: 'Goes with the walnut desk.' }, { id: 'n2' });
+    const SEARCH = '/namespaces/default/schemas/notes/operations/search';
+    const first = await data(call(app, 'POST', SEARCH, { token: 'reader', body: { query: 'walnut', limit: 1 } }));
+    assert.deepEqual([first.data.items, first.etag], [[{ id: 'n1', rank: 1, field: 'title', snippet: [{ text: 'Walnut', match: true }, { text: ' desk', match: false }] }], null]);
+    const second = await data(call(app, 'POST', SEARCH, { token: 'reader', body: { query: 'walnut', limit: 1, cursor: first.data.next } }));
+    assert.deepEqual([second.data.items.map((hit: { id: string; rank: number }) => [hit.id, hit.rank]), second.data.next], [[['n2', 2]], null]);
+    const refused = await problem(call(app, 'POST', SEARCH, { token: 'reader', body: { query: 'walnut AND', syntax: 'fts5' } }), 400);
+    assert.deepEqual([refused.code, refused.details.issues[0].path], ['invalid_argument', '/query']);
+    assert.equal((await problem(call(app, 'POST', SEARCH, { token: null, body: { query: 'walnut' } }), 401)).code, 'unauthorized');
+    // search is no instance operation, and documents does not compose Search.
+    assert.equal((await problem(call(app, 'POST', '/namespaces/default/schemas/notes/instances/n1/operations/search', { body: { query: 'walnut' } }), 404)).code, 'not_found');
+    assert.equal((await problem(call(app, 'POST', '/namespaces/default/schemas/documents/operations/search', { body: { query: 'walnut' } }), 404)).code, 'not_found');
   });
 
   test('listComments is a read: a reader may call it, and it answers the ETag it read', async () => {

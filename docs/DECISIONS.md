@@ -1061,24 +1061,19 @@ TypeScript implementation and no core edit, asserted by
 
 Status: built are the schema-file types and meta-schema
 (`@superschematic/schema-ir`), the strict loader
-(`@superschematic/schema-runtime`, held to the Go reader by
-`runtime/schema/testdata/schema_file_parity.json`), behavior declarations
-and the `@behavior` decorator (section 3.16 of `docs/extension-model.md`),
-and `@superschematic/engine` (`runtime/engine/README.md`): storage, the
-schema registry, instances, the event log, the access policy, the
-behavior plug-in interface with its reach into other instances (the
-amendment below), the HTTP API with its event stream and operation
-routes, and the describe and tools documents and MCP tools. The core
-declares `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links` and
-`Rollups` (fields derived from linked instances, computed when read), and
-the engine registers its implementations of them when it opens, so D10's
-done criterion is met: the core binary with no extension linked loads
-schemas that compose them (`make cli-smoke`), an engine with only its own
-behaviors runs them (`test/core-behaviors.test.ts`), and acme's
-`acme.Rating` runs with no core edit (`scripts/smoke.sh`). Not built:
-reactions, search, and the work-queue package. Each change that lands a
-piece updates this paragraph, the README layout table and the pages that
-describe it. The names and rules are reversible until the first release.
+(`@superschematic/schema-runtime`), behavior declarations and the
+`@behavior` decorator (section 3.16 of `docs/extension-model.md`), and
+`@superschematic/engine` (`runtime/engine/README.md`) with its HTTP API,
+event stream, MCP tools, the reach and publish hook of the first
+amendment below and the runner of the second. The core declares
+`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`,
+`Search` (full-text, on FTS5) and `Reactions`, and the engine registers
+them when it opens, which meets D10's done criterion (`make cli-smoke`,
+`test/core-behaviors.test.ts`, acme's `scripts/smoke.sh`). Not built:
+search's vectors, which need a SQLite extension the engine refuses to
+load and an embedding provider called outside the write transaction, and
+the work-queue package. Each change that lands a piece updates this
+paragraph. The names and rules are reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances
 
@@ -1100,6 +1095,7 @@ includes the state of another instance.
 | An operation's declaration takes a `scope`: `instance`, the default, or `schema`. A schema-level operation has no instance: its context has the config, `can`, reads of its behavior's tables and of instances, and invoke. No instance guard runs and it appends no event, so it changes state only through the operations it invokes, whose events record it. It is served at `POST /namespaces/{ns}/schemas/{name}/operations/{op}`, and its tool takes `params` and no `id`. | A pseudo-instance to hang it on; a second list of operations in the declaration |
 | A behavior runs a schema-level operation, of its own schema or another, with `instances.invokeSchema`, under `instances.invoke`'s rules: as the caller, asking `write` or `read` with the operation's name, in the caller's transaction, a writing one in a savepoint. A guard, a field reader and a read-only operation reach read-only ones only. | Schema-level operations served only over HTTP and MCP, so a behavior that needs another behavior's query, such as the instances that link to one, would read that behavior's tables, which it has no handle on |
 | A field that reads another instance is computed when it is read. The log records each instance's own changes, so a change of an instance that another's field reads shows at the reader's next read, without an event on the reader. | Storing derived values, which needs reactions to keep them current |
+| A publish that adds a behavior to a schema, removes it or changes its config runs the behavior's `afterConfigChange` in the publish's transaction, once for each namespace whose instances the schema serves, so storage that follows the config, such as a full-text index, matches the version before the version serves a read. It is an exception to "a behavior acts as the caller" (the first row): the hook has no principal and asks the access policy nothing, because the publish was already allowed and the hook writes only the behavior's own storage, so nothing it reads goes back to the publisher. It reads the instances 500 at a time, and a throw refuses the publish. | Running it as the publisher, which would leave every instance the publisher may not read out of an index every later reader searches; rebuilding at the first read after the publish, which puts the rebuild inside a read; rebuilding after the commit, which serves reads from storage that does not match the version |
 
 The first behaviors built on it are `Dependencies` and `Links`, bare
 plain nouns as `Workflow`, `Comments` and `Revisions` are:
@@ -1108,6 +1104,63 @@ plain nouns as `Workflow`, `Comments` and `Revisions` are:
 |----------|------------------------|
 | `Dependencies` requires `Workflow`. A blocker is an instance of the type's own schema, or of a schema its config lists, that composes Workflow; an edge that would close a cycle is refused. An instance is blocked while a blocker's status is not a terminal state of its own schema's Workflow config (`isTerminalState`). The `blocked` field and the guard call one function, over every blocker. The guard refuses a transition into a gated state (every terminal state of the type's Workflow, or the ones the config lists) while the instance is blocked; it reads the target state from `transition`'s `to`, which the closed parameters make the only way to ask. Deleting a blocker removes its edges. | Counting blockers of every schema in the field and of one schema in the guard; refusing the delete of a blocker |
 | `Links` holds named, single-valued links, each to an instance of the schema its config names. A pinned link needs a target schema that composes `Revisions`, records the target's revision and reports whether the target has moved past it. A required link cannot be unlinked, only moved, and the delete of its target is refused; an optional link is cleared when its target is deleted. One read-only field, `links`, holds them all, since declared fields are static. | A field per link name; clearing a required link, which leaves an instance its config says must have one |
+
+### D16, amended: reactions and timed work run after commit
+
+The amendment above runs every behavior function in the transaction of
+the change that calls it, and all but a publish's `afterConfigChange` as
+its caller: a hook can refuse that change, and does only what the caller
+may. Some work must do neither. A project closes when its last task
+finishes, whoever finished it, and a lease expires when nobody touches
+it. Such work runs after the commit, from the event log, as a principal
+the deployment names, on a runner in the engine's process that keeps a
+cursor and retries; a reaction never refuses the change that caused it.
+This was decided on 2026-10-01, so that a reaction can never refuse its
+cause and is not limited by the caller's permissions.
+`afterReferenceChange` stays the synchronous, same-transaction path for
+referential integrity, and a field that reads another instance still
+changes without an event.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A runner in the engine's process runs reactions and schedules, one per engine (`engine.runner`). The deployment starts and stops it (`start()`, `stop()`; `close()` stops it). Once started, it wakes when the commit notifier announces events and on a timer when a retry or a schedule comes due, and works through what is due in batches, yielding between them. `runDue()` runs everything due at once. | Running reactions in the commit's `afterCommit` work, which makes every write wait for them and drops their failures; another process, which D16's one writer per file rules out; starting with the engine, before the deployment has set up what the reactions need |
+| The runner acts as one principal, an engine option the deployment sets (`runner: { principal }`). The access policy is asked as that principal at every read and invoke, and the events the runner's work writes record it as their actor. There is no default and no implicit superuser: an engine opened without one has a runner that refuses to start. | The principal of the change that caused the reaction, which the synchronous path already has and whose limits after-commit work must not take; a system principal the policy is not asked about |
+| A subscription is one behavior on one schema that composes it, in one namespace. It hears the instance events of that schema, and of the schemas the implementation names for the schema's config, from the publish that made the schema compose the behavior on. Its cursor is a row of an engine table, `engine_subscriptions`, and it advances in the SQLite transaction that holds the reaction's writes. So a reaction's database effects happen once per event: a failure or a crash before the commit leaves neither the effects nor the advance, and the event runs again; after the commit it does not run again. An effect outside the database, such as a request a handler sends, happens at least once, since a handler that runs again repeats it; handlers are synchronous (D16) and cannot wait for one anyway. | Advancing the cursor first, which loses a reaction to a crash; a cursor in memory, which replays the log at every start; one cursor per behavior, where one schema's failure stops every other schema's reactions |
+| A subscription handles its events in log order, one at a time: it does not run an event until the one before has committed or been skipped. Subscriptions are independent of each other. A reaction reads instances as they are when it runs, which may be after later changes, and runs with the live version's config. | Handling a subscription's events concurrently, which reorders their effects |
+| A reaction that throws is retried with exponential backoff, from 1 second doubling to 1 minute by default, and after 5 failed attempts its subscription halts at the event. `engine.runner.status()` shows the event, the error and the attempts; `resume` runs the event again once its cause is fixed, and `resume` with `skip` passes over it and records the skip. Halting keeps the order the subscription promises: nothing after the event runs on state that assumed it ran. A refusal of the access policy is a failure like any other, so a principal the deployment has not granted halts where an operator sees it. | Skipping a failing event and recording it, which keeps going but breaks whatever the reaction maintains without anyone deciding to; retrying forever, which hides a reaction that cannot succeed |
+| An event the runner's work writes records its cause: the behavior, the event it reacted to or the schedule that ran, and its depth, one more than its cause's. A caller's change has depth 0 and a schedule's writes depth 1. A reaction does not run for an event at the depth limit, 8 by default: its subscription passes over the event and counts it as skipped, so a loop between reactions stops. A behavior's `parseConfig` can refuse rules that cycle on one instance; the core's `Reactions` does. | Tracking the chain in memory, which a restart loses; refusing the write past the limit, which halts a subscription for a loop that has already stopped |
+| A behavior declares named schedules, each with an interval of at least one second. The runner runs a schedule once per schema that composes the behavior, in each namespace, as schema-level work under its principal, and records the next run in an engine table, `engine_schedules`, in the run's transaction. Missed ticks are not replayed: a schedule that came due while the runner was stopped runs once, then an interval later, and its context gives the time of its previous run. A failing run is retried with backoff, never later than its next tick, and a schedule never halts. | Replaying each missed tick, which repeats a sweep that already covers all of them; halting a schedule, which leaves the leases it expires held |
+| Reactions and schedules change state only through the operations they invoke, as a schema-level operation does, so each change runs its guards and appends its event. They read instances, schemas' configs and their behavior's own tables, and a reaction reads an instance as the log had it before an event (`before`), which is all a delete leaves. Their `instances.invoke` and `instances.invokeSchema` run writing operations, as a writing operation's do. | Writing their behavior's tables directly, which changes state without an event |
+| `engine.runner.status()` is an engine call. It is not served over HTTP or MCP: it spans every namespace and schema, and the access policy has no action for that. A deployment shows it on its own terms. | A route under `read`, which the policy answers per schema |
+
+The core behavior built on it is `Reactions`, a plain noun as the others
+are:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Reactions` requires `Workflow` and takes a list of rules, each one `when` and one `then`. `when: { enters: <state> }` fires when the instance's status becomes the state, by a create or a transition. `when: { allTerminal: { schema, link } }` fires when an instance of `schema` that links to this one through `link` changes or goes and every instance that links here through it is in a terminal state of its own schema's Workflow, at least one. `then: { transition: <state>, link? }` moves this instance, or the instance its link points to, to the state through Workflow's `transition`. | Any operation with parameters from the config, which publish cannot check on a linked schema; conditions over fields, which derived fields are for |
+| A rule acts only where it can: a target already in the state, with no transition to it from where it is, or whose guards veto the transition is left as it is. A target without Workflow, a state its Workflow lacks, and a `schema` that does not link here through `link` are failures, which halt the subscription. | Failing on a veto, which halts a subscription over an ordinary refusal such as an open blocker |
+| `parseConfig` checks every state against the type's Workflow and every link against its Links, refuses a rule on the instance itself that no transition allows, and refuses rules on the instance itself whose states form a cycle. A linked schema's states and links are checked when a rule runs, since a config sees only its own type. `configChange` allows any change, and the behavior can be added to and removed from a schema with instances: it keeps no state. | Checking linked schemas at publish, which need not be published yet |
+
+### D16, amended: behaviors that serve claimable work
+
+The work-queue package D16 lists needs two things a behavior could not
+do: find the eligible instances across a schema, which a claim order
+ranks and `claimNext` picks from, and create child instances, which a
+blueprint makes with its parent. A human decided on 2026-10-01 that
+work-queue state lives on instances, in the behaviors' columns, and that
+`claimNext` is a schema-level operation that reads those columns and
+then invokes an instance operation on the instance it picks, so the
+claim itself runs with that instance's guards and appends its event.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A behavior reads its own columns across its schema's instances in SQL, through a read-only relation the engine names (`sql.instances()`): one row per instance of the call's schema in the call's namespace, with the instance's id and metadata, its own fields as JSON, and the behavior's own columns under its own names for them. The engine defines the relation in a common table expression ahead of each statement that names it, after the SQL checks have run on the behavior's text, and asks the access policy for `read` on the schema as the call's principal, once for each such statement; a refusal is `forbidden`. It is in every context that acts for a principal. A migration and `afterConfigChange` act for none and do not get it. | Reading other behaviors' columns, which breaks D16's rule that a behavior's storage is its own; a query builder, which cannot join the behavior's own tables; a side table per behavior mirroring the instances, which every create and delete would have to maintain |
+| The expression writes the namespace and the schema, names the engine has checked, as SQL string literals, and holds no parameter. | Parameters, which would take the positions ahead of the behavior's own and bind each `?` it wrote to the wrong value; a temporary view per call, which changes the file's schema inside a read |
+| The relation's name and the indexes' are under `bhv_<key>___`, one `_` past the behavior's prefix. `sql.table(name)` cannot give such a name, and a migration's SQL may not name one, so none collides with a table of the behavior's; it carries the prefix, so the behavior's statements pass the checker. | A plain word such as `instances`, which a behavior's own table can already be called; a name outside the prefix, which the checker would have to let through for every behavior |
+| A migration lists indexes on the behavior's own columns (`indexes`), which the engine creates on the instances table led by the namespace and the schema, so a claim's query reads one namespace's instances of one schema in index order. Registration refuses an index over a column no migration up to its own adds. An index is only added: no later migration drops or changes one yet. | Scanning every row in JavaScript inside the write lock, as the source implementation's claim did |
+| A behavior creates an instance wherever it may invoke a writing operation (`instances.create`): as the caller, asking `write` on the schema, with the live version's validation, every behavior's `initialize` and `afterChange`, and the create event, which records the runner's cause in the runner's work. It runs in the call's transaction, in a savepoint that rolls back alone when the behavior catches its failure, and nests like an invoke. A guard, a field reader and a read-only operation cannot create. A schema-level operation and the runner's work, which the amendments above hold to changing state through the operations they invoke, change it through the instances they create too, each with its hooks and its event. | An operation on the target schema that creates, which every schema would have to compose; creating after the commit only, which cannot create a parent's children in the parent's transaction |
+| A schedule's interval may be a function of the config of the schema it runs on, which the runner calls when it finds the schedule there, at its first pass and after each publish. A function that throws or gives no valid interval fails the schedule on that schema as a failing run does: `engine.runner.status()` shows the error, and the runner tries again after the backoff, while the schedule on other schemas and the runner go on. | One interval per behavior, which makes a lease sweep as slow as the slowest schema's lease |
 
 ## D17. A version graph over versioned tables, with one merge core
 

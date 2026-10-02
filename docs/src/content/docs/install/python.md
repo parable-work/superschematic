@@ -137,6 +137,14 @@ input and on every object it holds. A failure raises `ValidationError`,
 whose `errors` maps each path (`lines`, `lines[0].quantity`) to its rule
 and message, as the Go and TypeScript SDKs report them.
 
+An object-type body argument, alone or in a list, a list of lists or a
+map, is checked the same way, with each failure under the argument's path
+(`points[0].x`, `grid[0][1].pinLabel`, `point_by_name[a].x`). It is sent
+as pydantic read it, by wire name, so a value pydantic coerces, such as
+the text `"1"` for a number, reaches the route as the number. Each value
+of an argument is checked at its own path, and `None` there, as a required
+argument or a list element of any type, is `required` (`related[1]`).
+
 An operation's arguments travel where its route reads them: on `GET` in
 the query string, and on every other method, `DELETE` included, as the
 fields of the JSON body. A `Generic.JSON` body argument is typed as the
