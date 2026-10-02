@@ -1074,11 +1074,11 @@ declares the work-queue behaviors `Lease`, `Assignment` and `Queue`, each
 registered with the npm package that implements it, and `superschematic
 behaviors --package` writes each package only its own copies;
 `@superschematic/engine-workqueue` (`runtime/engine-workqueue/README.md`)
-implements `Lease` and `Assignment`, which a deployment registers with
-the engine. Not built: search's vectors, which need a SQLite extension
-the engine refuses to load and an embedding provider called outside the
-write transaction, and the rest of the work-queue package: `Queue` and
-`claimNext`, budgets, retries, presence and blueprints. Each change that
+implements `Lease`, `Assignment` and `Queue`, which a deployment
+registers with the engine. Not built: search's vectors, which need a
+SQLite extension the engine refuses to load and an embedding provider
+called outside the write transaction, and the rest of the work-queue
+package: budgets, retries, presence and blueprints. Each change that
 lands a piece updates this paragraph. The names and rules are reversible until the first release.
 
 ### D16, amended: behaviors that reach other instances

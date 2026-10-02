@@ -253,6 +253,11 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "sweepMs": {
+                    "description": "How often the engine's runner expires the leases past their expiry time or longest hold, in milliseconds; 5000 when absent.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  },
                   "ttlMs": {
                     "description": "How long a lease lasts after its acquire or its last heartbeat, in milliseconds; 60000 when absent.",
                     "minimum": 1000,

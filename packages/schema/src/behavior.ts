@@ -181,6 +181,8 @@ export interface LeaseConfig {
   readonly ttlMs?: number;
   /** How often the holder should send a heartbeat, in milliseconds, less than ttlMs; a third of ttlMs when absent. */
   readonly heartbeatMs?: number;
+  /** How often the engine's runner expires lapsed leases, in milliseconds, at least 1000; 5000 when absent. */
+  readonly sweepMs?: number;
   /** The longest a principal may hold a lease after acquiring it, in milliseconds, renewed or not; no limit when absent. */
   readonly maxHoldMs?: number;
   /** An integer field of the type whose positive value overrides maxHoldMs for the instance. */

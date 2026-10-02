@@ -15,7 +15,12 @@ A lease past either has lapsed: it gives its holder nothing, so the
 holder's heartbeat, release, acknowledgement and writes are refused, and
 only its expiry can follow. expire applies the expiry, and anyone who may
 write the instance may call it; acquire applies it first over a lapsed
-lease. An expiry clears the holder, advances the token, counts the expiry
+lease; and the expire schedule, which the engine's runner runs every
+sweepMs as its principal, calls it on every lapsed lease of the schema,
+found through the lease columns across the schema (sql.instances()) and
+their index. A principal with overridePermission expires a given holder's
+lease at once, active or not (expire with holder), and every lease that
+holder has on the schema (expireHolder), for a holder that is gone. An expiry clears the holder, advances the token, counts the expiry
 unless the instance is in a terminal state of its Workflow (a holder that
 finished and died before releasing has not failed), and moves the status
 with onExpiry, or escalate at the expiry that reaches maxExpiries, only
@@ -31,18 +36,24 @@ update, a delete and every writing operation of another behavior by any
 principal but the holder, except an operation the config exempts and a
 principal with overridePermission. A read-only operation passes, and so
 does a request a behavior's own code makes (call() or update(), which
-name it as caller): the operation that made it was asked already. Lease's
-own operations check their callers themselves. Nothing changes the field
+name it as caller): the operation that made it was asked already. Queue's
+refresh passes too: it only recomputes Queue's own copies of the
+instance's facts, and a blocker's change invokes it as whoever changed
+the blocker. Lease's own operations check their callers themselves, but
+for direct, whose permission the guard asks. Nothing changes the field
 that limits the hold (maxHoldField) while a lease is held, so a holder
 cannot extend its own hold. An operation another behavior's reference
 hook invokes on a leased instance, as Dependencies' removeBlocker when a
 blocker goes, runs as its caller and is refused like any other: a
 deployment exempts the ones it wants through.
 
-Directives are a holder's control channel. direct, which needs
-directPermission (overridePermission when that is absent), attaches one
-to the current token; heartbeat returns the ones not acknowledged, and
-acknowledge marks them handled. When the token advances, the directives
+Directives are a holder's control channel. direct attaches one to the
+current token; heartbeat returns the ones not acknowledged, and
+acknowledge marks them handled. A principal's direct needs
+directPermission (overridePermission when that is absent), which the
+guard asks; another behavior of the type sends one through call(), as
+the principal it runs for, with none, as a budget does when its usage
+runs over. When the token advances, the directives
 of the lease it ends are deleted, so none reaches the next holder.
 
 configChange: any config may change. Lease can be added to a schema that
@@ -63,6 +74,7 @@ import {
   type InstanceView,
   type OperationContext,
   type Row,
+  type SqlValue,
   type WorkflowStates,
 } from '@superschematic/engine';
 
@@ -70,6 +82,15 @@ import declaration from './declarations/Lease.behavior.json' with { type: 'json'
 
 /** How long a lease lasts after its acquire or its last heartbeat when the config gives no ttlMs. */
 export const DEFAULT_TTL_MS = 60000;
+
+/** How often the runner expires lapsed leases when the config gives no sweepMs. */
+export const DEFAULT_SWEEP_MS = 5000;
+
+/** The instances one query of the sweep or of expireHolder reads. */
+const BATCH = 100;
+
+/** The most leases one run of the expire schedule expires; the rest wait for the next. */
+export const MAX_SWEEP = 1000;
 
 /** A move of the status a lease's end makes: to transition, from one of from. */
 export interface LeaseTransition {
@@ -81,6 +102,7 @@ export interface LeaseTransition {
 export interface LeaseConfig {
   readonly ttlMs: number;
   readonly heartbeatMs: number;
+  readonly sweepMs: number;
   readonly maxHoldMs?: number;
   readonly maxHoldField?: string;
   readonly onExpiry?: LeaseTransition;
@@ -324,6 +346,61 @@ function checkIntegerField(target: ConfigTarget, field: string): void {
   }
 }
 
+// requireOverride holds a call to a principal with overridePermission,
+// and refuses it outright when the config names none.
+function requireOverride(scope: BehaviorScope<LeaseConfig>, what: string): void {
+  const permission = scope.config.overridePermission;
+  if (permission === undefined) {
+    throw new EngineError('forbidden', `${scope.principal.subject} may not ${what} ${scope.schema}: its Lease config names no overridePermission`);
+  }
+  if (!scope.can(permission)) {
+    throw new EngineError('forbidden', `${scope.principal.subject} may not ${what} ${scope.schema}: it needs permission ${permission}`);
+  }
+}
+
+// directGuard is who may send a directive: a principal with
+// directPermission, or overridePermission when that is absent. A
+// behavior's call() is not asked (the guard passes it).
+function directGuard(view: InstanceView<LeaseConfig>): string | undefined {
+  const permission = view.config.directPermission ?? view.config.overridePermission;
+  if (permission === undefined) {
+    return 'its config names no permission that sends directives (directPermission or overridePermission)';
+  }
+  if (!view.can(permission)) {
+    throw forbidden(view, 'send a directive to the holder of', permission);
+  }
+  return undefined;
+}
+
+// holdSql is the longest hold as SQL over the relation's row: the
+// instance's maxHoldField when it holds a positive integer, else
+// maxHoldMs; no SQL when the config gives neither.
+function holdSql(config: LeaseConfig): { sql?: string; params: SqlValue[] } {
+  if (config.maxHoldField === undefined) {
+    return config.maxHoldMs === undefined ? { params: [] } : { sql: '?', params: [config.maxHoldMs] };
+  }
+  const path = `$."${config.maxHoldField}"`;
+  return {
+    sql: `COALESCE(CASE WHEN json_type(data, ?) = 'integer' AND json_extract(data, ?) > 0 THEN json_extract(data, ?) END, ?)`,
+    params: [path, path, path, config.maxHoldMs ?? null],
+  };
+}
+
+// expireOne invokes expire on one instance for a sweep or expireHolder. A
+// guard's veto leaves that instance for the next sweep and the others go
+// on; any other failure, a principal the policy refuses say, fails the
+// run, so the deployment sees it.
+function expireOne(context: BehaviorScope<LeaseConfig>, id: string, params: { holder?: string }): boolean {
+  try {
+    return (context.instances.invoke(context.schema, id, 'expire', params as FrozenJSON) as { expired: boolean }).expired;
+  } catch (error) {
+    if (error instanceof BehaviorVetoError) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 export const lease = defineBehavior<LeaseConfig>({
   declaration,
 
@@ -333,6 +410,7 @@ export const lease = defineBehavior<LeaseConfig>({
     const raw = json as {
       ttlMs?: number;
       heartbeatMs?: number;
+      sweepMs?: number;
       maxHoldMs?: number;
       maxHoldField?: string;
       onExpiry?: LeaseTransition;
@@ -382,6 +460,7 @@ export const lease = defineBehavior<LeaseConfig>({
     return {
       ttlMs,
       heartbeatMs,
+      sweepMs: raw.sweepMs ?? DEFAULT_SWEEP_MS,
       ...(raw.maxHoldMs === undefined ? {} : { maxHoldMs: raw.maxHoldMs }),
       ...(raw.maxHoldField === undefined ? {} : { maxHoldField: raw.maxHoldField }),
       ...(raw.onExpiry === undefined ? {} : { onExpiry: { transition: raw.onExpiry.transition, from: [...raw.onExpiry.from] } }),
@@ -413,6 +492,8 @@ export const lease = defineBehavior<LeaseConfig>({
         ttl_ms: { type: 'integer' },
         expiries: { type: 'integer', notNull: true, default: 0 },
       },
+      // The sweep reads the held leases, and expireHolder one holder's.
+      indexes: { held: ['holder', 'expires_at'] },
       up(sql) {
         sql.run(`CREATE TABLE ${sql.table('directives')} (
           namespace       TEXT    NOT NULL,
@@ -433,11 +514,14 @@ export const lease = defineBehavior<LeaseConfig>({
 
   // The lease's exclusion: see the header.
   guard(view, request) {
+    if (request.kind === 'operation' && request.behavior === NAME) {
+      return request.operation === 'direct' && request.caller === undefined ? directGuard(view) : undefined;
+    }
     const lease = held(view);
     if (lease.holder === null) {
       return undefined;
     }
-    if (request.kind === 'operation' && (request.behavior === NAME || !request.writes)) {
+    if (request.kind === 'operation' && (!request.writes || (request.behavior === 'Queue' && request.operation === 'refresh'))) {
       return undefined;
     }
     if (overrides(view)) {
@@ -544,24 +628,21 @@ export const lease = defineBehavior<LeaseConfig>({
       return {};
     },
 
-    expire(context) {
+    expire(context, params) {
+      const holder = params.holder as string | undefined;
+      if (holder !== undefined) {
+        requireOverride(context, 'expire the lease of another holder of');
+      }
       const lease = held(context);
-      if (lease.holder === null || isActive(context, lease)) {
+      if (lease.holder === null || (holder === undefined ? isActive(context, lease) : lease.holder !== holder)) {
         return { expired: false };
       }
       applyExpiry(context, lease);
       return { expired: true };
     },
 
+    // Who may send one is the guard's question (directGuard).
     direct(context, params) {
-      const { config } = context;
-      const permission = config.directPermission ?? config.overridePermission;
-      if (permission === undefined) {
-        throw vetoed(context, 'direct', 'its config names no permission that sends directives (directPermission or overridePermission)');
-      }
-      if (!context.can(permission)) {
-        throw forbidden(context, 'send a directive to the holder of', permission);
-      }
       const lease = held(context);
       if (!isActive(context, lease)) {
         throw vetoed(context, 'direct', 'no lease is active, so there is no holder to direct');
@@ -619,6 +700,65 @@ export const lease = defineBehavior<LeaseConfig>({
       const { expiries } = held(context);
       context.columns.set({ expiries: 0 });
       return { expiries };
+    },
+  },
+
+  schemaOperations: {
+    // Every lease one holder has on the schema, found through the index on
+    // the holder, expired by expire on each instance, so each expiry runs
+    // that instance's guards and appends its event.
+    expireHolder(context, params) {
+      requireOverride(context, 'expire the leases of a holder on');
+      const holder = params.holder as string;
+      const relation = context.sql.instances();
+      let expired = 0;
+      let after = '';
+      for (;;) {
+        const ids = context.sql
+          .all(`SELECT id FROM ${relation} WHERE holder = ? AND id > ? ORDER BY id LIMIT ?`, [holder, after, BATCH])
+          .map((row) => String(row.id));
+        for (const id of ids) {
+          if (expireOne(context, id, { holder })) {
+            expired += 1;
+          }
+        }
+        if (ids.length < BATCH) {
+          return { expired };
+        }
+        after = ids[ids.length - 1];
+      }
+    },
+  },
+
+  schedules: {
+    // Every sweepMs, the runner expires the leases past their expiry time
+    // or their longest hold, at most MAX_SWEEP a run.
+    expire: {
+      everyMs: (config) => config.sweepMs,
+      run(context) {
+        const { config } = context;
+        const relation = context.sql.instances();
+        const hold = holdSql(config);
+        let after = '';
+        for (let swept = 0; swept < MAX_SWEEP; ) {
+          const ids = context.sql
+            .all(
+              `SELECT id FROM ${relation}
+               WHERE holder IS NOT NULL AND id > ? AND (expires_at <= ?${hold.sql === undefined ? '' : ` OR acquired_at + ${hold.sql} <= ?`})
+               ORDER BY id LIMIT ?`,
+              [after, context.now, ...hold.params, ...(hold.sql === undefined ? [] : [context.now]), Math.min(BATCH, MAX_SWEEP - swept)]
+            )
+            .map((row) => String(row.id));
+          for (const id of ids) {
+            expireOne(context, id, {});
+          }
+          swept += ids.length;
+          if (ids.length < BATCH) {
+            return;
+          }
+          after = ids[ids.length - 1];
+        }
+      },
     },
   },
 

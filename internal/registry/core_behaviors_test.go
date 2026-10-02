@@ -83,10 +83,10 @@ func TestCoreBehaviors(t *testing.T) {
 	if len(lease.Requires) != 0 || len(assignment.Requires) != 0 || !slices.Equal(queue.Requires, []string{"Workflow", "Lease"}) {
 		t.Errorf("requires: Lease %v, Assignment %v, Queue %v; want none, none and [Workflow Lease]", lease.Requires, assignment.Requires, queue.Requires)
 	}
-	// Every work-queue operation writes; claimNext alone is schema-level.
+	// Every work-queue operation writes; claimNext and expireHolder are schema-level.
 	for _, b := range []Behavior{lease, assignment, queue} {
 		for _, op := range b.Operations {
-			if !op.Writes || (op.Scope == OperationScopeSchema) != (op.Name == "claimNext") {
+			if !op.Writes || (op.Scope == OperationScopeSchema) != (op.Name == "claimNext" || op.Name == "expireHolder") {
 				t.Errorf("%s.%s: writes %v, scope %q", b.Name, op.Name, op.Writes, op.Scope)
 			}
 		}
@@ -175,10 +175,11 @@ func TestCoreBehaviors(t *testing.T) {
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "tasks", "link": "Project"}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"enters": "doing"}, "then": {"transition": "done", "invoke": "comment"}}]}`, "behavior Reactions config: "},
 		{lease, ``, ""},
-		{lease, `{"ttlMs": 30000, "heartbeatMs": 10000, "maxHoldMs": 3600000, "maxHoldField": "timeLimitMs",
+		{lease, `{"ttlMs": 30000, "heartbeatMs": 10000, "sweepMs": 2000, "maxHoldMs": 3600000, "maxHoldField": "timeLimitMs",
 			"onExpiry": {"transition": "queued", "from": ["running"]}, "maxExpiries": 3, "escalate": {"transition": "failed", "from": ["running"]},
 			"exempt": ["Comments.comment", "acme.Rating.rate"], "acquirePermission": "jobs.work", "overridePermission": "jobs.admin", "directPermission": "jobs.direct"}`, ""},
 		{lease, `{"ttlMs": 999}`, "behavior Lease config: "},
+		{lease, `{"sweepMs": 500}`, "behavior Lease config: "},
 		{lease, `{"heartbeatMs": 0}`, "behavior Lease config: "},
 		{lease, `{"ttlMs": 1500.5}`, "behavior Lease config: "},
 		{lease, `{"maxHoldMs": 10}`, "behavior Lease config: "},

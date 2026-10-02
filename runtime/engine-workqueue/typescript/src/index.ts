@@ -15,11 +15,14 @@ import type { AnyBehaviorImplementation } from '@superschematic/engine';
 
 import { assignment } from './assignment.js';
 import { lease } from './lease.js';
+import { queue } from './queue.js';
 
 export { assignment } from './assignment.js';
 export type { AssignmentConfig } from './assignment.js';
-export { DEFAULT_TTL_MS, lease } from './lease.js';
+export { DEFAULT_SWEEP_MS, DEFAULT_TTL_MS, MAX_SWEEP, lease } from './lease.js';
 export type { DirectiveRecord, LeaseConfig, LeaseRecord, LeaseTransition } from './lease.js';
+export { DEFAULT_MAX_CANDIDATES, queue } from './queue.js';
+export type { ClaimRecord, QueueConfig } from './queue.js';
 
 /** Every behavior this package implements, in the order a deployment registers them. */
-export const workQueueBehaviors: readonly AnyBehaviorImplementation[] = Object.freeze([lease, assignment]);
+export const workQueueBehaviors: readonly AnyBehaviorImplementation[] = Object.freeze([lease, assignment, queue]);

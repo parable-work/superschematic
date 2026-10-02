@@ -862,7 +862,7 @@ engine; without them the engine refuses a schema that composes one.
 | `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`); required | `rollups` | none |
 | `Search` | `fields`, `weights`; required | none | `search`, of scope `schema` |
 | `Reactions` | `rules` (each a `when`, `enters` or `allTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
-| `Lease` | `ttlMs`, `heartbeatMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `acquirePermission`, `overridePermission`, `directPermission`; optional; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries` |
+| `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `acquirePermission`, `overridePermission`, `directPermission`; optional; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
 | `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext`, of scope `schema` |
 

@@ -100,6 +100,11 @@
         "minLength": 1,
         "type": "string"
       },
+      "sweepMs": {
+        "description": "How often the engine's runner expires the leases past their expiry time or longest hold, in milliseconds; 5000 when absent.",
+        "minimum": 1000,
+        "type": "integer"
+      },
       "ttlMs": {
         "description": "How long a lease lasts after its acquire or its last heartbeat, in milliseconds; 60000 when absent.",
         "minimum": 1000,
@@ -241,9 +246,16 @@
     },
     {
       "name": "expire",
-      "description": "Applies the expiry of a lease past its expiry time or its longest hold: the holder is cleared, the token advances, the expiry is counted unless the instance is in a terminal state of its Workflow, and onExpiry or escalate moves the status. Any principal who may write the instance may call it; on any other instance it changes nothing.",
+      "description": "Applies the expiry of a lease past its expiry time or its longest hold: the holder is cleared, the token advances, the expiry is counted unless the instance is in a terminal state of its Workflow, and onExpiry or escalate moves the status. Any principal who may write the instance may call it; on any other instance it changes nothing. With holder, a principal with overridePermission expires that holder's lease at once, active or not. The engine's runner calls it on every lapsed lease, every sweepMs.",
       "paramsSchema": {
         "additionalProperties": false,
+        "properties": {
+          "holder": {
+            "description": "The principal whose lease to expire now, active or not; it needs overridePermission.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "resultSchema": {
@@ -263,7 +275,7 @@
     },
     {
       "name": "direct",
-      "description": "Sends the holder of the active lease a directive, which its heartbeats deliver until it acknowledges it. Needs directPermission, or overridePermission when that is absent; refused when the config names neither.",
+      "description": "Sends the holder of the active lease a directive, which its heartbeats deliver until it acknowledges it. A principal needs directPermission, or overridePermission when that is absent, and is refused when the config names neither; another behavior of the type sends one with call(), as the principal it runs for, without either.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -331,6 +343,39 @@
         "type": "object"
       },
       "writes": true
+    },
+    {
+      "name": "expireHolder",
+      "description": "Expires every lease one principal holds on the schema's instances, active or not, as expire with that holder does on each: for a principal that is gone. Needs overridePermission; refused when the config names none.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "holder": {
+            "description": "The principal whose leases to expire.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "holder"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "expired": {
+            "description": "How many leases expired.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expired"
+        ],
+        "type": "object"
+      },
+      "writes": true,
+      "scope": "schema"
     },
     {
       "name": "resetExpiries",

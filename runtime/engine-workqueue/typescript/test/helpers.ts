@@ -77,7 +77,8 @@ export interface BehaviorRef {
 
 /**
  * jobsDocument is a General schema named Job whose instance type has a
- * title, a priority and a time limit, and composes the behaviors given.
+ * title, a priority, a time limit, a topic and an urgent flag, and
+ * composes the behaviors given.
  */
 export function jobsDocument(behaviors: readonly BehaviorRef[], name = 'Job'): Record<string, unknown> {
   return {
@@ -92,6 +93,8 @@ export function jobsDocument(behaviors: readonly BehaviorRef[], name = 'Job'): R
           { name: 'title', typeRef: { name: 'string' }, required: true },
           { name: 'priority', typeRef: { name: 'Generic.Int64' } },
           { name: 'timeLimitMs', typeRef: { name: 'Generic.Int64' } },
+          { name: 'topic', typeRef: { name: 'string' } },
+          { name: 'urgent', typeRef: { name: 'boolean' } },
         ],
       },
     },

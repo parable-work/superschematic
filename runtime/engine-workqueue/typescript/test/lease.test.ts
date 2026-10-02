@@ -1,10 +1,11 @@
 // Lease: acquire, heartbeat and release with the fencing token, which only
 // the holder of an active lease may use; the guard that keeps the lease
-// exclusive; expiry, applied once by expire or by an acquire over a lapsed
-// lease, with onExpiry and escalate moving the status only through
-// Workflow's transition and only from their from states; maxExpiries and
+// exclusive; expiry, applied once by expire, by an acquire over a lapsed
+// lease or by the runner's sweep, with onExpiry and escalate moving the
+// status only through Workflow's transition and only from their from
+// states; a gone holder's leases, expired at once; maxExpiries and
 // resetExpiries; the longest hold; directives tied to the lease they were
-// sent under; and the config rules. Real SQLite, a real engine, a clock the
+// sent under, from a principal or another behavior; and the config rules. Real SQLite, a real engine, a clock the
 // tests move.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
@@ -20,7 +21,9 @@ import {
   type Principal,
 } from '@superschematic/engine';
 
+import { gate, openMetaSchema, signal } from './fixtures.ts';
 import { Clock, alice, cleanup, drivers, jobFlow, jobsDocument, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
+import { lease } from '../dist/index.js';
 
 afterEach(cleanup);
 
@@ -28,6 +31,7 @@ const worker: Principal = { subject: 'wren', permissions: [] };
 const other: Principal = { subject: 'otto', permissions: [] };
 const operator: Principal = { subject: 'opal', permissions: ['jobs.override'] };
 const sender: Principal = { subject: 'sid', permissions: ['jobs.direct'] };
+const runner: Principal = { subject: 'runner', permissions: [] };
 
 const T0 = 1_000_000;
 
@@ -442,6 +446,129 @@ for (const driver of drivers) {
     });
   });
 
+  describe(`Lease: expiry on the runner, and a gone holder (${driver})`, () => {
+    test("every sweepMs the runner expires the leases past their expiry time or their longest hold, as its principal", () => {
+      const { engine, clock } = world({ ...requeue, sweepMs: 2000, maxHoldField: 'timeLimitMs', overridePermission: 'jobs.override' }, [], {
+        runner: { principal: runner },
+      });
+      engine.runner.runDue();
+      const [schedule] = engine.runner.status().schedules;
+      assert.deepEqual([schedule.behavior, schedule.schedule, schedule.everyMs, schedule.next], ['Lease', 'expire', 2000, T0 + 2000]);
+      for (const id of ['j2', 'j3']) {
+        engine.instances.create(alice, 'Job', { title: id }, { id });
+      }
+      for (const id of ['j1', 'j2', 'j3']) {
+        invoke(engine, worker, 'acquire', {}, id);
+        invoke(engine, worker, 'transition', { to: 'running' }, id);
+      }
+      // j3's limit is cut below its expiry time: past it, the lease has lapsed though expiresAt has not come.
+      engine.instances.update(operator, 'Job', 'j3', { timeLimitMs: 30000 });
+      clock.advance(30000);
+      invoke(engine, worker, 'heartbeat', { token: 1 }, 'j2');
+      assert.equal(engine.runner.runDue().scheduled, 1);
+      assert.deepEqual(
+        ['j1', 'j2', 'j3'].map((id) => [statusOf(engine, id), leaseOf(engine, id).holder]),
+        [['running', 'wren'], ['running', 'wren'], ['queued', null]]
+      );
+      clock.advance(30000);
+      assert.equal(engine.runner.runDue().scheduled, 1);
+      assert.deepEqual(
+        ['j1', 'j2', 'j3'].map((id) => [statusOf(engine, id), leaseOf(engine, id).holder, leaseOf(engine, id).expiries]),
+        [['queued', null, 1], ['running', 'wren', 0], ['queued', null, 1]]
+      );
+      const last = engine.events.read(alice, { schema: 'Job', instanceId: 'j1' }).events.at(-1);
+      assert.deepEqual([last?.actor, (last?.change as { operation: string }).operation, last?.cause], [
+        'runner',
+        'expire',
+        { behavior: 'Lease', schedule: 'expire', depth: 1 },
+      ]);
+    });
+
+    test("a guard's veto of one expiry leaves that lease for the next sweep, and the sweep goes on", () => {
+      const clock = new Clock(T0);
+      const engine = openTestEngine({ driver, clock: clock.now, behaviors: [lease, gate], metaSchema: openMetaSchema(), runner: { principal: runner } });
+      publish(engine, jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Lease', config: requeue }, { name: 'test.Gate' }]));
+      for (const id of ['a', 'stuck', 'z']) {
+        engine.instances.create(alice, 'Job', { title: id }, { id });
+        invoke(engine, worker, 'acquire', {}, id);
+      }
+      engine.runner.runDue();
+      clock.advance(60000);
+      assert.deepEqual(engine.runner.runDue(), { handled: 0, skipped: 0, failed: 0, scheduled: 1 });
+      assert.deepEqual(['a', 'stuck', 'z'].map((id) => leaseOf(engine, id).holder), [null, 'wren', null]);
+    });
+
+    test('expire with a holder expires that holder\'s lease at once, active or not, and needs overridePermission', () => {
+      const { engine } = world({ ...requeue, overridePermission: 'jobs.override' });
+      invoke(engine, worker, 'acquire');
+      invoke(engine, worker, 'transition', { to: 'running' });
+      assert.equal(thrown(() => invoke(engine, other, 'expire', { holder: 'wren' }), EngineError).code, 'forbidden');
+      assert.deepEqual(invoke(engine, operator, 'expire', { holder: 'otto' }), { expired: false });
+      assert.deepEqual(invoke(engine, operator, 'expire', { holder: 'wren' }), { expired: true });
+      assert.deepEqual([statusOf(engine), leaseOf(engine).holder, leaseOf(engine).expiries], ['queued', null, 1]);
+    });
+
+    test("expireHolder expires every lease one holder has on the schema, and needs overridePermission, which the config must name", () => {
+      const { engine, clock } = world({ ...requeue, overridePermission: 'jobs.override' });
+      for (const id of ['j2', 'j3']) {
+        engine.instances.create(alice, 'Job', { title: id }, { id });
+      }
+      invoke(engine, worker, 'acquire', {}, 'j1');
+      invoke(engine, worker, 'transition', { to: 'running' }, 'j1');
+      invoke(engine, worker, 'acquire', {}, 'j2');
+      invoke(engine, other, 'acquire', {}, 'j3');
+      clock.advance(1000);
+      const refused = thrown(() => engine.instances.invokeSchema(other, 'Job', 'expireHolder', { holder: 'wren' }), EngineError);
+      assert.deepEqual([refused.code, refused.message], ['forbidden', 'otto may not expire the leases of a holder on Job: it needs permission jobs.override']);
+      assert.deepEqual(engine.instances.invokeSchema(operator, 'Job', 'expireHolder', { holder: 'wren' }), { expired: 2 });
+      assert.deepEqual(
+        ['j1', 'j2', 'j3'].map((id) => [statusOf(engine, id), leaseOf(engine, id).holder, leaseOf(engine, id).expiries]),
+        [['queued', null, 1], ['queued', null, 1], ['queued', 'otto', 0]]
+      );
+      assert.deepEqual(engine.instances.invokeSchema(operator, 'Job', 'expireHolder', { holder: 'wren' }), { expired: 0 });
+
+      const none = world().engine;
+      const unnamed = thrown(() => none.instances.invokeSchema(operator, 'Job', 'expireHolder', { holder: 'wren' }), EngineError);
+      assert.deepEqual([unnamed.code, unnamed.message], ['forbidden', 'opal may not expire the leases of a holder on Job: its Lease config names no overridePermission']);
+    });
+  });
+
+  describe(`Lease: directives from another behavior (${driver})`, () => {
+    function signalled(config?: Record<string, unknown>) {
+      const engine = openTestEngine({ driver, behaviors: [lease, signal], metaSchema: openMetaSchema() });
+      publish(
+        engine,
+        jobsDocument([{ name: 'Workflow', config: jobFlow }, config === undefined ? { name: 'Lease' } : { name: 'Lease', config }, { name: 'test.Signal' }])
+      );
+      engine.instances.create(alice, 'Job', { title: 'Build' }, { id: 'j1' });
+      return engine;
+    }
+
+    test("a behavior of the type sends a directive through call(), as its principal, without the permission a principal's own direct needs", () => {
+      const engine = signalled({ directPermission: 'jobs.direct' });
+      invoke(engine, worker, 'acquire');
+      assert.equal(thrown(() => invoke(engine, worker, 'direct', { name: 'stop' }), EngineError).code, 'forbidden');
+      assert.deepEqual(invoke(engine, worker, 'signal', { name: 'stop' }), { id: 1 });
+      const [directive] = (invoke(engine, worker, 'heartbeat', { token: 1 }) as { directives: Array<{ name: string; createdBy: string }> }).directives;
+      assert.deepEqual([directive.name, directive.createdBy], ['stop', 'wren']);
+    });
+
+    test('with no permission in the config, a principal cannot send one and a behavior still can', () => {
+      const engine = signalled();
+      invoke(engine, worker, 'acquire');
+      const refused = veto(() => invoke(engine, worker, 'direct', { name: 'stop' }));
+      assert.deepEqual([refused.behavior, refused.action, refused.reason], [
+        'Lease',
+        'direct',
+        'its config names no permission that sends directives (directPermission or overridePermission)',
+      ]);
+      assert.deepEqual(invoke(engine, worker, 'signal', { name: 'stop' }), { id: 1 });
+      // There must still be a lease to direct.
+      invoke(engine, worker, 'release', { token: 1 });
+      assert.equal(veto(() => invoke(engine, worker, 'signal', { name: 'stop' })).reason, 'no lease is active, so there is no holder to direct');
+    });
+  });
+
   describe(`Lease: its config (${driver})`, () => {
     function refusal(engine: Engine, config: Record<string, unknown>, behaviors?: BehaviorRef[]): string {
       const document = jobsDocument(behaviors ?? [{ name: 'Workflow', config: jobFlow }, { name: 'Lease', config }, { name: 'Comments' }]);
@@ -467,7 +594,7 @@ for (const driver of drivers) {
       );
       assert.match(refusal(engine, { exempt: ['Revisions.approve'] }), /exempt names Revisions.approve, but the type does not list Revisions \(it lists Workflow, Lease, Comments\)/);
       assert.match(refusal(engine, { exempt: ['Lease.release'] }), /exempt names Lease.release: Lease's own operations check their callers themselves/);
-      assert.match(refusal(engine, { maxHoldField: 'deadline' }), /maxHoldField "deadline" is not a field of Job \(its fields: title, priority, timeLimitMs\)/);
+      assert.match(refusal(engine, { maxHoldField: 'deadline' }), /maxHoldField "deadline" is not a field of Job \(its fields: title, priority, timeLimitMs, topic, urgent\)/);
       assert.match(refusal(engine, { maxHoldField: 'title' }), /maxHoldField "title" is not an integer field of Job/);
       // The core meta-schema holds the shape first.
       assert.ok(
