@@ -37,6 +37,14 @@ describe("TypeScript SDK optional Generic.JSON", () => {
     expect(bodies[1]).toStrictEqual({ body: { a: 1 }, extra: null });
   });
 
+  test("a DELETE sends its body arguments in the body, as a PUT does", async () => {
+    const { sdk, bodies } = sdkWith();
+    await sdk.note.retract("n1", { body: { a: 1 } });
+    await sdk.note.retract("n1", { body: { a: 1 }, extra: null });
+    expect(bodies[0]).toStrictEqual({ body: { a: 1 } });
+    expect(bodies[1]).toStrictEqual({ body: { a: 1 }, extra: null });
+  });
+
   test("an input type field set to null is sent as null; one left out is not sent", async () => {
     const { sdk, bodies } = sdkWith();
     await sdk.note.revise({ body: "text" });

@@ -14,14 +14,22 @@ import (
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
-// TestOptionalGenericJSONNullReachesTheGoServer generates the Go types
-// module, the Go API module and the Go SDK of apigen's body-args-api into
-// one temp tree. It copies apigen's route test into the API module for its
-// implementation and server, and runs optionalJSONServerTest beside it: the
-// SDK sends an optional Generic.JSON body argument and input type field as
-// null when the caller sets them to the JSON null token and leaves them out
-// when unset, and the implementation receives the two apart.
+// TestOptionalGenericJSONNullReachesTheGoServer runs optionalJSONServerTest
+// against the generated routes of body-args-api (runAgainstBodyArgsRoutes):
+// the SDK sends an optional Generic.JSON body argument and input type field
+// as null when the caller sets them to the JSON null token and leaves them
+// out when unset, and the implementation receives the two apart.
 func TestOptionalGenericJSONNullReachesTheGoServer(t *testing.T) {
+	runAgainstBodyArgsRoutes(t, "optional_json_test.go", optionalJSONServerTest)
+}
+
+// runAgainstBodyArgsRoutes generates the Go types module, the Go API module
+// and the Go SDK of apigen's body-args-api into one temp tree. It copies
+// apigen's route test into the API module for its implementation and
+// server, writes serverTest beside it as name, with the SDK replaced in,
+// and runs its tests named TestTheSDK. It skips in -short mode.
+func runAgainstBodyArgsRoutes(t *testing.T, name, serverTest string) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
@@ -77,11 +85,12 @@ func TestOptionalGenericJSONNullReachesTheGoServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, content := range map[string][]byte{
+	for file, content := range map[string][]byte{
 		"body_args_routes_test.go": routesTest,
-		"optional_json_test.go":    []byte(optionalJSONServerTest),
+		"sdk_client_test.go":       []byte(sdkClientTest),
+		name:                       []byte(serverTest),
 	} {
-		if err := os.WriteFile(filepath.Join(apiDir, name), content, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(apiDir, file), content, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -105,18 +114,15 @@ func TestOptionalGenericJSONNullReachesTheGoServer(t *testing.T) {
 	}
 }
 
-// optionalJSONServerTest runs in the generated API module of body-args-api
-// beside apigen's route test, whose serve and tags it uses, with the Go SDK
-// replaced in.
-const optionalJSONServerTest = `package bodyargsapi_test
+// sdkClientTest runs in the generated API module of body-args-api beside
+// apigen's route test: client is an SDK client of the server serve starts,
+// and the implementation behind it.
+const sdkClientTest = `package bodyargsapi_test
 
 import (
-	"context"
 	"testing"
 
 	sdk "example.com/schemas/sdk/go/body-args-api"
-	"example.com/schemas/sdk/go/body-args-api/namespaces"
-	types "example.com/schemas/types/go/body-args-api"
 )
 
 func client(t *testing.T) (*sdk.BodyArgsApiSDK, *tags) {
@@ -128,6 +134,19 @@ func client(t *testing.T) (*sdk.BodyArgsApiSDK, *tags) {
 	}
 	return client, impl
 }
+`
+
+// optionalJSONServerTest runs in the generated API module of body-args-api
+// (runAgainstBodyArgsRoutes).
+const optionalJSONServerTest = `package bodyargsapi_test
+
+import (
+	"context"
+	"testing"
+
+	"example.com/schemas/sdk/go/body-args-api/namespaces"
+	types "example.com/schemas/types/go/body-args-api"
+)
 
 func TestTheSDKSendsAnOptionalGenericJSONArgumentAsNullOrLeavesItOut(t *testing.T) {
 	client, impl := client(t)

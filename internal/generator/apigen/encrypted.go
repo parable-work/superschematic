@@ -2,6 +2,7 @@ package apigen
 
 import (
 	"fmt"
+	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -21,6 +22,22 @@ func operationEncrypted(set *ir.OperationSet, op *ir.FieldDef) bool {
 		}
 	}
 	return false
+}
+
+// EncryptedBodyMethod reports whether method is POST, PUT or PATCH, the
+// methods whose request body the SDKs send as an encrypted envelope and the
+// Go router decrypts. Every other method carries no encrypted body:
+// checkEncryptedMethod and checkEncryptedArguments refuse an encrypted
+// operation or EncryptedField<T> argument of one. It is narrower than
+// EndpointInfo.ArgumentsInBody: a DELETE reads its arguments from a body
+// that is never encrypted.
+func EncryptedBodyMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case "POST", "PUT", "PATCH":
+		return true
+	default:
+		return false
+	}
 }
 
 // checkEncryptedArguments refuses an EncryptedField<T> argument outside the
@@ -44,9 +61,7 @@ func checkEncryptedArguments(namespace string, op *ir.FieldDef, method string, p
 		if what, ok := outside[arg.Name]; ok {
 			return fmt.Errorf("apigen: operation %s.%s argument %s is EncryptedField<T> but is %s, which travels outside the encrypted request body", namespace, op.Name, arg.Name, what)
 		}
-		switch method {
-		case "POST", "PUT", "PATCH":
-		default:
+		if !EncryptedBodyMethod(method) {
 			return fmt.Errorf("apigen: operation %s.%s argument %s is EncryptedField<T>, which only a POST, PUT or PATCH request body carries encrypted; %s is not one", namespace, op.Name, arg.Name, method)
 		}
 	}
@@ -65,8 +80,7 @@ func checkEncryptedMethod(namespace string, set *ir.OperationSet, op *ir.FieldDe
 	if !set.Encrypted && !op.Encrypted {
 		return nil
 	}
-	switch method {
-	case "POST", "PUT", "PATCH":
+	if EncryptedBodyMethod(method) {
 		return nil
 	}
 	return fmt.Errorf("apigen: operation %s.%s is encrypted (an Encrypted operation set, @encrypted, or an EncryptedField<T> result), but a %s request has no body to encrypt; declare POST, PUT or PATCH, or drop the encryption", namespace, op.Name, method)

@@ -445,11 +445,11 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		anyJSON[arg.Name] = arg.AnyJSON
 		structuredJSON[arg.Name] = arg.StructuredJSON != ""
 	}
-	// The SDK sends the scalar arguments of a POST, PUT or PATCH in the
-	// body, where a Generic.JSON one is any JSON value and a JSON object or
-	// array scalar one that object or array. In the query string each stays
-	// the parameter's text.
-	inBody := isBodyMethod(endpoint.Method)
+	// The SDK sends the scalar arguments where the route reads them: in the
+	// body for every method but GET, where a Generic.JSON one is any JSON
+	// value and a JSON object or array scalar one that object or array. In
+	// the query string of a GET each stays the parameter's text.
+	inBody := endpoint.ArgumentsInBody()
 	scalarArgs := make([]ScalarArg, 0, len(endpoint.ScalarArgs))
 	for _, arg := range endpoint.ScalarArgs {
 		pyElementType := ""
@@ -500,11 +500,11 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 	sdkPath := endpoint.Path
 	sdkHTTPMethod := endpoint.Method
 	pathTemplate, pathIsFString := convertPathToPythonTemplate(sdkPath, endpoint.PathParams, isScopedNS, scopeParamOriginal)
-	hasEncryptedBody := endpoint.Encrypted && isBodyMethod(sdkHTTPMethod)
+	hasEncryptedBody := endpoint.Encrypted && apigen.EncryptedBodyMethod(sdkHTTPMethod)
 	// Endpoints with an explicit input object can require a JSON body even on GET
 	// (for example, GET /api/users/events with UserEventsSearchInput).
 	// Scalar-arg-only GET endpoints still use query parameters.
-	hasRequestBody := endpoint.HasInput || (isBodyMethod(sdkHTTPMethod) && len(scalarArgs) > 0)
+	hasRequestBody := endpoint.HasInput || (inBody && len(scalarArgs) > 0)
 	hasFileUpload := endpoint.HasFileUpload && len(fileFields) > 0
 
 	hasRequiredFileField := false
@@ -816,15 +816,6 @@ func findPathParam(pathParams []apigen.PathParam, name string) apigen.PathParam 
 		}
 	}
 	return apigen.PathParam{}
-}
-
-func isBodyMethod(method string) bool {
-	switch strings.ToUpper(method) {
-	case "POST", "PUT", "PATCH":
-		return true
-	default:
-		return false
-	}
 }
 
 func toPythonIdentifier(name string) string {

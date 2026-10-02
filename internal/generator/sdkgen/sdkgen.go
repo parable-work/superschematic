@@ -294,11 +294,8 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		if endpoint.RequiresAuth {
 			namespaceMap[ns].HasAuth = true
 		}
-		if endpoint.Encrypted {
-			switch strings.ToUpper(endpoint.Method) {
-			case "POST", "PUT", "PATCH":
-				namespaceMap[ns].HasEncryptedPayload = true
-			}
+		if endpoint.Encrypted && apigen.EncryptedBodyMethod(endpoint.Method) {
+			namespaceMap[ns].HasEncryptedPayload = true
 		}
 		if endpoint.Filterable {
 			namespaceMap[ns].HasFilterableEndpoints = true
@@ -712,15 +709,7 @@ func customTemplateFuncs() template.FuncMap {
 			return s
 		},
 		"has_encrypted_body": func(method string, encrypted bool) bool {
-			if !encrypted {
-				return false
-			}
-			switch method {
-			case "POST", "PUT", "PATCH":
-				return true
-			default:
-				return false
-			}
+			return encrypted && apigen.EncryptedBodyMethod(method)
 		},
 		"query_params_type": func(params []QueryParam) string {
 			// Generate TypeScript type for query params object
