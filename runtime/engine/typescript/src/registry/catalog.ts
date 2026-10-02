@@ -16,10 +16,12 @@ live version is replaced only by publishing a newer one, so an older
 version never comes back into use.
 
 A schema's instance type may compose behaviors (behaviors/). define and
-publish check them against the registered implementations, and the
-compatibility rule against each behavior's rule for its config. publish
-creates the storage of every behavior the new version composes, in its
-own transaction, so a publish that fails leaves none behind.
+publish check them against the registered implementations, with the
+namespace's other schemas in reach of their configs as the caller may
+read them (ConfigTarget.schemas), and the compatibility rule against
+each behavior's rule for its config. publish creates the storage of
+every behavior the new version composes, in its own transaction, so a
+publish that fails leaves none behind.
 
 The runtime of a version, its validator and its behaviors bound to their
 configs and storage, is built once and cached per namespace, name and
@@ -33,17 +35,18 @@ import { createHash } from 'node:crypto';
 import type { SchemaFileLoader } from '@superschematic/schema-runtime';
 import type { Document } from '@superschematic/schema-ir/schema-file';
 
-import { compose, configChanges, type Composition } from '../behaviors/composition.js';
+import type { ConfigSchema, ConfigSchemas } from '../behaviors/behavior.js';
+import { compose, configChanges, configSchemaOf, type Composition } from '../behaviors/composition.js';
 import type { Prefixes } from '../behaviors/execution.js';
 import type { BehaviorRegistry } from '../behaviors/registry.js';
 import { prefixOf, storedKey } from '../behaviors/storage.js';
-import { EngineError, IncompatibleChangeError } from '../errors.js';
+import { EngineError, IncompatibleChangeError, SchemaDocumentError } from '../errors.js';
 import { appendEvent } from '../events/log.js';
 import type { Namespaces } from '../namespaces.js';
 import type { Row } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
 import { incompatibleChanges } from './compat.js';
-import { modelOf, readSchema, type SchemaModel } from './document.js';
+import { checkSchemaName, modelOf, readSchema, type SchemaModel } from './document.js';
 import { SchemaValidator } from './validator.js';
 
 /** A stored draft or published version of a schema. */
@@ -97,6 +100,14 @@ export interface VersionRuntime {
   readonly prefixes: Prefixes;
 }
 
+/**
+ * The access check a define or publish asks, as its caller, before a
+ * behavior's config reaches another schema: it throws to refuse.
+ */
+export type ReadCheck = (schema: string) => void;
+
+const allowReads: ReadCheck = () => undefined;
+
 const DRAFT = 0;
 
 const COLUMNS = 'namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by';
@@ -117,11 +128,17 @@ export class SchemaCatalog {
     return this.load(typeof input === 'string' ? input : JSON.stringify(input), source);
   }
 
-  /** define stores a document as its name's draft in a namespace. */
-  define(model: SchemaModel, namespace: string, actor: string): SchemaRecord {
+  /**
+   * define stores a document as its name's draft in a namespace. ask is
+   * the access check of the caller who defines it, for read on each other
+   * schema its behaviors' configs reach (ConfigTarget.schemas); source
+   * names the document in errors.
+   */
+  define(model: SchemaModel, namespace: string, actor: string, ask: ReadCheck = allowReads, source = 'schema'): SchemaRecord {
     const now = this.clock();
     return this.storage.transaction(() => {
       this.checkNameSide(namespace, model.name);
+      this.composeReaching(model, namespace, ask, source);
       const live = this.row(namespace, model.name, 'live');
       if (live) {
         this.checkCompatible(namespace, live, model);
@@ -137,8 +154,11 @@ export class SchemaCatalog {
     });
   }
 
-  /** publish makes the draft of a name the next live version. */
-  publish(name: string, namespace: string, actor: string): PublishResult {
+  /**
+   * publish makes the draft of a name the next live version. ask is the
+   * access check of the caller who publishes it, as define's is.
+   */
+  publish(name: string, namespace: string, actor: string, ask: ReadCheck = allowReads): PublishResult {
     const now = this.clock();
     return this.storage.transaction(() => {
       const draft = this.row(namespace, name, DRAFT);
@@ -155,7 +175,7 @@ export class SchemaCatalog {
       if (live) {
         this.checkCompatible(namespace, live, model);
       }
-      for (const bound of (compose(model, this.behaviors).composition as Composition).behaviors) {
+      for (const bound of this.composeReaching(model, namespace, ask, `${namespace}/${name} draft`).behaviors) {
         this.behaviors.ensureStorage(bound.behavior);
       }
       const version = live ? Number(live.version) + 1 : 1;
@@ -259,6 +279,38 @@ export class SchemaCatalog {
 
   private load(text: string, source: string): SchemaModel {
     return readSchema(this.loader, text, source, (model) => compose(model, this.behaviors).issues);
+  }
+
+  // composeReaching composes a version being defined or published with
+  // the namespace's other schemas in reach of parseConfig, and refuses it
+  // as load does for what a config says about them.
+  private composeReaching(model: SchemaModel, namespace: string, ask: ReadCheck, source: string): Composition {
+    const { composition, issues } = compose(model, this.behaviors, this.configSchemas(model, namespace, ask));
+    if (!composition) {
+      throw new SchemaDocumentError(source, issues);
+    }
+    return composition;
+  }
+
+  // configSchemas is ConfigTarget.schemas for a version being defined or
+  // published: its own name is that version; another is its live
+  // version, read once, after ask allows it.
+  private configSchemas(model: SchemaModel, namespace: string, ask: ReadCheck): ConfigSchemas {
+    const read = new Map<string, ConfigSchema | undefined>();
+    return Object.freeze({
+      get: (name: string): ConfigSchema | undefined => {
+        if (name === model.name) {
+          return configSchemaOf(model);
+        }
+        if (!read.has(name)) {
+          checkSchemaName(name);
+          ask(name);
+          const record = this.find(name, namespace, 'live');
+          read.set(name, record === undefined ? undefined : configSchemaOf(modelOf(record.canonical)));
+        }
+        return read.get(name);
+      },
+    });
   }
 
   private row(namespace: string, name: string, version: number | 'live'): Row | undefined {

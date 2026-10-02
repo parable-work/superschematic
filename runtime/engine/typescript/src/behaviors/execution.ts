@@ -151,6 +151,8 @@ export interface Reach {
   read(chain: Chain, schema: string, ids: readonly string[], fields: readonly string[] | undefined): Map<string, InstanceRecord>;
   /** Invokes an instance operation as instances.invoke does, inside the chain's transaction; asks write or read. */
   invoke(chain: Chain, from: string, schema: string, id: string, operation: string, params: unknown, writes: boolean): unknown;
+  /** Invokes a schema-level operation as instances.invokeSchema does, inside the chain's transaction; asks write or read. */
+  invokeSchema(chain: Chain, from: string, schema: string, operation: string, params: unknown, writes: boolean): unknown;
   /** The config of a behavior a schema's live version composes, as the schema holds it; asks read unless the schema is own. */
   config(chain: Chain, own: string, schema: string, behavior: string): unknown;
   /** Whether the principal may read a schema. */
@@ -574,6 +576,11 @@ function instancesOf(chain: Chain, reach: Reach, behavior: string, invokeWrites:
       checkName(behavior, 'instances.invoke', 'id', id);
       checkName(behavior, 'instances.invoke', 'operation', operation);
       return reach.invoke(chain, behavior, schema, id, operation, params ?? {}, invokeWrites);
+    },
+    invokeSchema: (schema: string, operation: string, params?: FrozenJSON) => {
+      checkName(behavior, 'instances.invokeSchema', 'schema', schema);
+      checkName(behavior, 'instances.invokeSchema', 'operation', operation);
+      return reach.invokeSchema(chain, behavior, schema, operation, params ?? {}, invokeWrites);
     },
   });
 }

@@ -2,8 +2,9 @@
 // instances and of other schemas' configs as the caller, invokes that run
 // the target's guards, afterChange and event in the caller's transaction,
 // the depth and cycle limits, references with their guards and hooks, the
-// namespace rule, parseConfig's view of the other behaviors, and
-// schema-level operations over the engine API.
+// namespace rule, parseConfig's view of the other behaviors and, at define
+// and publish, of the other schemas, and schema-level operations over the
+// engine API and invoked by a behavior.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -13,6 +14,7 @@ import {
   BehaviorVetoError,
   EngineError,
   OperationParamsError,
+  SchemaDocumentError,
   defineBehavior,
   type AccessPolicy,
   type AccessRequest,
@@ -456,6 +458,37 @@ for (const driver of drivers) {
     });
   });
 
+  describe(`a behavior invokes schema-level operations (${driver})`, () => {
+    test('as the caller: a read reaches read-only ones, a write writing ones too, in its transaction', () => {
+      const { policy, asked } = recording(({ action }) => action === 'read');
+      const engine = world({ policy });
+      engine.instances.invoke(alice, 'Note', 'n2', 'hold', { schema: 'Item', id: 'i1' });
+      asked.length = 0;
+      const holders = { schema: 'Note', operation: 'holders', params: { schema: 'Item', id: 'i1' } };
+      assert.deepEqual(engine.instances.invoke(bob, 'Note', 'n1', 'peekSchema', holders), ['n2']);
+      assert.deepEqual(asked, [
+        { principal: bob, action: 'read', namespace: 'default', schema: 'Note', operation: 'peekSchema' },
+        { principal: bob, action: 'read', namespace: 'default', schema: 'Note', operation: 'holders' },
+      ]);
+      const releaseAll = { schema: 'Note', operation: 'releaseAll', params: { schema: 'Item', id: 'i1' } };
+      const read = thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'peekSchema', releaseAll), BehaviorError);
+      assert.equal(
+        read.message,
+        'behavior test.Reader: a read cannot invoke releaseAll of Note, which writes; initialize, afterChange, afterReferenceChange and a writing operation can'
+      );
+      const from = lastCursor(engine);
+      assert.equal(engine.instances.invoke(alice, 'Note', 'n1', 'pokeSchema', releaseAll), 1);
+      assert.deepEqual(eventsOf(engine, from), [
+        ['operation', 'Note', 'n2', 'release'],
+        ['operation', 'Note', 'n1', 'pokeSchema'],
+      ]);
+      assert.equal(engine.instances.get(alice, 'Note', 'n2')?.data.held, undefined);
+      const scope = thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'peekSchema', { schema: 'Note', operation: 'notes' }), EngineError);
+      assert.deepEqual([scope.code, scope.message], ['not_found', "Note's notes is an instance operation: call it on an instance"]);
+      assert.equal(thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'peekSchema', { schema: 'Note', operation: 'holders' }), OperationParamsError).code, 'invalid_argument');
+    });
+  });
+
   describe(`parseConfig sees the other behaviors (${driver})`, () => {
     const needsLimit = defineBehavior<{ counterLimit: number }>({
       declaration: { name: 'test.NeedsLimit', requires: ['test.Counter'] },
@@ -466,6 +499,62 @@ for (const driver of drivers) {
         }
         return { counterLimit: counter.limit };
       },
+    });
+
+    // test.Peer names another schema, which parseConfig reads when the
+    // schema is defined or published, and notes each read.
+    const seen: unknown[] = [];
+    const peer = defineBehavior<{ peer: string }>({
+      declaration: {
+        name: 'test.Peer',
+        configSchema: { type: 'object', additionalProperties: false, required: ['peer'], properties: { peer: { type: 'string' } } },
+      },
+      parseConfig(config, target) {
+        const name = (config as { peer: string }).peer;
+        if (target.schemas === undefined) {
+          seen.push('without schemas');
+          return { peer: name };
+        }
+        const found = target.schemas.get(name);
+        if (found === undefined) {
+          throw new BehaviorConfigError(`${name} has no live version`);
+        }
+        seen.push(found);
+        return { peer: name };
+      },
+    });
+
+    test('at define and publish it reaches the other schemas as the caller reads them; its own name is the version being defined', () => {
+      const { policy, asked } = recording(({ action, schema }) => action !== 'read' || schema !== 'Item');
+      const engine = open({ policy, behaviors: [...testBehaviors, ...reachBehaviors, peer] });
+      const peering = (name: string, of: string) => document(name, [{ name: 'test.Peer', config: { peer: of } }]);
+      assert.match(thrown(() => engine.schemas.define(alice, peering('Other', 'Item')), SchemaDocumentError).message, /behavior test\.Peer config: Item has no live version/);
+      publish(engine, 'Item', [{ name: 'test.Counter', config: { start: 0 } }]);
+      seen.length = 0;
+      asked.length = 0;
+      engine.schemas.define(alice, peering('Other', 'Item'));
+      assert.deepEqual(seen, [
+        'without schemas',
+        { schema: 'Item', type: 'Item', fields: { title: 'string', partner: 'string' }, behaviors: ['test.Counter'], configs: { 'test.Counter': { start: 0 } } },
+      ]);
+      assert.deepEqual(
+        asked.map(({ principal, action, schema }) => [principal.subject, action, schema]),
+        [
+          ['alice', 'define', 'Other'],
+          ['alice', 'read', 'Item'],
+        ]
+      );
+      const refused = thrown(() => engine.schemas.define(bob, peering('Other', 'Item')), EngineError);
+      assert.deepEqual([refused.code, refused.message], ['forbidden', 'bob may not read Item in namespace default']);
+      seen.length = 0;
+      engine.schemas.define(alice, peering('Self', 'Self'));
+      assert.deepEqual((seen[1] as { schema: string; behaviors: string[] }).behaviors, ['test.Peer'], 'its own name, which has no live version yet');
+      seen.length = 0;
+      engine.schemas.publish(alice, 'Other');
+      assert.equal((seen[1] as { schema: string }).schema, 'Item', 'publish reads it again');
+      seen.length = 0;
+      engine.instances.create(alice, 'Other', { title: 'o1' });
+      assert.deepEqual(seen, ['without schemas'], 'running a published version reads no other schema');
     });
 
     test("parseConfig gets the config of every behavior the type lists, as the schema holds it", () => {

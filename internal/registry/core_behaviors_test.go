@@ -10,7 +10,7 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Comments", "Dependencies", "Links", "Revisions", "Workflow"}
+var coreBehaviorNames = []string{"Comments", "Dependencies", "Links", "Revisions", "Rollups", "Workflow"}
 
 // A registry with no extension declares the behaviors the engine
 // implements, as the core's, under bare names, and holds each config to
@@ -31,12 +31,16 @@ func TestCoreBehaviors(t *testing.T) {
 	revisions, _ := reg.Behavior("Revisions")
 	dependencies, _ := reg.Behavior("Dependencies")
 	links, _ := reg.Behavior("Links")
-	if !workflow.ConfigRequired() || comments.ConfigRequired() || revisions.ConfigRequired() || dependencies.ConfigRequired() || !links.ConfigRequired() {
-		t.Errorf("ConfigRequired: Workflow %v, Comments %v, Revisions %v, Dependencies %v, Links %v; want true, false, false, false, true",
-			workflow.ConfigRequired(), comments.ConfigRequired(), revisions.ConfigRequired(), dependencies.ConfigRequired(), links.ConfigRequired())
+	rollups, _ := reg.Behavior("Rollups")
+	if !workflow.ConfigRequired() || comments.ConfigRequired() || revisions.ConfigRequired() || dependencies.ConfigRequired() || !links.ConfigRequired() || !rollups.ConfigRequired() {
+		t.Errorf("ConfigRequired: Workflow %v, Comments %v, Revisions %v, Dependencies %v, Links %v, Rollups %v; want true, false, false, false, true, true",
+			workflow.ConfigRequired(), comments.ConfigRequired(), revisions.ConfigRequired(), dependencies.ConfigRequired(), links.ConfigRequired(), rollups.ConfigRequired())
 	}
-	if !slices.Equal(dependencies.Requires, []string{"Workflow"}) || len(links.Requires) != 0 {
-		t.Errorf("requires: Dependencies %v, Links %v; want [Workflow] and none", dependencies.Requires, links.Requires)
+	if !slices.Equal(dependencies.Requires, []string{"Workflow"}) || len(links.Requires) != 0 || len(rollups.Requires) != 0 {
+		t.Errorf("requires: Dependencies %v, Links %v, Rollups %v; want [Workflow], none and none", dependencies.Requires, links.Requires, rollups.Requires)
+	}
+	if len(rollups.Operations) != 0 || len(rollups.Fields) != 1 || rollups.Fields[0].Name != "rollups" {
+		t.Errorf("Rollups: operations %v, fields %v; want none and rollups", rollups.Operations, rollups.Fields)
 	}
 	var scopes []string
 	for _, op := range links.Operations {
@@ -86,6 +90,27 @@ func TestCoreBehaviors(t *testing.T) {
 		{links, `{"links": {"spec": {"schema": "the documents"}}}`, "behavior Links config: "},
 		{links, `{"links": {"spec": {"schema": "documents", "weak": true}}}`, "behavior Links config: "},
 		{links, `{"links": {"spec": {"schema": "documents"}}, "cascade": true}`, "behavior Links config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count"}}}`, ""},
+		{rollups, `{"rollups": {"byStatus": {"schema": "tasks", "link": "project", "function": "countBy", "field": "status"},
+			"estimate": {"schema": "tasks", "link": "project", "function": "sum", "field": "estimate"},
+			"smallest": {"schema": "tasks", "link": "project", "function": "min", "field": "estimate"},
+			"largest": {"schema": "tasks", "link": "project", "function": "max", "field": "estimate"},
+			"finished": {"schema": "tasks", "link": "project", "function": "all", "gatedStates": ["done"]},
+			"started": {"schema": "tasks", "link": "project", "function": "any"}}}`, ""},
+		{rollups, ``, "behavior Rollups config: "},
+		{rollups, `{"rollups": {}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"Tasks": {"schema": "tasks", "link": "project", "function": "count"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "function": "count"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "the tasks", "link": "project", "function": "count"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "Project", "function": "count"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "average", "field": "estimate"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "sum"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "countBy"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "field": "status"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "all", "field": "status"}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "gatedStates": ["done"]}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "all", "gatedStates": []}}}`, "behavior Rollups config: "},
+		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "filter": "open"}}}`, "behavior Rollups config: "},
 	} {
 		err := test.behavior.ValidateConfig(json.RawMessage(test.config))
 		switch {

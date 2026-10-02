@@ -1,6 +1,7 @@
 // Behaviors the cross-instance tests register: a reader that reads and
-// invokes other instances, and a holder that records references to them,
-// hears of their changes and has schema-level operations.
+// invokes other instances and schema-level operations, and a holder that
+// records references to them, hears of their changes and has schema-level
+// operations.
 import { EngineError, defineBehavior, type BehaviorDeclaration, type FrozenJSON } from '../dist/index.js';
 
 const noParams = { type: 'object', additionalProperties: false } as const;
@@ -10,6 +11,11 @@ const target = {
 } as const;
 const call = {
   ...target,
+  operation: { type: 'string', minLength: 1 },
+  params: { type: 'object' },
+} as const;
+const schemaCall = {
+  schema: target.schema,
   operation: { type: 'string', minLength: 1 },
   params: { type: 'object' },
 } as const;
@@ -79,6 +85,19 @@ export const readerDeclaration: BehaviorDeclaration = {
       resultSchema: true,
     },
     {
+      name: 'peekSchema',
+      description: 'Invokes a schema-level operation from a read-only operation.',
+      paramsSchema: { type: 'object', additionalProperties: false, required: ['schema', 'operation'], properties: schemaCall },
+      resultSchema: true,
+    },
+    {
+      name: 'pokeSchema',
+      description: 'Counts a poke, then invokes a schema-level operation.',
+      paramsSchema: { type: 'object', additionalProperties: false, required: ['schema', 'operation'], properties: schemaCall },
+      resultSchema: true,
+      writes: true,
+    },
+    {
       name: 'guarded',
       description: 'Its guard invokes an operation of another instance before it runs.',
       paramsSchema: { type: 'object', additionalProperties: false, required: ['schema', 'id', 'operation'], properties: call },
@@ -142,6 +161,13 @@ export const reader = defineBehavior<{ partnerSchema?: string }>({
     },
     pokeRead(context, params) {
       return context.instances.invoke(params.schema as string, params.id as string, params.operation as string, params.params as FrozenJSON | undefined);
+    },
+    peekSchema(context, params) {
+      return context.instances.invokeSchema(params.schema as string, params.operation as string, params.params as FrozenJSON | undefined);
+    },
+    pokeSchema(context, params) {
+      context.columns.set({ pokes: Number(context.columns.get().pokes) + 1 });
+      return context.instances.invokeSchema(params.schema as string, params.operation as string, params.params as FrozenJSON | undefined);
     },
     guarded() {
       return 'ran';

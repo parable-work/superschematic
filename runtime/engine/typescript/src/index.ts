@@ -52,6 +52,8 @@ export type {
   BehaviorScope,
   ColumnSpec,
   Columns,
+  ConfigSchema,
+  ConfigSchemas,
   ConfigTarget,
   FieldReader,
   FrozenJSON,
@@ -88,7 +90,7 @@ export { page, pageRequest } from './behaviors/paging.js';
 export type { Page } from './behaviors/paging.js';
 
 // The core's behaviors, which every engine registers (runtime/engine/README.md, "Core behaviors").
-export { isTerminalState } from './behaviors/core/index.js';
+export { MAX_ROLLUP_READ, isTerminalState } from './behaviors/core/index.js';
 export type {
   BlockerRecord,
   CommentRecord,
@@ -101,6 +103,10 @@ export type {
   ProposalState,
   RevisionRecord,
   RevisionsConfig,
+  RollupFunction,
+  RollupOver,
+  RollupSpec,
+  RollupsConfig,
   WorkflowConfig,
   WorkflowStates,
   WorkflowTransition,

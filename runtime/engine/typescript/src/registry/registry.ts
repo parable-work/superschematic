@@ -8,7 +8,7 @@ import { checkPrincipal, type Access, type Principal } from '../access.js';
 import type { BehaviorDeclaration } from '../behaviors/declaration.js';
 import { EngineError, type ValidationIssue } from '../errors.js';
 import type { Namespaces } from '../namespaces.js';
-import type { PublishResult, SchemaCatalog, SchemaRecord, SchemaSummary } from './catalog.js';
+import type { PublishResult, ReadCheck, SchemaCatalog, SchemaRecord, SchemaSummary } from './catalog.js';
 import { checkSchemaName } from './document.js';
 import type { SchemaValidator } from './validator.js';
 
@@ -53,14 +53,20 @@ export class SchemaRegistry {
     const namespace = this.namespaces.resolve(options.namespace);
     const model = this.catalog.read(input, options.source ?? 'schema');
     this.access.require(principal, 'define', namespace, model.name);
-    return this.catalog.define(model, namespace, principal.subject);
+    return this.catalog.define(model, namespace, principal.subject, this.reads(principal, namespace), options.source ?? 'schema');
   }
 
   /** publish makes the draft of a name the next live version. */
   publish(principal: Principal, name: string, options: SchemaTarget = {}): PublishResult {
     const namespace = this.target(principal, name, options);
     this.access.require(principal, 'publish', namespace, name);
-    return this.catalog.publish(name, namespace, principal.subject);
+    return this.catalog.publish(name, namespace, principal.subject, this.reads(principal, namespace));
+  }
+
+  // reads is the check a define or publish asks before a behavior's
+  // config reaches another schema: read, as the caller.
+  private reads(principal: Principal, namespace: string): ReadCheck {
+    return (schema) => this.access.require(principal, 'read', namespace, schema);
   }
 
   /** live returns the live version of a name the namespace reaches. */

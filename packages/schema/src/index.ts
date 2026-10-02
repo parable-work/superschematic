@@ -29,6 +29,9 @@ export type {
   LinkConfig,
   LinksConfig,
   RevisionsConfig,
+  RollupConfig,
+  RollupSource,
+  RollupsConfig,
   WorkflowConfig,
   WorkflowTransition,
 } from "./behavior";

@@ -12,7 +12,7 @@ import type { Hono } from 'hono';
 import { EngineError, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { flag, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, tasksDocument, thrown } from './helpers.ts';
+import { alice, cleanup, documentsDocument, freshPath, openTestEngine, orderDocument, projectsDocument, tasksDocument, thrown } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 
 afterEach(cleanup);
@@ -350,6 +350,40 @@ describe("the core's behaviors over HTTP", () => {
     await data(call(app, 'DELETE', DOCUMENT));
     const read = await data(call(app, 'GET', `${TASKS}/instances/build`));
     assert.deepEqual([read.data.data.blocked, read.data.data.links], [true, { parent: { schema: 'tasks', id: 'plan' } }]);
+  });
+
+  test("Rollups through the routes: describe lists its field, a read carries it, a gated transition is 409, and a task's change moves no ETag", async () => {
+    const { app, engine } = withDocument();
+    for (const document of [tasksDocument(), projectsDocument()]) {
+      engine.schemas.define(alice, document);
+      engine.schemas.publish(alice, document.name as string);
+    }
+    engine.instances.create(alice, 'projects', { title: 'Launch' }, { id: 'launch' });
+    engine.instances.create(alice, 'tasks', { title: 'Plan' }, { id: 'plan' });
+    const PROJECTS = '/namespaces/default/schemas/projects';
+    const plan = (name: string) => `/namespaces/default/schemas/tasks/instances/plan/operations/${name}`;
+    await data(call(app, 'POST', plan('link'), { body: { name: 'project', id: 'launch' } }));
+    const described = (await data(call(app, 'GET', `${PROJECTS}/describe`, { token: 'reader' }))).data;
+    const rollups = described.behaviors.find((behavior: { name: string }) => behavior.name === 'Rollups');
+    assert.deepEqual(
+      [rollups.fields.map((field: { name: string }) => field.name), rollups.operations, Object.keys(rollups.config.rollups)],
+      [['rollups'], [], ['tasks', 'tasksByStatus', 'tasksFinished']]
+    );
+    assert.equal(described.instance.properties.rollups.readOnly, true);
+    const read = await data(call(app, 'GET', `${PROJECTS}/instances/launch`, { token: 'reader' }));
+    assert.deepEqual([read.etag, read.data.data.rollups], ['"1"', { tasks: 1, tasksByStatus: { todo: 1 }, tasksFinished: false }]);
+    const gated = await problem(call(app, 'POST', `${PROJECTS}/instances/launch/operations/transition`, { body: { to: 'done' } }), 409);
+    assert.deepEqual(
+      [gated.code, gated.details.behavior, gated.details.reason],
+      ['vetoed', 'Rollups', 'projects launch cannot move to done until rollup tasksFinished holds: 1 of the 1 instances of tasks that point at it through project are not in a terminal state']
+    );
+    await data(call(app, 'POST', plan('transition'), { body: { to: 'dropped' } }));
+    const again = await data(call(app, 'GET', `${PROJECTS}/instances/launch`));
+    assert.deepEqual([again.etag, again.data.data.rollups.tasksFinished], ['"1"', true]);
+    assert.deepEqual(await data(call(app, 'POST', `${PROJECTS}/instances/launch/operations/transition`, { body: { to: 'done' }, headers: { 'if-match': '"1"' } })), {
+      data: { from: 'active', to: 'done' },
+      etag: '"2"',
+    });
   });
 
   test('listComments is a read: a reader may call it, and it answers the ETag it read', async () => {

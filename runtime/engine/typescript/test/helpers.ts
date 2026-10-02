@@ -131,11 +131,25 @@ export function documentsDocument(): Record<string, unknown> {
  * with no extension linked beside documentsDocument (make cli-smoke,
  * fixture-cross-instance-json): its Task type composes Workflow,
  * Dependencies, whose blockers are tasks or documents and whose gated
- * state is done, and Links, with spec pinned to a document's revision and
- * a required parent task.
+ * state is done, and Links, with spec pinned to a document's revision, a
+ * required parent task and an optional project.
  */
 export function tasksDocument(): Record<string, unknown> {
   return JSON.parse(
     readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-cross-instance-json/src/task.schema.json', import.meta.url), 'utf8')
+  ) as Record<string, unknown>;
+}
+
+/**
+ * projectsDocument is the General schema-file document the core binary
+ * loads with no extension linked beside tasksDocument (make cli-smoke,
+ * fixture-rollups-json): its Project type composes Workflow, from active
+ * to done or dropped, and Rollups over the tasks whose project link points
+ * at it: how many, how many in each status, and whether every one is in a
+ * terminal state, which done waits for.
+ */
+export function projectsDocument(): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-rollups-json/src/project.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }

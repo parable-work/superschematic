@@ -15,8 +15,12 @@ operation of the same name. It refuses two things more:
   type has instances, so a nested type has nothing to add fields,
   operations or storage to.
 
-A config passes parseConfig after its configSchema. An operation named
-like a built-in never gets here: registration refuses its declaration.
+A config passes parseConfig after its configSchema. When the schema is
+defined or published, parseConfig also reaches the namespace's other
+schemas (ConfigTarget.schemas), so a config that names one is checked
+against it; a published version composed again to run it is not. An
+operation named like a built-in never gets here: registration refuses
+its declaration.
 
 configChanges is the behaviors' half of the compatibility rule: a new
 version keeps a behavior's config unless the implementation allows the
@@ -29,7 +33,8 @@ import type { Document, TypeDef } from '@superschematic/schema-ir/schema-file';
 import { BehaviorError, type SchemaChange, type SchemaIssue } from '../errors.js';
 import { isPlainObject, jsonEqual } from '../instances/patch.js';
 import { jsonKey, pointer } from '../registry/document.js';
-import { BehaviorConfigError, type ConfigTarget } from './behavior.js';
+import { FieldSchemas } from '../tools/schema.js';
+import { BehaviorConfigError, type ConfigSchema, type ConfigSchemas, type ConfigTarget } from './behavior.js';
 import { deepFreeze } from './json.js';
 import { BehaviorRegistry, type OperationSpec, type RegisteredBehavior } from './registry.js';
 import { synchronous } from './storage.js';
@@ -85,9 +90,15 @@ export interface ComposeTarget {
 
 /**
  * compose checks every type's behaviors and binds the instance type's. It
- * returns the composition, or every issue it found.
+ * returns the composition, or every issue it found. schemas, given when
+ * the schema is defined or published, is what parseConfig reaches of the
+ * namespace's other schemas (ConfigTarget.schemas).
  */
-export function compose(target: ComposeTarget, registry: BehaviorRegistry): { composition?: Composition; issues: SchemaIssue[] } {
+export function compose(
+  target: ComposeTarget,
+  registry: BehaviorRegistry,
+  schemas?: ConfigSchemas
+): { composition?: Composition; issues: SchemaIssue[] } {
   const issues: SchemaIssue[] = [];
   const types = target.document.types ?? {};
   for (const typeName of Object.keys(types).sort()) {
@@ -111,7 +122,7 @@ export function compose(target: ComposeTarget, registry: BehaviorRegistry): { co
     own.add(field.name);
     own.add(jsonKey(field));
   }
-  const configTarget = targetOf(target);
+  const configTarget = targetOf(target, schemas);
 
   const bound: BoundBehavior[] = [];
   const seen = new Set<string>();
@@ -247,25 +258,51 @@ export function configChanges(
 }
 
 // targetOf is what parseConfig is told about the type a config is given
-// on: its schema, its fields, and every behavior it lists with its config
-// as the schema holds it. A behavior listed twice keeps its first config;
-// compose refuses the list.
-function targetOf(target: ComposeTarget): ConfigTarget {
+// on: its schema, its fields, every behavior it lists with its config as
+// the schema holds it, and, when given, the other schemas it reaches. A
+// behavior listed twice keeps its first config; compose refuses the list.
+function targetOf(target: ComposeTarget, schemas?: ConfigSchemas): ConfigTarget {
   const typeDef = (target.document.types ?? {})[target.instanceType] as TypeDef;
   const refs = typeDef.behaviors ?? [];
+  return deepFreeze({
+    schema: target.name,
+    type: target.instanceType,
+    fields: (typeDef.fields ?? []).map(jsonKey),
+    behaviors: refs.map((ref) => ref.name),
+    configs: configsOf(refs),
+    ...(schemas === undefined ? {} : { schemas }),
+  });
+}
+
+/**
+ * configSchemaOf is a schema as parseConfig sees another one
+ * (ConfigSchemas.get): its instance type, the JSON type of each of the
+ * type's own fields, and its behaviors with their configs.
+ */
+export function configSchemaOf(target: ComposeTarget): ConfigSchema {
+  const typeDef = (target.document.types ?? {})[target.instanceType] as TypeDef;
+  const fields: Record<string, string> = {};
+  for (const [key, property] of new FieldSchemas(target.document).object(target.instanceType).properties) {
+    fields[key] = property.type ?? 'any';
+  }
+  const refs = typeDef.behaviors ?? [];
+  return deepFreeze({
+    schema: target.name,
+    type: target.instanceType,
+    fields,
+    behaviors: refs.map((ref) => ref.name),
+    configs: configsOf(refs),
+  });
+}
+
+function configsOf(refs: ReadonlyArray<{ readonly name: string; readonly config?: unknown }>): Record<string, unknown> {
   const configs: Record<string, unknown> = {};
   for (const ref of refs) {
     if (!Object.prototype.hasOwnProperty.call(configs, ref.name)) {
       configs[ref.name] = ref.config === undefined ? {} : (JSON.parse(JSON.stringify(ref.config)) as unknown);
     }
   }
-  return deepFreeze({
-    schema: target.name,
-    type: target.instanceType,
-    fields: (typeDef.fields ?? []).map(jsonKey),
-    behaviors: refs.map((ref) => ref.name),
-    configs,
-  });
+  return configs;
 }
 
 // decide asks an implementation's configChange; undefined allows.

@@ -159,6 +159,7 @@ export class InstanceStore {
     this.reach = {
       read: (chain, schema, ids, fields) => this.readFor(chain, schema, ids, fields),
       invoke: (chain, from, schema, id, operation, params, writes) => this.invokeFor(chain, from, schema, id, operation, params, writes),
+      invokeSchema: (chain, from, schema, operation, params, writes) => this.invokeSchemaFor(chain, from, schema, operation, params, writes),
       config: (chain, own, schema, behavior) => this.configFor(chain, own, schema, behavior),
       readable: (chain, schema) => {
         checkSchemaName(schema);
@@ -408,7 +409,12 @@ export class InstanceStore {
     const { record, runtime, spec } = this.operation(principal, namespace, schema, operation, 'schema');
     this.access.require(principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
     const checked = checkParams(spec, params);
-    const chain = this.chain(principal, namespace);
+    return this.runSchemaOperation(this.chain(principal, namespace), record, runtime, spec, checked);
+  }
+
+  // runSchemaOperation runs a schema-level operation's handler, in a
+  // transaction for a writing one: a savepoint inside a call's.
+  private runSchemaOperation(chain: Chain, record: SchemaRecord, runtime: VersionRuntime, spec: OperationSpec, checked: FrozenJSON): unknown {
     const run = () => new SchemaExecution(this.storage, runtime, chain, this.reach, record.name, record.version as number).invoke(spec, checked);
     return spec.writes ? this.storage.transaction(run) : run();
   }
@@ -557,6 +563,23 @@ export class InstanceStore {
       throw new BehaviorError(from, `invoking ${spec.name} of ${schema} ${id} is a cycle: a write of ${schema} ${id} is still running up this call`);
     }
     return this.storage.transaction(() => this.runOperation(chain, record, runtime, spec, id, checked, undefined)).result;
+  }
+
+  // invokeSchemaFor runs a schema-level operation a behavior invokes, as
+  // the chain's principal, in the chain's transaction; from a read, only a
+  // read-only one.
+  private invokeSchemaFor(chain: Chain, from: string, schema: string, operation: string, params: unknown, writes: boolean): unknown {
+    const namespace = chain.namespace;
+    checkSchemaName(schema);
+    const { record, runtime, spec } = this.operation(chain.principal, namespace, schema, operation, 'schema');
+    if (spec.writes && !writes) {
+      throw new BehaviorError(
+        from,
+        `a read cannot invoke ${spec.name} of ${schema}, which writes; initialize, afterChange, afterReferenceChange and a writing operation can`
+      );
+    }
+    this.access.require(chain.principal, spec.writes ? 'write' : 'read', namespace, schema, spec.name);
+    return this.runSchemaOperation(chain, record, runtime, spec, checkParams(spec, params));
   }
 
   // configFor returns the config a schema's live version gives a
