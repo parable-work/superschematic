@@ -4,8 +4,10 @@ The behaviors an engine can run: implementations registered when it opens
 checks the declaration (declaration.ts), compiles its config, parameter
 and result schemas, and refuses an implementation whose operations,
 schema-level operations or fields are not exactly the ones its
-declaration names, whose migrations are malformed, or whose reactions or
-schedules are not functions the runner can call. A name registers once.
+declaration names, whose migrations are malformed (an index over a
+column no migration up to its own adds among them), or whose reactions
+or schedules are not functions the runner can call. A name registers
+once.
 
 A behavior whose storage already exists in the file (a schema that
 composes it was published before) has its storage brought up to its
@@ -36,7 +38,7 @@ import {
   type OperationScope,
 } from './declaration.js';
 import { deepFreeze } from './json.js';
-import { assignKey, columnProblems, migrationSet, prefixOf, storedKey } from './storage.js';
+import { LOCAL_NAME, assignKey, columnProblems, migrationSet, prefixOf, storedKey } from './storage.js';
 
 /** One declared operation with its handler and compiled schemas. */
 export interface OperationSpec {
@@ -278,7 +280,8 @@ function checkReactions(reactions: unknown, problems: string[]): void {
 }
 
 // checkSchedules holds schedules to camelCase names, each with an interval
-// of at least MIN_SCHEDULE_MS and a run function.
+// of at least MIN_SCHEDULE_MS, or a function of the config that the runner
+// calls for one (runner.ts), and a run function.
 function checkSchedules(schedules: unknown, problems: string[]): void {
   if (schedules === undefined) {
     return;
@@ -297,8 +300,10 @@ function checkSchedules(schedules: unknown, problems: string[]): void {
       continue;
     }
     const { everyMs, run } = schedule as { everyMs?: unknown; run?: unknown };
-    if (typeof everyMs !== 'number' || !Number.isSafeInteger(everyMs) || everyMs < MIN_SCHEDULE_MS) {
-      problems.push(`${at}: everyMs is an integer of at least ${MIN_SCHEDULE_MS}, got ${String(everyMs)}`);
+    if (typeof everyMs !== 'function' && (typeof everyMs !== 'number' || !Number.isSafeInteger(everyMs) || everyMs < MIN_SCHEDULE_MS)) {
+      problems.push(
+        `${at}: everyMs is an integer of at least ${MIN_SCHEDULE_MS}, or a function of the config that returns one, got ${typeof everyMs === 'number' ? String(everyMs) : typeof everyMs}`
+      );
     }
     if (typeof run !== 'function') {
       problems.push(`${at}: run is a function`);
@@ -307,14 +312,16 @@ function checkSchedules(schedules: unknown, problems: string[]): void {
 }
 
 // checkMigrations holds migrations to 1, 2, 3, ... with names, well-formed
-// columns each added once, and an up() when there is one; it returns the
-// columns they add.
+// columns each added once, indexes each named once over columns that
+// migration or an earlier one adds, and an up() when there is one; it
+// returns the columns they add.
 function checkMigrations(migrations: unknown, problems: string[]): string[] {
   if (!Array.isArray(migrations)) {
     problems.push('migrations is a list');
     return [];
   }
   const columns: string[] = [];
+  const indexes: string[] = [];
   migrations.forEach((migration: Partial<BehaviorMigration>, index) => {
     const at = `migration ${index + 1}`;
     if (typeof migration !== 'object' || migration === null) {
@@ -343,8 +350,44 @@ function checkMigrations(migrations: unknown, problems: string[]): string[] {
         columns.push(name);
       }
     }
+    if (migration.indexes !== undefined) {
+      checkIndexes(at, migration.indexes, columns, indexes, problems);
+    }
   });
   return columns;
+}
+
+// checkIndexes holds one migration's indexes to names of the behavior's
+// own, each listed once across its migrations, over a list of its columns
+// that this migration or an earlier one adds (columns, so far), each once.
+function checkIndexes(at: string, declared: unknown, columns: readonly string[], indexes: string[], problems: string[]): void {
+  if (typeof declared !== 'object' || declared === null || Array.isArray(declared)) {
+    problems.push(`${at} indexes is an object of column lists by index name`);
+    return;
+  }
+  for (const [name, list] of Object.entries(declared)) {
+    const index = `${at} index ${name}`;
+    if (!LOCAL_NAME.test(name)) {
+      problems.push(`${index}: an index name matches ${LOCAL_NAME.source}`);
+    }
+    if (indexes.includes(name)) {
+      problems.push(`${at} adds index ${name}, which an earlier migration added`);
+    }
+    indexes.push(name);
+    if (!Array.isArray(list) || list.length === 0 || list.some((column) => typeof column !== 'string')) {
+      problems.push(`${index} is a non-empty list of the behavior's column names`);
+      continue;
+    }
+    const unknown = list.filter((column: string) => !columns.includes(column));
+    if (unknown.length > 0) {
+      problems.push(
+        `${index} names ${unknown.join(', ')}, which no migration up to this one adds; an index lists the behavior's own columns by its own names (${columns.join(', ') || 'none so far'})`
+      );
+    }
+    if (new Set(list).size !== list.length) {
+      problems.push(`${index} lists a column twice`);
+    }
+  }
 }
 
 function describe(error: ErrorObject): string {

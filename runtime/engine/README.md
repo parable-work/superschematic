@@ -139,7 +139,8 @@ CREATE INDEX engine_events_schema ON engine_events (namespace, schema, cursor);
 CREATE INDEX engine_events_publish ON engine_events (namespace, cursor) WHERE kind = 'publish';
 
 -- The key of each behavior whose storage the file holds: its columns on
--- engine_instances and its tables are named bhv_<key>__<name>.
+-- engine_instances and its tables are named bhv_<key>__<name>, and the
+-- indexes its migrations list on engine_instances bhv_<key>___index_<name>.
 CREATE TABLE engine_behaviors (
   name       TEXT    PRIMARY KEY,
   key        TEXT    NOT NULL UNIQUE,
@@ -487,6 +488,21 @@ run that throws rolls back and is retried with the backoff, never later
 than its next tick, and a schedule never halts: the next run redoes the
 work a sweep missed, and there is no order to keep.
 
+A schedule's interval is fixed (`everyMs: 60_000`) or follows the config
+of each schema that composes the behavior (`everyMs: (config) =>
+config.leaseMs`), so a sweep of leases on one schema runs as often as
+that schema's leases need. The runner calls the function for each schema
+when it finds the schedule there, at its first pass and after each
+publish, and holds its result to the rule a fixed interval meets: an
+integer of at least 1000. When a publish changes the interval, the run
+already due keeps the time the old one gave it, and the new one applies
+after it. A function that throws or returns
+anything else fails the schedule on that schema as a failing run does:
+the status shows the error and `everyMs: null`, nothing runs, and it is
+tried again after the backoff (with no interval to cap it), until a
+publish gives a config it accepts. The runner, and the schedule on other
+schemas, go on.
+
 ### Status
 
 `status()` lists every subscription and schedule:
@@ -495,7 +511,7 @@ work a sweep missed, and there is no order to keep.
 | --- | --- |
 | `running`, `principal`, `head` | whether it is started, the principal's subject, and the log's last cursor |
 | `subscriptions` | `{ behavior, namespace, schema, state, cursor, attempts, retryAt, failure, skipped, lastSkip }`: `state` is `active`, `retrying` (its next event failed; `retryAt` says when it tries again), `halted` or `inactive`; `failure` is `{ cursor, at, error }` until an attempt succeeds, with `cursor` null for a failure of `watches`; `lastSkip` is `{ cursor, reason }`, `depth` or `resume` |
-| `schedules` | `{ behavior, schedule, namespace, schema, state, everyMs, previous, next, failures, error }`: `state` is `active`, `retrying` or `inactive` |
+| `schedules` | `{ behavior, schedule, namespace, schema, state, everyMs, previous, next, failures, error }`: `state` is `active`, `retrying` or `inactive`; `everyMs` is null when the schedule's function gives no interval on the schema |
 | `error` | the runner's own last error outside any reaction (a busy file, say), cleared by the next pass that works |
 
 The status is not served over HTTP or MCP: it spans every namespace and
@@ -603,7 +619,7 @@ function is synchronous (D16): one that returns a promise is a
 | `parseConfig(config, target)` | checks a config its `configSchema` accepted and returns what the other functions get as `config`; throws `BehaviorConfigError` to refuse it. Absent, `config` is the JSON config, `{}` when the type gives none. `target` has the schema, the type, its fields' JSON keys and `fieldSchemas` (each one's JSON Schema, as the describe document writes it), every behavior the type lists with its config, and, when the schema is defined or published, `schemas` ("Other instances") |
 | `configChange(before, after)` | whether a new version may change the config, add the behavior (`before` undefined) or remove it (`after` undefined) on a schema with instances: a reason refuses. Absent, only an identical config, and no adding or removing while there are instances |
 | `afterConfigChange(context)` | brings its own storage in line when a published version adds it (a first version included), removes it or changes its config ("Publishing") |
-| `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table and an `up(sql)` for its own tables |
+| `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table, the `indexes` it adds on them, and an `up(sql)` for its own tables ("Storage") |
 | `initialize(context)` | sets up its state for a new instance |
 | `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does |
 | `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext` |
@@ -613,16 +629,17 @@ function is synchronous (D16): one that returns a promise is a
 | `guardReference(view, reference, request)` | may veto an `update`, a `delete` or a writing `operation` of an instance this behavior's instance refers to ("References"); the view is the referencing instance's |
 | `afterReferenceChange(context, reference, change)` | runs after such a change, in the same transaction, on the referencing instance; after a delete it must remove the reference |
 | `reactions` | `{ react(context, event), watches?(config, schema) }`: reactions to committed events, which the runner runs after the commit ("Reactions and schedules") |
-| `schedules` | named timed work, `{ <name>: { everyMs, run(context) } }`, which the runner runs on each schema that composes the behavior |
+| `schedules` | named timed work, `{ <name>: { everyMs, run(context) } }`, which the runner runs on each schema that composes the behavior; `everyMs` is a number or a function of the schema's config ("Schedules" under "The runner") |
 
 Registration (`openEngine({ behaviors })` or `engine.behaviors.register`)
 refuses, naming every problem, an implementation whose `operations` or
 `fields` are not exactly the ones its declaration names; `reactions`
 without a `react` function; a schedule whose name is not camelCase, whose
-`everyMs` is not an integer of at least 1000, or that has no `run`; a
-declaration of the wrong shape, with an operation named `create`, `get`, `list`,
-`update` or `delete`, or with a schema that does not compile; and
-malformed migrations or columns. An operation's `paramsSchema` sets
+`everyMs` is neither an integer of at least 1000 nor a function, or that
+has no `run`; a declaration of the wrong shape, with an operation named
+`create`, `get`, `list`, `update` or `delete`, or with a schema that does
+not compile; and malformed migrations, columns or indexes, an index over
+a column no migration up to its own adds included. An operation's `paramsSchema` sets
 `additionalProperties: false`, so the handler and every guard read the
 same declared parameters and no alias reaches one and not the other; the
 compiler refuses the same declaration when it registers. The engine adds
@@ -647,7 +664,10 @@ a field reader's) has:
 - `data`: the instance's own fields, deep-frozen, without any behavior's;
 - `columns.get()`: its own columns on the instance, by its own names;
 - `sql`: `get` and `all` on its own tables, reads only, with
-  `sql.table(name)` for the SQL name of one of them;
+  `sql.table(name)` for the SQL name of one of them, and
+  `sql.instances()` for the read-only relation over the schema's
+  instances with its own columns on each ("Its columns across the
+  schema");
 - `instances` and `schemas`: other instances and other schemas' configs,
   read as the principal ("Other instances"), and `instances.invoke` and
   `instances.invokeSchema` of read-only operations;
@@ -656,15 +676,15 @@ a field reader's) has:
 
 A context (initialize, afterChange, an operation) adds `columns.set()`,
 `sql.run()`, `references.add()` and `remove()`, `call(behavior,
-operation, params)`, and `instances.invoke` and `instances.invokeSchema`
-of writing operations. In a
-read-only operation `set`, `run`, `add` and `remove` refuse, and `call`
-and `invoke` reach only read-only operations; after a delete,
+operation, params)`, `instances.invoke` and `instances.invokeSchema` of
+writing operations, and `instances.create`. In a read-only operation
+`set`, `run`, `add` and `remove` refuse, `call` and `invoke` reach only
+read-only operations, and `create` refuses; after a delete,
 `columns.get()` returns what the instance had and `set`, `add`, `remove`
-and `call` refuse. There is no handle on the instances table, the event
-log, another behavior's storage or the connection: a status one behavior
-owns changes at another's request only through its operations, whose
-guards run, on this instance or another.
+and `call` refuse. There is no handle on the instances table beyond the
+read-only relation, the event log, another behavior's storage or the
+connection: a status one behavior owns changes at another's request only
+through its operations, whose guards run, on this instance or another.
 
 An operation's context (`OperationContext`) adds two more, so a
 behavior that changes the instance on a caller's behalf, approving a
@@ -705,6 +725,7 @@ if (milestone && flow && !isTerminalState(flow, String(milestone.data.status))) 
 | `instances.getMany(schema, ids, { fields? })` | a `Map` by id of the instances of one schema, at most 500, in one query; ids with none are left out | `read` on the schema, once |
 | `instances.invoke(schema, id, operation, params?)` | runs an instance operation of another instance, or of this one, as `engine.instances.invoke` would, and returns its result | `write` or `read` with the operation's name |
 | `instances.invokeSchema(schema, operation, params?)` | runs a schema-level operation of a schema, its own or another, as `engine.instances.invokeSchema` would, a writing one in a savepoint, and returns its result | `write` or `read` with the operation's name |
+| `instances.create(schema, data, { id? })` | creates an instance of the namespace as `engine.instances.create` would: validates `data`, the instance's own fields, against the live version, runs every behavior's `initialize` and `afterChange` and appends its create event, in a savepoint; returns the record, deep-frozen. Without an `id`, the engine's `ids` makes one | `write` on the schema |
 | `schemas.config(schema, behavior)` | the config a schema's live version gives a behavior, as the schema holds it (`{}` when none); `undefined` when it does not compose it | `read`, unless the schema is the call's own |
 | `schemas.readable(schema)` | whether the principal may read a schema | `read` |
 
@@ -721,13 +742,22 @@ if (milestone && flow && !isTerminalState(flow, String(milestone.data.status))) 
 - A guard, a field reader and a read-only operation invoke read-only
   operations only; initialize, afterChange, `afterReferenceChange`, a
   writing operation and the runner's work invoke writing ones too. That
-  holds for `invokeSchema` as for `invoke`.
-- `call()`, invokes and reads that compute fields nest at most 16 deep
-  together (`MAX_CALL_DEPTH`). Invoking a writing operation of an instance
-  whose own write is still running up the call is refused as a cycle
-  (`BehaviorError`); a read of it sees what the call has written so far.
-  A cycle of field reads ends at the depth limit, so a behavior names the
-  fields it needs.
+  holds for `invokeSchema` as for `invoke`, and `create` goes where a
+  writing `invoke` goes: from a guard, a field reader, a read-only
+  operation or a read-only schema-level one it is a `BehaviorError`.
+- A created instance's create event comes before the event of the call
+  that created it, as an invoked operation's does, and records the
+  runner's cause in the runner's work. A failure inside the create, its
+  validation or one of its hooks, rolls back the create alone when the
+  behavior catches it, and the whole call when it does not. A parent's
+  `initialize` or `afterChange` creates its children in the parent's
+  transaction, so they commit with it or not at all.
+- `call()`, invokes, creates and reads that compute fields nest at most
+  16 deep together (`MAX_CALL_DEPTH`). Invoking a writing operation of an
+  instance whose own write is still running up the call is refused as a
+  cycle (`BehaviorError`), and so is creating one; a read of it sees what
+  the call has written so far. A cycle of field reads ends at the depth
+  limit, so a behavior names the fields it needs.
 - A field that reads another instance is computed at each read. The log
   records each instance's own changes, so a change of an instance that
   another's field reads shows at the reader's next read, with no event on
@@ -758,6 +788,63 @@ caller who defines or publishes, and a refusal refuses the call
 without asking. `target.schemas` is absent when a published version is
 composed again to run it, so a version is never refused later because
 another schema changed.
+
+### Its columns across the schema
+
+A behavior reads its own columns across every instance of the call's
+schema, beside each one's metadata and own fields, with SQL. A claim
+finds the next eligible instance this way, and then invokes an operation
+on it, which runs that instance's guards and appends its event (D16,
+amended).
+
+```ts
+// In a schema-level operation of a queue behavior: the next instance no
+// worker holds, by rank. lease and rank are the behavior's own columns.
+const next = context.sql.get(
+  `SELECT id FROM ${context.sql.instances()} WHERE lease IS NULL ORDER BY rank DESC, created_at LIMIT 1`,
+);
+if (next) {
+  context.instances.invoke(context.schema, String(next.id), 'claim', { worker: params.worker });
+}
+```
+
+`sql.instances()` returns the name of a relation the behavior's
+statements read like a table. It has one row per instance of the call's
+schema in the call's namespace (for a schema of the shared namespace, the
+call's namespace's instances of it), with the columns `id`, `seq`,
+`version` (the schema version the instance was last written with),
+`created_at`, `created_by`, `updated_at`, `updated_by` and `data` (the
+instance's own fields, as the JSON text the engine stores; read one with
+`json_extract(data, '$.title')`), then each of the behavior's own columns
+under its own name for it (`RELATION_COLUMNS` lists the first eight). No
+other behavior's column is there, and neither are the namespace and the
+schema. A behavior column named like one of the eight makes the relation
+a `BehaviorError`.
+
+- It is in the SQL of every function that acts for a principal: a view,
+  an operation's context, a schema-level operation's and the runner's
+  work. A migration and `afterConfigChange` act for none and have no
+  relation; the hook reads the instances with `eachInstance`.
+- Each statement that names it asks the access policy for `read` on the
+  schema as the call's principal, once however often it names it; a
+  refusal is `forbidden`, as a read of another instance is. A statement
+  on the behavior's own tables alone asks nothing.
+- It is read-only. The engine defines it in a common table expression it
+  puts ahead of the statement (first in the statement's own `WITH` list
+  when it has one), and SQLite writes only to tables: an `INSERT`,
+  `UPDATE` or `DELETE` that targets it fails (`no such table`). A write
+  may read it, to copy rows into the behavior's own tables say.
+- It joins the behavior's own tables, and the statement's parameters
+  bind as written: the expression inlines the namespace and the schema as
+  literals and adds no parameter.
+- Its name is `bhv_<key>___instances`, under the names the engine keeps
+  for the behavior ("Storage"), so it never collides with one of
+  `sql.table(name)`. The SQL checks run on the behavior's statement before
+  the engine adds the expression, so `engine_instances` and another
+  behavior's names stay refused in it.
+
+A migration's `indexes` make such a statement read an index rather than
+every instance of the file ("Storage").
 
 ### References
 
@@ -797,9 +884,11 @@ referencing schema cannot delete an instance a hook must clear.
 An operation declared with `scope: "schema"` has no instance: it runs on
 the schema as a whole, from `schemaOperations`, with a `SchemaContext`:
 the behavior, its config, the call, `can`, `instances`, `schemas`, and
-`sql` that reads the behavior's tables and writes nothing. No instance
-guard runs and no event is appended for it; a writing one changes state
-only through the instance operations it invokes, each with its own event.
+`sql` that reads the behavior's tables and its columns across the schema
+(`sql.instances()`) and writes nothing. No instance guard runs and no
+event is appended for it; a writing one changes state only through the
+instance operations it invokes and the instances it creates, each with
+its own event.
 
 ```ts
 engine.instances.invokeSchema(me, 'Order', 'summarize', { since: 0 });   // a schema-level operation of Order
@@ -845,9 +934,12 @@ interval on each schema that composes the behavior, in each namespace.
 Their context is a schema-level one (`WorkContext`): the behavior, the
 schema's config, namespace, schema and version, the runner's principal,
 `now`, `can()`, `instances` and `schemas`, whose `invoke` and
-`invokeSchema` run writing operations, and `sql` reading the behavior's
-own tables. They change state only through the operations they invoke,
-whose events record the cause. A reaction's context adds
+`invokeSchema` run writing operations and whose `create` creates, and
+`sql` reading the behavior's own tables and its columns across the
+schema (`sql.instances()`). They change state only through the
+operations they invoke and the instances they create, whose events
+record the cause. A schedule's `everyMs` may be a function of the
+schema's config ("Schedules" under "The runner"). A reaction's context adds
 `before(event)`: the event's instance as the log had it just before the
 event, its behaviors' fields included, `undefined` for its create, which
 is all a delete leaves of it; it asks `read` on the event's schema. A
@@ -873,6 +965,34 @@ implementation registers and the file already holds its storage, its new
 migrations run then; a file whose ledger is ahead of the implementation
 is refused.
 
+A migration indexes the behavior's columns on the instances table with
+`indexes`, by its own name for each index, over its own names for the
+columns:
+
+```ts
+migrations: [
+  { version: 1, name: 'lease', columns: { lease: { type: 'text' }, rank: { type: 'integer', notNull: true, default: 0 } } },
+  { version: 2, name: 'claim order', indexes: { open_by_rank: ['lease', 'rank'] } },
+],
+```
+
+The engine creates `bhv_<key>___index_<name>` on `engine_instances
+(namespace, schema, <the columns>)` after the migration's columns and
+before its `up(sql)`, so a statement on the relation `sql.instances()`
+names that filters or orders by the columns reads the index for the
+call's namespace and schema alone. The migration's ledger row records it
+with its columns. A column must be one that migration or an earlier one
+adds, and an index name is `[a-z][a-z0-9_]*`, used once across the
+migrations; registration refuses anything else. An index is permanent: a
+later migration cannot drop or change one yet.
+
+The names under `bhv_<key>___`, the prefix and one more `_`, are the
+engine's for the behavior: its indexes on the instances table and the
+relation over the instances. A name the behavior gives with
+`sql.table(name)` starts with a letter after the prefix, so none of
+these collides with one of its tables, and a migration's SQL may not name
+one or create an object under one.
+
 A behavior's SQL runs one statement at a time. Before it reaches SQLite
 the engine refuses a statement that names, bare, quoted or as a string
 literal, anything starting with `engine_`, `sqlite_`, `pragma_` or `bhv_`
@@ -880,7 +1000,8 @@ other than the behavior's own `bhv_<key>__` names, and one that calls
 `load_extension`. A read runs `SELECT`, `VALUES` and `WITH ... SELECT`; a
 write adds `INSERT`, `UPDATE`, `DELETE` and `REPLACE`; a migration adds
 `CREATE TABLE`, `CREATE [UNIQUE] INDEX`, `CREATE VIRTUAL TABLE`, `ALTER
-TABLE`, `DROP TABLE` and `DROP INDEX`. A virtual table is `[IF NOT
+TABLE`, `DROP TABLE` and `DROP INDEX`, on names that are not under
+`bhv_<key>___`. A virtual table is `[IF NOT
 EXISTS] <own name> USING fts5`, unqualified: another module can reach
 past the behavior's tables (`dbstat` reports on every table in the
 file), and full-text search needs fts5 alone. `PRAGMA`, `ATTACH`,
@@ -903,7 +1024,9 @@ hook roll back with it.
 gives, undefined when it removes the behavior), `before` (the version it
 replaces gave, undefined when that one did not compose it), `namespace`,
 `schema`, `version`, `now`, `sql` with writes on the behavior's own
-tables, and `eachInstance(visit)`, which visits every instance of the
+tables (no `sql.instances()`: the hook acts for no principal, and the
+relation asks the policy as one), and `eachInstance(visit)`, which
+visits every instance of the
 schema in the namespace in creation order, read 500 at a time, each `{
 id, data }` with its own fields, deep-frozen. It has no principal and
 asks no policy: the publish was allowed, and what the hook reads goes
@@ -936,6 +1059,7 @@ every call on the schema `unavailable` until one registers.
 | `delete` | check `expectedSeq` -> every guard, then each referencing behavior's `guardReference` -> the row goes -> each `afterChange` -> its references go -> event -> each `afterReferenceChange` -> no reference to it may remain |
 | `invoke` | policy -> parameters against `paramsSchema` -> check `expectedSeq` -> every guard (and, for a writing operation, each `guardReference`) -> the handler -> its result against `resultSchema` -> for a writing operation, each `afterChange`, the next `seq`, the event and each `afterReferenceChange` |
 | `invokeSchema` | policy -> parameters against `paramsSchema` -> the handler -> its result against `resultSchema`; no guard, no event |
+| a behavior's `instances.create` | policy (`write`) -> as `create`, in a savepoint of the calling call's transaction |
 | `publish` (`schemas`) | policy -> the compatibility rule, with each `configChange` -> each `parseConfig` with `target.schemas` (`read` on each schema it reaches) -> each composed behavior's migrations -> the version -> each `afterConfigChange` of a behavior it adds, removes or changes, per namespace -> event |
 
 An `update` asks each `guardReference` after the guards and runs each

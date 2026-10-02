@@ -24,6 +24,8 @@ import {
   ledgerDocument,
   mark,
   openRunnerEngine,
+  pacer,
+  pacerDocument,
   plainDocument,
   probe,
   publish,
@@ -491,6 +493,79 @@ for (const driver of drivers) {
       assert.deepEqual([recovered.state, recovered.failures, recovered.error, recovered.previous], ['active', 0, null, clock.now]);
     });
 
+    test("a schedule's interval follows the config of each schema it runs on, and a new config's from the next run", () => {
+      const clock = testClock(0);
+      const engine = openRunnerEngine({ driver, clock, behaviors: [ledger, pacer] });
+      publish(engine, pacerDocument('Fast', { everyMs: 5_000 }));
+      publish(engine, pacerDocument('Slow', { everyMs: 20_000 }));
+      const runs: string[] = [];
+      probe.tick = (context) => {
+        runs.push(`${context.schema} ${context.now}`);
+      };
+      const status = (schema: string) => engine.runner.status().schedules.find((candidate) => candidate.schema === schema);
+
+      assert.equal(engine.runner.runDue().scheduled, 0);
+      assert.deepEqual(
+        engine.runner.status().schedules.map(({ schema, state, everyMs, next }) => [schema, state, everyMs, next]),
+        [
+          ['Fast', 'active', 5_000, 5_000],
+          ['Slow', 'active', 20_000, 20_000],
+        ]
+      );
+      for (let now = 5_000; now <= 20_000; now += 5_000) {
+        clock.now = now;
+        engine.runner.runDue();
+      }
+      assert.deepEqual(runs, ['Fast 5000', 'Fast 10000', 'Fast 15000', 'Fast 20000', 'Slow 20000']);
+
+      publish(engine, pacerDocument('Slow', { everyMs: 10_000 }));
+      assert.deepEqual([status('Slow')?.everyMs, status('Slow')?.next], [10_000, 40_000]);
+      clock.now = 40_000;
+      engine.runner.runDue();
+      assert.deepEqual([status('Slow')?.previous, status('Slow')?.next], [40_000, 50_000]);
+    });
+
+    test('an interval a config cannot give fails the schedule on that schema as a failing run does, and runs once a publish gives one', () => {
+      const clock = testClock(0);
+      const engine = openRunnerEngine({ driver, clock, behaviors: [ledger, pacer] });
+      publish(engine, pacerDocument('Fast', { everyMs: 5_000 }));
+      publish(engine, pacerDocument('Short', { everyMs: 10 }));
+      publish(engine, pacerDocument('Broken', { everyMs: -1 }));
+      probe.every = (config) => {
+        if (config.everyMs === -1) {
+          throw new Error('no interval for -1');
+        }
+        return config.everyMs;
+      };
+      const runs: string[] = [];
+      probe.tick = (context) => {
+        runs.push(`${context.schema} ${context.now}`);
+      };
+      const status = () =>
+        Object.fromEntries(engine.runner.status().schedules.map(({ schema, state, everyMs, failures, next, error }) => [schema, [state, everyMs, failures, next, error]]));
+
+      assert.deepEqual(engine.runner.runDue(), { handled: 0, skipped: 0, failed: 2, scheduled: 0 });
+      assert.deepEqual(status(), {
+        Broken: ['retrying', null, 1, 1_000, 'Error: no interval for -1'],
+        Fast: ['active', 5_000, 0, 5_000, null],
+        Short: ['retrying', null, 1, 1_000, 'BehaviorError: behavior test.Pacer: schedule tick: everyMs(config) returns an integer of at least 1000, got 10'],
+      });
+      clock.now = 1_000;
+      assert.deepEqual(engine.runner.runDue(), { handled: 0, skipped: 0, failed: 2, scheduled: 0 });
+      assert.deepEqual(status().Short.slice(0, 4), ['retrying', null, 2, 3_000]);
+      clock.now = 5_000;
+      assert.deepEqual(engine.runner.runDue(), { handled: 0, skipped: 0, failed: 2, scheduled: 1 });
+      assert.deepEqual(runs, ['Fast 5000']);
+      assert.equal(engine.runner.status().error, null);
+
+      publish(engine, pacerDocument('Short', { everyMs: 2_000 }));
+      clock.now = 9_000;
+      assert.deepEqual(engine.runner.runDue(), { handled: 0, skipped: 0, failed: 1, scheduled: 1 });
+      assert.deepEqual(status().Short, ['active', 2_000, 0, 11_000, null]);
+      assert.deepEqual(status().Broken.slice(0, 3), ['retrying', null, 4]);
+      assert.deepEqual(runs, ['Fast 5000', 'Short 9000']);
+    });
+
     test('a subscription starts at the publish that composes the behavior, and hears the schemas watches names', () => {
       const engine = openRunnerEngine({ driver });
       publish(engine, plainDocument('Note'));
@@ -553,7 +628,11 @@ for (const driver of drivers) {
         [{ ...ledger, reactions: { react: 1 } }, /reactions\.react is a function/],
         [{ ...ledger, reactions: { react() {}, watches: [] } }, /reactions\.watches is a function/],
         [{ ...ledger, schedules: { Sweep: { everyMs: 60_000, run() {} } } }, /schedule Sweep: a schedule name is camelCase/],
-        [{ ...ledger, schedules: { sweep: { everyMs: 999, run() {} } } }, /schedule sweep: everyMs is an integer of at least 1000, got 999/],
+        [
+          { ...ledger, schedules: { sweep: { everyMs: 999, run() {} } } },
+          /schedule sweep: everyMs is an integer of at least 1000, or a function of the config that returns one, got 999/,
+        ],
+        [{ ...ledger, schedules: { sweep: { everyMs: '60000', run() {} } } }, /schedule sweep: everyMs is an integer .* got string/],
         [{ ...ledger, schedules: { sweep: { everyMs: 1_000 } } }, /schedule sweep: run is a function/],
       ] as const) {
         assert.match(thrown(() => openRunnerEngine({ driver, behaviors: [broken as never] }), TypeError).message, problem);

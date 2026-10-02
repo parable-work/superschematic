@@ -1,6 +1,7 @@
-// The behavior the runner tests register: test.Ledger keeps the notes its
+// The behaviors the runner tests register: test.Ledger keeps the notes its
 // mark operation writes on an instance, and its reactions and schedule do
-// what the running test puts in probe.
+// what the running test puts in probe; test.Pacer has one schedule, whose
+// interval follows the config of each schema that composes it.
 import {
   allowAll,
   defineBehavior,
@@ -25,17 +26,27 @@ export interface LedgerConfig {
   readonly watch?: readonly string[];
 }
 
-/** What the running test makes test.Ledger's reactions and schedule do; nothing when unset. */
+export interface PacerConfig {
+  /** The interval of its schedule on the schema. */
+  readonly everyMs?: number;
+}
+
+/** What the running test makes test.Ledger's reactions and schedule, and test.Pacer's, do; nothing when unset. */
 export const probe: {
   react?: (context: ReactionContext<LedgerConfig>, event: EngineEvent) => void;
   sweep?: (context: ScheduleContext<LedgerConfig>) => void;
   watches?: (config: LedgerConfig) => readonly string[];
+  /** test.Pacer's interval for a config, in place of its everyMs. */
+  every?: (config: PacerConfig) => unknown;
+  tick?: (context: ScheduleContext<PacerConfig>) => void;
 } = {};
 
 export function resetProbe(): void {
   delete probe.react;
   delete probe.sweep;
   delete probe.watches;
+  delete probe.every;
+  delete probe.tick;
 }
 
 export const ledgerDeclaration: BehaviorDeclaration = {
@@ -145,6 +156,33 @@ export const ledger = defineBehavior<LedgerConfig>({
     },
   },
 });
+
+export const pacer = defineBehavior<PacerConfig>({
+  declaration: {
+    name: 'test.Pacer',
+    description: 'Ticks on each schema at the interval its config gives.',
+    // No minimum: the runner, not the config, holds the interval to its rule.
+    configSchema: { type: 'object', additionalProperties: false, properties: { everyMs: { type: 'integer' } } },
+  },
+  configChange: () => undefined,
+  schedules: {
+    tick: {
+      everyMs: (config) => (probe.every ? (probe.every(config) as number) : (config.everyMs ?? 60_000)),
+      run(context) {
+        probe.tick?.(context);
+      },
+    },
+  },
+});
+
+/** A schema of one string field whose instance type composes test.Pacer with a config. */
+export function pacerDocument(name: string, config: PacerConfig): Record<string, unknown> {
+  const document = schemaDocument(name, [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as {
+    types: Record<string, Record<string, unknown>>;
+  };
+  document.types[name].behaviors = [{ name: 'test.Pacer', config }];
+  return document;
+}
 
 /** A schema of one string field whose instance type composes test.Ledger with a config. */
 export function ledgerDocument(name: string, config: LedgerConfig = {}): Record<string, unknown> {
