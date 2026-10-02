@@ -6,7 +6,9 @@
 # a GET operation, which travel in the query string: lists of numbers, an
 # integer scalar, booleans, UUIDs, timestamps and strings, optional single
 # values of each, and a @query list. reviseDocument takes an input type
-# with an optional Generic.JSON field. The Go route tests in apigen load it.
+# with an optional Generic.JSON field. removeTags is a DELETE, whose
+# arguments the route reads from the JSON body, as it does a PUT's. The Go
+# route tests in apigen and the TypeScript SDK round trip in sdkgen load it.
 # saveTags, storeDocument and findTags match the TypeScript server's scalar
 # list fixture, so both servers answer the same vectors.
 name: body-args-api
@@ -190,6 +192,26 @@ operationSets:
           - name: pointByName
             typeRef: { name: Point, isMap: true }
             required: true
+      # Remove labels from a post; returns the labels removed.
+      - name: removeTags
+        typeRef: { name: string, isArray: true }
+        required: true
+        httpMethod: DELETE
+        restPath: "posts/{id}/tags"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          # The labels to remove.
+          - name: labels
+            typeRef: { name: string, isArray: true }
+            required: true
+          # Remove them from the post's history as well.
+          - name: purge
+            typeRef: { name: boolean }
+          # Why they were removed: any JSON value.
+          - name: reason
+            typeRef: { name: Generic.JSON }
   - name: TagQueries
     operations:
       # Find posts by label, rank, code and page, all in the query string.

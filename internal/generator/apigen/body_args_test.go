@@ -355,7 +355,7 @@ func TestMapArgumentOutsideTheBodyIsRefused(t *testing.T) {
 // element outside the enum is enum, a required builtin value must be
 // present, and a Generic.JSON argument is any JSON value but null, except
 // that an optional one, alone or as an input type's field, keeps null apart
-// from absent.
+// from absent. A DELETE reads its arguments from the body, as a PUT does.
 func TestBodyArgsRoutesApplyTheListRules(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")

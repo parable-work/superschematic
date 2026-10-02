@@ -533,3 +533,28 @@ func TestNamespaceDeleteSendsDeclaredInput(t *testing.T) {
 		t.Fatalf("DELETE does not send its input as the body:\n%s", got)
 	}
 }
+
+// TestNamespaceDeleteSendsScalarArgumentsInTheBody pins that a DELETE
+// endpoint without an input type sends its scalar arguments as the request
+// body, after validating them; the Go API handler reads them from the JSON
+// body for every method but GET.
+func TestNamespaceDeleteSendsScalarArgumentsInTheBody(t *testing.T) {
+	got := renderNamespace(t, EndpointInfo{
+		Name:          "removeTags",
+		Path:          "/api/posts/{id}/tags",
+		TSPath:        "/api/posts/${id}/tags",
+		Method:        "DELETE",
+		OutputType:    "string",
+		OutputIsArray: true,
+		PathParams:    []PathParam{{Name: "id", TSName: "id", TSType: "string"}},
+		ScalarArgs: []apigen.ScalarArg{
+			{Name: "labels", Type: "string", IsString: true, Required: true, IsArray: true},
+			{Name: "purge", Type: "boolean", IsBool: true},
+		},
+	})
+	validate := strings.Index(got, `setFieldErrors(errors, "labels", [{ validator: "required"`)
+	send := strings.Index(got, "this.client.delete<string[]>(\n      `/api/posts/${id}/tags`,\n      { signal: requestSignal, data: scalarInput }")
+	if validate < 0 || send < validate {
+		t.Fatalf("DELETE does not validate its scalar arguments, then send them as the body:\n%s", got)
+	}
+}
