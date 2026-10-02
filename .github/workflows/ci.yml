@@ -5,7 +5,8 @@ name: ci
 # gofmt, golangci-lint, scalar catalog, schema-file types and core behavior
 # declarations drift, CLI smoke over the fixture corpus), the acme example
 # extension (smoke plus the no-core-edits check), the TypeScript authoring
-# packages, schema runtime, http runtime, engine and engine example, the
+# packages, schema runtime, http runtime, engine, the engine's work-queue
+# package and the engine example, the
 # Python schema runtime, the Rust http runtime, the version graph (the core
 # crate, its Go binding, the TypeScript package over its wasm build and the
 # Python package over its PyO3 build, and the Go, TypeScript, Rust and
@@ -244,7 +245,7 @@ jobs:
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           go run ./internal/tools/schemafiletypes -check
 
-      - name: Core behavior declarations drift (the engine's copies match the core registry)
+      - name: Core behavior declarations drift (the engine's and the work-queue package's copies match the core registry)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: |
@@ -386,7 +387,7 @@ jobs:
         run: examples/acme-shop/scripts/check.sh
 
   typescript:
-    name: typescript (authoring packages + schema and http runtimes + engine)
+    name: typescript (authoring packages + schema and http runtimes + engine and its work-queue package)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -457,6 +458,15 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
           bun run build
+          bun run test
+
+      - name: runtime/engine-workqueue/typescript typecheck + build + test (Node.js and Bun)
+        # Runs after the engine's build, which its scripts/link-local-deps.mjs
+        # links into node_modules.
+        working-directory: runtime/engine-workqueue/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
           bun run test
 
       - name: examples/engine-notes type-check + end to end (Node.js and Bun)

@@ -1,7 +1,9 @@
 /**
  * The config each behavior takes, keyed by the behavior's registered name.
  * It lists the behaviors the core declares (internal/registry/behaviors in
- * the superschematic repository), which @superschematic/engine implements.
+ * the superschematic repository), which @superschematic/engine implements,
+ * and the work-queue behaviors, which @superschematic/engine-workqueue
+ * implements.
  * An extension's authoring package adds its behaviors by module
  * augmentation, as it adds an invocation policy key to MCPToolOptions:
  *
@@ -37,6 +39,12 @@ export interface BehaviorConfigs {
   Search: SearchConfig;
   /** Rules that move Workflow statuses after a change commits; it requires Workflow. */
   Reactions: ReactionsConfig;
+  /** An exclusive, time-bounded lease on the instance, with a fencing token, heartbeats and directives to its holder. */
+  Lease: LeaseConfig;
+  /** Assigns the instance to one principal, who alone may then take its lease or claim it. */
+  Assignment: AssignmentConfig;
+  /** Makes the type's instances claimable work, in priority order; it requires Workflow and Lease. */
+  Queue: QueueConfig;
 }
 
 /** Workflow's config. */
@@ -165,6 +173,62 @@ export interface ReactionThen {
   readonly transition: string;
   /** A link of the type's Links config: the target is the instance it points to. The instance itself when absent. */
   readonly link?: string;
+}
+
+/** Lease's config. */
+export interface LeaseConfig {
+  /** How long a lease lasts after its acquire or its last heartbeat, in milliseconds, at least 1000; 60000 when absent. */
+  readonly ttlMs?: number;
+  /** How often the holder should send a heartbeat, in milliseconds, less than ttlMs; a third of ttlMs when absent. */
+  readonly heartbeatMs?: number;
+  /** How often the engine's runner expires lapsed leases, in milliseconds, at least 1000; 5000 when absent. */
+  readonly sweepMs?: number;
+  /** The longest a principal may hold a lease after acquiring it, in milliseconds, renewed or not; no limit when absent. */
+  readonly maxHoldMs?: number;
+  /** An integer field of the type whose positive value overrides maxHoldMs for the instance. */
+  readonly maxHoldField?: string;
+  /**
+   * Moves the instance's Workflow status, through transition, when a lease
+   * ends with the work unfinished: at an expiry, and at a release, while
+   * the status is one of from. Needs Workflow on the type.
+   */
+  readonly onExpiry?: LeaseTransition;
+  /** How many expiries an instance may have before its lease cannot be acquired again. */
+  readonly maxExpiries?: number;
+  /** Used instead of onExpiry at the expiry that reaches maxExpiries, which it needs. */
+  readonly escalate?: LeaseTransition;
+  /** Writing operations of the type's other behaviors, as `<Behavior>.<operation>`, that other principals may run while the lease is active. */
+  readonly exempt?: readonly string[];
+  /** The permission a principal needs to acquire a lease. */
+  readonly acquirePermission?: string;
+  /** The permission that releases another principal's lease, writes while another holds it, resets expiries, and sends directives when directPermission is absent. */
+  readonly overridePermission?: string;
+  /** The permission a principal needs to send the holder a directive. */
+  readonly directPermission?: string;
+}
+
+/** A move of the status a lease's end makes: to transition, from one of from. */
+export interface LeaseTransition {
+  readonly transition: string;
+  readonly from: readonly string[];
+}
+
+/** Assignment's config. */
+export interface AssignmentConfig {
+  /** The permission a principal needs to assign another principal, reassign, or unassign another principal. */
+  readonly permission?: string;
+}
+
+/** Queue's config. */
+export interface QueueConfig {
+  /** The Workflow states an instance is claimed from, and the state a claim moves it to. */
+  readonly claim: { readonly from: readonly string[]; readonly to: string };
+  /** An integer field of the type that orders claimNext: higher first, an instance without a value last. */
+  readonly priorityField?: string;
+  /** The type's own top-level scalar fields claimNext may filter on, by equality. */
+  readonly match?: readonly string[];
+  /** The most instances one claimNext tries; 100 when absent. */
+  readonly maxCandidates?: number;
 }
 
 /** A name @behavior takes: a key of BehaviorConfigs. */

@@ -1,0 +1,114 @@
+{
+  "name": "Queue",
+  "description": "Makes the type's instances claimable work. claim checks that an instance can be claimed, takes its lease and moves its Workflow status from a claimable state to the claimed one, in one transaction; claimNext claims the first instance that can be claimed, highest priority first, then oldest. Requires Workflow and Lease.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["claim"],
+    "properties": {
+      "claim": {
+        "description": "The Workflow states an instance is claimed from, and the state a claim moves it to.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": {
+          "from": {
+            "description": "The states an instance can be claimed in; a transition from each to the claimed state must exist.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "to": { "description": "The state a claim moves the instance to.", "type": "string", "minLength": 1 }
+        }
+      },
+      "priorityField": {
+        "description": "An integer field of the type that orders claimNext: higher first, an instance without a value last. Absent, oldest first.",
+        "type": "string",
+        "minLength": 1
+      },
+      "match": {
+        "description": "The type's own top-level scalar fields claimNext may filter on, by equality.",
+        "type": "array",
+        "maxItems": 16,
+        "uniqueItems": true,
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "maxCandidates": {
+        "description": "The most instances one claimNext tries before it gives up; 100 when absent.",
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000
+      }
+    }
+  },
+  "requires": ["Workflow", "Lease"],
+  "operations": [
+    {
+      "name": "claim",
+      "description": "Claims the instance for the caller: its status must be one of the claimable states and no blocker may hold it up; then it takes the lease and moves the status to the claimed state, or does neither.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ttlMs": { "description": "The lease's length, as Lease's acquire takes it.", "type": "integer", "minimum": 1000 }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "token", "expiresAt", "heartbeatMs"],
+        "properties": {
+          "id": { "description": "The instance's id.", "type": "string" },
+          "token": { "description": "The lease's fencing token.", "type": "integer" },
+          "expiresAt": { "description": "When the lease expires unless renewed, in epoch milliseconds.", "type": "integer" },
+          "heartbeatMs": { "description": "How often to send a heartbeat, in milliseconds.", "type": "integer" }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "claimNext",
+      "description": "Claims the first instance of the schema the caller can claim, highest priority first, then oldest, skipping each one whose claim is refused, up to maxCandidates; null when none can be claimed.",
+      "scope": "schema",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "match": {
+            "description": "Values of the config's match fields an instance must hold.",
+            "type": "object",
+            "additionalProperties": { "type": ["string", "number", "boolean"] }
+          }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claimed"],
+        "properties": {
+          "claimed": {
+            "description": "The claim, as claim returns it; null when nothing was claimed.",
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["id", "token", "expiresAt", "heartbeatMs"],
+            "properties": {
+              "id": { "type": "string" },
+              "token": { "type": "integer" },
+              "expiresAt": { "type": "integer" },
+              "heartbeatMs": { "type": "integer" }
+            }
+          }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "refresh",
+      "description": "Recomputes what claimNext reads of the instance: whether its status is claimable, whether a blocker holds it up, its assignee, its priority and whether its lease has reached maxExpiries. Queue invokes it itself when a blocker changes.",
+      "paramsSchema": { "type": "object", "additionalProperties": false },
+      "resultSchema": { "type": "object", "additionalProperties": false },
+      "writes": true
+    }
+  ]
+}

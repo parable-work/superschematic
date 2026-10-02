@@ -142,6 +142,15 @@ reads them: on a `GET` in the query string, and on any other method, a
 `DELETE` among them, as the fields of the JSON body. A `@query` parameter
 is always in the query string.
 
+An object-type argument of an operation that is not a `GET`, in a list, a
+list of lists or a map, is checked the same way, with each failure under
+the argument's path (`points[0].x`, `grid[0][1].pinLabel`,
+`point_by_name[a].x`). It is sent as
+pydantic read it, by wire name, so a value pydantic coerces, such as the
+text `"1"` for a number, reaches the route as the number. Each value of an
+argument is checked at its own path, and `None` there, as a required
+argument or a list element of any type, is `required` (`related[1]`).
+
 A `Generic.JSON` argument of an operation that is not a `GET` is typed as
 the types package's `GenericJSON`, the type of a `Generic.JSON` field, and
 is sent as the JSON value it holds: a `dict`, a `list`, a `str`, a

@@ -151,6 +151,12 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/posts/{id}/flags",
 			Handler: createTagSetFlagsHandler(cfg.Implementations.Tag),
 		},
+		// Pin rows of points on a post's cover image.
+		{
+			Method:  "PUT",
+			Path:    "/posts/{id}/pins",
+			Handler: createTagPinPointsHandler(cfg.Implementations.Tag),
+		},
 		// Place named points on a post's cover image: a map of an object type
 		// is a body argument, not the operation's input type.
 		{
@@ -709,6 +715,65 @@ func createTagSetFlagsHandler(impl TagImplementation) gohttp.HandlerFunc {
 
 		// Call implementation
 		result, err := impl.SetFlags(r.Context(), Id, requestBody.Pinned, requestBody.Score, requestBody.Caption, requestBody.Rank, requestBody.Related, requestBody.Points)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createTagPinPointsHandler creates a handler for PUT /api/posts/{id}/pins
+//
+// Pin rows of points on a post's cover image.
+func createTagPinPointsHandler(impl TagImplementation) gohttp.HandlerFunc {
+	// Body arguments: the JSON type of each value, then its rules in the
+	// order they are checked (the scalar type's own, then the argument's).
+	bodyGridArg := bodyargs.NewArg("grid", bodyargs.Object, bodyargs.Required())
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id := IdStr
+		// Parse body arguments (non-GET endpoints). The body is one JSON
+		// object; each argument is decoded from its own JSON value and
+		// checked by the list and value rules, and every failure is reported
+		// at the argument's path (name, name[i], name[i][j], name[key]).
+		body, err := bodyargs.ReadObject(r.Body)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+			return
+		}
+		var requestBody struct {
+			Grid [][]types.Point
+		}
+		validationErrors := types.NewValidationErrors()
+		requestBody.Grid = bodyargs.ListOfLists[types.Point](validationErrors, body, bodyGridArg)
+		if validationErrors.HasErrors() {
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.PinPoints(r.Context(), Id, requestBody.Grid)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

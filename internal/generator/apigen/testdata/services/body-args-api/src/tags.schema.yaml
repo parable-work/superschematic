@@ -1,6 +1,7 @@
 # Body arguments of operations without an input type: lists of strings,
 # numbers, an integer scalar, an enum, a string scalar, a UUID and an object
-# type, required single values of each builtin type, Generic.JSON values
+# type, required single values of each builtin type, a list of lists of an
+# object type (one alone is the operation's input type), Generic.JSON values
 # and JSON object and array scalars (Generic.StringMap, Embedding.Vector)
 # alone, in a list and in a list of lists, and maps of an enum, of lists of
 # a string scalar and of an object type. removeTags is a DELETE, whose list,
@@ -58,6 +59,10 @@ types:
       - name: y
         typeRef: { name: number }
         required: true
+      # A label pinned at the point, at least two characters.
+      - name: pinLabel
+        typeRef: { name: string }
+        validateMinLength: 2
   # A revision of a stored document.
   DocumentRevision:
     name: DocumentRevision
@@ -217,6 +222,19 @@ operationSets:
             required: true
           - name: pointByName
             typeRef: { name: Point, isMap: true }
+            required: true
+      # Pin rows of points on a post's cover image.
+      - name: pinPoints
+        typeRef: { name: boolean }
+        required: true
+        httpMethod: PUT
+        restPath: "posts/{id}/pins"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: grid
+            typeRef: { name: Point, isArray: true, isArrayOfArrays: true }
             required: true
       # Remove labels from a post; returns the labels removed. A DELETE
       # reads its arguments from the body, as a PUT does.
