@@ -137,6 +137,14 @@ input and on every object it holds. A failure raises `ValidationError`,
 whose `errors` maps each path (`lines`, `lines[0].quantity`) to its rule
 and message, as the Go and TypeScript SDKs report them.
 
+An object-type argument of a `POST`, `PUT` or `PATCH` operation, in a list
+or a list of lists, is checked the same way, with each failure under the
+argument's path (`points[0].x`, `grid[0][1].pinLabel`). It is sent as
+pydantic read it, by wire name, so a value pydantic coerces, such as the
+text `"1"` for a number, reaches the route as the number. Each value of an
+argument is checked at its own path, and `None` there, as a required
+argument or a list element of any type, is `required` (`related[1]`).
+
 A `Generic.JSON` argument of a `POST`, `PUT` or `PATCH` operation is typed
 as the types package's `GenericJSON`, the type of a `Generic.JSON` field,
 and is sent as the JSON value it holds: a `dict`, a `list`, a `str`, a
