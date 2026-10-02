@@ -63,7 +63,7 @@ export { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './paging.js';
 export { ENGINE_OWNER, engineMigrations } from './migrations.js';
 
 // Behaviors: the implementation interface and the registry (runtime/engine/README.md, "Behaviors").
-export { BehaviorConfigError, defineBehavior } from './behaviors/behavior.js';
+export { BehaviorConfigError, RELATION_COLUMNS, defineBehavior } from './behaviors/behavior.js';
 export type {
   AnyBehaviorImplementation,
   BehaviorImplementation,
@@ -99,6 +99,8 @@ export type {
   SqlReader,
   SqlWriter,
   StoredInstance,
+  TableReader,
+  TableWriter,
   WorkContext,
   WritableColumns,
 } from './behaviors/behavior.js';

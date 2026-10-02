@@ -21,7 +21,12 @@ composes it, in one namespace, with the time of its next run in
 engine_schedules. A run and that time commit together. A schedule that
 came due while the runner was stopped runs once; missed ticks are not
 replayed. A failing run is retried with backoff, never later than its
-next tick, and a schedule never halts.
+next tick, and a schedule never halts. Its interval is fixed, or a
+function of the schema's config that the runner calls when it finds the
+schedule on the schema (discover); a function that throws or gives no
+valid interval fails the schedule on that schema as a failing run does,
+now and each time it comes due, with the backoff alone to space the
+retries, until a publish or a registration makes the runner look again.
 
 Both run as schema-level work (behaviors/execution.ts, WorkExecution)
 on a chain whose principal is the runner's and whose cause each event
@@ -41,7 +46,8 @@ import { checkPrincipal, type Principal } from '../access.js';
 import type { BehaviorReactions, BehaviorSchedule } from '../behaviors/behavior.js';
 import type { BoundBehavior } from '../behaviors/composition.js';
 import { Chain, WorkExecution, type Reach } from '../behaviors/execution.js';
-import type { BehaviorRegistry } from '../behaviors/registry.js';
+import { MIN_SCHEDULE_MS, type BehaviorRegistry } from '../behaviors/registry.js';
+import { synchronous } from '../behaviors/storage.js';
 import { BehaviorError, EngineError } from '../errors.js';
 import { EVENT_COLUMNS, toEvent, type EngineEvent, type EventLog } from '../events/log.js';
 import type { Namespaces } from '../namespaces.js';
@@ -114,9 +120,9 @@ export interface ScheduleStatus {
   schedule: string;
   namespace: string;
   schema: string;
-  /** retrying: its last run failed; inactive: no live version composes it now. */
+  /** retrying: its last run failed, or its interval could not be had; inactive: no live version composes it now. */
   state: 'active' | 'retrying' | 'inactive';
-  /** Its interval; null for an inactive one. */
+  /** Its interval on the schema; null for an inactive one and one whose everyMs function fails there. */
   everyMs: number | null;
   /** When its last run committed; null before its first. */
   previous: number | null;
@@ -178,6 +184,8 @@ interface ReactionUnit extends Unit {
 interface ScheduleUnit extends Unit {
   readonly name: string;
   readonly spec: BehaviorSchedule<unknown>;
+  /** Its interval on the schema, or why its everyMs function gives none. */
+  readonly every: { readonly everyMs: number } | { readonly error: unknown };
 }
 
 interface Discovery {
@@ -316,7 +324,7 @@ export class Runner {
     for (const unit of discovery.schedules) {
       const row = this.scheduleRow(unit);
       if (row) {
-        schedules.set(scheduleId({ ...unit, schedule: unit.name }), scheduleStatus(row, unit.spec.everyMs));
+        schedules.set(scheduleId({ ...unit, schedule: unit.name }), scheduleStatus(row, 'everyMs' in unit.every ? unit.every.everyMs : null));
       }
     }
     const head = this.storage.get('SELECT MAX(cursor) AS head FROM engine_events');
@@ -584,15 +592,20 @@ export class Runner {
     const now = this.clock();
     const row = this.scheduleRow(unit);
     const key = [unit.behavior, unit.name, unit.namespace, unit.schema];
+    if (!('everyMs' in unit.every)) {
+      this.failInterval(unit, row, now, unit.every.error, totals);
+      return;
+    }
+    const everyMs = unit.every.everyMs;
     if (!row) {
       this.storage.transaction(() =>
         this.storage.run(
           `INSERT INTO engine_schedules (behavior, schedule, namespace, schema, next_run_at) VALUES (?, ?, ?, ?, ?)
            ON CONFLICT (behavior, schedule, namespace, schema) DO NOTHING`,
-          [...key, now + unit.spec.everyMs]
+          [...key, now + everyMs]
         )
       );
-      this.dueAt(now + unit.spec.everyMs);
+      this.dueAt(now + everyMs);
       return;
     }
     if (Number(row.next_run_at) > now) {
@@ -612,7 +625,7 @@ export class Runner {
         });
       } catch (error) {
         const failures = Number(row.failures) + 1;
-        const next = now + Math.min(this.backoff(failures), unit.spec.everyMs);
+        const next = now + Math.min(this.backoff(failures), everyMs);
         this.storage.run(
           `UPDATE engine_schedules SET failures = ?, error = ?, next_run_at = ?
            WHERE behavior = ? AND schedule = ? AND namespace = ? AND schema = ?`,
@@ -625,11 +638,34 @@ export class Runner {
       this.storage.run(
         `UPDATE engine_schedules SET last_run_at = ?, next_run_at = ?, failures = 0, error = NULL
          WHERE behavior = ? AND schedule = ? AND namespace = ? AND schema = ?`,
-        [now, now + unit.spec.everyMs, ...key]
+        [now, now + everyMs, ...key]
       );
-      this.dueAt(now + unit.spec.everyMs);
+      this.dueAt(now + everyMs);
       totals.scheduled += 1;
     });
+  }
+
+  // failInterval records a schedule whose everyMs function gives no
+  // interval on the schema as a failed run, when the runner first finds
+  // it and each time it comes due after: the failure and the error show
+  // in status, and it is due again after the backoff. Nothing runs and
+  // the schedule never halts.
+  private failInterval(unit: ScheduleUnit, row: Row | undefined, now: number, error: unknown, totals: Totals): void {
+    if (row && Number(row.next_run_at) > now) {
+      this.dueAt(Number(row.next_run_at));
+      return;
+    }
+    const failures = Number(row?.failures ?? 0) + 1;
+    const next = now + this.backoff(failures);
+    this.storage.transaction(() =>
+      this.storage.run(
+        `INSERT INTO engine_schedules (behavior, schedule, namespace, schema, next_run_at, failures, error) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (behavior, schedule, namespace, schema) DO UPDATE SET next_run_at = excluded.next_run_at, failures = excluded.failures, error = excluded.error`,
+        [unit.behavior, unit.name, unit.namespace, unit.schema, next, failures, describe(error)]
+      )
+    );
+    this.dueAt(next);
+    totals.failed += 1;
   }
 
   private work(unit: Unit, chain: Chain): WorkExecution {
@@ -736,7 +772,7 @@ export class Runner {
             reactions.push({ ...unit, reactions: implementation.reactions, start: this.startOf(record, bound.behavior.name) });
           }
           for (const [name, spec] of Object.entries(implementation.schedules ?? {})) {
-            schedules.push({ ...unit, name, spec });
+            schedules.push({ ...unit, name, spec, every: intervalOf(bound, name, spec) });
           }
         }
       }
@@ -765,6 +801,32 @@ export class Runner {
       first,
     ]);
     return row ? Number(row.cursor) : 0;
+  }
+}
+
+// intervalOf is a schedule's interval on one schema: its everyMs, or what
+// its everyMs function returns for the schema's config, held to the rule
+// registration holds a fixed one to. A function that throws, returns a
+// promise or returns anything else gives the error instead.
+function intervalOf(bound: BoundBehavior, name: string, spec: BehaviorSchedule<unknown>): { everyMs: number } | { error: unknown } {
+  const every = spec.everyMs;
+  if (typeof every === 'number') {
+    return { everyMs: every };
+  }
+  try {
+    const value: unknown = every.call(spec, bound.config);
+    synchronous(bound.behavior.name, `schedule ${name} everyMs`, value);
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < MIN_SCHEDULE_MS) {
+      return {
+        error: new BehaviorError(
+          bound.behavior.name,
+          `schedule ${name}: everyMs(config) returns an integer of at least ${MIN_SCHEDULE_MS}, got ${typeof value === 'number' ? String(value) : typeof value}`
+        ),
+      };
+    }
+    return { everyMs: value };
+  } catch (error) {
+    return { error };
   }
 }
 

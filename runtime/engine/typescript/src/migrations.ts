@@ -18,8 +18,9 @@ up in a shared namespace reads from it.
 
 engine_behaviors records the key of each behavior whose storage the file
 holds: the behavior's columns on engine_instances and its tables are named
-bhv_<key>__<name> (behaviors/storage.ts), and its migrations are in the
-ledger under its own name.
+bhv_<key>__<name>, and the indexes its migrations list on
+engine_instances bhv_<key>___index_<name> (behaviors/storage.ts), and its
+migrations are in the ledger under its own name.
 
 engine_references holds the references behaviors record from one
 instance to another in the same namespace (instances/references.ts): by

@@ -13,6 +13,12 @@ Before a behavior's statement reaches SQLite, the engine reads its tokens
   storage. A string literal is checked the same way, since SQLite reads
   one as a name where a name is expected (`FROM 'engine_instances'`); a
   behavior passes data as parameters;
+- in a migration, a name under bhv_<key>___ (the behavior's prefix and
+  one more `_`), which the engine keeps for what it names for the
+  behavior: the relation over the instances (storage.ts) and the indexes
+  a migration declares on the behavior's columns. A name the behavior
+  gives with sql.table(name) starts with a letter after its prefix, so
+  it never falls there;
 - load_extension;
 - a statement kind the mode does not allow. A read runs SELECT, VALUES or
   WITH ... SELECT; a write adds INSERT, UPDATE, DELETE and REPLACE; a
@@ -27,6 +33,12 @@ Before a behavior's statement reaches SQLite, the engine reads its tokens
 A name without a reserved prefix passes (it may be a column or an alias),
 so the objects a migration leaves are checked again against sqlite_master
 after it runs (storage.ts): each must be a table or index of its own.
+
+The relation sql.instances() names is not a table: the engine defines it
+in a common table expression it puts ahead of a statement that names it
+(withRelation). It carries the behavior's own prefix, so the checks above
+pass it, and they run on the behavior's text alone, before the engine adds
+the expression, which names engine_instances.
 */
 
 /** The prefixes the engine reserves for its own tables, SQLite's and the behaviors'. */
@@ -40,6 +52,9 @@ type TokenKind = 'word' | 'quoted' | 'string' | 'semicolon' | 'open' | 'close' |
 interface Token {
   kind: TokenKind;
   text: string;
+  /** Where the token starts and ends in the SQL text. */
+  start: number;
+  end: number;
 }
 
 const READ_VERBS = new Set(['SELECT', 'VALUES']);
@@ -73,6 +88,9 @@ export function sqlRefusal(sql: string, prefix: string, mode: SqlMode): string |
     const name = token.text.toLowerCase();
     if (RESERVED_PREFIXES.some((reserved) => name.startsWith(reserved)) && !name.startsWith(prefix)) {
       return `it names ${token.text}, which is not the behavior's own storage (${prefix}*)`;
+    }
+    if (mode === 'migrate' && name.startsWith(`${prefix}_`)) {
+      return `it names ${token.text}, which is under ${prefix}_, the names the engine keeps for the behavior's relation over the instances and the indexes its migrations declare (indexes)`;
     }
     if (token.kind === 'word' && name === 'load_extension') {
       return 'it calls load_extension';
@@ -169,6 +187,34 @@ function virtualTableRefusal(rest: Token[], prefix: string): string | undefined 
   return undefined;
 }
 
+/**
+ * withRelation puts a common table expression that defines name ahead of
+ * a statement that names it, bare, quoted or as a string literal, in any
+ * ASCII case, and returns the new statement; undefined when the statement
+ * does not name it. definition returns what follows `<name> AS`, and is
+ * called only for a statement that names it. A statement that starts
+ * with WITH or WITH RECURSIVE takes the expression first in its own list,
+ * so its own expressions can read it; any other one gets a WITH clause of
+ * its own, which SELECT, VALUES, INSERT, REPLACE, UPDATE and DELETE all
+ * take. The expression must hold no parameter, so the statement's own
+ * keep their positions. Run sqlRefusal on the statement first: this
+ * reads the text, it does not check it.
+ */
+export function withRelation(sql: string, name: string, definition: () => string): string | undefined {
+  const tokens = tokenize(sql);
+  const named = tokens.some((token) => (token.kind === 'word' || token.kind === 'quoted' || token.kind === 'string') && token.text.toLowerCase() === name);
+  if (!named) {
+    return undefined;
+  }
+  const expression = `${name} AS ${definition()}`;
+  const upper = (token: Token | undefined): string => (token?.kind === 'word' ? token.text.toUpperCase() : '');
+  if (upper(tokens[0]) !== 'WITH') {
+    return `WITH ${expression}\n${sql}`;
+  }
+  const at = upper(tokens[1]) === 'RECURSIVE' ? tokens[1].end : tokens[0].end;
+  return `${sql.slice(0, at)} ${expression},${sql.slice(at)}`;
+}
+
 // tokenize splits SQL into the tokens the checks read. Blob and number
 // literals and parameters become `other`.
 // A malformed statement (an unterminated literal, a number glued to a word)
@@ -177,6 +223,11 @@ function tokenize(sql: string): Token[] {
   const tokens: Token[] = [];
   const n = sql.length;
   let i = 0;
+  // push records a token from i to end and moves past it.
+  const push = (kind: TokenKind, text: string, end: number): void => {
+    tokens.push({ kind, text, start: i, end });
+    i = end;
+  };
   while (i < n) {
     const c = sql[i];
     const next = sql[i + 1];
@@ -190,62 +241,54 @@ function tokenize(sql: string): Token[] {
       i = end < 0 ? n : end + 2;
     } else if (c === "'") {
       const end = quotedEnd(sql, i, "'");
-      tokens.push({
-        kind: 'string',
-        text: sql
+      push(
+        'string',
+        sql
           .slice(i + 1, end - 1)
           .split("''")
           .join("'"),
-      });
-      i = end;
+        end
+      );
     } else if ((c === 'x' || c === 'X') && next === "'") {
-      i = quotedEnd(sql, i + 1, "'");
-      tokens.push({ kind: 'other', text: "x'" });
+      push('other', "x'", quotedEnd(sql, i + 1, "'"));
     } else if (c === '"' || c === '`') {
       const end = quotedEnd(sql, i, c);
-      tokens.push({
-        kind: 'quoted',
-        text: sql
+      push(
+        'quoted',
+        sql
           .slice(i + 1, end - 1)
           .split(c + c)
           .join(c),
-      });
-      i = end;
+        end
+      );
     } else if (c === '[') {
       const close = sql.indexOf(']', i + 1);
       const end = close < 0 ? n : close;
-      tokens.push({ kind: 'quoted', text: sql.slice(i + 1, end) });
-      i = end + 1;
+      push('quoted', sql.slice(i + 1, end), Math.min(end + 1, n));
     } else if (c === ';') {
-      tokens.push({ kind: 'semicolon', text: c });
-      i += 1;
+      push('semicolon', c, i + 1);
     } else if (c === '(' || c === ')') {
-      tokens.push({ kind: c === '(' ? 'open' : 'close', text: c });
-      i += 1;
+      push(c === '(' ? 'open' : 'close', c, i + 1);
     } else if (identifierStart(c)) {
       let j = i + 1;
       while (j < n && identifierPart(sql[j])) {
         j += 1;
       }
-      tokens.push({ kind: 'word', text: sql.slice(i, j) });
-      i = j;
+      push('word', sql.slice(i, j), j);
     } else if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(next ?? ''))) {
       let j = i + 1;
       while (j < n && (/[0-9A-Za-z_.]/.test(sql[j]) || ((sql[j] === '+' || sql[j] === '-') && /[eE]/.test(sql[j - 1])))) {
         j += 1;
       }
-      tokens.push({ kind: 'other', text: '0' });
-      i = j;
+      push('other', '0', j);
     } else if (c === '?' || c === ':' || c === '@' || c === '$') {
       let j = i + 1;
       while (j < n && (identifierPart(sql[j]) || sql[j] === ':')) {
         j += 1;
       }
-      tokens.push({ kind: 'other', text: '?' });
-      i = j;
+      push('other', '?', j);
     } else {
-      tokens.push({ kind: 'other', text: c });
-      i += 1;
+      push('other', c, i + 1);
     }
   }
   return tokens;

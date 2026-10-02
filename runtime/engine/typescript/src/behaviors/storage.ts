@@ -9,18 +9,39 @@ in `_`, so one behavior's prefix never starts another's, and the table
 keeps each behavior's key for the life of the file.
 
 The behavior's migrations run through the engine's ledger under its name:
-each adds the columns it lists (ALTER TABLE engine_instances ADD COLUMN)
-and runs its up() with SQL scoped to the behavior (sql.ts). Afterwards
-every object sqlite_master gained must be a table or index of its own,
-on a table of its own; anything else rolls the migration back.
+each adds the columns it lists (ALTER TABLE engine_instances ADD COLUMN),
+then the indexes it lists on them, and runs its up() with SQL scoped to
+the behavior (sql.ts). Afterwards every object sqlite_master gained must
+be a table or index of its own, on a table of its own; anything else
+rolls the migration back. The ledger row of a migration records its
+columns and indexes with it.
+
+The engine keeps the names under bhv_<key>___, one `_` more than the
+prefix, for what it names for the behavior: an index a migration lists
+on the instances table is bhv_<key>___index_<name>, and the relation
+over the instances a call's SQL reads (sql.instances()) is
+bhv_<key>___instances. A name the behavior gives (sql.table(name), a
+LOCAL_NAME) starts with a letter after the prefix, so none of these
+collides with one of its tables, and a migration may not name one
+(sql.ts).
+
+The relation is a common table expression the engine puts ahead of each
+statement that names it (sql.ts, withRelation), over engine_instances
+for the call's namespace and schema, with the instance columns of
+RELATION_COLUMNS and the behavior's own columns under its own names.
+Before such a statement runs, the engine asks the access policy for read
+on the schema as the call's principal (InstanceRelation.allow). SQLite
+writes only to tables, so an INSERT, UPDATE or DELETE that targets the
+relation fails (no such table). A migration and afterConfigChange act for
+no principal and get no relation.
 */
 
 import { BehaviorError } from '../errors.js';
 import type { Row, RunResult, SqlValue } from '../storage/driver.js';
 import type { Migration, MigrationSet } from '../storage/migrations.js';
 import type { Storage } from '../storage/storage.js';
-import type { BehaviorMigration, ColumnSpec, SqlWriter, WritableColumns } from './behavior.js';
-import { sqlRefusal, type SqlMode } from './sql.js';
+import { RELATION_COLUMNS, type BehaviorMigration, type ColumnSpec, type SqlWriter, type WritableColumns } from './behavior.js';
+import { sqlRefusal, withRelation, type SqlMode } from './sql.js';
 
 /** The prefix of every name a behavior owns: bhv_<key>__<name>. */
 export const STORAGE_PREFIX = 'bhv_';
@@ -39,6 +60,16 @@ const COLUMN_TYPES: Record<ColumnSpec['type'], string> = {
 /** prefixOf is the prefix of a behavior's names under its key. */
 export function prefixOf(key: string): string {
   return `${STORAGE_PREFIX}${key}__`;
+}
+
+/** relationName is the SQL name of the relation over the instances a behavior's SQL reads (sql.instances()). */
+export function relationName(prefix: string): string {
+  return `${prefix}_instances`;
+}
+
+/** indexName is the SQL name of an index a behavior's migration lists on the instances table. */
+export function indexName(prefix: string, name: string): string {
+  return `${prefix}_index_${name}`;
 }
 
 /** storedKey returns a behavior's key, or undefined when no schema that composes it has been published. */
@@ -118,6 +149,13 @@ export function migrationSet(behavior: string, prefix: string, migrations: reado
         for (const [column, spec] of Object.entries(migration.columns ?? {})) {
           storage.exec(`ALTER TABLE engine_instances ADD COLUMN "${prefix}${column}" ${columnDefinition(spec)}`);
         }
+        // The names and columns were checked when the behavior registered
+        // (registry.ts, checkMigrations): its own names, of its own columns.
+        for (const [index, columns] of Object.entries(migration.indexes ?? {})) {
+          storage.exec(
+            `CREATE INDEX "${indexName(prefix, index)}" ON engine_instances (namespace, schema, ${columns.map((column) => `"${prefix}${column}"`).join(', ')})`
+          );
+        }
         if (migration.up) {
           const before = new Set(objects(storage).map((object) => object.key));
           const result: unknown = migration.up(new BehaviorSql(storage, behavior, prefix, 'migrate'));
@@ -133,13 +171,31 @@ export function migrationSet(behavior: string, prefix: string, migrations: reado
   };
 }
 
-/** The SQL handle a behavior gets: its own tables, in one mode. */
+/**
+ * The instances a call's relation reads (sql.instances()): one schema's in
+ * one namespace, as one principal.
+ */
+export interface InstanceRelation {
+  readonly namespace: string;
+  readonly schema: string;
+  /** The behavior's own columns, by its own names. */
+  readonly columns: readonly string[];
+  /** Asks the access policy for read on the schema as the call's principal; throws forbidden on a refusal. */
+  readonly allow: () => void;
+}
+
+/**
+ * The SQL handle a behavior gets: its own tables, in one mode, and with a
+ * relation, its own columns across the instances of the call's schema.
+ */
 export class BehaviorSql implements SqlWriter {
   constructor(
     private readonly storage: Storage,
     private readonly behavior: string,
     private readonly prefix: string,
-    private readonly mode: SqlMode
+    private readonly mode: SqlMode,
+    /** What sql.instances() reads; undefined for a call with no principal (a migration, afterConfigChange). */
+    private readonly relation?: InstanceRelation
   ) {}
 
   table(name: string): string {
@@ -149,30 +205,85 @@ export class BehaviorSql implements SqlWriter {
     return `${this.prefix}${name}`;
   }
 
+  // instances refuses where a statement on the relation would: in a call
+  // with no principal, and for a behavior with a column the relation
+  // cannot hold under its own name.
+  instances(): string {
+    this.definition();
+    return relationName(this.prefix);
+  }
+
   get(sql: string, params: readonly SqlValue[] = []): Row | undefined {
-    this.check(sql);
-    return this.storage.get(sql, params);
+    return this.storage.get(this.prepare(sql), params);
   }
 
   all(sql: string, params: readonly SqlValue[] = []): Row[] {
-    this.check(sql);
-    return this.storage.all(sql, params);
+    return this.storage.all(this.prepare(sql), params);
   }
 
   run(sql: string, params: readonly SqlValue[] = []): RunResult {
     if (this.mode === 'read') {
       throw new BehaviorError(this.behavior, 'a read cannot run a statement that writes; run() is for writes');
     }
-    this.check(sql);
-    return this.storage.run(sql, params);
+    return this.storage.run(this.prepare(sql), params);
   }
 
-  private check(sql: string): void {
+  // prepare checks the behavior's statement and returns what runs: the
+  // statement, with the relation's definition ahead of it when it names
+  // the relation, once the access policy has allowed the read.
+  private prepare(sql: string): string {
     const refusal = sqlRefusal(sql, this.prefix, this.mode);
     if (refusal !== undefined) {
       throw new BehaviorError(this.behavior, `SQL refused: ${refusal}: ${String(sql).trim().slice(0, 200)}`);
     }
+    if (this.relation === undefined) {
+      return sql;
+    }
+    const prepared = withRelation(sql, relationName(this.prefix), () => this.definition());
+    if (prepared === undefined) {
+      return sql;
+    }
+    this.relation.allow();
+    return prepared;
   }
+
+  // definition is what follows `<relation> AS` in the expression the
+  // engine puts ahead of a statement that names the relation.
+  //
+  // The namespace and the schema are SQL string literals, not parameters.
+  // A parameter in the expression would take the first position ahead of
+  // the statement's own, so every positional ? the behavior wrote would
+  // bind the wrong value, and numbered ones (?1) would collide; a literal
+  // adds no parameter, so the behavior's parameters bind as it wrote them.
+  // Both values are names the engine checked (NAMESPACE_NAME, SCHEMA_NAME:
+  // letters, digits, _ and -), and sqlString doubles a quote all the same.
+  //
+  // NOT MATERIALIZED makes SQLite fold the expression into the statement
+  // as it would a view, so a filter on the behavior's columns reaches the
+  // indexes its migrations list, even where the statement names the
+  // relation twice and SQLite would otherwise copy every row first.
+  private definition(): string {
+    if (this.relation === undefined) {
+      throw new BehaviorError(
+        this.behavior,
+        'sql.instances() reads as a principal, and a migration and afterConfigChange act for none; they read the instances with eachInstance'
+      );
+    }
+    const clash = this.relation.columns.filter((column) => RELATION_COLUMNS.includes(column));
+    if (clash.length > 0) {
+      throw new BehaviorError(
+        this.behavior,
+        `sql.instances(): its column ${clash.join(', ')} shares a name with the relation's own columns (${RELATION_COLUMNS.join(', ')})`
+      );
+    }
+    const own = this.relation.columns.map((column) => `, "${this.prefix}${column}" AS "${column}"`).join('');
+    return `NOT MATERIALIZED (SELECT ${RELATION_COLUMNS.join(', ')}${own} FROM engine_instances WHERE namespace = ${sqlString(this.relation.namespace)} AND schema = ${sqlString(this.relation.schema)})`;
+  }
+}
+
+// sqlString writes a value as an SQL string literal.
+function sqlString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 /** One instance's columns of one behavior, read and written in place. */
@@ -274,9 +385,10 @@ function objects(storage: Storage): SchemaObject[] {
 
 // checkCreated holds a new object to the behavior's own names: a table, or
 // an index (its own, or the one SQLite makes for a UNIQUE or PRIMARY KEY
-// constraint) on a table of its own.
+// constraint) on a table of its own. A name under the engine's for the
+// behavior (bhv_<key>___) is not its own.
 function checkCreated(behavior: string, prefix: string, migration: BehaviorMigration, object: SchemaObject): void {
-  const own = (name: string): boolean => name.toLowerCase().startsWith(prefix);
+  const own = (name: string): boolean => name.toLowerCase().startsWith(prefix) && !name.toLowerCase().startsWith(`${prefix}_`);
   const named = object.type === 'index' && object.name.startsWith('sqlite_autoindex_') ? own(object.table) : own(object.name);
   if ((object.type === 'table' || object.type === 'index') && named && own(object.table)) {
     return;
