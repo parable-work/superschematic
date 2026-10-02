@@ -28,6 +28,12 @@
       "Point": {
         "description": "A point on a post's cover image.",
         "properties": {
+          "pinLabel": {
+            "description": "A label pinned at the point, at least two characters.",
+            "minLength": 2,
+            "nullable": true,
+            "type": "string"
+          },
           "x": {
             "format": "double",
             "minimum": 0,
@@ -851,6 +857,98 @@
           }
         },
         "summary": "setFlags",
+        "tags": [
+          "tag"
+        ]
+      }
+    },
+    "/api/posts/{id}/pins": {
+      "put": {
+        "description": "Pin rows of points on a post's cover image.",
+        "operationId": "TagPinPointsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "grid": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/Point"
+                      },
+                      "type": "array"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "grid"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "type": "boolean"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "pinPoints",
         "tags": [
           "tag"
         ]

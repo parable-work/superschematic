@@ -108,6 +108,16 @@ class GridNamespace:
             return default_field
         return ".".join(parts)
 
+    @staticmethod
+    def _join_path(path: str, key: str) -> str:
+        """Return the path of key, an error's path inside the value at path
+        (point.x, points[0].x)."""
+        if not key:
+            return path
+        if not path:
+            return key
+        return f"{path}.{key}"
+
     def _build_validation_errors(
         self,
         err: Exception,
@@ -169,35 +179,43 @@ class GridNamespace:
                     self._build_validation_errors(err, default_field="input_data"),
                 ) from err
 
-        # pydantic checks types and presence; the schema's rules (listMin,
-        # minLength, min, pattern, ...) are validate_all's, run here before
-        # the request as the Go and TypeScript SDKs run theirs. validate_all
-        # checks every model the input holds as well, keyed by wire name
-        # under the path that reaches it (lines[0].quantity).
+        rule_errors = self._rule_errors(validated, "")
+        if rule_errors:
+            raise ValidationError(rule_errors)
+        return validated
+
+    def _rule_errors(self, validated: Any, path: str) -> dict[str, list[dict[str, str]]]:
+        """Return the errors of the schema's rules a validated model breaks.
+
+        pydantic checks types and presence; the schema's rules (listMin,
+        minLength, min, pattern, ...) are validate_all's, run before the
+        request as the Go and TypeScript SDKs run theirs. validate_all
+        checks every model the model holds as well, keyed by wire name
+        under the path that reaches it (lines[0].quantity), here under
+        path, the model's own (points[0].x).
+        """
         validate_all = getattr(validated, "validate_all", None)
         if not callable(validate_all):
-            return validated
+            return {}
         try:
             found = validate_all(by_alias=True)
         except TypeError:
             # A types package generated before by_alias keys its errors by
-            # snake_case name and checks the input's own fields only.
+            # snake_case name and checks the model's own fields only.
             found = validate_all()
         found_errors = getattr(found, "errors", None)
-        if isinstance(found_errors, dict) and found_errors:
-            raise ValidationError(
+        if not isinstance(found_errors, dict):
+            return {}
+        return {
+            self._join_path(path, str(key)): [
                 {
-                    str(key): [
-                        {
-                            "validator": str(field_error.get("validator", "invalid")),
-                            "message": str(field_error.get("message", "invalid value")),
-                        }
-                        for field_error in field_errors
-                    ]
-                    for key, field_errors in found_errors.items()
-                },
-            )
-        return validated
+                    "validator": str(field_error.get("validator", "invalid")),
+                    "message": str(field_error.get("message", "invalid value")),
+                }
+                for field_error in field_errors
+            ]
+            for key, field_errors in found_errors.items()
+        }
 
     def _coerce_response(self, raw: Any, output_type_name: str, is_array: bool) -> Any:
         """Coerce raw JSON-decoded responses into typed Pydantic models.
@@ -225,18 +243,42 @@ class GridNamespace:
         return from_dict_non_strict(raw)
 
     def _validate_scalar_argument(self, value: Any, scalar_type_name: str, field_name: str) -> Any:
+        """Validate one value of an argument and return it as it is sent.
+
+        field_name is the value's path: the argument's name, name[i] for a
+        list element and name[i][j] for an element of a list of lists. None
+        is required there, since a required argument and a list element are
+        never null and an optional one's None is sent as null or left out
+        before validation. An object (a generated model, or a dict of one)
+        is read as an input type is, pydantic's coercions included, and
+        checked by its type's rules; its errors are keyed by wire name under
+        field_name (points[0].x), and it is sent as validated, by wire name.
+        """
+        if value is None:
+            raise ValidationError(
+                {field_name: [{"validator": "required", "message": f"{field_name} is required"}]},
+            )
         scalar_type = self._resolve_validation_type(scalar_type_name)
         if scalar_type is None:
             return value
 
         from_dict_non_strict = getattr(scalar_type, "from_dict_non_strict", None)
-        if callable(from_dict_non_strict) and isinstance(value, dict):
-            try:
-                return from_dict_non_strict(value)
-            except Exception as err:
-                raise ValidationError(
-                    self._build_validation_errors(err, default_field=field_name),
-                ) from err
+        if callable(from_dict_non_strict) and isinstance(value, (dict, scalar_type)):
+            validated = value
+            if isinstance(value, dict):
+                try:
+                    validated = from_dict_non_strict(value)
+                except Exception as err:
+                    raise ValidationError(
+                        {
+                            self._join_path(field_name, key): errors
+                            for key, errors in self._build_validation_errors(err, default_field="").items()
+                        },
+                    ) from err
+            rule_errors = self._rule_errors(validated, field_name)
+            if rule_errors:
+                raise ValidationError(rule_errors)
+            return self._client.to_dict(validated)
 
         try:
             from pydantic import TypeAdapter
@@ -251,12 +293,12 @@ class GridNamespace:
 
     def _validate_list_of_lists_argument(self, value: Any, element_type_name: str, field_name: str) -> list[list[Any]]:
         """Validate an array-of-arrays argument and return its rows of
-        validated elements.
+        validated elements, each as it is sent.
 
-        Each inner list must be a list (an empty one is valid) and each
-        element is validated as element_type_name. Errors name the index:
-        field[i] for an inner list, field[i][j] for an element and
-        field[i][j].name for a field of an element.
+        Each inner list must be a list (an empty one is valid): None is
+        required at field[i], and any other value a type error there. Each
+        element is validated as element_type_name at field[i][j], a field of
+        an element at field[i][j].name.
         """
         if not isinstance(value, (list, tuple)):
             raise ValidationError(
@@ -264,23 +306,21 @@ class GridNamespace:
             )
         rows: list[list[Any]] = []
         for row_index, row in enumerate(value):
+            row_path = f"{field_name}[{row_index}]"
+            if row is None:
+                raise ValidationError(
+                    {row_path: [{"validator": "required", "message": f"{row_path} is required"}]},
+                )
             if not isinstance(row, (list, tuple)):
                 raise ValidationError(
-                    {f"{field_name}[{row_index}]": [{"validator": "required", "message": "inner list must be a list"}]},
+                    {row_path: [{"validator": "type", "message": f"{row_path} must be a list"}]},
                 )
-            items: list[Any] = []
-            for item_index, item in enumerate(row):
-                item_path = f"{field_name}[{row_index}][{item_index}]"
-                try:
-                    items.append(self._validate_scalar_argument(item, element_type_name, item_path))
-                except ValidationError as err:
-                    raise ValidationError(
-                        {
-                            key if key == item_path else f"{item_path}.{key}": errors
-                            for key, errors in err.errors.items()
-                        },
-                    ) from err
-            rows.append(items)
+            rows.append(
+                [
+                    self._validate_scalar_argument(item, element_type_name, f"{row_path}[{item_index}]")
+                    for item_index, item in enumerate(row)
+                ],
+            )
         return rows
 
     def _validate_query_param_constraints(
@@ -381,8 +421,7 @@ class GridNamespace:
             raise ValidationError(
                 {"labels": [{"validator": "required", "message": "labels is required"}]},
             )
-        self._validate_list_of_lists_argument(labels, "str", "labels")
-        payload["labels"] = labels
+        payload["labels"] = self._validate_list_of_lists_argument(labels, "str", "labels")
         response = self._client.request(
             method="PUT",
             path=path,
