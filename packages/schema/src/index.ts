@@ -31,6 +31,8 @@ export type {
   LeaseTransition,
   LinkConfig,
   LinksConfig,
+  PresenceConfig,
+  PresenceTransition,
   ReactionRule,
   ReactionThen,
   ReactionWhen,

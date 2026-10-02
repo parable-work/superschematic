@@ -328,6 +328,108 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Presence"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "onBeat": {
+                    "additionalProperties": false,
+                    "description": "Moves the instance's Workflow status at a beat, while the status is one of from: the way back from the state onMissed moves it to. Needs Workflow on the type.",
+                    "properties": {
+                      "from": {
+                        "description": "The states the status moves from; in any other state it stays.",
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "transition": {
+                        "description": "The state to move to, through Workflow's transition.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "transition",
+                      "from"
+                    ],
+                    "type": "object"
+                  },
+                  "onMissed": {
+                    "additionalProperties": false,
+                    "description": "Moves the instance's Workflow status when it is missed, while the status is one of from. Needs Workflow on the type.",
+                    "properties": {
+                      "from": {
+                        "description": "The states the status moves from; in any other state it stays.",
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "transition": {
+                        "description": "The state to move to, through Workflow's transition.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "transition",
+                      "from"
+                    ],
+                    "type": "object"
+                  },
+                  "principalField": {
+                    "description": "A string field of the type that holds the subject of the principal the instance stands for, the only principal that may beat it. Once set, it cannot change.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "releaseLeases": {
+                    "description": "Schemas that compose Lease, whose leases the principal holds are expired when the instance is missed, through Lease's schema-level expireHolder. The principal that applies the miss, the runner's in the sweep, needs Lease's overridePermission on each.",
+                    "items": {
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "sweepMs": {
+                    "description": "How often the engine's runner misses the instances past their deadline, in milliseconds; 5000 when absent.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  },
+                  "ttlMs": {
+                    "description": "How long the instance stays present after its create or its last beat, in milliseconds.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "ttlMs",
+                  "principalField"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Queue"
               }
             }
@@ -829,6 +931,7 @@
             "Dependencies",
             "Lease",
             "Links",
+            "Presence",
             "Queue",
             "Reactions",
             "Revisions",

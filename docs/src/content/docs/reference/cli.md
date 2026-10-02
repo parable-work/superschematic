@@ -283,7 +283,7 @@ copy comes from `acme-schematic`, and its smoke runs `--check`. The core
 binary writes the behaviors the core declares into the two packages that
 implement them: `Workflow`, `Comments`, `Revisions`, `Dependencies`,
 `Links`, `Rollups`, `Search` and `Reactions` with `--package
-@superschematic/engine`, and `Lease`, `Assignment` and `Queue` with
+@superschematic/engine`, and `Lease`, `Assignment`, `Queue` and `Presence` with
 `--package @superschematic/engine-workqueue` (`make behaviors`; `make
 behaviors-check` in CI). Without `--extension`, an extension's binary
 writes the core's declarations beside its own.

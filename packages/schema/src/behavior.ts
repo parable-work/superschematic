@@ -45,6 +45,8 @@ export interface BehaviorConfigs {
   Assignment: AssignmentConfig;
   /** Makes the type's instances claimable work, in priority order; it requires Workflow and Lease. */
   Queue: QueueConfig;
+  /** A heartbeat on an instance that stands for a worker, which the principal it names beats and a miss can expire that principal's leases. */
+  Presence: PresenceConfig;
 }
 
 /** Workflow's config. */
@@ -229,6 +231,28 @@ export interface QueueConfig {
   readonly match?: readonly string[];
   /** The most instances one claimNext tries; 100 when absent. */
   readonly maxCandidates?: number;
+}
+
+/** Presence's config. */
+export interface PresenceConfig {
+  /** How long the instance stays present after its create or its last beat, in milliseconds, at least 1000. */
+  readonly ttlMs: number;
+  /** A string field of the type that holds the subject of the principal the instance stands for, the only principal that may beat it. */
+  readonly principalField: string;
+  /** Moves the instance's Workflow status, through transition, when it is missed while the status is one of from. Needs Workflow on the type. */
+  readonly onMissed?: PresenceTransition;
+  /** Moves the instance's Workflow status, through transition, at a beat while the status is one of from. Needs Workflow on the type. */
+  readonly onBeat?: PresenceTransition;
+  /** Schemas that compose Lease, whose leases the principal holds a miss expires through expireHolder. */
+  readonly releaseLeases?: readonly string[];
+  /** How often the engine's runner misses the instances past their deadline, in milliseconds, at least 1000; 5000 when absent. */
+  readonly sweepMs?: number;
+}
+
+/** A move of the status a miss or a beat makes: to transition, from one of from. */
+export interface PresenceTransition {
+  readonly transition: string;
+  readonly from: readonly string[];
 }
 
 /** A name @behavior takes: a key of BehaviorConfigs. */

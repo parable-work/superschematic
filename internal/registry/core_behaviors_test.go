@@ -10,11 +10,11 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Assignment", "Comments", "Dependencies", "Lease", "Links", "Queue", "Reactions", "Revisions", "Rollups", "Search", "Workflow"}
+var coreBehaviorNames = []string{"Assignment", "Comments", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Revisions", "Rollups", "Search", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements; the engine implements the rest.
-var workQueueBehaviorNames = []string{"Assignment", "Lease", "Queue"}
+var workQueueBehaviorNames = []string{"Assignment", "Lease", "Presence", "Queue"}
 
 // A registry with no extension declares the behaviors the engine and the
 // work-queue package implement, as the core's, under bare names, each with
@@ -83,8 +83,12 @@ func TestCoreBehaviors(t *testing.T) {
 	if len(lease.Requires) != 0 || len(assignment.Requires) != 0 || !slices.Equal(queue.Requires, []string{"Workflow", "Lease"}) {
 		t.Errorf("requires: Lease %v, Assignment %v, Queue %v; want none, none and [Workflow Lease]", lease.Requires, assignment.Requires, queue.Requires)
 	}
+	presence, _ := reg.Behavior("Presence")
+	if !presence.ConfigRequired() || len(presence.Requires) != 0 {
+		t.Errorf("Presence: config required %v, requires %v; want true and none", presence.ConfigRequired(), presence.Requires)
+	}
 	// Every work-queue operation writes; claimNext and expireHolder are schema-level.
-	for _, b := range []Behavior{lease, assignment, queue} {
+	for _, b := range []Behavior{lease, assignment, queue, presence} {
 		for _, op := range b.Operations {
 			if !op.Writes || (op.Scope == OperationScopeSchema) != (op.Name == "claimNext" || op.Name == "expireHolder") {
 				t.Errorf("%s.%s: writes %v, scope %q", b.Name, op.Name, op.Writes, op.Scope)
@@ -203,6 +207,16 @@ func TestCoreBehaviors(t *testing.T) {
 		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "maxCandidates": 0}`, "behavior Queue config: "},
 		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "maxCandidates": 1001}`, "behavior Queue config: "},
 		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "kinds": ["build"]}`, "behavior Queue config: "},
+		{presence, `{"ttlMs": 30000, "principalField": "subject"}`, ""},
+		{presence, `{"ttlMs": 30000, "principalField": "subject", "onMissed": {"transition": "missing", "from": ["idle"]},
+			"onBeat": {"transition": "idle", "from": ["missing"]}, "releaseLeases": ["jobs"], "sweepMs": 1000}`, ""},
+		{presence, ``, "behavior Presence config: "},
+		{presence, `{"ttlMs": 999, "principalField": "subject"}`, "behavior Presence config: "},
+		{presence, `{"ttlMs": 30000}`, "behavior Presence config: "},
+		{presence, `{"ttlMs": 30000, "principalField": "subject", "onMissed": {"transition": "missing"}}`, "behavior Presence config: "},
+		{presence, `{"ttlMs": 30000, "principalField": "subject", "sweepMs": 500}`, "behavior Presence config: "},
+		{presence, `{"ttlMs": 30000, "principalField": "subject", "releaseLeases": ["the jobs"]}`, "behavior Presence config: "},
+		{presence, `{"ttlMs": 30000, "actorField": "subject"}`, "behavior Presence config: "},
 	} {
 		err := test.behavior.ValidateConfig(json.RawMessage(test.config))
 		switch {
