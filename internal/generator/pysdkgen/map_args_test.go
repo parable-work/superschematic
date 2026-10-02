@@ -130,6 +130,12 @@ for method, kwargs, want in [
         {"point_by_name": {"a": {"x": "one", "y": 0}, "b": None}},
         {"point_by_name[a].x": "type", "point_by_name[b]": "required"},
     ),
+    # A value's own rules, by wire name under its path.
+    (
+        sdk.tag.place_points,
+        {"point_by_name": {"a": {"x": -1, "y": 0, "pinLabel": "a"}}},
+        {"point_by_name[a].x": "min", "point_by_name[a].pinLabel": "minLength"},
+    ),
     # The map is the argument, not a Point: each of its values is one.
     (sdk.tag.place_points, {"point_by_name": {"x": 1, "y": 2}}, {"point_by_name[x]": "type", "point_by_name[y]": "type"}),
 ]:

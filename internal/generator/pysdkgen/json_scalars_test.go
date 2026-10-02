@@ -204,8 +204,8 @@ for kwargs, field, validator in [
     ({"labels": {}, "vector": {"x": 1}}, "vector", None),
     ({"labels": {}, "vector": [1, True]}, "vector", None),
     ({"labels": {}, "vector": "not JSON"}, "vector", None),
-    ({"labels": {}, "label_sets": [None]}, "label_sets", "required"),
-    ({"labels": {}, "label_sets": [["en"]]}, "label_sets", None),
+    ({"labels": {}, "label_sets": [None]}, "label_sets[0]", "required"),
+    ({"labels": {}, "label_sets": [["en"]]}, "label_sets[0]", None),
     ({"labels": {}, "vector_grid": [[None]]}, "vector_grid[0][0]", "required"),
     ({"labels": {}, "vector_grid": [[{"x": 1}]]}, "vector_grid[0][0]", None),
 ]:

@@ -3,9 +3,9 @@
 // generated routes with an implementation that records what each call
 // received, and drives them over httptest with the vectors the TypeScript
 // server's scalar list test uses, plus required single values of every
-// builtin type, a UUID list and a list of objects, Generic.JSON values and
-// JSON object and array scalars, the query string of a GET operation, and a
-// path parameter in each encoding of its value.
+// builtin type, a UUID list, a list and a list of lists of objects,
+// Generic.JSON values and JSON object and array scalars, the query string
+// of a GET operation, and a path parameter in each encoding of its value.
 package bodyargsapi_test
 
 import (
@@ -76,6 +76,12 @@ func (s *tags) PlacePoints(_ context.Context, id string, pointByName map[string]
 	return &placed, nil
 }
 
+func (s *tags) PinPoints(_ context.Context, id string, grid [][]types.Point) (*bool, error) {
+	s.record(map[string]any{"id": id, "grid": grid})
+	pinned := true
+	return &pinned, nil
+}
+
 func (s *tags) FindTags(_ context.Context, codes []string, pages []int64, labels []string, ranks []int64) ([]string, error) {
 	s.record(map[string]any{"codes": codes, "pages": pages, "labels": labels, "ranks": ranks})
 	return labels, nil
@@ -140,6 +146,7 @@ const (
 	embeddingsPath    = "/api/embeddings"
 	nameShadesPath    = "/api/posts/p1/shade-names"
 	placePointsPath   = "/api/posts/p1/points"
+	pinPointsPath     = "/api/posts/p1/pins"
 	findTagsPath      = "/api/posts/tags"
 	searchPostsPath   = "/api/posts/search"
 )
@@ -603,6 +610,25 @@ func TestAMapOfAnObjectTypeIsABodyArgument(t *testing.T) {
 	)
 	// The body is not a Point: the map is the argument named pointByName.
 	refusedWith(t, server, impl, http.MethodPut, placePointsPath, `{"x": 1, "y": 2}`, fieldError{"pointByName", "required", "required field"})
+}
+
+// A list of lists of an object type checks each object's fields under its
+// path, grid[i][j].x, by wire name, and a null or non-object element at
+// grid[i][j].
+func TestAListOfListsOfAnObjectType(t *testing.T) {
+	server, impl := serve(t)
+	accepted(t, server, impl, http.MethodPut, pinPointsPath, `{"grid": [[{"x": 1, "y": 2, "pinLabel": "ab"}], []]}`)
+	if want := [][]types.Point{{{X: 1, Y: 2, PinLabel: "ab"}}, {}}; !reflect.DeepEqual(impl.last["grid"], want) {
+		t.Errorf("grid = %#v, want %#v", impl.last["grid"], want)
+	}
+	refusedWith(t, server, impl, http.MethodPut, pinPointsPath, `{"grid": [[{"x": 0, "y": 0}, {"x": -1, "y": 0, "pinLabel": "a"}], [null, 5, {"x": "1", "y": 0}], {}]}`,
+		fieldError{"grid[0][1].x", "min", ""},
+		fieldError{"grid[0][1].pinLabel", "minLength", ""},
+		fieldError{"grid[1][0]", "required", "required field"},
+		fieldError{"grid[1][1]", "type", "expected an object"},
+		fieldError{"grid[1][2]", "type", "does not match the declared type"},
+		fieldError{"grid[2]", "type", "expected an array"},
+	)
 }
 
 func TestAGETListReadsEveryQueryKey(t *testing.T) {
