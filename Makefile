@@ -1,6 +1,7 @@
 # superschematic (the schema compiler). Convenience targets for the Go
 # modules, the TypeScript authoring packages, the schema runtimes, the
-# TypeScript and Rust http runtimes, the version-graph core and the engine.
+# TypeScript and Rust http runtimes, the version-graph core, the engine and
+# the engine's work-queue package.
 # Mirrors the CI workflow gates (.github/workflows/ci.yml).
 #
 #   make setup && make all
@@ -45,6 +46,7 @@ setup:
 	cd runtime/http/typescript && bun install
 	cd runtime/versiongraph/typescript && bun install
 	cd runtime/engine/typescript && bun install
+	cd runtime/engine-workqueue/typescript && bun install
 	cd runtime/schema/python && uv sync
 	cd runtime/versiongraph/python && uv sync
 
@@ -111,6 +113,7 @@ ts:
 	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && bun run test
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
+	cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	examples/engine-notes/scripts/check.sh
 
 # The version-graph core's Python binding: cargo test runs the binding's own
