@@ -3,7 +3,9 @@
 # type, required single values of each builtin type, Generic.JSON values
 # and JSON object and array scalars (Generic.StringMap, Embedding.Vector)
 # alone, in a list and in a list of lists, and maps of an enum, of lists of
-# a string scalar and of an object type. searchPosts takes the arguments of
+# a string scalar and of an object type. removeTags is a DELETE, whose
+# arguments (a string, a list, maps and JSON values) are body arguments
+# too. searchPosts takes the arguments of
 # a GET operation, which travel in the query string: lists of numbers, an
 # integer scalar, booleans, UUIDs, timestamps and strings, optional single
 # values of each, and a @query list. reviseDocument takes an input type
@@ -216,6 +218,41 @@ operationSets:
           - name: pointByName
             typeRef: { name: Point, isMap: true }
             required: true
+      # Remove labels from a post; returns the labels removed. A DELETE
+      # sends its arguments in the body, as every operation but a GET does.
+      - name: removeTags
+        typeRef: { name: string, isArray: true }
+        required: true
+        httpMethod: DELETE
+        restPath: "posts/{id}/tags"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          # Why the labels go, at least two characters.
+          - name: reason
+            typeRef: { name: string }
+            required: true
+            validateMinLength: 2
+          - name: labels
+            typeRef: { name: string, isArray: true }
+            required: true
+          # The shade each removed label had.
+          - name: shadeByLabel
+            typeRef: { name: Shade, isMap: true }
+          # Links per locale, each on https.
+          - name: linksByLocale
+            typeRef: { name: Network.Url, isMap: true, isArray: true }
+            validatePattern: "^https://"
+          # A record of the removal, any JSON value; null is a value, apart
+          # from absent.
+          - name: audit
+            typeRef: { name: Generic.JSON }
+          # A note per locale, a JSON object of strings.
+          - name: notes
+            typeRef: { name: Generic.StringMap }
+          - name: vector
+            typeRef: { name: Embedding.Vector }
   - name: TagQueries
     operations:
       # Find posts by label, rank, code and page, all in the query string.

@@ -137,23 +137,33 @@ input and on every object it holds. A failure raises `ValidationError`,
 whose `errors` maps each path (`lines`, `lines[0].quantity`) to its rule
 and message, as the Go and TypeScript SDKs report them.
 
-A `Generic.JSON` argument of a `POST`, `PUT` or `PATCH` operation is typed
-as the types package's `GenericJSON`, the type of a `Generic.JSON` field,
-and is sent as the JSON value it holds: a `dict`, a `list`, a `str`, a
-number or a `bool`. `None` for a required one or a list element raises
-`ValidationError`, and so, with the types package installed, does a value
-JSON cannot hold (`NaN`, a `set`, a key that is not a string). In the
-query string, a `GET` argument or a `@query` parameter, a `Generic.JSON`
-stays a `str`.
+The arguments of an operation without an input type travel as the route
+reads them: in the query string on `GET`, and as fields of the JSON body
+object on every other method, `DELETE` too.
 
-A `Generic.StringMap` or `Embedding.Vector` argument of a `POST`, `PUT` or
-`PATCH` operation is typed as the types package's `GenericStringMap` or
-`EmbeddingVector`, the type of a field of it, and is sent as the JSON
-object or array it holds. With the types package installed, JSON text such
-as `'{"region": "eu"}'` is read into that object or array, as the types
-package reads a field, and a value of another shape raises
-`ValidationError` at the argument. `None` for a required one or a list
-element raises `ValidationError`. In the query string each stays a `str`.
+A `Generic.JSON` body argument is typed as the types package's
+`GenericJSON`, the type of a `Generic.JSON` field, and is sent as the JSON
+value it holds: a `dict`, a `list`, a `str`, a number or a `bool`. `None`
+for a required one or a list element raises `ValidationError`, and so, with
+the types package installed, does a value JSON cannot hold (`NaN`, a `set`,
+a key that is not a string). In the query string, a `GET` argument or a
+`@query` parameter, a `Generic.JSON` stays a `str`.
+
+A `Generic.StringMap` or `Embedding.Vector` body argument is typed as the
+types package's `GenericStringMap` or `EmbeddingVector`, the type of a
+field of it, and is sent as the JSON object or array it holds. With the
+types package installed, JSON text such as `'{"region": "eu"}'` is read
+into that object or array, as the types package reads a field, and a value
+of another shape raises `ValidationError` at the argument. `None` for a
+required one or a list element raises `ValidationError`. In the query
+string each stays a `str`.
+
+A map argument (`Record<string, T>`) is typed as `dict[str, T]`, or
+`dict[str, list[T]]` for a map of lists, and is sent as a JSON object;
+`{}` is a value. Each value, or each element of a list value, is checked
+as `T` before the request, and a failure raises `ValidationError` at
+`name[key]` or `name[key][i]`, `name` being the Python parameter. A `None`
+value or element is required.
 
 An operation that returns a `Generic.JSON`, `Generic.StringMap` or
 `Embedding.Vector` is typed as returning the same alias, and returns the

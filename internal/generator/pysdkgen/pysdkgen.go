@@ -71,10 +71,12 @@ type NamespaceInfo struct {
 	HasEncryptedPayload    bool
 	HasFilterableEndpoints bool
 
-	// HasListOfListsArgs gates the _validate_list_of_lists_argument helper
-	// and HasListOfListsModelOutput the _coerce_list_of_lists_response
-	// helper of the namespace class.
+	// HasListOfListsArgs gates the _validate_list_of_lists_argument helper,
+	// HasMapArgs the _validate_map_argument helper and
+	// HasListOfListsModelOutput the _coerce_list_of_lists_response helper
+	// of the namespace class.
 	HasListOfListsArgs        bool
+	HasMapArgs                bool
 	HasListOfListsModelOutput bool
 	// HasQueryLists gates the _validate_query_list, _query_list_value and
 	// _query_list_item helpers of the namespace class, and their Enum
@@ -162,8 +164,8 @@ type QueryParam struct {
 type ScalarArg struct {
 	Name          string
 	PyName        string
-	PyType        string // Full type including list[] wrapper when IsArray is true
-	PyElementType string // Element type for per-element validation (only set when IsArray is true)
+	PyType        string // Full type including list[] and dict[str, ...] wrappers when IsArray or IsMap is true
+	PyElementType string // Element type for per-element validation (only set when IsArray or IsMap is true)
 	Required      bool
 	IsArray       bool
 
@@ -171,6 +173,12 @@ type ScalarArg struct {
 	// IsArray is also set): each inner list must be a list, and each
 	// element is validated as PyElementType.
 	IsArrayOfArrays bool
+
+	// IsMap marks a map body argument (Record<string, T>), sent as a JSON
+	// object: PyType is dict[str, T], or dict[str, list[T]] when IsArray is
+	// also set. Each value, or each element of a list value, is validated
+	// as PyElementType at name[key] or name[key][i]; {} is a value.
+	IsMap bool
 
 	// KeepsNull marks an optional single Generic.JSON body argument, whose
 	// null is a value apart from absent (apigen.BodyArg.KeepNull). Its
@@ -201,9 +209,9 @@ func (a ScalarArg) isJSONValue() bool {
 }
 
 // valueType is the Python type of one value of the argument: the element
-// type of a list, and the argument's type otherwise.
+// type of a list or a map, and the argument's type otherwise.
 func (a ScalarArg) valueType() string {
-	if a.IsArray {
+	if a.IsArray || a.IsMap {
 		return a.PyElementType
 	}
 	return a.PyType
@@ -320,6 +328,9 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		for _, arg := range converted.ScalarArgs {
 			if arg.IsArrayOfArrays {
 				namespace.HasListOfListsArgs = true
+			}
+			if arg.IsMap {
+				namespace.HasMapArgs = true
 			}
 			if arg.KeepsNull {
 				namespace.HasUnsetArgs = true
@@ -445,11 +456,13 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		anyJSON[arg.Name] = arg.AnyJSON
 		structuredJSON[arg.Name] = arg.StructuredJSON != ""
 	}
-	// The SDK sends the scalar arguments of a POST, PUT or PATCH in the
-	// body, where a Generic.JSON one is any JSON value and a JSON object or
-	// array scalar one that object or array. In the query string each stays
-	// the parameter's text.
-	inBody := isBodyMethod(endpoint.Method)
+	// The route reads the scalar arguments of a GET from the query string
+	// and those of every other method, DELETE too, from the JSON body
+	// (apigen's BodyArgs), so the SDK sends them there. In the body a
+	// Generic.JSON one is any JSON value, a JSON object or array scalar one
+	// that object or array, and a map a dict. In the query string each
+	// stays the parameter's text.
+	inBody := sendsArgumentsInBody(endpoint.Method)
 	scalarArgs := make([]ScalarArg, 0, len(endpoint.ScalarArgs))
 	for _, arg := range endpoint.ScalarArgs {
 		pyElementType := ""
@@ -459,9 +472,14 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		if isAnyJSON || isStructuredJSON {
 			pyType = pythonJSONType(arg.Type)
 		}
-		if arg.IsArray {
+		if arg.IsArray || arg.IsMap {
 			pyElementType = pyType
+		}
+		if arg.IsArray {
 			pyType = pythonListType(pyType, arg.ArrayDepth())
+		}
+		if arg.IsMap {
+			pyType = "dict[str, " + pyType + "]"
 		}
 		scalarArgs = append(scalarArgs, ScalarArg{
 			Name:             arg.Name,
@@ -471,6 +489,7 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 			Required:         arg.Required,
 			IsArray:          arg.IsArray,
 			IsArrayOfArrays:  arg.IsArrayOfArrays,
+			IsMap:            arg.IsMap,
 			KeepsNull:        keepsNull[arg.Name],
 			IsAnyJSON:        isAnyJSON,
 			IsStructuredJSON: isStructuredJSON,
@@ -500,11 +519,11 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 	sdkPath := endpoint.Path
 	sdkHTTPMethod := endpoint.Method
 	pathTemplate, pathIsFString := convertPathToPythonTemplate(sdkPath, endpoint.PathParams, isScopedNS, scopeParamOriginal)
-	hasEncryptedBody := endpoint.Encrypted && isBodyMethod(sdkHTTPMethod)
+	hasEncryptedBody := endpoint.Encrypted && isEncryptedBodyMethod(sdkHTTPMethod)
 	// Endpoints with an explicit input object can require a JSON body even on GET
 	// (for example, GET /api/users/events with UserEventsSearchInput).
 	// Scalar-arg-only GET endpoints still use query parameters.
-	hasRequestBody := endpoint.HasInput || (isBodyMethod(sdkHTTPMethod) && len(scalarArgs) > 0)
+	hasRequestBody := endpoint.HasInput || (inBody && len(scalarArgs) > 0)
 	hasFileUpload := endpoint.HasFileUpload && len(fileFields) > 0
 
 	hasRequiredFileField := false
@@ -818,7 +837,17 @@ func findPathParam(pathParams []apigen.PathParam, name string) apigen.PathParam 
 	return apigen.PathParam{}
 }
 
-func isBodyMethod(method string) bool {
+// sendsArgumentsInBody reports whether an operation of method sends its
+// scalar arguments in the JSON body: every method but GET, whose route
+// reads them from the query string.
+func sendsArgumentsInBody(method string) bool {
+	return !strings.EqualFold(method, "GET")
+}
+
+// isEncryptedBodyMethod reports whether a request of method carries an
+// encrypted body: POST, PUT and PATCH, as apigen refuses an encrypted
+// operation of any other method (checkEncryptedMethod).
+func isEncryptedBodyMethod(method string) bool {
 	switch strings.ToUpper(method) {
 	case "POST", "PUT", "PATCH":
 		return true

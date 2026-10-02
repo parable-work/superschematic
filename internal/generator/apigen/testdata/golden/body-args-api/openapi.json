@@ -1049,6 +1049,142 @@
       }
     },
     "/api/posts/{id}/tags": {
+      "delete": {
+        "description": "Remove labels from a post; returns the labels removed. A DELETE\nsends its arguments in the body, as every operation but a GET does.",
+        "operationId": "TagRemoveTagsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "audit": {
+                    "description": "Any valid JSON value: object, array, primitive, or null",
+                    "nullable": true
+                  },
+                  "labels": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "linksByLocale": {
+                    "additionalProperties": {
+                      "items": {
+                        "description": "Valid HTTP/HTTPS URL",
+                        "format": "uri",
+                        "maxLength": 2048,
+                        "pattern": "^https://",
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "nullable": true,
+                    "type": "object"
+                  },
+                  "notes": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "A string-to-string map stored as JSON",
+                    "nullable": true,
+                    "type": "object"
+                  },
+                  "reason": {
+                    "minLength": 2,
+                    "type": "string"
+                  },
+                  "shadeByLabel": {
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/Shade"
+                    },
+                    "nullable": true,
+                    "type": "object"
+                  },
+                  "vector": {
+                    "description": "Fixed-dimensional float32 vector",
+                    "items": {
+                      "type": "number"
+                    },
+                    "nullable": true,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "reason",
+                  "labels"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "removeTags",
+        "tags": [
+          "tag"
+        ]
+      },
       "put": {
         "description": "Replace a post's tags; returns the labels as stored.",
         "operationId": "TagSaveTagsHandler",

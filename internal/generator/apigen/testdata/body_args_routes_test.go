@@ -4,8 +4,9 @@
 // received, and drives them over httptest with the vectors the TypeScript
 // server's scalar list test uses, plus required single values of every
 // builtin type, a UUID list and a list of objects, Generic.JSON values and
-// JSON object and array scalars, the query string of a GET operation, and a
-// path parameter in each encoding of its value.
+// JSON object and array scalars, the body arguments of a DELETE operation,
+// the query string of a GET operation, and a path parameter in each
+// encoding of its value.
 package bodyargsapi_test
 
 import (
@@ -76,6 +77,14 @@ func (s *tags) PlacePoints(_ context.Context, id string, pointByName map[string]
 	return &placed, nil
 }
 
+func (s *tags) RemoveTags(_ context.Context, id string, reason string, labels []string, shadeByLabel map[string]types.Shade, linksByLocale map[string][]types.NetworkUrl, audit types.GenericJSON, notes types.GenericStringMap, vector types.EmbeddingVector) ([]string, error) {
+	s.record(map[string]any{
+		"id": id, "reason": reason, "labels": labels, "shadeByLabel": shadeByLabel, "linksByLocale": linksByLocale,
+		"audit": audit, "notes": notes, "vector": vector,
+	})
+	return labels, nil
+}
+
 func (s *tags) FindTags(_ context.Context, codes []string, pages []int64, labels []string, ranks []int64) ([]string, error) {
 	s.record(map[string]any{"codes": codes, "pages": pages, "labels": labels, "ranks": ranks})
 	return labels, nil
@@ -140,6 +149,7 @@ const (
 	embeddingsPath    = "/api/embeddings"
 	nameShadesPath    = "/api/posts/p1/shade-names"
 	placePointsPath   = "/api/posts/p1/points"
+	removeTagsPath    = "/api/posts/p1/tags"
 	findTagsPath      = "/api/posts/tags"
 	searchPostsPath   = "/api/posts/search"
 )
@@ -603,6 +613,36 @@ func TestAMapOfAnObjectTypeIsABodyArgument(t *testing.T) {
 	)
 	// The body is not a Point: the map is the argument named pointByName.
 	refusedWith(t, server, impl, http.MethodPut, placePointsPath, `{"x": 1, "y": 2}`, fieldError{"pointByName", "required", "required field"})
+}
+
+// A DELETE reads its arguments from the body, as every operation but a GET
+// does, and the query string carries none of them.
+func TestADELETEReadsItsArgumentsFromTheBody(t *testing.T) {
+	server, impl := serve(t)
+	accepted(t, server, impl, http.MethodDelete, removeTagsPath, `{"reason": "spam", "labels": ["a", "b"], "shadeByLabel": {"a": "dark"}, "linksByLocale": {"en": ["https://a.test"]}, "audit": {"by": [1]}, "notes": {"en": "gone"}, "vector": [0.5, -1]}`)
+	for name, want := range map[string]string{
+		"id":            `"p1"`,
+		"reason":        `"spam"`,
+		"labels":        `["a", "b"]`,
+		"shadeByLabel":  `{"a": "dark"}`,
+		"linksByLocale": `{"en": ["https://a.test"]}`,
+		"audit":         `{"by": [1]}`,
+		"notes":         `{"en": "gone"}`,
+		"vector":        `[0.5, -1]`,
+	} {
+		if !jsonEqual(t, impl.last[name], want) {
+			t.Errorf("%s: the implementation received %v, want %s", name, impl.last[name], want)
+		}
+	}
+	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath+"?reason=spam&labels=a,b", `{}`,
+		fieldError{"reason", "required", "required field"},
+		fieldError{"labels", "required", "required field"},
+	)
+	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath, `{"reason": "x", "labels": [], "shadeByLabel": {"a": "dim"}, "linksByLocale": {"en": ["http://a.test"]}}`,
+		fieldError{"reason", "minLength", "must be at least 2 characters"},
+		fieldError{"shadeByLabel[a]", "enum", ""},
+		fieldError{"linksByLocale[en][0]", "pattern", "invalid format"},
+	)
 }
 
 func TestAGETListReadsEveryQueryKey(t *testing.T) {

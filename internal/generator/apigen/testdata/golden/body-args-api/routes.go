@@ -164,6 +164,13 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/posts/{id}/shade-names",
 			Handler: createTagNameShadesHandler(cfg.Implementations.Tag),
 		},
+		// Remove labels from a post; returns the labels removed. A DELETE
+		// sends its arguments in the body, as every operation but a GET does.
+		{
+			Method:  "DELETE",
+			Path:    "/posts/{id}/tags",
+			Handler: createTagRemoveTagsHandler(cfg.Implementations.Tag),
+		},
 		// Replace a post's tags; returns the labels as stored.
 		{
 			Method:  "PUT",
@@ -833,6 +840,84 @@ func createTagNameShadesHandler(impl TagImplementation) gohttp.HandlerFunc {
 
 		// Respond with result
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createTagRemoveTagsHandler creates a handler for DELETE /api/posts/{id}/tags
+//
+// Remove labels from a post; returns the labels removed. A DELETE
+// sends its arguments in the body, as every operation but a GET does.
+func createTagRemoveTagsHandler(impl TagImplementation) gohttp.HandlerFunc {
+	// Body arguments: the JSON type of each value, then its rules in the
+	// order they are checked (the scalar type's own, then the argument's).
+	bodyReasonArg := bodyargs.NewArg("reason", bodyargs.String, bodyargs.Required(), bodyargs.MinLength(2))
+	bodyLabelsArg := bodyargs.NewArg("labels", bodyargs.String, bodyargs.Required())
+	bodyShadeByLabelArg := bodyargs.NewArg("shadeByLabel", bodyargs.String)
+	bodyLinksByLocaleArg := bodyargs.NewArg("linksByLocale", bodyargs.String, bodyargs.MaxLength(2048), bodyargs.Pattern(`^https?://[\w\-\{\}]+(\.[\w\-\{\}]+)+([:/?#][\w\-\._~:/?#\[\]@!\$&'\(\)\*\+,;=\{\}%]*)?$`), bodyargs.Pattern(`^https://`))
+	bodyAuditArg := bodyargs.NewArg("audit", bodyargs.Any, bodyargs.KeepNull())
+	bodyNotesArg := bodyargs.NewArg("notes", bodyargs.Object)
+	bodyVectorArg := bodyargs.NewArg("vector", bodyargs.Array)
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id := IdStr
+		// Parse body arguments (non-GET endpoints). The body is one JSON
+		// object; each argument is decoded from its own JSON value and
+		// checked by the list and value rules, and every failure is reported
+		// at the argument's path (name, name[i], name[i][j], name[key]).
+		body, err := bodyargs.ReadObject(r.Body)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "Invalid request body")
+			return
+		}
+		var requestBody struct {
+			Reason        string
+			Labels        []string
+			ShadeByLabel  map[string]types.Shade
+			LinksByLocale map[string][]types.NetworkUrl
+			Audit         types.GenericJSON
+			Notes         types.GenericStringMap
+			Vector        types.EmbeddingVector
+		}
+		validationErrors := types.NewValidationErrors()
+		requestBody.Reason = bodyargs.Value[string](validationErrors, body, bodyReasonArg)
+		requestBody.Labels = bodyargs.List[string](validationErrors, body, bodyLabelsArg)
+		requestBody.ShadeByLabel = bodyargs.Map[types.Shade](validationErrors, body, bodyShadeByLabelArg)
+		requestBody.LinksByLocale = bodyargs.MapOfLists[types.NetworkUrl](validationErrors, body, bodyLinksByLocaleArg)
+		requestBody.Audit = bodyargs.Value[types.GenericJSON](validationErrors, body, bodyAuditArg)
+		requestBody.Notes = bodyargs.Value[types.GenericStringMap](validationErrors, body, bodyNotesArg)
+		requestBody.Vector = bodyargs.Value[types.EmbeddingVector](validationErrors, body, bodyVectorArg)
+		if validationErrors.HasErrors() {
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.RemoveTags(r.Context(), Id, requestBody.Reason, requestBody.Labels, requestBody.ShadeByLabel, requestBody.LinksByLocale, requestBody.Audit, requestBody.Notes, requestBody.Vector)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondCollectionEnvelope(w, gohttp.StatusOK, result, r)
 	}
 }
 
