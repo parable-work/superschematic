@@ -20,12 +20,12 @@ which has no instance. Anything that throws rolls the whole call back.
 
 Each call is one Chain (behaviors/execution.ts) across every instance its
 behaviors reach. The store is their reach (D16, amended): it reads other
-instances and invokes their operations as the chain's principal, asking
-the policy each time, records the references behaviors hold, asks the
-guards of the behaviors that refer to an instance before it changes and
-runs their hooks after, and refuses a delete that leaves a reference to
-the deleted instance behind. The runner's work reaches through it too,
-on a chain whose cause each event it appends records.
+instances, invokes their operations and creates new ones as the chain's
+principal, asking the policy each time, records the references behaviors
+hold, asks the guards of the behaviors that refer to an instance before
+it changes and runs their hooks after, and refuses a delete that leaves
+a reference to the deleted instance behind. The runner's work reaches
+through it too, on a chain whose cause each event it appends records.
 
 list pages through a schema's instances in creation order with an opaque
 cursor. Each page is one indexed range read of at most the page size, so
@@ -165,6 +165,11 @@ export class InstanceStore {
       read: (chain, schema, ids, fields) => this.readFor(chain, schema, ids, fields),
       invoke: (chain, from, schema, id, operation, params, writes) => this.invokeFor(chain, from, schema, id, operation, params, writes),
       invokeSchema: (chain, from, schema, operation, params, writes) => this.invokeSchemaFor(chain, from, schema, operation, params, writes),
+      create: (chain, from, schema, data, id, writes) => this.createFor(chain, from, schema, data, id, writes),
+      allowRead: (chain, schema) => {
+        checkSchemaName(schema);
+        this.access.require(chain.principal, 'read', chain.namespace, schema);
+      },
       before: (chain, from, event) => this.beforeFor(chain, from, event),
       config: (chain, own, schema, behavior) => this.configFor(chain, own, schema, behavior),
       readable: (chain, schema) => {
@@ -184,42 +189,50 @@ export class InstanceStore {
     const id = options.id ?? this.ids();
     checkId(id);
     const chain = this.chain(principal, namespace);
-    return this.storage.transaction(() =>
-      chain.write(schema, id, () => {
-        const record = this.live(namespace, schema);
-        const runtime = this.catalog.runtimeOf(record);
-        this.validate(namespace, record, runtime, data);
-        const json = JSON.stringify(data);
-        const seq = nextSeq(this.storage, namespace, schema, id);
-        const inserted = this.storage.run(
-          `INSERT INTO engine_instances
-             (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (namespace, schema, id) DO NOTHING`,
-          [namespace, schema, id, record.namespace, record.version as number, seq, json, chain.now, principal.subject, chain.now, principal.subject]
-        );
-        if (inserted.changes === 0) {
-          throw new EngineError('conflict', `${schema} ${id} already exists in namespace ${namespace}`);
-        }
-        const execution = this.execution(chain, runtime, record, id, JSON.parse(json) as Record<string, unknown>, true);
-        execution.initialize();
-        execution.afterChange({ kind: 'create' });
-        const instance = toInstance(this.row(namespace, schema, id) as Row, execution.fields());
-        appendEvent(this.storage, {
-          kind: 'create',
-          namespace,
-          schema,
-          instanceId: id,
-          seq,
-          version: record.version as number,
-          actor: principal.subject,
-          at: chain.now,
-          change: JSON.stringify(instance.data),
-          cause: chain.cause,
-        });
-        return instance;
-      })
-    );
+    return this.storage.transaction(() => this.insert(chain, schema, id, data));
+  }
+
+  // insert creates an instance in the chain's namespace inside the
+  // chain's transaction: validate, insert, every initialize, every
+  // afterChange, then the create event, which records the chain's cause.
+  // The policy has been asked.
+  private insert(chain: Chain, schema: string, id: string, data: unknown): InstanceRecord {
+    const namespace = chain.namespace;
+    const subject = chain.principal.subject;
+    return chain.write(schema, id, () => {
+      const record = this.live(namespace, schema);
+      const runtime = this.catalog.runtimeOf(record);
+      this.validate(namespace, record, runtime, data);
+      const json = JSON.stringify(data);
+      const seq = nextSeq(this.storage, namespace, schema, id);
+      const inserted = this.storage.run(
+        `INSERT INTO engine_instances
+           (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (namespace, schema, id) DO NOTHING`,
+        [namespace, schema, id, record.namespace, record.version as number, seq, json, chain.now, subject, chain.now, subject]
+      );
+      if (inserted.changes === 0) {
+        throw new EngineError('conflict', `${schema} ${id} already exists in namespace ${namespace}`);
+      }
+      const execution = this.execution(chain, runtime, record, id, JSON.parse(json) as Record<string, unknown>, true);
+      execution.initialize();
+      execution.afterChange({ kind: 'create' });
+      const instance = toInstance(this.row(namespace, schema, id) as Row, execution.fields());
+      appendEvent(this.storage, {
+        kind: 'create',
+        namespace,
+        schema,
+        instanceId: id,
+        seq,
+        version: record.version as number,
+        actor: subject,
+        at: chain.now,
+        change: JSON.stringify(instance.data),
+        cause: chain.cause,
+      });
+      return instance;
+    });
   }
 
   /** get returns an instance, or undefined when the namespace has none with the id. */
@@ -573,6 +586,28 @@ export class InstanceStore {
       throw new BehaviorError(from, `invoking ${spec.name} of ${schema} ${id} is a cycle: a write of ${schema} ${id} is still running up this call`);
     }
     return this.storage.transaction(() => this.runOperation(chain, record, runtime, spec, id, checked, undefined)).result;
+  }
+
+  // createFor creates an instance a behavior asks for, as the chain's
+  // principal, who needs write on the schema, in the chain's transaction:
+  // a savepoint, so a failure the behavior catches leaves nothing of it.
+  // A read cannot create, and neither can a call up which the same
+  // instance is being written (deleted, say).
+  private createFor(chain: Chain, from: string, schema: string, data: Record<string, unknown>, id: string | undefined, writes: boolean): InstanceRecord {
+    if (!writes) {
+      throw new BehaviorError(
+        from,
+        `a read cannot create an instance of ${schema}; initialize, afterChange, afterReferenceChange, a writing operation and the runner's work can`
+      );
+    }
+    checkSchemaName(schema);
+    this.access.require(chain.principal, 'write', chain.namespace, schema);
+    const instanceId = id ?? this.ids();
+    checkId(instanceId);
+    if (chain.writing(schema, instanceId)) {
+      throw new BehaviorError(from, `creating ${schema} ${instanceId} is a cycle: a write of ${schema} ${instanceId} is still running up this call`);
+    }
+    return deepFreeze(this.storage.transaction(() => this.insert(chain, schema, instanceId, data)));
   }
 
   // invokeSchemaFor runs a schema-level operation a behavior invokes, as

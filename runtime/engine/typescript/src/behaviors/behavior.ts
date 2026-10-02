@@ -7,7 +7,11 @@ and gets a context that reaches only what the behavior may touch:
 
 - the instance's own fields (the type's, not any behavior's), deep-frozen;
 - the behavior's own columns on the instance, by the names it declared;
-- SQL on the behavior's own tables, which the engine names;
+- SQL on the behavior's own tables, which the engine names, and on a
+  read-only relation over the instances of the call's schema in its
+  namespace (sql.instances()): their ids, metadata and own fields, and
+  the behavior's own columns on each, with the access policy asked for
+  read on the schema at each statement that names it;
 - the principal, the schema version and the clock's time for the call;
 - can(permission), which asks the deployment's PermissionMatcher whether
   the principal holds a permission the behavior's config names (D16);
@@ -16,6 +20,10 @@ and gets a context that reaches only what the behavior may touch:
   policy asked at each read, and another instance's operation or a
   schema's schema-level one, which runs as a caller's would, a writing
   one only in a write (D16, amended);
+- instances.create, wherever a writing operation can be invoked: a new
+  instance of the namespace, created as engine.instances.create would
+  create it for the principal, with every behavior's initialize and
+  afterChange and its event (D16, amended);
 - references: the instances this one refers to, recorded with the engine
   so the behavior hears when one of them changes or goes;
 - in a write, call(), which runs another behavior's operation on the same
@@ -26,15 +34,20 @@ and gets a context that reaches only what the behavior may touch:
 Two more run after the commit, on the engine's runner, as the principal
 the deployment names for it (D16, amended): reactions, which hear the
 events of the instances of a schema that composes the behavior, one at a
-time in log order, and schedules, which run on an interval. Each runs
-in its own transaction with what the runner records for it, so its
-writes and that record commit together, and it changes state only
-through the operations it invokes.
+time in log order, and schedules, which run on an interval, a fixed one
+or one the schema's config gives. Each runs in its own transaction with
+what the runner records for it, so its writes and that record commit
+together, and it changes state only through the operations it invokes
+and the instances it creates.
 
-There is no handle on the instances table, on another behavior's storage
-or on the storage connection. A status one behavior owns changes at
-another's request only through its operations, so its guards always run,
-on this instance or another.
+A migration and afterConfigChange act for no principal: their SQL
+reaches the behavior's own tables only (TableWriter), without the
+relation over the instances.
+
+There is no handle on the instances table beyond that read-only
+relation, on another behavior's storage or on the storage connection. A
+status one behavior owns changes at another's request only through its
+operations, so its guards always run, on this instance or another.
 */
 
 import type { Principal } from '../access.js';
@@ -72,6 +85,18 @@ export interface BehaviorMigration {
   /** Columns this step adds to the instances table, by the behavior's own name for each. */
   readonly columns?: Readonly<Record<string, ColumnSpec>>;
   /**
+   * Indexes this step adds to the instances table over the behavior's
+   * own columns, by the behavior's own name for each (`[a-z][a-z0-9_]*`,
+   * unique across its migrations): the columns, by its own names, that
+   * this step or an earlier one adds, in index order. The engine names
+   * each index and leads it with the instance's namespace and schema, so
+   * a statement on the relation sql.instances() names that filters or
+   * orders by the columns reads the index rather than every instance. It
+   * creates them after the step's columns and before up(). An index is
+   * permanent: no later migration drops or changes one yet.
+   */
+  readonly indexes?: Readonly<Record<string, readonly string[]>>;
+  /**
    * DDL and data changes on the behavior's own tables: CREATE TABLE, CREATE
    * [UNIQUE] INDEX, CREATE VIRTUAL TABLE ... USING fts5, ALTER TABLE, DROP
    * TABLE and DROP INDEX, and the statements a write runs. Every object it
@@ -79,7 +104,7 @@ export interface BehaviorMigration {
    * view, a temporary object and a virtual table of another module are
    * refused.
    */
-  up?(sql: SqlWriter): void;
+  up?(sql: TableWriter): void;
 }
 
 /** The behavior's own columns on one instance. */
@@ -99,17 +124,46 @@ export interface WritableColumns extends Columns {
  * own storage (engine_*, sqlite_*, pragma_* and another behavior's bhv_*
  * names) and anything but SELECT, VALUES and WITH ... SELECT in a read.
  */
-export interface SqlReader {
+export interface TableReader {
   /** The SQL name of one of the behavior's tables, by its own name for it (`[a-z][a-z0-9_]*`). */
   table(name: string): string;
   get(sql: string, params?: readonly SqlValue[]): Row | undefined;
   all(sql: string, params?: readonly SqlValue[]): Row[];
 }
 
-export interface SqlWriter extends SqlReader {
+export interface TableWriter extends TableReader {
   /** Runs one INSERT, UPDATE, DELETE or REPLACE (or a read). */
   run(sql: string, params?: readonly SqlValue[]): RunResult;
 }
+
+/** The columns of the relation sql.instances() names, before the behavior's own. */
+export const RELATION_COLUMNS: readonly string[] = ['id', 'seq', 'version', 'created_at', 'created_by', 'updated_at', 'updated_by', 'data'];
+
+/**
+ * The SQL of a call that acts for a principal: the behavior's own tables,
+ * and its own columns across the instances of the call's schema.
+ */
+export interface SqlReader extends TableReader {
+  /**
+   * The SQL name of a read-only relation over the instances of the call's
+   * schema in the call's namespace (for a schema of the shared namespace,
+   * the call's namespace's own instances of it), one row per instance:
+   * id, seq, version (the schema version it was last written with),
+   * created_at, created_by, updated_at, updated_by, data (the instance's
+   * own fields, as the JSON text the engine stores), then each of the
+   * behavior's own columns under its own name for it. No other behavior's
+   * column is there. It is not a table: the engine defines it ahead of
+   * each statement that names it, and asks the access policy for read on
+   * the schema as the call's principal, once for each such statement; a
+   * refusal is forbidden, as a read of another instance is. A statement
+   * cannot write through it. The name never collides with one of
+   * sql.table(name). A behavior column named like one of RELATION_COLUMNS
+   * makes the relation a BehaviorError.
+   */
+  instances(): string;
+}
+
+export interface SqlWriter extends SqlReader, TableWriter {}
 
 /** How much of another instance a read returns. */
 export interface ReadOptions {
@@ -165,6 +219,22 @@ export interface Instances {
    * read-only operations only.
    */
   invokeSchema(schema: string, operation: string, params?: FrozenJSON): unknown;
+  /**
+   * Creates an instance of a schema, the namespace's own, as
+   * engine.instances.create would for the call's principal: it asks the
+   * access policy for write on the schema, validates data (the instance's
+   * own fields) against the live version, and runs every behavior's
+   * initialize and afterChange on the new instance and appends its create
+   * event, which records the runner's cause in the runner's work. It runs
+   * in this call's transaction, in a savepoint that rolls back alone when
+   * it throws, and nests like an invoke. The id is options.id, or one the
+   * engine's id generator makes. Returns the instance's record,
+   * deep-frozen. Where instances.invoke reaches only read-only
+   * operations, from a guard, a field reader and a read-only operation,
+   * it is a BehaviorError; so is creating an instance whose write is still
+   * running up the call.
+   */
+  create(schema: string, data: FrozenJSON, options?: { readonly id?: string }): InstanceRecord;
 }
 
 /** The schemas the namespace reaches, as the call's principal may read them. */
@@ -256,9 +326,11 @@ export interface InstanceView<Config> extends BehaviorScope<Config> {
 
 /**
  * A schema-level operation's context: the schema as a whole, with no
- * instance. Its SQL reads the behavior's tables and writes nothing, and no
- * event is appended for it: it changes state only through the operations
- * it invokes (instances.invoke), whose events record what they change.
+ * instance. Its SQL reads the behavior's tables and its columns across the
+ * schema's instances (sql.instances()) and writes nothing, and no event is
+ * appended for it: it changes state only through the operations it
+ * invokes (instances.invoke) and, when it writes, the instances it creates
+ * (instances.create), whose events record what they change.
  */
 export interface SchemaContext<Config> extends BehaviorScope<Config> {
   readonly sql: SqlReader;
@@ -268,9 +340,10 @@ export interface SchemaContext<Config> extends BehaviorScope<Config> {
  * The context of the runner's work: a reaction or a schedule run, on one
  * schema that composes the behavior, in one namespace, as the runner's
  * principal. Like a schema-level operation's, its SQL reads the
- * behavior's tables and writes nothing, and it changes state only through
- * the operations it invokes, which run writing operations here; their
- * events record the cause.
+ * behavior's tables and its columns across the schema's instances and
+ * writes nothing, and it changes state only through the operations it
+ * invokes, which run writing operations here, and the instances it
+ * creates; their events record the cause.
  */
 export interface WorkContext<Config> extends BehaviorScope<Config> {
   readonly sql: SqlReader;
@@ -315,8 +388,18 @@ export interface BehaviorReactions<Config> {
 
 /** A behavior's schedule: work the runner runs on each schema that composes it, once an interval. */
 export interface BehaviorSchedule<Config> {
-  /** How often it runs, in milliseconds: an integer of at least 1000. */
-  readonly everyMs: number;
+  /**
+   * How often it runs, in milliseconds: an integer of at least 1000, or a
+   * function of the config of a schema that composes the behavior that
+   * returns one, so each schema runs it at its own interval. The runner
+   * calls the function for each schema it schedules the behavior on, when
+   * it finds the schedule there: when it first looks and after each
+   * publish. A function that throws or returns anything else fails the
+   * schedule on that schema as a failing run does: engine.runner.status()
+   * shows the error and the runner tries again with its backoff; the
+   * runner and the schedule on other schemas go on.
+   */
+  readonly everyMs: number | ((config: Config) => number);
   /** One run. It is synchronous; it returns nothing. */
   run(context: ScheduleContext<Config>): void;
 }
@@ -442,8 +525,11 @@ export interface PublishContext<Config> {
   readonly version: number;
   /** The engine clock's time for the publish, in epoch milliseconds. */
   readonly now: number;
-  /** SQL on the behavior's own tables, writes included. */
-  readonly sql: SqlWriter;
+  /**
+   * SQL on the behavior's own tables, writes included; not the relation
+   * over the instances, which asks the policy as a principal this has not.
+   */
+  readonly sql: TableWriter;
   /** Visits every instance of the schema in the namespace, in creation order, reading 500 at a time. */
   eachInstance(visit: (instance: StoredInstance) => void): void;
 }

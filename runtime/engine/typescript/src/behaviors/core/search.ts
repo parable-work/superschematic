@@ -39,7 +39,7 @@ indexed every instance of the schema.
 
 import { EngineError, OperationParamsError } from '../../errors.js';
 import { SqliteError, type Row, type SqlValue } from '../../storage/driver.js';
-import { BehaviorConfigError, defineBehavior, type FrozenJSON, type SqlReader, type SqlWriter } from '../behavior.js';
+import { BehaviorConfigError, defineBehavior, type FrozenJSON, type TableReader, type TableWriter } from '../behavior.js';
 import { page, pageRequest } from '../paging.js';
 import declaration from './declarations/Search.behavior.json' with { type: 'json' };
 
@@ -120,7 +120,7 @@ function changed(config: SearchConfig, before: FrozenJSON, after: FrozenJSON): b
 
 // index writes an instance's indexed fields, replacing what the index held
 // for it.
-function index(sql: SqlWriter, config: SearchConfig, namespace: string, schema: string, id: string, data: FrozenJSON): void {
+function index(sql: TableWriter, config: SearchConfig, namespace: string, schema: string, id: string, data: FrozenJSON): void {
   const rows = sql.table('rows');
   const text = sql.table('text');
   sql.run(`INSERT INTO ${rows} (namespace, schema, id) VALUES (?, ?, ?) ON CONFLICT (namespace, schema, id) DO NOTHING`, key(namespace, schema, id));
@@ -133,7 +133,7 @@ function index(sql: SqlWriter, config: SearchConfig, namespace: string, schema: 
   ]);
 }
 
-function unindex(sql: SqlWriter, namespace: string, schema: string, id: string): void {
+function unindex(sql: TableWriter, namespace: string, schema: string, id: string): void {
   const rows = sql.table('rows');
   const found = sql.get(`SELECT row FROM ${rows} WHERE namespace = ? AND schema = ? AND id = ?`, key(namespace, schema, id));
   if (found) {
@@ -143,7 +143,7 @@ function unindex(sql: SqlWriter, namespace: string, schema: string, id: string):
 }
 
 // clear drops a namespace's index of a schema.
-function clear(sql: SqlWriter, namespace: string, schema: string): void {
+function clear(sql: TableWriter, namespace: string, schema: string): void {
   const rows = sql.table('rows');
   sql.run(`DELETE FROM ${sql.table('text')} WHERE rowid IN (SELECT row FROM ${rows} WHERE namespace = ? AND schema = ?)`, [namespace, schema]);
   sql.run(`DELETE FROM ${rows} WHERE namespace = ? AND schema = ?`, [namespace, schema]);
@@ -215,7 +215,7 @@ function hit(row: Row, rank: number, fields: readonly string[]): SearchHit {
   return best === undefined ? { id, rank } : { id, rank, field: best.field, snippet: best.parts };
 }
 
-function matches(sql: SqlReader, config: SearchConfig, namespace: string, schema: string, match: string, syntax: string, limit: number, after: number): Row[] {
+function matches(sql: TableReader, config: SearchConfig, namespace: string, schema: string, match: string, syntax: string, limit: number, after: number): Row[] {
   const text = sql.table('text');
   const snippets = config.fields.map((_, position) => `snippet(${text}, ${position}, ?, ?, '...', ${SNIPPET_WORDS}) AS s${position}`);
   const weights = COLUMNS.map((_, position) => config.weights[position] ?? 0);
