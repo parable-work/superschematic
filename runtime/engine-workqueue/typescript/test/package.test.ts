@@ -2,11 +2,10 @@
 // engine through the plug-in interface, carry the declarations the core
 // binary writes, and run the document the core binary builds in the CLI
 // smoke (fixture-workqueue-json), whose jobs compose Workflow, Lease,
-// Assignment, Queue and Budget, and Retries, which this package does not
-// implement yet and the tests take out: workers claim them in order, each
-// claim reserving its budget, hold and renew their leases, and the runner
-// puts a job whose time ran out back in the queue, settling what it
-// reserved.
+// Assignment, Queue, Budget and Retries: workers claim them in order, each
+// claim reserving its budget, hold and renew their leases and record their
+// attempts, and the runner puts a job whose time ran out back in the
+// queue, settling what it reserved.
 // The fixture's other files hold one type each, which run as schemas of
 // their own: a worker with Presence, which releases its principal's leases
 // on jobs, and a batch whose Blueprint stamps steps.
@@ -16,7 +15,7 @@ import { afterEach, describe, test } from 'node:test';
 
 import type { Principal } from '@superschematic/engine';
 
-import { DEFAULT_TTL_MS, assignment, blueprint, budget, lease, presence, queue, workQueueBehaviors } from '../dist/index.js';
+import { DEFAULT_TTL_MS, assignment, blueprint, budget, lease, presence, queue, retries, workQueueBehaviors } from '../dist/index.js';
 import { Clock, alice, cleanup, drivers, jobsFixture, openTestEngine } from './helpers.ts';
 
 afterEach(cleanup);
@@ -34,14 +33,6 @@ function fixtureType(name: string, file: string): Record<string, unknown> {
   return { kind: 'General', name, types: { [type.name]: type } };
 }
 
-// jobs is the fixture's jobs document without Retries, which the core
-// declares and this package does not implement yet.
-function jobs(): Record<string, unknown> {
-  const fixture = jobsFixture() as { types: { Job: { behaviors: Array<{ name: string }> } } };
-  fixture.types.Job.behaviors = fixture.types.Job.behaviors.filter((behavior) => behavior.name !== 'Retries');
-  return fixture;
-}
-
 function declarationFile(name: string): unknown {
   return JSON.parse(readFileSync(new URL(`../src/declarations/${name}.behavior.json`, import.meta.url), 'utf8'));
 }
@@ -49,13 +40,14 @@ function declarationFile(name: string): unknown {
 for (const driver of drivers) {
   describe(`the work-queue package (${driver})`, () => {
     test('its behaviors carry the core declarations and register with an engine, beside the core behaviors', () => {
-      assert.deepEqual(workQueueBehaviors, [lease, assignment, queue, presence, blueprint, budget]);
+      assert.deepEqual(workQueueBehaviors, [lease, assignment, queue, presence, blueprint, budget, retries]);
       assert.deepEqual(lease.declaration, declarationFile('Lease'));
       assert.deepEqual(assignment.declaration, declarationFile('Assignment'));
       assert.deepEqual(queue.declaration, declarationFile('Queue'));
       assert.deepEqual(presence.declaration, declarationFile('Presence'));
       assert.deepEqual(blueprint.declaration, declarationFile('Blueprint'));
       assert.deepEqual(budget.declaration, declarationFile('Budget'));
+      assert.deepEqual(retries.declaration, declarationFile('Retries'));
       assert.equal(DEFAULT_TTL_MS, 60000);
       const engine = openTestEngine({ driver });
       assert.deepEqual(engine.behaviors.names(), [
@@ -69,6 +61,7 @@ for (const driver of drivers) {
         'Presence',
         'Queue',
         'Reactions',
+        'Retries',
         'Revisions',
         'Rollups',
         'Search',
@@ -79,7 +72,7 @@ for (const driver of drivers) {
     test('it runs the document the core binary builds: claimed in order, held, and put back when its time runs out', () => {
       const clock = new Clock(1_000_000);
       const engine = openTestEngine({ driver, clock: clock.now, runner: { principal: runner } });
-      engine.schemas.define(alice, jobs());
+      engine.schemas.define(alice, jobsFixture());
       engine.schemas.publish(alice, 'jobs');
       const described = engine.tools.describe(alice, 'jobs');
       assert.deepEqual(
@@ -90,6 +83,7 @@ for (const driver of drivers) {
           ['Assignment', ['assign', 'unassign']],
           ['Queue', ['claim', 'claimNext', 'refresh']],
           ['Budget', ['reserve', 'recordUsage', 'settle', 'setLimit', 'reserveFor', 'settleFor', 'recordUsageFor']],
+          ['Retries', ['recordAttempt']],
         ]
       );
       // The config a client reads its lease length from.
@@ -112,6 +106,7 @@ for (const driver of drivers) {
       // Each claim reserved the job's claim amount of its daily CPU budget.
       assert.deepEqual(engine.instances.get(alice, 'jobs', 'index')?.data.budget, { cpuSeconds: { used: 0, reserved: 600, limit: 3600, remaining: 3000 } });
       engine.instances.invoke(worker, 'jobs', 'index', 'recordUsage', { meter: 'cpuSeconds', amount: 100 });
+      engine.instances.invoke(worker, 'jobs', 'index', 'recordAttempt', { failure: 'timeout' });
 
       clock.advance(20000);
       assert.equal((engine.instances.invoke(worker, 'jobs', 'reindex', 'heartbeat', { token: 1 }) as { expiresAt: number }).expiresAt, 1_050_000);
@@ -131,6 +126,7 @@ for (const driver of drivers) {
         status: 'queued',
         lease: { holder: null, token: 2, acquiredAt: null, expiresAt: null, active: false, expiries: 1 },
         budget: { cpuSeconds: { used: 100, reserved: 0, limit: 3600, remaining: 3500 } },
+        retries: { total: 1, classAttempts: { timeout: 1, invalidOutput: 0, rejected: 0 }, bestScore: null, exhausted: false, stuck: false },
       });
       assert.deepEqual([claimNext(other, 'search')?.id, claimNext(other, 'search')?.id], ['mine', 'index']);
       assert.equal(engine.instances.get(alice, 'jobs', 'reindex')?.data.status, 'done');
@@ -139,7 +135,7 @@ for (const driver of drivers) {
     test("it runs the fixture's worker type as a schema of its own: a missed worker's job goes back in the queue", () => {
       const clock = new Clock(1_000_000);
       const engine = openTestEngine({ driver, clock: clock.now, runner: { principal: { subject: 'runner', permissions: ['jobs.override'] } } });
-      engine.schemas.define(alice, jobs());
+      engine.schemas.define(alice, jobsFixture());
       engine.schemas.publish(alice, 'jobs');
       engine.schemas.define(alice, fixtureType('workers', 'worker'));
       engine.schemas.publish(alice, 'workers');
@@ -170,6 +166,8 @@ for (const driver of drivers) {
         expiries: 1,
       });
       assert.equal(engine.instances.get(alice, 'jobs', 'index')?.data.status, 'queued');
+      // The expiry settled the claim's reservation.
+      assert.deepEqual(engine.instances.get(alice, 'jobs', 'index')?.data.budget, { cpuSeconds: { used: 0, reserved: 0, limit: 3600, remaining: 3600 } });
       // Queue's copies followed the expiry, so claimNext finds the job again.
       assert.equal(claimNext(other), 'index');
     });

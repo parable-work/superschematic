@@ -15,9 +15,9 @@ Built: `Lease`, an exclusive lease with a fencing token, heartbeats,
 expiry on the engine's runner and directives to its holder;
 `Assignment`; `Queue`, the claim and `claimNext`; `Presence`, a
 heartbeat on an instance that stands for a worker; `Blueprint`, children
-created with their parent; and `Budget`, reserve-then-settle budgets
-across enclosing scopes. Not built yet: `Retries`, the retries D16
-lists, whose declaration the core already carries.
+created with their parent; `Budget`, reserve-then-settle budgets across
+enclosing scopes; and `Retries`, failure classes with caps, kept results
+and stuck detection. That is every work-queue behavior D16 lists.
 
 ```ts
 import { openEngine } from '@superschematic/engine';
@@ -35,8 +35,8 @@ engine.instances.invoke(worker, 'jobs', claimed.id, 'heartbeat', { token: claime
 A deployment passes the implementations as the engine's `behaviors`
 option when it opens the engine, after the core's, which the engine
 registers itself: `workQueueBehaviors` is every one, and `lease`,
-`assignment`, `queue`, `presence`, `blueprint` and `budget` are exported
-one by one for a deployment that runs only some.
+`assignment`, `queue`, `presence`, `blueprint`, `budget` and `retries` are
+exported one by one for a deployment that runs only some.
 `engine.behaviors.register(lease)` registers one later; a published
 version that composes a behavior the engine cannot run is `unavailable`
 until it does. Registering one whose storage already
@@ -563,6 +563,80 @@ A daily meter's usage counts from the start of the UTC day on the
 engine's clock. A read never writes: a meter whose day has passed reads
 as used 0, and the next write of its row starts the day. Reservations
 carry over.
+
+## Retries
+
+Retries per failure class: each attempt is recorded, counted against its
+class's cap and a total, and an instance whose caps run out is exhausted
+and moved to `exhaustedState`. Requires `Workflow`. There is no backoff
+in time: an instance that may run again may be taken again at once.
+
+| | |
+| --- | --- |
+| Config | `classes` (required, by name: `{ attempts }` of at least 1, or `"terminal"`), `totalAttempts` (required, at least 1), `exhaustedState` (required, a Workflow state), `limitsField` (an object field of the type), `keepBest` (`{ minDelta?, neverRegress? }`), `stuckAfter` (at least 1), `resultField` (a field of the type), `from` (Workflow states, each with a transition to `exhaustedState`), `permission` |
+| Fields | `retries`: `{ total, classAttempts, bestScore, exhausted, stuck }` |
+| Operations | `recordAttempt({ failure?, score?, result?, signature?, predicates? })` -> `{ failure, score, kept, total, classAttempts, exhausted, stuck }`, writes |
+| Guards | once exhausted, a `Workflow` transition into any state but `exhaustedState`, Lease's `acquire` and Queue's `claim`: `vetoed` |
+| Refusals | an unknown class, and a result without `resultField` (`invalid_argument`); a result the field's type refuses (`invalid_instance`); an attempt once exhausted (`vetoed`); without `permission` (`forbidden`) |
+| Events | each attempt's operation event, by its caller |
+| `configChange` | any config may change. Added to a schema with instances, which start with no attempts; not removed from one |
+
+```json
+{ "name": "Retries", "config": {
+    "classes": { "timeout": { "attempts": 3 }, "invalidOutput": { "attempts": 2 }, "rejected": "terminal" },
+    "totalAttempts": 4,
+    "keepBest": { "minDelta": 0.05, "neverRegress": ["compiles"] },
+    "stuckAfter": 2,
+    "resultField": "report",
+    "exhaustedState": "failed" } }
+```
+
+### Counting
+
+An attempt without `failure` is a success and counts nothing. A failure
+of a terminal class counts and exhausts the instance; a failure of a
+class with no room left, its own cap or the total, is not counted and
+exhausts it; any other failure counts, and exhausts the instance when the
+total reaches its cap, or its class reaches its cap and no other class
+has room. The instance's `limitsField` holds its own caps, a class's name
+to a cap of at least 0 and `totalAttempts` to one of at least 1; an
+unknown or terminal class, and a value that is not such a cap, is
+ignored. Exhaustion is set only by an attempt, so a config whose classes
+are all terminal, or caps of 0, exhaust nothing before the first failure.
+
+### Kept results
+
+A success's result is kept. A failure's is kept only with `keepBest`:
+when its score beats the best kept score by at least `minDelta`, and no
+`neverRegress` predicate that held for the last kept attempt fails for it
+(a predicate the attempt does not report fails). A kept result is written
+to `resultField` through `update()`, with the checks of an update, so a
+result the live version refuses fails the attempt and records nothing.
+
+### Stuck failures
+
+With `stuckAfter`, a failure that is not kept and carries a `signature`
+extends a streak when the signature is the last attempt's, and starts a
+new one otherwise; a streak of `stuckAfter` exhausts the instance as
+stuck. A kept attempt, a success and a failure without a signature end
+the streak.
+
+### Exhaustion
+
+On exhaustion the status moves to `exhaustedState` through Workflow's
+`transition`, as the caller, only from the `from` states: every state but
+the terminal ones and `exhaustedState` when the config names none. Work
+that finished stays finished. A transition a guard vetoes leaves the
+status and the instance exhausted all the same. Once exhausted, the
+instance takes no more attempts, its status moves only to
+`exhaustedState`, and its lease cannot be acquired nor the instance
+claimed: an exhausted instance that `from` left in a claimable state is a
+candidate Queue's `claimNext` tries, is refused, and passes over. Nothing
+resets it.
+
+`recordAttempt` needs `permission` when the config names one, and while
+a lease is active, `Lease`'s guard keeps it to the holder, as any writing
+operation.
 
 ## Development
 

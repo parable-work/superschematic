@@ -19,6 +19,7 @@ import { budget } from './budget.js';
 import { lease } from './lease.js';
 import { presence } from './presence.js';
 import { queue } from './queue.js';
+import { retries } from './retries.js';
 
 export { assignment } from './assignment.js';
 export type { AssignmentConfig } from './assignment.js';
@@ -30,8 +31,10 @@ export { presence } from './presence.js';
 export type { PresenceConfig, PresenceRecord, PresenceTransition } from './presence.js';
 export { DEFAULT_MAX_CANDIDATES, queue } from './queue.js';
 export type { ClaimRecord, QueueConfig } from './queue.js';
+export { retries } from './retries.js';
+export type { AttemptRecord, RetriesConfig, RetriesRecord, RetryClass } from './retries.js';
 export { MAX_STEPS, blueprint } from './blueprint.js';
 export type { BlueprintConfig, BlueprintRecord, BlueprintStep, BlueprintWhen } from './blueprint.js';
 
 /** Every behavior this package implements, in the order a deployment registers them. */
-export const workQueueBehaviors: readonly AnyBehaviorImplementation[] = Object.freeze([lease, assignment, queue, presence, blueprint, budget]);
+export const workQueueBehaviors: readonly AnyBehaviorImplementation[] = Object.freeze([lease, assignment, queue, presence, blueprint, budget, retries]);
