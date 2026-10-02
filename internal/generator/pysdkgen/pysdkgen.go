@@ -90,7 +90,7 @@ type NamespaceInfo struct {
 	// JSON-valued body arguments (ScalarArg.IsAnyJSON, IsStructuredJSON),
 	// sorted. They gate _JSON_VALUE_TYPES: _validate_scalar_argument
 	// refuses None as one of them, and reports a failure inside one at the
-	// argument's path.
+	// value's path: the argument, or an element's index.
 	JSONValueTypes []string
 }
 

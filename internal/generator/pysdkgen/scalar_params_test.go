@@ -198,8 +198,8 @@ func TestScalarParamsFollowScalarDefinitions(t *testing.T) {
 // scalarParamsProbe against a local HTTP server: an int rank and a float
 // score reach the path, the query string and the body in the shapes the Go
 // route parses, and a string where the route parses a number fails
-// validation at its argument before any request. The probe needs pydantic
-// and skips without it.
+// validation at its argument, or a list element at its index, before any
+// request. The probe needs pydantic and skips without it.
 func TestScalarParamsSDKSendsParsedTypes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -312,7 +312,7 @@ assert calls[-1][3] == {"rank": 4, "score": 0.75, "ranks": [5]}, calls[-1]
 # A string where the route parses a number fails before any request.
 before = len(calls)
 for call, field in [
-    (lambda: sdk.shelf.ranked_items(shelf_id, 3, ranks=["1"]), "ranks"),
+    (lambda: sdk.shelf.ranked_items(shelf_id, 3, ranks=[1, "1"]), "ranks[1]"),
     (lambda: sdk.shelf.ranked_items(shelf_id, 3, max_score="0.5"), "max_score"),
     (lambda: sdk.shelf.rank_item(shelf_id, "4"), "rank"),
 ]:

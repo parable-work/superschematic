@@ -146,7 +146,8 @@ func TestAJSONScalarResponseIsTypedAsItsAlias(t *testing.T) {
 // Embedding.Vector one, alone, in a list and in a list of lists, and the
 // implementation receives each as that object or array. JSON text is read
 // into the value it holds and sent as that value. A value the route would
-// refuse is refused before the request, at the argument's path.
+// refuse is refused before the request, at its path: the argument, or an
+// element's index.
 func TestJSONObjectAndArrayArgumentsReachTheGoServer(t *testing.T) {
 	modules := writeBodyArgsModules(t)
 	var want []map[string]string
@@ -184,8 +185,9 @@ var structuredJSONValues = []struct{ labels, vector string }{
 // structuredJSONProbe takes a JSON array of [labels, vector] pairs and
 // sends each through store_embedding, alone, in a list and in a list of
 // lists, then the same as JSON text. Then it checks that values the route
-// would refuse are refused before the request, each with one error at the
-// argument's path; None where null is not a value is required.
+// would refuse are refused before the request, each with one error at its
+// path, an element's at its index; None where null is not a value is
+// required.
 const structuredJSONProbe = `
 for labels, vector in json.loads(sys.argv[2]):
     got = sdk.tag.store_embedding(labels, vector=vector, label_sets=[labels, {}], vector_grid=[[vector], []])
@@ -204,8 +206,8 @@ for kwargs, field, validator in [
     ({"labels": {}, "vector": {"x": 1}}, "vector", None),
     ({"labels": {}, "vector": [1, True]}, "vector", None),
     ({"labels": {}, "vector": "not JSON"}, "vector", None),
-    ({"labels": {}, "label_sets": [None]}, "label_sets", "required"),
-    ({"labels": {}, "label_sets": [["en"]]}, "label_sets", None),
+    ({"labels": {}, "label_sets": [None]}, "label_sets[0]", "required"),
+    ({"labels": {}, "label_sets": [{}, ["en"]]}, "label_sets[1]", None),
     ({"labels": {}, "vector_grid": [[None]]}, "vector_grid[0][0]", "required"),
     ({"labels": {}, "vector_grid": [[{"x": 1}]]}, "vector_grid[0][0]", None),
 ]:

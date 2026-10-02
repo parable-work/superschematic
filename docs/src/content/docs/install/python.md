@@ -137,6 +137,12 @@ input and on every object it holds. A failure raises `ValidationError`,
 whose `errors` maps each path (`lines`, `lines[0].quantity`) to its rule
 and message, as the Go and TypeScript SDKs report them.
 
+The arguments of an operation without an input type are checked against
+their types before the request too, and a failure is keyed by its path
+from the argument: `labels[1]` for an element of a list, `grid[0][1]` for
+one of a list of lists, and `point.x` or `points[1].x` for a field of an
+object, alone or as an element.
+
 A `Generic.JSON` argument of a `POST`, `PUT` or `PATCH` operation is typed
 as the types package's `GenericJSON`, the type of a `Generic.JSON` field,
 and is sent as the JSON value it holds: a `dict`, a `list`, a `str`, a
@@ -152,8 +158,10 @@ A `Generic.StringMap` or `Embedding.Vector` argument of a `POST`, `PUT` or
 object or array it holds. With the types package installed, JSON text such
 as `'{"region": "eu"}'` is read into that object or array, as the types
 package reads a field, and a value of another shape raises
-`ValidationError` at the argument. `None` for a required one or a list
-element raises `ValidationError`. In the query string each stays a `str`.
+`ValidationError` at its path, the argument or an element's index
+(`label_sets[0]`), never a key or an index inside the value. `None` for a
+required one or a list element raises `ValidationError`. In the query
+string each stays a `str`.
 
 An operation that returns a `Generic.JSON`, `Generic.StringMap` or
 `Embedding.Vector` is typed as returning the same alias, and returns the

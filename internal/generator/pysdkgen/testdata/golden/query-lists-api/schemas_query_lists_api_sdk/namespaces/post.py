@@ -87,11 +87,14 @@ class PostNamespace:
         return "invalid"
 
     @staticmethod
-    def _format_error_location(location: Any, default_field: str) -> str:
+    def _format_error_location(location: Any, default_field: str, path: str = "") -> str:
+        """Key an error by its location: under path, the path of the value
+        the location is relative to (path.name, path[0]), or alone when path
+        is empty. An error with no location is keyed at default_field."""
         if not isinstance(location, (list, tuple)):
             return default_field
 
-        parts: list[str] = []
+        parts: list[str] = [path] if path else []
         for segment in location:
             if isinstance(segment, int):
                 if parts:
@@ -113,6 +116,7 @@ class PostNamespace:
         err: Exception,
         *,
         default_field: str,
+        path: str = "",
     ) -> dict[str, list[dict[str, str]]]:
         validation_errors: dict[str, list[dict[str, str]]] = {}
 
@@ -127,7 +131,7 @@ class PostNamespace:
                     if not isinstance(detail, dict):
                         continue
 
-                    field = self._format_error_location(detail.get("loc"), default_field)
+                    field = self._format_error_location(detail.get("loc"), default_field, path)
                     validator = self._map_validator_name(detail.get("type"))
                     raw_message = detail.get("msg")
                     message = str(raw_message) if raw_message is not None else "invalid value"
@@ -225,6 +229,12 @@ class PostNamespace:
         return from_dict_non_strict(raw)
 
     def _validate_scalar_argument(self, value: Any, scalar_type_name: str, field_name: str) -> Any:
+        """Validate value as scalar_type_name and return it as validated.
+
+        field_name is the value's path from the argument: the argument's
+        name, or an element's (name[i], name[i][j]). A failure inside the
+        value is keyed by its path under field_name (name[i].x).
+        """
         scalar_type = self._resolve_validation_type(scalar_type_name)
         if scalar_type is None:
             return value
@@ -235,7 +245,7 @@ class PostNamespace:
                 return from_dict_non_strict(value)
             except Exception as err:
                 raise ValidationError(
-                    self._build_validation_errors(err, default_field=field_name),
+                    self._build_validation_errors(err, default_field=field_name, path=field_name),
                 ) from err
 
         try:
@@ -246,7 +256,7 @@ class PostNamespace:
         try:
             return TypeAdapter(scalar_type).validate_python(value, strict=True)
         except Exception as err:
-            validation_errors = self._build_validation_errors(err, default_field=field_name)
+            validation_errors = self._build_validation_errors(err, default_field=field_name, path=field_name)
             raise ValidationError(validation_errors) from err
 
     def _validate_query_param_constraints(

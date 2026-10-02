@@ -361,7 +361,7 @@ for kwargs, field in [
     ({"document": None}, "document"),
     ({"document": float("nan")}, "document"),
     ({"document": {1: "a"}}, "document"),
-    ({"document": 1, "extras": [None]}, "extras"),
+    ({"document": 1, "extras": [1, None]}, "extras[1]"),
     ({"document": 1, "grid": [[None]]}, "grid[0][0]"),
     ({"document": 1, "note": {"a": float("inf")}}, "note"),
 ]:
