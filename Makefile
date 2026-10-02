@@ -1,6 +1,7 @@
 # superschematic (the schema compiler). Convenience targets for the Go
 # modules, the TypeScript authoring packages, the schema runtimes, the
-# TypeScript and Rust http runtimes, the version-graph core and the engine.
+# TypeScript and Rust http runtimes, the version-graph core, the engine and
+# the engine's work-queue package.
 # Mirrors the CI workflow gates (.github/workflows/ci.yml).
 #
 #   make setup && make all
@@ -45,6 +46,7 @@ setup:
 	cd runtime/http/typescript && bun install
 	cd runtime/versiongraph/typescript && bun install
 	cd runtime/engine/typescript && bun install
+	cd runtime/engine-workqueue/typescript && bun install
 	cd runtime/schema/python && uv sync
 	cd runtime/versiongraph/python && uv sync
 
@@ -90,16 +92,20 @@ schema-file-types:
 schema-file-types-check:
 	go run ./internal/tools/schemafiletypes -check
 
-# The engine implements the core's behaviors over a copy of each
-# declaration (internal/registry/behaviors), which the core binary writes.
-# CI fails when a committed copy differs.
+# The engine and the work-queue package implement the core's behaviors over
+# a copy of each declaration (internal/registry/behaviors), which the core
+# binary writes into the package that implements it (--package). CI fails
+# when a committed copy differs.
 ENGINE_DECLARATIONS := runtime/engine/typescript/src/behaviors/core/declarations
+WORKQUEUE_DECLARATIONS := runtime/engine-workqueue/typescript/src/declarations
 
 behaviors:
-	go run ./cmd/superschematic behaviors --out $(ENGINE_DECLARATIONS)
+	go run ./cmd/superschematic behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS)
+	go run ./cmd/superschematic behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS)
 
 behaviors-check:
-	go run ./cmd/superschematic behaviors --out $(ENGINE_DECLARATIONS) --check
+	go run ./cmd/superschematic behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS) --check
+	go run ./cmd/superschematic behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS) --check
 
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
@@ -107,6 +113,7 @@ ts:
 	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && bun run test
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
+	cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	examples/engine-notes/scripts/check.sh
 
 # The version-graph core's Python binding: cargo test runs the binding's own
@@ -182,11 +189,13 @@ docs:
 
 # The binary with no extension linked builds a DB, an API and a General
 # service from the fixture corpus, and loads fixture-behaviors-json,
-# fixture-cross-instance-json, fixture-rollups-json, fixture-search-json
-# and fixture-reactions-json, whose types compose the core's behaviors
-# (D10): --emit-ir carries all eight and json-schema admits them. The
-# engine runs those documents with its own behaviors in
-# runtime/engine/typescript/test/core-behaviors.test.ts.
+# fixture-cross-instance-json, fixture-rollups-json, fixture-search-json,
+# fixture-reactions-json and fixture-workqueue-json, whose types compose
+# the core's behaviors (D10): --emit-ir carries all eleven and json-schema
+# admits them. The engine runs the first five documents with its own
+# behaviors in runtime/engine/typescript/test/core-behaviors.test.ts, and
+# the work-queue package runs the last in
+# runtime/engine-workqueue/typescript/test/package.test.ts.
 cli-smoke: $(BIN)
 	@rm -rf /tmp/superschematic-cli-smoke
 	@for s in fixture-db fixture-api fixture-general; do \
@@ -203,8 +212,10 @@ cli-smoke: $(BIN)
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(BIN) build internal/loader/testdata/services/fixture-reactions-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(BIN) build internal/loader/testdata/services/fixture-workqueue-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
-	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions; do \
+	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Lease Assignment Queue; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 

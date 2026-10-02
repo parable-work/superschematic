@@ -244,7 +244,10 @@ for (const driver of drivers) {
       const document = clone(orderDocument()) as { types: { Order: Record<string, unknown> } };
       document.types.Order.behaviors = [{ name: 'acme.Audited' }];
       assert.deepEqual(issuesOf(() => engine.schemas.define(alice, document)), [
-        { path: '/types/Order/behaviors/0/name', message: 'must be one of "Comments", "Dependencies", "Links", "Reactions", "Revisions", "Rollups", "Search", "Workflow"' },
+        {
+          path: '/types/Order/behaviors/0/name',
+          message: 'must be one of "Assignment", "Comments", "Dependencies", "Lease", "Links", "Queue", "Reactions", "Revisions", "Rollups", "Search", "Workflow"',
+        },
       ]);
     });
   });

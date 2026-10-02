@@ -22,15 +22,19 @@ export type {
 } from "./wrappers";
 export { behavior } from "./behavior";
 export type {
+  AssignmentConfig,
   BehaviorConfigArg,
   BehaviorConfigs,
   BehaviorName,
   DependenciesConfig,
+  LeaseConfig,
+  LeaseTransition,
   LinkConfig,
   LinksConfig,
   ReactionRule,
   ReactionThen,
   ReactionWhen,
+  QueueConfig,
   ReactionsConfig,
   RevisionsConfig,
   RollupConfig,

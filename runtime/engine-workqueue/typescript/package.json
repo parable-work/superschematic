@@ -1,0 +1,41 @@
+{
+  "name": "@superschematic/engine-workqueue",
+  "version": "0.0.0",
+  "description": "Claimable work for @superschematic/engine (D16): the implementations of the core's Lease, an exclusive lease with a fencing token, heartbeats and directives to its holder, and Assignment, which a deployment registers with the engine it opens. Runs on Node.js 24 and Bun. Needs @superschematic/engine next to it in node_modules, the copy the deployment opens; see scripts/link-local-deps.mjs.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "link-deps": "node scripts/link-local-deps.mjs",
+    "typecheck": "node scripts/link-local-deps.mjs && tsc -p tsconfig.json --noEmit",
+    "build": "node scripts/link-local-deps.mjs && node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "test": "bun run build && bun run test:node && bun run test:bun",
+    "test:node": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && node --test 'test/*.test.ts'",
+    "test:bun": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && bun test ./test"
+  },
+  "peerDependencies": {
+    "@superschematic/engine": "*"
+  },
+  "peerDependenciesMeta": {
+    "@superschematic/engine": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  },
+  "license": "Apache-2.0"
+}

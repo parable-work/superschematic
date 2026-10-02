@@ -13,8 +13,10 @@ describe and tools documents, the MCP endpoint
 (`@superschematic/engine/mcp`), and the core's behaviors: `Workflow`,
 `Comments`, `Revisions`, and `Dependencies`, `Links` and `Rollups`, which
 reach other instances, `Search`, full-text search, and `Reactions`, which
-the runner runs. Not built yet: the vectors D16 lists beside search, and
-the work-queue package.
+the runner runs. Not built yet: the vectors D16 lists beside search. The
+work-queue behaviors are a package of their own,
+`@superschematic/engine-workqueue` (`runtime/engine-workqueue/README.md`),
+which a deployment registers with the engine.
 
 ```ts
 import { allowAll, openEngine } from '@superschematic/engine';
@@ -605,7 +607,8 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 `metaSchema` is the `json-schema` output of the deployment's binary, which
 lists the behaviors it declares; the core's lists the core's own
 (`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`,
-`Rollups`, `Search` and `Reactions`), so its loader refuses any other.
+`Rollups`, `Search` and `Reactions`, and the work-queue package's
+`Lease`, `Assignment` and `Queue`), so its loader refuses any other.
 
 ### The implementation
 
@@ -621,7 +624,7 @@ function is synchronous (D16): one that returns a promise is a
 | `afterConfigChange(context)` | brings its own storage in line when a published version adds it (a first version included), removes it or changes its config ("Publishing") |
 | `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table, the `indexes` it adds on them, and an `up(sql)` for its own tables ("Storage") |
 | `initialize(context)` | sets up its state for a new instance |
-| `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does |
+| `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes. An operation's request carries `writes`, as its declaration says, so a guard that holds back changes can let a read-only operation through. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does |
 | `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext` |
 | `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext` ("Schema-level operations") |
 | `fields` | a reader per declared field: `(view) => value` |
@@ -1103,11 +1106,17 @@ operation that expects the sequence from before the operation is refused
 
 ### Core behaviors
 
-The core declares eight behaviors (`internal/registry/behaviors`, section
-3.16 of `docs/extension-model.md`), so every binary's meta-schema admits
-them, and the engine implements them in `src/behaviors/core` and
-registers them when it opens, before `behaviors`: a schema that composes
-them runs with no extension linked. Each implementation imports the copy
+The core declares eight behaviors the engine implements
+(`internal/registry/behaviors`, section 3.16 of
+`docs/extension-model.md`), so every binary's meta-schema admits them,
+and the engine implements them in `src/behaviors/core` and registers
+them when it opens, before `behaviors`: a schema that composes them runs
+with no extension linked. The core declares the work-queue behaviors
+too, `Lease`, `Assignment` and `Queue`, which
+`@superschematic/engine-workqueue` implements
+(`runtime/engine-workqueue/README.md`): the engine refuses a schema that
+composes one until a deployment registers that package's
+implementations. Each implementation imports the copy
 of its declaration in `src/behaviors/core/declarations`, which the core
 binary writes (`make behaviors`) and CI checks (`make behaviors-check`).
 They reach the engine only through the plug-in interface above. A

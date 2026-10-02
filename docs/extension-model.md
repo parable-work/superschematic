@@ -701,9 +701,14 @@ with them. It declares, carries and checks behaviors; it runs none.
 ```go
 type BehaviorSpec struct {
     Extension   string
+    Package     string
     Declaration json.RawMessage
 }
 ```
+
+`Package` is optional: the npm package whose implementation runs the
+behavior in an engine, which the `behaviors` command's `--package` keeps
+(below). When set it must be an npm package name.
 
 A behavior is declared once, in a JSON file beside the Go package that
 registers it, which embeds it and passes it to `RegisterBehavior`. Its
@@ -738,8 +743,8 @@ scope other than `instance` or `schema`. `Finalize`
 checks `requires`, `conflicts` and the invocation policy values, since the
 policy is fixed only once every extension has registered.
 `Registry.Behavior(name)` returns a registered `Behavior`: the declaration,
-the registering extension, `ConfigRequired()` (its config schema rejects
-`{}`) and `ValidateConfig`.
+the registering extension, the package that implements it,
+`ConfigRequired()` (its config schema rejects `{}`) and `ValidateConfig`.
 
 An operation's `paramsSchema` sets `"additionalProperties": false`, so its
 parameters are exactly the ones it declares. An engine runs a behavior's
@@ -822,9 +827,13 @@ No core generator sets the flag. `build --emit-ir`, `format` and
 The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`
 registers with no extension: `Workflow`, `Comments`, `Revisions`,
-`Dependencies`, `Links`, `Rollups`, `Search` and `Reactions`. Every
-binary therefore accepts a schema that composes them, the schema-file
-JSON Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
+`Dependencies`, `Links`, `Rollups`, `Search` and `Reactions`. It
+declares the work-queue behaviors the optional
+`@superschematic/engine-workqueue` package implements the same way:
+`Lease`, `Assignment` and `Queue`. Each spec names its package
+(`registry.EnginePackage` or `registry.WorkQueuePackage`). Every binary
+therefore accepts a schema that composes them, the schema-file JSON
+Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
 types their configs. None names an invocation policy, since a
 distribution's policy need not have the core's values; each operation
 takes the policy's default. Every
@@ -834,11 +843,14 @@ implementation checks what JSON Schema cannot (a Workflow transition
 that names a state the config does not list, a gated state of
 `Dependencies` that is not a terminal state of the type's Workflow, or a
 rollup whose linked schema has no such link, say);
-`runtime/engine/README.md`, "Core behaviors", has each one's
-config, fields and operations. The engine registers its implementations
-of them when it opens, so a schema that composes them runs with no
-extension linked (D10), its operations served over HTTP and as MCP tools
-like any behavior's.
+`runtime/engine/README.md`, "Core behaviors", has each engine
+behavior's config, fields and operations, and
+`runtime/engine-workqueue/README.md` each work-queue behavior's. The
+engine registers its implementations when it opens, so a schema that
+composes them runs with no extension linked (D10), its operations served
+over HTTP and as MCP tools like any behavior's. A deployment that runs
+the work-queue behaviors registers the package's implementations with the
+engine; without them the engine refuses a schema that composes one.
 
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |
@@ -850,6 +862,9 @@ like any behavior's.
 | `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`); required | `rollups` | none |
 | `Search` | `fields`, `weights`; required | none | `search`, of scope `schema` |
 | `Reactions` | `rules` (each a `when`, `enters` or `allTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
+| `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `acquirePermission`, `overridePermission`, `directPermission`; optional; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
+| `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
+| `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext`, of scope `schema` |
 
 `Dependencies`, `Links` and `Rollups` reach other instances (D16,
 amended): a blocker, a link target or the instances a rollup reads are
@@ -875,6 +890,13 @@ Workflow and Links configs. `make cli-smoke` loads
 `fixture-reactions-json`, whose projects start and finish their parent,
 and its TypeScript twin loads to the same IR.
 
+`Lease`, `Assignment` and `Queue` name the type's fields (`maxHoldField`,
+`priorityField`, `match`), its Workflow states (`onExpiry`, `escalate`,
+`claim`) and its other behaviors' operations (`exempt`), which the loader
+does not check: the work-queue package does, when the schema is defined.
+`make cli-smoke` loads `fixture-workqueue-json`, whose jobs compose all
+three, and its TypeScript twin loads to the same IR.
+
 acme declares `acme.Rating` and types its config in
 `packages/schema/src/behaviors.ts` (section 10);
 `internal/registry/registrytest` declares two, `acme.Stock` and
@@ -893,17 +915,21 @@ checks them when the implementation registers.
 
 `superschematic behaviors --out <dir>` copies the declaration there: one
 canonical `<name>.behavior.json` per behavior the binary registers
-(`--extension <name>` keeps one extension's), and
+(`--extension <name>` keeps one extension's, `--package <npm name>` the
+ones that package implements), and
 `--check` fails, naming each file, on a copy that differs, is missing or
 has no behavior. It is a command of the binary rather than a tool in the
 core module, as `internal/tools/scalarcatalog` is, because an extension's
 declarations are registered only in its own binary: acme's copy comes
 from `acme-schematic behaviors --extension acme`, which acme's smoke runs
-with `--check` (section 10). The engine's copy of the core's comes from
-the core binary: `make behaviors` writes
-`runtime/engine/typescript/src/behaviors/core/declarations`, and `make
-behaviors-check`, part of `make test` and CI's go job, fails on a stale
-copy. The copy is canonical, not the source bytes:
+with `--check` (section 10). The core's copies come from
+the core binary, each into the package that implements it: `make
+behaviors` writes `runtime/engine/typescript/src/behaviors/core/declarations`
+with `--package @superschematic/engine` and
+`runtime/engine-workqueue/typescript/src/declarations` with `--package
+@superschematic/engine-workqueue`, so each package carries only the
+declarations it implements, and `make behaviors-check`, part of `make
+test` and CI's go job, fails on a stale copy in either. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
 Schema's object keys sorted, two-space indents and a final newline, so
 it changes only when the declaration does.

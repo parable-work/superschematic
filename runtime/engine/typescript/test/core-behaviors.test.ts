@@ -37,6 +37,17 @@ for (const driver of drivers) {
       assert.throws(() => openTestEngine({ driver, behaviors: [impostor] }), /already registered/);
     });
 
+    test('the core also declares the work-queue behaviors, which this engine runs only once a deployment registers their package', () => {
+      const engine = openTestEngine({ driver });
+      const document = JSON.parse(JSON.stringify(notes)) as { types: { Note: Record<string, unknown> } };
+      document.types.Note.behaviors = [{ name: 'Lease', config: { ttlMs: 30000 } }];
+      // The core meta-schema admits Lease, so the loader passes it; the
+      // engine has no implementation of it.
+      const refused = thrown(() => engine.schemas.define(alice, document));
+      assert.equal(refused.code, 'invalid_schema');
+      assert.match(refused.message, /behavior Lease on type Note: no implementation registered/);
+    });
+
     test('it runs the document the core binary builds, with all three composed on one type', () => {
       let now = 1000;
       const engine = openTestEngine({ driver, clock: () => (now += 1) });

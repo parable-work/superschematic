@@ -324,13 +324,13 @@ for (const driver of drivers) {
       assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.data, { title: 'Desk', count: 2, edits: 100 });
     });
 
-    test("a guard sees who called: the caller's behavior for a call()", () => {
+    test("a guard sees who called, the caller's behavior for a call(), and whether the operation writes", () => {
       const seen: unknown[] = [];
       const watcher = defineBehavior({
         declaration: { name: 'test.Watcher' },
         guard(_context, request) {
           if (request.kind === 'operation') {
-            seen.push([request.behavior, request.operation, request.caller ?? null, request.params]);
+            seen.push([request.behavior, request.operation, request.caller ?? null, request.params, request.writes]);
           }
           return undefined;
         },
@@ -339,9 +339,11 @@ for (const driver of drivers) {
       publishItem(engine, [{ name: 'test.Watcher' }, { name: 'test.Counter' }, { name: 'test.Tally' }]);
       engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
       engine.instances.invoke(alice, 'Item', 'i1', 'bump');
+      engine.instances.invoke(alice, 'Item', 'i1', 'history');
       assert.deepEqual(seen, [
-        ['test.Tally', 'bump', null, {}],
-        ['test.Counter', 'increment', 'test.Tally', { by: 1 }],
+        ['test.Tally', 'bump', null, {}, true],
+        ['test.Counter', 'increment', 'test.Tally', { by: 1 }, true],
+        ['test.Counter', 'history', null, {}, false],
       ]);
     });
 

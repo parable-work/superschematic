@@ -68,6 +68,30 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Assignment"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "permission": {
+                    "description": "The permission a principal needs to assign the instance to another principal, reassign it, or unassign another principal. Absent, only the first two self-service moves are possible.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Comments"
               }
             }
@@ -124,6 +148,131 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Lease"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "acquirePermission": {
+                    "description": "The permission a principal needs to acquire a lease. Absent, any principal who may write the instance can.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "directPermission": {
+                    "description": "The permission a principal needs to send the holder a directive; overridePermission when absent. With neither, direct is refused.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "escalate": {
+                    "additionalProperties": false,
+                    "description": "Used instead of onExpiry at the expiry that reaches maxExpiries, which it needs. Needs Workflow on the type.",
+                    "properties": {
+                      "from": {
+                        "description": "The states the status moves from; in any other state it stays.",
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "transition": {
+                        "description": "The state to move to, through Workflow's transition.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "transition",
+                      "from"
+                    ],
+                    "type": "object"
+                  },
+                  "exempt": {
+                    "description": "Writing operations of the type's other behaviors, each as \u003cBehavior\u003e.\u003coperation\u003e, that a principal other than the holder may run while the lease is active.",
+                    "items": {
+                      "pattern": "^([A-Za-z][A-Za-z0-9_-]*\\.)?[A-Z][A-Za-z0-9]*\\.[a-z][A-Za-z0-9]*$",
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "heartbeatMs": {
+                    "description": "How often the holder should send a heartbeat, in milliseconds, less than ttlMs; a third of ttlMs when absent. acquire returns it.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "maxExpiries": {
+                    "description": "How many expiries an instance may have. Once it has had this many, its lease cannot be acquired again until resetExpiries.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "maxHoldField": {
+                    "description": "An integer field of the type that gives the instance's own longest hold, in milliseconds. When the instance holds a positive integer there, it overrides maxHoldMs.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxHoldMs": {
+                    "description": "The longest a principal may hold a lease after acquiring it, in milliseconds, renewed or not; no limit when absent.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  },
+                  "onExpiry": {
+                    "additionalProperties": false,
+                    "description": "Moves the instance's Workflow status when a lease ends with the work unfinished: at an expiry, and at a release, while the status is one of from. Needs Workflow on the type.",
+                    "properties": {
+                      "from": {
+                        "description": "The states the status moves from; in any other state it stays.",
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "transition": {
+                        "description": "The state to move to, through Workflow's transition.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "transition",
+                      "from"
+                    ],
+                    "type": "object"
+                  },
+                  "overridePermission": {
+                    "description": "The permission that lets a principal release another principal's lease, change the instance while another principal holds its lease, reset its expiries, and send directives when directPermission is absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sweepMs": {
+                    "description": "How often the engine's runner expires the leases past their expiry time or longest hold, in milliseconds; 5000 when absent.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  },
+                  "ttlMs": {
+                    "description": "How long a lease lasts after its acquire or its last heartbeat, in milliseconds; 60000 when absent.",
+                    "minimum": 1000,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Links"
               }
             }
@@ -166,6 +315,78 @@
                 },
                 "required": [
                   "links"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Queue"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "claim": {
+                    "additionalProperties": false,
+                    "description": "The Workflow states an instance is claimed from, and the state a claim moves it to.",
+                    "properties": {
+                      "from": {
+                        "description": "The states an instance can be claimed in; a transition from each to the claimed state must exist.",
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "to": {
+                        "description": "The state a claim moves the instance to.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "from",
+                      "to"
+                    ],
+                    "type": "object"
+                  },
+                  "match": {
+                    "description": "The type's own top-level scalar fields claimNext may filter on, by equality.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 16,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "maxCandidates": {
+                    "description": "The most instances one claimNext tries before it gives up; 100 when absent.",
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "priorityField": {
+                    "description": "An integer field of the type that orders claimNext: higher first, an instance without a value last. Absent, oldest first.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "claim"
                 ],
                 "type": "object"
               }
@@ -603,9 +824,12 @@
         },
         "name": {
           "enum": [
+            "Assignment",
             "Comments",
             "Dependencies",
+            "Lease",
             "Links",
+            "Queue",
             "Reactions",
             "Revisions",
             "Rollups",

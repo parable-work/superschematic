@@ -477,6 +477,11 @@ export type GuardRequest =
       readonly operation: string;
       /** The parameters, as the operation's handler gets them. */
       readonly params: FrozenJSON;
+      /**
+       * Whether the operation writes, as its declaration says: a guard that
+       * holds back changes, a lease say, lets a read-only one through.
+       */
+      readonly writes: boolean;
       /** The behavior whose code made the call, for a call(); absent for a caller's. */
       readonly caller?: string;
     };
