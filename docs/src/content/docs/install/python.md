@@ -153,14 +153,18 @@ types package's `GenericStringMap` or `EmbeddingVector`, the type of a
 field of it, and is sent as the JSON object or array it holds. With the
 types package installed, JSON text such as `'{"region": "eu"}'` is read
 into that object or array, as the types package reads a field, and a value
-of another shape raises `ValidationError` at the argument. `None` for a required one or a list
-element raises `ValidationError`. In the query string each stays a `str`.
+of another shape raises `ValidationError` at the argument. `None` for a
+required one or a list element raises `ValidationError`. In the query
+string each stays a `str`.
 
-A map argument is a `dict` from `str` to its value type, or to a `list`
-of it for a map of lists, and is sent as one JSON object. Each value is
-checked before the request, and a failure is keyed by its path as the
-route names it: `shade_by_name[a]`, or `links_by_locale[en][0]` in a map
-of lists. `None` there is `required`, and so is a required map.
+A map argument is typed `dict[str, T]` (`dict[str, list[T]]` for a map of
+lists), as the route takes it, and is sent as a JSON object of its values
+as validated; an optional one is left out when it is `None`. Before the
+request, `None` for a required map is `required`, a key that is not a
+`str` fails the argument, `None` as a value or a list element is
+`required` at `name[key]` or `name[key][i]`, and with the types package
+installed each value or list element is validated as `T` there, a failure
+inside an object at `name[key].field`. Every failure is raised at once.
 
 An operation that returns a `Generic.JSON`, `Generic.StringMap` or
 `Embedding.Vector` is typed as returning the same alias, and returns the
