@@ -1,6 +1,6 @@
 // A behavior's storage is its own: its SQL reaches its own tables only, a
 // read cannot write, and its migrations create only tables and indexes of
-// its own.
+// its own, a virtual table only with fts5.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -166,6 +166,37 @@ for (const driver of drivers) {
           /migration 2 "rename" created table notes/,
         ],
         [{ version: 2, name: 'pragma', up: (sql) => void sql.run('PRAGMA writable_schema = ON') }, /not PRAGMA/],
+        // A virtual table is fts5, under a name of its own: no other module, no other name.
+        [
+          { version: 2, name: 'rtree', up: (sql) => void sql.run(`CREATE VIRTUAL TABLE ${sql.table('boxes')} USING rtree(id, lo, hi)`) },
+          /a migration creates a virtual table only with the fts5 module, not rtree/,
+        ],
+        [
+          { version: 2, name: 'fts4', up: (sql) => void sql.run(`CREATE VIRTUAL TABLE ${sql.table('old')} USING fts4(body)`) },
+          /only with the fts5 module, not fts4/,
+        ],
+        [{ version: 2, name: 'dbstat', up: (sql) => void sql.run(`CREATE VIRTUAL TABLE ${sql.table('stat')} USING dbstat`) }, /not dbstat/],
+        [{ version: 2, name: 'no module', up: (sql) => void sql.run(`CREATE VIRTUAL TABLE ${sql.table('bare')}`) }, /under a name of its own/],
+        [
+          { version: 2, name: 'other name', up: (sql) => void sql.run('CREATE VIRTUAL TABLE notes_index USING fts5(body)') },
+          /a migration creates a virtual table only under a name of its own \(bhv_test_sneaky__\*, unqualified\)/,
+        ],
+        [
+          { version: 2, name: 'qualified', up: (sql) => void sql.run(`CREATE VIRTUAL TABLE main.${sql.table('more')} USING fts5(body)`) },
+          /only under a name of its own/,
+        ],
+        [
+          { version: 2, name: 'temp', up: (sql) => void sql.run(`CREATE VIRTUAL TABLE temp.${sql.table('more')} USING fts5(body)`) },
+          /only under a name of its own/,
+        ],
+        [
+          {
+            version: 2,
+            name: 'content',
+            up: (sql) => void sql.run(`CREATE VIRTUAL TABLE ${sql.table('mirror')} USING fts5(data, content='engine_instances')`),
+          },
+          /it names engine_instances/,
+        ],
         [{ version: 2, name: 'later', up: (async () => undefined) as never }, /migration 2 is synchronous \(D16\): it returned a promise/],
       ];
       for (const [migration, message] of cases) {
@@ -186,6 +217,23 @@ for (const driver of drivers) {
         assert.deepEqual(tablesOf(engine, 'bhv_'), [], migration.name);
         assert.deepEqual(tablesOf(engine, 'notes'), [], migration.name);
       }
+    });
+
+    test('a migration creates an fts5 table of its own, IF NOT EXISTS and quoted alike', () => {
+      const more: BehaviorMigration = {
+        version: 2,
+        name: 'more',
+        up(sql) {
+          sql.run(`CREATE VIRTUAL TABLE IF NOT EXISTS ${sql.table('titles')} USING fts5(title)`);
+          sql.run(`CREATE VIRTUAL TABLE "${sql.table('bodies')}" USING FTS5(body, tokenize = 'unicode61 remove_diacritics 2')`);
+        },
+      };
+      const engine = openBehaviorEngine({ driver, behaviors: [counter, sneaky([more])] });
+      publishItem(engine, [{ name: 'test.Sneaky' }]);
+      assert.deepEqual(
+        tablesOf(engine, 'bhv_test_sneaky__').filter((name) => !/_(data|idx|content|docsize|config)$/.test(name)),
+        ['bhv_test_sneaky__bodies', 'bhv_test_sneaky__notes', 'bhv_test_sneaky__search', 'bhv_test_sneaky__titles']
+      );
     });
   });
 }
