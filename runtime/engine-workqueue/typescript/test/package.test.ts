@@ -2,10 +2,11 @@
 // engine through the plug-in interface, carry the declarations the core
 // binary writes, and run the document the core binary builds in the CLI
 // smoke (fixture-workqueue-json), whose jobs compose Workflow, Lease,
-// Assignment and Queue, and Budget and Retries, which this package does
-// not implement yet and the tests take out: workers claim them in order,
-// hold and renew their leases, and the runner puts a job whose time ran
-// out back in the queue.
+// Assignment, Queue and Budget, and Retries, which this package does not
+// implement yet and the tests take out: workers claim them in order, each
+// claim reserving its budget, hold and renew their leases, and the runner
+// puts a job whose time ran out back in the queue, settling what it
+// reserved.
 // The fixture's other files hold one type each, which run as schemas of
 // their own: a worker with Presence, which releases its principal's leases
 // on jobs, and a batch whose Blueprint stamps steps.
@@ -15,7 +16,7 @@ import { afterEach, describe, test } from 'node:test';
 
 import type { Principal } from '@superschematic/engine';
 
-import { DEFAULT_TTL_MS, assignment, blueprint, lease, presence, queue, workQueueBehaviors } from '../dist/index.js';
+import { DEFAULT_TTL_MS, assignment, blueprint, budget, lease, presence, queue, workQueueBehaviors } from '../dist/index.js';
 import { Clock, alice, cleanup, drivers, jobsFixture, openTestEngine } from './helpers.ts';
 
 afterEach(cleanup);
@@ -33,11 +34,11 @@ function fixtureType(name: string, file: string): Record<string, unknown> {
   return { kind: 'General', name, types: { [type.name]: type } };
 }
 
-// jobs is the fixture's jobs document without Budget and Retries, which
-// the core declares and this package does not implement yet.
+// jobs is the fixture's jobs document without Retries, which the core
+// declares and this package does not implement yet.
 function jobs(): Record<string, unknown> {
   const fixture = jobsFixture() as { types: { Job: { behaviors: Array<{ name: string }> } } };
-  fixture.types.Job.behaviors = fixture.types.Job.behaviors.filter((behavior) => behavior.name !== 'Budget' && behavior.name !== 'Retries');
+  fixture.types.Job.behaviors = fixture.types.Job.behaviors.filter((behavior) => behavior.name !== 'Retries');
   return fixture;
 }
 
@@ -48,17 +49,19 @@ function declarationFile(name: string): unknown {
 for (const driver of drivers) {
   describe(`the work-queue package (${driver})`, () => {
     test('its behaviors carry the core declarations and register with an engine, beside the core behaviors', () => {
-      assert.deepEqual(workQueueBehaviors, [lease, assignment, queue, presence, blueprint]);
+      assert.deepEqual(workQueueBehaviors, [lease, assignment, queue, presence, blueprint, budget]);
       assert.deepEqual(lease.declaration, declarationFile('Lease'));
       assert.deepEqual(assignment.declaration, declarationFile('Assignment'));
       assert.deepEqual(queue.declaration, declarationFile('Queue'));
       assert.deepEqual(presence.declaration, declarationFile('Presence'));
       assert.deepEqual(blueprint.declaration, declarationFile('Blueprint'));
+      assert.deepEqual(budget.declaration, declarationFile('Budget'));
       assert.equal(DEFAULT_TTL_MS, 60000);
       const engine = openTestEngine({ driver });
       assert.deepEqual(engine.behaviors.names(), [
         'Assignment',
         'Blueprint',
+        'Budget',
         'Comments',
         'Dependencies',
         'Lease',
@@ -86,6 +89,7 @@ for (const driver of drivers) {
           ['Lease', ['acquire', 'heartbeat', 'release', 'expire', 'direct', 'acknowledge', 'expireHolder', 'resetExpiries']],
           ['Assignment', ['assign', 'unassign']],
           ['Queue', ['claim', 'claimNext', 'refresh']],
+          ['Budget', ['reserve', 'recordUsage', 'settle', 'setLimit', 'reserveFor', 'settleFor', 'recordUsageFor']],
         ]
       );
       // The config a client reads its lease length from.
@@ -105,6 +109,9 @@ for (const driver of drivers) {
       assert.equal(claimNext(worker, 'search')?.id, 'index');
       assert.equal(claimNext(worker, 'search'), null);
       assert.equal(claimNext(other, 'search')?.id, 'mine');
+      // Each claim reserved the job's claim amount of its daily CPU budget.
+      assert.deepEqual(engine.instances.get(alice, 'jobs', 'index')?.data.budget, { cpuSeconds: { used: 0, reserved: 600, limit: 3600, remaining: 3000 } });
+      engine.instances.invoke(worker, 'jobs', 'index', 'recordUsage', { meter: 'cpuSeconds', amount: 100 });
 
       clock.advance(20000);
       assert.equal((engine.instances.invoke(worker, 'jobs', 'reindex', 'heartbeat', { token: 1 }) as { expiresAt: number }).expiresAt, 1_050_000);
@@ -123,6 +130,7 @@ for (const driver of drivers) {
         timeLimitMs: 45000,
         status: 'queued',
         lease: { holder: null, token: 2, acquiredAt: null, expiresAt: null, active: false, expiries: 1 },
+        budget: { cpuSeconds: { used: 100, reserved: 0, limit: 3600, remaining: 3500 } },
       });
       assert.deepEqual([claimNext(other, 'search')?.id, claimNext(other, 'search')?.id], ['mine', 'index']);
       assert.equal(engine.instances.get(alice, 'jobs', 'reindex')?.data.status, 'done');

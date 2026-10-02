@@ -14,10 +14,10 @@ no implementation for.
 Built: `Lease`, an exclusive lease with a fencing token, heartbeats,
 expiry on the engine's runner and directives to its holder;
 `Assignment`; `Queue`, the claim and `claimNext`; `Presence`, a
-heartbeat on an instance that stands for a worker; and `Blueprint`,
-children created with their parent. Not built yet: `Budget` and
-`Retries`, the budgets and retries D16 lists, whose declarations the core
-already carries.
+heartbeat on an instance that stands for a worker; `Blueprint`, children
+created with their parent; and `Budget`, reserve-then-settle budgets
+across enclosing scopes. Not built yet: `Retries`, the retries D16
+lists, whose declaration the core already carries.
 
 ```ts
 import { openEngine } from '@superschematic/engine';
@@ -35,8 +35,8 @@ engine.instances.invoke(worker, 'jobs', claimed.id, 'heartbeat', { token: claime
 A deployment passes the implementations as the engine's `behaviors`
 option when it opens the engine, after the core's, which the engine
 registers itself: `workQueueBehaviors` is every one, and `lease`,
-`assignment`, `queue`, `presence` and `blueprint` are exported one by
-one for a deployment that runs only some.
+`assignment`, `queue`, `presence`, `blueprint` and `budget` are exported
+one by one for a deployment that runs only some.
 `engine.behaviors.register(lease)` registers one later; a published
 version that composes a behavior the engine cannot run is `unavailable`
 until it does. Registering one whose storage already
@@ -464,6 +464,105 @@ Not ported from the source implementation: create governance, which
 checked the child schema's own creates for a parent link and an edge,
 and the trial flag. A step map is checked when it is stamped, not when
 the definition is written.
+## Budget
+
+Reserve-then-settle budgets in units the deployment names: each meter
+counts what the instance has used and the reservations it holds against
+its limit, and passes both to the enclosing scopes its `scope` link
+points at.
+
+| | |
+| --- | --- |
+| Config | `meters` (required, at least one, by camelCase name): each `limit` (at least 1) or `limitField` (an integer field of the type), `reserve` (at least 1) or `reserveField` (an integer field of the type), `scope` (a link of the type's `Links` config) and `reset` (`daily`), all optional; `limitPermission`; `onExceeded` (`{ direct }`, needs `Lease`) |
+| Fields | `budget`: by meter, `{ used, reserved, limit, remaining }`, `limit` and `remaining` null without a limit; `reserved` counts what the instance holds for the instances inside it |
+| Operations | `reserve({ meter?, amount? })` -> `{ reserved }` by meter; `recordUsage({ meter, amount })` -> `{ meter, used, released, overruns, directed }`; `settle({ meter? })` -> `{ released }` by meter; `setLimit({ meter, limit })` -> `{ meter, limit, previous }`; the scope side, `reserveFor`, `settleFor` and `recordUsageFor({ meter, schema, id, amount, ... })`. All write |
+| Guards | while the instance has a reservation of a meter, a `Links` `link` or `unlink` of the meter's scope link is `vetoed`; a change of a meter's `limitField` without `limitPermission` is `forbidden` (`vetoed` when the config names none), and below what is used and reserved `vetoed` |
+| Refusals | `reserve` that does not fit here or in a scope, and on a type with `Lease` without an active lease (`vetoed`); an unknown meter, an amount without a meter, a meter without a configured reservation and no amount (`invalid_argument`); `setLimit` without `limitPermission` (`forbidden`, or `vetoed` when the config names none) and below what is used and reserved (`vetoed`); a scope operation from an instance that does not draw the meter from the scope (`invalid_argument`) or for more than it reserved (`vetoed`). `recordUsage` is never refused for its amount |
+| Events | each operation's event, on the instance and on every scope it reaches |
+| `configChange` | a meter cannot be removed; anything else may change. Added to a schema with instances, whose meters start empty; not removed from one |
+
+```json
+{ "name": "Budget", "config": {
+    "meters": { "cpuSeconds": { "limit": 3600, "reserve": 600, "scope": "pool", "reset": "daily" } },
+    "limitPermission": "jobs.budget",
+    "onExceeded": { "direct": "budgetExceeded" } } }
+```
+
+### Reservations and usage
+
+A reservation fits while the meter's used plus reserved plus the amount
+is within its limit: the config's `limit`, the instance's `limitField`,
+or the one `setLimit` set. `reserve` with no meter takes every meter
+whose `reserve` or `reserveField` gives an amount; that is the call
+Queue's claim makes once the lease is taken, so a claim that does not fit
+is refused with no lease, no reservation and its status as it was, and
+`claimNext` moves on to the next candidate. The instance keeps its own
+reservation apart from what it holds for others, so `settle` releases
+exactly what its claims reserved.
+
+`recordUsage` is never refused: usage has happened. It adds the amount
+to `used` and releases the part of it the instance's own reservation
+covers, `min(amount, reservation)`, and exactly that part at every scope,
+so usage beyond a reservation never eats the reservations other
+instances hold in a scope. The result lists every instance of the chain
+whose usage is over its limit afterwards, this one first.
+
+### Scopes
+
+A meter's `scope` names a link of the type's `Links` config; its target
+is the enclosing scope, a pool the work draws on, say, and its schema
+composes `Budget` with the same meter, which the package checks when the
+schema is defined. Budget never writes another instance's rows: the
+instance invokes `reserveFor`, `settleFor` or `recordUsageFor` on its
+scope, as the caller, which applies the scope's own limit, records what
+it holds for the instance, appends the scope's own event and passes the
+change on up its own scope. It all runs in one transaction, so a
+reservation one scope refuses leaves nothing anywhere in the chain. The
+access policy and the scope's guards are asked as for any operation: a
+scope type that composes `Lease` lists the three in `exempt` to let
+other principals' work reach it while it is leased.
+
+The scope operations cannot free what an instance still holds. A scope
+reads the instance's `budget` field first: it releases at most what it
+holds for the instance beyond what the instance still has reserved,
+holds no more than the instance has reserved, and takes reservations and
+usage only from an instance whose scope link for the meter points at it.
+A scope link does not move while a reservation is held through it.
+
+### Settlement
+
+On a type that composes `Lease`, a reservation is made under the active
+lease, which `reserve` needs, and lasts as long as it: after a caller's
+`Lease` or `Queue` operation, and before each `reserve`, the reservations
+of a lease that is no longer active are settled. That covers a release,
+an expiry, the runner's sweep, `expireHolder`, and a claim or an acquire
+over a lapsed lease. Deleting the instance
+settles everything it reserved and holds, up the chain. On a type
+without `Lease`, a reservation lasts until `settle` or the delete.
+
+### Overruns and directives
+
+With `onExceeded`, usage that takes the instance or a scope over its
+limit sends `onExceeded.direct` to the holder of the instance's active
+lease through Lease's `direct`, with data `{ meter, used, limit, scope
+}`, once per meter per lease token. A caller without a lease learns of
+the overrun from `recordUsage`'s result. Lease's guard lets a call() of
+`direct` by another behavior of the type through without a permission,
+so the principal that records the usage needs none; a refusal sends
+nothing and does not refuse the usage.
+
+### Limits and daily meters
+
+`setLimit` raises or lowers a limit, never below what is used and
+reserved, and needs `limitPermission`; a meter with `limitField` writes
+the field through `update()`, with an update's checks, and a direct
+update of the field is held to the same rules. A lease holder's lease
+keeps others' `setLimit` out unless `Lease` exempts `Budget.setLimit`.
+
+A daily meter's usage counts from the start of the UTC day on the
+engine's clock. A read never writes: a meter whose day has passed reads
+as used 0, and the next write of its row starts the day. Reservations
+carry over.
 
 ## Development
 

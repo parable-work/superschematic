@@ -15,12 +15,15 @@ import type { AnyBehaviorImplementation } from '@superschematic/engine';
 
 import { assignment } from './assignment.js';
 import { blueprint } from './blueprint.js';
+import { budget } from './budget.js';
 import { lease } from './lease.js';
 import { presence } from './presence.js';
 import { queue } from './queue.js';
 
 export { assignment } from './assignment.js';
 export type { AssignmentConfig } from './assignment.js';
+export { budget } from './budget.js';
+export type { BudgetConfig, BudgetMeter, MeterRecord, Overrun } from './budget.js';
 export { DEFAULT_SWEEP_MS, DEFAULT_TTL_MS, MAX_SWEEP, lease } from './lease.js';
 export type { DirectiveRecord, LeaseConfig, LeaseRecord, LeaseTransition } from './lease.js';
 export { presence } from './presence.js';
@@ -31,4 +34,4 @@ export { MAX_STEPS, blueprint } from './blueprint.js';
 export type { BlueprintConfig, BlueprintRecord, BlueprintStep, BlueprintWhen } from './blueprint.js';
 
 /** Every behavior this package implements, in the order a deployment registers them. */
-export const workQueueBehaviors: readonly AnyBehaviorImplementation[] = Object.freeze([lease, assignment, queue, presence, blueprint]);
+export const workQueueBehaviors: readonly AnyBehaviorImplementation[] = Object.freeze([lease, assignment, queue, presence, blueprint, budget]);
