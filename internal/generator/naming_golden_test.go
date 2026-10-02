@@ -199,7 +199,7 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated types.ts: %v", err)
 	}
-	if !strings.Contains(string(tsTypes), "  /** @"+names.ScalarJSDocTag+" Identity.UUID */\n  id?: string | null;\n") {
+	if !strings.Contains(string(tsTypes), "  /** @"+names.ScalarJSDocTag+" Identity.UUID */\n  id?: IdentityUUID | null;\n") {
 		t.Errorf("types.ts does not carry the fixture's scalar JSDoc tag:\n%s", tsTypes)
 	}
 

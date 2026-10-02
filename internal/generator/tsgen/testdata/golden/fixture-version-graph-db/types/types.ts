@@ -28,11 +28,11 @@ export interface HistoryRecord<T> {
  * Cover - The recipe's cover photo: at most one per ref.
  */
 export interface Cover {
-  id?: string | null;
+  id?: IdentityUUID | null;
   recipe: Recipe;
   photoUrl: string;
   /** The entity's logical identity, shared by its rows on every ref. */
-  entityKey?: string | null;
+  entityKey?: IdentityUUID | null;
   /** The ref this row overrides the entity on. */
   ref: RecipeRef;
   /** True when the row deletes the entity on its ref. */
@@ -61,13 +61,13 @@ export function makeCover(overrides?: Partial<Cover>): Cover {
  * Ingredient - An ingredient one step uses.
  */
 export interface Ingredient {
-  id?: string | null;
+  id?: IdentityUUID | null;
   recipe: Recipe;
-  stepKey: string;
+  stepKey: IdentityUUID;
   quantity: string;
   substitutes: GenericJSON;
   /** The entity's logical identity, shared by its rows on every ref. */
-  entityKey?: string | null;
+  entityKey?: IdentityUUID | null;
   /** The ref this row overrides the entity on. */
   ref: RecipeRef;
   /** True when the row deletes the entity on its ref. */
@@ -96,12 +96,12 @@ export function makeIngredient(overrides?: Partial<Ingredient>): Ingredient {
  * Note - A cook's note, threaded under another note.
  */
 export interface Note {
-  id?: string | null;
+  id?: IdentityUUID | null;
   recipe: Recipe;
-  replyTo?: string | null;
+  replyTo?: IdentityUUID | null;
   body: string;
   /** The entity's logical identity, shared by its rows on every ref. */
-  entityKey?: string | null;
+  entityKey?: IdentityUUID | null;
   /** The ref this row overrides the entity on. */
   ref: RecipeRef;
   /** True when the row deletes the entity on its ref. */
@@ -130,38 +130,38 @@ export function makeNote(overrides?: Partial<Note>): Note {
  * Recipe - A recipe: the stable identity its steps and ingredients are versioned under.
  */
 export interface Recipe {
-  id?: string | null;
+  id?: IdentityUUID | null;
   title: string;
-  createdAt: JSDate;
-  createdBy: string;
+  createdAt: TemporalDateTime;
+  createdBy: IdentityUUID;
 }
 
 /**
  * RecipeCommit - A commit of the Recipe version graph: the exact row versions one ref sealed.
  */
 export interface RecipeCommit {
-  id?: string | null;
+  id?: IdentityUUID | null;
   root: Recipe;
   ref: RecipeRef;
   parentCommit?: RecipeCommit | null;
   message?: string | null;
-  schemaEpoch: number;
+  schemaEpoch: GenericInt64;
   contentHash: string;
-  sequence?: number | null;
-  createdAt: JSDate;
-  createdBy: string;
+  sequence?: GenericInt64 | null;
+  createdAt: TemporalDateTime;
+  createdBy: IdentityUUID;
 }
 
 /**
  * RecipePatch - One entity a commit of the Recipe version graph changed, pinned to the row version it sealed.
  */
 export interface RecipePatch {
-  id?: string | null;
+  id?: IdentityUUID | null;
   commit: RecipeCommit;
   entityKind: RecipeEntityKind;
-  entityKey: string;
-  entityId: string;
-  entityVersion: number;
+  entityKey: IdentityUUID;
+  entityId: IdentityUUID;
+  entityVersion: GenericInt64;
   operation: RecipePatchOperation;
 }
 
@@ -169,19 +169,19 @@ export interface RecipePatch {
  * RecipeRef - A line of the Recipe version graph: a primary line when parentRef is null, else a change set.
  */
 export interface RecipeRef {
-  id?: string | null;
+  id?: IdentityUUID | null;
   root: Recipe;
   parentRef?: RecipeRef | null;
   baseCommit?: RecipeCommit | null;
   headCommit?: RecipeCommit | null;
   name: string;
-  sealedAt?: JSDate | null;
-  createdAt: JSDate;
-  createdBy: string;
-  updatedAt: JSDate;
-  updatedBy: string;
-  deletedAt?: JSDate | null;
-  deletedBy?: string | null;
+  sealedAt?: TemporalDateTime | null;
+  createdAt: TemporalDateTime;
+  createdBy: IdentityUUID;
+  updatedAt: TemporalDateTime;
+  updatedBy: IdentityUUID;
+  deletedAt?: TemporalDateTime | null;
+  deletedBy?: IdentityUUID | null;
   _version: number;
 }
 
@@ -189,13 +189,13 @@ export interface RecipeRef {
  * RecipeRelease - The released commit of one root of the Recipe version graph; its history is the release log.
  */
 export interface RecipeRelease {
-  id?: string | null;
+  id?: IdentityUUID | null;
   root: Recipe;
   commit: RecipeCommit;
-  createdAt: JSDate;
-  createdBy: string;
-  updatedAt: JSDate;
-  updatedBy: string;
+  createdAt: TemporalDateTime;
+  createdBy: IdentityUUID;
+  updatedAt: TemporalDateTime;
+  updatedBy: IdentityUUID;
   _version: number;
 }
 
@@ -203,30 +203,30 @@ export interface RecipeRelease {
  * RecipeSnapshotEntry - One entity of a snapshotted commit of the Recipe version graph, pinned to the row version its tree holds.
  */
 export interface RecipeSnapshotEntry {
-  id?: string | null;
+  id?: IdentityUUID | null;
   commit: RecipeCommit;
   entityKind: RecipeEntityKind;
-  entityKey: string;
-  entityId: string;
-  entityVersion: number;
+  entityKey: IdentityUUID;
+  entityId: IdentityUUID;
+  entityVersion: GenericInt64;
 }
 
 /**
  * Step - One step of a recipe, ordered by position; updatedBy names its row's writer.
  */
 export interface Step {
-  id?: string | null;
+  id?: IdentityUUID | null;
   recipe: Recipe;
-  position: number;
+  position: GenericInt64;
   instruction: string;
   timings: GenericJSON;
   scratch?: string | null;
-  createdAt: JSDate;
-  createdBy: string;
-  updatedAt: JSDate;
-  updatedBy: string;
+  createdAt: TemporalDateTime;
+  createdBy: IdentityUUID;
+  updatedAt: TemporalDateTime;
+  updatedBy: IdentityUUID;
   /** The entity's logical identity, shared by its rows on every ref. */
-  entityKey?: string | null;
+  entityKey?: IdentityUUID | null;
   /** The ref this row overrides the entity on. */
   ref: RecipeRef;
   /** True when the row deletes the entity on its ref. */
@@ -256,23 +256,23 @@ export function makeStep(overrides?: Partial<Step>): Step {
 descriptor names.
  */
 export interface Tasting {
-  id?: string | null;
+  id?: IdentityUUID | null;
   recipe: Recipe;
-  taster: string;
+  taster: IdentityUserID;
   salty: boolean;
   score: number;
-  servings: number;
-  tastedOn: string;
-  tastedAt: JSDate;
-  servedAt: string;
-  rested: string;
+  servings: GenericInt64;
+  tastedOn: TemporalDate;
+  tastedAt: TemporalDateTime;
+  servedAt: TemporalTime;
+  rested: TemporalDuration;
   verdict: Verdict;
   remarks: GenericJSON;
   tags: string[];
-  helpers: string[];
-  bites: number[][];
+  helpers: IdentityUUID[];
+  bites: GenericInt64[][];
   /** The entity's logical identity, shared by its rows on every ref. */
-  entityKey?: string | null;
+  entityKey?: IdentityUUID | null;
   /** The ref this row overrides the entity on. */
   ref: RecipeRef;
   /** True when the row deletes the entity on its ref. */
@@ -302,11 +302,11 @@ export function makeTasting(overrides?: Partial<Tasting>): Tasting {
 AutoGenerate one.
  */
 export interface Utensil {
-  id: string;
+  id: IdentityUUID;
   recipe: Recipe;
   name: string;
   /** The entity's logical identity, shared by its rows on every ref. */
-  entityKey?: string | null;
+  entityKey?: IdentityUUID | null;
   /** The ref this row overrides the entity on. */
   ref: RecipeRef;
   /** True when the row deletes the entity on its ref. */

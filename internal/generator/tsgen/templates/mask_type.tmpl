@@ -21,16 +21,8 @@ export function maskSecrets{{.Type.Name}}(value: {{.Type.Name}}): {{.Type.Name}}
     {{.TSName}}: null,
 {{- else if .IsArray}}
     {{.TSName}}: [],
-{{- else if eq .TSType "string"}}
-    {{.TSName}}: '',
-{{- else if eq .TSType "number"}}
-    {{.TSName}}: 0,
-{{- else if eq .TSType "boolean"}}
-    {{.TSName}}: false,
-{{- else if eq .TSType "JSDate"}}
-    {{.TSName}}: new Date(0),
 {{- else}}
-    {{.TSName}}: {} as {{.TSType}},
+    {{.TSName}}: {{secretMaskValue .}},
 {{- end}}
 {{- else if .IsScalar}}
     {{.TSName}}: value.{{.TSName}},

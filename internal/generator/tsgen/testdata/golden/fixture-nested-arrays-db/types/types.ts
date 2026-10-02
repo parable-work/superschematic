@@ -12,7 +12,7 @@ import type {
  * Board - A game board whose columns are lists of lists.
  */
 export interface Board {
-  id?: string | null;
+  id?: IdentityUUID | null;
   /** Cell labels, one inner list per row. */
   labels: string[][];
   /** Cell states, one inner list per row. */
