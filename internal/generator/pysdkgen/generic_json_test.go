@@ -143,28 +143,11 @@ type bodyArgsModules struct {
 // skips in -short mode, and without a compatible Python with pydantic.
 func writeBodyArgsModules(t *testing.T) bodyArgsModules {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("skipping compile check in -short mode")
-	}
-	python, err := findCompatiblePython()
-	if err != nil {
-		t.Skipf("no compatible python: %v", err)
-	}
-	if err := exec.Command(python, "-c", "import pydantic").Run(); err != nil {
-		t.Skip("pydantic not available; skipping the Python SDK probe")
-	}
+	modules, root := newBodyArgsModules(t)
 	schema := loadBodyArgsAPI(t)
 	paths := testpaths.Local(t)
 	typesModule := "example.com/schemas/types/go/" + bodyArgsAPI
-
-	root := t.TempDir()
 	typesDir := filepath.Join(root, "types", "go", bodyArgsAPI)
-	modules := bodyArgsModules{
-		python:     python,
-		apiDir:     filepath.Join(root, "api", bodyArgsAPI),
-		pyTypesDir: filepath.Join(root, "types", "python", bodyArgsAPI),
-		pySDKDir:   filepath.Join(root, "sdk", "python", bodyArgsAPI),
-	}
 
 	typesOutput, err := typegen.Generate(schema, typegen.Options{SchemaName: bodyArgsAPI, ModulePath: typesModule, Clock: nestedArraysClock})
 	if err != nil {
@@ -192,20 +175,7 @@ func writeBodyArgsModules(t *testing.T) bodyArgsModules {
 	if err := apigen.WriteAPI(apiOutput, modules.apiDir); err != nil {
 		t.Fatalf("apigen.WriteAPI: %v", err)
 	}
-	pyTypesOutput, err := pygen.Generate(schema, pygen.Options{SchemaName: bodyArgsAPI, Clock: nestedArraysClock})
-	if err != nil {
-		t.Fatalf("pygen.Generate: %v", err)
-	}
-	if err := pygen.WriteTypes(pyTypesOutput, modules.pyTypesDir); err != nil {
-		t.Fatalf("pygen.WriteTypes: %v", err)
-	}
-	modules.sdk, err = Generate(apiOutput, "", "", nestedArraysClock)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	if err := WriteSDK(modules.sdk, modules.pySDKDir); err != nil {
-		t.Fatalf("WriteSDK: %v", err)
-	}
+	modules.writePython(t, schema, apiOutput)
 
 	routesTest, err := os.ReadFile(filepath.Join("..", "apigen", "testdata", "body_args_routes_test.go"))
 	if err != nil {
@@ -215,6 +185,81 @@ func writeBodyArgsModules(t *testing.T) bodyArgsModules {
 		t.Fatal(err)
 	}
 	return modules
+}
+
+// writeBodyArgsPython generates body-args-api's Python types package and
+// Python SDK alone, for a probe that runs without the Go server
+// (runPythonProbe). It skips as writeBodyArgsModules does.
+func writeBodyArgsPython(t *testing.T) bodyArgsModules {
+	t.Helper()
+	modules, _ := newBodyArgsModules(t)
+	schema := loadBodyArgsAPI(t)
+	apiOutput, err := apigen.Generate(schema, apigen.Options{
+		Provider:   sessionauth.Provider{},
+		SchemaName: bodyArgsAPI,
+		Clock:      nestedArraysClock,
+	})
+	if err != nil {
+		t.Fatalf("apigen.Generate: %v", err)
+	}
+	modules.writePython(t, schema, apiOutput)
+	return modules
+}
+
+// newBodyArgsModules lays out body-args-api's modules under a new temp
+// root, which it returns too. It skips in -short mode, and without a
+// compatible Python with pydantic.
+func newBodyArgsModules(t *testing.T) (bodyArgsModules, string) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	python, err := findCompatiblePython()
+	if err != nil {
+		t.Skipf("no compatible python: %v", err)
+	}
+	if err := exec.Command(python, "-c", "import pydantic").Run(); err != nil {
+		t.Skip("pydantic not available; skipping the Python SDK probe")
+	}
+	root := t.TempDir()
+	return bodyArgsModules{
+		python:     python,
+		apiDir:     filepath.Join(root, "api", bodyArgsAPI),
+		pyTypesDir: filepath.Join(root, "types", "python", bodyArgsAPI),
+		pySDKDir:   filepath.Join(root, "sdk", "python", bodyArgsAPI),
+	}, root
+}
+
+// writePython writes the Python types package of schema and the Python SDK
+// of apiOutput, and sets m.sdk.
+func (m *bodyArgsModules) writePython(t *testing.T, schema *ir.Schema, apiOutput *apigen.APIOutput) {
+	t.Helper()
+	typesOutput, err := pygen.Generate(schema, pygen.Options{SchemaName: bodyArgsAPI, Clock: nestedArraysClock})
+	if err != nil {
+		t.Fatalf("pygen.Generate: %v", err)
+	}
+	if err := pygen.WriteTypes(typesOutput, m.pyTypesDir); err != nil {
+		t.Fatalf("pygen.WriteTypes: %v", err)
+	}
+	m.sdk, err = Generate(apiOutput, "", "", nestedArraysClock)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if err := WriteSDK(m.sdk, m.pySDKDir); err != nil {
+		t.Fatalf("WriteSDK: %v", err)
+	}
+}
+
+// runPythonProbe runs probe, after probeHeader, with no server behind the
+// SDK's base URL. A probe that calls an operation stubs the client's
+// request.
+func (m bodyArgsModules) runPythonProbe(t *testing.T, probe string) {
+	t.Helper()
+	header := fmt.Sprintf(probeHeader, m.pyTypesDir, m.pySDKDir, m.sdk.PackageName, m.sdk.SDKClassName, m.sdk.TypesPackage)
+	cmd := exec.Command(m.python, "-B", "-c", header+probe, "http://127.0.0.1:1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Python SDK probe failed: %v\n%s", err, out)
+	}
 }
 
 // runPythonSDK runs pythonSDKServerTest in the API module: the probe, after
@@ -362,7 +407,7 @@ for kwargs, field in [
     ({"document": None}, "document"),
     ({"document": float("nan")}, "document"),
     ({"document": {1: "a"}}, "document"),
-    ({"document": 1, "extras": [None]}, "extras"),
+    ({"document": 1, "extras": [None]}, "extras[0]"),
     ({"document": 1, "grid": [[None]]}, "grid[0][0]"),
     ({"document": 1, "note": {"a": float("inf")}}, "note"),
 ]:
