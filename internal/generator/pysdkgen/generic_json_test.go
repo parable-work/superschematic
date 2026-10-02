@@ -22,7 +22,9 @@ import (
 // bodyArgsAPI is apigen's body-args-api. Its storeDocument takes a
 // required, an optional, a list and a list of lists Generic.JSON body
 // argument, and returns the document. Its storeEmbedding takes the same of
-// Generic.StringMap and Embedding.Vector, and returns the labels.
+// Generic.StringMap and Embedding.Vector, and returns the labels. Its
+// nameShades takes a map of an enum and a map of lists of a string scalar,
+// and its placePoints a map of an object type.
 const bodyArgsAPI = "body-args-api"
 
 func loadBodyArgsAPI(t *testing.T) *ir.Schema {

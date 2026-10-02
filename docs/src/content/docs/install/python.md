@@ -155,6 +155,17 @@ package reads a field, and a value of another shape raises
 `ValidationError` at the argument. `None` for a required one or a list
 element raises `ValidationError`. In the query string each stays a `str`.
 
+A map argument (`Record<string, T>`) is typed `dict[str, T]`, and a map of
+lists (`Record<string, T[]>`) `dict[str, list[T]]`, as the route takes it,
+and is sent as a JSON object; `{}` is a value, and an optional one left as
+`None` is not sent. Before the request, a required map that is `None`, a
+map that is not a `dict` or other `Mapping`, and a key that is not a
+`str` raise `ValidationError` at the argument. A value that is `None` or
+fails its type is reported at `name[key]`. For a map of lists, so is a
+value that is not a list, and an element is reported at `name[key][i]`.
+A failure inside an object value nests under that path
+(`point_by_name[a].y`). Every failure in the map is reported at once.
+
 An operation that returns a `Generic.JSON`, `Generic.StringMap` or
 `Embedding.Vector` is typed as returning the same alias, and returns the
 JSON value as decoded.

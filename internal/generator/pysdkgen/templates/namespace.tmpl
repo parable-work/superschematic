@@ -327,6 +327,68 @@ class {{.Namespace.ClassName}}:
             rows.append(items)
         return rows
 {{- end}}
+{{- if .Namespace.HasMapArgs}}
+
+    def _validate_map_argument(
+        self,
+        value: Any,
+        value_type_name: str,
+        field_name: str,
+        *,
+        lists: bool = False,
+    ) -> dict[str, Any]:
+        """Validate a map argument and return the dict of its validated
+        values, sent as the JSON object the API reads.
+
+        The map must be a dict with str keys; an empty one is valid. Each
+        value is validated as value_type_name at field[key]. With lists,
+        each value must be a list (an empty one is valid) and each element
+        is validated at field[key][i]. Every failure is raised at once.
+        """
+        if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
+            raise ValidationError(
+                {field_name: [{"validator": "type", "message": f"{field_name} must be a dict with str keys"}]},
+            )
+        validation_errors: dict[str, list[dict[str, str]]] = {}
+        values: dict[str, Any] = {}
+        for key, item in value.items():
+            path = f"{field_name}[{key}]"
+            if not lists:
+                values[key] = self._validate_map_value(item, value_type_name, path, validation_errors)
+            elif item is None:
+                validation_errors[path] = [{"validator": "required", "message": f"{path} is required"}]
+            elif not isinstance(item, (list, tuple)):
+                validation_errors[path] = [{"validator": "type", "message": f"{path} must be a list"}]
+            else:
+                values[key] = [
+                    self._validate_map_value(element, value_type_name, f"{path}[{index}]", validation_errors)
+                    for index, element in enumerate(item)
+                ]
+        if validation_errors:
+            raise ValidationError(validation_errors)
+        return values
+
+    def _validate_map_value(
+        self,
+        value: Any,
+        type_name: str,
+        path: str,
+        validation_errors: dict[str, list[dict[str, str]]],
+    ) -> Any:
+        """Validate one value of a map argument, or one element of a list
+        value, as type_name and return it validated. None is required at
+        path. A failure is added to validation_errors, one inside the value
+        named under path (path.field)."""
+        if value is None:
+            validation_errors[path] = [{"validator": "required", "message": f"{path} is required"}]
+            return None
+        try:
+            return self._validate_scalar_argument(value, type_name, path)
+        except ValidationError as err:
+            for key, errors in err.errors.items():
+                validation_errors[key if key == path else f"{path}.{key}"] = errors
+            return None
+{{- end}}
 {{- if .Namespace.HasListOfListsModelOutput}}
 
     def _coerce_list_of_lists_response(self, raw: Any, output_type_name: str) -> Any:
@@ -728,7 +790,9 @@ scalarArgsPayload builds the JSON body of an endpoint's scalar arguments,
 each validated before it is set. A single value is sent as validated. A
 list of a JSON object or array scalar (IsStructuredJSON) is sent as
 validated too, since its alias reads JSON text into the object or array it
-holds; any other list is sent as given.
+holds; any other list is sent as given. A map (IsMap) is sent as the dict
+of its validated values, a JSON object; IsMap comes before IsArray, which a
+map of lists also sets.
 */ -}}
 {{- define "scalarArgsPayload"}}
         payload: dict[str, Any] = {}
@@ -745,6 +809,17 @@ holds; any other list is sent as given.
         if {{.PyName}} is not None:
             {{if .IsStructuredJSON}}{{.PyName}} = {{end}}self._validate_list_of_lists_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}")
             payload["{{.Name}}"] = {{.PyName}}
+{{- end}}
+{{- else if .IsMap}}
+{{- if .Required}}
+        if {{.PyName}} is None:
+            raise ValidationError(
+                {"{{.PyName}}": [{"validator": "required", "message": "{{.Name}} is required"}]},
+            )
+        payload["{{.Name}}"] = self._validate_map_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}"{{if .IsArray}}, lists=True{{end}})
+{{- else}}
+        if {{.PyName}} is not None:
+            payload["{{.Name}}"] = self._validate_map_argument({{.PyName}}, "{{.PyElementType}}", "{{.PyName}}"{{if .IsArray}}, lists=True{{end}})
 {{- end}}
 {{- else if .IsArray}}
 {{- if .Required}}
