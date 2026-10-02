@@ -60,14 +60,14 @@ describe("TypeScript SDK map arguments", () => {
 
   test("a DELETE sends its arguments, a map among them, as the JSON body", async () => {
     const { sdk, requests } = sdkWith();
-    await sdk.tag.removeTags("p1", ["a", "b"], true, { by: ["editor"] }, { a: "dark" });
+    await sdk.tag.removeTags("p1", ["a", "b"], "merged", { by: ["editor"] }, { a: "dark" });
     await sdk.tag.removeTags("p1", { labels: ["c"], shadeByLabel: {} });
     await sdk.tag.removeTags("p1", ["d"]);
     expect(requests).toStrictEqual([
       {
         method: "DELETE",
         url: `${baseUrl}/api/posts/p1/tags`,
-        body: { labels: ["a", "b"], purge: true, reason: { by: ["editor"] }, shadeByLabel: { a: "dark" } },
+        body: { labels: ["a", "b"], reason: "merged", requester: { by: ["editor"] }, shadeByLabel: { a: "dark" } },
       },
       { method: "DELETE", url: `${baseUrl}/api/posts/p1/tags`, body: { labels: ["c"], shadeByLabel: {} } },
       { method: "DELETE", url: `${baseUrl}/api/posts/p1/tags`, body: { labels: ["d"] } },

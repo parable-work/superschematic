@@ -20,7 +20,7 @@ import { defineBehavior, type AccessPolicy, type Engine, type EngineOptions } fr
 import { engineApp } from '../dist/http/index.js';
 import { MCP_PATH, engineMcp, type EngineMcpOptions } from '../dist/mcp/index.js';
 import { openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, documentsDocument, openTestEngine, orderDocument, projectsDocument, tasksDocument } from './helpers.ts';
+import { alice, cleanup, documentsDocument, notesDocument, openTestEngine, orderDocument, projectsDocument, tasksDocument } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 
 // The bearer token is the caller's subject; reader may only read.
@@ -461,6 +461,31 @@ describe("the core's behaviors", () => {
     const published = await call(pat, 'documents_transition', { id: 'doc-1', params: { to: 'published' }, expectedSeq: 3 });
     assert.deepEqual(published.structuredContent, { from: 'review', to: 'published' });
     assert.equal(engine.instances.get(alice, 'documents', 'doc-1')?.data.status, 'published');
+  });
+
+  test('Search is a tool with no id that only reads: a reader calls it, and a query FTS5 cannot parse is a tool error with the 400 problem', async () => {
+    const { url, engine } = await withDocument();
+    engine.schemas.define(everything, notesDocument());
+    engine.schemas.publish(everything, 'notes');
+    engine.instances.create(everything, 'notes', { title: 'Walnut desk', body: 'Solid wood.' }, { id: 'n1' });
+    engine.instances.create(everything, 'notes', { title: 'Oak chair', body: 'Goes with the walnut desk.' }, { id: 'n2' });
+    const { client } = await connect(endpoint(url));
+    const search = (await client.listTools()).tools.find((tool) => tool.name === 'notes_search');
+    assert.deepEqual(
+      [search?.annotations?.readOnlyHint, Object.keys(search?.inputSchema.properties ?? {}), search?.inputSchema.required],
+      [true, ['params'], ['params']]
+    );
+    const { client: reader } = await connect(endpoint(url), 'reader');
+    const found = await call(reader, 'notes_search', { params: { query: 'walnut' } });
+    assert.deepEqual(
+      (found.structuredContent as { items: Array<{ id: string; rank: number; field: string }> }).items.map((hit) => [hit.id, hit.rank, hit.field]),
+      [
+        ['n1', 1, 'title'],
+        ['n2', 2, 'body'],
+      ]
+    );
+    const refused = problemOf(await call(reader, 'notes_search', { params: { query: 'title: walnut', syntax: 'fts5' } }));
+    assert.deepEqual([refused.status, refused.code, refused.details.issues[0].path], [400, 'invalid_argument', '/query']);
   });
 
   test('Dependencies and Links are tools: listLinked takes no id; a gated transition and a required target\'s delete are tool errors with the 409 problem', async () => {

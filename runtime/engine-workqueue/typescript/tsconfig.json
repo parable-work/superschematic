@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true,
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "comment": "The package ships compiled ESM with declarations, as the engine does: Node.js does not strip types from files under node_modules. NodeNext resolution reads the exports map of @superschematic/engine, which scripts/link-local-deps.mjs links into node_modules.",
+  "include": ["src/**/*.ts"]
+}

@@ -304,7 +304,9 @@ parameters as the body and an optional `If-Match`. The README's
 [core behaviors](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#core-behaviors)
 section lists every operation, guard and config change of each. The core
 also declares `Dependencies`, `Links` and `Rollups`, which reach other
-instances; the example does not use them.
+instances, `Search`, full-text search over a type's text fields, and
+`Reactions`, whose rules the engine's runner applies after a change
+commits; the example does not use them.
 
 ### Workflow
 
@@ -465,6 +467,18 @@ declares it. `acme.Rating` in `examples/acme-schematic` is the worked
 example, and
 [Write an extension](/superschematic/extending/write-an-extension/#a-behavior)
 walks through it.
+
+A behavior's functions reach the instance they run on, the behavior's own
+columns and tables, and the rest of the namespace as the caller: they
+read other instances and change them through their operations, and the
+access policy is asked at each step. Beyond one instance, a behavior
+reads its own columns across every instance of its schema with SQL, on a
+read-only relation the engine names (`sql.instances()`) and a migration
+can index; creates instances wherever it may invoke a writing operation
+(`instances.create`), so a parent's children commit with it; and runs
+schedules at an interval its schema's config can set. The README's
+[behaviors](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#behaviors)
+section has the whole interface.
 
 ## The event log
 

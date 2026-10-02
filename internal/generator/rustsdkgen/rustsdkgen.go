@@ -649,7 +649,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 
 	methodHTTP := strings.ToUpper(ep.Method)
 	methodPrefix := toRustTypeName(ep.Name)
-	hasEncryptedBody := ep.Encrypted && isBodyMethod(methodHTTP)
+	hasEncryptedBody := ep.Encrypted && apigen.EncryptedBodyMethod(methodHTTP)
 	supportsListAll, listAllPageSize := listAllPagination(ep, pathParams, pathQueryBindings, queryParams, scalarArgs, hasRequiredQueryParams)
 
 	return EndpointInfo{
@@ -746,15 +746,6 @@ func outputType(typeName string, arrayDepth int) string {
 // "Vec<T>" or "Vec<Vec<T>>".
 func rustListType(elem string, depth int) string {
 	return codegen.WrapArray(elem, depth, func(inner string) string { return "Vec<" + inner + ">" })
-}
-
-func isBodyMethod(method string) bool {
-	switch strings.ToUpper(method) {
-	case "POST", "PUT", "PATCH":
-		return true
-	default:
-		return false
-	}
 }
 
 var pathParamPattern = regexp.MustCompile(`\{([a-zA-Z0-9_]+)\}`)

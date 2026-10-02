@@ -1,0 +1,54 @@
+{
+  "kind": "General",
+  "name": "jobs",
+  "description": "A job an engine runs with the core's work-queue behaviors and no extension: a worker claims the queued job of a topic with the highest priority, holds its lease while it runs, and a lease that expires puts the job back in the queue, until its third expiry fails it.",
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "languagePrimitive": "number"
+    }
+  },
+  "types": {
+    "Job": {
+      "name": "Job",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["queued", "running", "done", "failed"],
+            "transitions": [
+              { "from": "queued", "to": "running" },
+              { "from": "running", "to": "queued" },
+              { "from": "running", "to": "done" },
+              { "from": "running", "to": "failed" },
+              { "from": "queued", "to": "failed" }
+            ]
+          }
+        },
+        {
+          "name": "Lease",
+          "config": {
+            "ttlMs": 30000,
+            "maxHoldField": "timeLimitMs",
+            "onExpiry": { "transition": "queued", "from": ["running"] },
+            "maxExpiries": 3,
+            "escalate": { "transition": "failed", "from": ["running"] },
+            "overridePermission": "jobs.override"
+          }
+        },
+        { "name": "Assignment", "config": { "permission": "jobs.assign" } },
+        {
+          "name": "Queue",
+          "config": { "claim": { "from": ["queued"], "to": "running" }, "priorityField": "priority", "match": ["topic"] }
+        }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },
+        { "name": "topic", "typeRef": { "name": "string" } },
+        { "name": "priority", "typeRef": { "name": "Generic.Int64" } },
+        { "name": "timeLimitMs", "typeRef": { "name": "Generic.Int64" } }
+      ]
+    }
+  }
+}

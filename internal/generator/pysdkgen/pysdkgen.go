@@ -458,13 +458,13 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		anyJSON[arg.Name] = arg.AnyJSON
 		structuredJSON[arg.Name] = arg.StructuredJSON != ""
 	}
-	// The SDK sends the scalar arguments where the route reads them: from
-	// the JSON body for every method but GET, DELETE included (BodyArgs),
-	// where a Generic.JSON one is any JSON value and a JSON object or array
-	// scalar one that object or array. A GET's travel in the query string,
-	// where each stays the parameter's text. A map, which only a body
-	// carries, is a dict of its values, each a list for a map of lists.
-	inBody := len(endpoint.BodyArgs) > 0
+	// The SDK sends the scalar arguments where the route reads them: in the
+	// body for every method but GET, where a Generic.JSON one is any JSON
+	// value and a JSON object or array scalar one that object or array. In
+	// the query string of a GET each stays the parameter's text. A map,
+	// which only a body carries, is a dict of its values, each a list for a
+	// map of lists.
+	inBody := endpoint.ArgumentsInBody()
 	scalarArgs := make([]ScalarArg, 0, len(endpoint.ScalarArgs))
 	for _, arg := range endpoint.ScalarArgs {
 		pyElementType := ""
@@ -519,11 +519,11 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 	sdkPath := endpoint.Path
 	sdkHTTPMethod := endpoint.Method
 	pathTemplate, pathIsFString := convertPathToPythonTemplate(sdkPath, endpoint.PathParams, isScopedNS, scopeParamOriginal)
-	hasEncryptedBody := endpoint.Encrypted && isBodyMethod(sdkHTTPMethod)
+	hasEncryptedBody := endpoint.Encrypted && apigen.EncryptedBodyMethod(sdkHTTPMethod)
 	// Endpoints with an explicit input object can require a JSON body even on GET
 	// (for example, GET /api/users/events with UserEventsSearchInput).
 	// Scalar-arg-only GET endpoints still use query parameters.
-	hasRequestBody := endpoint.HasInput || inBody
+	hasRequestBody := endpoint.HasInput || (inBody && len(scalarArgs) > 0)
 	hasFileUpload := endpoint.HasFileUpload && len(fileFields) > 0
 
 	hasRequiredFileField := false
@@ -835,18 +835,6 @@ func findPathParam(pathParams []apigen.PathParam, name string) apigen.PathParam 
 		}
 	}
 	return apigen.PathParam{}
-}
-
-// isBodyMethod reports whether the SDK encrypts a request body of method:
-// POST, PUT and PATCH. Where scalar arguments travel follows the route
-// (apigen.EndpointInfo.BodyArgs) instead.
-func isBodyMethod(method string) bool {
-	switch strings.ToUpper(method) {
-	case "POST", "PUT", "PATCH":
-		return true
-	default:
-		return false
-	}
 }
 
 func toPythonIdentifier(name string) string {

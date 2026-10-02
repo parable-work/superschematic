@@ -71,7 +71,7 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 	finalizeWithCoreGenerators(t, reg)
 
-	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Comments", "Dependencies", "Links", "Pinned", "Revisions", "Rollups", "Workflow", "acme.Flag", "acme.Rating"}) {
+	if got := reg.BehaviorNames(); !slices.Equal(got, []string{"Assignment", "Comments", "Dependencies", "Lease", "Links", "Pinned", "Queue", "Reactions", "Revisions", "Rollups", "Search", "Workflow", "acme.Flag", "acme.Rating"}) {
 		t.Fatalf("BehaviorNames() = %v", got)
 	}
 	rating, ok := reg.Behavior("acme.Rating")
@@ -187,6 +187,33 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 	}
 }
 
+// A spec may name the npm package that implements its behavior, which the
+// registered behavior carries for the behaviors command; a name npm would
+// refuse is refused.
+func TestRegisterBehaviorPackage(t *testing.T) {
+	reg := New(naming.Default())
+	for _, spec := range []BehaviorSpec{
+		{Extension: "acme", Package: "@acme/behaviors", Declaration: ratingDeclaration()},
+		{Extension: "acme", Package: "acme-behaviors", Declaration: declaration("acme.Flag", nil)},
+		{Extension: "acme", Declaration: declaration("acme.Pin", nil)},
+	} {
+		if err := reg.RegisterBehavior(spec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, want := range map[string]string{"acme.Rating": "@acme/behaviors", "acme.Flag": "acme-behaviors", "acme.Pin": ""} {
+		if b, _ := reg.Behavior(name); b.Package != want {
+			t.Errorf("%s Package = %q, want %q", name, b.Package, want)
+		}
+	}
+	for _, pkg := range []string{"@Acme/behaviors", "acme behaviors", "@acme", "@/behaviors", "acme/behaviors", ".acme", strings.Repeat("a", 215)} {
+		err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Extension: "acme", Package: pkg, Declaration: ratingDeclaration()})
+		if want := fmt.Sprintf("registry: behavior acme.Rating package %q is not an npm package name", pkg); err == nil || err.Error() != want {
+			t.Errorf("package %q: err = %v, want %q", pkg, err, want)
+		}
+	}
+}
+
 // An operation's params schema sets "additionalProperties": false, the
 // engine's rule (D16): an operation's parameters are exactly the ones it
 // declares, so no alias of one reaches the handler without its guards
@@ -261,7 +288,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 		want  string
 	}{
 		{"requires unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Rating"}})},
-			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Comments, Dependencies, Links, Revisions, Rollups, Workflow, acme.Review)`},
+			`behavior acme.Review requires "acme.Rating", which is not a registered behavior (registered: Assignment, Comments, Dependencies, Lease, Links, Queue, Reactions, Revisions, Rollups, Search, Workflow, acme.Review)`},
 		{"conflicts unregistered", []json.RawMessage{declaration("acme.Review", map[string]any{"conflicts": []string{"acme.Hidden"}})},
 			`behavior acme.Review conflicts "acme.Hidden", which is not a registered behavior`},
 		{"requires itself", []json.RawMessage{declaration("acme.Review", map[string]any{"requires": []string{"acme.Review"}})},

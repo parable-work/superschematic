@@ -19,7 +19,8 @@ import (
 // (sdktest.LoadOptionalJSONService) and runs optionalJSONSDKTest on them:
 // an optional Generic.JSON body argument or input type field that is
 // Some(Value::Null) is sent as null, one that is None is not sent, and a
-// response's null reads back as Some(Value::Null).
+// response's null reads back as Some(Value::Null). The body arguments of a
+// DELETE are sent in the body, as those of a PUT are.
 func TestOptionalJSONSDKCrateSendsNullApartFromAbsent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
@@ -75,7 +76,7 @@ use std::sync::mpsc;
 use std::thread;
 
 use serde_json::{json, Value};
-use SDK_CRATE::namespaces::note::AnnotateInput;
+use SDK_CRATE::namespaces::note::{AnnotateInput, RetractInput};
 use SDK_CRATE::types;
 use SDK_CRATE::{ClientConfig, OptionalJsonApiSdk};
 
@@ -121,12 +122,17 @@ fn serve(requests: usize) -> (String, mpsc::Receiver<Value>) {
 
 #[tokio::test]
 async fn an_optional_json_value_is_sent_as_null_or_left_out() {
-    let (base_url, bodies) = serve(4);
+    let (base_url, bodies) = serve(6);
     let sdk = OptionalJsonApiSdk::new(ClientConfig::with_base_url(base_url, None, None)).unwrap();
 
     sdk.note.annotate("n1".to_string(), AnnotateInput { body: json!({"a": 1}), extra: None }, None).await.unwrap();
     assert_eq!(bodies.recv().unwrap(), json!({"body": {"a": 1}}));
     sdk.note.annotate("n1".to_string(), AnnotateInput { body: json!({"a": 1}), extra: Some(Value::Null) }, None).await.unwrap();
+    assert_eq!(bodies.recv().unwrap(), json!({"body": {"a": 1}, "extra": null}));
+
+    sdk.note.retract("n1".to_string(), RetractInput { body: json!({"a": 1}), extra: None }, None).await.unwrap();
+    assert_eq!(bodies.recv().unwrap(), json!({"body": {"a": 1}}));
+    sdk.note.retract("n1".to_string(), RetractInput { body: json!({"a": 1}), extra: Some(Value::Null) }, None).await.unwrap();
     assert_eq!(bodies.recv().unwrap(), json!({"body": {"a": 1}, "extra": null}));
 
     sdk.note.revise(types::NoteRevision { body: json!("text"), extra: None }, None).await.unwrap();

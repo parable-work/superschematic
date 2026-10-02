@@ -3,9 +3,10 @@
 // generated routes with an implementation that records what each call
 // received, and drives them over httptest with the vectors the TypeScript
 // server's scalar list test uses, plus required single values of every
-// builtin type, a UUID list and a list of objects, Generic.JSON values and
-// JSON object and array scalars, the query string of a GET operation, a
-// DELETE's body, and a path parameter in each encoding of its value.
+// builtin type, a UUID list, a list and a list of lists of objects,
+// Generic.JSON values and JSON object and array scalars, the body
+// arguments of a DELETE, the query string of a GET operation, and a path
+// parameter in each encoding of its value.
 package bodyargsapi_test
 
 import (
@@ -76,8 +77,14 @@ func (s *tags) PlacePoints(_ context.Context, id string, pointByName map[string]
 	return &placed, nil
 }
 
-func (s *tags) RemoveTags(_ context.Context, id string, labels []string, purge bool, reason types.GenericJSON, shadeByLabel map[string]types.Shade) ([]string, error) {
-	s.record(map[string]any{"id": id, "labels": labels, "purge": purge, "reason": reason, "shadeByLabel": shadeByLabel})
+func (s *tags) PinPoints(_ context.Context, id string, grid [][]types.Point) (*bool, error) {
+	s.record(map[string]any{"id": id, "grid": grid})
+	pinned := true
+	return &pinned, nil
+}
+
+func (s *tags) RemoveTags(_ context.Context, id string, labels []string, reason string, requester types.GenericJSON, shadeByLabel map[string]types.Shade) ([]string, error) {
+	s.record(map[string]any{"id": id, "labels": labels, "reason": reason, "requester": requester, "shadeByLabel": shadeByLabel})
 	return labels, nil
 }
 
@@ -145,6 +152,7 @@ const (
 	embeddingsPath    = "/api/embeddings"
 	nameShadesPath    = "/api/posts/p1/shade-names"
 	placePointsPath   = "/api/posts/p1/points"
+	pinPointsPath     = "/api/posts/p1/pins"
 	removeTagsPath    = "/api/posts/p1/tags"
 	findTagsPath      = "/api/posts/tags"
 	searchPostsPath   = "/api/posts/search"
@@ -611,27 +619,54 @@ func TestAMapOfAnObjectTypeIsABodyArgument(t *testing.T) {
 	refusedWith(t, server, impl, http.MethodPut, placePointsPath, `{"x": 1, "y": 2}`, fieldError{"pointByName", "required", "required field"})
 }
 
-// A DELETE reads its arguments from the JSON body, as a PUT does, a map
-// among them; the query string carries none of them, and a DELETE without
-// a body is refused.
+// A list of lists of an object type checks each object's fields under its
+// path, grid[i][j].x, by wire name, and a null or non-object element at
+// grid[i][j].
+func TestAListOfListsOfAnObjectType(t *testing.T) {
+	server, impl := serve(t)
+	accepted(t, server, impl, http.MethodPut, pinPointsPath, `{"grid": [[{"x": 1, "y": 2, "pinLabel": "ab"}], []]}`)
+	if want := [][]types.Point{{{X: 1, Y: 2, PinLabel: "ab"}}, {}}; !reflect.DeepEqual(impl.last["grid"], want) {
+		t.Errorf("grid = %#v, want %#v", impl.last["grid"], want)
+	}
+	refusedWith(t, server, impl, http.MethodPut, pinPointsPath, `{"grid": [[{"x": 0, "y": 0}, {"x": -1, "y": 0, "pinLabel": "a"}], [null, 5, {"x": "1", "y": 0}], {}]}`,
+		fieldError{"grid[0][1].x", "min", ""},
+		fieldError{"grid[0][1].pinLabel", "minLength", ""},
+		fieldError{"grid[1][0]", "required", "required field"},
+		fieldError{"grid[1][1]", "type", "expected an object"},
+		fieldError{"grid[1][2]", "type", "does not match the declared type"},
+		fieldError{"grid[2]", "type", "expected an array"},
+	)
+}
+
+// A DELETE reads its arguments from the body object, as a PUT does: a list,
+// a string, a Generic.JSON and a map. The query string carries none of them.
 func TestADELETEReadsItsArgumentsFromTheBody(t *testing.T) {
 	server, impl := serve(t)
-	accepted(t, server, impl, http.MethodDelete, removeTagsPath, `{"labels": ["a", "b"], "purge": true, "reason": {"by": ["editor"]}, "shadeByLabel": {"a": "dark"}}`)
-	if want := []string{"a", "b"}; !reflect.DeepEqual(impl.last["labels"], want) || impl.last["purge"] != true {
-		t.Errorf("labels, purge = %#v, %#v; want %#v, true", impl.last["labels"], impl.last["purge"], want)
+	accepted(t, server, impl, http.MethodDelete, removeTagsPath, `{"labels": ["a", "b,c"], "reason": "merged", "requester": {"by": "ops"}, "shadeByLabel": {"a": "light", "b,c": "dark"}}`)
+	for name, want := range map[string]string{
+		"id":        `"p1"`,
+		"labels":    `["a", "b,c"]`,
+		"reason":    `"merged"`,
+		"requester": `{"by": "ops"}`,
+	} {
+		if !jsonEqual(t, impl.last[name], want) {
+			t.Errorf("%s: the implementation received %v, want %s", name, impl.last[name], want)
+		}
 	}
-	if !jsonEqual(t, impl.last["reason"], `{"by": ["editor"]}`) {
-		t.Errorf("reason = %#v, want {\"by\": [\"editor\"]}", impl.last["reason"])
-	}
-	if want := map[string]types.Shade{"a": types.Shade_Dark}; !reflect.DeepEqual(impl.last["shadeByLabel"], want) {
+	if want := map[string]types.Shade{"a": types.Shade_Light, "b,c": types.Shade_Dark}; !reflect.DeepEqual(impl.last["shadeByLabel"], want) {
 		t.Errorf("shadeByLabel = %#v, want %#v", impl.last["shadeByLabel"], want)
 	}
+	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath, `{"labels": ["a", "b", "c", "d"], "reason": "x", "shadeByLabel": {"a": "dim"}}`,
+		fieldError{"labels", "listMax", "must contain at most 3 items"},
+		fieldError{"reason", "minLength", ""},
+		fieldError{"shadeByLabel[a]", "enum", ""},
+	)
 	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath, `{"labels": [], "shadeByLabel": {"a": "dim", "b": null}}`,
 		fieldError{"shadeByLabel[a]", "enum", ""},
 		fieldError{"shadeByLabel[b]", "required", "required field"},
 	)
-	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath+"?labels=a", `{}`, fieldError{"labels", "required", "required field"})
-	refused(t, server, impl, http.MethodDelete, removeTagsPath+"?labels=a", "")
+	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath+"?labels=a&reason=merged", `{}`, fieldError{"labels", "required", "required field"})
+	refused(t, server, impl, http.MethodDelete, removeTagsPath+"?labels=a&reason=merged", "")
 }
 
 func TestAGETListReadsEveryQueryKey(t *testing.T) {

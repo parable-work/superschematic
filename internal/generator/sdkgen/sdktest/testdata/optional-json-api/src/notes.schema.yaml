@@ -1,7 +1,7 @@
-# An optional Generic.JSON value as a body argument and as a field of an
-# input type, each beside a required one. Null is a value of the optional
-# one, apart from absent. The SDK tests of every language load it through
-# sdktest.LoadOptionalJSONService.
+# An optional Generic.JSON value as a body argument of a PUT and of a
+# DELETE, and as a field of an input type, each beside a required one. Null
+# is a value of the optional one, apart from absent. The SDK tests of every
+# language load it through sdktest.LoadOptionalJSONService.
 name: optional-json-api
 kind: API
 scalars:
@@ -37,6 +37,23 @@ operationSets:
             typeRef: { name: Generic.JSON }
             required: true
           # Null clears the extra; left out, the extra is kept.
+          - name: extra
+            typeRef: { name: Generic.JSON }
+      # Retract a note's annotation; returns whether it changed. A DELETE
+      # reads its arguments from the body, as a PUT does.
+      - name: retract
+        typeRef: { name: boolean }
+        required: true
+        httpMethod: DELETE
+        restPath: "notes/{id}"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: body
+            typeRef: { name: Generic.JSON }
+            required: true
+          # Null retracts the extra too; left out, the extra is kept.
           - name: extra
             typeRef: { name: Generic.JSON }
       # Revise a note; returns whether it changed.

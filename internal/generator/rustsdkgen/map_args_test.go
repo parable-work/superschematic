@@ -204,7 +204,7 @@ async fn a_map_is_sent_as_a_json_object_of_its_values() {
     assert_eq!(requests.recv().unwrap(), ("PUT /api/posts/p2/shade-names".to_string(), json!({"shadeByName": {}})));
 
     let input = PlacePointsInput {
-        point_by_name: map(vec![("a", types::Point { x: 1.0, y: 2.0 }), ("b", types::Point { x: 0.5, y: -1.0 })]),
+        point_by_name: map(vec![("a", types::Point { x: 1.0, y: 2.0, pin_label: None }), ("b", types::Point { x: 0.5, y: -1.0, pin_label: None })]),
     };
     assert!(sdk.tag.place_points("p3".to_string(), input, None).await.unwrap());
     assert_eq!(
@@ -220,17 +220,17 @@ async fn a_delete_sends_its_arguments_a_map_among_them_as_the_json_body() {
 
     let input = RemoveTagsInput {
         labels: vec!["a".to_string(), "b".to_string()],
-        purge: Some(true),
-        reason: None,
+        reason: Some("merged".to_string()),
+        requester: None,
         shade_by_label: Some(map(vec![("a", types::Shade::Dark)])),
     };
     assert_eq!(sdk.tag.remove_tags("p1".to_string(), input, None).await.unwrap(), vec!["a", "b"]);
     assert_eq!(
         requests.recv().unwrap(),
-        ("DELETE /api/posts/p1/tags".to_string(), json!({"labels": ["a", "b"], "purge": true, "shadeByLabel": {"a": "dark"}}))
+        ("DELETE /api/posts/p1/tags".to_string(), json!({"labels": ["a", "b"], "reason": "merged", "shadeByLabel": {"a": "dark"}}))
     );
 
-    let input = RemoveTagsInput { labels: vec!["c".to_string()], purge: None, reason: None, shade_by_label: None };
+    let input = RemoveTagsInput { labels: vec!["c".to_string()], reason: None, requester: None, shade_by_label: None };
     assert_eq!(sdk.tag.remove_tags("p1".to_string(), input, None).await.unwrap(), vec!["c"]);
     assert_eq!(requests.recv().unwrap(), ("DELETE /api/posts/p1/tags".to_string(), json!({"labels": ["c"]})));
 }
@@ -260,9 +260,9 @@ async fn a_map_value_the_route_would_refuse_is_refused_before_the_request() {
 
     let input = PlacePointsInput {
         point_by_name: map(vec![
-            ("c", types::Point { x: -2.5, y: 0.0 }),
-            ("b", types::Point { x: 1.0, y: 0.0 }),
-            ("a", types::Point { x: -1.0, y: 0.0 }),
+            ("c", types::Point { x: -2.5, y: 0.0, pin_label: None }),
+            ("b", types::Point { x: 1.0, y: 0.0, pin_label: None }),
+            ("a", types::Point { x: -1.0, y: 0.0, pin_label: None }),
         ]),
     };
     let err = sdk.tag.place_points("p0".to_string(), input, None).await.unwrap_err();
