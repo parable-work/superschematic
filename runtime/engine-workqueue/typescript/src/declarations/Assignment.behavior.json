@@ -1,0 +1,86 @@
+{
+  "name": "Assignment",
+  "description": "Assigns the instance to one principal at a time. A principal may assign an unassigned instance to itself and unassign itself; assigning another principal, reassigning, and unassigning another principal need the config's permission. While the instance is assigned, only its assignee may take its lease (Lease's acquire) or claim it (Queue's claim).",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "permission": {
+        "description": "The permission a principal needs to assign the instance to another principal, reassign it, or unassign another principal. Absent, only the first two self-service moves are possible.",
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "fields": [
+    {
+      "name": "assignee",
+      "description": "The principal the instance is assigned to; absent when it is unassigned."
+    }
+  ],
+  "operations": [
+    {
+      "name": "assign",
+      "description": "Assigns the instance to a principal: the caller itself when it is unassigned, or anyone, reassigning included, with the config's permission.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "to": {
+            "description": "The principal's subject.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assignedAt": {
+            "description": "When, in epoch milliseconds.",
+            "type": "integer"
+          },
+          "assignedBy": {
+            "description": "The principal that assigned it.",
+            "type": "string"
+          },
+          "assignee": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "assignee",
+          "assignedAt",
+          "assignedBy"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "unassign",
+      "description": "Clears the assignment: the assignee itself, or a principal with the config's permission.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assignee": {
+            "description": "The principal it was assigned to.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assignee"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    }
+  ]
+}

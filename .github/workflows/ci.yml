@@ -244,7 +244,7 @@ jobs:
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           go run ./internal/tools/schemafiletypes -check
 
-      - name: Core behavior declarations drift (the engine's copies match the core registry)
+      - name: Core behavior declarations drift (the engine's and the work-queue package's copies match the core registry)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: |

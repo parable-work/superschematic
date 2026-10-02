@@ -24,6 +24,12 @@ type BehaviorSpec struct {
 	// behavior has a bare name ("Workflow"), an extension's is
 	// "<extension>.<Name>".
 	Extension string
+	// Package is the npm package whose implementation runs the behavior in
+	// an engine (the core's are "@superschematic/engine" and
+	// "@superschematic/engine-workqueue"), so the behaviors command can
+	// write each package's declarations into that package (--package).
+	// Optional; when set it is an npm package name.
+	Package string
 	// Declaration is the behavior's JSON declaration.
 	Declaration json.RawMessage
 }
@@ -88,6 +94,9 @@ type Behavior struct {
 	BehaviorDeclaration
 	// Extension is the registering extension's Name(); "" for core.
 	Extension string
+	// Package is the npm package that implements it; "" when its spec
+	// names none.
+	Package string
 
 	config         *validator.Schema
 	configRequired bool
@@ -108,6 +117,8 @@ var (
 	behaviorBareName      = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 	behaviorOperationName = regexp.MustCompile(`^[a-z][A-Za-z0-9]*$`)
 	behaviorFieldName     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	// npmPackageName is a lowercase npm package name, scoped or not.
+	npmPackageName = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$`)
 )
 
 const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
@@ -121,8 +132,9 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // false, the engine's rule, so no parameter reaches a handler without its
 // guards seeing it; an operation name that is not camelCase, repeats, or
 // is one an engine gives every schema (create, get, list, update, delete);
-// a scope other than "instance" or "schema"; and a field name that is not
-// an identifier or repeats. Finalize checks
+// a scope other than "instance" or "schema"; a field name that is not an
+// identifier or repeats; and a Package that is not an npm package name.
+// Finalize checks
 // what needs the whole registry: requires and conflicts name registered
 // behaviors, and each operation's invocation policy is a value of the
 // registry's policy.
@@ -145,10 +157,13 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	if err := checkBehaviorName(decl.Name, spec.Extension); err != nil {
 		return err
 	}
+	if spec.Package != "" && (len(spec.Package) > 214 || !npmPackageName.MatchString(spec.Package)) {
+		return fmt.Errorf("registry: behavior %s package %q is not an npm package name", decl.Name, spec.Package)
+	}
 	if _, dup := r.behaviors[decl.Name]; dup {
 		return fmt.Errorf("registry: behavior %q is already registered", decl.Name)
 	}
-	b := Behavior{BehaviorDeclaration: decl, Extension: spec.Extension}
+	b := Behavior{BehaviorDeclaration: decl, Extension: spec.Extension, Package: spec.Package}
 	if len(decl.ConfigSchema) > 0 {
 		compiled, err := compileSchema(decl.ConfigSchema, "superschematic://behaviors/"+decl.Name+"/config.json")
 		if err != nil {

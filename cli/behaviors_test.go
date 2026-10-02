@@ -55,7 +55,7 @@ func TestBehaviorsThroughTheCommands(t *testing.T) {
 	require.ErrorContains(t, err, "generator: types does not render behaviors yet: type Item composes behavior acme.Stock")
 
 	_, err = runCommandWith(t, nil, "build", service, "--emit-ir", "--out", t.TempDir())
-	require.ErrorContains(t, err, `behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Comments, Dependencies, Links, Reactions, Revisions, Rollups, Search, Workflow)`)
+	require.ErrorContains(t, err, `behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Assignment, Comments, Dependencies, Lease, Links, Queue, Reactions, Revisions, Rollups, Search, Workflow)`)
 
 	yamlOut, err := runCommandWith(t, acme, "format", "--to=yaml", "--stdout", filepath.Join(service, "src/item.schema.json"))
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestBehaviorsThroughTheCommands(t *testing.T) {
 		} `json:"$defs"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(schemaOut), &def))
-	assert.Equal(t, []string{"Comments", "Dependencies", "Links", "Reactions", "Revisions", "Rollups", "Search", "Workflow", "acme.Audited", "acme.Stock"}, def.Defs.BehaviorRef.Properties.Name.Enum)
+	assert.Equal(t, []string{"Assignment", "Comments", "Dependencies", "Lease", "Links", "Queue", "Reactions", "Revisions", "Rollups", "Search", "Workflow", "acme.Audited", "acme.Stock"}, def.Defs.BehaviorRef.Properties.Name.Enum)
 	compileSchema(t, []byte(schemaOut), "superschematic://schema-file.json")
 }
 
@@ -170,7 +170,7 @@ func TestBehaviorsCommand_Extension(t *testing.T) {
 	assert.Len(t, files, 2)
 
 	_, err = runCommandWith(t, acme, "behaviors", "--out", out, "--extension", "shop", "--check")
-	require.EqualError(t, err, `behaviors: extension "shop" registers no behavior in this binary (registered: Comments (core), Dependencies (core), Links (core), Reactions (core), Revisions (core), Rollups (core), Search (core), Workflow (core), acme.Audited (extension acme), acme.Stock (extension acme))`)
+	require.EqualError(t, err, `behaviors: extension "shop" registers no behavior in this binary (registered: Assignment (core), Comments (core), Dependencies (core), Lease (core), Links (core), Queue (core), Reactions (core), Revisions (core), Rollups (core), Search (core), Workflow (core), acme.Audited (extension acme), acme.Stock (extension acme))`)
 
 	_, err = runCommandWith(t, acme, "behaviors", "--out", out, "--extension", "acme", "--check")
 	require.NoError(t, err)
@@ -178,10 +178,11 @@ func TestBehaviorsCommand_Extension(t *testing.T) {
 	core := filepath.Join(t.TempDir(), "core")
 	log, err := runCommandWith(t, nil, "behaviors", "--out", core)
 	require.NoError(t, err)
-	assert.Equal(t, "behaviors: 8 declaration(s) in "+core+"\n", log)
+	assert.Equal(t, "behaviors: 11 declaration(s) in "+core+"\n", log)
 	written, err := behaviorFiles(core)
 	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{"Comments.behavior.json", "Dependencies.behavior.json", "Links.behavior.json", "Reactions.behavior.json", "Revisions.behavior.json", "Rollups.behavior.json", "Search.behavior.json", "Workflow.behavior.json"}, sortedKeys(written))
+	assert.ElementsMatch(t, []string{"Assignment.behavior.json", "Comments.behavior.json", "Dependencies.behavior.json", "Lease.behavior.json", "Links.behavior.json",
+		"Queue.behavior.json", "Reactions.behavior.json", "Revisions.behavior.json", "Rollups.behavior.json", "Search.behavior.json", "Workflow.behavior.json"}, sortedKeys(written))
 	_, err = runCommandWith(t, nil, "behaviors", "--out", out, "--check")
 	require.ErrorContains(t, err, "acme.Audited.behavior.json is no registered behavior's declaration")
 
@@ -189,11 +190,50 @@ func TestBehaviorsCommand_Extension(t *testing.T) {
 	require.ErrorContains(t, err, `required flag(s) "out" not set`)
 }
 
+// --package keeps the behaviors one npm package implements: the core's
+// split between the engine and the work-queue package, each of which gets
+// only its own, and --check holds each directory to its package. With
+// --extension too, a behavior must match both. A package that implements
+// nothing the binary registers is refused, naming the packages there are.
+func TestBehaviorsCommand_Package(t *testing.T) {
+	engine := filepath.Join(t.TempDir(), "engine")
+	log, err := runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine", "--out", engine)
+	require.NoError(t, err)
+	assert.Equal(t, "behaviors: 8 declaration(s) in "+engine+"\n", log)
+	files, err := behaviorFiles(engine)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Comments.behavior.json", "Dependencies.behavior.json", "Links.behavior.json", "Reactions.behavior.json",
+		"Revisions.behavior.json", "Rollups.behavior.json", "Search.behavior.json", "Workflow.behavior.json"}, sortedKeys(files))
+
+	workqueue := filepath.Join(t.TempDir(), "workqueue")
+	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine-workqueue", "--out", workqueue)
+	require.NoError(t, err)
+	files, err = behaviorFiles(workqueue)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Assignment.behavior.json", "Lease.behavior.json", "Queue.behavior.json"}, sortedKeys(files))
+
+	// Each directory is current for its own package and stale for the other.
+	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine-workqueue", "--out", workqueue, "--check")
+	require.NoError(t, err)
+	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine", "--out", workqueue, "--check")
+	require.EqualError(t, err, "behaviors: "+workqueue+": Comments.behavior.json is missing; Dependencies.behavior.json is missing; Links.behavior.json is missing; "+
+		"Reactions.behavior.json is missing; Revisions.behavior.json is missing; Rollups.behavior.json is missing; Search.behavior.json is missing; "+
+		"Workflow.behavior.json is missing; Assignment.behavior.json is no registered behavior's declaration; Lease.behavior.json is no registered behavior's declaration; "+
+		"Queue.behavior.json is no registered behavior's declaration; run: superschematic behaviors --out "+workqueue+" --package @superschematic/engine")
+
+	_, err = runCommandWith(t, nil, "behaviors", "--package", "@acme/behaviors", "--out", t.TempDir())
+	require.EqualError(t, err, `behaviors: no behavior this binary registers is implemented by package "@acme/behaviors" (packages: @superschematic/engine, @superschematic/engine-workqueue)`)
+	acme := []registry.Extension{registrytest.Acme{}}
+	_, err = runCommandWith(t, acme, "behaviors", "--extension", "acme", "--package", "@superschematic/engine", "--out", t.TempDir())
+	require.EqualError(t, err, `behaviors: no behavior this binary registers for extension acme is implemented by package "@superschematic/engine" (packages: @superschematic/engine, @superschematic/engine-workqueue)`)
+}
+
 // D10 for behaviors: the binary with no extension linked loads a schema
 // that composes the core's behaviors, in the data form an engine reads and
 // in TypeScript, to the same IR; refuses a config the declaration's schema
 // rejects; admits exactly the core's names in json-schema; and writes the
-// copies @superschematic/engine carries, which are current.
+// copies @superschematic/engine and @superschematic/engine-workqueue
+// carry, which are current.
 func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	type ir struct {
 		Types map[string]struct {
@@ -243,7 +283,7 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 		} `json:"$defs"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(schemaOut), &def))
-	assert.Equal(t, []string{"Comments", "Dependencies", "Links", "Reactions", "Revisions", "Rollups", "Search", "Workflow"}, def.Defs.BehaviorRef.Properties.Name.Enum)
+	assert.Equal(t, []string{"Assignment", "Comments", "Dependencies", "Lease", "Links", "Queue", "Reactions", "Revisions", "Rollups", "Search", "Workflow"}, def.Defs.BehaviorRef.Properties.Name.Enum)
 
 	// Dependencies and Links, whose configs name other schemas, load in both
 	// forms to the same IR; the loader resolves none of those names.
@@ -282,6 +322,23 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	assert.JSONEq(t, `{"rules": [{"when": {"enters": "doing"}, "then": {"link": "parent", "transition": "doing"}}, {"when": {"allTerminal": {"schema": "projects", "link": "parent"}}, "then": {"transition": "done"}}]}`, string(reactionsJSON.Behaviors[2].Config))
 	assert.Equal(t, reactionsJSON, load(filepath.Join(tsreaderTestdata, "fixture-reactions")).Types["Project"])
 
-	_, err = runCommandWith(t, nil, "behaviors", "--out", filepath.Join("..", "runtime", "engine", "typescript", "src", "behaviors", "core", "declarations"), "--check")
+	// Lease, Assignment and Queue, whose configs name the type's fields
+	// and Workflow states, load in both forms to the same IR; the engine
+	// checks those names when the schema is defined.
+	jobsJSON := load(filepath.Join(loaderTestdata, "fixture-workqueue-json")).Types["Job"]
+	require.Len(t, jobsJSON.Behaviors, 4)
+	assert.Equal(t, []string{"Workflow", "Lease", "Assignment", "Queue"},
+		[]string{jobsJSON.Behaviors[0].Name, jobsJSON.Behaviors[1].Name, jobsJSON.Behaviors[2].Name, jobsJSON.Behaviors[3].Name})
+	assert.JSONEq(t, `{"ttlMs": 30000, "maxHoldField": "timeLimitMs", "onExpiry": {"transition": "queued", "from": ["running"]}, "maxExpiries": 3,
+		"escalate": {"transition": "failed", "from": ["running"]}, "overridePermission": "jobs.override"}`, string(jobsJSON.Behaviors[1].Config))
+	assert.JSONEq(t, `{"permission": "jobs.assign"}`, string(jobsJSON.Behaviors[2].Config))
+	assert.JSONEq(t, `{"claim": {"from": ["queued"], "to": "running"}, "priorityField": "priority", "match": ["topic"]}`, string(jobsJSON.Behaviors[3].Config))
+	assert.Equal(t, jobsJSON, load(filepath.Join(tsreaderTestdata, "fixture-workqueue")).Types["Job"])
+
+	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine",
+		"--out", filepath.Join("..", "runtime", "engine", "typescript", "src", "behaviors", "core", "declarations"), "--check")
 	require.NoError(t, err, "the engine's copies of the core declarations are stale; run make behaviors")
+	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine-workqueue",
+		"--out", filepath.Join("..", "runtime", "engine-workqueue", "typescript", "src", "declarations"), "--check")
+	require.NoError(t, err, "the work-queue package's copies of the core declarations are stale; run make behaviors")
 }

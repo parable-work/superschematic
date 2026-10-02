@@ -10,11 +10,15 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Comments", "Dependencies", "Links", "Reactions", "Revisions", "Rollups", "Search", "Workflow"}
+var coreBehaviorNames = []string{"Assignment", "Comments", "Dependencies", "Lease", "Links", "Queue", "Reactions", "Revisions", "Rollups", "Search", "Workflow"}
 
-// A registry with no extension declares the behaviors the engine
-// implements, as the core's, under bare names, and holds each config to
-// its schema.
+// workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
+// implements; the engine implements the rest.
+var workQueueBehaviorNames = []string{"Assignment", "Lease", "Queue"}
+
+// A registry with no extension declares the behaviors the engine and the
+// work-queue package implement, as the core's, under bare names, each with
+// the package that implements it, and holds each config to its schema.
 func TestCoreBehaviors(t *testing.T) {
 	reg := New(naming.Default())
 	finalizeWithCoreGenerators(t, reg)
@@ -22,8 +26,16 @@ func TestCoreBehaviors(t *testing.T) {
 		t.Fatalf("BehaviorNames() = %v, want %v", got, coreBehaviorNames)
 	}
 	for _, name := range coreBehaviorNames {
-		if b, _ := reg.Behavior(name); b.Extension != "" {
+		b, _ := reg.Behavior(name)
+		if b.Extension != "" {
 			t.Errorf("%s is registered by %q, want the core", name, b.Extension)
+		}
+		want := EnginePackage
+		if slices.Contains(workQueueBehaviorNames, name) {
+			want = WorkQueuePackage
+		}
+		if b.Package != want {
+			t.Errorf("%s is implemented by %q, want %q", name, b.Package, want)
 		}
 	}
 	workflow, _ := reg.Behavior("Workflow")
@@ -61,6 +73,23 @@ func TestCoreBehaviors(t *testing.T) {
 	if len(search.Operations) != 1 || search.Operations[0].Name != "search" || search.Operations[0].Scope != OperationScopeSchema ||
 		search.Operations[0].Writes || len(search.Fields) != 0 {
 		t.Errorf("Search = %+v, want one read-only schema-level operation, search, and no field", search)
+	}
+	lease, _ := reg.Behavior("Lease")
+	assignment, _ := reg.Behavior("Assignment")
+	queue, _ := reg.Behavior("Queue")
+	if lease.ConfigRequired() || assignment.ConfigRequired() || !queue.ConfigRequired() {
+		t.Errorf("ConfigRequired: Lease %v, Assignment %v, Queue %v; want false, false, true", lease.ConfigRequired(), assignment.ConfigRequired(), queue.ConfigRequired())
+	}
+	if len(lease.Requires) != 0 || len(assignment.Requires) != 0 || !slices.Equal(queue.Requires, []string{"Workflow", "Lease"}) {
+		t.Errorf("requires: Lease %v, Assignment %v, Queue %v; want none, none and [Workflow Lease]", lease.Requires, assignment.Requires, queue.Requires)
+	}
+	// Every work-queue operation writes; claimNext alone is schema-level.
+	for _, b := range []Behavior{lease, assignment, queue} {
+		for _, op := range b.Operations {
+			if !op.Writes || (op.Scope == OperationScopeSchema) != (op.Name == "claimNext") {
+				t.Errorf("%s.%s: writes %v, scope %q", b.Name, op.Name, op.Writes, op.Scope)
+			}
+		}
 	}
 
 	for _, test := range []struct {
@@ -145,6 +174,34 @@ func TestCoreBehaviors(t *testing.T) {
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "the tasks", "link": "project"}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"allTerminal": {"schema": "tasks", "link": "Project"}}, "then": {"transition": "done"}}]}`, "behavior Reactions config: "},
 		{reactions, `{"rules": [{"when": {"enters": "doing"}, "then": {"transition": "done", "invoke": "comment"}}]}`, "behavior Reactions config: "},
+		{lease, ``, ""},
+		{lease, `{"ttlMs": 30000, "heartbeatMs": 10000, "maxHoldMs": 3600000, "maxHoldField": "timeLimitMs",
+			"onExpiry": {"transition": "queued", "from": ["running"]}, "maxExpiries": 3, "escalate": {"transition": "failed", "from": ["running"]},
+			"exempt": ["Comments.comment", "acme.Rating.rate"], "acquirePermission": "jobs.work", "overridePermission": "jobs.admin", "directPermission": "jobs.direct"}`, ""},
+		{lease, `{"ttlMs": 999}`, "behavior Lease config: "},
+		{lease, `{"heartbeatMs": 0}`, "behavior Lease config: "},
+		{lease, `{"ttlMs": 1500.5}`, "behavior Lease config: "},
+		{lease, `{"maxHoldMs": 10}`, "behavior Lease config: "},
+		{lease, `{"onExpiry": {"transition": "queued"}}`, "behavior Lease config: "},
+		{lease, `{"onExpiry": {"transition": "queued", "from": []}}`, "behavior Lease config: "},
+		{lease, `{"onExpiry": {"transition": "queued", "from": ["running"], "release": true}}`, "behavior Lease config: "},
+		{lease, `{"maxExpiries": 0}`, "behavior Lease config: "},
+		{lease, `{"exempt": ["comment"]}`, "behavior Lease config: "},
+		{lease, `{"exempt": ["Comments.Comment"]}`, "behavior Lease config: "},
+		{lease, `{"overridePermission": ""}`, "behavior Lease config: "},
+		{lease, `{"fenceExemptOps": ["comment"]}`, "behavior Lease config: "},
+		{assignment, ``, ""},
+		{assignment, `{"permission": "jobs.assign"}`, ""},
+		{assignment, `{"permission": ""}`, "behavior Assignment config: "},
+		{assignment, `{"actorKinds": ["person"]}`, "behavior Assignment config: "},
+		{queue, `{"claim": {"from": ["queued"], "to": "running"}}`, ""},
+		{queue, `{"claim": {"from": ["queued", "paused"], "to": "running"}, "priorityField": "priority", "match": ["topic"], "maxCandidates": 50}`, ""},
+		{queue, ``, "behavior Queue config: "},
+		{queue, `{"claim": {"from": [], "to": "running"}}`, "behavior Queue config: "},
+		{queue, `{"claim": {"from": ["queued"]}}`, "behavior Queue config: "},
+		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "maxCandidates": 0}`, "behavior Queue config: "},
+		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "maxCandidates": 1001}`, "behavior Queue config: "},
+		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "kinds": ["build"]}`, "behavior Queue config: "},
 	} {
 		err := test.behavior.ValidateConfig(json.RawMessage(test.config))
 		switch {

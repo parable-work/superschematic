@@ -26,6 +26,7 @@ type behaviorsFlags struct {
 	out        string
 	check      bool
 	extension  string
+	pkg        string
 	namingPath string
 }
 
@@ -36,7 +37,7 @@ type behaviorsFlags struct {
 func newBehaviorsCmd(a *app) *cobra.Command {
 	flags := &behaviorsFlags{}
 	cmd := &cobra.Command{
-		Use:   "behaviors --out <dir>",
+		Use:   "behaviors --out <dir> [--package <npm package>] [--extension <name>]",
 		Short: "Write each registered behavior's declaration for the package that implements it",
 		Long: `behaviors writes the declaration of every behavior this binary registers,
 the JSON file its Go package embeds, into a directory of the npm package
@@ -47,8 +48,11 @@ declaration.
 A copy is canonical: the declaration's keys in their documented order,
 each JSON Schema's object keys sorted, two-space indents and a final
 newline, whatever the source file's layout. Other *.behavior.json files in
-the directory are removed. With --extension, only the behaviors that
-extension registered are written.
+the directory are removed. With --package, only the behaviors that npm
+package implements are written: the core's behaviors are implemented by
+@superschematic/engine and @superschematic/engine-workqueue, and each
+package carries only its own. With --extension, only the behaviors that
+extension registered are written. Given both, a behavior must match both.
 
 With --check nothing is written: the command fails, naming each file, when
 a copy differs, is missing, or has no registered behavior. CI runs it so a
@@ -56,6 +60,8 @@ changed declaration cannot reach the compiler without its implementation's
 copy.
 
 Examples:
+  superschematic behaviors --package @superschematic/engine --out runtime/engine/typescript/src/behaviors/core/declarations
+  superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/typescript/src/declarations --check
   acme-schematic behaviors --extension acme --out packages/behaviors/declarations
   acme-schematic behaviors --extension acme --out packages/behaviors/declarations --check`,
 		Args: cobra.NoArgs,
@@ -66,6 +72,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.out, "out", "", "directory the <name>.behavior.json files go in (required)")
 	cmd.Flags().BoolVar(&flags.check, "check", false, "write nothing; fail when the directory's copies are not what would be written")
 	cmd.Flags().StringVar(&flags.extension, "extension", "", "only the behaviors this extension registered (its Name())")
+	cmd.Flags().StringVar(&flags.pkg, "package", "", "only the behaviors this npm package implements (@superschematic/engine, @superschematic/engine-workqueue)")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: built-in names; behaviors has no service directory to find superschematic.toml from)")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd
@@ -84,8 +91,13 @@ func runBehaviors(cmd *cobra.Command, a *app, flags *behaviorsFlags) error {
 		return err
 	}
 	want := map[string][]byte{}
+	extensionHas := false
 	for _, behavior := range reg.Behaviors() {
 		if flags.extension != "" && behavior.Extension != flags.extension {
+			continue
+		}
+		extensionHas = true
+		if flags.pkg != "" && behavior.Package != flags.pkg {
 			continue
 		}
 		data, err := behaviorDeclarationFile(behavior.BehaviorDeclaration)
@@ -94,8 +106,11 @@ func runBehaviors(cmd *cobra.Command, a *app, flags *behaviorsFlags) error {
 		}
 		want[behavior.Name+behaviorFileSuffix] = data
 	}
-	if flags.extension != "" && len(want) == 0 {
+	if flags.extension != "" && !extensionHas {
 		return fmt.Errorf("behaviors: extension %q registers no behavior in this binary (registered: %s)", flags.extension, registeredList(reg))
+	}
+	if flags.pkg != "" && len(want) == 0 {
+		return fmt.Errorf("behaviors: no behavior this binary registers%s is implemented by package %q (packages: %s)", extensionClause(flags.extension), flags.pkg, packageList(reg))
 	}
 	have, err := behaviorFiles(flags.out)
 	if err != nil {
@@ -147,6 +162,9 @@ func checkBehaviorFiles(cmd *cobra.Command, flags *behaviorsFlags, want, have ma
 		return nil
 	}
 	rerun := cmd.Root().Name() + " behaviors --out " + flags.out
+	if flags.pkg != "" {
+		rerun += " --package " + flags.pkg
+	}
 	if flags.extension != "" {
 		rerun += " --extension " + flags.extension
 	}
@@ -241,6 +259,30 @@ func registeredList(reg *registry.Registry) string {
 		return "none"
 	}
 	return strings.Join(owned, ", ")
+}
+
+// packageList names the npm packages the registered behaviors name, sorted.
+func packageList(reg *registry.Registry) string {
+	seen := map[string]bool{}
+	var packages []string
+	for _, behavior := range reg.Behaviors() {
+		if behavior.Package != "" && !seen[behavior.Package] {
+			seen[behavior.Package] = true
+			packages = append(packages, behavior.Package)
+		}
+	}
+	if len(packages) == 0 {
+		return "no behavior names one"
+	}
+	sort.Strings(packages)
+	return strings.Join(packages, ", ")
+}
+
+func extensionClause(extension string) string {
+	if extension == "" {
+		return ""
+	}
+	return " for extension " + extension
 }
 
 func sortedKeys(m map[string][]byte) []string {
