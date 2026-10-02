@@ -312,7 +312,7 @@ assert calls[-1][3] == {"rank": 4, "score": 0.75, "ranks": [5]}, calls[-1]
 # A string where the route parses a number fails before any request.
 before = len(calls)
 for call, field in [
-    (lambda: sdk.shelf.ranked_items(shelf_id, 3, ranks=["1"]), "ranks"),
+    (lambda: sdk.shelf.ranked_items(shelf_id, 3, ranks=["1"]), "ranks[0]"),
     (lambda: sdk.shelf.ranked_items(shelf_id, 3, max_score="0.5"), "max_score"),
     (lambda: sdk.shelf.rank_item(shelf_id, "4"), "rank"),
 ]:

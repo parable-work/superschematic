@@ -13,29 +13,38 @@ Each function gets a context for its own behavior (behavior.ts). A guard
 and a field reader get a view: read-only columns and SQL, reads of other
 instances and their read-only operations. initialize, afterChange and a
 writing operation get a writable context, call(), references, and invoke
-of writing operations on other instances; a read-only operation gets one
-whose writes refuse and whose call() and invoke reach only read-only
-operations. An operation's context also has update(), which changes the
-instance's own fields with instances.update's checks and every guard,
-and validateUpdate(). A called operation runs in a savepoint, so a failure
-the caller catches leaves nothing of it behind.
+of writing operations on other instances and create; a read-only
+operation gets one whose writes refuse and whose call() and invoke reach
+only read-only operations. An operation's context also has update(),
+which changes the instance's own fields with instances.update's checks
+and every guard, and validateUpdate(). A called operation runs in a
+savepoint, so a failure the caller catches leaves nothing of it behind.
 
 What a behavior reaches beyond its instance goes through the Reach, which
-the instance store implements: reads, invokes and references there ask
-the access policy as the chain's principal (D16, amended). A schema-level
+the instance store implements: reads, invokes, creates and references
+there ask the access policy as the chain's principal (D16, amended), and
+so does each statement of the behavior's SQL that names the relation over
+the schema's instances (sql.instances(), storage.ts). A schema-level
 operation runs in a SchemaExecution, with the same reach and no instance.
+The runner's work, a reaction or a schedule run, runs in a WorkExecution:
+a schema-level context whose invokes and creates write, as the runner's
+principal, on a chain whose cause the events it writes record.
 */
 
 import type { PermissionMatcher } from '@superschematic/http-runtime';
 
 import type { Principal } from '../access.js';
 import { BehaviorError, BehaviorVetoError, EngineError, InstanceValidationError, OperationParamsError, type ValidationIssue } from '../errors.js';
+import type { EngineEvent, EventCause } from '../events/log.js';
 import type { InstanceRecord } from '../instances/store.js';
 import { isPlainObject, jsonEqual, mergePatch, setMember } from '../instances/patch.js';
 import { readOnlyIssue } from '../registry/validator.js';
 import type { SqlValue } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
+import type { SqlMode } from './sql.js';
 import type {
+  BehaviorReactions,
+  BehaviorSchedule,
   FrozenJSON,
   GuardRequest,
   InstanceChange,
@@ -46,17 +55,20 @@ import type {
   OperationHandler,
   ReadOptions,
   Reference,
+  ReactionContext,
   ReferenceContext,
   References,
+  ScheduleContext,
   SchemaContext,
   SchemaOperationHandler,
   Schemas,
+  WorkContext,
   WritableColumns,
 } from './behavior.js';
 import type { BoundBehavior, Composition } from './composition.js';
 import { deepFreeze, jsonCopy } from './json.js';
 import { BehaviorRegistry, type OperationSpec } from './registry.js';
-import { BehaviorSql, DeletedColumns, InstanceColumns, synchronous } from './storage.js';
+import { BehaviorSql, DeletedColumns, InstanceColumns, synchronous, type InstanceRelation } from './storage.js';
 
 /** How deep call(), invokes and reads of other instances may nest together; deeper is a cycle. */
 export const MAX_CALL_DEPTH = 16;
@@ -81,8 +93,10 @@ export interface Runtime {
 
 /**
  * One engine call across every instance it reaches: who acts, in which
- * namespace, at what time, how deep calls nest, and which instances have a
- * write running. The instance store makes one per public call.
+ * namespace, at what time, how deep calls nest, which instances have a
+ * write running, and for the runner's work, the cause the events it
+ * writes record. The instance store makes one per public call, and the
+ * runner one per event and per schedule run.
  */
 export class Chain {
   private depth = 0;
@@ -94,7 +108,9 @@ export class Chain {
     /** The clock's time for the whole call. */
     readonly now: number,
     /** Answers a context's can(): whether the principal's permissions cover a required one. */
-    readonly permissions: PermissionMatcher
+    readonly permissions: PermissionMatcher,
+    /** What caused the call, for the runner's work; undefined for a caller's. */
+    readonly cause?: EventCause
   ) {}
 
   /** nest runs fn one level deeper, refusing past MAX_CALL_DEPTH with a BehaviorError of behavior. */
@@ -153,6 +169,16 @@ export interface Reach {
   invoke(chain: Chain, from: string, schema: string, id: string, operation: string, params: unknown, writes: boolean): unknown;
   /** Invokes a schema-level operation as instances.invokeSchema does, inside the chain's transaction; asks write or read. */
   invokeSchema(chain: Chain, from: string, schema: string, operation: string, params: unknown, writes: boolean): unknown;
+  /**
+   * Creates an instance as instances.create does, inside the chain's
+   * transaction, in a savepoint; asks write. data is a JSON object; a
+   * read (writes false) is refused.
+   */
+  create(chain: Chain, from: string, schema: string, data: Record<string, unknown>, id: string | undefined, writes: boolean): InstanceRecord;
+  /** Asks read on a schema, as a read of its instances does; throws forbidden on a refusal. */
+  allowRead(chain: Chain, schema: string): void;
+  /** The instance of an event as the log had it just before the event; asks read on its schema. */
+  before(chain: Chain, from: string, event: EngineEvent): FrozenJSON | undefined;
   /** The config of a behavior a schema's live version composes, as the schema holds it; asks read unless the schema is own. */
   config(chain: Chain, own: string, schema: string, behavior: string): unknown;
   /** Whether the principal may read a schema. */
@@ -294,12 +320,8 @@ export class Execution {
    */
   invoke(operation: OperationSpec, params: FrozenJSON, caller?: string): unknown {
     return this.chain.nest(operation.behavior.name, `operation ${operation.name}`, () => {
-      this.guard(
-        caller === undefined
-          ? { kind: 'operation', behavior: operation.behavior.name, operation: operation.name, params }
-          : { kind: 'operation', behavior: operation.behavior.name, operation: operation.name, params, caller },
-        operation.writes
-      );
+      const request = { kind: 'operation', behavior: operation.behavior.name, operation: operation.name, params, writes: operation.writes } as const;
+      this.guard(caller === undefined ? request : { ...request, caller }, operation.writes);
       const bound = this.composition.bound(operation.behavior.name) as BoundBehavior;
       const result: unknown = (operation.handler as OperationHandler<unknown>).call(
         bound.behavior.implementation.operations,
@@ -417,7 +439,7 @@ export class Execution {
       ...scopeMembers(this.chain, this.reach, bound, this.target.schema, this.target.version, invokeWrites),
       id: this.target.id,
       columns: this.columns(bound, 'reading'),
-      sql: new BehaviorSql(this.storage, bound.behavior.name, this.prefix(bound), 'read'),
+      sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.target.schema, 'read'),
       references: Object.freeze({ list: () => this.reach.listReferences(this.chain, source) }),
     };
   }
@@ -444,7 +466,7 @@ export class Execution {
       ...scopeMembers(this.chain, this.reach, bound, this.target.schema, this.target.version, writable),
       id: this.target.id,
       columns: this.columns(bound, writable ? 'writing' : 'a read-only operation'),
-      sql: new BehaviorSql(this.storage, bound.behavior.name, this.prefix(bound), writable ? 'write' : 'read'),
+      sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.target.schema, writable ? 'write' : 'read'),
       references: this.references(bound, writable),
       call: (behavior: string, operation: string, params?: FrozenJSON) => this.call(bound, writable, behavior, operation, params),
     };
@@ -500,6 +522,53 @@ export class Execution {
 }
 
 /**
+ * The runner's work on one schema (D16, amended): a reaction to one event
+ * or one run of a schedule, for one behavior the live version composes,
+ * with no instance and no event of its own. Its context is a schema-level
+ * one whose invokes run writing operations; the chain carries the cause
+ * their events record.
+ */
+export class WorkExecution {
+  constructor(
+    private readonly storage: Storage,
+    private readonly runtime: Runtime,
+    private readonly chain: Chain,
+    private readonly reach: Reach,
+    private readonly schema: string,
+    private readonly version: number
+  ) {}
+
+  /** react hands one event to the behavior's reactions. */
+  react(bound: BoundBehavior, reactions: BehaviorReactions<unknown>, event: EngineEvent): void {
+    const name = bound.behavior.name;
+    const context: ReactionContext<unknown> = Object.freeze({
+      ...this.members(bound),
+      before: (of: EngineEvent) => this.reach.before(this.chain, name, of),
+    });
+    const frozen = deepFreeze(JSON.parse(JSON.stringify(event)) as EngineEvent);
+    this.chain.nest(name, 'react', () => {
+      synchronous(name, 'react', reactions.react.call(reactions, context, frozen));
+    });
+  }
+
+  /** schedule runs one schedule of the behavior once. */
+  schedule(bound: BoundBehavior, schedule: string, spec: BehaviorSchedule<unknown>, previous: number | undefined): void {
+    const name = bound.behavior.name;
+    const context: ScheduleContext<unknown> = Object.freeze({ ...this.members(bound), schedule, previous });
+    this.chain.nest(name, `schedule ${schedule}`, () => {
+      synchronous(name, `schedule ${schedule}`, spec.run.call(spec, context));
+    });
+  }
+
+  private members(bound: BoundBehavior): WorkContext<unknown> {
+    return {
+      ...scopeMembers(this.chain, this.reach, bound, this.schema, this.version, true),
+      sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.schema, 'read'),
+    };
+  }
+}
+
+/**
  * A schema-level operation's run: the operation's behavior on the schema
  * as a whole, with no instance, no instance guard and no event of its own.
  */
@@ -519,7 +588,7 @@ export class SchemaExecution {
       const bound = this.runtime.composition.bound(operation.behavior.name) as BoundBehavior;
       const context: SchemaContext<unknown> = Object.freeze({
         ...scopeMembers(this.chain, this.reach, bound, this.schema, this.version, operation.writes),
-        sql: new BehaviorSql(this.storage, bound.behavior.name, prefixOf(this.runtime.prefixes, bound), 'read'),
+        sql: behaviorSql(this.storage, this.runtime, this.chain, this.reach, bound, this.schema, 'read'),
       });
       const result: unknown = (operation.handler as SchemaOperationHandler<unknown>).call(
         bound.behavior.implementation.schemaOperations,
@@ -529,6 +598,20 @@ export class SchemaExecution {
       return checkResult(operation, result);
     });
   }
+}
+
+// behaviorSql is the SQL a behavior's function gets in a call: its own
+// tables, in a mode, and its own columns across the instances of the
+// call's schema in the chain's namespace, each statement that names them
+// asking read on the schema as the chain's principal.
+function behaviorSql(storage: Storage, runtime: Runtime, chain: Chain, reach: Reach, bound: BoundBehavior, schema: string, mode: SqlMode): BehaviorSql {
+  const relation: InstanceRelation = {
+    namespace: chain.namespace,
+    schema,
+    columns: bound.behavior.columns,
+    allow: () => reach.allowRead(chain, schema),
+  };
+  return new BehaviorSql(storage, bound.behavior.name, prefixOf(runtime.prefixes, bound), mode, relation);
 }
 
 // scopeMembers are what every function of a behavior gets: the behavior,
@@ -581,6 +664,24 @@ function instancesOf(chain: Chain, reach: Reach, behavior: string, invokeWrites:
       checkName(behavior, 'instances.invokeSchema', 'schema', schema);
       checkName(behavior, 'instances.invokeSchema', 'operation', operation);
       return reach.invokeSchema(chain, behavior, schema, operation, params ?? {}, invokeWrites);
+    },
+    create: (schema: string, data: FrozenJSON, options?: { readonly id?: string }) => {
+      checkName(behavior, 'instances.create', 'schema', schema);
+      if (options !== undefined && (typeof options !== 'object' || options === null)) {
+        throw new BehaviorError(behavior, 'instances.create takes options { id? }');
+      }
+      if (options?.id !== undefined) {
+        checkName(behavior, 'instances.create', 'id', options.id);
+      }
+      const copied = jsonCopy(data);
+      if (!('value' in copied)) {
+        throw new BehaviorError(behavior, `instances.create: the data is not JSON${copied.path ? ` at ${copied.path}` : ''}: ${copied.problem}`);
+      }
+      if (!isPlainObject(copied.value)) {
+        throw new BehaviorError(behavior, "instances.create takes the instance's own fields: a JSON object");
+      }
+      const fields = copied.value;
+      return chain.nest(behavior, 'instances.create', () => reach.create(chain, behavior, schema, fields, options?.id, invokeWrites));
     },
   });
 }

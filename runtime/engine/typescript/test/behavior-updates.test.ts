@@ -170,7 +170,7 @@ for (const driver of drivers) {
       // The handler's context reads the fields as update() left them.
       assert.deepEqual(seen.data, [{ title: 'Table', note: 'oak' }]);
       assert.deepEqual(seen.guards, [
-        { kind: 'operation', behavior: 'test.Editor', operation: 'rename', params: { title: 'Table' } },
+        { kind: 'operation', behavior: 'test.Editor', operation: 'rename', params: { title: 'Table' }, writes: true },
         { kind: 'update', patch: { title: 'Table' }, after: { title: 'Table', note: 'oak' }, caller: 'test.Editor' },
       ]);
       assert.deepEqual(seen.changes, [

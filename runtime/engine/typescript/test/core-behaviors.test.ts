@@ -3,13 +3,15 @@
 // core binary builds in the CLI smoke: fixture-behaviors-json, whose type
 // composes Workflow, Comments and Revisions, fixture-cross-instance-json,
 // whose tasks wait on tasks and documents and link to both and to a
-// project, and fixture-rollups-json, whose projects roll their tasks up.
+// project, fixture-rollups-json, whose projects roll their tasks up,
+// fixture-search-json, whose notes are searched, and
+// fixture-reactions-json, whose projects start and finish their parent.
 // They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import { EngineError, defineBehavior, type Principal } from '../dist/index.js';
-import { alice, cleanup, documentsDocument, drivers, openTestEngine, projectsDocument, tasksDocument } from './helpers.ts';
+import { alice, cleanup, documentsDocument, drivers, notesDocument, openTestEngine, projectTreeDocument, projectsDocument, tasksDocument } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -18,6 +20,7 @@ afterEach(cleanup);
 const documents = documentsDocument();
 const tasks = tasksDocument();
 const projects = projectsDocument();
+const notes = notesDocument();
 
 const writer: Principal = { subject: 'wes', permissions: [] };
 const reviewer: Principal = { subject: 'rae', permissions: ['documents.review'] };
@@ -27,11 +30,22 @@ for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Dependencies', 'Links', 'Revisions', 'Rollups', 'Workflow']);
+      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'Workflow']);
       assert.deepEqual(engine.behaviors.declaration('Workflow')?.fields, [{ name: 'status', description: 'The state the instance is in.' }]);
       const impostor = defineBehavior({ declaration: { name: 'Workflow' } });
       assert.throws(() => engine.behaviors.register(impostor), /behavior Workflow is already registered with this engine/);
       assert.throws(() => openTestEngine({ driver, behaviors: [impostor] }), /already registered/);
+    });
+
+    test('the core also declares the work-queue behaviors, which this engine runs only once a deployment registers their package', () => {
+      const engine = openTestEngine({ driver });
+      const document = JSON.parse(JSON.stringify(notes)) as { types: { Note: Record<string, unknown> } };
+      document.types.Note.behaviors = [{ name: 'Lease', config: { ttlMs: 30000 } }];
+      // The core meta-schema admits Lease, so the loader passes it; the
+      // engine has no implementation of it.
+      const refused = thrown(() => engine.schemas.define(alice, document));
+      assert.equal(refused.code, 'invalid_schema');
+      assert.match(refused.message, /behavior Lease on type Note: no implementation registered/);
     });
 
     test('it runs the document the core binary builds, with all three composed on one type', () => {
@@ -115,6 +129,28 @@ for (const driver of drivers) {
         commentCount: 2,
         revision: 3,
       });
+    });
+
+    test('it runs the notes document: its title and body are searched, the title weighing more', () => {
+      const engine = openTestEngine({ driver });
+      engine.schemas.define(alice, notes);
+      engine.schemas.publish(alice, 'notes');
+      assert.deepEqual(engine.schemas.behaviors(alice, 'notes'), [
+        { name: 'Search', config: { fields: ['title', 'body'], weights: { title: 3 } }, declaration: engine.behaviors.declaration('Search') },
+      ]);
+      engine.instances.create(writer, 'notes', { title: 'Standup', body: 'The release slips a week.' }, { id: 'n1' });
+      engine.instances.create(writer, 'notes', { title: 'Release plan', body: 'Dates and owners.' }, { id: 'n2' });
+      engine.instances.create(writer, 'notes', { title: 'Lunch', body: 'Tacos.' }, { id: 'n3' });
+      const found = engine.instances.invokeSchema(writer, 'notes', 'search', { query: 'release' }) as { items: Array<{ id: string; field: string }> };
+      assert.deepEqual(
+        found.items.map((hit) => [hit.id, hit.field]),
+        [
+          ['n2', 'title'],
+          ['n1', 'body'],
+        ]
+      );
+      engine.instances.delete(writer, 'notes', 'n2');
+      assert.deepEqual(engine.instances.invokeSchema(writer, 'notes', 'search', { query: 'release plan' }), { items: [], next: null });
     });
 
     test('it runs the tasks document beside the documents one: blockers of both schemas, and links to both', () => {
@@ -211,6 +247,38 @@ for (const driver of drivers) {
       const read = engine.instances.get(alice, 'projects', 'launch');
       assert.deepEqual([read?.seq, read?.data.rollups], [1, { tasks: 2, tasksByStatus: { done: 1, dropped: 1 }, tasksFinished: true }]);
       assert.deepEqual(engine.instances.invoke(writer, 'projects', 'launch', 'transition', { to: 'done' }), { from: 'active', to: 'done' });
+    });
+
+    test('it runs the project tree document: a project starts its parent, and the last to finish finishes it, after the commit', () => {
+      const runner: Principal = { subject: 'runner', permissions: [] };
+      const engine = openTestEngine({ driver, runner: { principal: runner } });
+      engine.schemas.define(alice, projectTreeDocument());
+      engine.schemas.publish(alice, 'projects');
+      for (const id of ['launch', 'design', 'build']) {
+        engine.instances.create(writer, 'projects', { title: id }, { id });
+      }
+      for (const id of ['design', 'build']) {
+        engine.instances.invoke(writer, 'projects', id, 'link', { name: 'parent', id: 'launch' });
+      }
+      const statuses = () => ['launch', 'design', 'build'].map((id) => engine.instances.get(alice, 'projects', id)?.data.status);
+
+      engine.instances.invoke(writer, 'projects', 'design', 'transition', { to: 'doing' });
+      assert.deepEqual(statuses(), ['todo', 'doing', 'todo']);
+      engine.runner.runDue();
+      assert.deepEqual(statuses(), ['doing', 'doing', 'todo']);
+      engine.instances.invoke(writer, 'projects', 'design', 'transition', { to: 'done' });
+      engine.instances.invoke(writer, 'projects', 'build', 'transition', { to: 'doing' });
+      engine.instances.invoke(writer, 'projects', 'build', 'transition', { to: 'done' });
+      engine.runner.runDue();
+      assert.deepEqual(statuses(), ['done', 'done', 'done']);
+      const launch = engine.events.read(alice, { schema: 'projects', instanceId: 'launch' }).events;
+      assert.deepEqual(
+        launch.slice(1).map((event) => [event.actor, (event.change as { params: unknown }).params, event.cause?.behavior, event.cause?.depth]),
+        [
+          ['runner', { to: 'doing' }, 'Reactions', 1],
+          ['runner', { to: 'done' }, 'Reactions', 1],
+        ]
+      );
     });
   });
 }

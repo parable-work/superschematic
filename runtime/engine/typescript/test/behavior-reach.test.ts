@@ -256,7 +256,7 @@ for (const driver of drivers) {
       engine.instances.invoke(alice, 'Item', 'i1', 'increment');
       assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'pokeRead', { schema: 'Item', id: 'i1', operation: 'history' }), [1]);
       const read = thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'pokeRead', { schema: 'Item', id: 'i1', operation: 'increment' }), BehaviorError);
-      assert.equal(read.message, 'behavior test.Reader: a read cannot invoke increment of Item, which writes; initialize, afterChange, afterReferenceChange and a writing operation can');
+      assert.equal(read.message, "behavior test.Reader: a read cannot invoke increment of Item, which writes; initialize, afterChange, afterReferenceChange, a writing operation and the runner's work can");
       assert.equal(engine.instances.invoke(alice, 'Note', 'n1', 'guarded', { schema: 'Item', id: 'i1', operation: 'history' }), 'ran');
       thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'guarded', { schema: 'Item', id: 'i1', operation: 'increment' }), BehaviorError);
       assert.equal(engine.instances.get(alice, 'Item', 'i1')?.data.count, 2);
@@ -474,7 +474,7 @@ for (const driver of drivers) {
       const read = thrown(() => engine.instances.invoke(alice, 'Note', 'n1', 'peekSchema', releaseAll), BehaviorError);
       assert.equal(
         read.message,
-        'behavior test.Reader: a read cannot invoke releaseAll of Note, which writes; initialize, afterChange, afterReferenceChange and a writing operation can'
+        "behavior test.Reader: a read cannot invoke releaseAll of Note, which writes; initialize, afterChange, afterReferenceChange, a writing operation and the runner's work can"
       );
       const from = lastCursor(engine);
       assert.equal(engine.instances.invoke(alice, 'Note', 'n1', 'pokeSchema', releaseAll), 1);

@@ -680,12 +680,15 @@ export const rating = defineBehavior<{ readonly maxStars: number }>({
 });
 ```
 
-Every function is synchronous and reaches only the behavior's own
+Every function is synchronous and writes only the behavior's own
 storage: columns the engine adds to its instances table and names for
-the behavior, and tables of its own through `sql.table(name)`. A guard
-may veto an update, a delete or any behavior's operation on the type, and
-another behavior changes this one's state only by calling its operations,
-so those guards always run. Where a config names a permission, the
+the behavior, and tables of its own through `sql.table(name)`. Its SQL
+also reads its own columns across every instance of the schema, with
+their own fields, through a read-only relation the engine names
+(`sql.instances()`), asking the access policy for read as the caller. A
+guard may veto an update, a delete or any behavior's operation on the
+type, and another behavior changes this one's state only by calling its
+operations, so those guards always run. Where a config names a permission, the
 behavior asks `can(permission)`, which the permission matcher the
 deployment gives the engine answers. An operation can change the
 instance's own fields with `update(patch)`, which runs the checks and
@@ -710,9 +713,10 @@ engine.instances.invoke(me, "Product", id, "rate", { stars: 4 });
 
 An engine without the implementation refuses a schema that composes the
 behavior. The engine registers the core's own behaviors, `Workflow`,
-`Comments`, `Revisions`, `Dependencies`, `Links` and `Rollups`, when it opens; `behaviors` adds yours beside
-them. No core operation names an invocation policy, so their tools take
-the default of the policy you pass. acme's `packages/behaviors` is the
+`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search` and
+`Reactions`, when it opens; `behaviors` adds yours beside them. No core
+operation names an invocation policy, so their tools take the default of
+the policy you pass. acme's `packages/behaviors` is the
 whole example, and its smoke runs it. The
 [engine guide](/superschematic/guides/engine/) serves three of the core's
 behaviors in `examples/engine-notes`.

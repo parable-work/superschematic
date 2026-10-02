@@ -18,14 +18,24 @@ up in a shared namespace reads from it.
 
 engine_behaviors records the key of each behavior whose storage the file
 holds: the behavior's columns on engine_instances and its tables are named
-bhv_<key>__<name> (behaviors/storage.ts), and its migrations are in the
-ledger under its own name.
+bhv_<key>__<name>, and the indexes its migrations list on
+engine_instances bhv_<key>___index_<name> (behaviors/storage.ts), and its
+migrations are in the ledger under its own name.
 
 engine_references holds the references behaviors record from one
 instance to another in the same namespace (instances/references.ts): by
 target, for the guards and hooks a change of the target runs, and by
 source, for a behavior's own list and for dropping them when the source
 is deleted.
+
+engine_subscriptions and engine_schedules are the runner's
+(runner/runner.ts): one row per behavior's reactions on a schema in a
+namespace, with the cursor of the last event they handled and the state
+of their retries, and one per behavior's schedule on a schema in a
+namespace, with the time of its last run and of its next. The event log
+records the cause of an event the runner's work wrote: the behavior, the
+event it reacted to or the schedule that ran, and its depth, 0 for a
+caller's change.
 */
 
 import type { MigrationSet } from './storage/migrations.js';
@@ -186,6 +196,47 @@ CREATE TABLE engine_references (
 ) STRICT;
 
 CREATE INDEX engine_references_source ON engine_references (namespace, source_schema, source_id, behavior);
+`);
+      },
+    },
+    {
+      version: 6,
+      name: 'reactions, schedules and causes',
+      up(storage) {
+        storage.exec(`
+CREATE TABLE engine_subscriptions (
+  behavior       TEXT    NOT NULL,
+  namespace      TEXT    NOT NULL,
+  schema         TEXT    NOT NULL,
+  cursor         INTEGER NOT NULL CHECK (cursor >= 0),
+  halted         INTEGER NOT NULL DEFAULT 0 CHECK (halted IN (0, 1)),
+  attempts       INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  retry_at       INTEGER,
+  failed_cursor  INTEGER,
+  failed_at      INTEGER,
+  error          TEXT,
+  skipped        INTEGER NOT NULL DEFAULT 0 CHECK (skipped >= 0),
+  skipped_cursor INTEGER,
+  skipped_reason TEXT CHECK (skipped_reason IS NULL OR skipped_reason IN ('depth', 'resume')),
+  PRIMARY KEY (behavior, namespace, schema)
+) STRICT;
+
+CREATE TABLE engine_schedules (
+  behavior    TEXT    NOT NULL,
+  schedule    TEXT    NOT NULL,
+  namespace   TEXT    NOT NULL,
+  schema      TEXT    NOT NULL,
+  last_run_at INTEGER,
+  next_run_at INTEGER NOT NULL,
+  failures    INTEGER NOT NULL DEFAULT 0 CHECK (failures >= 0),
+  error       TEXT,
+  PRIMARY KEY (behavior, schedule, namespace, schema)
+) STRICT;
+
+ALTER TABLE engine_events ADD COLUMN cause_behavior TEXT;
+ALTER TABLE engine_events ADD COLUMN cause_event INTEGER;
+ALTER TABLE engine_events ADD COLUMN cause_schedule TEXT;
+ALTER TABLE engine_events ADD COLUMN depth INTEGER NOT NULL DEFAULT 0 CHECK (depth >= 0);
 `);
       },
     },
