@@ -320,12 +320,8 @@ export class Execution {
    */
   invoke(operation: OperationSpec, params: FrozenJSON, caller?: string): unknown {
     return this.chain.nest(operation.behavior.name, `operation ${operation.name}`, () => {
-      this.guard(
-        caller === undefined
-          ? { kind: 'operation', behavior: operation.behavior.name, operation: operation.name, params }
-          : { kind: 'operation', behavior: operation.behavior.name, operation: operation.name, params, caller },
-        operation.writes
-      );
+      const request = { kind: 'operation', behavior: operation.behavior.name, operation: operation.name, params, writes: operation.writes } as const;
+      this.guard(caller === undefined ? request : { ...request, caller }, operation.writes);
       const bound = this.composition.bound(operation.behavior.name) as BoundBehavior;
       const result: unknown = (operation.handler as OperationHandler<unknown>).call(
         bound.behavior.implementation.operations,

@@ -621,7 +621,7 @@ function is synchronous (D16): one that returns a promise is a
 | `afterConfigChange(context)` | brings its own storage in line when a published version adds it (a first version included), removes it or changes its config ("Publishing") |
 | `migrations` | its storage, as forward-only migrations: the columns each adds to the instances table, the `indexes` it adds on them, and an `up(sql)` for its own tables ("Storage") |
 | `initialize(context)` | sets up its state for a new instance |
-| `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does |
+| `guard(view, request)` | may veto an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason vetoes. An operation's request carries `writes`, as its declaration says, so a guard that holds back changes can let a read-only operation through. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does |
 | `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext` |
 | `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext` ("Schema-level operations") |
 | `fields` | a reader per declared field: `(view) => value` |
