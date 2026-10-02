@@ -179,6 +179,102 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Reactions"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "rules": {
+                    "description": "The rules, each one when and one then, in the order they run.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "then": {
+                          "additionalProperties": false,
+                          "description": "What the rule does: move the instance, or the instance its link points to, to a state through Workflow's transition.",
+                          "properties": {
+                            "link": {
+                              "description": "A link of the type's Links config: the target is the instance it points to. The instance itself when absent.",
+                              "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                              "type": "string"
+                            },
+                            "transition": {
+                              "description": "The state to move the target to.",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "transition"
+                          ],
+                          "type": "object"
+                        },
+                        "when": {
+                          "additionalProperties": false,
+                          "description": "What sets the rule off: one of enters and allTerminal.",
+                          "maxProperties": 1,
+                          "minProperties": 1,
+                          "properties": {
+                            "allTerminal": {
+                              "additionalProperties": false,
+                              "description": "The rule fires on an instance when an instance of schema that links to it through link changes or goes, and every instance that links to it there is in a terminal state of its own schema's Workflow, at least one.",
+                              "properties": {
+                                "link": {
+                                  "description": "The link of that schema's Links config that points at this type's schema.",
+                                  "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                                  "type": "string"
+                                },
+                                "schema": {
+                                  "description": "The schema of the linking instances, which composes Links and Workflow.",
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "schema",
+                                "link"
+                              ],
+                              "type": "object"
+                            },
+                            "enters": {
+                              "description": "A state of the type's Workflow: the rule fires when the instance's status becomes it, by a create or a transition.",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "when",
+                        "then"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 64,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "rules"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Revisions"
               }
             }
@@ -510,6 +606,7 @@
             "Comments",
             "Dependencies",
             "Links",
+            "Reactions",
             "Revisions",
             "Rollups",
             "Search",

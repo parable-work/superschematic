@@ -759,7 +759,7 @@
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Audited\"}]}",
       "accept": false,
-      "error": "a behavior under the core: behavior \"acme.Audited\" on type \"Item\" is not a registered behavior (registered: Comments, Dependencies, Links, Revisions, Rollups, Search, Workflow)"
+      "error": "a behavior under the core: behavior \"acme.Audited\" on type \"Item\" is not a registered behavior (registered: Comments, Dependencies, Links, Reactions, Revisions, Rollups, Search, Workflow)"
     },
     {
       "name": "the core's behaviors under the core",
@@ -794,14 +794,14 @@
       "registry": "extended",
       "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Ghost\"}]}",
       "accept": false,
-      "error": "an unregistered behavior: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: Comments, Dependencies, Links, Revisions, Rollups, Search, Workflow, acme.Audited, acme.Stock)"
+      "error": "an unregistered behavior: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: Comments, Dependencies, Links, Reactions, Revisions, Rollups, Search, Workflow, acme.Audited, acme.Stock)"
     },
     {
       "name": "an unregistered behavior in a document",
       "registry": "extended",
       "input": "{\"types\": {\"Item\": {\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Ghost\"}]}}}",
       "accept": false,
-      "error": "an unregistered behavior in a document: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: Comments, Dependencies, Links, Revisions, Rollups, Search, Workflow, acme.Audited, acme.Stock)"
+      "error": "an unregistered behavior in a document: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: Comments, Dependencies, Links, Reactions, Revisions, Rollups, Search, Workflow, acme.Audited, acme.Stock)"
     },
     {
       "name": "a behavior config its schema rejects",
@@ -864,7 +864,7 @@
       "registry": "extended",
       "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"config\": {\"aisles\": 1}}]}",
       "accept": false,
-      "error": "a behavior entry without its name: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0': validation failed\n  - at '/behaviors/0': missing property 'name'\n  - at '/behaviors/0': 'allOf' failed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'links'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'rollups'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'fields'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'states', 'transitions'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed"
+      "error": "a behavior entry without its name: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0': validation failed\n  - at '/behaviors/0': missing property 'name'\n  - at '/behaviors/0': 'allOf' failed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'links'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'rules'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'rollups'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'fields'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'states', 'transitions'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed"
     },
     {
       "name": "a behavior name that is not a string",

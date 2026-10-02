@@ -35,6 +35,8 @@ export interface BehaviorConfigs {
   Rollups: RollupsConfig;
   /** Full-text search over the type's own text fields. */
   Search: SearchConfig;
+  /** Rules that move Workflow statuses after a change commits; it requires Workflow. */
+  Reactions: ReactionsConfig;
 }
 
 /** Workflow's config. */
@@ -127,6 +129,42 @@ export interface SearchConfig {
   readonly fields: readonly string[];
   /** A weight per indexed field, which multiplies that field's part of a match's score; 1 for a field it does not name. */
   readonly weights?: Readonly<Record<string, number>>;
+}
+
+/** Reactions' config. */
+export interface ReactionsConfig {
+  /** The rules, each one when and one then, in the order they run. */
+  readonly rules: readonly ReactionRule[];
+}
+
+/** One rule of a Reactions config. */
+export interface ReactionRule {
+  readonly when: ReactionWhen;
+  readonly then: ReactionThen;
+}
+
+/** What sets a rule off: one of enters and allTerminal. */
+export type ReactionWhen =
+  | {
+      /** A state of the type's Workflow: the rule fires when the instance's status becomes it, by a create or a transition. */
+      readonly enters: string;
+    }
+  | {
+      /**
+       * The rule fires on an instance when an instance of schema that links
+       * to it through link changes or goes, and every instance that links to
+       * it there is in a terminal state of its own schema's Workflow, at
+       * least one.
+       */
+      readonly allTerminal: { readonly schema: string; readonly link: string };
+    };
+
+/** What a rule does: move the instance, or the instance its link points to, to a state through Workflow's transition. */
+export interface ReactionThen {
+  /** The state to move the target to. */
+  readonly transition: string;
+  /** A link of the type's Links config: the target is the instance it points to. The instance itself when absent. */
+  readonly link?: string;
 }
 
 /** A name @behavior takes: a key of BehaviorConfigs. */

@@ -3,14 +3,15 @@
 // core binary builds in the CLI smoke: fixture-behaviors-json, whose type
 // composes Workflow, Comments and Revisions, fixture-cross-instance-json,
 // whose tasks wait on tasks and documents and link to both and to a
-// project, fixture-rollups-json, whose projects roll their tasks up, and
-// fixture-search-json, whose notes are searched. They register when the
-// engine opens, under names no deployment can take.
+// project, fixture-rollups-json, whose projects roll their tasks up,
+// fixture-search-json, whose notes are searched, and
+// fixture-reactions-json, whose projects start and finish their parent.
+// They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import { EngineError, defineBehavior, type Principal } from '../dist/index.js';
-import { alice, cleanup, documentsDocument, drivers, notesDocument, openTestEngine, projectsDocument, tasksDocument } from './helpers.ts';
+import { alice, cleanup, documentsDocument, drivers, notesDocument, openTestEngine, projectTreeDocument, projectsDocument, tasksDocument } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -29,7 +30,7 @@ for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Dependencies', 'Links', 'Revisions', 'Rollups', 'Search', 'Workflow']);
+      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'Workflow']);
       assert.deepEqual(engine.behaviors.declaration('Workflow')?.fields, [{ name: 'status', description: 'The state the instance is in.' }]);
       const impostor = defineBehavior({ declaration: { name: 'Workflow' } });
       assert.throws(() => engine.behaviors.register(impostor), /behavior Workflow is already registered with this engine/);
@@ -235,6 +236,38 @@ for (const driver of drivers) {
       const read = engine.instances.get(alice, 'projects', 'launch');
       assert.deepEqual([read?.seq, read?.data.rollups], [1, { tasks: 2, tasksByStatus: { done: 1, dropped: 1 }, tasksFinished: true }]);
       assert.deepEqual(engine.instances.invoke(writer, 'projects', 'launch', 'transition', { to: 'done' }), { from: 'active', to: 'done' });
+    });
+
+    test('it runs the project tree document: a project starts its parent, and the last to finish finishes it, after the commit', () => {
+      const runner: Principal = { subject: 'runner', permissions: [] };
+      const engine = openTestEngine({ driver, runner: { principal: runner } });
+      engine.schemas.define(alice, projectTreeDocument());
+      engine.schemas.publish(alice, 'projects');
+      for (const id of ['launch', 'design', 'build']) {
+        engine.instances.create(writer, 'projects', { title: id }, { id });
+      }
+      for (const id of ['design', 'build']) {
+        engine.instances.invoke(writer, 'projects', id, 'link', { name: 'parent', id: 'launch' });
+      }
+      const statuses = () => ['launch', 'design', 'build'].map((id) => engine.instances.get(alice, 'projects', id)?.data.status);
+
+      engine.instances.invoke(writer, 'projects', 'design', 'transition', { to: 'doing' });
+      assert.deepEqual(statuses(), ['todo', 'doing', 'todo']);
+      engine.runner.runDue();
+      assert.deepEqual(statuses(), ['doing', 'doing', 'todo']);
+      engine.instances.invoke(writer, 'projects', 'design', 'transition', { to: 'done' });
+      engine.instances.invoke(writer, 'projects', 'build', 'transition', { to: 'doing' });
+      engine.instances.invoke(writer, 'projects', 'build', 'transition', { to: 'done' });
+      engine.runner.runDue();
+      assert.deepEqual(statuses(), ['done', 'done', 'done']);
+      const launch = engine.events.read(alice, { schema: 'projects', instanceId: 'launch' }).events;
+      assert.deepEqual(
+        launch.slice(1).map((event) => [event.actor, (event.change as { params: unknown }).params, event.cause?.behavior, event.cause?.depth]),
+        [
+          ['runner', { to: 'doing' }, 'Reactions', 1],
+          ['runner', { to: 'done' }, 'Reactions', 1],
+        ]
+      );
     });
   });
 }

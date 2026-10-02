@@ -18,7 +18,13 @@ read are skipped, so a page can hold fewer events than its limit while
 more follow.
 
 Each commit that appends events notifies the engine's watchers after it
-commits (notifier.ts), which is how a stream learns the log grew.
+commits (notifier.ts), which is how a stream and the runner learn the
+log grew.
+
+An event the runner's work wrote (runner/runner.ts) records its cause:
+the behavior whose reaction or schedule wrote it, the event it reacted
+to or the schedule that ran, and its depth, one more than its cause's.
+A caller's change has none.
 */
 
 import { checkPrincipal, type Access, type Principal } from '../access.js';
@@ -31,6 +37,18 @@ import type { Storage } from '../storage/storage.js';
 import { notifierOf, type EventNotifier, type EventWatcher } from './notifier.js';
 
 export type EventKind = 'create' | 'update' | 'delete' | 'operation' | 'publish';
+
+/** Why the runner's work wrote an event: a reaction to an event, or a schedule. */
+export interface EventCause {
+  /** The behavior whose reaction or schedule wrote it. */
+  behavior: string;
+  /** The cursor of the event its reaction handled; absent for a schedule's. */
+  event?: number;
+  /** The schedule that ran; absent for a reaction's. */
+  schedule?: string;
+  /** One more than its cause's depth: 1 for a reaction to a caller's change and for a schedule's write. */
+  depth: number;
+}
 
 /** One entry of the event log. */
 export interface EngineEvent {
@@ -57,6 +75,8 @@ export interface EngineEvent {
    * publish: the schema document.
    */
   change: unknown;
+  /** What caused it, for an event a reaction or a schedule wrote; absent for a caller's change. */
+  cause?: EventCause;
 }
 
 /** The change of an operation event: what was called, and what it did to the instance. */
@@ -107,6 +127,8 @@ export interface NewEvent {
   at: number;
   /** The change as JSON text, or null. */
   change: string | null;
+  /** For an event the runner's work writes, what caused it. */
+  cause?: EventCause;
 }
 
 /**
@@ -115,10 +137,26 @@ export interface NewEvent {
  * transaction commits, and never if it rolls back.
  */
 export function appendEvent(storage: Storage, event: NewEvent): number {
+  const cause = event.cause;
   const result = storage.run(
-    `INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [event.kind, event.namespace, event.schema, event.instanceId, event.seq, event.version, event.actor, event.at, event.change]
+    `INSERT INTO engine_events
+       (kind, namespace, schema, instance_id, seq, version, actor, at, change, cause_behavior, cause_event, cause_schedule, depth)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      event.kind,
+      event.namespace,
+      event.schema,
+      event.instanceId,
+      event.seq,
+      event.version,
+      event.actor,
+      event.at,
+      event.change,
+      cause?.behavior ?? null,
+      cause?.event ?? null,
+      cause?.schedule ?? null,
+      cause?.depth ?? 0,
+    ]
   );
   const cursor = Number(result.lastInsertRowid);
   const notify = () => notifierOf(storage).committed(cursor);
@@ -139,7 +177,8 @@ export function nextSeq(storage: Storage, namespace: string, schema: string, ins
   return row?.seq === null || row?.seq === undefined ? 1 : Number(row.seq) + 1;
 }
 
-const EVENT_COLUMNS = 'cursor, kind, namespace, schema, instance_id, seq, version, actor, at, change';
+/** The engine_events columns toEvent reads. */
+export const EVENT_COLUMNS = 'cursor, kind, namespace, schema, instance_id, seq, version, actor, at, change, cause_behavior, cause_event, cause_schedule, depth';
 
 export class EventLog {
   private readonly notifier: EventNotifier;
@@ -239,8 +278,9 @@ export class EventLog {
   }
 }
 
-function toEvent(row: Row): EngineEvent {
-  return {
+/** toEvent reads an engine_events row of EVENT_COLUMNS. */
+export function toEvent(row: Row): EngineEvent {
+  const event: EngineEvent = {
     cursor: Number(row.cursor),
     kind: String(row.kind) as EventKind,
     namespace: String(row.namespace),
@@ -252,4 +292,13 @@ function toEvent(row: Row): EngineEvent {
     at: Number(row.at),
     change: row.change === null ? null : (JSON.parse(String(row.change)) as unknown),
   };
+  if (row.cause_behavior !== null && row.cause_behavior !== undefined) {
+    event.cause = {
+      behavior: String(row.cause_behavior),
+      ...(row.cause_event === null ? {} : { event: Number(row.cause_event) }),
+      ...(row.cause_schedule === null ? {} : { schedule: String(row.cause_schedule) }),
+      depth: Number(row.depth),
+    };
+  }
+  return event;
 }

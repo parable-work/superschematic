@@ -1,0 +1,36 @@
+{
+  "kind": "General",
+  "name": "projects",
+  "description": "A project an engine runs with the core's behaviors and no extension: it moves from todo through doing to done, may be part of a parent project, starts its parent when it starts, and is done once every project under it is.",
+  "types": {
+    "Project": {
+      "name": "Project",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["todo", "doing", "done"],
+            "transitions": [
+              { "from": "todo", "to": "doing" },
+              { "from": "doing", "to": "done" }
+            ]
+          }
+        },
+        { "name": "Links", "config": { "links": { "parent": { "schema": "projects" } } } },
+        {
+          "name": "Reactions",
+          "config": {
+            "rules": [
+              { "when": { "enters": "doing" }, "then": { "link": "parent", "transition": "doing" } },
+              { "when": { "allTerminal": { "schema": "projects", "link": "parent" } }, "then": { "transition": "done" } }
+            ]
+          }
+        }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 }
+      ]
+    }
+  }
+}
