@@ -18,6 +18,7 @@ func customTemplateFuncs() template.FuncMap {
 		"scalarLibTypeName":        scalarLibTypeName,
 		"elemType":                 elemType,
 		"lowerFirst":               lowerFirst,
+		"secretMaskValue":          secretMaskValue,
 		"hasStringValidator": func(s ScalarInfo) bool {
 			return s.TSType == "string" && s.Primitive == ir.LanguageString
 		},
@@ -305,6 +306,50 @@ func typeEnumDefaultsUsed(t *TypeInfo, moduleEnums []codegen.EnumInfo) []string 
 		names = append(names, f.Type)
 	}
 	return names
+}
+
+// typeScalarDefaultCasts returns the unique scalar symbols that scalar
+// @default literals on the type's fields are cast to
+// (`"ops@example.com" as ContactEmail`), for the validator's type import.
+func typeScalarDefaultCasts(t *TypeInfo) []string {
+	seen := make(map[string]bool)
+	var names []string
+	for _, f := range t.Fields {
+		if !f.HasDefault || f.DefaultScalarCast == "" || seen[f.DefaultScalarCast] {
+			continue
+		}
+		seen[f.DefaultScalarCast] = true
+		names = append(names, f.DefaultScalarCast)
+	}
+	return names
+}
+
+// secretMaskValue returns the value a mask writes in place of a required,
+// single-valued @secret field: the zero value of the field's base type, cast
+// to the field's type when a scalar symbol narrows it (an empty string cast
+// to AuthPassword), or an empty object cast to the field's type.
+func secretMaskValue(f FieldInfo) string {
+	base := f.TSType
+	if f.ScalarInfo != nil && !f.IsArray && !f.IsMap {
+		base = f.ScalarInfo.TSType
+	}
+	var zero string
+	switch base {
+	case "string":
+		zero = "''"
+	case "number":
+		zero = "0"
+	case "boolean":
+		zero = "false"
+	case "JSDate":
+		zero = "new Date(0)"
+	default:
+		return "{} as " + f.TSType
+	}
+	if base != f.TSType {
+		return zero + " as " + f.TSType
+	}
+	return zero
 }
 
 // typeMaskTypesUsed returns unique nested generated type names referenced by

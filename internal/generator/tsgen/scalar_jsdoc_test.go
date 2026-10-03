@@ -106,7 +106,7 @@ func TestScalarJSDocTagFollowsNaming(t *testing.T) {
 			}
 
 			if tc.service == "fixture-db" {
-				const docThenTag = "  /** Display name shown across the product. */\n  /** @" + tag + " Identity.Name */\n  name: string;\n"
+				const docThenTag = "  /** Display name shown across the product. */\n  /** @" + tag + " Identity.Name */\n  name: IdentityName;\n"
 				if !strings.Contains(string(got), docThenTag) {
 					t.Errorf("a documented scalar field must carry its doc line, then the tag line:\n%s", got)
 				}
@@ -138,8 +138,8 @@ func TestScalarJSDocTagOnArraysOfArrays(t *testing.T) {
 		t.Fatalf("read generated types.ts: %v", err)
 	}
 	for _, want := range []string{
-		"  /** @fixtureScalar Identity.UUID */\n  ids: string[][];\n",
-		"  /** @fixtureScalar Temporal.DateTime */\n  stamps?: JSDate[][] | null;\n",
+		"  /** @fixtureScalar Identity.UUID */\n  ids: IdentityUUID[][];\n",
+		"  /** @fixtureScalar Temporal.DateTime */\n  stamps?: TemporalDateTime[][] | null;\n",
 	} {
 		if !strings.Contains(string(got), want) {
 			t.Errorf("types.ts is missing\n%s\ngot:\n%s", want, got)

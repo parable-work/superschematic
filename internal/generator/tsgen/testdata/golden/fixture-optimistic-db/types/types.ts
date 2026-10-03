@@ -11,14 +11,14 @@ import type {
  * Shelf - A shelf of the pantry. A delete sets deletedAt.
  */
 export interface Shelf {
-  id?: string | null;
+  id?: IdentityUUID | null;
   label: string;
-  createdAt: JSDate;
-  createdBy: string;
-  updatedAt: JSDate;
-  updatedBy: string;
-  deletedAt?: JSDate | null;
-  deletedBy?: string | null;
+  createdAt: TemporalDateTime;
+  createdBy: IdentityUUID;
+  updatedAt: TemporalDateTime;
+  updatedBy: IdentityUUID;
+  deletedAt?: TemporalDateTime | null;
+  deletedBy?: IdentityUUID | null;
   _version: number;
 }
 
@@ -26,9 +26,9 @@ export interface Shelf {
  * Stock - How much of one ingredient a shelf holds. A delete removes the row.
  */
 export interface Stock {
-  id?: string | null;
+  id?: IdentityUUID | null;
   shelf: Shelf;
   ingredient: string;
-  quantity: number;
+  quantity: GenericInt64;
   _version: number;
 }

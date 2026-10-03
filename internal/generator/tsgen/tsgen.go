@@ -114,6 +114,10 @@ type FieldInfo struct {
 
 	// DefaultLiteral is the TypeScript expression for the field's @default.
 	DefaultLiteral string
+
+	// DefaultScalarCast is the scalar symbol DefaultLiteral is cast to when
+	// the field is a scalar (`"UTC" as TemporalTimeZone`), else "".
+	DefaultScalarCast string
 }
 
 // TypeInfo holds information about a complex type for TypeScript generation.
@@ -476,6 +480,12 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			kind := codegen.ClassifyDefault(f, enumLookup)
 			if kind != codegen.DefaultLiteralUnknown {
 				if literal, ok := formatTSDefaultLiteral(*f.Default, kind, field); ok && literal != "" {
+					if field.IsScalar && kind != codegen.DefaultLiteralEmptyArray {
+						// A literal does not assign to a branded scalar, so
+						// it is cast the way an enum default is.
+						literal += " as " + field.TSType
+						field.DefaultScalarCast = field.TSType
+					}
 					field.HasDefault = true
 					field.DefaultLiteral = literal
 				}
@@ -533,13 +543,10 @@ func fieldValueTypeMapperTS(typeName string, arrayDepth int, inMap bool, isRequi
 
 	var resolvedType string
 	if scalar, ok := scalarMap[typeName]; ok {
-		resolvedType = scalar.TargetType
-		// A field names Generic.JSON by the scalar's own alias (GenericJSON),
-		// which types/scalars.ts re-exports, rather than superscalar's
-		// JSONValue, so the type modules need no second import.
-		if resolvedType == "JSONValue" {
-			resolvedType = scalar.Tokens.Symbol
-		}
+		// A scalar field is typed by the scalar's symbol (ContactEmail,
+		// IdentityUUID, GenericJSON), which types/scalars.ts re-exports, not
+		// by its base type, so a plain string does not assign to a brand.
+		resolvedType = scalar.Tokens.Symbol
 	} else {
 		switch typeName {
 		case codegen.PrimitiveString:

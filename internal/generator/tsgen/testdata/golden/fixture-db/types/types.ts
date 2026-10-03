@@ -23,20 +23,20 @@ export interface HistoryRecord<T> {
  * Auditable - Base class providing audit fields to every table.
  */
 export interface Auditable {
-  createdAt: JSDate;
-  updatedAt?: JSDate | null;
+  createdAt: TemporalDateTime;
+  updatedAt?: TemporalDateTime | null;
 }
 
 /**
  * Tenant - A tenant of the platform.
  */
 export interface Tenant {
-  createdAt: JSDate;
-  updatedAt?: JSDate | null;
-  id?: string | null;
+  createdAt: TemporalDateTime;
+  updatedAt?: TemporalDateTime | null;
+  id?: IdentityUUID | null;
   /** Display name shown across the product. */
-  name: string;
-  slug: string;
+  name: IdentityName;
+  slug: IdentitySlug;
   email: string;
   status: TenantStatus;
   isActive: boolean;
@@ -69,12 +69,12 @@ export function makeTenant(overrides?: Partial<Tenant>): Tenant {
  * TenantUser - A soft-deletable tenant membership.
  */
 export interface TenantUser {
-  createdAt: JSDate;
-  updatedAt?: JSDate | null;
-  id?: string | null;
+  createdAt: TemporalDateTime;
+  updatedAt?: TemporalDateTime | null;
+  id?: IdentityUUID | null;
   tenant: Tenant;
   displayName?: string | null;
-  deletedAt?: JSDate | null;
-  deletedBy?: string | null;
+  deletedAt?: TemporalDateTime | null;
+  deletedBy?: IdentityUUID | null;
   _version: number;
 }
