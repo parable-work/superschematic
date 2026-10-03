@@ -2,18 +2,16 @@
 #![allow(unused_imports)]
 
 use crate::interfaces::Implementations;
-{{- if .WebhookProviders }}
 use crate::interfaces::WebhookVerifier;
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::routing::MethodRouter;
-{{- end }}
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Method, Uri};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
-use {{ .RuntimeCrateIdent }}::{
+use superschematic_http_runtime::{
     error_response, path_is_percent_encoded, request_id_from_headers, wrap_envelope, ApiError,
     RequestContext,
 };
@@ -25,21 +23,13 @@ use std::sync::Arc;
 pub struct RouterState {
     pub implementations: Implementations,
 }
-{{ if .ManualEndpoints }}
+
 /// Mounts every operation except those declared @manualRouteRegistration,
 /// which the service mounts itself by adding a route for each to the
 /// returned router:
 ///
-{{- range .ManualEndpoints }}
-/// - `{{ toUpper .Method }} {{ .Path }}` ({{ .Namespace }}.{{ .Name }}){{ if .WebhookProvider }}, @hmacVerified:
-///   wrap its route in `webhook_verified` with the {{ .WebhookProvider }} verifier
-{{- end }}
-{{- end }}
-{{- end }}
-{{- if .WebhookProviders }}
-{{- if not .ManualEndpoints }}
-/// Mounts every operation.
-{{- end }}
+/// - `POST /api/webhooks/github/raw` (webhook.receiveRawGithubEvent), @hmacVerified:
+///   wrap its route in `webhook_verified` with the github verifier
 ///
 /// An @hmacVerified operation's route runs its provider's verifier first.
 ///
@@ -47,31 +37,29 @@ pub struct RouterState {
 ///
 /// When `implementations.webhook_verifiers` lacks the verifier of a
 /// provider (`Implementations::validate_implementations`).
-{{- end }}
 pub fn build_router(implementations: Implementations) -> Router {
-{{- if .WebhookProviders }}
     if let Err(message) = implementations.validate_implementations() {
         panic!("{message}");
     }
-{{- end }}
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
-{{- range .Endpoints }}
-{{- if .WebhookProvider }}
+    router = router.route("/api/events/{id}", get(handle_event_get_event));
     router = router.route(
-        "{{ .Path }}",
+        "/api/webhooks/github",
         webhook_verified(
-            {{ .Method }}(handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}),
-            Arc::clone(&state.implementations.webhook_verifiers[{{ rustString .WebhookProvider }}]),
+            post(handle_webhook_receive_github_event),
+            Arc::clone(&state.implementations.webhook_verifiers["github"]),
         ),
     );
-{{- else }}
-    router = router.route("{{ .Path }}", {{ .Method }}(handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}));
-{{- end }}
-{{- end }}
+    router = router.route(
+        "/api/webhooks/stripe",
+        webhook_verified(
+            post(handle_webhook_receive_stripe_event),
+            Arc::clone(&state.implementations.webhook_verifiers["stripe"]),
+        ),
+    );
     router.with_state(state)
 }
-{{- if .WebhookProviders }}
 
 /// Runs `verifier` before `route`'s handler, so before its extractors read
 /// the body. `build_router` wraps each @hmacVerified operation's route in it;
@@ -85,7 +73,6 @@ where
         async move { verifier.verify(request, next).await }
     }))
 }
-{{- end }}
 
 fn method_from_str(method: &str) -> Method {
     match method {
@@ -110,23 +97,14 @@ fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
     }
     out
 }
-
-{{- range .Endpoints }}
-async fn handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}(
+async fn handle_event_get_event(
     State(state): State<Arc<RouterState>>,
     headers: HeaderMap,
-{{- if .PathParams }}
     uri: Uri,
     path_params: Result<Path<HashMap<String, String>>, PathRejection>,
-{{- end }}
-{{- if isGetMethod .Method }}
     Query(query): Query<HashMap<String, String>>,
-{{- else }}
-    Json(payload): Json<Value>,
-{{- end }}
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let request_id = request_id_from_headers(&headers);
-{{- if .PathParams }}
     // axum decodes each capture once, but keeps an escape it cannot decode
     // (%ZZ) as text and refuses bytes that are not UTF-8 with a bare 400:
     // both answer the error envelope here.
@@ -138,29 +116,58 @@ async fn handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}(
             )))
         }
     };
-{{- end }}
-    let mut ctx = RequestContext::new(method_from_str("{{ .Method }}"), "{{ .Path }}".to_string());
+    let mut ctx = RequestContext::new(method_from_str("get"), "/api/events/{id}".to_string());
     ctx.headers = headers_to_map(&headers);
-{{- if .PathParams }}
     for (key, value) in path_params {
         ctx.path_params.insert(key, value);
     }
-{{- end }}
-{{- if isGetMethod .Method }}
     for (key, value) in query {
         ctx.query_params.insert(key, value);
     }
     let payload = Value::Null;
-{{- end }}
     let result = state
         .implementations
-        .{{ toSnakeCase .Namespace }}
-        .{{ .FunctionName }}(ctx, payload)
+        .event
+        .get_event(ctx, payload)
         .await;
     match result {
         Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
         Err(err) => Err(error_response(err)),
     }
 }
-
-{{- end }}
+async fn handle_webhook_receive_github_event(
+    State(state): State<Arc<RouterState>>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let request_id = request_id_from_headers(&headers);
+    let mut ctx = RequestContext::new(method_from_str("post"), "/api/webhooks/github".to_string());
+    ctx.headers = headers_to_map(&headers);
+    let result = state
+        .implementations
+        .webhook
+        .receive_github_event(ctx, payload)
+        .await;
+    match result {
+        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
+        Err(err) => Err(error_response(err)),
+    }
+}
+async fn handle_webhook_receive_stripe_event(
+    State(state): State<Arc<RouterState>>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let request_id = request_id_from_headers(&headers);
+    let mut ctx = RequestContext::new(method_from_str("post"), "/api/webhooks/stripe".to_string());
+    ctx.headers = headers_to_map(&headers);
+    let result = state
+        .implementations
+        .webhook
+        .receive_stripe_event(ctx, payload)
+        .await;
+    match result {
+        Ok(body) => Ok(Json(wrap_envelope(body, request_id.as_deref()))),
+        Err(err) => Err(error_response(err)),
+    }
+}

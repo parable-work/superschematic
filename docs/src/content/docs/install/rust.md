@@ -183,3 +183,41 @@ an encrypted operation
 unless it is `@manualRouteRegistration`. The service's own handler for
 such an operation receives the envelope as its body and decrypts it, as
 the Go server's `PayloadDecryptor` does.
+
+An `@hmacVerified` operation's route
+([Webhooks](/superschematic/guides/api-routes/#webhooks)) runs its
+provider's verifier before the handler and its body extractor.
+`Implementations` gains `webhook_verifiers`, a map from provider name to
+an `Arc<dyn WebhookVerifier>`, and `build_router` panics without one for
+every provider; `Implementations::validate_implementations` returns the
+same message without panicking. `verify` is axum middleware: it answers a
+request it refuses and passes one it accepts to `next`, rebuilt with the
+body's bytes if it read them.
+
+```rust
+struct GitHubVerifier {
+    secret: String,
+}
+
+#[async_trait]
+impl WebhookVerifier for GitHubVerifier {
+    async fn verify(&self, request: Request, next: Next) -> Response {
+        let (parts, body) = request.into_parts();
+        let Ok(bytes) = axum::body::to_bytes(body, 1 << 20).await else {
+            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        };
+        if !signature_matches(&self.secret, &parts.headers, &bytes) {
+            return error_response(ApiError::unauthorized("The webhook signature does not match")).into_response();
+        }
+        next.run(Request::from_parts(parts, Body::from(bytes))).await
+    }
+}
+```
+
+`build_router` does not mount a `@manualRouteRegistration` webhook, so
+wrap the route you add in `webhook_verified`:
+
+```rust
+let router = build_router(implementations)
+    .route("/api/webhooks/github/raw", webhook_verified(post(receive_raw), github_verifier));
+```

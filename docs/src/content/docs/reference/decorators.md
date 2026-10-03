@@ -56,6 +56,7 @@ as their support lands in every generator.
 | `@requirePermission([...])` | method | the route needs a caller holding one of the permissions | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@publicRoute` | method | marks a route anyone may call | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@rateLimit`, `@bodyLimit`, `@timeout` | class, method | bound a route's requests per minute, body size and duration | [API routes](/superschematic/guides/api-routes/#traffic-controls) |
+| `@webhook`, `@hmacVerified({ provider })` | method | a route a third party calls; the provider's verifier checks its signature before every other step | [API routes](/superschematic/guides/api-routes/#webhooks) |
 | `@manualRouteRegistration` | method | the Go and Rust routers leave the route for your service to mount; the TypeScript router gates it and hands it to your handler | [TypeScript](/superschematic/install/typescript/#serve-a-generated-api), [Rust](/superschematic/install/rust/#serve-a-generated-api) |
 | `@docs`, `@icon` | method | the operation's documentation and icon | [Documentation](/superschematic/reference/documentation/) |
 | `@mcp` | method | publishes the operation as an MCP tool, or says why not | [MCP tools](/superschematic/reference/mcp-tools/) |
