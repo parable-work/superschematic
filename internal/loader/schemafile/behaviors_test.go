@@ -52,7 +52,7 @@ func TestDefinitionForComposesBehaviors(t *testing.T) {
 	}
 	compact, _ := json.Marshal(def)
 	for _, want := range []string{
-		`"name":{"enum":["Assignment","Blueprint","Comments","Dependencies","Lease","Links","Presence","Queue","Reactions","Revisions","Rollups","Search","Workflow","acme.Flag","acme.Rating"],"type":"string"}`,
+		`"name":{"enum":["Assignment","Blueprint","Budget","Comments","Dependencies","Lease","Links","Presence","Queue","Reactions","Retries","Revisions","Rollups","Search","Workflow","acme.Flag","acme.Rating"],"type":"string"}`,
 		`{"if":{"properties":{"name":{"const":"acme.Flag"}}},"then":{"properties":{"config":{"additionalProperties":false,"type":"object"}}}}`,
 		`{"if":{"properties":{"name":{"const":"acme.Rating"}}},"then":{"properties":{"config":{"additionalProperties":false,"properties":{"maxStars":{"maximum":10,"minimum":3,"type":"integer"}},"required":["maxStars"],"type":"object"}},"required":["config"]}}`,
 	} {
@@ -118,8 +118,8 @@ func TestDecodeBehaviors(t *testing.T) {
 		behaviors string
 		want      string
 	}{
-		{reg, `[{"name": "acme.Ghost"}]`, `product.schema.json: behavior "acme.Ghost" on type "Product" is not a registered behavior (registered: Assignment, Blueprint, Comments, Dependencies, Lease, Links, Presence, Queue, Reactions, Revisions, Rollups, Search, Workflow, acme.Flag, acme.Rating)`},
-		{core(), `[{"name": "acme.Flag"}]`, `product.schema.json: behavior "acme.Flag" on type "Product" is not a registered behavior (registered: Assignment, Blueprint, Comments, Dependencies, Lease, Links, Presence, Queue, Reactions, Revisions, Rollups, Search, Workflow)`},
+		{reg, `[{"name": "acme.Ghost"}]`, `product.schema.json: behavior "acme.Ghost" on type "Product" is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Workflow, acme.Flag, acme.Rating)`},
+		{core(), `[{"name": "acme.Flag"}]`, `product.schema.json: behavior "acme.Flag" on type "Product" is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Workflow)`},
 		{reg, `[{"name": "acme.Rating", "config": {"maxStars": 12}}]`, `product.schema.json: type "Product": behavior acme.Rating config: `},
 		{reg, `[{"name": "acme.Rating"}]`, `product.schema.json: type "Product": behavior acme.Rating config: `},
 		{reg, `[{"name": "acme.Flag", "config": {"on": true}}]`, `product.schema.json: type "Product": behavior acme.Flag takes no config`},

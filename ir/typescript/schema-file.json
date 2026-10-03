@@ -246,6 +246,112 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Budget"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "limitPermission": {
+                    "description": "The permission a principal needs to change a meter's limit, with setLimit or through limitField. Absent, no limit changes once the instance exists.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "meters": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "not": {
+                        "anyOf": [
+                          {
+                            "required": [
+                              "limit",
+                              "limitField"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "reserve",
+                              "reserveField"
+                            ]
+                          }
+                        ]
+                      },
+                      "properties": {
+                        "limit": {
+                          "description": "The most the instance may have used and reserved together; no limit of its own when neither this nor limitField is given.",
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "limitField": {
+                          "description": "An integer field of the type that holds the instance's limit; no limit while it holds no value of at least 0. Only a principal with limitPermission changes it once the instance exists.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "reserve": {
+                          "description": "The amount reserve takes for the meter when it is given no meter: what a claim reserves.",
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "reserveField": {
+                          "description": "An integer field of the type whose positive value is the amount reserve takes for the meter when it is given no meter.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "reset": {
+                          "description": "daily: the used amount starts again at 0 at each UTC day; reservations are kept.",
+                          "enum": [
+                            "daily"
+                          ]
+                        },
+                        "scope": {
+                          "description": "A link of the type's Links config whose target is the enclosing scope: its schema composes Budget with the same meter, and every reservation and usage of the meter here is taken there too, and on up its own scope.",
+                          "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "description": "The meters, by name: camelCase, at most 64 characters.",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
+                    },
+                    "type": "object"
+                  },
+                  "onExceeded": {
+                    "additionalProperties": false,
+                    "description": "A directive sent to the holder of the instance's active lease, through Lease's direct, when usage takes the instance or an enclosing scope over its limit: once per meter per lease. Needs Lease on the type.",
+                    "properties": {
+                      "direct": {
+                        "description": "The directive's name. Its data is { meter, used, limit, scope }, scope being the instance over its limit as { schema, id }.",
+                        "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "direct"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "meters"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Comments"
               }
             }
@@ -752,6 +858,126 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Retries"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "classes": {
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "attempts": {
+                              "description": "How many failures of the class an instance may have.",
+                              "minimum": 1,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "attempts"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "const": "terminal"
+                        }
+                      ]
+                    },
+                    "description": "The failure classes, by name: each its own cap of attempts, or terminal, which exhausts the instance at its first failure.",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "not": {
+                        "const": "totalAttempts"
+                      },
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$"
+                    },
+                    "type": "object"
+                  },
+                  "exhaustedState": {
+                    "description": "The state of the type's Workflow an exhausted instance moves to.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "from": {
+                    "description": "The states exhaustion moves the status from; every state but the terminal ones and exhaustedState when absent. A transition from each to exhaustedState must exist.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "keepBest": {
+                    "additionalProperties": false,
+                    "description": "Keeps the best scoring result rather than only a success's: a failed attempt's result is kept when its score beats the best kept one by at least minDelta and no neverRegress predicate that held for the kept one fails.",
+                    "properties": {
+                      "minDelta": {
+                        "description": "How much a score must beat the best kept one by; any amount above it when absent.",
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "neverRegress": {
+                        "description": "Predicates an attempt reports that a kept result never loses: one true for the kept result must be true for the next one kept.",
+                        "items": {
+                          "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$",
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "limitsField": {
+                    "description": "An object field of the type with the instance's own caps: a class's name to a cap of at least 0, and totalAttempts to a total of at least 1. An unknown or terminal class, and a value that is not such an integer, is ignored.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "permission": {
+                    "description": "The permission a principal needs to record an attempt. Absent, any principal who may write the instance can.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "resultField": {
+                    "description": "A field of the type a kept result is written to, with the checks of an update.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "stuckAfter": {
+                    "description": "How many failures in a row, none of them kept, with the same signature exhaust the instance as stuck.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "totalAttempts": {
+                    "description": "How many failures of every class together an instance may have.",
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "classes",
+                  "totalAttempts",
+                  "exhaustedState"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Revisions"
               }
             }
@@ -1033,6 +1259,7 @@
           "enum": [
             "Assignment",
             "Blueprint",
+            "Budget",
             "Comments",
             "Dependencies",
             "Lease",
@@ -1040,6 +1267,7 @@
             "Presence",
             "Queue",
             "Reactions",
+            "Retries",
             "Revisions",
             "Rollups",
             "Search",

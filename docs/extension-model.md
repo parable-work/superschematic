@@ -830,7 +830,7 @@ registers with no extension: `Workflow`, `Comments`, `Revisions`,
 `Dependencies`, `Links`, `Rollups`, `Search` and `Reactions`. It
 declares the work-queue behaviors the optional
 `@superschematic/engine-workqueue` package implements the same way:
-`Lease`, `Assignment`, `Queue`, `Presence` and `Blueprint`. Each spec names its package
+`Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`. Each spec names its package
 (`registry.EnginePackage` or `registry.WorkQueuePackage`). Every binary
 therefore accepts a schema that composes them, the schema-file JSON
 Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
@@ -867,6 +867,8 @@ engine; without them the engine refuses a schema that composes one.
 | `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext`, of scope `schema` |
 | `Presence` | `ttlMs`, `principalField`, `onMissed` and `onBeat` (`transition`, `from`), `releaseLeases`, `sweepMs`; required; `@superschematic/engine-workqueue` | `presence` | `beat`, `miss` |
 | `Blueprint` | `schema`, `parentLink`, `keyField`, one of `steps` (by key: `after`, `when`, `data`) and `from` (`link`, `field`), `copyFields`, `copyLinks`; required; `@superschematic/engine-workqueue` | `blueprint` | none |
+| `Budget` | `meters` (by name: `limit` or `limitField`, `reserve` or `reserveField`, `scope`, `reset`), `limitPermission`, `onExceeded` (`direct`); required; `@superschematic/engine-workqueue` | `budget` | `reserve`, `recordUsage`, `settle`, `setLimit`, `reserveFor`, `settleFor`, `recordUsageFor` |
+| `Retries` | `classes` (by name: `attempts`, or `terminal`), `totalAttempts`, `limitsField`, `keepBest` (`minDelta`, `neverRegress`), `stuckAfter`, `resultField`, `exhaustedState`, `from`, `permission`; required; requires `Workflow`; `@superschematic/engine-workqueue` | `retries` | `recordAttempt` |
 
 `Dependencies`, `Links` and `Rollups` reach other instances (D16,
 amended): a blocker, a link target or the instances a rollup reads are
@@ -892,14 +894,17 @@ Workflow and Links configs. `make cli-smoke` loads
 `fixture-reactions-json`, whose projects start and finish their parent,
 and its TypeScript twin loads to the same IR.
 
-`Lease`, `Assignment` and `Queue` name the type's fields (`maxHoldField`,
-`priorityField`, `match`), its Workflow states (`onExpiry`, `escalate`,
-`claim`) and its other behaviors' operations (`exempt`), which the loader
-does not check: the work-queue package does, when the schema is defined.
-So do `Presence` (`principalField`, its states, and the schemas of
-`releaseLeases`) and `Blueprint` (the child schema, its links and
+`Lease`, `Assignment`, `Queue`, `Budget` and `Retries` name the type's
+fields (`maxHoldField`, `priorityField`, `match`, `limitField`,
+`reserveField`, `limitsField`, `resultField`), its Workflow states
+(`onExpiry`, `escalate`, `claim`, `exhaustedState`, `from`), its Links
+links (a meter's `scope`, whose target schema must compose `Budget` with
+the meter) and its other behaviors' operations (`exempt`), which the
+loader does not check: the work-queue package does, when the schema is
+defined. So do `Presence` (`principalField`, its states, and the schemas
+of `releaseLeases`) and `Blueprint` (the child schema, its links and
 fields, and this type's fields its steps read). `make cli-smoke` loads
-`fixture-workqueue-json`, whose jobs compose the first three and whose
+`fixture-workqueue-json`, whose jobs compose the first five and whose
 workers, batches and steps, one type a file, compose the other two, and
 its TypeScript twin loads to the same IR.
 

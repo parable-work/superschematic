@@ -14,9 +14,10 @@ no implementation for.
 Built: `Lease`, an exclusive lease with a fencing token, heartbeats,
 expiry on the engine's runner and directives to its holder;
 `Assignment`; `Queue`, the claim and `claimNext`; `Presence`, a
-heartbeat on an instance that stands for a worker; and `Blueprint`,
-children created with their parent. Not built yet: the budgets and
-retries D16 lists.
+heartbeat on an instance that stands for a worker; `Blueprint`, children
+created with their parent; `Budget`, reserve-then-settle budgets across
+enclosing scopes; and `Retries`, failure classes with caps, kept results
+and stuck detection. That is every work-queue behavior D16 lists.
 
 ```ts
 import { openEngine } from '@superschematic/engine';
@@ -34,8 +35,8 @@ engine.instances.invoke(worker, 'jobs', claimed.id, 'heartbeat', { token: claime
 A deployment passes the implementations as the engine's `behaviors`
 option when it opens the engine, after the core's, which the engine
 registers itself: `workQueueBehaviors` is every one, and `lease`,
-`assignment`, `queue`, `presence` and `blueprint` are exported one by
-one for a deployment that runs only some.
+`assignment`, `queue`, `presence`, `blueprint`, `budget` and `retries` are
+exported one by one for a deployment that runs only some.
 `engine.behaviors.register(lease)` registers one later; a published
 version that composes a behavior the engine cannot run is `unavailable`
 until it does. Registering one whose storage already
@@ -463,6 +464,179 @@ Not ported from the source implementation: create governance, which
 checked the child schema's own creates for a parent link and an edge,
 and the trial flag. A step map is checked when it is stamped, not when
 the definition is written.
+## Budget
+
+Reserve-then-settle budgets in units the deployment names: each meter
+counts what the instance has used and the reservations it holds against
+its limit, and passes both to the enclosing scopes its `scope` link
+points at.
+
+| | |
+| --- | --- |
+| Config | `meters` (required, at least one, by camelCase name): each `limit` (at least 1) or `limitField` (an integer field of the type), `reserve` (at least 1) or `reserveField` (an integer field of the type), `scope` (a link of the type's `Links` config) and `reset` (`daily`), all optional; `limitPermission`; `onExceeded` (`{ direct }`, needs `Lease`) |
+| Fields | `budget`: by meter, `{ used, reserved, limit, remaining }`, `limit` and `remaining` null without a limit; `reserved` counts what the instance holds for the instances inside it |
+| Operations | `reserve({ meter?, amount? })` -> `{ reserved }` by meter; `recordUsage({ meter, amount })` -> `{ meter, used, released, overruns, directed }`; `settle({ meter? })` -> `{ released }` by meter; `setLimit({ meter, limit })` -> `{ meter, limit, previous }`; the scope side, `reserveFor`, `settleFor` and `recordUsageFor({ meter, schema, id, amount, ... })`. All write |
+| Guards | while the instance has a reservation of a meter, a `Links` `link` or `unlink` of the meter's scope link is `vetoed`; a change of a meter's `limitField` without `limitPermission` is `forbidden` (`vetoed` when the config names none), and below what is used and reserved `vetoed` |
+| Refusals | `reserve` that does not fit here or in a scope, and on a type with `Lease` without an active lease (`vetoed`); an unknown meter, an amount without a meter, a meter without a configured reservation and no amount (`invalid_argument`); `setLimit` without `limitPermission` (`forbidden`, or `vetoed` when the config names none) and below what is used and reserved (`vetoed`); a scope operation from an instance that does not draw the meter from the scope (`invalid_argument`) or for more than it reserved (`vetoed`). `recordUsage` is never refused for its amount |
+| Events | each operation's event, on the instance and on every scope it reaches |
+| `configChange` | a meter cannot be removed; anything else may change. Added to a schema with instances, whose meters start empty; not removed from one |
+
+```json
+{ "name": "Budget", "config": {
+    "meters": { "cpuSeconds": { "limit": 3600, "reserve": 600, "scope": "pool", "reset": "daily" } },
+    "limitPermission": "jobs.budget",
+    "onExceeded": { "direct": "budgetExceeded" } } }
+```
+
+### Reservations and usage
+
+A reservation fits while the meter's used plus reserved plus the amount
+is within its limit: the config's `limit`, the instance's `limitField`,
+or the one `setLimit` set. `reserve` with no meter takes every meter
+whose `reserve` or `reserveField` gives an amount; that is the call
+Queue's claim makes once the lease is taken, so a claim that does not fit
+is refused with no lease, no reservation and its status as it was, and
+`claimNext` moves on to the next candidate. The instance keeps its own
+reservation apart from what it holds for others, so `settle` releases
+exactly what its claims reserved.
+
+`recordUsage` is never refused: usage has happened. It adds the amount
+to `used` and releases the part of it the instance's own reservation
+covers, `min(amount, reservation)`, and exactly that part at every scope,
+so usage beyond a reservation never eats the reservations other
+instances hold in a scope. The result lists every instance of the chain
+whose usage is over its limit afterwards, this one first.
+
+### Scopes
+
+A meter's `scope` names a link of the type's `Links` config; its target
+is the enclosing scope, a pool the work draws on, say, and its schema
+composes `Budget` with the same meter, which the package checks when the
+schema is defined. Budget never writes another instance's rows: the
+instance invokes `reserveFor`, `settleFor` or `recordUsageFor` on its
+scope, as the caller, which applies the scope's own limit, records what
+it holds for the instance, appends the scope's own event and passes the
+change on up its own scope. It all runs in one transaction, so a
+reservation one scope refuses leaves nothing anywhere in the chain. The
+access policy and the scope's guards are asked as for any operation: a
+scope type that composes `Lease` lists the three in `exempt` to let
+other principals' work reach it while it is leased.
+
+The scope operations cannot free what an instance still holds. A scope
+reads the instance's `budget` field first: it releases at most what it
+holds for the instance beyond what the instance still has reserved,
+holds no more than the instance has reserved, and takes reservations and
+usage only from an instance whose scope link for the meter points at it.
+A scope link does not move while a reservation is held through it.
+
+### Settlement
+
+On a type that composes `Lease`, a reservation is made under the active
+lease, which `reserve` needs, and lasts as long as it: after a caller's
+`Lease` or `Queue` operation, and before each `reserve`, the reservations
+of a lease that is no longer active are settled. That covers a release,
+an expiry, the runner's sweep, `expireHolder`, and a claim or an acquire
+over a lapsed lease. Deleting the instance
+settles everything it reserved and holds, up the chain. On a type
+without `Lease`, a reservation lasts until `settle` or the delete.
+
+### Overruns and directives
+
+With `onExceeded`, usage that takes the instance or a scope over its
+limit sends `onExceeded.direct` to the holder of the instance's active
+lease through Lease's `direct`, with data `{ meter, used, limit, scope
+}`, once per meter per lease token. A caller without a lease learns of
+the overrun from `recordUsage`'s result. Lease's guard lets a call() of
+`direct` by another behavior of the type through without a permission,
+so the principal that records the usage needs none; a refusal sends
+nothing and does not refuse the usage.
+
+### Limits and daily meters
+
+`setLimit` raises or lowers a limit, never below what is used and
+reserved, and needs `limitPermission`; a meter with `limitField` writes
+the field through `update()`, with an update's checks, and a direct
+update of the field is held to the same rules. A lease holder's lease
+keeps others' `setLimit` out unless `Lease` exempts `Budget.setLimit`.
+
+A daily meter's usage counts from the start of the UTC day on the
+engine's clock. A read never writes: a meter whose day has passed reads
+as used 0, and the next write of its row starts the day. Reservations
+carry over.
+
+## Retries
+
+Retries per failure class: each attempt is recorded, counted against its
+class's cap and a total, and an instance whose caps run out is exhausted
+and moved to `exhaustedState`. Requires `Workflow`. There is no backoff
+in time: an instance that may run again may be taken again at once.
+
+| | |
+| --- | --- |
+| Config | `classes` (required, by name: `{ attempts }` of at least 1, or `"terminal"`), `totalAttempts` (required, at least 1), `exhaustedState` (required, a Workflow state), `limitsField` (an object field of the type), `keepBest` (`{ minDelta?, neverRegress? }`), `stuckAfter` (at least 1), `resultField` (a field of the type), `from` (Workflow states, each with a transition to `exhaustedState`), `permission` |
+| Fields | `retries`: `{ total, classAttempts, bestScore, exhausted, stuck }` |
+| Operations | `recordAttempt({ failure?, score?, result?, signature?, predicates? })` -> `{ failure, score, kept, total, classAttempts, exhausted, stuck }`, writes |
+| Guards | once exhausted, a `Workflow` transition into any state but `exhaustedState`, Lease's `acquire` and Queue's `claim`: `vetoed` |
+| Refusals | an unknown class, and a result without `resultField` (`invalid_argument`); a result the field's type refuses (`invalid_instance`); an attempt once exhausted (`vetoed`); without `permission` (`forbidden`) |
+| Events | each attempt's operation event, by its caller |
+| `configChange` | any config may change. Added to a schema with instances, which start with no attempts; not removed from one |
+
+```json
+{ "name": "Retries", "config": {
+    "classes": { "timeout": { "attempts": 3 }, "invalidOutput": { "attempts": 2 }, "rejected": "terminal" },
+    "totalAttempts": 4,
+    "keepBest": { "minDelta": 0.05, "neverRegress": ["compiles"] },
+    "stuckAfter": 2,
+    "resultField": "report",
+    "exhaustedState": "failed" } }
+```
+
+### Counting
+
+An attempt without `failure` is a success and counts nothing. A failure
+of a terminal class counts and exhausts the instance; a failure of a
+class with no room left, its own cap or the total, is not counted and
+exhausts it; any other failure counts, and exhausts the instance when the
+total reaches its cap, or its class reaches its cap and no other class
+has room. The instance's `limitsField` holds its own caps, a class's name
+to a cap of at least 0 and `totalAttempts` to one of at least 1; an
+unknown or terminal class, and a value that is not such a cap, is
+ignored. Exhaustion is set only by an attempt, so a config whose classes
+are all terminal, or caps of 0, exhaust nothing before the first failure.
+
+### Kept results
+
+A success's result is kept. A failure's is kept only with `keepBest`:
+when its score beats the best kept score by at least `minDelta`, and no
+`neverRegress` predicate that held for the last kept attempt fails for it
+(a predicate the attempt does not report fails). A kept result is written
+to `resultField` through `update()`, with the checks of an update, so a
+result the live version refuses fails the attempt and records nothing.
+
+### Stuck failures
+
+With `stuckAfter`, a failure that is not kept and carries a `signature`
+extends a streak when the signature is the last attempt's, and starts a
+new one otherwise; a streak of `stuckAfter` exhausts the instance as
+stuck. A kept attempt, a success and a failure without a signature end
+the streak.
+
+### Exhaustion
+
+On exhaustion the status moves to `exhaustedState` through Workflow's
+`transition`, as the caller, only from the `from` states: every state but
+the terminal ones and `exhaustedState` when the config names none. Work
+that finished stays finished. A transition a guard vetoes leaves the
+status and the instance exhausted all the same. Once exhausted, the
+instance takes no more attempts, its status moves only to
+`exhaustedState`, and its lease cannot be acquired nor the instance
+claimed: an exhausted instance that `from` left in a claimable state is a
+candidate Queue's `claimNext` tries, is refused, and passes over. Nothing
+resets it.
+
+`recordAttempt` needs `permission` when the config names one, and while
+a lease is active, `Lease`'s guard keeps it to the holder, as any writing
+operation.
 
 ## Development
 

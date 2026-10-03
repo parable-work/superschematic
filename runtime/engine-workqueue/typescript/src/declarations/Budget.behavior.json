@@ -1,0 +1,486 @@
+{
+  "name": "Budget",
+  "description": "Reserve-then-settle budgets on the instance, in units the deployment names. Each meter counts what the instance has used and the reservations it holds against its limit. A reservation that does not fit here, or in an enclosing scope that a Links link points at, is refused, and the whole chain is left as it was. Usage is never refused: it draws the instance's own reservation down, counts here and in every enclosing scope, and reports each instance it takes over its limit. On a type that composes Lease, a reservation lives as long as the lease it was made under.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "limitPermission": {
+        "description": "The permission a principal needs to change a meter's limit, with setLimit or through limitField. Absent, no limit changes once the instance exists.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "meters": {
+        "additionalProperties": {
+          "additionalProperties": false,
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "limit",
+                  "limitField"
+                ]
+              },
+              {
+                "required": [
+                  "reserve",
+                  "reserveField"
+                ]
+              }
+            ]
+          },
+          "properties": {
+            "limit": {
+              "description": "The most the instance may have used and reserved together; no limit of its own when neither this nor limitField is given.",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "limitField": {
+              "description": "An integer field of the type that holds the instance's limit; no limit while it holds no value of at least 0. Only a principal with limitPermission changes it once the instance exists.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "reserve": {
+              "description": "The amount reserve takes for the meter when it is given no meter: what a claim reserves.",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "reserveField": {
+              "description": "An integer field of the type whose positive value is the amount reserve takes for the meter when it is given no meter.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "reset": {
+              "description": "daily: the used amount starts again at 0 at each UTC day; reservations are kept.",
+              "enum": [
+                "daily"
+              ]
+            },
+            "scope": {
+              "description": "A link of the type's Links config whose target is the enclosing scope: its schema composes Budget with the same meter, and every reservation and usage of the meter here is taken there too, and on up its own scope.",
+              "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "description": "The meters, by name: camelCase, at most 64 characters.",
+        "minProperties": 1,
+        "propertyNames": {
+          "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
+        },
+        "type": "object"
+      },
+      "onExceeded": {
+        "additionalProperties": false,
+        "description": "A directive sent to the holder of the instance's active lease, through Lease's direct, when usage takes the instance or an enclosing scope over its limit: once per meter per lease. Needs Lease on the type.",
+        "properties": {
+          "direct": {
+            "description": "The directive's name. Its data is { meter, used, limit, scope }, scope being the instance over its limit as { schema, id }.",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "direct"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "meters"
+    ],
+    "type": "object"
+  },
+  "fields": [
+    {
+      "name": "budget",
+      "description": "Each meter, by name: used, reserved (this instance's own reservation and what it holds for the instances inside it), limit and remaining (limit minus used and reserved), limit and remaining null when the meter has no limit. A daily meter whose day has passed shows used 0."
+    }
+  ],
+  "operations": [
+    {
+      "name": "reserve",
+      "description": "Reserves an amount of one meter, or of every meter the config gives a reservation, for the instance and every enclosing scope. Refused when the instance or an enclosing scope cannot fit it, and then nothing is reserved anywhere. On a type that composes Lease it needs an active lease, and the reservation is settled when that lease ends.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "How much to reserve of the meter; its configured reservation when absent. Needs meter.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "meter": {
+            "description": "The meter; every meter with a configured reservation when absent.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "reserved": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "What this call reserved, by meter.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "reserved"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "recordUsage",
+      "description": "Records usage of a meter, which is never refused. The part of it the instance's own reservation covers is released, here and in every enclosing scope, and the usage counts in each of them. Reports every instance of the chain whose usage is over its limit after it, and sends onExceeded's directive to the holder of the active lease once per meter per lease.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "How much was used.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "meter": {
+            "description": "The meter.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "meter",
+          "amount"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "directed": {
+            "description": "Whether this call sent onExceeded's directive.",
+            "type": "boolean"
+          },
+          "meter": {
+            "type": "string"
+          },
+          "overruns": {
+            "description": "Every instance of the chain whose usage of the meter is over its limit after this call, this one first, then outward.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "limit": {
+                  "type": "integer"
+                },
+                "schema": {
+                  "type": "string"
+                },
+                "used": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "schema",
+                "id",
+                "used",
+                "limit"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "released": {
+            "description": "The part of the instance's own reservation the usage drew down.",
+            "type": "integer"
+          },
+          "used": {
+            "description": "The instance's usage of the meter after this call.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "meter",
+          "used",
+          "released",
+          "overruns",
+          "directed"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "settle",
+      "description": "Releases the instance's own reservation of one meter, or of every meter, here and in every enclosing scope.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "meter": {
+            "description": "The meter; every meter when absent.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "released": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "What this call released, by meter.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "released"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "setLimit",
+      "description": "Sets a meter's limit on the instance, raising or lowering it; through limitField when the meter has one. Needs limitPermission, and is refused when the config names none, and below what the instance has used and reserved.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "The new limit.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "meter": {
+            "description": "The meter.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "meter",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "meter": {
+            "type": "string"
+          },
+          "previous": {
+            "description": "The limit before; null when there was none.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "meter",
+          "limit",
+          "previous"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "reserveFor",
+      "description": "Holds an amount of a meter for an instance whose scope link points here, as that instance's reserve does, and passes it on up this instance's own scope. Refused when the amount does not fit, when that instance does not draw the meter from here, and beyond what it has reserved and this instance does not hold for it yet.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "How much to hold.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "description": "Its id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "meter": {
+            "description": "The meter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "description": "The schema of the instance inside this scope.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "meter",
+          "schema",
+          "id",
+          "amount"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "held": {
+            "description": "What this instance now holds of the meter for that one.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "held"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "settleFor",
+      "description": "Releases up to an amount of what this instance holds of a meter for another, never more than that one no longer holds itself, and passes the release on up this instance's own scope.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "How much to release.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "description": "Its id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "meter": {
+            "description": "The meter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "description": "The schema of the instance inside this scope.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "meter",
+          "schema",
+          "id",
+          "amount"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "released": {
+            "description": "What this instance released.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "released"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "recordUsageFor",
+      "description": "Counts usage of a meter by an instance whose scope link points here, releases the part of what this instance holds for it that its own reservation covered, never more than that one no longer holds, and passes both on up this instance's own scope. Never refused for the amount.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "How much it used.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "description": "Its id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "meter": {
+            "description": "The meter.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "released": {
+            "description": "How much of its reservation the usage drew down.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": {
+            "description": "The schema of the instance inside this scope.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "meter",
+          "schema",
+          "id",
+          "amount",
+          "released"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "overruns": {
+            "description": "This instance and every scope up from it whose usage of the meter is over its limit after the usage, innermost first.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "limit": {
+                  "type": "integer"
+                },
+                "schema": {
+                  "type": "string"
+                },
+                "used": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "schema",
+                "id",
+                "used",
+                "limit"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "released": {
+            "description": "What this instance released.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "released",
+          "overruns"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    }
+  ]
+}

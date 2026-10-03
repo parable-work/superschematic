@@ -608,8 +608,8 @@ engine.instances.invoke(me, 'Item', id, 'increment', {});            // { count:
 lists the behaviors it declares; the core's lists the core's own
 (`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`,
 `Rollups`, `Search` and `Reactions`, and the work-queue package's
-`Lease`, `Assignment`, `Queue`, `Presence` and `Blueprint`), so its
-loader refuses any other.
+`Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and
+`Retries`), so its loader refuses any other.
 
 ### The implementation
 
@@ -1113,7 +1113,8 @@ The core declares eight behaviors the engine implements
 and the engine implements them in `src/behaviors/core` and registers
 them when it opens, before `behaviors`: a schema that composes them runs
 with no extension linked. The core declares the work-queue behaviors
-too, `Lease`, `Assignment`, `Queue`, `Presence` and `Blueprint`, which
+too, `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`
+and `Retries`, which
 `@superschematic/engine-workqueue` implements
 (`runtime/engine-workqueue/README.md`): the engine refuses a schema that
 composes one until a deployment registers that package's

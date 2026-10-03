@@ -1,7 +1,7 @@
 {
   "kind": "General",
   "name": "jobs",
-  "description": "A job an engine runs with the core's work-queue behaviors and no extension: a worker claims the queued job of a topic with the highest priority, holds its lease while it runs, and a lease that expires puts the job back in the queue, until its third expiry fails it.",
+  "description": "A job an engine runs with the core's work-queue behaviors and no extension: a worker claims the queued job of a topic with the highest priority, holds its lease while it runs, and a lease that expires puts the job back in the queue, until its third expiry fails it. A claim reserves CPU seconds from a daily budget, and a failed attempt is retried per failure class until its caps fail the job.",
   "scalars": {
     "Generic.Int64": {
       "name": "Generic.Int64",
@@ -41,6 +41,18 @@
         {
           "name": "Queue",
           "config": { "claim": { "from": ["queued"], "to": "running" }, "priorityField": "priority", "match": ["topic"] }
+        },
+        {
+          "name": "Budget",
+          "config": { "meters": { "cpuSeconds": { "limit": 3600, "reserve": 600, "reset": "daily" } }, "limitPermission": "jobs.budget" }
+        },
+        {
+          "name": "Retries",
+          "config": {
+            "classes": { "timeout": { "attempts": 3 }, "invalidOutput": { "attempts": 2 }, "rejected": "terminal" },
+            "totalAttempts": 4,
+            "exhaustedState": "failed"
+          }
         }
       ],
       "fields": [

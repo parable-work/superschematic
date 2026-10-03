@@ -42,6 +42,8 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"queue", WorkQueuePackage},
 	{"presence", WorkQueuePackage},
 	{"blueprint", WorkQueuePackage},
+	{"budget", WorkQueuePackage},
+	{"retries", WorkQueuePackage},
 }
 
 // coreBehaviorSpecs returns the core's BehaviorSpecs. A declaration that

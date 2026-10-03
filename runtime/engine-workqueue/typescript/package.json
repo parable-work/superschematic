@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/engine-workqueue",
   "version": "0.0.0",
-  "description": "Claimable work for @superschematic/engine (D16): the implementations of the core's Lease, an exclusive lease with a fencing token, heartbeats and directives to its holder, and Assignment, which a deployment registers with the engine it opens. Runs on Node.js 24 and Bun. Needs @superschematic/engine next to it in node_modules, the copy the deployment opens; see scripts/link-local-deps.mjs.",
+  "description": "Claimable work for @superschematic/engine (D16): the implementations of the core's work-queue behaviors, Lease, Assignment, Queue, Presence, Blueprint, Budget and Retries, which a deployment registers with the engine it opens. Runs on Node.js 24 and Bun. Needs @superschematic/engine next to it in node_modules, the copy the deployment opens; see scripts/link-local-deps.mjs.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

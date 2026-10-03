@@ -49,6 +49,10 @@ export interface BehaviorConfigs {
   Presence: PresenceConfig;
   /** Creates the instance's children and the edges between them, in one transaction, from a map of steps. */
   Blueprint: BlueprintConfig;
+  /** Reserve-then-settle budgets in units the deployment names, held against limits here and in enclosing scopes. */
+  Budget: BudgetConfig;
+  /** Retries per failure class, with caps, kept results and stuck detection; it requires Workflow. */
+  Retries: RetriesConfig;
 }
 
 /** Workflow's config. */
@@ -291,6 +295,54 @@ export interface BlueprintStep {
 export interface BlueprintSource {
   readonly link: string;
   readonly field: string;
+}
+
+/** Budget's config. */
+export interface BudgetConfig {
+  /** The meters, by name: camelCase. */
+  readonly meters: { readonly [meter: string]: BudgetMeter };
+  /** The permission a principal needs to change a meter's limit, with setLimit or through limitField. */
+  readonly limitPermission?: string;
+  /** A directive sent to the holder of the active lease when usage takes the instance or an enclosing scope over its limit; needs Lease. */
+  readonly onExceeded?: { readonly direct: string };
+}
+
+/** One meter of a Budget config. */
+export interface BudgetMeter {
+  /** The most the instance may have used and reserved together; no limit of its own without this or limitField. */
+  readonly limit?: number;
+  /** An integer field of the type that holds the instance's limit; not with limit. */
+  readonly limitField?: string;
+  /** The amount reserve takes for the meter when it is given no meter. */
+  readonly reserve?: number;
+  /** An integer field of the type whose positive value is that amount; not with reserve. */
+  readonly reserveField?: string;
+  /** A link of the type's Links config whose target, which composes Budget with the meter, is the enclosing scope. */
+  readonly scope?: string;
+  /** daily: the used amount starts again at 0 at each UTC day. */
+  readonly reset?: "daily";
+}
+
+/** Retries' config. */
+export interface RetriesConfig {
+  /** The failure classes, by name: a cap of attempts each, or terminal. */
+  readonly classes: { readonly [failure: string]: { readonly attempts: number } | "terminal" };
+  /** How many failures of every class together an instance may have. */
+  readonly totalAttempts: number;
+  /** An object field of the type with the instance's own caps, by class name and totalAttempts. */
+  readonly limitsField?: string;
+  /** Keeps the best scoring result: by at least minDelta, and never losing a neverRegress predicate. */
+  readonly keepBest?: { readonly minDelta?: number; readonly neverRegress?: readonly string[] };
+  /** How many failures in a row, none kept, with the same signature exhaust the instance as stuck. */
+  readonly stuckAfter?: number;
+  /** A field of the type a kept result is written to. */
+  readonly resultField?: string;
+  /** The state of the type's Workflow an exhausted instance moves to. */
+  readonly exhaustedState: string;
+  /** The states exhaustion moves the status from; every state but the terminal ones and exhaustedState when absent. */
+  readonly from?: readonly string[];
+  /** The permission a principal needs to record an attempt. */
+  readonly permission?: string;
 }
 
 /** A name @behavior takes: a key of BehaviorConfigs. */

@@ -10,11 +10,11 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Assignment", "Blueprint", "Comments", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Revisions", "Rollups", "Search", "Workflow"}
+var coreBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Comments", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements; the engine implements the rest.
-var workQueueBehaviorNames = []string{"Assignment", "Blueprint", "Lease", "Presence", "Queue"}
+var workQueueBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Lease", "Presence", "Queue", "Retries"}
 
 // A registry with no extension declares the behaviors the engine and the
 // work-queue package implement, as the core's, under bare names, each with
@@ -92,8 +92,14 @@ func TestCoreBehaviors(t *testing.T) {
 	if len(blueprint.Operations) != 0 || len(blueprint.Fields) != 1 || blueprint.Fields[0].Name != "blueprint" {
 		t.Errorf("Blueprint = %+v, want no operation and one field, blueprint", blueprint)
 	}
+	budget, _ := reg.Behavior("Budget")
+	retries, _ := reg.Behavior("Retries")
+	if !budget.ConfigRequired() || !retries.ConfigRequired() || len(budget.Requires) != 0 || !slices.Equal(retries.Requires, []string{"Workflow"}) {
+		t.Errorf("Budget: config required %v, requires %v; Retries: config required %v, requires %v; want true, none, true, [Workflow]",
+			budget.ConfigRequired(), budget.Requires, retries.ConfigRequired(), retries.Requires)
+	}
 	// Every work-queue operation writes; claimNext and expireHolder are schema-level.
-	for _, b := range []Behavior{lease, assignment, queue, presence} {
+	for _, b := range []Behavior{lease, assignment, queue, presence, budget, retries} {
 		for _, op := range b.Operations {
 			if !op.Writes || (op.Scope == OperationScopeSchema) != (op.Name == "claimNext" || op.Name == "expireHolder") {
 				t.Errorf("%s.%s: writes %v, scope %q", b.Name, op.Name, op.Writes, op.Scope)
@@ -233,6 +239,34 @@ func TestCoreBehaviors(t *testing.T) {
 		{blueprint, `{"schema": "steps", "parentLink": "run", "keyField": "step", "steps": {"a": {"kind": "build"}}}`, "behavior Blueprint config: "},
 		{blueprint, `{"schema": "steps", "parentLink": "Run", "keyField": "step", "steps": {"a": {}}}`, "behavior Blueprint config: "},
 		{blueprint, `{"schema": "steps", "parentLink": "run", "keyField": "step", "steps": {"a": {}}, "stamp": "steps"}`, "behavior Blueprint config: "},
+		{budget, `{"meters": {"cpuSeconds": {"limit": 3600, "reserve": 600, "reset": "daily"}}}`, ""},
+		{budget, `{"meters": {"cpuSeconds": {"limitField": "cpuLimit", "reserveField": "cpuEstimate", "scope": "pool"}, "requests": {}},
+			"limitPermission": "jobs.budget", "onExceeded": {"direct": "budgetExceeded"}}`, ""},
+		{budget, ``, "behavior Budget config: "},
+		{budget, `{"meters": {}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"CpuSeconds": {}}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {"limit": 0}}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {"limit": 10, "limitField": "cpuLimit"}}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {"reserve": 5, "reserveField": "cpuEstimate"}}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {"reset": "weekly"}}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {"scope": "Pool"}}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {}}, "onExceeded": {}}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {}}, "limitPermission": ""}`, "behavior Budget config: "},
+		{budget, `{"meters": {"cpuSeconds": {}}, "raiseLimitKinds": ["person"]}`, "behavior Budget config: "},
+		{retries, `{"classes": {"timeout": {"attempts": 3}, "rejected": "terminal"}, "totalAttempts": 4, "exhaustedState": "failed"}`, ""},
+		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "limitsField": "caps", "keepBest": {"minDelta": 0.5, "neverRegress": ["compiles"]},
+			"stuckAfter": 2, "resultField": "result", "exhaustedState": "failed", "from": ["running"], "permission": "jobs.work"}`, ""},
+		{retries, ``, "behavior Retries config: "},
+		{retries, `{"classes": {}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
+		{retries, `{"classes": {"timeout": {"attempts": 3}}, "exhaustedState": "failed"}`, "behavior Retries config: "},
+		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4}`, "behavior Retries config: "},
+		{retries, `{"classes": {"timeout": {"attempts": 0}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
+		{retries, `{"classes": {"timeout": "fatal"}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
+		{retries, `{"classes": {"timeout": {"attempts": 3, "hint": "wait"}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
+		{retries, `{"classes": {"totalAttempts": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed"}`, "behavior Retries config: "},
+		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed", "stuckAfter": 0}`, "behavior Retries config: "},
+		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed", "from": []}`, "behavior Retries config: "},
+		{retries, `{"classes": {"timeout": {"attempts": 3}}, "totalAttempts": 4, "exhaustedState": "failed", "bestSoFar": true}`, "behavior Retries config: "},
 	} {
 		err := test.behavior.ValidateConfig(json.RawMessage(test.config))
 		switch {
