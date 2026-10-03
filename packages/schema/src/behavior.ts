@@ -45,6 +45,10 @@ export interface BehaviorConfigs {
   Assignment: AssignmentConfig;
   /** Makes the type's instances claimable work, in priority order; it requires Workflow and Lease. */
   Queue: QueueConfig;
+  /** A heartbeat on an instance that stands for a worker, which the principal it names beats and a miss can expire that principal's leases. */
+  Presence: PresenceConfig;
+  /** Creates the instance's children and the edges between them, in one transaction, from a map of steps. */
+  Blueprint: BlueprintConfig;
 }
 
 /** Workflow's config. */
@@ -229,6 +233,64 @@ export interface QueueConfig {
   readonly match?: readonly string[];
   /** The most instances one claimNext tries; 100 when absent. */
   readonly maxCandidates?: number;
+}
+
+/** Presence's config. */
+export interface PresenceConfig {
+  /** How long the instance stays present after its create or its last beat, in milliseconds, at least 1000. */
+  readonly ttlMs: number;
+  /** A string field of the type that holds the subject of the principal the instance stands for, the only principal that may beat it. */
+  readonly principalField: string;
+  /** Moves the instance's Workflow status, through transition, when it is missed while the status is one of from. Needs Workflow on the type. */
+  readonly onMissed?: PresenceTransition;
+  /** Moves the instance's Workflow status, through transition, at a beat while the status is one of from. Needs Workflow on the type. */
+  readonly onBeat?: PresenceTransition;
+  /** Schemas that compose Lease, whose leases the principal holds a miss expires through expireHolder. */
+  readonly releaseLeases?: readonly string[];
+  /** How often the engine's runner misses the instances past their deadline, in milliseconds, at least 1000; 5000 when absent. */
+  readonly sweepMs?: number;
+}
+
+/** A move of the status a miss or a beat makes: to transition, from one of from. */
+export interface PresenceTransition {
+  readonly transition: string;
+  readonly from: readonly string[];
+}
+
+/** Blueprint's config: one of steps and from. */
+export type BlueprintConfig = BlueprintBase & ({ readonly steps: BlueprintSteps; readonly from?: never } | { readonly from: BlueprintSource; readonly steps?: never });
+
+/** What every Blueprint config gives. */
+export interface BlueprintBase {
+  /** The child schema: it composes Links with parentLink, Dependencies when a step comes after another, and not Blueprint. */
+  readonly schema: string;
+  /** The link of the child schema's Links config that points at this schema. */
+  readonly parentLink: string;
+  /** A string field of the child's type that gets each step's key. */
+  readonly keyField: string;
+  /** Fields of this type copied to every child. */
+  readonly copyFields?: readonly string[];
+  /** Links of this type copied to every child, keeping a pinned one's revision; only with from. */
+  readonly copyLinks?: readonly string[];
+}
+
+/** A map of steps, by key: each one child. */
+export type BlueprintSteps = Readonly<Record<string, BlueprintStep>>;
+
+/** One step of a Blueprint. */
+export interface BlueprintStep {
+  /** The keys of the steps whose children block this step's child. */
+  readonly after?: readonly string[];
+  /** Stamps the step only when this instance's field equals a value, or is a list that includes one. */
+  readonly when?: { readonly field: string; readonly equals: unknown } | { readonly field: string; readonly includes: unknown };
+  /** Fields of the child beside its key and the copied fields. */
+  readonly data?: Readonly<Record<string, unknown>>;
+}
+
+/** Where a Blueprint's steps are kept: a pinned link of the type, and the field of the linked instance that holds them. */
+export interface BlueprintSource {
+  readonly link: string;
+  readonly field: string;
 }
 
 /** A name @behavior takes: a key of BehaviorConfigs. */

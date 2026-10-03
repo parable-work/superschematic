@@ -13,8 +13,10 @@ no implementation for.
 
 Built: `Lease`, an exclusive lease with a fencing token, heartbeats,
 expiry on the engine's runner and directives to its holder;
-`Assignment`; and `Queue`, the claim and `claimNext`. Not built yet: the
-budgets, retries, presence and blueprints D16 lists.
+`Assignment`; `Queue`, the claim and `claimNext`; `Presence`, a
+heartbeat on an instance that stands for a worker; and `Blueprint`,
+children created with their parent. Not built yet: the budgets and
+retries D16 lists.
 
 ```ts
 import { openEngine } from '@superschematic/engine';
@@ -32,10 +34,11 @@ engine.instances.invoke(worker, 'jobs', claimed.id, 'heartbeat', { token: claime
 A deployment passes the implementations as the engine's `behaviors`
 option when it opens the engine, after the core's, which the engine
 registers itself: `workQueueBehaviors` is every one, and `lease`,
-`assignment` and `queue` are exported one by one for a deployment that
-runs only some. `engine.behaviors.register(lease)` registers one later; a
-published version that composes a behavior the engine cannot run is
-`unavailable` until it does. Registering one whose storage already
+`assignment`, `queue`, `presence` and `blueprint` are exported one by
+one for a deployment that runs only some.
+`engine.behaviors.register(lease)` registers one later; a published
+version that composes a behavior the engine cannot run is `unavailable`
+until it does. Registering one whose storage already
 exists in the file brings it up to date, as for any behavior
 (`runtime/engine/README.md`, "Behaviors").
 
@@ -288,6 +291,179 @@ The engine writes a file from one process (D16), and its calls are
 synchronous, so two claims never interleave: `claimNext`'s scan and the
 claim it makes are one transaction under the file's write lock.
 
+## Presence
+
+A heartbeat on an instance that stands for a worker. The instance's
+`principalField` holds the subject of the principal it stands for, and
+only that principal may beat it.
+
+| | |
+| --- | --- |
+| Config | `ttlMs` (at least 1000) and `principalField` (a string field of the type), required; `onMissed` and `onBeat` (`{ transition, from }`), `releaseLeases` (schema names), `sweepMs` (at least 1000; 5000 when absent) |
+| Fields | `presence`: `{ deadline, lastBeatAt, missed }`, the times in epoch milliseconds or null |
+| Operations | `beat()` -> `{ deadline }`; `miss()` -> `{ missed }`. Both write |
+| Schedule | `miss`, every `sweepMs`: `miss` on every instance past its deadline and not missed, at most 1000 a run, as the runner's principal |
+| Guards | an update that changes `principalField` once it holds a value: `vetoed`, whoever asks |
+| Refusals | `beat` by any principal but the one `principalField` names, or on an instance whose `principalField` holds none (`vetoed`) |
+| Events | each operation's event; a beat is a write, with its event |
+| `configChange` | any config may change but `principalField`. Added to a schema with instances, which have no deadline until their first beat; not removed from one, since their deadlines and misses would stay behind |
+
+```json
+{ "name": "Presence", "config": {
+    "ttlMs": 30000,
+    "principalField": "subject",
+    "onMissed": { "transition": "missing", "from": ["idle", "busy"] },
+    "onBeat": { "transition": "idle", "from": ["missing"] },
+    "releaseLeases": ["jobs"] } }
+```
+
+### Deadline and miss
+
+`initialize` sets the first deadline one `ttlMs` after the create, so a
+worker that never beats is missed. `beat` moves the deadline to `ttlMs`
+from now and clears `missed`; it checks its caller in its handler, and
+knowing the subject the instance holds does not make another principal
+it. `onBeat`, when the status is one of its `from` states, moves it to
+its `transition`, the way back from the state `onMissed` moves it to.
+
+`miss` acts on an instance past its deadline that is not missed yet, and
+only once: it sets `missed`, moves the status with `onMissed` when it is
+one of its `from` states, so a worker in a terminal state stays there,
+and expires the principal's leases on each `releaseLeases` schema
+through that schema's `expireHolder`, Lease's schema-level operation, so
+each expiry runs Lease's rules (the token, `onExpiry`, the count) and
+appends its own event. The leases are the principal's, not the
+instance's: while another instance of the schema stands for the same
+principal and is present (not missed, before its deadline), a miss
+leaves them. A status move a guard vetoes leaves the status as
+it is and the instance missed all the same; any other refusal fails the
+miss and leaves the instance as it was. Any principal who may write the
+instance may call `miss`; on any other instance it returns `{ missed:
+false }`. A missed instance stays missed, whatever its status, until it
+beats.
+
+`parseConfig` checks that `principalField` is a string field of the
+type, that the type lists Workflow for `onMissed` and `onBeat`, that
+their states are its states with a transition from each `from` state,
+and, when the schema is defined or published, that each `releaseLeases`
+schema has a live version that composes `Lease`.
+
+### The sweep
+
+The runner runs the `miss` schedule on every schema that composes
+Presence, every `sweepMs` of that schema's config. It reads Presence's
+own columns across the schema through the index on `missed` and
+`deadline`, oldest deadline first, and invokes `miss` on each instance
+due, at most 1000 a run; the rest wait for the next run. It runs as the
+runner's principal (`runner: { principal }`), which needs `write` on the
+schema and, for `releaseLeases`, Lease's `overridePermission` on each
+schema it names, which `expireHolder` asks for, and the permission of
+the `onMissed` transition when it names one. A miss that fails fails the
+run: nothing of the run commits, `engine.runner.status()` shows the
+error, and the runner tries again with its backoff.
+
+Not ported from the source implementation: directives delivered on a
+beat, which belong to Lease's holder, and a worker's heartbeat stored in
+Lease's columns; Presence keeps its own.
+
+## Blueprint
+
+Children created with their parent: a map of steps, by key, says which
+instances of the child schema an instance has and which of them block
+which.
+
+| | |
+| --- | --- |
+| Config | `schema` (the child schema), `parentLink` (a link of its Links config to this schema) and `keyField` (a string field of its type), required; one of `steps` (inline) and `from` (`{ link, field }`); `copyFields`, `copyLinks` |
+| Steps | by key (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`, at most 500): `{ after?, when?, data? }`; `after`, the keys of the steps whose children block this one's; `when`, `{ field, equals }` or `{ field, includes }`; `data`, more fields of the child |
+| Fields | `blueprint`: `{ children: [{ key, id }] }`, in the order they were created; absent until the instance is stamped |
+| Operations | none |
+| Guards | with `from`, once stamped, Links' `link` of the `from` link: `vetoed` |
+| Refusals | with `from`, a map the pinned revision holds that breaks a rule (`vetoed`, on the link); whatever a child's create, link or edge is refused for (its own error), which refuses the change that stamps |
+| `configChange` | any config may change; it applies to the stamps that come after. Added to a schema with instances; not removed from one, since the record of what was stamped would stay behind |
+
+```json
+{ "name": "Blueprint", "config": {
+    "schema": "steps",
+    "parentLink": "batch",
+    "keyField": "step",
+    "steps": {
+      "fetch": {},
+      "check": { "after": ["fetch"], "when": { "field": "topic", "equals": "search" } },
+      "index": { "after": ["check"], "data": { "title": "Index what was fetched" } } },
+    "copyFields": ["topic"] } }
+```
+
+### Stamping
+
+Stamping creates a child per step with `instances.create`, its fields its
+key in `keyField`, the `copyFields` this instance holds, then the step's
+`data`; links it to this instance through the child's own `Links.link`
+for `parentLink`, and for each `copyLinks` link this instance holds, with
+the revision a pinned one records when the child's link is pinned too;
+and adds its edges with the child's own `Dependencies.addBlocker`. Each
+child runs its behaviors' `initialize` and `afterChange`, its guards and
+its events. Everything runs in one transaction, as the principal that
+made the change, who therefore needs `write` on the child schema and
+`read` on this one: a failure at any child refuses the change, and the
+parent, every child, link and edge roll back together. Children come in
+an order where each follows its blockers, ties in the map's order. A
+child schema that composes `Queue` makes the children claimable work:
+`claimNext` claims each once its blockers are in a terminal state, so the
+steps are claimed in the order their edges give.
+
+Inline `steps` are stamped in the instance's create. A create sets no
+link, since a link is set by `Links.link` on an instance that exists, so
+`from` steps are stamped when the `from` link is first set, in that
+link's transaction: the link and the children commit together, or
+neither does. The map is read from the revision the link pins, through
+`Revisions`' `listRevisions` on the definition, as the principal (who
+needs `read` on its schema): a later revision of the definition changes
+only what is stamped from then on, and `link` with a `revision` stamps
+an earlier one. `copyLinks` needs `from`, since an instance holds no
+link at its create.
+
+### when
+
+A step's `when` holds when this instance's field equals the value, or is
+a list that includes it, both compared as JSON, without coercion: `1`
+does not equal `"1"`, and a field the instance does not hold equals
+nothing. A step whose `when` does not hold is left out, and the steps
+that come after it come after the steps it came after instead,
+transitively, so the chain stays connected: with `check` left out,
+`index` comes after `fetch`. An included step keeps the edges it had to
+other included steps.
+
+### The checks
+
+When the schema is defined or published, `parseConfig` checks the child
+schema's live version as the definer may read it: it composes Links with
+`parentLink` pointing at this schema (and this type lists Revisions
+before Blueprint when that link is pinned, so the parent has a revision
+to pin), Dependencies with its own schema among its
+blockers' schemas when a step has `after`, and not Blueprint; `keyField`
+is a string field of its type, `copyFields` are fields of both types of
+one JSON type, and `data` sets fields of its type. `when` names a field
+of this type, a list for `includes`; `data` does not set `keyField`;
+inline steps name only steps the map has in `after` and form no cycle,
+which the refusal names, whatever their `when`. `from` names a pinned
+link of this type's Links to a schema that composes Revisions and has
+the field, an object or JSON; `copyLinks` are links of both Links
+configs to one schema. A map read through `from` is held to the same
+rules against this type when it is stamped.
+
+### What was stamped
+
+Blueprint keeps what it stamped in its own table, so `blueprint` lists
+each step's key and its child's id from that record and not from the
+links that point here: a child linked to the instance later is not among
+them, and one deleted later still is.
+
+Not ported from the source implementation: create governance, which
+checked the child schema's own creates for a parent link and an edge,
+and the trial flag. A step map is checked when it is stamped, not when
+the definition is written.
+
 ## Development
 
 ```
@@ -303,5 +479,5 @@ bun run test        # build, then test:node (node --test) and test:bun (bun test
 The tests import the built package from `dist/` and the engine from
 `node_modules`, open real SQLite files in temporary directories with a
 clock they move, and on Bun run against both adapters.
-`test/package.test.ts` runs the document the core binary builds in `make
-cli-smoke` (`fixture-workqueue-json`).
+`test/package.test.ts` runs the documents the core binary builds in
+`make cli-smoke` (`fixture-workqueue-json`).
