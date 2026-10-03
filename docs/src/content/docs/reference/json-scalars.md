@@ -96,8 +96,8 @@ null when the model was given `None` for it.
 
 The rule covers a single value. An optional `Generic.JSON[]`, list of
 lists or map that is null is absent, as any other list or map is. A
-`Generic.JSON` in the query string, a `GET` argument or a `@query`
-parameter, has no null to carry.
+`Generic.JSON` in the query string, a `GET` argument or a
+`QueryParam<T>`, has no null to carry.
 
 ## Geo.Location
 

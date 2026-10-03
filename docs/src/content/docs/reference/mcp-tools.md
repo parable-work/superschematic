@@ -328,7 +328,8 @@ above as options, and takes a behavior operation's policy from its
 declaration, else the default: the core's behaviors (`Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`
 and `Reactions`, which has no operations), which every engine registers,
-name none.
+name none, and neither do the work-queue behaviors
+`@superschematic/engine-workqueue` implements.
 Its argument schemas are the generators':
 `runtime/engine/testdata/tool_parameters_parity.json` holds them to
 `toolsutil`. `runtime/engine/README.md` ("Tools", "MCP") has the rest, and

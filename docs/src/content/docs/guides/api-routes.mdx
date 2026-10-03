@@ -8,7 +8,7 @@ sidebar:
 import Snippet from '../../../components/Snippet.astro';
 
 An API schema declares routes as methods of classes. Its build writes a
-server (Go by default, or a TypeScript router), an OpenAPI document, the
+server (Go by default, a TypeScript Hono router or a Rust axum crate), an OpenAPI document, the
 request and response types, and an SDK per language the config lists. This
 guide walks the acme shop's `shop-orders` service, served in Go.
 [Auth and permissions](/superschematic/guides/auth-and-permissions/) covers
@@ -24,15 +24,37 @@ method bodies never run: the compiler reads their signatures.
 - `@rest(method, path)` sets the route's HTTP method and path. The server
   mounts every path under `/api`, so `orders/{id}` is `GET /api/orders/{id}`.
 - Sets group into namespaces. `OrderQueries` and `OrderMutations` share the
-  `order` namespace: a set named `<Name>Queries` or `<Name>Mutations`
-  belongs to `<name>`, and any other set, like `ProductReviews`, is its own.
-  A namespace is one interface to implement in the server and one field or
-  property of each SDK.
+  `order` namespace: a set named `<Name>Queries`, `<Name>Mutations`,
+  `<Name>Operations` or `<Name>Actions` belongs to `<name>` (kebab-case),
+  sets named exactly `Query` or `Mutation` belong to `root`, and any other
+  set, like `ProductReviews`, is its own. A namespace is one interface to
+  implement in the server and one field or property of each SDK
+  (`sdk.order`).
+
+`@rest` may leave out the path, and a method may leave out `@rest`. The
+route then gets defaults:
+
+- **Method**: `POST` in a set whose name ends in `Mutations` or `Actions`,
+  `GET` in any other.
+- **Path**: `/api/<namespace>/<method-name>` in kebab-case (no namespace
+  segment for `root`), then a `{param}` segment for each argument whose
+  type can be one: a scalar that is an id, a UUID, an integer or
+  path-like, never a list. `getOrder(id: Identity.UUID)` in `OrderQueries`
+  is `GET /api/order/get-order/{id}`.
+
+Give public routes an explicit path, so renaming a method or a set does
+not move them.
 
 The server asks for one implementation per namespace, with a method per
 route and typed arguments:
 
 <Snippet file="testdata/generated/api/shop-orders/interfaces.go" symbol="OrderImplementation" />
+
+To start an implementation, set `outputs.api.scaffoldsOutputDir` to a
+directory, relative to the service directory. The Go and Rust servers then
+write a stub implementation of each route there, and a later build never
+overwrites one that exists, so you edit the stubs in place; the build log
+says how many it created and skipped. The TypeScript server writes none.
 
 ## Arguments
 
@@ -166,6 +188,24 @@ decryptor, which in a deployment calls a key service. On such a route
 `@bodyLimit` counts the envelope, not the decrypted payload.
 
 <Snippet file="go/orders_test.go" symbol="TestTrafficControls" />
+
+## Webhooks
+
+`@webhook` marks an operation a third party calls, not your clients. The
+Go and TypeScript SDKs leave it out; the Python and Rust SDKs still
+generate a method for it.
+
+`@hmacVerified({ provider: "stripe" })` puts a signature check in front of
+the route in the Go server. `Implementations` gains `WebhookVerifiers`, a
+map from provider name to a `WebhookVerifier`
+(`func(http.Handler) http.Handler`) that you write, and
+`ValidateImplementations` fails until every provider the schema names has
+one. The verifier runs before the rate limit, the body limit and the
+permission check, so an unsigned request costs nothing else.
+
+Only the Go server applies `@hmacVerified`. The TypeScript and Rust
+servers do not read it, so a webhook served by either must check the
+signature in its own handler.
 
 ## OpenAPI
 

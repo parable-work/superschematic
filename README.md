@@ -1,110 +1,387 @@
 # superschematic
 
-A schema compiler. You write one schema per service in TypeScript, JSON or
-YAML; superschematic generates the SQL DDL, Go ORM, a REST server (Go, Rust
-or TypeScript), OpenAPI document, TypeScript, Python and Rust types, and TypeScript, Go, Python and
-Rust SDKs for it. Scalar types (email, UUID, URL, cron, and about forty more)
-come from [superscalar](https://github.com/parable-work/superscalar), which
-validates them the same way in every language.
+Describe your data and your APIs once. superschematic compiles that schema
+into Postgres tables, a Go ORM, an HTTP server, OpenAPI, types and client
+SDKs in Go, TypeScript, Python and Rust, and every one of them validates a
+value the same way.
 
 ```
 schema source (.schema.ts | .schema.json | .schema.yaml)
   -> superschematic build
      -> sql/         Postgres DDL
      -> orm/         Go repositories
-     -> api/         Go chi router, middleware, OpenAPI; or a Rust axum crate;
-                     or a TypeScript Hono router package
+     -> api/         a Go (chi), Rust (axum) or TypeScript (Hono) server, and OpenAPI
      -> types/       Go, TypeScript, Python, Rust
-     -> sdk/         TypeScript, Go, Python, Rust clients
+     -> sdk/         Go, TypeScript, Python, Rust clients, and MCP tool documents
 ```
 
-## Extension model
+superschematic is pre-release: build it from this checkout (see
+[Status](#status)). The documentation lives under [`docs/`](docs/) and is
+linked [below](#documentation).
 
-The core knows three schema kinds (DB, API, General), one auth
-provider (`session`) and the generic scalar set. Everything project-specific
-lives in an extension: a Go package that registers kinds, decorators,
-generators, auth providers, build hooks and scalars with the registry, and a
-naming file (`superschematic.toml`) that gives the generated packages their
-coordinates. A binary is `cli.New(cli.Config{Name: ...}, ext...)`; the
-`cmd/superschematic` binary links no extension. `extensions/deploy` and
-`extensions/platform` are worked examples. The design is written up in
-`docs/extension-model.md`; the decisions behind it are in
-`docs/DECISIONS.md`. The Starlight site under `docs/` (quickstarts, the
-extension guide, the naming-file and CLI references) deploys to GitHub
-Pages on a release tag once the repository is public.
+## Why superschematic
 
-## Layout
+A service's data is usually written down many times: a `CREATE TABLE`, an
+ORM struct, the server's request and response types, an OpenAPI document,
+and a client with its own types in every language that calls it. Each copy
+carries its own validation, and the copies drift: a column that is
+nullable in SQL but required in the SDK, an email address the server
+accepts and the TypeScript client refuses.
+
+superschematic makes the schema the one place a shape is written. A build
+generates everything else from it, so a schema change reaches every layer
+at once, and the type checker in each language points at the code that has
+to follow.
+
+Validation is part of that contract. Field types such as `Contact.Email`,
+`Identity.UUID` and `Temporal.DateTime` come from
+[superscalar](https://github.com/parable-work/superscalar), a scalar library
+that parses and validates each one identically in Go, TypeScript, Python
+and Rust. The constraints you declare (`min`, `maxLength`, `pattern` and
+the rest) are enforced by the generated decoders in every language, so an
+SDK refuses the request the server would refuse.
+
+## What you can build with it
+
+| You want | You write | You get |
+| --- | --- | --- |
+| A Postgres data layer | a DB schema: one class per table | DDL with keys, relations, indexes, text search and JSON columns; a Go ORM with typed repositories and transactions |
+| An HTTP API | an API schema: operations over those tables | a Go, Rust or TypeScript server that routes, decodes, validates and checks permissions, and its OpenAPI; you implement one interface |
+| Clients for that API | a line per language in the service's config | SDKs in Go, TypeScript, Python and Rust, plus MCP tool documents an agent can call the operations through |
+| Types shared across a polyglot stack | a General schema | the same types and validators in all four languages, and a typed loader for environment variables |
+| Row history, branches and merges | `@versioned` and `@versionGraph` on tables | history tables and version-fenced writes; a tree of tables you can branch, commit, merge, release and rebase, with an engine in each language |
+| A backend without generated code | a schema as JSON, published to a running server | [`@superschematic/engine`](runtime/engine/README.md): instances, an event log and access control, with workflow, comments, revisions, links, search and work queues, over HTTP, an event stream and MCP |
+| Your own conventions | a Go extension | new schema kinds, decorators, generators, auth providers and commands, without forking the core |
+
+## A quick look
+
+These files are trimmed from [`examples/acme-shop`](examples/acme-shop/), a
+small shop that CI builds and tests on every pull request.
+
+A **General** schema declares plain types, shared by other services:
+
+```ts
+// schemas/services/shop-common/src/price.schema.ts
+import { Generic } from "superscalar";
+
+export enum Currency { EUR = "EUR", GBP = "GBP", USD = "USD" }
+
+// A price in the currency's smallest unit: 1999 EUR is 19.99 euros.
+export abstract class Price {
+  amountCents: Generic.Int64;
+  currency: Currency;
+}
+```
+
+A **DB** schema declares tables. Each class becomes a table, a Go
+repository and a type in every language the config lists:
+
+```ts
+// schemas/services/shop-db/src/shop.schema.ts
+import { Contact, Generic, Identity } from "superscalar";
+import { Default } from "@superschematic/schema";
+import { AutoGenerate, Relation, key, unique } from "@superschematic/db";
+
+export abstract class User {
+  @key id: AutoGenerate<Identity.UUID>;
+  @unique email: Contact.Email;
+  name: Identity.Name;
+}
+
+export abstract class Product {
+  @key id: AutoGenerate<Identity.UUID>;
+  @unique sku: Identity.Slug;
+  name: Identity.Name;
+  priceCents: Generic.Int64;
+  inStock: Default<boolean, true>;
+}
+
+export abstract class StockLevel {
+  @key id: AutoGenerate<Identity.UUID>;
+  product: Relation<Product, { onDelete: "CASCADE" }>;
+  quantity: Generic.Int64;
+}
+```
+
+An **API** schema declares operations: here, a view checked against a
+table, a validated input, and routes behind permissions:
+
+```ts
+// schemas/services/shop-api/src/products.schema.ts
+import { Generic, Identity } from "superscalar";
+import { Validate } from "@superschematic/schema";
+import { Authenticated, HttpMethod, QueryParam, requirePermission, rest, source } from "@superschematic/api";
+import { Product } from "@acme/shop-db";
+
+@source(Product)
+export abstract class ProductView {
+  id: Identity.UUID;
+  sku: Identity.Slug;
+  name: Identity.Name;
+  priceCents: Generic.Int64;
+  inStock: boolean;
+}
+
+export abstract class CreateProductInput {
+  sku: Identity.Slug;
+  name: Identity.Name;
+  priceCents: Validate<Generic.Int64, { min: 0 }>;
+}
+
+export class ProductQueries extends Authenticated {
+  @rest(HttpMethod.GET, "products")
+  @requirePermission(["products.read"])
+  listProducts(inStock: QueryParam<boolean>): ProductView[] {
+    throw new Error("schema declaration only");
+  }
+}
+
+export class ProductMutations extends Authenticated {
+  @rest(HttpMethod.POST, "products")
+  @requirePermission(["products.write"])
+  createProduct(input: CreateProductInput): ProductView {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+Each service's `schema.config.ts` names its kind and the outputs to
+generate:
+
+```ts
+export default defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  public: true,
+  authDb: service({ name: "shop-db", kind: SchemaKind.DB }),
+  outputs: {
+    types: { [TargetLanguage.Go]: { enabled: true }, [TargetLanguage.TypeScript]: { enabled: true } },
+    api: { enabled: true },  // the Go server; or language: "TYPESCRIPT" or "RUST"
+    sdk: { [TargetLanguage.Go]: { enabled: true }, [TargetLanguage.TypeScript]: { enabled: true } }
+  }
+});
+```
+
+One command builds every service in dependency order:
+
+```sh
+superschematic build-all schemas/services
+```
+
+```
+schemas/dist/
+  sql/shop-db/create.sql                 Postgres DDL
+  orm/shop-db/                           Go ORM over those tables
+  api/shop-api/                          Go server: interfaces.go (yours to implement), routes.go, openapi.json
+  types/{go,typescript,python,rust}/...  Price, User, Product, ProductView, ... in each language
+  sdk/{go,typescript}/shop-api/          clients that validate before they send
+  .deps.json                             the package graph, for release and CI scripts
+```
+
+You implement the generated `interfaces.go` with your business logic; the
+server has already routed, authenticated, decoded and validated the
+request by the time your method runs. Schemas can also be written as JSON
+or YAML, and `superschematic format` converts between the three forms.
+
+## Get started
+
+You need Go 1.26.4, a C compiler, Rust, Node 22.12+ (24 for the engine) and
+Bun 1.4; Python 3.12 with uv only for Python output, and Postgres 16 only
+to run the generated SQL. The exact pins are in [`tools.env`](tools.env);
+[Prerequisites](docs/src/content/docs/start/prerequisites.md) says what each
+tool is for.
+
+```sh
+git clone https://github.com/parable-work/superschematic
+cd superschematic
+make setup      # checks out and builds superscalar, the version-graph archive; bun install; uv sync
+make build      # writes bin/superschematic
+export PATH="$PWD/bin:$PATH"
+superschematic --help
+```
+
+Then build and test the example shop end to end. It compiles the generated
+Go, type-checks the generated TypeScript, and runs clients in all four
+languages against the Go server:
+
+```sh
+examples/acme-shop/scripts/check.sh
+```
+
+From there, [Getting started](docs/src/content/docs/start/getting-started.mdx)
+builds one schema and uses its types, and
+[Your first project](docs/src/content/docs/first-project/index.mdx) grows it
+into a database, a Go API and a TypeScript API.
+
+## Documentation
+
+The pages below are the source of the docs site, which is published to
+<https://parable-work.github.io/superschematic/> from the first release
+tag. To browse it locally with working navigation and code samples, run
+`cd docs && npm install && npm run dev`.
+
+**Start here**
+
+- [Prerequisites](docs/src/content/docs/start/prerequisites.md): the toolchain, and setting up a checkout.
+- [Getting started](docs/src/content/docs/start/getting-started.mdx): build one schema and use its Go, TypeScript, Python and Rust types.
+- [How it works](docs/src/content/docs/start/how-it-works.mdx): services, kinds, outputs, the naming file and the IR.
+
+**Tutorial: your first project**
+
+- [Overview](docs/src/content/docs/first-project/index.mdx): the acme shop and how its services find each other.
+- [Model the database](docs/src/content/docs/first-project/database.mdx): Postgres DDL, a Go ORM, and Go and TypeScript types.
+- [Serve and call it from Go](docs/src/content/docs/first-project/go-api.mdx): implement the generated Go server and call it with the Go SDK.
+- [Serve and call it from TypeScript](docs/src/content/docs/first-project/typescript-api.mdx): implement the generated Hono router and call it with the TypeScript SDK.
+- [Build the whole tree](docs/src/content/docs/first-project/build-the-tree.mdx): `build-all`, the package graph and the build cache.
+
+**Guides**
+
+- [Modeling types](docs/src/content/docs/guides/modeling-types.mdx): objects, scalars, enums, lists, maps, defaults, constraints, environment variables and secrets.
+- [Database tables](docs/src/content/docs/guides/database-tables.mdx): keys, relations, indexes, text search, JSON columns, soft delete and transactions.
+- [API routes](docs/src/content/docs/guides/api-routes.mdx): operation sets, default routes, parameters, bodies, views, errors, encrypted payloads, traffic controls and webhooks.
+- [Auth and permissions](docs/src/content/docs/guides/auth-and-permissions.mdx): which routes need a caller, permissions, and credentials in each SDK.
+- [Client SDKs](docs/src/content/docs/guides/client-sdks.mdx): generate and call a client in Go, TypeScript, Python and Rust.
+- [The engine](docs/src/content/docs/guides/engine.mdx): run a schema with no generated code, over HTTP, an event stream and MCP.
+- [Engine behaviors](docs/src/content/docs/guides/engine-behaviors.md): compose behaviors in TypeScript or JSON; schema-level operations; the runner; Dependencies, Links, Rollups, Search and Reactions.
+- [Work queues](docs/src/content/docs/guides/work-queues.md): claimable work with `@superschematic/engine-workqueue`: leases, claims, worker heartbeats, blueprints, budgets and retries.
+
+**Languages**: what the generated code offers in
+[Go](docs/src/content/docs/install/go.md),
+[TypeScript](docs/src/content/docs/install/typescript.md),
+[Python](docs/src/content/docs/install/python.md) and
+[Rust](docs/src/content/docs/install/rust.md).
+
+**Reference**
+
+- [Decorators and wrappers](docs/src/content/docs/reference/decorators.md): every core decorator and type wrapper, and the page that covers it.
+- [Naming file](docs/src/content/docs/reference/naming.md): every `superschematic.toml` key and its default.
+- [CLI](docs/src/content/docs/reference/cli.md): every command and flag.
+- [Documentation decorators](docs/src/content/docs/reference/documentation.md): `@docs`, `@purpose` and `@icon`.
+- [MCP tools](docs/src/content/docs/reference/mcp-tools.md): publish operations as MCP tools, and the tool documents the SDKs carry.
+- [Projection views](docs/src/content/docs/reference/projections.md): read-only SQL views with `@projection`, `@join` and `@column`.
+- [Arrays of arrays](docs/src/content/docs/reference/arrays-of-arrays.md): `T[][]` in every generator.
+- [JSON-valued scalars](docs/src/content/docs/reference/json-scalars.md): `Generic.JSON`, `Generic.StringMap` and `Embedding.Vector`.
+- [Versioned tables](docs/src/content/docs/reference/versioned-tables.md): `@versioned` and `@optimistic`, history tables and fenced writes.
+- [Version graphs](docs/src/content/docs/reference/version-graphs.md): branch, commit and merge a tree of tables, with engines in Go, TypeScript, Rust and Python.
+
+**Extending**
+
+- [Write an extension](docs/src/content/docs/extending/write-an-extension.md): add a kind, decorator, document, generator, auth provider or command.
+- [Deploy extension](docs/src/content/docs/extending/deploy.md): map `@envVars` fields to a Helm values file.
+- [Platform extension](docs/src/content/docs/extending/platform.md): a kind that groups other services.
+
+**Runtime references.** Each runtime the generated code or the engine
+links has its own README:
+[schema runtime](runtime/schema/README.md),
+HTTP runtime for [Go](runtime/http/go/README.md),
+[Rust](runtime/http/rust/README.md) and
+[TypeScript](runtime/http/typescript/README.md),
+[engine](runtime/engine/README.md),
+[engine work queue](runtime/engine-workqueue/README.md) and
+[version graph](runtime/versiongraph/README.md) (with its
+[TypeScript](runtime/versiongraph/typescript/README.md),
+[Rust engine](runtime/versiongraph/rust-engine/README.md) and
+[Python](runtime/versiongraph/python/README.md) packages).
+
+**Design.** [`docs/extension-model.md`](docs/extension-model.md) is the
+design of the extension seam, and [`docs/DECISIONS.md`](docs/DECISIONS.md)
+records every design decision (cited as D1, D2, ... in code and commits).
+
+## Examples
+
+| Example | What it shows | Run it |
+| --- | --- | --- |
+| [`examples/acme-shop`](examples/acme-shop/) | The tutorial's shop on the core binary: five services, a Go and a TypeScript server, and clients in all four languages | `examples/acme-shop/scripts/check.sh` |
+| [`examples/acme-schematic`](examples/acme-schematic/) | The same shop with an extension that adds a kind, decorators, a generator, an auth provider, a behavior and commands, without editing the core | `examples/acme-schematic/scripts/smoke.sh` |
+| [`examples/engine-notes`](examples/engine-notes/) | A notes server on the engine: workflow, comments and revisions over HTTP, an event stream and MCP | `examples/engine-notes/scripts/check.sh` |
+| [`extensions/deploy`](extensions/deploy/), [`extensions/platform`](extensions/platform/) | Two small extensions: Helm values from `@envVars`, and a kind that groups services | `go test ./extensions/...` |
+
+## Extending superschematic
+
+The core knows three schema kinds (DB, API and General), one auth provider
+(`session`) and superscalar's generic scalar set. Everything specific to
+one organization lives in an extension: a Go package that registers kinds,
+decorators, documents, generators, auth providers, build hooks, behaviors
+and scalars with the registry. A binary is the core plus the extensions
+you link:
+
+```go
+func main() {
+	root := cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+```
+
+`cmd/superschematic` links none. The naming file, `superschematic.toml` at
+the root of your schemas, gives the generated packages their module paths,
+npm scope and crate names. See
+[Write an extension](docs/src/content/docs/extending/write-an-extension.md)
+and the [naming file reference](docs/src/content/docs/reference/naming.md).
+
+## Repository layout
 
 | Path | What it is |
 | --- | --- |
-| `cmd/superschematic/` | The binary with no extension linked |
-| `cli/` | `cli.New(Config, ...Extension)`: build, build-all, format, json-schema, behaviors |
-| `registry/`, `loader/`, `schemadeps/` | Public packages an extension imports |
-| `internal/` | Loader, generators, writers, build plan and cache |
-| `ir/` | The schema IR (own Go module; the runtimes import it) |
-| `ir/typescript/` | `@superschematic/schema-ir`: the runtime document's types, and the schema-file data form's types and JSON Schema |
-| `runtime/schema/{go,typescript,python}/` | Schema runtime the generated code links |
-| `runtime/http/{go,rust,typescript}/` | HTTP runtime the generated servers link; the engine's HTTP API is built on the TypeScript one |
-| `runtime/versiongraph/{rust,go,typescript}/` | Version-graph core: compose, merge, diff, hash and validate trees of versioned rows; a Rust crate with a Go binding (its own Go module) and `@superschematic/versiongraph`, the TypeScript package over its wasm build for the browser, bun and Node. `runtime/versiongraph/README.md` is its JSON contract and `testdata/vectors` its executable form. A generated ORM whose schema declares a graph imports the Go binding |
-| `runtime/engine/typescript/` | `@superschematic/engine`: runs a schema with no generated code (D16); its storage, schema registry, instances, event log, access policy, HTTP API with the event stream (`@superschematic/engine/http`), behavior plug-in interface, runner of reactions and schedules, describe and tools documents, MCP endpoint (`@superschematic/engine/mcp`) and the core's behaviors (`Workflow`, `Comments`, `Revisions`, and `Dependencies`, `Links` and `Rollups`, which reach other instances, `Search`, full-text search without vectors, and `Reactions`, which the runner runs) are built. `runtime/engine/testdata/` holds the Go vectors its tool argument schemas are checked against |
-| `runtime/engine-workqueue/typescript/` | `@superschematic/engine-workqueue`: claimable work for the engine (D16), behaviors a deployment registers with it. `Lease`, leases with fencing tokens, heartbeats, expiry on the runner and directives, `Assignment`, `Queue`, the claim and `claimNext`, `Presence`, worker heartbeats whose miss expires the worker's leases, and `Blueprint`, children created with their parent, are built |
-| `packages/` | `@superschematic/{api,db,schema,schema-config}`: the TypeScript authoring packages |
-| `extensions/` | Example extensions |
-| `superschematic.toml` | The default naming file, written out |
+| [`cmd/superschematic/`](cmd/superschematic/) | The binary, with no extension linked |
+| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `build`, `build-all`, `format`, `json-schema`, `behaviors` |
+| [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
+| [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
+| [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |
+| [`packages/`](packages/) | The authoring packages schemas import: `@superschematic/{schema,db,api,schema-config}` |
+| [`runtime/schema/`](runtime/schema/) | The schema runtime generated types link, in Go, TypeScript and Python |
+| [`runtime/http/`](runtime/http/) | The HTTP runtime generated servers link, in Go, Rust and TypeScript |
+| [`runtime/versiongraph/`](runtime/versiongraph/) | The version-graph core (Rust, with a Go binding and a wasm build) and its engines in Go, TypeScript, Rust and Python |
+| [`runtime/engine/`](runtime/engine/) | `@superschematic/engine`: runs a schema with no generated code |
+| [`runtime/engine-workqueue/`](runtime/engine-workqueue/) | `@superschematic/engine-workqueue`: claimable work for the engine |
+| [`extensions/`](extensions/), [`examples/`](examples/) | Example extensions and projects |
+| [`docs/`](docs/) | The docs site, the decision log and the extension design |
+| [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
-Five Go modules: the root (compiler), `ir`, `runtime/schema/go`,
-`runtime/http/go` and `runtime/versiongraph/go`. Generated code imports the
-runtimes and the IR, never the compiler.
+The repository has five Go modules: the root (the compiler), `ir`,
+`runtime/schema/go`, `runtime/http/go` and `runtime/versiongraph/go`.
+Generated code imports the runtimes and the IR, never the compiler.
 
-## Build
+## Development
 
-Pins: `tools.env` (Go 1.26.4, Node, Bun, Python, uv, Rust) and
-`superscalar.pin` (the superscalar commit). superscalar has no release yet, so
-its Go binding is built from source: `scripts/superscalar-dep.sh` checks the
-pinned commit out under `third_party/superscalar`, builds the static archive
-and the TypeScript binding, and prints the `CGO_LDFLAGS` value Go needs.
+Pins: [`tools.env`](tools.env) (Go, Node, Bun, Python, uv, Rust) and
+[`superscalar.pin`](superscalar.pin) (the superscalar commit).
 
-```
-make setup          # superscalar checkout + build, bun install, uv sync
+```sh
+make setup          # superscalar checkout and build, bun install, uv sync
 make build          # go build every module; bin/superschematic
-make test           # go test, catalog drift, TypeScript, Python, Rust, CLI smoke
+make test           # Go, catalog drift, TypeScript, Python, Rust, CLI smoke
 make lint           # go vet, gofmt, golangci-lint, scrub
+make docs           # build the docs site; fails on a broken link
 ```
 
-Or by hand:
+superscalar has no release yet, so its Go binding is built from source:
+`scripts/superscalar-dep.sh` checks the pinned commit out under
+`third_party/superscalar`, builds its static archive and TypeScript
+binding, and prints the `CGO_LDFLAGS` Go needs. To build or test generated
+Go code by hand, export the same flags the Makefile uses:
 
-```
+```sh
 export GOTOOLCHAIN=go1.26.4
-eval "$(scripts/superscalar-dep.sh --export)"
-go build -trimpath -buildvcs=false -o bin/superschematic ./cmd/superschematic
-bin/superschematic build path/to/schemas/services/my-service
+export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
 ```
 
-`superschematic build <service-dir>` reads `<schemas-root>/superschematic.toml`
-for names and writes to `<schemas-root>/dist`. `examples/acme-shop` is the
-docs site's tutorial project: four services built with the core binary,
-and a Go and a TypeScript app that serve and call what they generate;
-`examples/acme-shop/scripts/check.sh` builds and tests it. `examples/acme-schematic` is a
-complete downstream example: a schemas root with one service per kind and an
-extension that adds a kind, a decorator, a document, a generator, an auth
-provider and a command without editing the core. Its README walks through
-each surface; `examples/acme-schematic/scripts/smoke.sh` runs it.
-`examples/engine-notes` is the engine guide's project: a notes server on
-`@superschematic/engine` whose schema composes `Workflow`, `Comments` and
-`Revisions`, served over HTTP, the event stream and MCP;
-`examples/engine-notes/scripts/check.sh` runs its end-to-end test on
-Node.js and Bun.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has every make target, the test
+layout and the release procedure. [`docs/README.md`](docs/README.md) covers
+writing docs pages.
 
 ## Status
 
-Pre-release. The API surface an extension depends on (`registry`, `loader`,
-`cli`, `schemadeps`, `generator.Naming`) is not yet frozen. The first tag is
-`v0.1.0-alpha.1`; until it is cut the Go modules are consumed at a commit and
-nothing is published to npm, PyPI or crates.io. `CONTRIBUTING.md`, "Releases",
-has the procedure.
+Pre-release. The first tag will be `v0.1.0-alpha.1`; until it is cut, the Go
+modules are consumed at a commit and nothing is published to npm, PyPI or
+crates.io. The API surface an extension depends on (`registry`, `loader`,
+`cli`, `schemadeps`, `generator.Naming`) is not frozen.
 
 ## Contributing
 
-See `CONTRIBUTING.md`. Commits need a DCO sign-off (`git commit -s`).
-superschematic is maintained by Parable Work, Inc. and licensed under
-Apache-2.0 (`LICENSE`).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). Commits need a DCO sign-off
+(`git commit -s`). Report security issues as [`SECURITY.md`](SECURITY.md)
+describes. superschematic is maintained by Parable Work, Inc. and licensed
+under Apache-2.0 ([`LICENSE`](LICENSE)).
