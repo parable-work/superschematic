@@ -123,12 +123,13 @@ sdk = CatalogSDK(ClientConfig(
     base_url="https://api.example.com",
     auth_token=token,
 ))
-product = sdk.product_queries.get_product(id)
+product = sdk.product.get_product(id)
 ```
 
 `auth_token` is static. `auth_token_provider` is called per request.
 `set_token` / `clear_token` change the token after construction.
-Operation sets become snake_case properties.
+Each namespace is a snake_case property of the SDK: `ProductQueries` and
+`ProductMutations` both live on `sdk.product`.
 
 With the types package installed, an input is checked before the request:
 pydantic checks its types and required fields, then `validate_all` checks
@@ -139,8 +140,8 @@ and message, as the Go and TypeScript SDKs report them.
 
 An operation without an input type sends its arguments where the route
 reads them: on a `GET` in the query string, and on any other method, a
-`DELETE` among them, as the fields of the JSON body. A `@query` parameter
-is always in the query string.
+`DELETE` among them, as the fields of the JSON body. A `QueryParam<T>`
+argument is always in the query string.
 
 An object-type argument of an operation that is not a `GET`, in a list, a
 list of lists or a map, is checked the same way, with each failure under
@@ -157,7 +158,7 @@ is sent as the JSON value it holds: a `dict`, a `list`, a `str`, a
 number or a `bool`. `None` for a required one or a list element raises
 `ValidationError`, and so, with the types package installed, does a value
 JSON cannot hold (`NaN`, a `set`, a key that is not a string). In the
-query string, a `GET` argument or a `@query` parameter, a `Generic.JSON`
+query string, a `GET` argument or a `QueryParam<T>`, a `Generic.JSON`
 stays a `str`.
 
 A `Generic.StringMap` or `Embedding.Vector` argument of an operation that

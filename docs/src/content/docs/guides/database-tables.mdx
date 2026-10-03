@@ -160,3 +160,17 @@ no-op transaction returns none.
 `ErrNotFound` from a lookup, and the unique index's `23505` error from
 Postgres, are the errors an implementation usually turns into a 404 or a
 409; [API routes](/superschematic/guides/api-routes/) shows how.
+
+## Beyond plain tables
+
+Three reference pages cover what a DB schema can add on top of this guide:
+
+- [Versioned tables](/superschematic/reference/versioned-tables/): `@versioned`
+  keeps every version of a row in a history table, with readers for a
+  past version or a past time, and writes fenced on the version a caller
+  read. `@optimistic` keeps only the fence.
+- [Version graphs](/superschematic/reference/version-graphs/): branch,
+  commit, merge, release and rebase a tree of versioned tables as a
+  whole, with engines in Go, TypeScript, Rust and Python.
+- [Projection views](/superschematic/reference/projections/): read-only SQL
+  views over joined tables, with `@projection`, `@join` and `@column`.

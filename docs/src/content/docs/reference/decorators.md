@@ -19,12 +19,14 @@ as their support lands in every generator.
 | `Nullable<T>` | field | the field may be absent or null; `name?: T` means the same | [Modeling types](/superschematic/guides/modeling-types/#required-nullable-and-optional) |
 | `Default<T, V>` | field | the decoders fill in `V` when a payload leaves the field out | [Modeling types](/superschematic/guides/modeling-types/#defaults) |
 | `Validate<T, C>` | field | `min`, `max`, `minLength`, `maxLength`, `pattern`, `listMin`, `listMax`, `uploadMaxBytes` | [Modeling types](/superschematic/guides/modeling-types/#constraints) |
+| `Secret<T>` | field | a value kept out of logs: mask helpers clear it, and an `@envVars` loader marks it secret | [Modeling types](/superschematic/guides/modeling-types/#secrets) |
 | `@strictJSON` | class | every decoder of the type refuses a key it does not declare | [Modeling types](/superschematic/guides/modeling-types/#strict-decoding) |
 | `@denyUnknownFields` | class | the Rust type refuses a key it does not declare | [Modeling types](/superschematic/guides/modeling-types/#strict-decoding) |
 | `@jsonField` | class | the type is stored as `JSONB` inside the row that holds it, not as a table | [Database tables](/superschematic/guides/database-tables/#json-columns) |
 | `@source(Table)` | class (API, General) | the class is a view of a table; its fields are checked against the table's | [API routes](/superschematic/guides/api-routes/#responses-and-views) |
 | `@virtual` | field of a `@source` view | a field with no column behind it, filled in by the implementation | [API routes](/superschematic/guides/api-routes/#responses-and-views) |
 | `@docs`, `@purpose`, `@icon` | field | presentation for a settings or form UI | [Documentation](/superschematic/reference/documentation/) |
+| `@behavior(name, config?)` | class | composes an engine behavior (`Workflow`, `Links`, `Queue`, ...) on a type the engine runs; `BehaviorConfigs` types the config | [Engine behaviors](/superschematic/guides/engine-behaviors/#compose-a-behavior) |
 
 ## Tables: `@superschematic/db`
 
@@ -54,7 +56,10 @@ as their support lands in every generator.
 | `EncryptedField<T>` | argument, result | the operation's request body travels as an encrypted envelope | [API routes](/superschematic/guides/api-routes/#encrypted-payloads) |
 | `@auth` | method | the route needs a caller | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@requirePermission([...])` | method | the route needs a caller holding one of the permissions | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
+| `@requireOwnership` | method | the route needs a caller; your implementation checks ownership | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
 | `@publicRoute` | method | marks a route anyone may call | [Auth and permissions](/superschematic/guides/auth-and-permissions/#what-a-route-requires) |
+| `@webhook` | method | an operation a third party calls; the Go and TypeScript SDKs leave it out | [API routes](/superschematic/guides/api-routes/#webhooks) |
+| `@hmacVerified({ provider })` | method | the Go server checks the request's signature with the provider's verifier | [API routes](/superschematic/guides/api-routes/#webhooks) |
 | `@rateLimit`, `@bodyLimit`, `@timeout` | class, method | bound a route's requests per minute, body size and duration | [API routes](/superschematic/guides/api-routes/#traffic-controls) |
 | `@manualRouteRegistration` | method | the Go and Rust routers leave the route for your service to mount; the TypeScript router gates it and hands it to your handler | [TypeScript](/superschematic/install/typescript/#serve-a-generated-api), [Rust](/superschematic/install/rust/#serve-a-generated-api) |
 | `@docs`, `@icon` | method | the operation's documentation and icon | [Documentation](/superschematic/reference/documentation/) |
@@ -66,3 +71,4 @@ as their support lands in every generator.
 | --- | --- | --- |
 | `defineConfig({...})` | a service's name, kind, `public`, `authDb`, `dependencies` and `outputs` | [How it works](/superschematic/start/how-it-works/) |
 | `service({ name, kind })` | a handle to another service, for `authDb` and `dependencies` | [How it works](/superschematic/start/how-it-works/#services-depend-on-each-other) |
+| `@envVars` | on a class of a General schema: its fields are the service's environment variables, with a generated loader and `values-schema.json` | [Modeling types](/superschematic/guides/modeling-types/#environment-variables) |
