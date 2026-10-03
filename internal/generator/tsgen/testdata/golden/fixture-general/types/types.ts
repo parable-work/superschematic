@@ -11,7 +11,7 @@ import type {
 } from './enums';
 
 export interface FixtureConfig {
-  DATABASE_URL: string;
+  DATABASE_URL: NetworkUrl;
   JWT_SECRET: string;
   PORT: number;
   ENVIRONMENT: FixtureEnvironment;
@@ -44,8 +44,8 @@ export interface FixtureFilter {
   kind: string;
   values?: string[] | null;
   /** Scalars with rules of their own, checked after the scalar's. */
-  minCents: number;
-  labels?: string[] | null;
+  minCents: GenericInt64;
+  labels?: IdentityName[] | null;
 }
 
 export interface RetryPolicy {

@@ -229,9 +229,12 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				LocalEnumsUsed    []string
 				ImportedEnumsUsed []ImportedTypeInfo
 				EnumDefaultsUsed  []string
-				ParserNestedTypes []string
-				ParserScalarsUsed []ScalarInfo
-				NeedsJSONParse    bool
+				// ScalarDefaultCasts are the scalar symbols @default
+				// literals are cast to.
+				ScalarDefaultCasts []string
+				ParserNestedTypes  []string
+				ParserScalarsUsed  []ScalarInfo
+				NeedsJSONParse     bool
 				// ValidatesNestedObjects is true when validate<Type>
 				// validates a nested object field and reports its errors
 				// with addNestedErrors.
@@ -241,17 +244,18 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				PrimitiveHelpers []string
 				Naming           naming.Naming
 			}{
-				Naming:            output.Naming,
-				Type:              t,
-				ScalarsUsed:       typeScalarsUsed(t),
-				EnumsUsed:         typeEnumNames(t, allEnums),
-				LocalEnumsUsed:    typeEnumNames(t, output.Enums),
-				ImportedEnumsUsed: typeImportedEnumsUsed(t, output.ImportedTypes),
-				EnumDefaultsUsed:  typeEnumDefaultsUsed(t, allEnums),
-				ParserNestedTypes: typeParserNestedTypes(t, generatedTypeNames),
-				ParserScalarsUsed: typeParserScalarsUsed(t),
-				NeedsJSONParse:    typeNeedsJSONParse(t, generatedTypeNames),
-				PrimitiveHelpers:  typePrimitiveHelpers(t),
+				Naming:             output.Naming,
+				Type:               t,
+				ScalarsUsed:        typeScalarsUsed(t),
+				EnumsUsed:          typeEnumNames(t, allEnums),
+				LocalEnumsUsed:     typeEnumNames(t, output.Enums),
+				ImportedEnumsUsed:  typeImportedEnumsUsed(t, output.ImportedTypes),
+				EnumDefaultsUsed:   typeEnumDefaultsUsed(t, allEnums),
+				ScalarDefaultCasts: typeScalarDefaultCasts(t),
+				ParserNestedTypes:  typeParserNestedTypes(t, generatedTypeNames),
+				ParserScalarsUsed:  typeParserScalarsUsed(t),
+				NeedsJSONParse:     typeNeedsJSONParse(t, generatedTypeNames),
+				PrimitiveHelpers:   typePrimitiveHelpers(t),
 			}
 			data.ValidatesNestedObjects = typeValidatesNestedObjects(t, data.ParserNestedTypes)
 			if err := generateFile(generator, "validator_type.tmpl", outPath, data); err != nil {

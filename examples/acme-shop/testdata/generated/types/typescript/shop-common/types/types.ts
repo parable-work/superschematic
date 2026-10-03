@@ -14,7 +14,7 @@ import type {
 a supplier's mistake, so every decoder refuses it.
  */
 export interface FeedItem {
-  sku: string;
+  sku: IdentitySlug;
   name: string;
   price: Price;
   tags: string[];
@@ -26,6 +26,6 @@ export interface FeedItem {
  * Price - A price in the currency's smallest unit: 1999 EUR is 19.99 euros.
  */
 export interface Price {
-  amountCents: number;
+  amountCents: GenericInt64;
   currency: Currency;
 }

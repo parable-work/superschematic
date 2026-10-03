@@ -164,8 +164,8 @@ func TestNestedArraysEdgesRendering(t *testing.T) {
 	checks := map[string][]string{
 		"types/types.ts": {
 			"cells: Cell[][];",
-			"ids: string[][];",
-			"stamps?: JSDate[][] | null;",
+			"ids: IdentityUUID[][];",
+			"stamps?: TemporalDateTime[][] | null;",
 			"tones?: Tone[][] | null;",
 			"codes?: string[][] | null;",
 			"weights?: number[][] | null;",
