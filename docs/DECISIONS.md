@@ -1860,3 +1860,134 @@ checks the types, the casts and the masks with tsc and under Bun, and
 type-checks a package with a field of every scalar in the linked catalog.
 
 The rule is reversible until the first release.
+
+## D27. Schema migrations: an offline plan from the model sqlgen builds
+
+`sqlgen` writes the whole DDL of a DB service, `create.sql`, for Postgres
+only. A database that already holds data changes through migrations its
+owners write by hand. The only migrations the compiler writes are the
+projection views' (`outputs.sql.migrationsDir`). The stack model's
+Database deployable (`docs/stack-model.md`) needs five things from
+`sqlgen`:
+
+- a plan of ordered steps from the deployed schema to the new one, made
+  with no database, so CI can show it on a pull request;
+- a hazard on each step, so the deploy gate can stop on what the pull
+  request has not acknowledged;
+- a job that applies the plan and records it;
+- a check of the plan against the columns each API reads;
+- the same plan for SQLite as for Postgres.
+
+This entry records the design before any of it is built. Names and rules
+are reversible until the first release.
+
+### Diff the model, not the database
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `sqlgen` plans by diffing two models of its own. The model is the relational schema `sqlgen` resolves from the IR before it renders `create.sql`: tables with their columns, keys, constraints and indexes, plus the history tables, triggers, functions and projection views the decorators add. The diff matches objects by name and by the renames the schema declares (below), and yields changes. A dialect turns the changes into steps. No database is read. | Diffing the raw IR, which would repeat in the diff every rule that maps the IR to tables: flattened bases, `@hasMany` columns on the other table, join tables, a key added when none is declared, defaults inferred from scalars, `@versioned`'s objects and projections resolved to columns; diffing `create.sql` text, which needs a SQL parser that agrees with Postgres and with SQLite; reading the live database at plan time, which CI cannot reach |
+| Neither Stripe's `pg-schema-diff` nor Atlas is a dependency. Both compare schemas they read from a database: `pg-schema-diff` loads the target DDL into a temporary Postgres and reads it back, and Atlas normalizes a desired state written as SQL in a dev database, so neither plans offline. `pg-schema-diff` is Postgres only. Atlas covers SQLite, but its Community Edition leaves out views, functions, triggers, extensions and partitioned tables, and `create.sql` writes all five. Neither knows which columns an API reads or which the running server writes, and neither can take a rename from the schema. The design takes their practice instead: a hazard on each statement, indexes built concurrently, constraints added `NOT VALID` and validated later. | Delegating the diff to either, with a temporary database in CI and superschematic's own checks on top of its output |
+
+### The model and the baseline
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The `sql` generator writes the model beside `create.sql`, as `dist/sql/<service>/model.json`: `version`, `dialect`, `service`, and the objects. A column records its name, type in the dialect's spelling, nullability, default, generation expression, and the `Type.field` it came from. Constraints and indexes carry the names the database gives them, including the names Postgres chooses for `create.sql`'s unnamed `UNIQUE` and primary key constraints. A trigger, function or view carries its rendered definition. A view also lists the columns it reads and the columns it publishes. The file is canonical JSON (`ir.CanonicalJSON`) with no timestamp, and its SHA-256 is the model's hash. | A model with dialect-neutral types shared by every dialect. A database is one dialect, so its baseline is that dialect's model, and a trigger's body means something in one dialect only. |
+| The baseline is the model last applied to the database: the deploy manifest records each environment's `model.json`, and the runner records it in the database too (below). The first deploy plans from the empty model. A database built before this entry, from `create.sql` or by hand, is adopted: `adopt` records a model as applied without running anything. | The previously deployed IR. The model depends on the compiler that resolves it, so planning from an old IR with a new compiler hides every DDL change the compiler made; an old IR may not load in a newer compiler; and the IR alone does not fix the DDL, since dependency schemas, the naming file and `outputs.sql` feed it too. |
+| The renames come from the new model, which carries them from the new IR. The baseline needs no intent. | Intent recorded with the baseline, which an environment that skipped a deploy would not have |
+
+### Renames
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@renamedFrom(name)` from `@superschematic/db` marks a DB table class or one of its fields with its previous name. The IR carries it as `TypeDef.RenamedFrom` and `FieldDef.RenamedFrom` (`renamedFrom`, omitted when empty, so existing IR JSON is unchanged), the data forms and `json-schema` carry it, and `format --to=ts` writes it back. Verification refuses it outside a DB table, equal to the name it marks, or claimed by two fields of one type. | A rename file per migration, which an environment that skips a deploy would apply out of order; detecting renames by shape, which turns a drop and an unrelated add into a rename |
+| The plan renames when the baseline has the old name, lacks the new one, and the new model lacks the old one. A mark whose old name is not in the baseline has already been applied and is ignored, so it can stay until every environment has it. When the new model has a field under the old name again and the baseline lacks the new one, the plan fails as ambiguous. | Removing the mark after one deploy, which breaks every environment not yet deployed |
+| A rename carries what is named after it. A renamed relation field renames its `_id` column. A renamed column or table renames the foreign keys, indexes and unique constraints derived from it, and a renamed table its join tables and history objects. Each is a rename step, never a drop and a create. | |
+| Other intent is not modeled: a cast with a custom expression, a backfill, a column split. It goes in a hand-written migration the stack orders around the plan, or the operator applies it and `adopt`s the new model. | An escape hatch of raw SQL in the schema, which would put SQL back in declarations that carry none |
+
+### The plan
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `superschematic migrate plan <service-dir> --from <model.json>` builds the service's model as `build` would and diffs it against the baseline; without `--from` it plans from the empty model. It writes the plan as JSON (`--out`) and prints it as JSON, SQL or Markdown for a pull request (`--format`). The stack model calls the same Go function. | A plan written into `dist/` on every build, which has no baseline to diff against |
+| The plan is JSON: `version`, `dialect`, `service`, the `from` and `to` model hashes, and the steps. A step has an index, a phase, an operation, its subject (`table/order/column/total`), its SQL statements, whether it runs in a transaction, and its hazards. The plan's hash is the SHA-256 of its canonical JSON. A plan is a pure function of the two models and the reads (below), so the deploy can plan again and check that it runs the plan the pull request showed. | SQL files with comments, which the gate would have to parse for hazards |
+| Steps fall in two phases. A step is in `expand`, which runs before the new servers roll out, unless it removes something the baseline's servers use or tightens what they write: then it is in `contract`, which runs after. Drops, `SET NOT NULL`, dropped defaults, and foreign keys over columns the baseline already has are `contract`. A column dropped in `contract` that is `NOT NULL` first loses the constraint in `expand`, so the new servers can insert without it. A step that no order keeps both servers working with stays in `expand` and carries `compat`: a rename, a retype, a required column without a default, a unique constraint on an existing table. A deploy without a rollout runs both phases back to back. | One phase, which breaks the running server at every drop; leaving the split to the deploy, which cannot tell a drop from an add in SQL |
+| A step on a table the baseline already has uses the online form where Postgres has one: `CREATE INDEX CONCURRENTLY` outside a transaction; a foreign key added `NOT VALID`, then validated; `SET NOT NULL` through a `CHECK (col IS NOT NULL) NOT VALID` that is validated first, so Postgres skips the scan; a unique constraint added `USING INDEX` over an index built concurrently. A table the plan creates gets the plain forms. | Plain DDL everywhere, which blocks writes for the length of every index build on a live table |
+| Order: renames, then creates and adds in dependency order, then alterations, each wrapped by the drop and re-create of the views that read the altered columns, then indexes, constraints, functions, triggers, views and comments; then the `contract` steps, tightenings before drops, drops in reverse dependency order. Extensions are created and never dropped, as `drop.sql` leaves them. | |
+| A change the plan cannot express fails the plan and names it, for example a history table's `partitionBy` changed on an existing table. The operator changes the database by hand and `adopt`s the new model. | A step with no SQL that the runner waits on someone to mark done |
+| There are no down plans. Rolling back is a plan from the current model to the previous one, with its own hazards. Because `expand` keeps the old servers working, a server rollback needs no schema rollback. | Down migrations generated beside each plan, which drift from the database they would undo |
+
+### Hazards
+
+Every step lists the classes it falls in. The diff and the dialect
+compute them; an author never declares one.
+
+| Class | The step | For example |
+|-------|----------|-------------|
+| `destructive` | deletes data the new model cannot recover | dropping a table, a column, a history table; a narrowing cast that truncates |
+| `blocking` | holds a lock that blocks writes, or reads, for time that grows with the table | a type change that rewrites the table, a column added with a volatile default or as a stored generated column, an index built without `CONCURRENTLY`, seeding a history table |
+| `compat` | breaks a server built from the baseline, which may still be running | a rename, a retype, a required column without a default, a new unique constraint over columns it writes |
+| `data-dependent` | fails at apply when existing rows violate it | `SET NOT NULL`, a unique constraint, validating a foreign key, a narrowing cast, a required column without a default, which fails on a table with rows |
+| `copy-table` | rebuilds the table by copying it (SQLite) | any change SQLite's `ALTER TABLE` cannot make |
+| `api-breaking` | drops, renames or retypes a column a deployed reader declares it reads, or changes the columns a projection view publishes | the next section |
+| `history` | changes the shape of rows a history table keeps | retyping a column of a versioned table; changing a version graph member's content columns |
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A hazard's id is `<class>:<subject>`, and an `api-breaking` hazard's subject also names the reader (`api-breaking:table/order/column/total@shop-api/OrderView.total`). The id stays the same across plans of the same change, so an acknowledgment survives a rebase. Where acknowledgments live and how the gate matches them is the stack model's. | Ids numbered per plan, so an acknowledgment would not outlive a new commit on the pull request |
+| `compat` is judged against the server generated from the baseline. The Go ORM names every column of its table in its `SELECT` and `RETURNING` lists, so it fails on any dropped or renamed column of a table it reads, whether an API exposes it or not. | Treating only the columns an API exposes as read, which misses the ORM's own lists |
+
+### Readers
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A build of an API or General service whose `@source` views read a DB service's table writes `dist/sql/<service>/reads.json`: for each view field with a column behind it, the database service, the table, the column and the view field (`OrderView.total`). It resolves a field to its column as `sqlgen` does, a relation field to its `_id` column; a `@virtual` field reads nothing. A core generator appended to the API and General kinds writes it, and writes nothing for a schema without such a view. The model lists what the database's own projection views read. | Recording the API's IR in the manifest and resolving its reads at plan time, which needs the database's IR of that time too |
+| The plan takes the readers deployed before the rollout, which `expand` steps are checked against, and those deployed after it, which `contract` steps are checked against. The deploy manifest records each deployed service's `reads.json`, and a service the deploy does not roll out is in both. A step that drops, renames or retypes a column a reader live at that phase reads is `api-breaking` for that reader. So dropping a column the new API stopped reading passes when the new API rolls out in the same deploy, and fails while another stack still runs an API that reads it. | One reader set, which either flags every contract drop or misses a lagging consumer |
+| A projection view whose published columns change, by name, type or order, is `api-breaking` for its readers: its Arrow schema is their contract. | Treating views as internal to the database |
+
+### Versioned tables and version graphs
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A table that becomes `@versioned` gets `_version BIGINT NOT NULL DEFAULT 1`, which Postgres adds without a rewrite, its history table and indexes, and its functions and triggers. In the same transaction as the triggers, the plan seeds the history with one `INSERT` image per existing row at version 1 (`blocking`), so every live row has an image at its version, as `GetVersion` and a version graph's pins assume. | Starting history at each row's next write, which leaves version 1 of every existing row unreadable |
+| A table that stops being versioned loses its triggers and functions, then its history table (`destructive`) and `_version`, in `contract`. A change of `exclude`, `retentionDays` or `pruneKeepReferencedBy` replaces the functions in `expand`. Images recorded before an `exclude` change keep the newly excluded columns; the plan reports that as `history` and does not scrub them. | Scrubbing old images, a rewrite of the whole history table that the author may not want |
+| A column change on a versioned table is planned as on any table. Images recorded before it keep the old shape, which a retype makes unreadable as the new type (`history`). | |
+| A version graph's tables are ordinary tables after the loader's expansion (D17), so they migrate as any other. A change to a member's content columns is `history`: commits made before it hash and merge rows of the old shape. The hazard says whether the graph's `schemaEpoch` rose. Transforms between epochs stay open, as D17 and D19 leave them. | Refusing a content change without an epoch bump, which is policy the core does not hold |
+
+### Dialects
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A dialect supplies the model's types, how one type converts to another (no change, no rewrite, rewrite, cast that can fail, impossible), which changes its `ALTER TABLE` can make, the definitions of the derived objects, the SQL of each step and its dialect-specific hazards (`blocking`, `copy-table`). The diff and the hazards `destructive`, `compat`, `data-dependent`, `api-breaking` and `history` are shared. Postgres is first. | Two planners, one per dialect, whose rules for the shared hazards would drift |
+| `outputs.sql.dialects` lists the dialects a DB service is built for, `["postgres"]` by default. Each dialect gets its model and its `create.sql`: Postgres in `dist/sql/<service>/`, as today, and SQLite in `dist/sql/<service>/sqlite/`. SQLite's `create.sql` is its plan from the empty model. Postgres keeps its template, and a test holds the template and Postgres's plan from the empty model equal (below). | Rendering Postgres's `create.sql` from the plan too, which would change every golden for no reader |
+| SQLite stores a catalog type as the type its values need: `UUID`, text types, dates, times and timestamps as `TEXT`; `CITEXT` as `TEXT COLLATE NOCASE`; integers and `BOOLEAN` as `INTEGER`; floats as `REAL`; `JSONB`, `JSON` and lists as JSON `TEXT`; `BYTEA` as `BLOB`. A default renders as an expression that writes the form the schema runtime reads: a version 4 UUID string for `gen_random_uuid()`, an RFC 3339 UTC instant for `CURRENT_TIMESTAMP`. A unique field is a named unique index, so adding or dropping one is not a table rebuild. | Leaving defaults to the application, which a DB service with no ORM in that language does not have |
+| A SQLite step uses `ADD COLUMN`, `RENAME COLUMN`, `RENAME TO` and `DROP COLUMN` where SQLite allows them, and rebuilds the table for every other change: create the new table, copy the rows, drop the old one, rename the new one, re-create its indexes, all in one transaction (`copy-table`, `blocking`). Every change to one table in one phase shares one rebuild. Dropping the old table would fire `ON DELETE` actions on the tables that reference it, so the runner turns `foreign_keys` off around the step, which SQLite allows only outside a transaction, and runs `foreign_key_check` before the commit. | `defer_foreign_keys`, which defers the checks but still runs the `ON DELETE` actions, so a `CASCADE` would delete the children |
+| SQLite refuses, at build, with the feature and the dialect named: `@versioned`, `@optimistic`, `@searchField`, projections, `GIN` and `GIST` indexes, and types it has no storage for (`LTREE`, PostGIS types). A service lists SQLite only when its schema fits. Versioned tables on SQLite are the first thing D19's SQLite adapter needs, and its entry adds them through this dialect's derived objects. | Rendering triggers for SQLite now, without the adapter that would read their history |
+| The engine's storage (D16) stays the engine's: it creates its own tables and runs its behaviors' migrations, and nothing here diffs them. The SQLite dialect serves DB services deployed to SQLite, such as an edge target, and the SQLite adapter D19 leaves for later. | Driving the engine's tables from `sqlgen`, which D16 declined for its behaviors' SQL |
+
+### Apply
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The runner is a sixth Go module, `runtime/migrate/go`, amending D1: package `migrate`, a driver per database (pgx for Postgres, as D19's Go engine uses; a pure-Go SQLite driver), and the binary `superschematic-migrate` with `apply`, `status` and `adopt`. It runs a plan document and never computes one, so a migration job (a Cloud Run job, a local Postgres container) needs the plan and the binary, not the compiler. The compiler writes plans and does not import the module, so no database driver enters its module graph. | `superschematic migrate apply` in the compiler binary, which would put the drivers in the compiler's module graph and the compiler in every job image |
+| `apply --plan plan.json [--phase expand\|contract\|all]` takes a lock first: a session-level advisory lock keyed by the service on Postgres, since some steps run outside a transaction; `BEGIN IMMEDIATE` per step on SQLite. A second runner waits. | |
+| Two tables in the connection's schema record the state. `superschematic_schema_state` has a row per service: the dialect, the applied model's hash and the model itself, and the plan in progress with its finished phase. `superschematic_migrations` logs each step: the plan's hash, the step's index, phase and SQL hash, and when it started and finished. The names are fixed until a distribution needs its own, as D10 leaves the vendor-extension prefix. | Only the deploy manifest, which a database restored from a backup would contradict |
+| The runner refuses a plan whose `from` is not the database's applied model, unless the database is part-way through that same plan. It resumes at the first unfinished step. A step in a transaction commits with its log row, so it runs once. A step outside one logs its start, runs, and logs its end; on resume it first runs its recovery, such as dropping the invalid index a failed concurrent build leaves, then runs again. Each step sets `lock_timeout` (5s, as the projection migrations do) and is retried on a lock timeout a bounded number of times. Running a finished plan again does nothing. | One transaction for the whole plan, which holds every table's lock until the last step |
+| When the last step of `contract` commits, the applied model becomes the plan's `to`. A new plan is refused while a plan's `contract` is pending. `status` prints the applied model and any plan in progress; the stack model can read its baseline from there when its manifest and the database disagree. | |
+
+### Testing
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Plan goldens: pairs of fixture schemas, one change each (add, drop, rename and retype a column, a table, an index, a unique field, a relation and its `onDelete`, a join table, `@searchField`, `@versioned` on and off and each option, `@optimistic`, a projection, a graph member's content), each with its expected plan JSON, SQL and hazards. A table test asserts each operation's hazard classes. | Hazards checked only through goldens, where a wrong class reads as an expected diff |
+| Convergence on Postgres, in CI's Postgres service under `SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL` as the projection tests run: for each pair (A, B), applying `create.sql` of A and then the plan from A to B leaves the same catalog as applying `create.sql` of B, compared by name through `pg_catalog`; the plan from the empty model leaves the same catalog as `create.sql`. Rows seeded before a plan survive every step that is not `destructive`, and a rename keeps them. | Comparing SQL text, which proves nothing about what the database ends up with |
+| The runner's tests apply plan vectors the compiler writes to `runtime/migrate/testdata/plans`, as the version graph's vectors are shared (D17): a second run does nothing, a failure injected after any step resumes to the same catalog, two runners serialize, and a plan from the wrong baseline is refused. | Runner tests over hand-written plans, which can drift from what the compiler writes |
+| SQLite runs the same convergence and runner tests with the pure-Go driver, in every CI run, with no service. | |
+
+Status: nothing is built. Postgres comes first, in this order: the model
+and `model.json`; the diff, the plan and the hazards with `migrate plan`;
+`@renamedFrom`; `reads.json` and `api-breaking`; the runner module; a
+reference page "Schema migrations". SQLite follows through the same
+dialect seam: its model and `create.sql`, its steps with the copy-table
+rebuild, and its runner driver. Each change that lands a piece updates
+this paragraph.
