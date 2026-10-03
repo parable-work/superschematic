@@ -4,8 +4,9 @@
 // received, and drives them over httptest with the vectors the TypeScript
 // server's scalar list test uses, plus required single values of every
 // builtin type, a UUID list, a list and a list of lists of objects,
-// Generic.JSON values and JSON object and array scalars, the query string
-// of a GET operation, and a path parameter in each encoding of its value.
+// Generic.JSON values and JSON object and array scalars, the body
+// arguments of a DELETE, the query string of a GET operation, and a path
+// parameter in each encoding of its value.
 package bodyargsapi_test
 
 import (
@@ -82,6 +83,11 @@ func (s *tags) PinPoints(_ context.Context, id string, grid [][]types.Point) (*b
 	return &pinned, nil
 }
 
+func (s *tags) RemoveTags(_ context.Context, id string, labels []string, reason string, requester types.GenericJSON, shadeByLabel map[string]types.Shade) ([]string, error) {
+	s.record(map[string]any{"id": id, "labels": labels, "reason": reason, "requester": requester, "shadeByLabel": shadeByLabel})
+	return labels, nil
+}
+
 func (s *tags) FindTags(_ context.Context, codes []string, pages []int64, labels []string, ranks []int64) ([]string, error) {
 	s.record(map[string]any{"codes": codes, "pages": pages, "labels": labels, "ranks": ranks})
 	return labels, nil
@@ -147,6 +153,7 @@ const (
 	nameShadesPath    = "/api/posts/p1/shade-names"
 	placePointsPath   = "/api/posts/p1/points"
 	pinPointsPath     = "/api/posts/p1/pins"
+	removeTagsPath    = "/api/posts/p1/tags"
 	findTagsPath      = "/api/posts/tags"
 	searchPostsPath   = "/api/posts/search"
 )
@@ -629,6 +636,33 @@ func TestAListOfListsOfAnObjectType(t *testing.T) {
 		fieldError{"grid[1][2]", "type", "does not match the declared type"},
 		fieldError{"grid[2]", "type", "expected an array"},
 	)
+}
+
+// A DELETE reads its arguments from the body object, as a PUT does: a list,
+// a string, a Generic.JSON and a map. The query string carries none of them.
+func TestADELETEReadsItsArgumentsFromTheBody(t *testing.T) {
+	server, impl := serve(t)
+	accepted(t, server, impl, http.MethodDelete, removeTagsPath, `{"labels": ["a", "b,c"], "reason": "merged", "requester": {"by": "ops"}, "shadeByLabel": {"a": "light", "b,c": "dark"}}`)
+	for name, want := range map[string]string{
+		"id":        `"p1"`,
+		"labels":    `["a", "b,c"]`,
+		"reason":    `"merged"`,
+		"requester": `{"by": "ops"}`,
+	} {
+		if !jsonEqual(t, impl.last[name], want) {
+			t.Errorf("%s: the implementation received %v, want %s", name, impl.last[name], want)
+		}
+	}
+	if want := map[string]types.Shade{"a": types.Shade_Light, "b,c": types.Shade_Dark}; !reflect.DeepEqual(impl.last["shadeByLabel"], want) {
+		t.Errorf("shadeByLabel = %#v, want %#v", impl.last["shadeByLabel"], want)
+	}
+	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath, `{"labels": ["a", "b", "c", "d"], "reason": "x", "shadeByLabel": {"a": "dim"}}`,
+		fieldError{"labels", "listMax", "must contain at most 3 items"},
+		fieldError{"reason", "minLength", ""},
+		fieldError{"shadeByLabel[a]", "enum", ""},
+	)
+	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath+"?labels=a&reason=merged", `{}`, fieldError{"labels", "required", "required field"})
+	refused(t, server, impl, http.MethodDelete, removeTagsPath+"?labels=a&reason=merged", "")
 }
 
 func TestAGETListReadsEveryQueryKey(t *testing.T) {

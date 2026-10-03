@@ -377,13 +377,21 @@ func (o *APIOutput) RoutesNeedTypes() bool {
 	return false
 }
 
+// ArgumentsInBody reports whether the route reads the endpoint's
+// ScalarArgs from the JSON body object, as it does for every method but
+// GET, whose arguments travel in the query string. An SDK sends them where
+// the route reads them.
+func (e EndpointInfo) ArgumentsInBody() bool {
+	return e.Method != "GET"
+}
+
 // handlerUsesTypes reports whether the endpoint's handler factory in
 // routes.go references the generated types module. It follows the branches
 // of routes.tmpl.
 func (e EndpointInfo) handlerUsesTypes() bool {
 	// An input type, with or without file uploads, is decoded into
 	// types.<Input>, and body arguments collect types.ValidationErrors.
-	if e.HasInput || (len(e.ScalarArgs) > 0 && e.Method != "GET") {
+	if e.HasInput || (len(e.ScalarArgs) > 0 && e.ArgumentsInBody()) {
 		return true
 	}
 	// A nil inner list of a list-of-lists response is sent as []<Output>{}.
@@ -402,7 +410,7 @@ func (e EndpointInfo) handlerUsesTypes() bool {
 			return true
 		}
 	}
-	if e.Method == "GET" {
+	if !e.ArgumentsInBody() {
 		for _, arg := range e.ScalarArgs {
 			if arg.queryArgUsesTypes() {
 				return true
@@ -902,7 +910,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 			queryLists = append(queryLists, param)
 		}
 	}
-	if method != "GET" {
+	if endpoint.ArgumentsInBody() {
 		endpoint.BodyArgs = types.bodyArgs(scalarArgs)
 	} else {
 		for _, arg := range scalarArgs {

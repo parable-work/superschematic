@@ -313,7 +313,7 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 		}
 
 		// GET endpoints carry scalar args in the query string instead of a body.
-		if endpoint.Method == "GET" && len(endpoint.ScalarArgs) > 0 {
+		if !endpoint.ArgumentsInBody() && len(endpoint.ScalarArgs) > 0 {
 			parameters = append(parameters, buildQueryParams(endpoint.ScalarArgs, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)...)
 		}
 
@@ -386,7 +386,7 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 					},
 				},
 			}
-		} else if len(endpoint.ScalarArgs) > 0 && endpoint.Method != "GET" {
+		} else if len(endpoint.ScalarArgs) > 0 && endpoint.ArgumentsInBody() {
 			properties := make(map[string]interface{})
 			required := []string{}
 

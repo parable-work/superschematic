@@ -32,9 +32,11 @@ func LoadQueryListsService() (*ir.Schema, error) {
 const OptionalJSONService = "optional-json-api"
 
 // LoadOptionalJSONService loads optional-json-api from this package's
-// testdata: note.annotate, a PUT whose body arguments are a required and an
-// optional Generic.JSON, and note.revise, a POST whose input type has a
-// required and an optional Generic.JSON field. An SDK sends the optional
+// testdata: note.annotate, a PUT, and note.retract, a DELETE, whose body
+// arguments are a required and an optional Generic.JSON, and note.revise, a
+// POST whose input type has a required and an optional Generic.JSON field.
+// An SDK sends the arguments of the DELETE in the body, as those of the
+// PUT, and the optional
 // one as null when the caller sets it to null and leaves it out when the
 // caller does not set it. It is local to the SDK generator tests, so no
 // other generator's goldens read it.

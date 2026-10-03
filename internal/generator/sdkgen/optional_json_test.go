@@ -18,7 +18,8 @@ import (
 // SDK of optional-json-api (sdktest.LoadOptionalJSONService) against its
 // generated types package, then runs test_optional_json.js: an optional
 // Generic.JSON body argument or input type field set to null is sent as
-// null, and one left out is not sent.
+// null, and one left out is not sent. The body arguments of a DELETE are
+// sent in the body, as those of a PUT are.
 func TestOptionalJSONSDKSendsNullApartFromAbsent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")

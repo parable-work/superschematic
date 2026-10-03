@@ -92,11 +92,11 @@ func TestGenericJSONBodyArgumentsAreJSONValues(t *testing.T) {
 
 // TestGenericJSONInTheQueryStringStaysAStr: a GET sends its scalar
 // arguments in the query string, where a Generic.JSON argument stays a
-// str, the parameter's text, and the same argument of a POST is a JSON
-// value.
+// str, the parameter's text, and the same argument of a POST or a DELETE,
+// a body argument, is a JSON value.
 func TestGenericJSONInTheQueryStringStaysAStr(t *testing.T) {
 	param := apigen.Param{Name: "params", Type: "Generic.JSON", Required: true}
-	for method, want := range map[string]string{"GET": "str", "POST": "GenericJSON"} {
+	for method, want := range map[string]string{"GET": "str", "POST": "GenericJSON", "DELETE": "GenericJSON"} {
 		endpoint := apigen.EndpointInfo{Path: "/api/previews", Method: method, ScalarArgs: []apigen.Param{param}}
 		if method != "GET" {
 			endpoint.BodyArgs = []apigen.BodyArg{{Param: param, Kind: "Any", AnyJSON: true}}

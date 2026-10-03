@@ -17,7 +17,9 @@ import (
 // (sdktest.LoadOptionalJSONService), byte-compiles both, and runs
 // optionalJSONProbe against a local HTTP server: an optional Generic.JSON
 // body argument or input type field set to None is sent as null, and one
-// left out is not sent. The probe needs pydantic and skips without it.
+// left out is not sent. The body arguments of a DELETE are sent in the
+// body, as those of a PUT are. The probe needs pydantic and skips without
+// it.
 func TestOptionalJSONSDKSendsNullApartFromAbsent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -93,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    do_POST = do_PUT = _answer
+    do_POST = do_PUT = do_DELETE = _answer
 
     def log_message(self, *args):
         pass
@@ -110,6 +112,12 @@ sdk.note.annotate("n1", "text", extra=None)
 assert bodies[-1] == {"body": "text", "extra": None}, bodies[-1]
 sdk.note.annotate("n1", "text", extra="more")
 assert bodies[-1] == {"body": "text", "extra": "more"}, bodies[-1]
+
+# A DELETE sends its body arguments in the body, as a PUT does.
+sdk.note.retract("n1", {"a": 1})
+assert bodies[-1] == {"body": {"a": 1}}, bodies[-1]
+sdk.note.retract("n1", {"a": 1}, extra=None)
+assert bodies[-1] == {"body": {"a": 1}, "extra": None}, bodies[-1]
 
 # An input type field: unset, it is not sent; set to None, it is null, from
 # a model and from a dict alike.

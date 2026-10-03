@@ -4,11 +4,13 @@
 # object type (one alone is the operation's input type), Generic.JSON values
 # and JSON object and array scalars (Generic.StringMap, Embedding.Vector)
 # alone, in a list and in a list of lists, and maps of an enum, of lists of
-# a string scalar and of an object type. searchPosts takes the arguments of
-# a GET operation, which travel in the query string: lists of numbers, an
-# integer scalar, booleans, UUIDs, timestamps and strings, optional single
-# values of each, and a @query list. reviseDocument takes an input type
-# with an optional Generic.JSON field. The Go route tests in apigen load it.
+# a string scalar and of an object type. removeTags is a DELETE, whose list,
+# string, Generic.JSON and map arguments are body arguments too.
+# searchPosts takes the arguments of a GET operation, which travel in the
+# query string: lists of numbers, an integer scalar, booleans, UUIDs,
+# timestamps and strings, optional single values of each, and a @query
+# list. reviseDocument takes an input type with an optional Generic.JSON
+# field. The Go route tests in apigen load it.
 # saveTags, storeDocument and findTags match the TypeScript server's scalar
 # list fixture, so both servers answer the same vectors.
 name: body-args-api
@@ -234,6 +236,32 @@ operationSets:
           - name: grid
             typeRef: { name: Point, isArray: true, isArrayOfArrays: true }
             required: true
+      # Remove labels from a post; returns the labels removed. A DELETE
+      # reads its arguments from the body, as a PUT does.
+      - name: removeTags
+        typeRef: { name: string, isArray: true }
+        required: true
+        httpMethod: DELETE
+        restPath: "posts/{id}/tags"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          # The labels, at most three; a label may hold a comma.
+          - name: labels
+            typeRef: { name: string, isArray: true }
+            required: true
+            validateListMax: 3
+          # Why, at least two characters.
+          - name: reason
+            typeRef: { name: string }
+            validateMinLength: 2
+          # Who asked, any JSON value.
+          - name: requester
+            typeRef: { name: Generic.JSON }
+          # The shade each label had.
+          - name: shadeByLabel
+            typeRef: { name: Shade, isMap: true }
   - name: TagQueries
     operations:
       # Find posts by label, rank, code and page, all in the query string.

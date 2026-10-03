@@ -494,7 +494,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 	}
 
 	methodName := goutil.GoPublicIdentifier(ep.Name)
-	hasEncryptedBody := ep.Encrypted && isBodyMethod(sdkHTTPMethod)
+	hasEncryptedBody := ep.Encrypted && apigen.EncryptedBodyMethod(sdkHTTPMethod)
 
 	return EndpointInfo{
 		MethodName:            methodName,
@@ -533,15 +533,6 @@ func outputType(typeName string, arrayDepth int, scalarSymbols map[string]string
 // "[][]T".
 func goListType(elem string, depth int) string {
 	return codegen.WrapArray(elem, depth, func(inner string) string { return "[]" + inner })
-}
-
-func isBodyMethod(method string) bool {
-	switch strings.ToUpper(method) {
-	case "POST", "PUT", "PATCH":
-		return true
-	default:
-		return false
-	}
 }
 
 var pathParamPattern = regexp.MustCompile(`\{([a-zA-Z0-9_]+)\}`)
