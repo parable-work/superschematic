@@ -1147,6 +1147,113 @@
       }
     },
     "/api/posts/{id}/tags": {
+      "delete": {
+        "description": "Remove labels from a post; returns the labels removed. A DELETE\nreads its arguments from the body, as a PUT does.",
+        "operationId": "TagRemoveTagsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "labels": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 3,
+                    "type": "array"
+                  },
+                  "reason": {
+                    "minLength": 2,
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "requester": {
+                    "description": "Any valid JSON value: object, array, primitive, or null",
+                    "nullable": true
+                  },
+                  "shadeByLabel": {
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/Shade"
+                    },
+                    "nullable": true,
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "labels"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "links": {
+                      "$ref": "#/components/schemas/ResponseLinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "removeTags",
+        "tags": [
+          "tag"
+        ]
+      },
       "put": {
         "description": "Replace a post's tags; returns the labels as stored.",
         "operationId": "TagSaveTagsHandler",
