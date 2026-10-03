@@ -34,32 +34,37 @@ type NamespaceInfo struct {
 	HasFilterableEndpoints bool           // Whether namespace has any @filterable endpoint
 	ScopeParamName         string         // Name of the hoisted scope parameter if IsScopedNS
 	Imports                []string       // Unique list of types to import from types package
+	// HasMapArgs gates the validateMapArgument helper, for a map argument
+	// (ScalarArg.IsMap), and HasObjectMapArgs the setObjectErrors helper,
+	// for a map of an object type (ScalarArg.ValueIsObject).
+	HasMapArgs       bool
+	HasObjectMapArgs bool
 }
 
 // EndpointInfo represents a single API endpoint for the SDK
 type EndpointInfo struct {
-	Name           string             // Method name (e.g., "sendMagicLink")
-	OperationID    string             // OpenAPI operation id (the handler name)
-	Title          string             // @docs title; "" without it
-	Docs           *ir.OperationDocs  // @docs record; nil without it
-	MCP            *ir.OperationMCP   // resolved @mcp record; nil without it
-	RequiredPerms  []string           // permissions the route requires
-	Path           string             // API path (e.g., "/api/auth/send-magic-link")
-	Method         string             // HTTP method (GET, POST, etc.)
-	InputType      string             // TypeScript input type (if any)
-	OutputType     string             // TypeScript output type
-	OutputIsArray  bool               // Whether output is an array
-	HasInput       bool               // Whether endpoint has input
-	InputRequired  bool               // Whether the input argument is non-null (!) in GraphQL
-	RequiresAuth   bool               // Whether endpoint requires authentication
-	PathParams     []PathParam        // Path parameters
-	QueryParams    []QueryParam       // Query string parameters (from @query directive)
-	ScalarArgs     []apigen.ScalarArg // Scalar arguments (not input types)
-	Description    string             // @docs description, else the operation's comment
-	TSPath         string             // TypeScript template literal path
-	ResourceTSPath string             // resource route path as TypeScript template literal
-	Encrypted      bool               // Whether endpoint payload must be encrypted
-	Filterable     bool               // Whether endpoint accepts bracket-notation filter query params
+	Name           string            // Method name (e.g., "sendMagicLink")
+	OperationID    string            // OpenAPI operation id (the handler name)
+	Title          string            // @docs title; "" without it
+	Docs           *ir.OperationDocs // @docs record; nil without it
+	MCP            *ir.OperationMCP  // resolved @mcp record; nil without it
+	RequiredPerms  []string          // permissions the route requires
+	Path           string            // API path (e.g., "/api/auth/send-magic-link")
+	Method         string            // HTTP method (GET, POST, etc.)
+	InputType      string            // TypeScript input type (if any)
+	OutputType     string            // TypeScript output type
+	OutputIsArray  bool              // Whether output is an array
+	HasInput       bool              // Whether endpoint has input
+	InputRequired  bool              // Whether the input argument is non-null (!) in GraphQL
+	RequiresAuth   bool              // Whether endpoint requires authentication
+	PathParams     []PathParam       // Path parameters
+	QueryParams    []QueryParam      // Query string parameters (from @query directive)
+	ScalarArgs     []ScalarArg       // Scalar arguments (not input types)
+	Description    string            // @docs description, else the operation's comment
+	TSPath         string            // TypeScript template literal path
+	ResourceTSPath string            // resource route path as TypeScript template literal
+	Encrypted      bool              // Whether endpoint payload must be encrypted
+	Filterable     bool              // Whether endpoint accepts bracket-notation filter query params
 
 	// File upload configuration
 	HasFileUpload    bool              // True if any input field is a file-type scalar
@@ -71,6 +76,18 @@ type EndpointInfo struct {
 	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
 	// set.
 	OutputIsArrayOfArrays bool
+}
+
+// ScalarArg is an argument of an endpoint without an input type: a body
+// argument, or on GET a query string value.
+type ScalarArg struct {
+	apigen.ScalarArg
+	// ValueIsObject marks a map argument whose values are of an object type
+	// of the types package. Each value runs validate<T>, its errors at
+	// name[key].field as the route reports them; validate<T>Required, which
+	// a value of a scalar or an enum runs, would report them as one error at
+	// name[key].
+	ValueIsObject bool
 }
 
 // FileUploadField represents a file upload field in an endpoint's input for TypeScript SDK
@@ -257,7 +274,14 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 			// Import newValidationErrors and setFieldErrors for scalar args validation
 			importsMap[ns]["newValidationErrors"] = true
 			importsMap[ns]["setFieldErrors"] = true
-			for _, arg := range endpoint.ScalarArgs {
+			for _, arg := range sdkEndpoint.ScalarArgs {
+				if arg.IsMap {
+					namespaceMap[ns].HasMapArgs = true
+					importsMap[ns]["ValidationErrors"] = true
+				}
+				if arg.ValueIsObject {
+					namespaceMap[ns].HasObjectMapArgs = true
+				}
 				// Bare language primitives have no generated type alias or
 				// validators in the types package; only named scalars import.
 				if codegen.IsLanguagePrimitive(arg.Type) {
@@ -267,12 +291,16 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 				// Import the scalar type itself (e.g., Email, JWT)
 				importsMap[ns][scalarSymbol] = true
 				// Import validation functions for the scalar.
-				// Array args always need the Required variant because each element
-				// is validated with validateXRequired regardless of whether the
-				// array itself is required or optional.
-				if arg.IsArray || arg.Required {
+				// Array and map args always need the Required variant because
+				// each element or value is validated with validateXRequired
+				// regardless of whether the argument itself is required or
+				// optional; a map of an object type runs validateX on each value.
+				switch {
+				case arg.ValueIsObject:
+					importsMap[ns]["validate"+scalarSymbol] = true
+				case arg.IsArray || arg.IsMap || arg.Required:
 					importsMap[ns]["validate"+scalarSymbol+"Required"] = true
-				} else {
+				default:
 					importsMap[ns]["validate"+scalarSymbol] = true
 				}
 			}
@@ -390,6 +418,14 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 		description = ep.Docs.Description
 	}
 
+	// A map argument's values are validated one by one; an object type's
+	// values run its own validate<T>, which the types package generates for
+	// each of its types (parseableTypes).
+	scalarArgs := make([]ScalarArg, len(ep.ScalarArgs))
+	for i, arg := range ep.ScalarArgs {
+		scalarArgs[i] = ScalarArg{ScalarArg: arg, ValueIsObject: arg.IsMap && parseableTypes[arg.Type]}
+	}
+
 	return EndpointInfo{
 		Name:             tsutil.ToCamelCase(ep.Name),
 		OperationID:      ep.HandlerName,
@@ -407,7 +443,7 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 		RequiresAuth:     ep.RequiresAuth,
 		PathParams:       tsPathParams,
 		QueryParams:      tsQueryParams,
-		ScalarArgs:       ep.ScalarArgs,
+		ScalarArgs:       scalarArgs,
 		Description:      description,
 		TSPath:           tsPath,
 		Encrypted:        ep.Encrypted,

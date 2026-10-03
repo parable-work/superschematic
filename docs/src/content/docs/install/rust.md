@@ -143,6 +143,21 @@ let sdk = CatalogSdk::new(ClientConfig {
 per-request tokens and a one-shot refresh on 401. Operation sets become
 fields on the SDK struct.
 
+An operation without an input type takes its arguments as one input
+struct, `<Operation>Input`, whose fields are sent under the arguments'
+names as the schema spells them (`shadeByName`, not `shade_by_name`). On
+`GET` they travel in the query string, and on every other method,
+`DELETE` included, as the JSON body.
+
+A map argument is a `HashMap<String, T>` field (`HashMap<String, Vec<T>>`
+for a map of lists), as the route takes it, inside an `Option` when
+optional, and is sent as a JSON object; `None` leaves it out. Before the
+request, each value, and each element of a list value, is checked against
+the route's own schema for it: the scalar's and the argument's rules, and
+an object type's fields. Every failure is reported at once, at its path, in
+one `SDKError::Config`:
+`argument validation failed: linksByLocale[en][1]: invalid format; pointByName[a].x: must be at least 0`.
+
 ## Serve a generated API
 
 An API schema with `outputs.api` set to `language: "RUST"` writes the

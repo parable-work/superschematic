@@ -22,6 +22,9 @@ pub struct {{.Namespace.StructName}} {
 #[derive(Debug, Clone, Serialize)]
 pub struct {{.ScalarInputStructName}} {
 {{- range .ScalarArgs}}
+{{- if ne .RustName .Name}}
+    #[serde(rename = "{{.Name}}")]
+{{- end}}
 {{- if not .Required}}
     #[serde(skip_serializing_if = "Option::is_none")]
 {{- end}}
@@ -271,6 +274,29 @@ impl {{.Namespace.StructName}} {
 {{- end}}
 {{- end}}
 {{- end}}
+{{- end}}
+{{- if .ValidatesMapValues}}
+        // Each value of a map, and each element of a list value, is checked
+        // against the route's own schema for it, at name[key] and
+        // name[key][i]; every failure is reported at once.
+        let mut argument_errors: Vec<String> = Vec::new();
+{{- range .ScalarArgs}}
+{{- if .ValueSchema}}
+{{- if .Required}}
+        runtime::validate_map_values("{{.ValueSchema}}", "{{.Name}}", &input.{{.RustName}}, &mut argument_errors)?;
+{{- else}}
+        if let Some(values) = &input.{{.RustName}} {
+            runtime::validate_map_values("{{.ValueSchema}}", "{{.Name}}", values, &mut argument_errors)?;
+        }
+{{- end}}
+{{- end}}
+{{- end}}
+        if !argument_errors.is_empty() {
+            return Err(SDKError::config(format!(
+                "argument validation failed: {}",
+                argument_errors.join("; ")
+            )));
+        }
 {{- end}}
 {{- if or .HasQueryParams .Filterable}}
         let mut query_params: Vec<(String, String)> = Vec::new();

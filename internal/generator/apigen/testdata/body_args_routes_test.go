@@ -661,6 +661,10 @@ func TestADELETEReadsItsArgumentsFromTheBody(t *testing.T) {
 		fieldError{"reason", "minLength", ""},
 		fieldError{"shadeByLabel[a]", "enum", ""},
 	)
+	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath, `{"labels": [], "shadeByLabel": {"a": "dim", "b": null}}`,
+		fieldError{"shadeByLabel[a]", "enum", ""},
+		fieldError{"shadeByLabel[b]", "required", "required field"},
+	)
 	refusedWith(t, server, impl, http.MethodDelete, removeTagsPath+"?labels=a&reason=merged", `{}`, fieldError{"labels", "required", "required field"})
 	refused(t, server, impl, http.MethodDelete, removeTagsPath+"?labels=a&reason=merged", "")
 }

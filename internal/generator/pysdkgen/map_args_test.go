@@ -7,9 +7,10 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 )
 
-// TestMapBodyArgumentsAreDicts: each map body argument of nameShades and
-// placePoints is typed dict[str, T], and a map of lists dict[str, list[T]],
-// as the Go route decodes it (bodyargs.Map, bodyargs.MapOfLists).
+// TestMapBodyArgumentsAreDicts: each map body argument of nameShades,
+// placePoints and removeTags, a DELETE, is typed dict[str, T], and a map of
+// lists dict[str, list[T]], as the Go route decodes it (bodyargs.Map,
+// bodyargs.MapOfLists).
 // PyElementType is T, the type each value, or each element of a value, is
 // validated as. The namespace gates _validate_map_argument.
 func TestMapBodyArgumentsAreDicts(t *testing.T) {
@@ -19,6 +20,7 @@ func TestMapBodyArgumentsAreDicts(t *testing.T) {
 		{"name_shades", "shade_by_name", "dict[str, Shade]", "Shade", "shade_by_name: dict[str, Shade]"},
 		{"name_shades", "links_by_locale", "dict[str, list[str]]", "str", "links_by_locale: dict[str, list[str]] | None = None"},
 		{"place_points", "point_by_name", "dict[str, Point]", "Point", "point_by_name: dict[str, Point]"},
+		{"remove_tags", "shade_by_label", "dict[str, Shade]", "Shade", "shade_by_label: dict[str, Shade] | None = None"},
 	} {
 		namespace, endpoint := bodyArgsEndpoint(t, tc.method)
 		if !namespace.HasMapArgs {
@@ -73,9 +75,10 @@ func TestAMapOfJSONValuesIsADictOfTheAlias(t *testing.T) {
 
 // TestMapArgumentsReachTheGoServer runs mapArgsProbe against the generated
 // routes of body-args-api (writeBodyArgsModules): the Python SDK sends each
-// map argument of nameShades and placePoints as a JSON object of its
-// validated values, and the implementation receives each map, an empty one
-// as empty and an absent optional one as nil. A map the route would refuse
+// map argument of nameShades, placePoints and removeTags, a DELETE, as a
+// JSON object of its validated values in the body, and the implementation
+// receives each map, an empty one as empty and an absent optional one as
+// nil. A map the route would refuse
 // is refused before the request, every failure at once, each at the path
 // the route reports it: the argument, name[key], name[key][i] or
 // name[key].field.
@@ -86,12 +89,15 @@ func TestMapArgumentsReachTheGoServer(t *testing.T) {
 		{"id": `"p2"`, "shadeByName": `{}`, "linksByLocale": `null`},
 		{"id": `"p3"`, "shadeByName": `{"a": "light"}`, "linksByLocale": `{"en": ["https://b.test"]}`},
 		{"id": `"p4"`, "pointByName": `{"a": {"x": 1, "y": 2}, "b": {"x": 0.5, "y": -1}}`},
+		{"id": `"p5"`, "labels": `["a", "b"]`, "shadeByLabel": `{"a": "dark", "b": "light"}`},
+		{"id": `"p5"`, "labels": `["c"]`, "shadeByLabel": `{}`},
+		{"id": `"p5"`, "labels": `["d"]`, "shadeByLabel": `null`},
 	})
 }
 
-// mapArgsProbe sends maps through name_shades and place_points: of enum
-// values and members, of lists, empty, absent, a read-only mapping with a
-// tuple, and of Point dicts and models. Then it checks that maps the route
+// mapArgsProbe sends maps through name_shades, place_points and
+// remove_tags: of enum values and members, of lists, empty, absent, a
+// read-only mapping with a tuple, and of Point dicts and models. Then it checks that maps the route
 // would refuse are refused before the request with the errors it expects,
 // by path; a validator of None is not checked.
 const mapArgsProbe = `
@@ -103,6 +109,9 @@ assert sdk.tag.name_shades("p1", {"a": "light", "b": Shade.Dark}, links_by_local
 assert sdk.tag.name_shades("p2", {}) is True
 assert sdk.tag.name_shades("p3", MappingProxyType({"a": Shade.Light}), links_by_locale=MappingProxyType({"en": ("https://b.test",)})) is True
 assert sdk.tag.place_points("p4", {"a": {"x": 1, "y": 2}, "b": Point(x=0.5, y=-1)}) is True
+assert sdk.tag.remove_tags("p5", ["a", "b"], shade_by_label={"a": "dark", "b": Shade.Light}) == ["a", "b"]
+assert sdk.tag.remove_tags("p5", ["c"], shade_by_label={}) == ["c"]
+assert sdk.tag.remove_tags("p5", ["d"]) == ["d"]
 
 for method, kwargs, want in [
     (sdk.tag.name_shades, {"shade_by_name": None}, {"shade_by_name": "required"}),
@@ -138,6 +147,12 @@ for method, kwargs, want in [
     ),
     # The map is the argument, not a Point: each of its values is one.
     (sdk.tag.place_points, {"point_by_name": {"x": 1, "y": 2}}, {"point_by_name[x]": "type", "point_by_name[y]": "type"}),
+    (sdk.tag.remove_tags, {"labels": ["a"], "shade_by_label": "dark"}, {"shade_by_label": "type"}),
+    (
+        sdk.tag.remove_tags,
+        {"labels": ["a"], "shade_by_label": {"a": "dim", "b": None}},
+        {"shade_by_label[a]": None, "shade_by_label[b]": "required"},
+    ),
 ]:
     try:
         method("p0", **kwargs)

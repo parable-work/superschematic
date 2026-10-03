@@ -10,7 +10,8 @@
 # query string: lists of numbers, an integer scalar, booleans, UUIDs,
 # timestamps and strings, optional single values of each, and a @query
 # list. reviseDocument takes an input type with an optional Generic.JSON
-# field. The Go route tests in apigen load it.
+# field. The Go route tests in apigen and the Python, TypeScript and Rust
+# SDK round trips load it.
 # saveTags, storeDocument and findTags match the TypeScript server's scalar
 # list fixture, so both servers answer the same vectors.
 name: body-args-api
