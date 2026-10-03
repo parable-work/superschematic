@@ -42,10 +42,10 @@ scalars the shop uses become:
 
 | Schema | Go | TypeScript | Python | Rust |
 | --- | --- | --- | --- | --- |
-| `Identity.UUID` | `IdentityUUID` (a `uuid.UUID`) | `string` | `str` | `superscalar::Uuid` |
-| `Identity.Name`, `Identity.Slug`, `Contact.Email`, `Contact.PhoneNumber` | a named `string` type | `string` | `str` | `String` |
-| `Generic.Int64` | `GenericInt64` (an `int64`) | `number` | `int` | `i64` |
-| `Temporal.DateTime` | `TemporalDateTime` (a `time.Time`) | `Date` | `datetime` | `superscalar::DateTime` |
+| `Identity.UUID` | `IdentityUUID` (a `uuid.UUID`) | `IdentityUUID` (a branded `string`) | `str` | `superscalar::Uuid` |
+| `Identity.Name`, `Identity.Slug`, `Contact.Email`, `Contact.PhoneNumber` | a named `string` type | a branded `string` (`IdentityName`, ...) | `str` | `String` |
+| `Generic.Int64` | `GenericInt64` (an `int64`) | `GenericInt64` (a `number`) | `int` | `i64` |
+| `Temporal.DateTime` | `TemporalDateTime` (a `time.Time`) | `TemporalDateTime` (a `Date`) | `datetime` | `superscalar::DateTime` |
 | `string`, `number`, `boolean` | `string`, `float64`, `bool` | the same | `str`, `float`, `bool` | `String`, `f64`, `bool` |
 
 - `Generic.Int64` is limited to JavaScript's safe-integer range, so a value
@@ -56,6 +56,36 @@ scalars the shop uses become:
 - The scalar decides the SQL column type too: `Contact.Email` is `CITEXT`,
   which compares case-insensitively. [Database tables](/superschematic/guides/database-tables/)
   has the list.
+
+### Branded values in TypeScript
+
+A field of a scalar is typed by the scalar's symbol, which the types
+package's `types/scalars.ts` re-exports from superscalar. Most symbols are
+brands, a base type joined to a marker
+(`string & { readonly __brand: "Contact.Email" }`), so a plain `string` does
+not assign to a `ContactEmail` field. Others are plain aliases, such as
+`GenericInt64` (`number`), `TemporalDateTime` (`Date`) and `EmbeddingVector`
+(`number[]`). A scalar default is cast to its symbol
+(`"UTC" as TemporalTimeZone`), as an enum default is cast to its enum.
+
+To make a branded value:
+
+- Parse a value where it enters the program, with superscalar's
+  `parse<Scalar>Strict`, which throws, or `parse<Scalar>`, which returns
+  null: `parseContactEmailStrict(form.email)`. Request and search params,
+  form fields, storage reads and third-party responses are such places.
+- Carry the type from there: type a parameter or a variable as the
+  generated field (`Order['productId']`) or as its symbol.
+- Do not cast to a brand (`as ContactEmail`). The cast skips the check the
+  brand stands for.
+
+The generated scalar validators still take the base type, so they check a
+value that has not been parsed yet. `parse<Type>Json` and `parse<Type>Yaml`
+check every field before they return a typed value, and a generated router
+checks a request before the implementation sees it. The shop's TypeScript
+client parses its ids and the recipient's name before it sends them:
+
+<Snippet file="typescript/orders-client.ts" from="import { parseIdentityNameStrict" to="const missingOrder" />
 
 ## Required, nullable and optional
 
@@ -68,7 +98,7 @@ null is a value of an optional field, apart from absent
 | Language | A nullable field |
 | --- | --- |
 | Go | a pointer for a scalar or object type (`UpdatedAt *TemporalDateTime`) and for a `boolean` without a default (`*bool`); the plain value, left out when empty, for `string` and `number` |
-| TypeScript | `updatedAt?: Date \| null` |
+| TypeScript | `updatedAt?: TemporalDateTime \| null` |
 | Python | `Optional[T]` with a default of `None` |
 | Rust | `Option<T>` |
 

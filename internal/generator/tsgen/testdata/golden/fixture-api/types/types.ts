@@ -16,13 +16,13 @@ import type {
  * TenantView - Customer-facing projection of the Tenant table.
  */
 export interface TenantView {
-  id: string;
-  name: string;
+  id: IdentityUUID;
+  name: IdentityName;
   userCount: number;
   internalDebugLabel: string;
 }
 
 export interface CreateTenantInput {
-  name: string;
-  slug: string;
+  name: IdentityName;
+  slug: IdentitySlug;
 }

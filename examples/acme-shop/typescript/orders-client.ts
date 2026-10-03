@@ -2,9 +2,12 @@
 // runs it against the Go server and compares what it prints with the other
 // languages' clients.
 import { ApiError, ShopOrdersSDK } from '@acme/shop-orders-sdk';
+import { parseIdentityNameStrict, parseIdentityUUIDStrict } from 'superscalar/scalars';
 
-const product = '00000000-0000-4000-8000-0000000000b1';
-const missingOrder = '00000000-0000-4000-8000-0000000000c1';
+// A scalar field's type is its brand (IdentityUUID, IdentityName), which a
+// plain string does not satisfy: parse a value where it enters the program.
+const product = parseIdentityUUIDStrict('00000000-0000-4000-8000-0000000000b1');
+const missingOrder = parseIdentityUUIDStrict('00000000-0000-4000-8000-0000000000c1');
 
 async function status(call: () => Promise<unknown>): Promise<number | string> {
   try {
@@ -31,7 +34,7 @@ console.log(`order a product that does not exist: ${await status(() =>
   shopper.order.placeOrder({
     lines: [{ productId: product, quantity: 2 }],
     shippingAddress: {
-      recipient: 'Ada Lovelace',
+      recipient: parseIdentityNameStrict('Ada Lovelace'),
       line1: "12 St James's Square",
       line2: null,
       city: 'London',

@@ -11,7 +11,7 @@ import type { ScalarValidationResult, ValidationResult } from '{{$.Naming.Scalar
 import { {{join .PrimitiveHelpers ", "}} } from '../primitives';
 {{- end}}
 import { load as loadYaml } from 'js-yaml';
-import type { {{.Type.Name}}{{if .ParserScalarsUsed}}, JSDate{{end}}{{range .ParserNestedTypes}}, {{.}}{{end}}{{range .EnumDefaultsUsed}}, {{.}}{{end}} } from '../../types';
+import type { {{.Type.Name}}{{if .ParserScalarsUsed}}, JSDate{{end}}{{range .ParserNestedTypes}}, {{.}}{{end}}{{range .EnumDefaultsUsed}}, {{.}}{{end}}{{range .ScalarDefaultCasts}}, {{.}}{{end}} } from '../../types';
 {{range .ScalarsUsed}}
 import { validate{{.Symbol}}Required, validate{{.Symbol}} } from '../scalars/{{.Module}}';
 {{end}}

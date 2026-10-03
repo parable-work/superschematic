@@ -286,7 +286,7 @@ go_module_compiles "$OUT/session-dist/api/shop-api"
 echo "==> TypeScript types tag every scalar field with acme's scalar_jsdoc_tag"
 TS_TYPES="$DIST/types/typescript/shop-db/types/types.ts"
 # The tag line sits directly above its field and names the canonical scalar.
-awk '/^  \/\*\* @acmeScalar Contact\.Email \*\/$/ { if ((getline field) > 0 && field == "  email: string;") found = 1 }
+awk '/^  \/\*\* @acmeScalar Contact\.Email \*\/$/ { if ((getline field) > 0 && field == "  email: ContactEmail;") found = 1 }
   END { exit !found }' "$TS_TYPES"
 awk '/@acmeScalar / { tags++; if ((getline field) <= 0 || field !~ /^  [A-Za-z_$][A-Za-z0-9_$]*\??: /) bad++ }
   END { exit !(tags > 0 && bad == 0) }' "$TS_TYPES"

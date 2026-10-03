@@ -12,7 +12,7 @@ import type {
  * GridView - Response: a stored grid.
  */
 export interface GridView {
-  id: string;
+  id: IdentityUUID;
   labels: string[][];
   shades: Shade[][];
   polygons: Point[][];

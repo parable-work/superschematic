@@ -1829,3 +1829,34 @@ Output for a schema whose catalog declares no check for the scalars it
 uses is unchanged byte for byte, and every existing golden is.
 
 The rule is reversible until the first release.
+
+## D25. A TypeScript scalar field is typed by its scalar's symbol
+
+The TypeScript types generator typed a scalar field by the scalar's base
+type: an `Identity.UUID` field was `string`, a `Contact.Email` field was
+`string`, a `Temporal.DateTime` field was `JSDate`. `types/scalars.ts`
+already re-exported each scalar's symbol from superscalar, and the
+TypeScript router already typed path and query parameters by it, but no
+field used it. A plain string assigned to an email or an id field, so the
+type of a value said nothing about whether it had been checked. The source
+tree made the same change for every service it builds.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A scalar field, list element and map value is typed by the scalar's symbol (`IdentityUUID`, `ContactEmail`, `TemporalDateTime`, `GenericJSON`). Most symbols are brands, a base type joined to a marker (`string & { readonly __brand: "Contact.Email" }`); others are aliases (`GenericInt64` is `number`). `Generic.JSON`'s field, already typed `GenericJSON`, follows the same rule. | An option per schema or a naming key, which no consumer needs: the source tree turned its option on for every service; brands of the core's own, which would differ from the ones superscalar's parsers return |
+| A scalar `@default` literal is cast to the symbol (`"UTC" as TemporalTimeZone`, `5 as GenericInt64`), as an enum default is cast to its enum. An empty list default stays `[]`. | Calling superscalar's parser in `*Defaults`, which would put runtime code into `types/`, the type-only entry |
+| The scalar validators keep the base type as their parameter, and their `parse<Scalar>` returns it. They check a value that has not been parsed. | Typing them by the brand, which would make a caller parse a value before it can call the check |
+| A mask writes a required single-valued secret scalar's zero value cast to its symbol (`'' as AuthPassword`, `new Date(0) as TemporalDateTime`). | `{} as AuthPassword`, an object where the type promises a string |
+
+A caller builds a branded value with superscalar's `parse<Scalar>Strict`
+or `parse<Scalar>` where the value enters the program, and carries the
+type from there. acme-shop's TypeScript client parses its ids and a name
+that way.
+
+The generated output changes in field types, scalar default casts and
+secret masks only; the validators, the parsers and the SDKs' path and query
+arguments are unchanged. `internal/generator/tsgen/branded_scalars_test.go`
+checks the types, the casts and the masks with tsc and under Bun, and
+type-checks a package with a field of every scalar in the linked catalog.
+
+The rule is reversible until the first release.
