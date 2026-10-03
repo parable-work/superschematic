@@ -1,0 +1,23 @@
+{
+  "name": "Step",
+  "role": "EmbeddedStruct",
+  "behaviors": [
+    {
+      "name": "Workflow",
+      "config": {
+        "states": ["queued", "running", "done"],
+        "transitions": [
+          { "from": "queued", "to": "running" },
+          { "from": "running", "to": "done" }
+        ]
+      }
+    },
+    { "name": "Dependencies" },
+    { "name": "Links", "config": { "links": { "batch": { "schema": "batches", "required": true } } } }
+  ],
+  "fields": [
+    { "name": "step", "typeRef": { "name": "string" }, "required": true },
+    { "name": "title", "typeRef": { "name": "string" } },
+    { "name": "topic", "typeRef": { "name": "string" } }
+  ]
+}

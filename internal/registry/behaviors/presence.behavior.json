@@ -1,0 +1,97 @@
+{
+  "name": "Presence",
+  "description": "A heartbeat on an instance that stands for a worker: the principal whose subject the instance's principalField holds beats it, and an instance not beaten within ttlMs of its create or its last beat is missed. A miss can move the instance's Workflow status and expire the leases the principal holds on the schemas the config names; the engine's runner applies the misses every sweepMs.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["ttlMs", "principalField"],
+    "properties": {
+      "ttlMs": {
+        "description": "How long the instance stays present after its create or its last beat, in milliseconds.",
+        "type": "integer",
+        "minimum": 1000
+      },
+      "principalField": {
+        "description": "A string field of the type that holds the subject of the principal the instance stands for, the only principal that may beat it. Once set, it cannot change.",
+        "type": "string",
+        "minLength": 1
+      },
+      "onMissed": {
+        "description": "Moves the instance's Workflow status when it is missed, while the status is one of from. Needs Workflow on the type.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["transition", "from"],
+        "properties": {
+          "transition": { "description": "The state to move to, through Workflow's transition.", "type": "string", "minLength": 1 },
+          "from": {
+            "description": "The states the status moves from; in any other state it stays.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "onBeat": {
+        "description": "Moves the instance's Workflow status at a beat, while the status is one of from: the way back from the state onMissed moves it to. Needs Workflow on the type.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["transition", "from"],
+        "properties": {
+          "transition": { "description": "The state to move to, through Workflow's transition.", "type": "string", "minLength": 1 },
+          "from": {
+            "description": "The states the status moves from; in any other state it stays.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "releaseLeases": {
+        "description": "Schemas that compose Lease, whose leases the principal holds are expired when the instance is missed, through Lease's schema-level expireHolder. The principal that applies the miss, the runner's in the sweep, needs Lease's overridePermission on each.",
+        "type": "array",
+        "uniqueItems": true,
+        "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" }
+      },
+      "sweepMs": {
+        "description": "How often the engine's runner misses the instances past their deadline, in milliseconds; 5000 when absent.",
+        "type": "integer",
+        "minimum": 1000
+      }
+    }
+  },
+  "fields": [
+    { "name": "presence", "description": "The heartbeat: deadline, when the instance is missed unless beaten, lastBeatAt, both in epoch milliseconds or null, and missed." }
+  ],
+  "operations": [
+    {
+      "name": "beat",
+      "description": "Moves the deadline to ttlMs from now and clears missed, and onBeat moves the status when it is one of its from states. Only the principal whose subject the instance's principalField holds.",
+      "paramsSchema": { "type": "object", "additionalProperties": false },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["deadline"],
+        "properties": {
+          "deadline": { "description": "When the instance is missed unless beaten again, in epoch milliseconds.", "type": "integer" }
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "miss",
+      "description": "Applies the miss of an instance past its deadline and not missed yet: sets missed, moves the status with onMissed when it is one of its from states, and expires the principal's leases on the releaseLeases schemas. Any principal who may write the instance may call it; on any other instance it changes nothing. The engine's runner calls it every sweepMs.",
+      "paramsSchema": { "type": "object", "additionalProperties": false },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["missed"],
+        "properties": {
+          "missed": { "description": "Whether this call missed the instance.", "type": "boolean" }
+        }
+      },
+      "writes": true
+    }
+  ]
+}

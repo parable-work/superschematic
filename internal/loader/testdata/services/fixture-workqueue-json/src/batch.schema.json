@@ -1,0 +1,24 @@
+{
+  "name": "Batch",
+  "role": "EmbeddedStruct",
+  "behaviors": [
+    {
+      "name": "Blueprint",
+      "config": {
+        "schema": "steps",
+        "parentLink": "batch",
+        "keyField": "step",
+        "steps": {
+          "fetch": {},
+          "check": { "after": ["fetch"], "when": { "field": "topic", "equals": "search" } },
+          "index": { "after": ["check"], "data": { "title": "Index what was fetched" } }
+        },
+        "copyFields": ["topic"]
+      }
+    }
+  ],
+  "fields": [
+    { "name": "title", "typeRef": { "name": "string" }, "required": true },
+    { "name": "topic", "typeRef": { "name": "string" } }
+  ]
+}

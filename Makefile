@@ -191,7 +191,7 @@ docs:
 # service from the fixture corpus, and loads fixture-behaviors-json,
 # fixture-cross-instance-json, fixture-rollups-json, fixture-search-json,
 # fixture-reactions-json and fixture-workqueue-json, whose types compose
-# the core's behaviors (D10): --emit-ir carries all eleven and json-schema
+# the core's behaviors (D10): --emit-ir carries all thirteen and json-schema
 # admits them. The engine runs the first five documents with its own
 # behaviors in runtime/engine/typescript/test/core-behaviors.test.ts, and
 # the work-queue package runs the last in
@@ -215,7 +215,7 @@ cli-smoke: $(BIN)
 	@$(BIN) build internal/loader/testdata/services/fixture-workqueue-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
-	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Lease Assignment Queue; do \
+	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Lease Assignment Queue Presence Blueprint; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 
