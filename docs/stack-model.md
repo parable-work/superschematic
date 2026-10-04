@@ -334,10 +334,12 @@ Resolution fails on:
 The order comes from the graph:
 
 1. infrastructure;
-2. migrations;
+2. the migrations' `expand` steps, which the running servers survive;
 3. servers, callees before callers, so a new caller never meets an old
    callee;
-4. exposure.
+4. the migrations' `contract` steps, once no server of the previous
+   version runs (D27);
+5. exposure.
 
 The provisioner applies in that order (section 6.5).
 
@@ -637,8 +639,9 @@ and connectors.
 
 ### 8.4 What the model needs from migrations
 
-Migrations belong to `sqlgen` and are designed separately, for Postgres and
-SQLite. The stack model needs:
+Migrations belong to `sqlgen`, for Postgres and SQLite, and D27 designs
+them: `superschematic migrate plan` and the `superschematic-migrate` runner
+(reference page "Schema migrations"). The stack model needs:
 
 - an offline plan from the previously deployed schema to the new one. The
   baseline comes from the deploy manifest (section 11.2), so CI can show the
@@ -738,12 +741,24 @@ plug into it; they add no commands of their own.
 
 1. builds the images of the affected servers;
 2. applies infrastructure;
-3. runs migrations;
+3. plans each database's migration from the model the manifest records
+   (D27), checks that it is the plan the pull request showed, and runs its
+   `expand` steps (`superschematic-migrate apply --phase expand`), which
+   keep the servers of the previous version working;
 4. rolls servers callee first, waiting for readiness;
-5. applies exposure;
-6. writes a deploy manifest to the state bucket: the resolved environment,
-   the IR digest of each service, the image digests and the applied
-   schema.
+5. runs the plan's `contract` steps (`--phase contract`), the drops and
+   tightenings that the previous version's servers could not survive, once
+   none of them runs;
+6. applies exposure;
+7. writes a deploy manifest to the state bucket: the resolved environment,
+   the IR digest of each service, the image digests and each database's
+   applied model.
+
+A rollout that fails runs no `contract` step, so the previous version's
+servers keep working on the expanded schema. The runner then holds that
+plan's `contract` as pending and refuses a new plan for the database until
+it runs; setting it aside for a rollback that keeps the previous servers is
+open.
 
 The manifest is the migration baseline, the record of what is running, and
 the starting point for a rollback.
