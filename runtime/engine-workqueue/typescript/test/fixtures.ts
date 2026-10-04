@@ -1,12 +1,13 @@
 // Behaviors only these tests register, beside the package's: one that sends
 // a directive from its own operation, as a budget does on an overrun; one
-// that refuses changes of an instance by its title; and a stand-in for
+// that refuses changes of an instance by its title; one that forbids some
+// principals to claim an instance by its title; and a stand-in for
 // Budget's reserve, which holds Queue's claim to the contract Budget
 // implements. The core meta-schema admits only the core's behaviors, so
 // the engines that compose them load against one that admits any name.
 import { readFileSync } from 'node:fs';
 
-import { BehaviorVetoError, defineBehavior, type AnyBehaviorImplementation } from '@superschematic/engine';
+import { BehaviorVetoError, EngineError, defineBehavior, type AnyBehaviorImplementation } from '@superschematic/engine';
 
 import { assignment, lease, queue } from '../dist/index.js';
 
@@ -67,6 +68,21 @@ export const gate = defineBehavior({
   },
 });
 
+/**
+ * test.Lock forbids Queue's claim of an instance titled locked to a
+ * principal without jobs.unlock: a refusal of one caller, which another
+ * may not get.
+ */
+export const lock = defineBehavior({
+  declaration: { name: 'test.Lock' },
+  guard(view, request) {
+    if (request.kind === 'operation' && request.behavior === 'Queue' && request.operation === 'claim' && view.data.title === 'locked' && !view.can('jobs.unlock')) {
+      throw new EngineError('forbidden', `${view.principal.subject} may not claim ${view.schema} ${view.id}: it needs permission jobs.unlock`);
+    }
+    return undefined;
+  },
+});
+
 /** What the Budget stand-in heard, in order. */
 export const reserved: Array<{ id: string; params: unknown; holder: unknown; status: unknown }> = [];
 
@@ -74,7 +90,7 @@ export const reserved: Array<{ id: string; params: unknown; holder: unknown; sta
  * A stand-in for Budget, under its name: reserve({ meter?, amount? }), as
  * Budget declares it, records the call with the lease and the status it
  * sees, and refuses an instance titled broke, as a reservation that does
- * not fit is refused.
+ * not fit is refused; checkReserve says so of broke, until a change.
  */
 export const budgetStandIn = defineBehavior({
   declaration: {
@@ -90,9 +106,21 @@ export const budgetStandIn = defineBehavior({
         resultSchema: true,
         writes: true,
       },
+      {
+        name: 'checkReserve',
+        paramsSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { meter: { type: 'string' }, amount: { type: 'integer' } },
+        },
+        resultSchema: true,
+      },
     ],
   },
   operations: {
+    checkReserve(context) {
+      return { fits: context.data.title !== 'broke', until: null, scopes: [] };
+    },
     reserve(context, params) {
       const seen = context.instances.get(context.schema, context.id, { fields: ['lease', 'status'] })?.data;
       reserved.push({ id: context.id, params, holder: (seen?.lease as { holder?: unknown } | undefined)?.holder, status: seen?.status });

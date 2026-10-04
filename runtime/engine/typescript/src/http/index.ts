@@ -8,7 +8,7 @@ peer dependencies; the engine's main entry point imports neither. See
 runtime/engine/README.md, "HTTP".
 */
 
-export { JSON_MEDIA_TYPE, MERGE_PATCH_MEDIA_TYPE, engineApp } from './app.js';
+export { JSON_MEDIA_TYPE, MERGE_PATCH_MEDIA_TYPE, PRECONDITIONS_HEADER, engineApp } from './app.js';
 export type { EngineHttpOptions } from './app.js';
 export { ENGINE_ERROR_STATUS, engineProblem } from './problems.js';
 export { DEFAULT_HEARTBEAT_MS, DEFAULT_STREAM_PAGE_SIZE } from './stream.js';

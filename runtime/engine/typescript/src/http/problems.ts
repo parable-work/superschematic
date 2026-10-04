@@ -1,10 +1,14 @@
 /*
 How an engine refusal crosses HTTP. Each EngineError code has one status,
 and the problem document carries the code as its `code` member; a refused
-schema document, instance, operation's parameters or create's parameters
-carries its issues as `details.issues`, a refused version its changes as `details.changes`, and
-a behavior's veto the behavior, what it refused and why as `details`. The
-detail is the engine's message, which names only what the request named.
+schema document, instance, operation's parameters, create's parameters
+or preconditions carries its issues as `details.issues`, a refused
+version its changes as `details.changes`, and a behavior's veto the
+behavior, what it refused and why as `details`, with the veto's own code
+and details, when it gives them, as `details.code` and `details.details`:
+a client branches on `code: "vetoed"` and then on the behavior and its
+code. The detail is the engine's message, which names only what the
+request named.
 `type` stays about:blank, as the HTTP runtime writes it for every problem,
 so `code` is what a client branches on. A BehaviorError, a defect in a
 behavior's code, is not an EngineError: it answers 500 like any failure.
@@ -19,6 +23,7 @@ import {
   IncompatibleChangeError,
   InstanceValidationError,
   OperationParamsError,
+  PreconditionsError,
   SchemaDocumentError,
   type EngineErrorCode,
 } from '../errors.js';
@@ -59,12 +64,21 @@ function detailsOf(error: EngineError): { details?: unknown } {
     error instanceof SchemaDocumentError ||
     error instanceof InstanceValidationError ||
     error instanceof OperationParamsError ||
-    error instanceof CreateParamsError
+    error instanceof CreateParamsError ||
+    error instanceof PreconditionsError
   ) {
     return { details: { issues: error.issues } };
   }
   if (error instanceof BehaviorVetoError) {
-    return { details: { behavior: error.behavior, action: error.action, reason: error.reason } };
+    return {
+      details: {
+        behavior: error.behavior,
+        action: error.action,
+        reason: error.reason,
+        ...(error.vetoCode !== undefined ? { code: error.vetoCode } : {}),
+        ...(error.vetoDetails !== undefined ? { details: error.vetoDetails } : {}),
+      },
+    };
   }
   if (error instanceof IncompatibleChangeError) {
     return { details: { changes: error.changes } };

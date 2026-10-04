@@ -125,7 +125,7 @@ for (const driver of drivers) {
         ['listProposals', {}],
       ] as const) {
         const veto = thrown(() => engine.instances.invoke(reviewer, 'Document', 'd1', operation, params), BehaviorVetoError);
-        assert.equal(veto.reason, 'Document has no review step: its Revisions config sets no review');
+        assert.deepEqual([veto.reason, veto.vetoCode], ['Document has no review step: its Revisions config sets no review', 'no_review']);
       }
     });
 
@@ -195,7 +195,7 @@ for (const driver of drivers) {
         patch: { body: 'Proposed.', revision: 2 },
       });
       const again = thrown(() => engine.instances.invoke(reviewer, 'Document', 'd1', 'approve', { proposal: 1 }), BehaviorVetoError);
-      assert.equal(again.reason, 'proposal 1 is approved, not pending');
+      assert.deepEqual([again.reason, again.vetoCode, again.vetoDetails], ['proposal 1 is approved, not pending', 'not_pending', { proposal: 1, state: 'approved' }]);
       const unknown = thrown(() => engine.instances.invoke(reviewer, 'Document', 'd1', 'approve', { proposal: 7 }), OperationParamsError);
       assert.deepEqual(unknown.issues, [{ path: '/proposal', message: 'Document d1 has no proposal 7' }]);
     });
@@ -235,7 +235,7 @@ for (const driver of drivers) {
       assert.deepEqual([rejected.state, rejected.reviewedBy, rejected.reason, rejected.revision], ['rejected', 'rae', 'Not yet.', undefined]);
       assert.deepEqual(engine.instances.get(alice, 'Document', 'd1')?.data, { title: 'Plan', revision: 1 });
       const late = thrown(() => engine.instances.invoke(reviewer, 'Document', 'd1', 'approve', { proposal: 1 }), BehaviorVetoError);
-      assert.equal(late.reason, 'proposal 1 is rejected, not pending');
+      assert.deepEqual([late.reason, late.vetoCode], ['proposal 1 is rejected, not pending', 'not_pending']);
     });
 
     test('listProposals filters by state and pages, is read-only, and the policy is asked for read', () => {

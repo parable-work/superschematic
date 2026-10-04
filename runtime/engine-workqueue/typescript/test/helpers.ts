@@ -113,6 +113,11 @@ export const jobFlow = {
   ],
 };
 
+/** fenced is the options of a call that presents a lease's token as Lease's precondition. */
+export function fenced(token: number): { preconditions: { Lease: { token: number } } } {
+  return { preconditions: { Lease: { token } } };
+}
+
 /** publish defines and publishes a document as alice. */
 export function publish(engine: Engine, document: Record<string, unknown>): void {
   engine.schemas.define(alice, document);

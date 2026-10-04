@@ -357,6 +357,23 @@ for (const driver of drivers) {
       ]);
     });
 
+    test("a holder whose own write changes what it holds hears it with writing set, and leaves it to its own write", () => {
+      const engine = world();
+      engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1' });
+      engine.instances.invoke(alice, 'Note', 'n2', 'hold', { schema: 'Item', id: 'i1' });
+      const from = lastCursor(engine);
+      // n1's poke increments i1 while n1's own write runs: n1's hook sees
+      // writing and invokes nothing, which would be a cycle; n2's notes it.
+      engine.instances.invoke(alice, 'Note', 'n1', 'poke', { schema: 'Item', id: 'i1', operation: 'increment' });
+      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'notes'), []);
+      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n2', 'notes'), ['operation Item i1']);
+      assert.deepEqual(eventsOf(engine, from), [
+        ['operation', 'Item', 'i1', 'increment'],
+        ['operation', 'Note', 'n2', 'note'],
+        ['operation', 'Note', 'n1', 'poke'],
+      ]);
+    });
+
     test('a delete no guard vetoes runs the hooks, which remove the references through an operation', () => {
       const engine = world();
       engine.instances.invoke(alice, 'Note', 'n1', 'hold', { schema: 'Item', id: 'i1', key: 'a' });

@@ -9,12 +9,17 @@ worker that never beats is missed too.
 miss applies a miss, and only once: on an instance past its deadline that
 is not missed yet, it sets missed, moves the status with onMissed when it
 is one of onMissed's from states, through Workflow's transition, whose
-guards run, and expires every lease the principal holds on the schemas
+guards run, and expires the leases the principal holds on the schemas
 releaseLeases names, through each schema's expireHolder, Lease's
 schema-level operation, so each expiry runs Lease's own rules and appends
-its own event. The leases are the principal's, not the instance's: while
-another instance of the schema stands for the same principal and is
-present (not missed, before its deadline), a miss leaves them. A
+its own event. It spares a lease renewed after the principal's last beat
+(notRenewedAfter): a worker whose presence beat starved while its lease
+heartbeats went on is alive, and a lease that stops being renewed expires
+on its own. It records the ids it expired, by schema, in its released
+column, which the presence field shows and so the miss's event carries.
+The leases are the principal's, not the instance's: while another
+instance of the schema stands for the same principal and is present (not
+missed, before its deadline), a miss leaves them. A
 transition a guard vetoes leaves the status as it is and the instance
 missed all the same; any other refusal, a missing permission say, fails
 the miss and leaves it as it was. Anyone who may write the instance may
@@ -32,8 +37,9 @@ expireHolder asks for; a miss that fails fails the run, which the runner
 retries and engine.runner.status() shows.
 
 The guard keeps the instance to its principal: an update that changes
-principalField once it holds a value is refused, whoever asks. beat
-checks its caller in its handler.
+principalField once it holds a value is refused, whoever asks
+(principal_fixed). beat checks its caller in its handler (no_principal,
+not_principal).
 
 configChange: any config may change except principalField, which names
 where every instance's principal is held. A new ttlMs applies from each
@@ -89,6 +95,8 @@ export interface PresenceRecord {
   readonly lastBeatAt: number | null;
   /** Whether a miss was applied and no beat came after it. */
   readonly missed: boolean;
+  /** The instances whose lease the last miss expired, by schema; null before a miss. */
+  readonly released: Readonly<Record<string, readonly string[]>> | null;
 }
 
 const NAME = 'Presence';
@@ -98,12 +106,18 @@ interface State {
   readonly deadline: number | null;
   readonly lastBeatAt: number | null;
   readonly missed: boolean;
+  readonly released: Readonly<Record<string, readonly string[]>> | null;
 }
 
 function state(view: InstanceView<PresenceConfig>): State {
   const columns = view.columns.get();
   const number = (value: unknown): number | null => (value === null || value === undefined ? null : Number(value));
-  return { deadline: number(columns.deadline), lastBeatAt: number(columns.last_beat_at), missed: Number(columns.missed) === 1 };
+  return {
+    deadline: number(columns.deadline),
+    lastBeatAt: number(columns.last_beat_at),
+    missed: Number(columns.missed) === 1,
+    released: columns.released === null || columns.released === undefined ? null : (JSON.parse(String(columns.released)) as Record<string, string[]>),
+  };
 }
 
 // principalOf reads the subject the instance stands for; undefined when
@@ -113,8 +127,11 @@ function principalOf(view: InstanceView<PresenceConfig>): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
-function vetoed(view: InstanceView<unknown>, operation: string, reason: string): BehaviorVetoError {
-  return new BehaviorVetoError(NAME, operation, view.schema, view.id, reason);
+/** The codes Presence's vetoes carry, as its declaration lists them. */
+type PresenceVeto = 'no_principal' | 'not_principal' | 'principal_fixed';
+
+function vetoed(view: InstanceView<unknown>, operation: string, reason: string, code: PresenceVeto): BehaviorVetoError {
+  return new BehaviorVetoError(NAME, operation, view.schema, view.id, { reason, code });
 }
 
 // statusOf reads the instance's Workflow status as the caller; undefined
@@ -154,6 +171,17 @@ function presentElsewhere(context: OperationContext<PresenceConfig>, principal: 
     [context.id, context.now, `$."${context.config.principalField}"`, principal]
   );
   return row !== undefined;
+}
+
+// lastSeen is the principal's last beat on any instance of the schema that
+// stands for it, or, for one that never beat, its create: a lease renewed
+// after it shows its holder alive, and the miss spares it.
+function lastSeen(context: OperationContext<PresenceConfig>, principal: string): number {
+  const row = context.sql.get(`SELECT MAX(COALESCE(last_beat_at, created_at)) AS seen FROM ${context.sql.instances()} WHERE json_extract(data, ?) = ?`, [
+    `$."${context.config.principalField}"`,
+    principal,
+  ]);
+  return Number(row?.seen ?? 0);
 }
 
 /** A Workflow config as the schema holds it: its states and transitions. */
@@ -277,13 +305,17 @@ export const presence = defineBehavior<PresenceConfig>({
       // The sweep reads the instances not missed, oldest deadline first.
       indexes: { due: ['missed', 'deadline'] },
     },
+    // What the last miss expired, as JSON, which the field and so the
+    // miss's event show.
+    { version: 2, name: 'released', columns: { released: { type: 'text' } } },
   ],
 
   initialize(context) {
     context.columns.set({ deadline: context.now + context.config.ttlMs, missed: 0 });
   },
 
-  // The instance stays the principal's: see the header.
+  // The instance stays the principal's: see the header. A create sets
+  // principalField, an update only while it holds none.
   guard(view, request) {
     if (request.kind !== 'update') {
       return undefined;
@@ -293,17 +325,17 @@ export const presence = defineBehavior<PresenceConfig>({
     if (before === undefined || before === null || before === request.after[field]) {
       return undefined;
     }
-    return `${field} holds the principal the instance stands for, so it cannot change once set`;
+    return { reason: `${field} holds the principal the instance stands for, so it cannot change once set`, code: 'principal_fixed' };
   },
 
   operations: {
     beat(context) {
       const principal = principalOf(context);
       if (principal === undefined) {
-        throw vetoed(context, 'beat', `its ${context.config.principalField} holds no principal, so no one may beat it`);
+        throw vetoed(context, 'beat', `its ${context.config.principalField} holds no principal, so no one may beat it`, 'no_principal');
       }
       if (principal !== context.principal.subject) {
-        throw vetoed(context, 'beat', 'it stands for another principal, who alone may beat it');
+        throw vetoed(context, 'beat', 'it stands for another principal, who alone may beat it', 'not_principal');
       }
       const deadline = context.now + context.config.ttlMs;
       context.columns.set({ deadline, last_beat_at: context.now, missed: 0 });
@@ -319,12 +351,16 @@ export const presence = defineBehavior<PresenceConfig>({
       context.columns.set({ missed: 1 });
       move(context, context.config.onMissed);
       const principal = principalOf(context);
+      const released: Record<string, string[]> = {};
       if (principal !== undefined && !presentElsewhere(context, principal)) {
+        const notRenewedAfter = lastSeen(context, principal);
         for (const schema of context.config.releaseLeases) {
-          context.instances.invokeSchema(schema, 'expireHolder', { holder: principal } as FrozenJSON);
+          const result = context.instances.invokeSchema(schema, 'expireHolder', { holder: principal, notRenewedAfter } as FrozenJSON) as { ids: string[] };
+          released[schema] = [...result.ids];
         }
       }
-      return { missed: true };
+      context.columns.set({ released: JSON.stringify(released) });
+      return { missed: true, released };
     },
   },
 

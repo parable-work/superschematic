@@ -3,7 +3,9 @@
 // a cap or a stuck signature, which moves the status through Workflow only
 // from the from states and then holds the instance; kept results, the best
 // scoring one with keepBest, written to resultField with an update's
-// checks; and the config rules. Real SQLite, a real engine.
+// checks; caps a worker cannot raise for itself; an attempt's detail in its
+// event and its class's hint in its result; and the config rules. Real
+// SQLite, a real engine.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -18,7 +20,7 @@ import {
   type Principal,
 } from '@superschematic/engine';
 
-import { Clock, alice, cleanup, drivers, jobFlow, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
+import { Clock, alice, cleanup, drivers, fenced, jobFlow, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -59,6 +61,7 @@ interface Attempt {
   classAttempts: Record<string, number>;
   exhausted: boolean;
   stuck: boolean;
+  hint: string | null;
 }
 
 for (const driver of drivers) {
@@ -91,6 +94,7 @@ for (const driver of drivers) {
         classAttempts: counts(0, 0, 0),
         exhausted: false,
         stuck: false,
+        hint: null,
       });
       assert.deepEqual(dataOf(engine).report, { ok: true });
       assert.deepEqual(attempt(engine, { result: { ok: 'again' } }).score, null);
@@ -131,9 +135,10 @@ for (const driver of drivers) {
         classAttempts: counts(0, 0, 1),
         exhausted: true,
         stuck: false,
+        hint: null,
       });
       assert.equal(dataOf(engine).status, 'failed');
-      invoke(engine, worker, 'release', { token: 1 });
+      engine.instances.invoke(worker, 'Job', 'j1', 'release', {}, fenced(1 as number));
       assert.equal(veto(() => invoke(engine, other, 'acquire')).reason, 'its retries are exhausted, so it is not taken again');
       assert.equal(veto(() => attempt(engine, { failure: 'timeout' })).reason, 'its retries are exhausted');
     });
@@ -153,6 +158,7 @@ for (const driver of drivers) {
         classAttempts: counts(3, 1, 0),
         exhausted: true,
         stuck: false,
+        hint: null,
       });
       assert.equal(dataOf(engine).status, 'failed');
       const fresh = world(base);
@@ -216,6 +222,36 @@ for (const driver of drivers) {
       assert.equal((invoke(zero, worker, 'acquire') as { token: number }).token, 1);
       assert.deepEqual(attempt(zero, { failure: 'invalid' }), { ...attempt0(1), failure: 'invalid', classAttempts: counts(0, 1, 0) });
       assert.deepEqual(attempt(zero, { failure: 'timeout' }), { ...attempt0(1), exhausted: true, classAttempts: counts(0, 1, 0) });
+    });
+
+    test('a failure returns its class hint, and an attempt keeps its detail in its event and nowhere else', () => {
+      const engine = world({ ...base, classes: { ...classes, invalid: { attempts: 2, hint: 'Return JSON that matches the schema.' } } });
+      assert.equal(attempt(engine, { failure: 'invalid', detail: { errors: [{ path: '/title', message: 'required' }] } }).hint, 'Return JSON that matches the schema.');
+      assert.equal(attempt(engine, { failure: 'timeout' }).hint, null);
+      assert.equal(attempt(engine, {}).hint, null);
+      const [first] = engine.events.read(alice, { schema: 'Job', instanceId: 'j1' }).events.slice(-3);
+      assert.deepEqual((first.change as { params: unknown }).params, { failure: 'invalid', detail: { errors: [{ path: '/title', message: 'required' }] } });
+      assert.equal(thrown(() => attempt(engine, { detail: 'not an object' }), OperationParamsError).code, 'invalid_argument');
+    });
+
+    test('limitsField changes only with limitsPermission, and never by the holder of the lease, so a worker does not raise its own caps', () => {
+      const config = { ...base, limitsField: 'caps', limitsPermission: 'jobs.caps' };
+      const lead: Principal = { subject: 'lena', permissions: ['jobs.caps'] };
+      const engine = world(config, { caps: { timeout: 1 } });
+      const refused = thrown(() => engine.instances.update(worker, 'Job', 'j1', { caps: { timeout: 9 } }), EngineError);
+      assert.deepEqual([refused.code, refused.message], ['forbidden', 'wren may not change caps, the caps of Job j1: it needs permission jobs.caps']);
+      engine.instances.update(lead, 'Job', 'j1', { caps: { timeout: 2 } });
+      // The holder of the lease, permission or not, leaves them as they are; an update that leaves them passes.
+      const holder: Principal = { subject: 'hal', permissions: ['jobs.caps'] };
+      invoke(engine, holder, 'acquire');
+      const fixed = veto(() => engine.instances.update(holder, 'Job', 'j1', { caps: { timeout: 9 } }));
+      assert.deepEqual([fixed.behavior, fixed.vetoCode], ['Retries', 'limits_fixed']);
+      engine.instances.update(holder, 'Job', 'j1', { title: 'Renamed', caps: { timeout: 2 } });
+      assert.deepEqual(dataOf(engine).caps, { timeout: 2 });
+
+      const unnamed = world({ ...base, limitsField: 'caps' }, { caps: { timeout: 1 } });
+      const none = veto(() => unnamed.instances.update(alice, 'Job', 'j1', { caps: { timeout: 9 } }));
+      assert.deepEqual([none.reason, none.vetoCode], ["caps holds the instance's caps, which change only with limitsPermission, and the config names none", 'not_configured']);
     });
 
     test('a config whose classes are all terminal exhausts nothing before the first failure', () => {
@@ -340,11 +376,12 @@ for (const driver of drivers) {
     const claimNext = (engine: Engine, who: Principal = worker) =>
       (engine.instances.invokeSchema(who, 'Job', 'claimNext', {}) as { claimed: { id: string; token: number } | null }).claimed;
 
-    test('an exhausted instance still in a claimable state is not claimed, and claimNext moves on to the next', () => {
+    test('an exhausted instance still in a claimable state is not claimed, and is no candidate claimNext tries', () => {
       const engine = queued({ ...base, from: ['running'] });
       assert.equal(attempt(engine, { failure: 'rejected' }).exhausted, true);
       assert.equal(dataOf(engine).status, 'queued');
       assert.equal(veto(() => invoke(engine, worker, 'claim')).reason, 'its retries are exhausted, so it is not taken again');
+      assert.equal((engine.instances.invokeSchema(worker, 'Job', 'countClaimable', {}) as { count: number }).count, 1);
       assert.equal(claimNext(engine)?.id, 'j2');
       assert.deepEqual([dataOf(engine).status, (dataOf(engine).lease as { holder: string | null }).holder], ['queued', null]);
       assert.equal(claimNext(engine, other), null);
@@ -356,13 +393,13 @@ for (const driver of drivers) {
         const claimed = claimNext(engine);
         assert.equal(claimed?.id, 'j1');
         assert.equal(attempt(engine, { failure: 'timeout' }).exhausted, false);
-        invoke(engine, worker, 'release', { token: claimed?.token });
+        engine.instances.invoke(worker, 'Job', 'j1', 'release', {}, fenced(claimed?.token as number));
         assert.equal(dataOf(engine).status, 'queued');
       }
       const last = claimNext(engine);
       assert.deepEqual(attempt(engine, { failure: 'invalid' }), { ...attempt0(4), failure: 'invalid', classAttempts: counts(3, 1, 0), exhausted: true });
       assert.equal(dataOf(engine).status, 'failed');
-      invoke(engine, worker, 'release', { token: last?.token });
+      engine.instances.invoke(worker, 'Job', 'j1', 'release', {}, fenced(last?.token as number));
       assert.equal(dataOf(engine).status, 'failed');
       assert.equal(claimNext(engine)?.id, 'j2');
     });
@@ -408,6 +445,6 @@ for (const driver of drivers) {
 
   // attempt0 is a counted timeout failure's result with total n, not kept and not exhausted.
   function attempt0(n: number): Attempt {
-    return { failure: 'timeout', score: null, kept: false, total: n, classAttempts: counts(n, 0, 0), exhausted: false, stuck: false };
+    return { failure: 'timeout', score: null, kept: false, total: n, classAttempts: counts(n, 0, 0), exhausted: false, stuck: false, hint: null };
   }
 }

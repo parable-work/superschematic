@@ -3,8 +3,9 @@
 // deadline, onMissed only from its from states and onBeat back, the
 // runner's sweep on the engine clock, the guard on principalField, the
 // leases a miss expires on the releaseLeases schemas through Lease's
-// expireHolder, and the config rules. Real SQLite, a real engine, a clock
-// the tests move.
+// expireHolder, sparing the ones renewed since the last beat and recording
+// the rest, the codes its refusals carry, and the config rules. Real
+// SQLite, a real engine, a clock the tests move.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -18,7 +19,7 @@ import {
   type Principal,
 } from '@superschematic/engine';
 
-import { Clock, alice, cleanup, drivers, jobFlow, jobsDocument, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
+import { Clock, alice, cleanup, drivers, fenced, jobFlow, jobsDocument, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -89,17 +90,20 @@ for (const driver of drivers) {
   describe(`Presence: beat and miss (${driver})`, () => {
     test('a create sets the first deadline one ttl on, so a worker that never beats is missed; the presence field shows it', () => {
       const { engine } = world();
-      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, lastBeatAt: null, missed: false });
+      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, lastBeatAt: null, missed: false, released: null });
     });
 
     test('only the principal the instance stands for can beat it', () => {
       const { engine, clock } = world();
       clock.advance(10000);
       assert.deepEqual(invoke(engine, wren, 'beat'), { deadline: T0 + 10000 + TTL });
-      assert.deepEqual(presenceOf(engine), { deadline: T0 + 10000 + TTL, lastBeatAt: T0 + 10000, missed: false });
+      assert.deepEqual(presenceOf(engine), { deadline: T0 + 10000 + TTL, lastBeatAt: T0 + 10000, missed: false, released: null });
       // Knowing the subject the instance holds does not make another principal it.
       const refused = veto(() => invoke(engine, otto, 'beat'));
-      assert.deepEqual([refused.behavior, refused.action, refused.reason], ['Presence', 'beat', 'it stands for another principal, who alone may beat it']);
+      assert.deepEqual(
+        [refused.behavior, refused.action, refused.reason, refused.vetoCode],
+        ['Presence', 'beat', 'it stands for another principal, who alone may beat it', 'not_principal']
+      );
       assert.equal(presenceOf(engine).lastBeatAt, T0 + 10000);
     });
 
@@ -109,8 +113,8 @@ for (const driver of drivers) {
       assert.deepEqual(invoke(engine, otto, 'miss'), { missed: false });
       assert.equal(statusOf(engine), 'idle');
       clock.advance(1);
-      assert.deepEqual(invoke(engine, otto, 'miss'), { missed: true });
-      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, lastBeatAt: null, missed: true });
+      assert.deepEqual(invoke(engine, otto, 'miss'), { missed: true, released: {} });
+      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, lastBeatAt: null, missed: true, released: {} });
       assert.equal(statusOf(engine), 'missing');
       assert.deepEqual(invoke(engine, otto, 'miss'), { missed: false });
     });
@@ -119,7 +123,7 @@ for (const driver of drivers) {
       const { engine, clock } = world();
       engine.instances.invoke(wren, 'Worker', 'w1', 'transition', { to: 'stopped' });
       clock.advance(TTL);
-      assert.deepEqual(invoke(engine, otto, 'miss'), { missed: true });
+      assert.deepEqual(invoke(engine, otto, 'miss'), { missed: true, released: {} });
       assert.equal(statusOf(engine), 'stopped');
       assert.equal(presenceOf(engine).missed, true);
     });
@@ -130,7 +134,7 @@ for (const driver of drivers) {
       invoke(engine, otto, 'miss');
       clock.advance(5000);
       assert.deepEqual(invoke(engine, wren, 'beat'), { deadline: T0 + TTL + 5000 + TTL });
-      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL + 5000 + TTL, lastBeatAt: T0 + TTL + 5000, missed: false });
+      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL + 5000 + TTL, lastBeatAt: T0 + TTL + 5000, missed: false, released: {} });
       assert.equal(statusOf(engine), 'idle');
       // From busy, which onBeat does not list, a beat leaves the status.
       engine.instances.invoke(wren, 'Worker', 'w1', 'transition', { to: 'busy' });
@@ -144,7 +148,7 @@ for (const driver of drivers) {
       publish(engine, workersDocument([{ name: 'Presence', config: { ttlMs: 1000, principalField: 'subject' } }]));
       engine.instances.create(alice, 'Worker', { subject: 'wren' }, { id: 'w1' });
       clock.advance(1000);
-      assert.deepEqual(invoke(engine, otto, 'miss'), { missed: true });
+      assert.deepEqual(invoke(engine, otto, 'miss'), { missed: true, released: {} });
       assert.equal(engine.instances.get(alice, 'Worker', 'w1')?.data.status, undefined);
       assert.deepEqual(invoke(engine, wren, 'beat'), { deadline: T0 + 2000 });
     });
@@ -194,7 +198,7 @@ for (const driver of drivers) {
       const [status] = engine.runner.status().schedules;
       assert.equal(status.schedule, 'miss');
       assert.match(String(status.error), /runner may not move Worker w1 from idle to missing: the transition needs permission workers.mark/);
-      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, lastBeatAt: null, missed: false });
+      assert.deepEqual(presenceOf(engine), { deadline: T0 + TTL, lastBeatAt: null, missed: false, released: null });
       assert.equal(statusOf(engine), 'idle');
     });
   });
@@ -203,11 +207,20 @@ for (const driver of drivers) {
     test('an update that changes principalField is refused, whoever asks; the rest of an update goes through', () => {
       const { engine } = world();
       const refused = veto(() => engine.instances.update(alice, 'Worker', 'w1', { subject: 'otto' }));
-      assert.deepEqual([refused.behavior, refused.action], ['Presence', 'update']);
+      assert.deepEqual([refused.behavior, refused.action, refused.vetoCode], ['Presence', 'update', 'principal_fixed']);
       assert.equal(refused.reason, 'subject holds the principal the instance stands for, so it cannot change once set');
       engine.instances.update(alice, 'Worker', 'w1', { name: 'Wren the second', subject: 'wren' });
       assert.equal(engine.instances.get(alice, 'Worker', 'w1')?.data.name, 'Wren the second');
       assert.equal(veto(() => invoke(engine, otto, 'beat')).reason, 'it stands for another principal, who alone may beat it');
+    });
+
+    test('an instance whose principalField holds no principal cannot be beaten (no_principal)', () => {
+      const clock = new Clock(T0);
+      const engine = openTestEngine({ driver, clock: clock.now });
+      publish(engine, workersDocument([{ name: 'Presence', config: { ttlMs: TTL, principalField: 'subject' } }]));
+      engine.instances.create(alice, 'Worker', { subject: '' }, { id: 'w0' });
+      const refused = veto(() => engine.instances.invoke(wren, 'Worker', 'w0', 'beat', {}));
+      assert.deepEqual([refused.reason, refused.vetoCode], ['its subject holds no principal, so no one may beat it', 'no_principal']);
     });
   });
 
@@ -260,10 +273,35 @@ for (const driver of drivers) {
       assert.deepEqual(
         expiries.map((event) => [event.instanceId, (event.change as { operation: string; params: unknown }).operation, (event.change as { params: unknown }).params, event.cause]),
         [
-          ['j1', 'expire', { holder: 'wren' }, { behavior: 'Presence', schedule: 'miss', depth: 1 }],
-          ['j2', 'expire', { holder: 'wren' }, { behavior: 'Presence', schedule: 'miss', depth: 1 }],
+          ['j1', 'expire', { holder: 'wren', notRenewedAfter: T0 }, { behavior: 'Presence', schedule: 'miss', depth: 1 }],
+          ['j2', 'expire', { holder: 'wren', notRenewedAfter: T0 }, { behavior: 'Presence', schedule: 'miss', depth: 1 }],
         ]
       );
+    });
+
+    test("a miss spares a lease its holder renewed after the worker's last beat, and records the ones it expired in its event", () => {
+      const { engine, clock } = fleet(['jobs.override']);
+      clock.advance(5000);
+      engine.instances.invoke(wren, 'Worker', 'w1', 'beat', {});
+      // The worker's beats stop at T0 + 5000; j2's heartbeats go on.
+      clock.advance(15000);
+      engine.instances.invoke(wren, 'Job', 'j2', 'heartbeat', {}, fenced(1));
+      clock.advance(15000);
+      assert.equal(engine.runner.runDue().failed, 0);
+      assert.equal(statusOf(engine), 'missing');
+      assert.deepEqual(jobs(engine), [
+        ['queued', null, 1],
+        ['running', 'wren', 0],
+        ['running', 'otto', 0],
+      ]);
+      // The miss's event carries what it released; the expiry's, the time it was given.
+      assert.deepEqual(presenceOf(engine).released, { Job: ['j1'] });
+      const miss = engine.events
+        .read(alice, { schema: 'Worker', instanceId: 'w1', limit: 500 })
+        .events.find((event) => (event.change as { operation?: string } | null)?.operation === 'miss');
+      assert.deepEqual((miss?.change as { patch: { presence: unknown } }).patch.presence, { missed: true, released: { Job: ['j1'] } });
+      const expiry = engine.events.read(alice, { schema: 'Job', instanceId: 'j1' }).events.at(-1);
+      assert.deepEqual((expiry?.change as { params: unknown }).params, { holder: 'wren', notRenewedAfter: T0 + 5000 });
     });
 
     test('a miss leaves the leases while another instance that stands for the same principal is present, and expires them when that one is missed too', () => {
@@ -273,7 +311,7 @@ for (const driver of drivers) {
       engine.instances.invoke(wren, 'Worker', 'w2', 'beat', {});
       // The holders renew their leases, so none lapses before the second worker is missed.
       for (const [id, who] of [['j1', wren], ['j2', wren], ['j3', otto]] as const) {
-        engine.instances.invoke(who, 'Job', id, 'heartbeat', { token: 1 });
+        engine.instances.invoke(who, 'Job', id, 'heartbeat', {}, fenced(1));
       }
       engine.runner.runDue();
       assert.deepEqual([presenceOf(engine).missed, presenceOf(engine, 'w2').missed], [true, false]);

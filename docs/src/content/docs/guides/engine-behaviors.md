@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; create parameters; schema-level operations; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants and Variants behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants and Variants behaviors.
 sidebar:
   order: 7
 ---
@@ -134,20 +134,24 @@ create tool (`tasks_create`) takes them as its `behaviors` argument:
   each issue at a JSON pointer such as `/behaviors/Links/project`, or
   `vetoed` (409), and nothing of the create is left.
 - Every behavior's guard can refuse a create too, before any behavior
-  sets anything up.
+  sets anything up. A create's veto carries a code like any other
+  ([below](#refusals-and-preconditions)): a blocker given twice is
+  Dependencies' `already_blocking`, as `addBlocker` would say.
+- A create takes no preconditions: there is no instance yet to fence.
 - The create, its links and its edges are one event, in one transaction.
 
 ## Schema-level operations
 
 Most operations run on one instance. An operation a behavior declares
 with `scope: "schema"` runs on the schema as a whole and names no
-instance. Four do so far:
+instance. Five do so far:
 
 | Operation | Behavior | What it does |
 | --- | --- | --- |
 | `listLinked` | `Links` | the instances whose link points at a target |
 | `search` | `Search` | a full-text search over the schema's instances |
 | `claimNext` | `Queue` | claims the first instance the caller can claim |
+| `countClaimable` | `Queue` | counts the instances `claimNext` would try, read-only |
 | `expireHolder` | `Lease` | expires every lease one principal holds |
 
 Each is served at its own route, with its parameters as the body:
@@ -170,6 +174,45 @@ event of its own: it changes state only through the instance operations
 it invokes and the instances it creates, each with its own event. Each
 route answers 404 for an operation of the other scope. Over MCP, the tool
 takes the operation's parameters and no instance id.
+
+## Refusals and preconditions
+
+A behavior that refuses a change answers 409 `vetoed`. Its problem's
+`details` name the behavior, what it refused and why, and, where a client
+would branch on it, a code the behavior's declaration lists, with
+details of its own:
+
+```json
+{ "status": 409, "code": "vetoed",
+  "details": { "behavior": "Workflow", "action": "transition", "reason": "no transition leads from todo to done; from todo it can move to doing",
+               "code": "transition_not_allowed", "details": { "from": "todo", "to": "done", "allowed": ["doing"] } } }
+```
+
+The describe document lists each behavior's codes. A code is read beside
+`details.behavior`, so `blocked` is Dependencies' and `token_stale`
+Lease's. An MCP tool error carries the same problem.
+
+A write can carry preconditions, each behavior's entry by its name, for
+that behavior's guard to check: Lease's is `{ token }`, so a worker's
+writes are refused once its lease is gone. Over HTTP they are the
+`Preconditions` header on PATCH, DELETE and an operation; over MCP the
+`preconditions` argument; in TypeScript the `preconditions` option:
+
+```
+PATCH /namespaces/default/schemas/jobs/instances/{id}   Preconditions: {"Lease": {"token": 3}}
+```
+
+```ts
+engine.instances.invoke(worker, 'jobs', id, 'transition', { to: 'done' }, { preconditions: { Lease: { token: 3 } } });
+```
+
+An entry for a behavior the type does not compose, or that declares no
+precondition, or that its schema refuses, is 400 `invalid_argument` with
+`details.issues`, checked before the instance is read; a precondition
+the guard finds false is that behavior's 409 veto. Guards run once the
+fields are validated, `Constants` and `Variants` included, so a write
+whose fields are refused is 422 `invalid_instance` whatever its
+preconditions say.
 
 ## The runner
 
@@ -263,8 +306,8 @@ cannot be done while a task it waits on is open.
 | Config | `schemas`: the schemas a blocker may belong to, each composing Workflow (the type's own when absent); `gatedStates`: the states a transition into waits on, terminal or not (every terminal state when absent); `satisfiedBy`: the outcomes that finish a blocker (`["success"]` when absent) |
 | Field | `blocked`: whether any blocker is not yet finished: in a terminal state of its own Workflow whose outcome `satisfiedBy` lists |
 | Operations | `addBlocker({ schema?, id })`, `removeBlocker({ schema?, id })`, and the read-only `listBlockers` and `listDependents`, which page with `limit` and `cursor` |
-| Create parameters | `{ blockers: [{ schema?, id }] }`, each held to `addBlocker`'s checks against the Workflow's initial state, finished or open by `satisfiedBy` |
-| Guard | a transition into a gated state while `blocked` is `vetoed` (409), naming the open blockers |
+| Create parameters | `{ blockers: [{ schema?, id }] }`, each held to `addBlocker`'s checks against the Workflow's initial state, finished or open by `satisfiedBy`; a veto carries `addBlocker`'s code |
+| Guard | a transition into a gated state while `blocked` is `vetoed` (409) with `details.code` `blocked`, naming the open blockers, which `details.details.blockers` lists |
 
 ```ts
 engine.instances.invoke(alice, 'Task', 't1', 'addBlocker', { id: 't2' });
@@ -305,7 +348,8 @@ a task's project, its parent, the spec it implements.
 | Field | `links`: `{ <name>: { schema, id, revision?, stale? } }`, absent when the instance holds none |
 | Operations | `link({ name, id, revision? })`, `unlink({ name })`, and the schema-level, read-only `listLinked({ name, id, stale?, limit?, cursor? })` |
 | Create parameters | by link name, the target's `id`, or `{ id, revision? }` for a pinned link |
-| Guard | deleting the target of a required link is `vetoed` |
+| Guard | deleting the target of a required link is `vetoed` (`required_target`) |
+| Vetoes | `no_revision`, a pinned link to a target with no revision yet, by `link` or at create; `required_link`, unlinking a required link; `required_target` |
 
 ```ts
 engine.instances.invoke(alice, 'Task', 't1', 'link', { name: 'owner', id: 'p1' });
@@ -566,7 +610,14 @@ engine.instances.update(me, 'Step', lint.id, { kind: 'review' });
 - **What a client sees.** The describe document's instance and the
   create and update tools carry an `if`/`then` per kind under `allOf`, so
   an MCP client or an agent sees which shape each kind takes before it
-  writes.
+  writes, beside the create parameters, the preconditions and each
+  behavior's veto codes.
+- **Fields a work-queue behavior guards.** `Constants` is the general
+  rule. `Retries` guards its `limitsField` itself, since its rule reads
+  who holds the lease: the holder must never raise its own caps, even
+  with `limitsPermission`. `Lease`'s `maxHoldField`, `Budget`'s
+  `limitField` and `Presence`'s `principalField` keep rules of their own
+  too; listing such a field in `Constants` as well adds its permission.
 
 The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#validating-fields)
 shows how a behavior of your own judges the fields a write stores.
