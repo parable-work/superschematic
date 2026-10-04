@@ -1,0 +1,87 @@
+{
+  "dialect": "postgres",
+  "from": "8f8a634659902bbb610a36f200465aa34f1aaa89666f553f0340f89cacc221f6",
+  "hash": "f5c817ca74a2445c852fe798865921df2b48d07e66c3b703ee77f4483617f063",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_order_bump_version ON \"order\""
+      ],
+      "subject": "trigger/order/trg_order_bump_version",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_order_capture_history_delete ON \"order\""
+      ],
+      "subject": "trigger/order/trg_order_capture_history_delete",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_order_capture_history_write ON \"order\""
+      ],
+      "subject": "trigger/order/trg_order_capture_history_write",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "dropFunction",
+      "phase": "contract",
+      "statements": [
+        "DROP FUNCTION order_capture_history()"
+      ],
+      "subject": "function/order_capture_history",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order/column/_version",
+          "reason": "Dropping order._version deletes its values.",
+          "subject": "table/order/column/_version"
+        }
+      ],
+      "index": 5,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" DROP COLUMN _version"
+      ],
+      "subject": "table/order/column/_version",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order_history",
+          "reason": "Dropping order_history deletes every recorded version of Order.",
+          "subject": "table/order_history"
+        }
+      ],
+      "index": 6,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE order_history"
+      ],
+      "subject": "table/order_history",
+      "transactional": true
+    }
+  ],
+  "to": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "toModel": null,
+  "version": 1
+}

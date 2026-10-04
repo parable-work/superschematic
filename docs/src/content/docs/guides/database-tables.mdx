@@ -9,7 +9,9 @@ import Snippet from '../../../components/Snippet.astro';
 
 A DB schema declares tables. Its build writes Postgres DDL
 (`sql/<service>/create.sql` and `drop.sql`), a Go ORM over pgx, and the row
-types in the languages `outputs.types` lists. This guide walks the acme
+types in the languages `outputs.types` lists. A service whose
+`outputs.sql.dialects` lists `sqlite` also gets SQLite DDL
+(`sql/<service>/sqlite/create.sql`; see [SQLite](/superschematic/reference/migrations/#sqlite)). This guide walks the acme
 shop's order and review tables in `shop-db`. [Your first project](/superschematic/first-project/database/)
 covers the basics of the users and products tables.
 

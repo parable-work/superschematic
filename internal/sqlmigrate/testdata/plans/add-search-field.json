@@ -1,0 +1,42 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "1bc45ba814bf8d6540e11218ba73e63e59f443a5c5028b491f0e47a0b7302676",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer/column/search_text",
+          "reason": "Adding a stored generated column rewrites customer under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/customer/column/search_text"
+        }
+      ],
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE customer ADD COLUMN search_text TEXT GENERATED ALWAYS AS (COALESCE(\"name\", '')) STORED"
+      ],
+      "subject": "table/customer/column/search_text",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_customer_search_trgm"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_customer_search_trgm ON customer USING GIN (search_text gin_trgm_ops)"
+      ],
+      "subject": "table/customer/index/idx_customer_search_trgm",
+      "transactional": false
+    }
+  ],
+  "to": "2d6301f019e4c62f3549a67e78b54526fc1ef88ddf9eb85d66489fbd18212f68",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,5 @@
+-- Migration plan for shop-db (postgres)
+-- from:    empty database
+-- to:      b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+-- plan:    c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+-- no steps, no hazards

@@ -263,6 +263,7 @@ tag. To browse it locally with working navigation and code samples, run
 - [JSON-valued scalars](docs/src/content/docs/reference/json-scalars.md): `Generic.JSON`, `Generic.StringMap` and `Embedding.Vector`.
 - [Versioned tables](docs/src/content/docs/reference/versioned-tables.md): `@versioned` and `@optimistic`, history tables and fenced writes.
 - [Version graphs](docs/src/content/docs/reference/version-graphs.md): branch, commit and merge a tree of tables, with engines in Go, TypeScript, Rust and Python.
+- [Schema migrations](docs/src/content/docs/reference/migrations.md): plan a database's change between two versions of a schema with `migrate plan`, its hazards, and the runner that applies it.
 
 **Extending**
 
@@ -326,7 +327,7 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 | Path | What it is |
 | --- | --- |
 | [`cmd/superschematic/`](cmd/superschematic/) | The binary, with no extension linked |
-| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `build`, `build-all`, `format`, `json-schema`, `behaviors` |
+| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `build`, `build-all`, `migrate`, `format`, `json-schema`, `behaviors` |
 | [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
 | [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
 | [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |
@@ -334,14 +335,16 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 | [`runtime/schema/`](runtime/schema/) | The schema runtime generated types link, in Go, TypeScript and Python, and the helpers the generated Rust validators call |
 | [`runtime/http/`](runtime/http/) | The HTTP runtime generated servers link, in Go, Rust and TypeScript |
 | [`runtime/versiongraph/`](runtime/versiongraph/) | The version-graph core (Rust, with a Go binding and a wasm build) and its engines in Go, TypeScript, Rust and Python |
+| [`runtime/migrate/`](runtime/migrate/) | The migration runner: `superschematic-migrate` applies the plans `superschematic migrate plan` writes |
 | [`runtime/engine/`](runtime/engine/) | `@superschematic/engine`: runs a schema with no generated code |
 | [`runtime/engine-workqueue/`](runtime/engine-workqueue/) | `@superschematic/engine-workqueue`: claimable work for the engine |
 | [`extensions/`](extensions/), [`examples/`](examples/) | Example extensions and projects |
 | [`docs/`](docs/) | The docs site, the decision log and the extension design |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
-The repository has five Go modules: the root (the compiler), `ir`,
-`runtime/schema/go`, `runtime/http/go` and `runtime/versiongraph/go`.
+The repository has six Go modules: the root (the compiler), `ir`,
+`runtime/schema/go`, `runtime/http/go`, `runtime/versiongraph/go` and
+`runtime/migrate/go`, the migration runner.
 Generated code imports the runtimes and the IR, never the compiler.
 
 ## Development

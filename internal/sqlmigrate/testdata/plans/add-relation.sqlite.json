@@ -1,0 +1,21 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "770484c6b637c6c92cd018684baf920822768c94ad4a863effc53d3131c25c24",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order_line\" ADD COLUMN \"product_id\" TEXT REFERENCES \"product\" (\"id\") ON DELETE CASCADE"
+      ],
+      "subject": "table/order_line/column/product_id",
+      "transactional": true
+    }
+  ],
+  "to": "1d0ed9d00ab83cc3e95e141d1f47cad3d80f38fc83564f5f55640f6b0848d12c",
+  "toModel": null,
+  "version": 1
+}

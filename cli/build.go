@@ -30,6 +30,9 @@ type buildFlags struct {
 	skipFormat bool
 	namingPath string
 	withDeps   bool
+	// apiLanguage, when set, replaces the target's outputs.api.language
+	// for this build (--api-language).
+	apiLanguage string
 }
 
 // newBuildCmd is the build orchestrator entrypoint: it loads a service
@@ -56,6 +59,13 @@ in-tree paths come from <schemas-root>/superschematic.toml or --naming.
 
 Use --emit-ir to print the IR as JSON instead of generating code.
 
+Use --api-language to build the target's API server in another language
+(GO, RUST or TYPESCRIPT) than its config names, for example to build a Rust
+server of a service whose committed config builds a Go one. It applies to the
+target only, never to the dependencies --with-deps builds, and the target's
+config must enable outputs.api and the types of that language. Pair it with
+--out so the two servers do not share an output root.
+
 Use --with-deps to also build every schema service the target transitively
 depends on (declared dependencies plus authDb), dependencies first. The
 closure is resolved from the sibling services under the target's parent
@@ -66,7 +76,8 @@ listing the dependencies by hand.
 
 Examples:
   superschematic build ./schemas/services/shop-db
-  superschematic build --with-deps ./schemas/services/shop-api`,
+  superschematic build --with-deps ./schemas/services/shop-api
+  superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust ./schemas/services/shop-api`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runBuild(cmd, a, flags, args[0])
@@ -78,6 +89,7 @@ Examples:
 	cmd.Flags().BoolVar(&flags.profile, "profile", false, "emit build phase timings to stderr")
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
+	cmd.Flags().StringVar(&flags.apiLanguage, "api-language", "", "build the target's API server in this language (GO, RUST or TYPESCRIPT) instead of its config's outputs.api.language")
 	return cmd
 }
 
@@ -122,6 +134,13 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 	}
 	if flags.withDeps && flags.emitIR {
 		return fmt.Errorf("--emit-ir prints one schema's IR and cannot be combined with --with-deps")
+	}
+	if flags.apiLanguage != "" {
+		language, err := apiLanguageFlag(flags.apiLanguage)
+		if err != nil {
+			return err
+		}
+		flags.apiLanguage = language
 	}
 
 	var prof *profile.Profiler
@@ -197,13 +216,25 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 		LoadDependency: func(name string) (*ir.Schema, error) {
 			return loader.LoadService(filepath.Join(servicePath, "..", name), loader.WithProfiler(prof), loader.WithNaming(names), loader.WithRegistry(reg))
 		},
-		Log:        cmd.OutOrStdout(),
-		Profile:    prof,
-		EmitIR:     flags.emitIR,
-		SkipFormat: flags.skipFormat,
-		Registry:   reg,
+		Log:         cmd.OutOrStdout(),
+		Profile:     prof,
+		EmitIR:      flags.emitIR,
+		SkipFormat:  flags.skipFormat,
+		Registry:    reg,
+		APILanguage: flags.apiLanguage,
 	})
 	return err
+}
+
+// apiLanguageFlag returns the --api-language value as the config spells it,
+// accepting any case, or an error naming the languages it accepts.
+func apiLanguageFlag(value string) (string, error) {
+	language := strings.ToUpper(strings.TrimSpace(value))
+	switch language {
+	case registry.APILanguageGo, registry.APILanguageRust, registry.APILanguageTypeScript:
+		return language, nil
+	}
+	return "", fmt.Errorf("--api-language %q: want %s, %s or %s", value, registry.APILanguageGo, registry.APILanguageRust, registry.APILanguageTypeScript)
 }
 
 // runBuildWithDeps builds the target and every schema service it
@@ -292,7 +323,11 @@ func runBuildWithDeps(cmd *cobra.Command, reg *registry.Registry, names naming.N
 		defer ctx.tsProgramCache.Close()
 	}
 	for _, service := range closure {
-		if err := executeBuildAllTask(cmd, buildAllTask{service: service}, ctx); err != nil {
+		task := buildAllTask{service: service}
+		if service.Name == rootName {
+			task.apiLanguage = flags.apiLanguage
+		}
+		if err := executeBuildAllTask(cmd, task, ctx); err != nil {
 			return err
 		}
 	}

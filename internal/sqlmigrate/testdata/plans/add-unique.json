@@ -1,0 +1,48 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "2b46a29ce84a1193089f9908ed5fea65f9b7f0db114c22928e57fc4d6ece70f9",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order/constraint/order_code_key",
+          "reason": "Order.code becomes unique: servers built from the previous version may write duplicates.",
+          "subject": "table/order/constraint/order_code_key"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/constraint/order_code_key",
+          "reason": "Building the unique index fails when order holds duplicate values of Order.code.",
+          "subject": "table/order/constraint/order_code_key"
+        }
+      ],
+      "index": 1,
+      "op": "buildUniqueIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS order_code_key"
+      ],
+      "statements": [
+        "CREATE UNIQUE INDEX CONCURRENTLY order_code_key ON \"order\" USING BTREE (code)"
+      ],
+      "subject": "table/order/constraint/order_code_key",
+      "transactional": false
+    },
+    {
+      "index": 2,
+      "op": "addUnique",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ADD CONSTRAINT order_code_key UNIQUE USING INDEX order_code_key"
+      ],
+      "subject": "table/order/constraint/order_code_key",
+      "transactional": true
+    }
+  ],
+  "to": "628763749d25f9e4735e526cb9679ebed601417bcbfaf5e662b8dbbcf00db102",
+  "toModel": null,
+  "version": 1
+}

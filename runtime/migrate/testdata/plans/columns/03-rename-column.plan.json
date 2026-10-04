@@ -1,0 +1,85 @@
+{
+  "dialect": "postgres",
+  "from": "1d64906138f97c4817b8f19e7183a82e2084a0360395677ba52be394fd099865",
+  "hash": "018bfece7370bc47ebe8a6caa6b42fb3588b0613296e083c4ed91a330bb07e66",
+  "renames": [
+    "account.name=account.display_name"
+  ],
+  "service": "ledger-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/account/column/display_name",
+          "reason": "account.name is renamed to account.display_name (Account.displayName): servers built from the previous version still use the old name.",
+          "subject": "table/account/column/display_name"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE account RENAME COLUMN \"name\" TO display_name"
+      ],
+      "subject": "table/account/column/display_name",
+      "transactional": true
+    }
+  ],
+  "to": "dba852f966f7937569500eb439ff81547f46549d7002c4fbc4f22567a7e710af",
+  "toModel": {
+    "dialect": "postgres",
+    "extensions": [
+      "pgcrypto"
+    ],
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "display_name",
+            "origin": "Account.displayName",
+            "type": "TEXT"
+          },
+          {
+            "name": "balance",
+            "origin": "Account.balance",
+            "type": "DOUBLE PRECISION"
+          },
+          {
+            "name": "email",
+            "nullable": true,
+            "origin": "Account.email",
+            "type": "TEXT"
+          }
+        ],
+        "comment": "Generated from schema type: Account",
+        "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "method": "BTREE",
+            "name": "idx_account_email"
+          }
+        ],
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

@@ -1,9 +1,11 @@
 // Behaviors take parameters at create (D16, amended): a declaration's
 // createParamsSchema; the engine's checks of a create's parameters, at
 // JSON pointers under /behaviors; the create guard, asked after the
-// insert and before any initialize; each initialize with its own
-// parameters; a behavior's instances.create with parameters; and the
-// create route, tool and describe document, which carry them.
+// insert and before any initialize, whose veto, like one initialize
+// throws, carries a code its declaration lists; each initialize with its
+// own parameters; a behavior's instances.create with parameters; and the
+// create route, tool and describe document, which carry them beside the
+// preconditions and veto codes.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -20,7 +22,7 @@ import {
   type GuardRequest,
 } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
-import { openBehaviorEngine, publishItem, testBehaviors } from './behavior-fixtures.ts';
+import { hold, holdDeclaration, openBehaviorEngine, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, thrown } from './helpers.ts';
 
 /** What the test behaviors saw, in order. */
@@ -34,18 +36,21 @@ afterEach(() => {
 const tagsDeclaration: BehaviorDeclaration = {
   name: 'test.Tags',
   description: 'Tags a create gives, which it keeps.',
-  configSchema: { type: 'object', additionalProperties: false, properties: { refuse: { type: 'string' } } },
+  configSchema: { type: 'object', additionalProperties: false, properties: { refuse: { type: 'string' }, code: { type: 'string' } } },
   createParamsSchema: {
     type: 'object',
     additionalProperties: false,
     properties: { tags: { type: 'array', maxItems: 3, items: { type: 'string', minLength: 1 } } },
   },
   fields: [{ name: 'tags', description: 'The tags its create gave.' }],
+  vetoes: [{ code: 'refused_tag', description: 'A create gives a tag its config refuses.' }],
 };
 
 // test.Tags records what its guard is asked at a create and what its
-// initialize gets, and vetoes a create that gives the tag its config refuses.
-const tags = defineBehavior<{ refuse?: string }>({
+// initialize gets, and vetoes a create that gives the tag its config
+// refuses, with the code its config names (refused_tag by default); its
+// initialize vetoes the tag late the same way.
+const tags = defineBehavior<{ refuse?: string; code?: string }>({
   declaration: tagsDeclaration,
   migrations: [{ version: 1, name: 'tags', columns: { tags: { type: 'text' } } }],
   guard(view, request) {
@@ -54,10 +59,16 @@ const tags = defineBehavior<{ refuse?: string }>({
     }
     seen.push({ step: 'guard', columns: view.columns.get(), data: view.data, request, frozen: Object.isFrozen(request.behaviors) });
     const given = (request.behaviors['test.Tags']?.tags ?? []) as readonly string[];
-    return view.config.refuse !== undefined && given.includes(view.config.refuse) ? `tag ${view.config.refuse} is refused` : undefined;
+    const refuse = view.config.refuse;
+    return refuse !== undefined && given.includes(refuse)
+      ? { reason: `tag ${refuse} is refused`, code: view.config.code ?? 'refused_tag', details: { tag: refuse } }
+      : undefined;
   },
   initialize(context, params) {
     seen.push({ step: 'initialize', params });
+    if (((params.tags ?? []) as readonly string[]).includes('late')) {
+      throw new BehaviorVetoError('test.Tags', 'create', context.schema, context.id, { reason: 'tag late is refused', code: context.config.code ?? 'refused_tag' });
+    }
     context.columns.set({ tags: JSON.stringify(params.tags ?? []) });
   },
   afterChange(context, change) {
@@ -120,7 +131,7 @@ const maker = defineBehavior({
   },
 });
 
-const createBehaviors = [tags, reason, maker];
+const createBehaviors = [tags, reason, maker, hold];
 
 for (const driver of drivers) {
   function open(): Engine {
@@ -183,8 +194,8 @@ for (const driver of drivers) {
       publishItem(engine, [{ name: 'test.Counter' }, { name: 'test.Tags', config: { refuse: 'x' } }]);
       const vetoed = thrown(() => engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1', behaviors: { 'test.Tags': { tags: ['a', 'x'] } } }), BehaviorVetoError);
       assert.deepEqual(
-        [vetoed.code, vetoed.behavior, vetoed.action, vetoed.message],
-        ['vetoed', 'test.Tags', 'create', 'behavior test.Tags vetoes create of Item i1: tag x is refused']
+        [vetoed.code, vetoed.behavior, vetoed.action, vetoed.message, vetoed.vetoCode, vetoed.vetoDetails],
+        ['vetoed', 'test.Tags', 'create', 'behavior test.Tags vetoes create of Item i1: tag x is refused', 'refused_tag', { tag: 'x' }]
       );
       assert.deepEqual(
         seen.map((entry) => entry.step),
@@ -193,6 +204,24 @@ for (const driver of drivers) {
       assert.equal(engine.instances.get(alice, 'Item', 'i1'), undefined);
       assert.equal(engine.events.read(alice, { schema: 'Item' }).events.filter((event) => event.kind !== 'publish').length, 0);
       assert.equal(engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1', behaviors: { 'test.Tags': { tags: ['a'] } } }).seq, 1);
+    });
+
+    test("a veto initialize throws refuses the create too; a create's veto whose code the declaration does not list is a BehaviorError", () => {
+      const world = (config: Record<string, unknown>) => {
+        const engine = open();
+        publishItem(engine, [{ name: 'test.Tags', config }]);
+        const create = (given: string[]) => () => engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1', behaviors: { 'test.Tags': { tags: given } } });
+        return { engine, create };
+      };
+      const listed = world({ refuse: 'x' });
+      const late = thrown(listed.create(['late']), BehaviorVetoError);
+      assert.deepEqual([late.behavior, late.action, late.reason, late.vetoCode], ['test.Tags', 'create', 'tag late is refused', 'refused_tag']);
+      assert.equal(listed.engine.instances.get(alice, 'Item', 'i1'), undefined);
+      const unlisted = world({ refuse: 'x', code: 'unlisted' });
+      for (const given of [['x'], ['late']]) {
+        assert.match(thrown(unlisted.create(given), BehaviorError).message, /a veto's code "unlisted" is not one its declaration lists \(refused_tag\)/);
+      }
+      assert.equal(unlisted.engine.instances.list(alice, 'Item').items.length, 0);
     });
 
     test('the engine refuses parameters for a behavior the type does not compose or that takes none, and ones a createParamsSchema refuses, each at a pointer', () => {
@@ -270,6 +299,34 @@ for (const driver of drivers) {
       publishItem(engine, [{ name: 'test.Counter' }]);
       const plain = engine.tools.describe(alice, 'Item').operations.find((operation) => operation.name === 'create');
       assert.deepEqual(Object.keys((plain?.params as { properties: object }).properties), ['data', 'id']);
+    });
+
+    test("describe and the tools document show a schema's create parameters, preconditions and veto codes together", () => {
+      const engine = open();
+      publishItem(engine, [{ name: 'test.Tags' }, { name: 'test.Hold' }, { name: 'test.Counter' }]);
+      const described = engine.tools.describe(alice, 'Item');
+      assert.deepEqual(
+        described.behaviors.map((behavior) => [behavior.name, behavior.vetoes]),
+        [
+          ['test.Tags', tagsDeclaration.vetoes],
+          ['test.Hold', holdDeclaration.vetoes],
+          ['test.Counter', []],
+        ]
+      );
+      const paramsOf = (name: string) => described.operations.find((operation) => operation.name === name)?.params as { properties: Record<string, unknown> };
+      // create takes the create parameters and no preconditions; the writes
+      // of an instance take the preconditions and no create parameters.
+      assert.deepEqual(Object.keys(paramsOf('create').properties), ['behaviors', 'data', 'id']);
+      assert.deepEqual(Object.keys((paramsOf('create').properties.behaviors as { properties: object }).properties), ['test.Tags']);
+      for (const name of ['update', 'delete', 'advance', 'increment']) {
+        const properties = paramsOf(name).properties;
+        assert.ok(!('behaviors' in properties), name);
+        assert.deepEqual((properties.preconditions as { properties: Record<string, unknown> }).properties, { 'test.Hold': holdDeclaration.preconditionSchema }, name);
+      }
+      const tools = engine.tools.manifest(alice).tools;
+      for (const name of ['create', 'update', 'delete', 'advance']) {
+        assert.deepEqual(tools.find((tool) => tool.name === `item.${name}`)?.parameters, paramsOf(name), name);
+      }
     });
 
     test('the create route and tool take behaviors beside data: a refusal is 400 with its issues, null is none', async () => {

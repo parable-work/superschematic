@@ -1257,7 +1257,7 @@ The first behavior built on it is `Constants`:
 | An update that changes a listed field, compared as JSON, is refused with the rule `constant` at the field, whoever makes it, a caller or an operation's `update()` (a `Revisions` approval, a `Retries` result), unless the caller holds `permission`. A create is never refused. | Exempting behaviors' operations, through which an approval could rename a step; a veto |
 | A field the create leaves absent stays absent: setting it later is a change. Absent and null are one value, as a merge patch has it. | The first write wins, so any writer could give a step its kind after the create, the failure it prevents; requiring the field at create, which `required` already says and the compatibility rule governs |
 | `configChange` allows any change, and it is added to and removed from a schema with instances: it keeps no state, and stored instances satisfy any list. | Freezing the list once instances exist |
-| `Blueprint` requires that its child schema compose `Constants` over `keyField` and every copied field, checked through `ConfigTarget.schemas` when the parent schema is defined or published, as its other checks of the child are. A later version of the child can drop them; the first amendment keeps a published version from being refused for that. | Blueprint guarding its children's updates itself, which a guard on another schema cannot; leaving the stamped fields open |
+| `Blueprint` requires that its child schema compose `Constants` over `keyField` and every copied field, checked through `ConfigTarget.schemas` when the parent schema is defined or published, as its other checks of the child are. A later version of the child can drop them; the first amendment keeps a published version from being refused for that, and a stamp then is refused (`not_constant`, in the amendments below). | Blueprint guarding its children's updates itself, which a guard on another schema cannot; leaving the stamped fields open |
 
 The second is `Variants`:
 
@@ -1267,6 +1267,74 @@ The second is `Variants`:
 | While `by` holds a listed value, `field`, when it holds a value, is held to that value's type with `checkType`. While `by` holds another value or none, `field` holds none, refused with the rule `variant`. So a required `field` admits only the listed values. | Leaving `field` open for an unlisted value, which lets a result in the wrong shape through and makes giving that value a type later break stored instances; refusing the value of `by`, which its enum or the type's own rules decide |
 | `instanceSchema` writes an `if`/`then` per listed value (`if` `by` is the value, `then` `field` is the type) and one more (`if` `by` is none of them, `then` `field` is null), under `allOf`. In a patch, `if` needs `by` in the patch, since a patch that leaves it alone does not show it. | `oneOf` over whole objects, which needs a branch for every other value, holds exactly one, and reports a failure as matching none of them |
 | `checkedTypes` names the types, so the compatibility rule holds them. `configChange` keeps `field` and `by`, keeps each value's type, and lets a value gain one, since no stored instance holds a value for it; it is removed from a schema with instances, not added to one, whose values no type checked. | Allowing a value's type to change to another that accepts as much, which would compare two types where the rule compares versions of one |
+
+### D16, amended: refusals carry a code, and writes carry preconditions
+
+A guard returned a reason, and every veto reached a client as `vetoed`
+with that reason as prose, so a worker that must stop when its lease is
+lost had to parse English. And a caller had no way to tell a behavior
+what it assumes when it writes: `expectedSeq` names the instance's whole
+sequence, which every heartbeat moves, and a guard saw only who calls.
+This changes the order the amendment above gives an update: its
+preconditions are checked, as arguments, before any `validate`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A veto is a reason, and optionally a code and details: a guard returns a string or `{ reason, code?, details? }`, and a handler throws a `BehaviorVetoError` with the same. The error carries `vetoCode` and `vetoDetails` beside `behavior`, `action` and `reason`. The problem document's `details` is `{ behavior, action, reason, code?, details? }`, and an MCP tool error carries the same document. The engine's code stays `vetoed`, 409. | An engine error code per refusal, which would make the engine's table name every behavior's; the veto's code at the problem's top level, where `vetoed` is |
+| A code is lowercase snake case of at most 64 characters, unique within its behavior. A client reads it beside `details.behavior`, so it needs no prefix and two behaviors' codes never collide. | Codes qualified by the behavior (`lease.token_stale`), which repeat `behavior` |
+| A behavior's declaration lists its codes (`vetoes: [{ code, description }]`). The compiler's `RegisterBehavior` and the engine's registration check them, and the describe document lists them per behavior. A veto whose code its behavior does not list is a `BehaviorError`, held where the engine reads a guard's answer and where a handler, `initialize`, `afterChange` or a `validate` throws (a `validate` refuses with issues, not a veto, but one that throws a veto is held to the list too), so a create's veto, from a guard asked with `kind: 'create'` or from `initialize`, is held to the list as an update's is. Details are a JSON object. | Free-form codes, which a client cannot rely on and no tool can check; a list per operation, when one behavior's guard refuses other behaviors' operations |
+| A caller sends preconditions with an update, a delete or an instance operation: a JSON object of entries by behavior name, such as `{ "Lease": { "token": 7 } }`. A behavior declares its entry's schema (`preconditionSchema`), a closed object schema as a `paramsSchema` is. Before any guard runs, the engine refuses (`invalid_argument`, `PreconditionsError` with issues at `/<Behavior>/...`) an entry for a behavior the type does not compose, one for a behavior that declares no schema, and one its schema refuses. Each guard gets its own behavior's entry as the request's `precondition`; what it asserts is the guard's, and a failed one is that behavior's veto, with its code. | An engine option for a token, which names one behavior's concept in the engine; every entry to every guard, which lets a behavior read what a caller told another; 412 for a failed precondition, which tells a client to read again and retry, where a stale lease token means stop |
+| The entries are checked with the call's other arguments, before the instance is read: on an update, after the patch's behavior fields (`readOnly`) and before `expectedSeq`, the live version and every `validate`. What an entry asserts is judged by its guard, and guards run once every `validate` has accepted the fields, so a write whose fields are refused is `invalid_instance` whatever its preconditions say, and a precondition never reaches `validate`, which judges fields, not state. In an operation the caller's preconditions go to the operation's guards, before the handler, so before the `validate` of any `update()` it makes, whose own guard request carries none. A create has no preconditions; its parameters are checked after `validate`, as the amendment above says. | Judging preconditions before `validate`, which asks a guard about a write whose fields may be refused, against that amendment's rule; checking the entries after the live version, which reports a malformed argument only for a valid patch; handing `validate` the preconditions, which would make a field's validity depend on what the caller asserts |
+| Over HTTP, the `Preconditions` request header carries the object as JSON on PATCH, DELETE and an instance operation's POST. A header that is not a JSON object is 400 `bad_request`; other routes ignore it. Over MCP, the update, delete and instance operation tools of a schema one of whose behaviors declares a schema take a `preconditions` argument; other schemas' tools are as they were. The describe document's operations carry the same argument, so one document shows a schema's create parameters, its preconditions, each behavior's codes and the `allOf` entries `instanceSchema` writes, side by side. A behavior's `instances.invoke` takes `{ preconditions }`, which the target's guards get as a caller's; a request a behavior's own code makes (`call()`, `update()`) carries none. | A member of the body, where an update's merge patch would read it as a field and an operation's closed parameters would refuse it; a query parameter, which puts the assertion in the resource's URL; a vendor-prefixed header, a name a distribution would have to rename (D10, D11) |
+| A read-only operation's guards get the preconditions too, and a patch that changes nothing asks no guard: a precondition fences a write. | Refusing preconditions on a read, which a client that sends them on every call would trip over |
+| A create takes no preconditions: there is no instance yet to fence. Its guard request has no `precondition`, the create route ignores the header and the create tool has no `preconditions` argument beside `behaviors`, the parameters a create gives its behaviors. | Preconditions on a create, which every guard would have to read against a row the create is making |
+
+### D16, amended: the lease token fences every write
+
+Lease's guard checked who calls, not what token it holds. A worker fleet
+usually runs under one service principal, so a process whose lease
+lapsed, and which a sibling replaced, still wrote as the holder; only
+`heartbeat`, `release` and `acknowledge` took the token. A worker that
+kept taking an instance and giving it back never reached `maxExpiries`.
+An expiry's event did not say whether the holder stopped renewing or
+renewed past its longest hold, and one late heartbeat could lose a lease.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The token is Lease's precondition (`{ "Lease": { "token": n } }`), the one way any write presents it. Lease's guard refuses a write that presents a token other than the current one, whoever calls, an override included (`token_stale`), and on a free instance too: a lease that ended leaves its token stale, and the current token makes `acquire` a compare-and-set. `heartbeat`, `acknowledge` and the holder's `release` lose their `token` parameter and need the precondition (`token_required`, where a release without one was `invalid_argument`). | Keeping `token` in those operations' parameters beside the precondition: two ways to present one token, which could disagree; fencing only Lease's own operations, which leaves ordinary writes open |
+| `requireToken: true` refuses a write under an active lease that presents no token, the holder's own included (`token_required`). Exempt and read-only operations, Queue's `refresh`, a request a behavior's own code makes, Lease's own operations (the runner's `expire` among them) and a principal with `overridePermission` are not held to it, and neither is a create, which holds no lease to present. It is off by default: a holder that is one process is fenced by who calls. | Requiring the token always, which refuses every client that writes without one; holding exempt operations to it, which others make by design |
+| The token is still no capability: the `lease` field shows it to every reader. It fences one principal's processes from each other; principals are fenced by who calls. | A secret token, which every read would have to hide |
+| A holder gives work up with `release({ abandon: true })`: it counts as an expiry (not in a terminal state of the instance's Workflow), applies `onExpiry`, and `escalate` at the one that reaches `maxExpiries`, as an expiry does. A plain release counts nothing. | Config that counts every release in a claimed state, which counts a worker that hands work back as it shuts down as a failure; Retries is where a deployment counts every failed attempt with its cause |
+| `expire` returns `{ expired, reason }`: `ttl`, the holder stopped renewing; `maxHold`, it reached its longest hold, so it renewed and did not finish; `holder`, an active lease expired by its holder's name. `expire({ holder })` on a lease that has lapsed gives the lapse. `expireHolder` returns `{ expired, reasons }`, the count by reason. The `lease` field gains `ended: { reason, at }`, how the last lease ended (`release`, `abandon` or an expiry's reason), which `acquire` clears, so the operation event of every end carries it in its patch; an expiry that an `acquire` or a claim applies first shows only as the count and the token. | The reason in the result alone, which the event log does not keep; a field of its own, one more member of every instance |
+| `heartbeatMs` is at most half of `ttlMs`, so one late heartbeat does not lose the lease; the default stays a third. A published version whose config breaks the rule is `unavailable` until a new version fixes it. | Less than `ttlMs`, as before, where a heartbeat a moment late loses the lease |
+| Lease's refusals are vetoes with codes: `held_by_another`, `held_by_caller`, `not_leased`, `not_holder`, `lapsed`, `token_stale`, `token_required`, `max_expiries`, `hold_limit_fixed` and `not_configured`. So are Workflow's (`already_in_state`, `terminal_state`, `transition_not_allowed`, `no_status`), Dependencies' (`blocked`, with the open blockers in its details, `already_blocking`, `cycle`, `gated`) and Retries' (`exhausted`); the other work-queue behaviors' refusals carry none yet. | Codes on every behavior's refusals at once, before a client branches on them |
+
+### D16, amended: claimable work does not starve, and a live worker keeps its work
+
+`claimNext` tried at most `maxCandidates` instances and took only a veto
+or a conflict as one instance's refusal. An instance whose reservation
+did not fit its budget, or its pool's, stayed queued and was tried by
+every call, so enough of them at the head of the order made `claimNext`
+return null while claimable work waited behind them, and one claim
+`forbidden` to the caller ended the call. A presence miss expired every
+lease of the principal, so a worker whose presence beat starved while
+its lease heartbeats went on lost live work, and nothing recorded which.
+A worker could raise its own retry caps, and the other work-queue
+refusals were prose.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Queue copies until when an instance is excluded (`excluded_until`), as it copies `blocked`: while Retries' field shows it exhausted, until a change; while Budget's `checkReserve` says a claim's reservation does not fit, until the next UTC day when that day alone makes it fit, else until a change. The candidate query compares it with the time, through an index, so an instance over a daily meter comes back at the day's start with no write. It is computed only for an instance its status and blockers make a candidate. | A config `excludeWhen` naming boolean fields, which a deployment must remember for behaviors a claim already calls, and whose field tells Queue neither which instances its value depends on nor when time alone changes it; trying refused candidates past `maxCandidates`, which bounds nothing; reading Budget's tables, which D16 rules out |
+| Budget's `checkReserve`, a read-only instance operation with `reserve`'s parameters, answers `{ fits, until, scopes }`: whether `reserve` would fit now, here and at every scope, read through their `budget` and `links` fields, counting the own reservation of an ended lease as settled, as `reserve` settles it first; when it would fit by the day alone; and the scopes it read. Queue calls it, and a client may. | A field, which every read of the instance would compute up the chain; a boolean alone, which leaves Queue without the scopes to hear and the day to wait for |
+| Queue records a reference to each scope `checkReserve` read, while the instance is a candidate but for its budget (key `budget`, beside the blockers' `''`), so a scope's change runs its `afterReferenceChange`. That checks the exclusion through `checkReserve`, as the principal who changed the scope, and invokes `refresh` only when the copy no longer matches: a scope's change costs a check of each instance waiting under it, and an event on each whose fit it moves. That principal needs `write` on the instance's schema, as a blocker's does, and a change of a candidate needs `read` on its scopes' schemas. | Refreshing every dependent at every change, as for a blocker, an event per queued instance per claim in a pool; references from every instance, which a finished instance's pool would pay for at every claim |
+| `afterReferenceChange`'s context says whether the referencing instance's own write is running up the call (`writing`): a claim's reservation changes a pool the claimed instance refers to, and invoking its `refresh` then is a cycle. Queue leaves such a change to the instance's own `afterChange`. | Catching the cycle's `BehaviorError`, a defect's error; refusing such a change, which refuses every claim in a pool |
+| `claimNext` skips a candidate whose claim is `forbidden` to the caller, as it skips a veto or a conflict, and throws the first `forbidden` when every candidate it tried was, so a caller that may claim none of them learns why rather than that there is no work. | Ending the call at the first `forbidden`, so one instance the caller may not claim hides the rest; returning null whatever refused, which hides a policy that refuses everything |
+| A `match` value may be a list, one of whose values an instance holds (SQL `IN`), so a pool of workers claims two kinds in one priority order. `claimNext` passes `ttlMs` to the claim, and `assignedOnly` takes only work assigned to the caller, refused on a type without Assignment. The schema-level, read-only `countClaimable({ match?, assignedOnly? })` counts the candidates `claimNext` would try for the caller, with no `maxCandidates`: a signal to scale workers on. | A `claimNext` per kind, which loses the order across kinds; a count in `claimNext`'s result, which a monitor would have to claim to read |
+| Lease records when its holder last renewed a lease (`renewedAt`: its acquire or last heartbeat). `expire({ holder, notRenewedAfter })` and `expireHolder` spare an active lease renewed after the time, and `expireHolder` returns the ids it expired. A presence miss passes the principal's last beat on its schema, or the create of one that never beat, and records the ids in `presence.released`, which the miss's event carries. A spared lease that stops being renewed expires on its own. | Expiring every lease of a missed principal, which loses live work when only the presence beat starved; sparing a lease renewed within its own heartbeat interval, which says nothing about the missed beat; the ids only in `expireHolder`'s result, which the runner's sweep discards |
+| `heartbeat({ acknowledge })` acknowledges directives in the heartbeat's own write. `direct({ dedupeKey })` sends a directive once per lease: one sent under the current token with the key, acknowledged or not, stands, and `direct` returns its id with `created: false`. | Acknowledging only through `acknowledge`, a write and an event per acknowledgement; a key unique across leases, which keeps a new holder from hearing a standing order |
+| Budget's `reserve` and `reserveField` go together, `reserve` the amount when the field holds no positive integer, as Lease's `maxHoldField` falls back to `maxHoldMs`. `escalate` (`{ transition, from }`) moves the status of an instance that usage leaves over a limit through Workflow, as the caller, in the usage's transaction; each level applies its own config, so a pool's moves the pool. A move a guard vetoes or the caller may not make leaves the status, since usage is never refused, and each overrun says whether it moved. `onExceeded` stays. | Exclusive reserve config, which makes every instance set the field; escalating after the commit, on the runner, which lets more work through the pool first; failing the usage when the move is refused |
+| Retries' `limitsField` changes, once the instance exists, only with `limitsPermission` (`forbidden`; `not_configured` when the config names none), and never by the holder of the instance's active lease, read through Lease's field (`limits_fixed`): a worker does not raise its own caps, and Lease keeps other principals out unless they override. `Constants` (the amendment on the fields a write stores) is the general rule for a field nothing changes after the create but a caller with its permission; Retries guards its own field because its rule reads who holds the lease, which a `validate` cannot, and the holder must never raise its caps, with the permission or without. A type may list `limitsField` in `Constants` too, which then needs both permissions. A class may carry a `hint`, which `recordAttempt` returns for its failures to steer the next attempt, and `recordAttempt` takes a `detail` object, which its event keeps. | Refusing every change while a lease is held, which keeps an operator from giving a stuck job room; `Constants` over `limitsField` with `limitsPermission`, which lets a holder that has the permission raise its own caps; a hint per instance, which a worker could write; keeping `detail` in Retries' tables, beside the event that already has it |
+| Queue (`not_claimable`, `blocked`, `claim_required`), Budget (`over_limit`, `not_leased`, `scope_moved`, `scope_reserved`, `below_committed`, `exceeds_reservation`, `not_configured`), Presence (`no_principal`, `not_principal`, `principal_fixed`) and Assignment (`assigned_to_another`, `already_assigned`, `not_assigned`, `not_configured`) give their refusals codes; a permission a caller lacks stays `forbidden`. So do Links (`no_revision`, `required_link`, `required_target`), Blueprint (`stamped`, `no_dependencies`, `not_constant`, `no_revision`, `unreadable`, `invalid_steps`) and Revisions (`no_review`, `not_pending`), Links and Blueprint as create parameters reworked them. A veto a create's parameters meet carries the code of the operation whose checks they get, `addBlocker`'s `already_blocking`, `cycle` or `gated` and `link`'s `no_revision`, with the entry's pointer in its details; parameters a behavior's config refuses, a required link not given among them, stay `invalid_argument` (`CreateParamsError`), since the create's arguments are wrong, not the instances they name. A stamp checks the child schema's live version again for what `Constants` must keep, `keyField` and every copied field, as it checks `Dependencies` for `after`, and is vetoed `not_constant`, with the fields in `details.fields`, when a later version dropped them: the parent's published version is not refused, and no child is stamped whose route a writer could change. | Codes for a create's vetoes of their own, so one refusal had two codes by how the edge was given; a veto for a required link not given, which no state of another instance could clear; stamping children whose `Constants` a later version dropped, which a worker could then turn into another step |
 
 ## D17. A version graph over versioned tables, with one merge core
 
@@ -1777,7 +1845,7 @@ imported by the package's `__init__`, so the types load without the
 engine. Every language's engine is now built, Go, TypeScript, Rust and
 Python, and each passes every scenario against Postgres; what stays open
 is schema-epoch transforms (`Materialize` still refuses a commit from a
-newer epoch) and a SQLite adapter for D16's engine.
+newer epoch) and a SQLite adapter for D16's engine, which D32 designs.
 
 ## D20. An `EncryptedField<T>` argument encrypts its operation's request body
 
@@ -1997,6 +2065,209 @@ a schema without `@hmacVerified` is unchanged byte for byte.
 
 The rule is reversible until the first release.
 
+## D27. Schema migrations: a plan between two versions of a schema
+
+`sqlgen` writes the whole DDL of a DB service, `create.sql`, for Postgres
+only. A database that already holds data changes through migrations its
+owners write by hand. The only migrations the compiler writes are the
+projection views' (`outputs.sql.migrationsDir`). A deploy needs more: the
+stack model's Database deployable (`docs/stack-model.md`) is the first
+consumer, and any CI pipeline is another. It needs five things from
+`sqlgen`:
+
+- a plan of ordered steps from a previous version of the schema to the
+  new one, made with no database, so CI can show it on a pull request;
+- a hazard on each step, so a gate can stop on what the pull request has
+  not acknowledged;
+- a job that applies the plan and records it;
+- a check of the plan against the columns each API reads;
+- the same plan for SQLite as for Postgres.
+
+The tool takes two versions of a schema and nothing else. The schema
+carries no record of its own history.
+
+This entry records the design before any of it is built. Names and rules
+are reversible until the first release.
+
+### Diff the model, not the database
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `sqlgen` plans by diffing two models of its own. The model is the relational schema `sqlgen` resolves from the IR before it renders `create.sql`: tables with their columns, keys, constraints and indexes, plus the history tables, triggers, functions and projection views the decorators add. The diff matches objects by name and by the renames the caller names (below), and yields changes. A dialect turns the changes into steps. No database is read. | Diffing the raw IR, which would repeat in the diff every rule that maps the IR to tables: flattened bases, `@hasMany` columns on the other table, join tables, a key added when none is declared, defaults inferred from scalars, `@versioned`'s objects and projections resolved to columns; diffing `create.sql` text, which needs a SQL parser that agrees with Postgres and with SQLite and loses which field a column came from; reading the live database at plan time, which CI cannot reach |
+| Neither Stripe's `pg-schema-diff` nor Atlas is a dependency. Both compare schemas they read from a database: `pg-schema-diff` loads the target DDL into a temporary Postgres and reads it back, and Atlas normalizes a desired state written as SQL in a dev database, so neither plans offline. `pg-schema-diff` is Postgres only. Atlas covers SQLite, but its Community Edition leaves out views, functions, triggers, extensions and partitioned tables, and `create.sql` writes all five. Neither knows which columns an API reads or which the running server writes. The design takes their practice instead: a hazard on each statement, indexes built concurrently, constraints added `NOT VALID` and validated later. | Delegating the diff to either, with a temporary database in CI and superschematic's own checks on top of its output |
+
+### The previous version and the model
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `superschematic migrate plan <service-dir>` compares the service with a previous version of it that the caller supplies: another checkout of the service directory (`--from <service-dir>`), or a git ref (`--from-ref origin/main`), whose schemas root the command reads from the repository at that ref. Each version's dependencies resolve from its own schemas root, as `build --with-deps` resolves them. Without either flag the plan starts from an empty database. | A baseline only a deploy system can supply, such as a file its manifest records, which ties the tool to that system; metadata in the schema that records its history |
+| The compiler resolves both versions to models in memory, the same way. A model holds, per column, its name, its type in the dialect's spelling, its nullability, default and generation expression, and the `Type.field` it came from. Constraints and indexes carry the names the database gives them, including the names Postgres chooses for `create.sql`'s unnamed `UNIQUE` and primary key constraints. A trigger, function or view carries its rendered definition, and a view the columns it reads and publishes. The model's hash is the SHA-256 of its canonical JSON (`ir.CanonicalJSON`). The build writes no new file. | A model file written beside `create.sql` on every build; a model with dialect-neutral types shared by every dialect, where a database is one dialect and a trigger's body means something in one dialect only |
+| Both versions are resolved by the compiler that runs the plan, so a DDL change a compiler upgrade makes with no schema change is not in the plan. The runner notices: it refuses a plan whose `from` hash is not the hash of the model the database recorded (Apply, below). `--from` also takes that recorded model, which `superschematic-migrate status --model` prints, and a plan from it includes the compiler's change. | Resolving the previous version with the compiler that built it, which needs every past compiler on hand |
+
+### Renames
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A rename reads as a drop and an add, and the plan makes it one: the new column or table in `expand`, the drop of the old one in `contract`, which is `destructive`. When a table loses one column and gains one with the same type, nullability and default, or the schema loses a table and gains one with the same columns, the hazard says it may be a rename. | A decorator such as `@renamedFrom` that marks the previous name, which puts migration history into the schema; renaming by shape on its own, which turns an unrelated drop and add into a rename and moves data into the wrong column |
+| `--rename <old>=<new>` on `migrate plan` makes it a rename, of a table (`purchase=order`) or a column (`order.total=order.amount`). The old name must be in the previous version and not the new one, and the new name in the new version and not the previous one; otherwise the plan fails and names the flag. A rename carries what is named after it: a column's foreign keys, indexes and unique constraints, a table's join tables and history objects, and the `_id` columns `@hasMany` adds to other tables. Each is a rename step, never a drop and a create. A rename is `compat`. The flag is an input to one run, and the plan records it. | |
+| Other intent is not modeled: a cast with a custom expression, a backfill, a column split. It goes in a hand-written migration the deploy orders around the plan, or the operator applies it and `adopt`s the result (Apply, below). | An escape hatch of raw SQL in the schema, which would put SQL back in declarations that carry none |
+
+### The plan
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `migrate plan` writes the plan as JSON (`--out`) and prints it as JSON, SQL or Markdown for a pull request (`--format`). `--fail-on <class,...>` exits non-zero when the plan has a hazard of a listed class that no `--allow <hazard id>` names, so a CI job can gate on the plan with no other tool. The stack model calls the same Go function. | A plan written into `dist/` on every build, which has no previous version to compare with |
+| The plan is JSON: `version`, `dialect`, `service`, the renames it was given, the `from` and `to` model hashes, the `to` model, and the steps. A step has an index, a phase, an operation, its subject (`table/order/column/total`), its SQL statements, whether it runs in a transaction, and its hazards. The plan's hash is the SHA-256 of its canonical JSON. A plan is a pure function of the two versions, the renames and the readers (below), so a deploy can plan again and check that it runs the plan the pull request showed. | SQL files with comments, which a gate would have to parse for hazards |
+| Steps fall in two phases. A step is in `expand`, which runs before the new servers roll out, unless it removes something the previous version's servers use or tightens what they write: then it is in `contract`, which runs after. Drops, `SET NOT NULL`, dropped defaults, and foreign keys over columns the previous version already has are `contract`. A column dropped in `contract` that is `NOT NULL` first loses the constraint in `expand`, so the new servers can insert without it. A step that no order keeps both servers working with stays in `expand` and carries `compat`: a rename, a retype, a required column without a default, a unique constraint on an existing table. A deploy without a rollout runs both phases back to back. | One phase, which breaks the running server at every drop; leaving the split to the deploy, which cannot tell a drop from an add in SQL |
+| A step on a table the previous version already has uses the online form where Postgres has one: `CREATE INDEX CONCURRENTLY` outside a transaction; a foreign key added `NOT VALID`, then validated; `SET NOT NULL` through a `CHECK (col IS NOT NULL) NOT VALID` that is validated first, so Postgres skips the scan; a unique constraint added `USING INDEX` over an index built concurrently. A table the plan creates gets the plain forms. | Plain DDL everywhere, which blocks writes for the length of every index build on a live table |
+| Order: renames, then creates and adds in dependency order, then alterations, each wrapped by the drop and re-create of the views that read the altered columns, then indexes, constraints, functions, triggers, views and comments; then the `contract` steps, tightenings before drops, drops in reverse dependency order. Extensions are created and never dropped, as `drop.sql` leaves them. | |
+| A change the plan cannot express fails the plan and names it, for example a history table's `partitionBy` changed on an existing table. The operator changes the database by hand and `adopt`s the new version. | A step with no SQL that the runner waits on someone to mark done |
+| There are no down plans. Rolling back is a plan from the current version to the previous one, with its own hazards. Because `expand` keeps the old servers working, a server rollback needs no schema rollback. | Down migrations generated beside each plan, which drift from the database they would undo |
+
+### Hazards
+
+Every step lists the classes it falls in. The diff and the dialect
+compute them; an author never declares one.
+
+| Class | The step | For example |
+|-------|----------|-------------|
+| `destructive` | deletes data the new version cannot recover | dropping a table, a column, a history table; a narrowing cast that truncates |
+| `blocking` | holds a lock that blocks writes, or reads, for time that grows with the table | a type change that rewrites the table, a column added with a volatile default or as a stored generated column, an index built without `CONCURRENTLY`, seeding a history table |
+| `compat` | breaks a server built from the previous version, which may still be running | a rename, a retype, a required column without a default, a new unique constraint over columns it writes |
+| `data-dependent` | fails at apply when existing rows violate it | `SET NOT NULL`, a unique constraint, validating a foreign key, a narrowing cast, a required column without a default, which fails on a table with rows |
+| `copy-table` | rebuilds the table by copying it (SQLite) | any change SQLite's `ALTER TABLE` cannot make |
+| `api-breaking` | drops, renames or retypes a column a deployed reader reads, or changes the columns a projection view publishes | the next section |
+| `history` | changes the shape of rows a history table keeps | retyping a column of a versioned table; changing a version graph member's content columns |
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A hazard's id is `<class>:<subject>`, and an `api-breaking` hazard's subject also names the reader (`api-breaking:table/order/column/total@shop-api/OrderView.total`). The id stays the same across plans of the same change, so an acknowledgment survives a rebase. `--allow` takes these ids; where a deploy keeps acknowledgments is the stack model's. | Ids numbered per plan, so an acknowledgment would not outlive a new commit on the pull request |
+| `compat` is judged against the server generated from the previous version. The Go ORM names every column of its table in its `SELECT` and `RETURNING` lists, so it fails on any dropped or renamed column of a table it reads, whether an API exposes it or not. | Treating only the columns an API exposes as read, which misses the ORM's own lists |
+
+### Readers
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The readers come from the schemas too. An API or General service whose `@source` view reads the DB service's table reads the column behind each of the view's fields: a relation field reads its `_id` column, and a `@virtual` field reads none. The services in the previous version's schemas root are the readers before the rollout, which `expand` steps are checked against; those in the new root are the readers after it, which `contract` steps are checked against. `--reader <service-dir>` adds a service that lives elsewhere and is deployed at a version of its own; it counts on both sides. A `--from` model has no services beside it, so its readers before are the `--reader`s only. | A `reads.json` every build writes and a deploy records, another file to keep beside the schema |
+| A step that drops, renames or retypes a column a reader live at that phase reads is `api-breaking` for that reader. So dropping a column the new API stopped reading passes when both are in the new root, and fails while a `--reader` still reads it. | One reader set, which either flags every contract drop or misses a lagging consumer |
+| A projection view whose published columns change, by name, type or order, is `api-breaking` for its readers: its Arrow schema is their contract. | Treating views as internal to the database |
+
+### Versioned tables and version graphs
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A table that becomes `@versioned` gets `_version BIGINT NOT NULL DEFAULT 1`, which Postgres adds without a rewrite, its history table and indexes, and its functions and triggers. In the same transaction as the triggers, the plan seeds the history with one `INSERT` image per existing row at version 1 (`blocking`), so every live row has an image at its version, as `GetVersion` and a version graph's pins assume. | Starting history at each row's next write, which leaves version 1 of every existing row unreadable |
+| A table that stops being versioned loses its triggers and functions, then its history table (`destructive`) and `_version`, in `contract`. A change of `exclude`, `retentionDays` or `pruneKeepReferencedBy` replaces the functions in `expand`. Images recorded before an `exclude` change keep the newly excluded columns; the plan reports that as `history` and does not scrub them. | Scrubbing old images, a rewrite of the whole history table that the author may not want |
+| A column change on a versioned table is planned as on any table. Images recorded before it keep the old shape, which a retype makes unreadable as the new type (`history`). | |
+| A version graph's tables are ordinary tables after the loader's expansion (D17), so they migrate as any other. A change to a member's content columns is `history`: commits made before it hash and merge rows of the old shape. The hazard says whether the graph's `schemaEpoch` rose. Transforms between epochs stay open, as D17 and D19 leave them. | Refusing a content change without an epoch bump, which is policy the core does not hold |
+
+### Dialects
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A dialect supplies the model's types, how one type converts to another (no change, no rewrite, rewrite, cast that can fail, impossible), which changes its `ALTER TABLE` can make, the definitions of the derived objects, the SQL of each step and its dialect-specific hazards (`blocking`, `copy-table`). The diff and the hazards `destructive`, `compat`, `data-dependent`, `api-breaking` and `history` are shared. Postgres is first. | Two planners, one per dialect, whose rules for the shared hazards would drift |
+| `outputs.sql.dialects` lists the dialects a DB service is built for, `["postgres"]` by default, and `migrate plan --dialect` picks one of them. Each dialect gets its `create.sql`: Postgres in `dist/sql/<service>/`, as today, and SQLite in `dist/sql/<service>/sqlite/`. SQLite's `create.sql` is its plan from an empty database. Postgres keeps its template, and a test holds the template and Postgres's plan from an empty database equal (below). | Rendering Postgres's `create.sql` from the plan too, which would change every golden for no reader |
+| SQLite stores a catalog type as the type its values need: `UUID`, text types, dates, times and timestamps as `TEXT`; `CITEXT` as `TEXT COLLATE NOCASE`; integers and `BOOLEAN` as `INTEGER`; floats as `REAL`; `JSONB`, `JSON` and lists as JSON `TEXT`; `BYTEA` as `BLOB`. A default renders as an expression that writes the form the schema runtime reads: a version 4 UUID string for `gen_random_uuid()`, an RFC 3339 UTC instant for `CURRENT_TIMESTAMP`. A unique field is a named unique index, so adding or dropping one is not a table rebuild. | Leaving defaults to the application, which a DB service with no ORM in that language does not have |
+| A SQLite step uses `ADD COLUMN`, `RENAME COLUMN`, `RENAME TO` and `DROP COLUMN` where SQLite allows them, and rebuilds the table for every other change: create the new table, copy the rows, drop the old one, rename the new one, re-create its indexes, all in one transaction (`copy-table`, `blocking`). Every change to one table in one phase shares one rebuild. Dropping the old table would fire `ON DELETE` actions on the tables that reference it, so the runner turns `foreign_keys` off around the step, which SQLite allows only outside a transaction, and runs `foreign_key_check` before the commit. | `defer_foreign_keys`, which defers the checks but still runs the `ON DELETE` actions, so a `CASCADE` would delete the children |
+| SQLite refuses, at build, with the feature and the dialect named: `@versioned`, `@optimistic`, `@searchField`, projections, `GIN` and `GIST` indexes, and types it has no storage for (`LTREE`, PostGIS types). A service lists SQLite only when its schema fits. Versioned tables on SQLite are the first thing D19's SQLite adapter needs, and its entry adds them through this dialect's derived objects. | Rendering triggers for SQLite now, without the adapter that would read their history |
+| The engine's storage (D16) stays the engine's: it creates its own tables and runs its behaviors' migrations, and nothing here diffs them. The SQLite dialect serves DB services deployed to SQLite, such as an edge target, and the SQLite adapter D19 leaves for later. | Driving the engine's tables from `sqlgen`, which D16 declined for its behaviors' SQL |
+
+### Apply
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The runner is a sixth Go module, `runtime/migrate/go`, amending D1: package `migrate`, a driver per database (pgx for Postgres, as D19's Go engine uses; a pure-Go SQLite driver), and the binary `superschematic-migrate` with `apply`, `status` and `adopt`. It runs a plan document and never computes one, so a migration job (a Cloud Run job, a local Postgres container, any CI step) needs the plan and the binary, not the compiler. The compiler writes plans and does not import the module, so no database driver enters its module graph. | `superschematic migrate apply` in the compiler binary, which would put the drivers in the compiler's module graph and the compiler in every job image |
+| `apply --plan plan.json [--phase expand\|contract\|all]` takes a lock first: a session-level advisory lock keyed by the service on Postgres, since some steps run outside a transaction; `BEGIN IMMEDIATE` per step on SQLite. A second runner waits. | |
+| Two tables in the connection's schema record the state. `superschematic_schema_state` has a row per service: the dialect, the applied model's hash and the model itself, taken from the plan, and the plan in progress with its finished phase. `superschematic_migrations` logs each step: the plan's hash, the step's index, phase and SQL hash, and when it started and finished. The names are fixed until a distribution needs its own, as D10 leaves the vendor-extension prefix. `adopt --model` records a model as applied without running anything, for a database built from `create.sql` or by hand; `migrate plan --print-model` prints the model to adopt. | Recording only the hash, which leaves nothing to plan from when the previous version is not at hand |
+| The runner refuses a plan whose `from` is not the database's applied model, unless the database is part-way through that same plan. It resumes at the first unfinished step. A step in a transaction commits with its log row, so it runs once. A step outside one logs its start, runs, and logs its end; on resume it first runs its recovery, such as dropping the invalid index a failed concurrent build leaves, then runs again. Each step sets `lock_timeout` (5s, as the projection migrations do) and is retried on a lock timeout a bounded number of times. Running a finished plan again does nothing. | One transaction for the whole plan, which holds every table's lock until the last step |
+| When the last step of `contract` commits, the applied model becomes the plan's `to`. A new plan is refused while a plan's `contract` is pending. `status` prints the applied model and any plan in progress. | |
+
+### Testing
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Plan goldens: pairs of fixture schemas, one change each (add, drop, rename and retype a column, a table, an index, a unique field, a relation and its `onDelete`, a join table, `@searchField`, `@versioned` on and off and each option, `@optimistic`, a projection, a graph member's content), each with its expected plan JSON, SQL and hazards. A rename is planned twice, as a drop and an add with the possible-rename note and with `--rename`. A table test asserts each operation's hazard classes. `--from-ref` is tested against a git repository the test builds. | Hazards checked only through goldens, where a wrong class reads as an expected diff |
+| Convergence on Postgres, in CI's Postgres service under `SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL` as the projection tests run: for each pair (A, B), applying `create.sql` of A and then the plan from A to B leaves the same catalog as applying `create.sql` of B, compared by name through `pg_catalog`; the plan from an empty database leaves the same catalog as `create.sql`. Rows seeded before a plan survive every step that is not `destructive`, and a rename keeps them. | Comparing SQL text, which proves nothing about what the database ends up with |
+| The runner's tests apply plan vectors the compiler writes to `runtime/migrate/testdata/plans`, as the version graph's vectors are shared (D17): a second run does nothing, a failure injected after any step resumes to the same catalog, two runners serialize, and a plan from the wrong baseline is refused. | Runner tests over hand-written plans, which can drift from what the compiler writes |
+| SQLite runs the same convergence and runner tests with the pure-Go driver, in every CI run, with no service. | |
+
+Status: Postgres and SQLite are built. `internal/sqlmigrate` resolves a
+schema to its model (`BuildModel`) and plans between two models (`Diff`)
+through a dialect seam, with both dialects implemented; `sqlgen` renders
+each derived object once, for `create.sql` and the model, and `create.sql`
+is unchanged byte for byte. `outputs.sql.dialects` lists `sqlite` beside
+`postgres` to have the build write `sqlite/create.sql`, the SQLite plan
+from an empty database. `superschematic migrate plan` takes the previous
+version as `--from` or `--from-ref`, with `--rename`, `--reader`,
+`--fail-on`, `--allow`, `--print-model` and `--dialect`, and prints the
+plan as JSON, SQL or Markdown. The runner is the sixth Go module,
+`runtime/migrate/go`, with a Postgres and a SQLite driver and the binary
+`superschematic-migrate` (`runtime/migrate/README.md`). The reference page
+is "Schema migrations".
+Plan goldens cover 55 pairs for Postgres and 39 for SQLite, 9 of them
+rebuilds; every pair and every `sqlgen` fixture converges on Postgres, and
+every SQLite pair and fixture converges on SQLite in every test run; the
+runner applies the compiler's vectors of both dialects, resumes after a
+failure at every step, and serializes two runners. Rules settled as they
+were built: the model records a `@versioned` table's excluded
+columns (`historyExclude`), which the history seed and an `exclude` change
+read; renaming a column of a versioned table is `history` too, since old
+images keep the old key; a column dropped in `contract` keeps its
+`NOT NULL` in `expand` when it has a default, which new servers' inserts
+fill; dropping a generated column is not `destructive`; pool schemas, like
+extensions, are created and never dropped; a unique `@index` added to an
+existing table is `compat` and `data-dependent`, as a unique constraint is;
+a type change that is not binary-coercible casts with `USING col::T`, so a
+narrowing cast truncates and is `destructive` rather than failing; a
+foreign key whose `onDelete` alone changes is replaced in `contract` with
+no hazard; an index is dropped with a plain `DROP INDEX` in a transaction;
+`Diff` refuses a `partitionBy` change on an existing table, an impossible
+cast, a primary key change and a change between a generated and a stored
+column; a change to a graph member's content set with no DDL change has no
+step, so no hazard; `--reader` services are read against both models;
+`--from-ref` extracts the previous schemas root beside the checkout's, so
+the paths its `tsconfig` reaches resolve, and each version uses its own
+naming file; a service is a reader when its kind allows `@source`; a
+second runner polls `pg_try_advisory_lock`, since one blocked in
+`pg_advisory_lock` deadlocks with the first runner's
+`CREATE INDEX CONCURRENTLY`; starting a plan clears the step log an
+earlier run of the same plan left, since A to B, B to A and A to B again
+repeat a plan hash; and the runner refuses a non-transactional step on
+SQLite and `foreignKeysOff` on Postgres. Rules settled building SQLite:
+its model is the Postgres model's tables in SQLite's types, so a unique
+field's index keeps the name Postgres gives the constraint, and the
+primary key and foreign keys keep their names in the model only, since
+SQLite names neither and renaming one is no step; SQLite keeps no
+comments; `INTERVAL` and `INET` are `TEXT`, a `CURRENT_DATE` default is
+`strftime('%Y-%m-%d', 'now')`, a `CURRENT_TIME` default
+`strftime('%H:%M:%f', 'now')`, and a JSON platform default its text; any
+other type has no storage, and a default with no SQLite form fails the
+model; SQLite's `CAST` never fails, so a type change that cannot keep
+every value is `destructive`, never `data-dependent`, and a change between
+`BLOB` and a number is impossible; a table the dialect rebuilds in a phase
+takes every change the phase makes to it but the renames of the table and
+its columns, which run first and in place, so the rebuild starts from the
+table with the renames applied, sits at the first change `ALTER TABLE`
+cannot make, and also adds the columns and indexes the phase adds; a
+foreign key added in `expand` is over a column the plan adds, and
+`ADD COLUMN ... REFERENCES` declares it when that column is nullable with
+no default; SQLite cannot rename an index, so an index or unique field
+renamed is dropped and built again (`blocking`), and building an index on
+a table that exists and `DROP COLUMN`, which rewrites the table, are
+`blocking`; `DROP COLUMN` runs in place, since the column's indexes are
+dropped before it and a foreign key over it rebuilds the table; a dropped
+table is dropped with foreign keys off, since with them on `DROP TABLE`
+deletes its rows first, which a `RESTRICT` on the table itself refuses;
+a plan that drops two tables that reference each other fails on SQLite,
+since dropping the foreign key that closes the cycle needs a rebuild of a
+table the plan drops; a change between a list, a JSON value and text, all
+`TEXT`, is no step and converts no value; `migrate plan --dialect sqlite`
+refuses a service whose new version does not list `sqlite`, and builds
+the previous version's SQLite model without checking its list; and the
+SQLite convergence test compares a column's collation through an index
+it builds and rolls back, since no pragma reports it. Each change that
+lands a piece updates this paragraph.
+
 ## D30. A stack model deploys a schema tree through platforms and provisioners
 
 superschematic generates the code of a tree of services but nothing that
@@ -2092,3 +2363,136 @@ gains `validators.rs` and the runtime dependency; its other files are
 unchanged.
 
 The rule is reversible until the first release.
+## D32. The version graph on SQLite, and a behavior that hosts one
+
+D19 left one adapter open: "a SQLite adapter for D16's engine". D16's
+engine keeps everything in one SQLite file, runs behavior code
+synchronously inside its write transaction, and lets a behavior write
+only its own tables, through SQL it checks. The version graph as D19
+built it fits none of that:
+
+- **An asynchronous engine.** The TypeScript engine and its `Storage` and `Tx` return promises, because the `pg` driver does. A behavior cannot await.
+- **Postgres does the versioning.** plpgsql triggers bump `_version` and write every history image, a transaction-local setting names a delete's actor, a function per kind prunes history, and row and advisory locks order writers. SQLite triggers cannot assign `NEW`, D16 refuses a trigger in a behavior's migration, and SQLite has no settings, no `to_jsonb` and no `uuid` type.
+- **Tables per kind.** A graph's member tables follow its kinds, and only sqlgen writes them, for Postgres. A behavior's tables are fixed by its migrations, whatever a schema's config says.
+- **Nothing to declare a graph with.** A D16 schema cannot say that its instances are graph roots.
+
+This entry closes them. It records the design before any of it is built.
+A human decided on 2026-10-04 that a core behavior hosts a graph, that the
+TypeScript engine is written once and run by a synchronous and an
+asynchronous driver, that TypeScript comes first, that the SQLite adapter
+owns one fixed layout, and that the shared scenarios run against SQLite
+with their roots declared and their SQL given per backend. Names and rules
+are reversible until the first release.
+
+### One engine, two drivers
+
+A behavior cannot await because of how the engine holds its file. Its
+transaction belongs to its one connection, not to a call: an await inside
+it would let the event loop run another request's statements in the same
+transaction. A second connection does not help: `node:sqlite` and
+`bun:sqlite` block the thread while a connection waits for the write lock,
+and the transaction holding it, on the same thread, cannot go on to
+release it. And the engine's cycle check, nesting limit, savepoints and
+`afterCommit` queue lean on one synchronous call stack. The graph engine's
+operations await only their storage calls: over SQLite each of those is
+synchronous, and so is the wasm core once it is instantiated.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The TypeScript engine's operations are written once, as generator functions that yield each storage call. `Engine` runs them asynchronously over `Storage` and `Tx`, with its API as it is. `SyncEngine` runs them synchronously over `SyncStorage` and `SyncTx`, which have the same methods returning values. A storage call's failure is thrown back into the generator, so the engine handles it the same way under both (a sweep's discard of a ref that moved, say). | A second engine, synchronous and written by hand, which repeats commit, merge and rebase and leaves only the scenarios to keep the two equal; asynchronous D16 transactions, the later entry D16 names, which convert every guard, hook, the store and the runner and still order writes on one SQLite writer; an asynchronous SQLite adapter that runs outside D16's transaction, which a behavior could not call |
+| `@superschematic/versiongraph` gains `initSync`, which compiles and instantiates the wasm module synchronously and, given no source under bun and Node, reads the module the package ships. A `SyncEngine` is built over a core already instantiated. | A `SyncEngine.create` that awaits `init`, which D16's synchronous `Engine.open` cannot call |
+| Over SQLite only the `SyncEngine` runs. The asynchronous engine's transactions, on one connection, would interleave at each await. | An asynchronous wrapper with a queue per connection, which a behavior could not call either |
+| The Go, Python and Rust engines keep their shape. Go's and Python's are synchronous already. Rust's `Storage` and `Tx` traits stay as they are, and its SQLite client holds a `rusqlite` connection behind a mutex, blocking the executor while a statement runs. | |
+
+### The layout
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The SQLite adapter owns one fixed set of tables, the same for every graph: `ref`, `ref_history`, `commit`, `patch`, `snapshot_entry`, `release`, `release_history`, `member` and `member_history`, under a prefix its caller gives (`graph_` by default). Every row carries its graph's name, so one file holds several graphs. The adapter creates the tables, and lists their statements for a caller that runs its own migrations. | Tables per kind, built from the descriptor when the adapter opens, which a behavior's fixed migrations cannot create; a SQLite dialect in sqlgen, which serves compiled schemas only, needs a second `UPDATE` in an `AFTER` trigger to bump `_version`, and puts triggers where D16 refuses them |
+| This departs, for SQLite, from D17's rule that a graph's tables are generated per graph with relations to the root. The layout has no root table, so no foreign key checks a ref's root: in D16 the root is an instance, which the behavior's tables cannot reference, and the behavior deletes a root's graph with it. Foreign keys still check every edge inside the layout (a ref's parent, base and head, a commit's ref and parent, a patch's and a snapshot entry's commit, a member's ref, a pointer's commit), and ids are UUIDs, unique across graphs. That a row's graph and kind agree with its ref's is the adapter's check, not a key's. | Per-graph tables, which a behavior's fixed migrations cannot create |
+| A member row holds its kind and its role columns (id, entity key, ref, root, tombstone, version) as columns, and its other columns as one canonical JSON object. The adapter reads from the descriptor only the kinds, their roles, columns, value classes and history (below); the tables the descriptor names are the Postgres adapter's. Content is not in typed columns: readers of released content read `Released` or `Materialize` (D19), not member tables. | Typed columns per field, which need tables per kind |
+| Every table is `STRICT`, so a value of the wrong type is refused rather than stored. An id is `TEXT` in canonical form; a version, a sequence, a tombstone and a time are `INTEGER`. | Tables without `STRICT`, which store a value of the wrong type silently |
+| The adapter writes history in the statements of the transaction that changes a row. An insert or an update writes the row's image at its new version, and a delete writes the tombstone image at the old version plus 1, with the kind's actor column set to the delete's actor. `_version` starts at 1 and every update sets it to the old version plus 1, so every version is the one Postgres's triggers give. An image leaves out the kind's history-excluded columns. Refs and release pointers keep history too, as `@versioned` tables, and the release pointer's history is the release log (D19). A member's image is its canonical row less those columns, so it hashes as the live row it was taken from does. | Triggers, which cannot assign `NEW` in SQLite and which D16 refuses in a behavior's migration; a side table that such triggers read for a delete's actor |
+| The times of refs, commits, release pointers and history images are `INTEGER` microseconds since the Unix epoch, which order and subtract as numbers; the adapter returns them as canonical date-times. A transaction reads its time once, when it begins, from a clock its caller gives (the system clock by default), so every write in it has one time, as Postgres's `now()` does. History images take that time too, where Postgres's `clock_timestamp()` gives each its own; only pruning reads an image's time, and it compares in days. A member's audit times are canonical text in its JSON object, which no statement compares. | `CURRENT_TIMESTAMP`, which has second precision; canonical text, whose trimmed trailing zeros sort `…00.5Z` before `…00Z` |
+| The adapter generates every id Postgres takes from `gen_random_uuid()`: a version-4 UUID for each new ref, commit, release pointer, patch, snapshot entry, row, history image and entity key. | A UUID function registered on the connection, which D16's driver seam has no way to register |
+| Values are stored in canonical form. The adapter canonicalizes each value it writes by its class, with the rules the canonical module already has for input, so it reads with no rules of its own. The canonical vectors run against SQLite as a round trip: each case's canonical value, written in a row, reads back unchanged. | Each class in a native SQLite form, which needs read rules per class as Postgres's text does |
+
+D30 gives sqlgen SQLite migrations for compiled schemas. A graph on SQLite
+needs none of them, since its layout is the adapter's and changes only
+through the adapter's own migrations.
+
+### The descriptor's history
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each kind gains `history`, from what sqlgen's triggers and prune function hold today: `retentionDays` (absent for none), `exclude` (the columns images leave out) and `actor` (the column a delete's image names its actor in: `deleted_by`, else `updated_by`, and absent when there is neither or the column is excluded from history). The descriptor's version rises to 3, and the core reads version 3 only. The Postgres adapters do not read `history`, since their triggers and prune functions hold the same facts. | An optional member of version 2, which a descriptor written before it would give the SQLite adapter as no retention and no exclusions, silently; settings passed to the adapter beside the descriptor, which the compiler already knows and every caller would restate |
+
+Generated output for a schema without a version graph is unchanged. The
+descriptor of each graph changes: the core's vectors, the scenario
+fixture's `recipe.json`, acme's `Planogram`, each facade's descriptor
+constant and the generators' goldens of graph schemas.
+
+### Locking and transactions
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One process writes the file (D16). On a connection of its own, the adapter begins every transaction with `BEGIN IMMEDIATE`, which takes the file's write lock at once, and one begun inside another is a savepoint. Inside D16 it issues no transaction control, which a behavior's `sql` refuses: the graph runs in the transaction of the operation that calls it, and an invoked operation's savepoint rolls the graph's writes back with the rest. Either way the write lock orders every writer, so `lockRef` reads a ref as `readRef` does, `nextSequence` reads the root's highest sequence plus one, and `sweepLock` reports true. | Lock rows, which a single writer never waits on; a lock table shared across processes, which D16's one writer per file rules out |
+| A name already taken is the partial unique index on live refs' names, read from `SQLITE_CONSTRAINT_UNIQUE`. | A read before the insert alone, without the index behind it |
+
+### Scenarios
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every shared scenario runs against SQLite through the TypeScript `SyncEngine`, from `recipe.json`, over the fixed layout. It needs no database server, so `make versiongraph-scenarios-ts` runs the SQLite pass with or without a Postgres URL. | A SQLite copy of the scenario files, which drifts |
+| A scenario names its roots (`roots`), and each runner seeds them as its backend needs before the first step: on Postgres it inserts the fixture's root rows, on SQLite nothing, since the layout has no root table. This replaces the 18 `sql` steps that seed roots. | The same seeding statement in an `sql` step of every file, once per backend |
+| An `sql` step's `statement` gives one statement per backend, `{"postgres", "sqlite"}`, and a runner refuses a step that lacks its backend's, so no step is skipped silently. A SQLite statement numbers its placeholders `?1`, `?2`, and takes UUID arguments in canonical form, as the layout stores them; a Postgres statement takes them hyphenated, as today. | Named test operations, one per purpose (backdate a ref, age history, drop pins), which every runner in every language would implement |
+| A step may name the backends that run it (`backends`), and a runner refuses a name it does not know. The sweep scenario's two lock steps, and the sweep between them that expects to be skipped, run on Postgres only: under one writer, no transaction can hold the lock while a sweep runs. The adapter's own tests check that a second connection's transaction waits. | |
+| The Go, Python and Rust runners learn the new forms and run Postgres as they do now. Their SQLite passes come with their adapters. | |
+
+### The `Branches` behavior
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Branches` is a core behavior, a plain noun as the others are. A schema that composes it makes each instance a graph root. The root is never overlaid and is in no commit (D17), so the instance's own fields stay outside the graph: they are the root's. | `Versions`, which D16 already uses for a schema's versions; `Drafts`, which D16 uses for a defined schema not yet published; a name that is not a plain noun |
+| The config names the graph's kinds: `kinds: { <kind>: { type, parent?, order?, singleton?, units?, retentionDays? } }`. `type` is another type of the schema (a nested value, in D16's terms), whose fields are the kind's content. `parent: { key, of }`, `order` and `singleton` are `@graphMember`'s, `units` sets a field's conflict unit as `@conflictUnit` does, `retentionDays` is `@versioned`'s, and `snapshotEvery` (default 64) is `@versionGraph`'s. `parseConfig` derives the graph's descriptor from the config and the types, which it reads through `ConfigTarget.types` (What D16 gains, below). A kind's images exclude nothing, and its actor column is `updated_by`. | Members as instances of other schemas, which a ref cannot overlay; one kind holding the instance's own fields, which `Revisions` already versions |
+| A member's role and audit columns have fixed names: `id`, `entity_key`, `ref_id`, `root_id`, `deleted_on_ref`, `_version`, `created_at`, `created_by`, `updated_at` and `updated_by` (the author). D16 puts no rule on a field's name, so `parseConfig` refuses a kind whose type has a field with one of those JSON keys. | Names the config chooses, which every reader of the descriptor would look up |
+| A field's value class follows graphdesc's rule for a compiled field: a primitive's from its name (`string`, `String` and `ID` are `string`, `Int` is `integer`, `number` and `Float` are `number`, `boolean` and `Boolean` are `boolean`), an enum's is `enum`, a nested type's `json`, and each list level adds `[]`. A builtin scalar's class comes from the scalar catalog in `@superschematic/schema-runtime`, which gains each scalar's class, computed with graphdesc's rule by the Go tool that writes the catalog, under the catalog's existing `-check`. A scalar the document defines, under a new name or a builtin's, takes the class its JSON type gives (`string`, `integer`, `number`, `boolean`, and `json` for an object or an array), as the document's definition decides its validation. | A second scalar rule in TypeScript, which drifts from graphdesc's |
+| `save` checks each written row's content against its kind's type, with the live version's validator, before the engine sees it. | Checking only the tree's structure, which the core already does |
+| The operations, all of instance scope. Writing: `branch`, `save`, `commit`, `seal`, `merge`, `rebase`, `revert`, `release` and `discard`. Read-only: `refs`, `releases`, `compose`, `materialize`, `released`, `diff` and `history`. Each but `refs` and `releases` takes what the engine's operation takes, refs and commits by id, and every write through a ref its expected version. Who may merge or release is the deployment's access policy, which is asked `write` or `read` with the operation's name (D16), as D17 left that policy to the distribution. Each writing operation appends the instance's operation event. | Permissions in the config, as `Revisions` names one for review, which the access policy already answers per operation |
+| `refs` and `releases` read the behavior's own tables, since the engine has no such operations: a root's live refs, and its release pointer's history, which is the release log (D19). | |
+| `initialize` creates an instance's primary line, named by `primary` in the config (default `main`). An instance created before its schema composed `Branches` gets its primary line at its first writing operation, in that operation's transaction. | Creating every instance's primary line in `afterConfigChange`, which acts for no principal, while a ref records its creator |
+| An actor is a UUID and a principal's subject is any string, so the actor of a write is the version-5 UUID of the subject, in one fixed namespace the implementation records. The behavior records each subject it maps, and its reads return subjects. | Widening the actor to any string, in every language's engine |
+| A root's id is the version-5 UUID of its instance's id, in another fixed namespace, since an instance id is any string the create gives (D16), not always a UUID. | The instance id itself, which holds only for the engine's default ids |
+| The graph's tables are the behavior's own (`bhv_<key>__…`), created by its migration from the adapter's statements. The adapter reaches them through the behavior's `sql`, whose checks its statements pass: one statement at a time, on the behavior's own tables, with no trigger and no transaction control. A graph is named by its namespace and schema, so the behavior's tables hold every schema's graphs. | |
+| A new version of the schema may add a kind, and change a kind's fields as D16 allows a field to change. `configChange` refuses anything else: removing a kind, or changing a parent, an order, a singleton or a unit. A retention may change. `Branches` can be added to a schema that has instances, and not removed from one, as `Revisions` can. The schema epoch stays 0, since every version reads every stored row. | Epoch transforms, which stay open (D19) |
+| Deleting an instance deletes its graph, as deleting one deletes its revisions. | A guard that refuses the delete of a root with commits, which a deployment's access policy can already refuse |
+| `sweep` in the config (an interval, the discard grace, the prune batch and `abandonAfter`) turns a schedule on for the schema; without it the schedule does not run there, as D19's sweep is off by default. Each run discards idle drafts by invoking `discard` on each instance, with the draft and its version, so each discard runs its guards and appends its event. It then runs the engine's sweep with abandoning off, writing the behavior's tables as a schedule may (What D16 gains, below): history past retention, rows of refs discarded past the grace, and missing snapshots. | A sweep operation on each instance, which writes an event per instance per run for maintenance no reader sees, and needs a sweep scoped to one root in every language's engine |
+| `@superschematic/engine` depends on `@superschematic/versiongraph` and instantiates the core with `initSync` when it first runs a schema that composes `Branches`. | An optional peer dependency, which leaves a core behavior unregistered in a default engine |
+
+### What D16 gains
+
+`Branches` needs four things a behavior cannot do today. Each is general,
+and each changes a D16 rule.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `ConfigTarget` gains `types`: each other type of the schema, by name, with each field's JSON key, its type's name and kind (primitive, scalar, enum or type), its list depth and whether it is optional. A type `parseConfig` reads through it counts as reachable from the instance type for that version. The engine's document checks then cover the type's fields, map fields refused included, and a new version must keep them as D16's rule keeps the instance type's. Today a type no field reaches can change freely between versions, which would break every stored row of a kind. | The nested types inlined in `fieldSchemas`, which reach only the types the instance type's fields use and drop each field's scalar name; a list of kinds' types that the compatibility rule reads apart from the config |
+| A behavior's context can check a value against another type of its schema, with the live version's validator and the closed-object checks a nested value gets (`validate(type, value)`). Today a behavior checks only its own instance's fields (`validateUpdate`). | Each behavior building a validator of its own from `ConfigTarget.types`, which drifts from the engine's |
+| A schedule's interval function may return none for a schema, which runs nothing there until a publish changes its config. Today a schedule runs on every schema that composes its behavior, and a function that gives no interval fails it. | An interval long enough to be ignored, which still wakes the runner for nothing |
+| A schedule may write its behavior's own tables when the write changes nothing an operation returns: history that no commit or snapshot pins, rows of refs that no operation can read any more, and snapshots, which only shorten a read. It runs in the schedule's transaction, as the runner's principal. A change an operation does show, such as discarding a draft, still goes through the operation the schedule invokes. Like `afterConfigChange`, it writes only the behavior's own storage. | Schedules that only read, invoke and create, as D16's amendments have them, which makes the sweep an operation with an event per instance per run |
+
+### Phases
+
+| Phase | Scope |
+|-------|-------|
+| 1 | Descriptor version 3, with `history`: graphdesc writes it, the core reads it, and every binding, engine, facade, vector, golden and fixture moves to it. |
+| 2 | The scenario format: `roots`, `statement` per backend and `backends`, in the four runners and the 18 files, on Postgres only. |
+| 3 | The TypeScript engine as generators, `SyncEngine`, `SyncStorage`, `SyncTx` and `initSync`. Every scenario still passes on Postgres. |
+| 4 | The SQLite adapter, at `./sqlite` of `@superschematic/versiongraph`: the layout, a small synchronous client seam with bindings for `node:sqlite` and `bun:sqlite`, every scenario and the canonical round trip on SQLite, and the adapter's tests. |
+| 5 | What D16 gains, the scalar catalog's value classes, and `Branches`: its declaration and registration in Go, its implementation in `@superschematic/engine`, and the docs. |
+| Later | SQLite adapters in Go (a `database/sql` seam), Python (`sqlite3`) and Rust (`rusqlite`), each running every scenario on SQLite, as D19 built its Postgres adapters. |
+
+Phases 1, 2 and 3 do not depend on each other. Phase 4 needs all three,
+and phase 5 needs phase 4.
+
+Nothing here is built.

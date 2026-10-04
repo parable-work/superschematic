@@ -69,8 +69,14 @@ type Index struct {
 
 // Column represents a table column.
 type Column struct {
-	Name          string
-	QuotedName    string
+	Name       string
+	QuotedName string
+	// Origin is the schema field the column stores ("Order.total"): a
+	// relation's foreign-key column has the relation field's origin, and the
+	// column @hasMany adds to the other table has the @hasMany field's.
+	// Empty for a column the generator adds on its own (an added id,
+	// _version, a history or join table's columns).
+	Origin        string
 	Type          string
 	Nullable      bool
 	Unique        bool
@@ -309,6 +315,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 			targetTable.Columns = append(targetTable.Columns, Column{
 				Name:       fkColumnName,
 				QuotedName: sqlutil.QuoteIdentifier(fkColumnName),
+				Origin:     typeDef.Name + "." + field.Name,
 				Type:       keyFieldType(typeDef, scalarMapping),
 				Nullable:   !field.Required,
 			})
@@ -522,6 +529,7 @@ func convertTypeToTable(
 		// Single object reference: FK column on this table.
 		if !field.JsonField && !field.TypeRef.IsMap && !field.TypeRef.IsArray && relationalTarget {
 			fkColumn, fkConstraint := buildForeignKey(field, schema, scalarMapping)
+			fkColumn.Origin = typeDef.Name + "." + field.Name
 
 			if field.Unique && !field.Key {
 				fkColumn.Unique = true
@@ -539,6 +547,7 @@ func convertTypeToTable(
 		column := Column{
 			Name:       columnName,
 			QuotedName: sqlutil.QuoteIdentifier(columnName),
+			Origin:     typeDef.Name + "." + field.Name,
 			Type:       sqlutil.ColumnType(field, scalarMapping),
 			Nullable:   !field.Required,
 		}

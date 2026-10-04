@@ -1,0 +1,144 @@
+[
+  {
+    "name": "object members sort by key at every depth",
+    "input": "{\"b\":1,\"a\":{\"d\":[3,1,2],\"c\":\"x\",\"b\":{\"z\":null,\"y\":true}}}",
+    "canonical": "{\"a\":{\"b\":{\"y\":true,\"z\":null},\"c\":\"x\",\"d\":[3,1,2]},\"b\":1}",
+    "sha256": "e20b3940882aba48af1d3ea1e8d2ad28923bbb0b4535d9454a4cacceded13b0c"
+  },
+  {
+    "name": "whitespace between tokens goes",
+    "input": "{ \"a\" : [ 1 , 2 ] ,\n\t\"b\" : { } }\n",
+    "canonical": "{\"a\":[1,2],\"b\":{}}",
+    "sha256": "8c547cce7ccb1b89359479c0b71a0a4b62acfc54a2b2780fd34aaeb75f9e44b7"
+  },
+  {
+    "name": "\u003c, \u003e and \u0026 in strings are escaped",
+    "input": "{\"html\":\"\u003ca href=\\\"x\\\"\u003e\u0026amp;\u003c/a\u003e\",\"\u003ckey\u003e\":\"\u0026\"}",
+    "canonical": "{\"\\u003ckey\\u003e\":\"\\u0026\",\"html\":\"\\u003ca href=\\\"x\\\"\\u003e\\u0026amp;\\u003c/a\\u003e\"}",
+    "sha256": "c19e44d893ce0ce0b8befa2901a3a1262d40d4deb6bd5d72568321b4fc3765d0"
+  },
+  {
+    "name": "escaped \u003c, \u003e and \u0026 stay escaped",
+    "input": "\"\\u003cb\\u003e \\u0026\"",
+    "canonical": "\"\\u003cb\\u003e \\u0026\"",
+    "sha256": "6abc79b4e72017435e7165264a109da2a5a6a421abebfde4b64da5bc9745c917"
+  },
+  {
+    "name": "escaped non-ASCII becomes UTF-8",
+    "input": "\"caf\\u00e9 \\u65e5\\u672c \\ud83d\\ude00\"",
+    "canonical": "\"caf\u00e9 \u65e5\u672c \ud83d\ude00\"",
+    "sha256": "3428af75be32f281f0ab04a603bbe5e8c6298f25df5f0a3394d8c76902d6b7bb"
+  },
+  {
+    "name": "raw non-ASCII stays UTF-8",
+    "input": "\"caf\u00e9 \u65e5\u672c \ud83d\ude00\"",
+    "canonical": "\"caf\u00e9 \u65e5\u672c \ud83d\ude00\"",
+    "sha256": "3428af75be32f281f0ab04a603bbe5e8c6298f25df5f0a3394d8c76902d6b7bb"
+  },
+  {
+    "name": "line and paragraph separators are escaped",
+    "input": "[\"\\u2028\\u2029\",\"\u2028\u2029\"]",
+    "canonical": "[\"\\u2028\\u2029\",\"\\u2028\\u2029\"]",
+    "sha256": "400186cee031eb41b9e70626d9dd481d205cb5678c6188f291182e8d336f664f"
+  },
+  {
+    "name": "control characters and escapes",
+    "input": "\"\\u0000\\u001f\\t\\n\\r\\b\\f\\\"\\\\\\/\\u0041\"",
+    "canonical": "\"\\u0000\\u001f\\t\\n\\r\\b\\f\\\"\\\\/A\"",
+    "sha256": "a7d6ada7e0f30c8f19a3477bc1eebfc9ee40053ee31e51e26440f1ccd322e1d6"
+  },
+  {
+    "name": "number literals are kept as written",
+    "input": "[1.0,1e3,1E+3,-0,0.10,12345678901234567890123456789,1.5e-10,-12,0]",
+    "canonical": "[1.0,1e3,1E+3,-0,0.10,12345678901234567890123456789,1.5e-10,-12,0]",
+    "sha256": "2d499023dd392f8b8a7e93acc71ec44c6138200b80275536ece4084c041c033f"
+  },
+  {
+    "name": "a duplicate key keeps the last value",
+    "input": "{\"a\":1,\"a\":2}",
+    "canonical": "{\"a\":2}",
+    "sha256": "7e8059f495589fcd981232cc11d00b00da3802c01d688fa1cf1f6bed6e5bb33c"
+  },
+  {
+    "name": "keys sort by their UTF-8 bytes",
+    "input": "{\"b\":1,\"B\":2,\"\u00e9\":3,\"a\":4,\"_\":5,\"1\":6,\"aa\":7,\"\":8}",
+    "canonical": "{\"\":8,\"1\":6,\"B\":2,\"_\":5,\"a\":4,\"aa\":7,\"b\":1,\"\u00e9\":3}",
+    "sha256": "92c495498d156deaa97ea85a9531eb0c7a97bee5f6cb8de96569290ec8619b19"
+  },
+  {
+    "name": "array order is kept",
+    "input": "[3,\"b\",{\"y\":1,\"x\":2},null,true,false,[2,1]]",
+    "canonical": "[3,\"b\",{\"x\":2,\"y\":1},null,true,false,[2,1]]",
+    "sha256": "a6179ef73b4b60047ceca3ad6420da229267e62f3f314810e3e535fe7cfcd440"
+  },
+  {
+    "name": "a scalar",
+    "input": " true ",
+    "canonical": "true",
+    "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+  },
+  {
+    "name": "null",
+    "input": "null",
+    "canonical": "null",
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  {
+    "name": "empty containers",
+    "input": "{\"o\":{},\"a\":[]}",
+    "canonical": "{\"a\":[],\"o\":{}}",
+    "sha256": "9bee7ebfc94b459dacb8cbc72cb2900e61f0aa42189df18329f84f92568f4f89"
+  },
+  {
+    "name": "deep nesting",
+    "input": "[[[{\"b\":[{\"d\":1,\"c\":{\"f\":[],\"e\":{}}}]}]]]",
+    "canonical": "[[[{\"b\":[{\"c\":{\"e\":{},\"f\":[]},\"d\":1}]}]]]",
+    "sha256": "1cd02255d7fc17a6cdeda208eeb4884fef173d47c98d7d265ec768a3ca5b675c"
+  },
+  {
+    "name": "a model",
+    "input": "{\"version\":1,\"service\":\"shop\",\"dialect\":\"postgres\",\"tables\":[{\"name\":\"order\",\"kind\":\"entity\",\"columns\":[{\"type\":\"BIGINT\",\"name\":\"total\",\"nullable\":true}]}]}",
+    "canonical": "{\"dialect\":\"postgres\",\"service\":\"shop\",\"tables\":[{\"columns\":[{\"name\":\"total\",\"nullable\":true,\"type\":\"BIGINT\"}],\"kind\":\"entity\",\"name\":\"order\"}],\"version\":1}",
+    "sha256": "1cc6e3192f17b8748ee3ca1b948a41444ea16f054eae9291f004ed21e34a3cf1"
+  },
+  {
+    "name": "trailing data is refused",
+    "input": "{} x",
+    "error": true
+  },
+  {
+    "name": "a closing bracket after the value is refused",
+    "input": "{}]",
+    "error": true
+  },
+  {
+    "name": "a second value is refused",
+    "input": "{} {}",
+    "error": true
+  },
+  {
+    "name": "a missing value is refused",
+    "input": "{\"a\":}",
+    "error": true
+  },
+  {
+    "name": "no value is refused",
+    "input": "",
+    "error": true
+  },
+  {
+    "name": "a trailing comma is refused",
+    "input": "[1,]",
+    "error": true
+  },
+  {
+    "name": "a raw control character in a string is refused",
+    "input": "\"tab\there\"",
+    "error": true
+  },
+  {
+    "name": "a leading zero is refused",
+    "input": "[01]",
+    "error": true
+  }
+]

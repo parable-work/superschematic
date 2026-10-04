@@ -1,0 +1,165 @@
+{
+  "dialect": "sqlite",
+  "from": "295de4e412d1254794d91926feb77450972604e2271c35d8bc0b72a1fa2e637a",
+  "hash": "a8741ba849a576888f18082166688e862d212943f21e91821f9447d0a2b156d7",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "foreignKeysOff": true,
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/account",
+          "reason": "Copying account holds the database's write lock for time that grows with the table.",
+          "subject": "table/account"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/account/constraint/account_name_key",
+          "reason": "Account.name becomes unique: servers built from the previous version may write duplicates.",
+          "subject": "table/account/constraint/account_name_key"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/account/constraint/account_name_key",
+          "reason": "Building the unique index fails when account holds duplicate values of Account.name.",
+          "subject": "table/account/constraint/account_name_key"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/account",
+          "reason": "SQLite's ALTER TABLE cannot drop NOT NULL from name, so the step rebuilds account: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "subject": "table/account"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"_new_account\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT,\n  PRIMARY KEY (\"id\")\n)",
+        "INSERT INTO \"_new_account\" (\"id\", \"name\")\nSELECT \"id\", \"name\"\nFROM \"account\"",
+        "DROP TABLE \"account\"",
+        "ALTER TABLE \"_new_account\" RENAME TO \"account\"",
+        "CREATE UNIQUE INDEX \"account_name_key\" ON \"account\" (\"name\")"
+      ],
+      "subject": "table/account",
+      "transactional": true
+    },
+    {
+      "foreignKeysOff": true,
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/entry",
+          "reason": "Copying entry holds the database's write lock for time that grows with the table.",
+          "subject": "table/entry"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/entry/column/memo",
+          "reason": "Entry.memo becomes required: the step fails when entry has a row where memo is null.",
+          "subject": "table/entry/column/memo"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/entry",
+          "reason": "SQLite's ALTER TABLE cannot make memo NOT NULL, so the step rebuilds entry: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "subject": "table/entry"
+        }
+      ],
+      "index": 2,
+      "op": "copyTable",
+      "phase": "contract",
+      "statements": [
+        "CREATE TABLE \"_new_entry\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"account_id\" TEXT NOT NULL,\n  \"memo\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"account_id\") REFERENCES \"account\" (\"id\") ON DELETE CASCADE\n)",
+        "INSERT INTO \"_new_entry\" (\"id\", \"account_id\", \"memo\")\nSELECT \"id\", \"account_id\", \"memo\"\nFROM \"entry\"",
+        "DROP TABLE \"entry\"",
+        "ALTER TABLE \"_new_entry\" RENAME TO \"entry\""
+      ],
+      "subject": "table/entry",
+      "transactional": true
+    }
+  ],
+  "to": "576373790680e60bf34cde20cd4d158f1667da4bf5967476e164546435b26d13",
+  "toModel": {
+    "dialect": "sqlite",
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "name",
+            "nullable": true,
+            "origin": "Account.name",
+            "type": "TEXT"
+          }
+        ],
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        },
+        "uniques": [
+          {
+            "columns": [
+              "name"
+            ],
+            "name": "account_name_key"
+          }
+        ]
+      },
+      {
+        "columns": [
+          {
+            "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "name": "id",
+            "type": "TEXT"
+          },
+          {
+            "name": "account_id",
+            "origin": "Entry.account",
+            "type": "TEXT"
+          },
+          {
+            "name": "memo",
+            "origin": "Entry.memo",
+            "type": "TEXT"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "columns": [
+              "account_id"
+            ],
+            "name": "fk_entry_account_id",
+            "onDelete": "CASCADE",
+            "refColumns": [
+              "id"
+            ],
+            "refTable": "account"
+          }
+        ],
+        "kind": "entity",
+        "name": "entry",
+        "origin": "Entry",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "entry_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

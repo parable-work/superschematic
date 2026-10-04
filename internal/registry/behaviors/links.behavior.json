@@ -134,5 +134,10 @@
         }
       }
     }
+  ],
+  "vetoes": [
+    { "code": "no_revision", "description": "A pinned link, by link or a create's links, to a target that has no revision to pin yet." },
+    { "code": "required_link", "description": "unlink of a required link, which link moves and nothing unlinks." },
+    { "code": "required_target", "description": "The delete of an instance a required link points at, whoever the caller." }
   ]
 }

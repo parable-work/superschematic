@@ -1,0 +1,31 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "ea28bc5b432187577e206482bb5c2d743a3c229a5e55ec07f181147a1e38b234",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropIndex",
+      "phase": "contract",
+      "statements": [
+        "DROP INDEX idx_product_search_trgm"
+      ],
+      "subject": "table/product/index/idx_product_search_trgm",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE product DROP COLUMN search_text"
+      ],
+      "subject": "table/product/column/search_text",
+      "transactional": true
+    }
+  ],
+  "to": "ba3626e51f603707879594a0fefd0a67c34fd8315db96ccab9e0669cd0df471f",
+  "toModel": null,
+  "version": 1
+}

@@ -137,6 +137,46 @@ func TestParseOutputsReadsTheSQLSectionStrictly(t *testing.T) {
 	}
 }
 
+// outputs.sql.dialects lists the databases a DB service is built for:
+// postgres by default, and always postgres, since the Go ORM runs on it.
+func TestParseOutputsReadsTheSQLDialects(t *testing.T) {
+	reg := New(naming.Default())
+	if err := reg.RegisterGenerator(GeneratorSpec{Name: "sql", OutputKey: "sql", Generate: func(GenerateContext) error { return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	dialects := func(list ...any) map[string]any {
+		return map[string]any{"sql": map[string]any{"dialects": list}}
+	}
+	for _, outputs := range []*Outputs{nil, {}, {SQL: &SQLOutputConfig{ViewOwner: "x"}}} {
+		if got := outputs.SQLDialects(); len(got) != 1 || got[0] != "postgres" || !outputs.SQLDialect("postgres") || outputs.SQLDialect("sqlite") {
+			t.Errorf("%+v: dialects %v, want the default [postgres]", outputs, got)
+		}
+	}
+	outputs, err := ParseOutputs(dialects("sqlite", "postgres"), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := outputs.SQLDialects(); len(got) != 2 || !outputs.SQLDialect("sqlite") || !outputs.SQLDialect("postgres") {
+		t.Errorf("dialects = %v", got)
+	}
+
+	for _, tc := range []struct {
+		raw  map[string]any
+		want string
+	}{
+		{dialects("sqlite"), "outputs.sql.dialects must list postgres: the DB kind always generates the Go ORM, which runs on Postgres"},
+		{map[string]any{"sql": map[string]any{"dialects": []any{}}}, "outputs.sql.dialects must list postgres"},
+		{dialects("postgres", "mysql"), `outputs.sql.dialects: unknown dialect "mysql" (want postgres or sqlite)`},
+		{dialects("postgres", "sqlite", "sqlite"), "outputs.sql.dialects lists sqlite twice"},
+		{dialects("postgres", 1), "sql.dialects"},
+		{map[string]any{"sql": map[string]any{"dialects": "postgres"}}, "sql.dialects"},
+	} {
+		if _, err := ParseOutputs(tc.raw, reg); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%v: %v, want an error containing %q", tc.raw, err, tc.want)
+		}
+	}
+}
+
 // Every SDK imports the types package of its language, so an SDK whose
 // language has no types output would name a package the build never writes.
 // The error names each such language and what the SDK uses the types for.

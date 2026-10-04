@@ -138,7 +138,7 @@ for (const driver of drivers) {
       // Revisions added to a schema with instances: s1 has none until it changes.
       publish(engine, schema('Spec', [{ name: 'Revisions' }]));
       const none = thrown(() => link(engine, 't1', { name: 'spec', id: 's1' }), BehaviorVetoError);
-      assert.deepEqual([none.behavior, none.action, none.reason], ['Links', 'link', 'Spec s1 has no revision to pin yet']);
+      assert.deepEqual([none.behavior, none.action, none.reason, none.vetoCode], ['Links', 'link', 'Spec s1 has no revision to pin yet', 'no_revision']);
       engine.instances.update(alice, 'Spec', 's1', { title: 's1, revised' });
       assert.equal((link(engine, 't1', { name: 'spec', id: 's1' }) as { revision: number }).revision, 1);
     });
@@ -149,7 +149,7 @@ for (const driver of drivers) {
       link(engine, 't1', { name: 'spec', id: 's1' });
       assert.deepEqual(engine.instances.invoke(alice, 'Task', 't1', 'unlink', { name: 'spec' }), { name: 'spec', schema: 'Spec', id: 's1', revision: 1 });
       const required = thrown(() => engine.instances.invoke(alice, 'Task', 't1', 'unlink', { name: 'owner' }), BehaviorVetoError);
-      assert.equal(required.reason, 'link owner is required: it can be moved with link, not unlinked');
+      assert.deepEqual([required.reason, required.vetoCode], ['link owner is required: it can be moved with link, not unlinked', 'required_link']);
       assert.deepEqual(thrown(() => engine.instances.invoke(alice, 'Task', 't1', 'unlink', { name: 'related' }), OperationParamsError).issues, [
         { path: '/name', message: 'Task t1 has no link related' },
       ]);
@@ -163,8 +163,8 @@ for (const driver of drivers) {
       link(engine, 't3', { name: 'related', id: 't2' });
       const refused = thrown(() => engine.instances.delete(bob, 'Person', 'p1'), BehaviorVetoError);
       assert.deepEqual(
-        [refused.behavior, refused.action, refused.message],
-        ['Links', 'delete', 'behavior Links vetoes delete of Person p1: an instance of Task links to it through its required link owner']
+        [refused.behavior, refused.action, refused.message, refused.vetoCode],
+        ['Links', 'delete', 'behavior Links vetoes delete of Person p1: an instance of Task links to it through its required link owner', 'required_target']
       );
       const after = engine.events.read(alice, { limit: 500 }).events.at(-1)?.cursor ?? 0;
       assert.equal(engine.instances.delete(bob, 'Task', 't2'), true);
@@ -334,7 +334,11 @@ for (const driver of drivers) {
       // Revisions added to a schema with instances: s1 has none until it changes.
       publish(engine, schema('Spec', [{ name: 'Revisions' }]));
       const none = thrown(() => engine.instances.create(alice, 'Task', { title: 't1' }, { behaviors: { Links: { spec: 's1' } } }), BehaviorVetoError);
-      assert.deepEqual([none.behavior, none.action, none.reason], ['Links', 'create', 'Spec s1 has no revision to pin yet']);
+      // A create's link is vetoed with link's declared code, and its entry.
+      assert.deepEqual(
+        [none.behavior, none.action, none.reason, none.vetoCode, none.vetoDetails],
+        ['Links', 'create', 'Spec s1 has no revision to pin yet', 'no_revision', { path: '/behaviors/Links/spec' }]
+      );
       engine.instances.update(alice, 'Spec', 's1', { title: 's1, revised' });
       const refused = thrown(() => engine.instances.create(bob, 'Task', { title: 't1' }, { behaviors: { Links: { spec: 's1' } } }), EngineError);
       assert.equal(refused.code, 'forbidden');

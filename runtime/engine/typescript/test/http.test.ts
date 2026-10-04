@@ -10,7 +10,7 @@ import { Hono } from 'hono';
 
 import { BehaviorError, OperationParamsError, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
 import { ENGINE_ERROR_STATUS, MERGE_PATCH_MEDIA_TYPE, engineApp, engineProblem, type EngineHttpOptions } from '../dist/http/index.js';
-import { counter, flag, itemDocument, openMetaSchema, testBehaviors } from './behavior-fixtures.ts';
+import { counter, flag, hold, itemDocument, openMetaSchema, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, clone, freshPath, openTestEngine, orderDocument, schemaDocument, stepsDocument, thrown } from './helpers.ts';
 
 afterEach(cleanup);
@@ -235,6 +235,43 @@ describe('instances', () => {
     // A missing instance is 404 whatever If-Match says.
     await problem(call(app, 'PATCH', `${ORDERS}/o1`, { body: { title: 'Desk' }, headers: ifMatch('"4"') }), 404);
     await problem(call(app, 'DELETE', `${ORDERS}/o1`, { headers: ifMatch('*') }), 404);
+  });
+
+  test("the Preconditions header carries a write's preconditions to PATCH, DELETE and an operation; a veto's code and details are the problem's", async () => {
+    const { app, engine } = serve({}, { metaSchema: openMetaSchema(), behaviors: [...testBehaviors, hold] });
+    engine.schemas.define(everything, itemDocument([{ name: 'test.Counter' }, { name: 'test.Hold' }]));
+    engine.schemas.publish(everything, 'Item');
+    engine.instances.create(everything, 'Item', { title: 'Desk' }, { id: 'i1' });
+    const fenced = (generation: number) => ({ preconditions: JSON.stringify({ 'test.Hold': { generation } }) });
+
+    assert.equal((await data(call(app, 'PATCH', `${ITEMS}/i1`, { body: { title: 'Lamp' }, headers: fenced(0) }))).data.title, 'Lamp');
+    assert.deepEqual(await data(call(app, 'POST', `${ITEMS}/i1/operations/advance`, { headers: fenced(0) })), { generation: 1 });
+    const stale = await problem(call(app, 'PATCH', `${ITEMS}/i1`, { body: { title: 'Late' }, headers: fenced(0) }), 409);
+    assert.equal(stale.code, 'vetoed');
+    assert.deepEqual(stale.details, {
+      behavior: 'test.Hold',
+      action: 'update',
+      reason: 'generation 0 is stale: the instance is at 1',
+      code: 'stale',
+      details: { generation: 0, current: 1 },
+    });
+    assert.equal((await problem(call(app, 'POST', `${ITEMS}/i1/operations/increment`, { headers: fenced(0) }), 409)).details.code, 'stale');
+    assert.equal((await problem(call(app, 'DELETE', `${ITEMS}/i1`, { headers: fenced(0) }), 409)).details.code, 'stale');
+    // A veto without a code has none in its details.
+    assert.deepEqual((await problem(call(app, 'POST', `${ITEMS}/i1/operations/refuse`, { body: {} }), 409)).details, {
+      behavior: 'test.Hold',
+      action: 'refuse',
+      reason: 'refused as asked',
+    });
+
+    // A header that is not a JSON object is 400; an entry the engine refuses is 400 with its issues.
+    for (const header of ['not json', '[1]', '"Lease"']) {
+      assert.equal((await problem(call(app, 'PATCH', `${ITEMS}/i1`, { body: { title: 'X' }, headers: { preconditions: header } }), 400)).code, 'bad_request');
+    }
+    const invalid = await problem(call(app, 'DELETE', `${ITEMS}/i1`, { headers: { preconditions: '{"test.Counter":{}}' } }), 400);
+    assert.deepEqual([invalid.code, invalid.details], ['invalid_argument', { issues: [{ path: '/test.Counter', message: 'behavior test.Counter takes no precondition' }] }]);
+    assert.equal(engine.instances.get(everything, 'Item', 'i1')?.data.title, 'Lamp');
+    assert.equal(await data(call(app, 'DELETE', `${ITEMS}/i1`, { headers: fenced(1) })), null);
   });
 
   test('a list pages in creation order with an opaque cursor', async () => {

@@ -40,9 +40,9 @@ Not in scope:
 - Schema migrations. They belong to `sqlgen` and are designed on their own,
   for Postgres and SQLite. Section 8.4 states what this model needs from
   them.
-- Moving the distribution that built a deploy family on the source tree
-  onto this model. That family informed the design; section 16 lists what
-  was kept and what was not.
+- Moving the distribution built on the source tree onto this model. Its
+  deploy family informed the design; section 16 lists what was kept and what
+  was not.
 
 ## 2. Three tiers
 
@@ -872,7 +872,10 @@ model, or retired, when it lands.
    convenience. If OpenTofu becomes a first-class provisioner, test the
    name translation in both directions.
 
-## 16. What the distribution's deploy family taught
+## 16. What the source tree taught
+
+The source tree's generator grew a deploy family for a distribution:
+## 17. What the distribution's deploy family taught
 
 A distribution built a deploy family on the source tree's generator:
 `resourcesgen`, `chartgen`, `argogen`, `helmvaluesgen`, `mergedvalues`,

@@ -23,6 +23,21 @@ func IsRustKeyword(value string) bool {
 	}
 }
 
+// EscapeKeyword makes a snake_case identifier usable where Rust would read it
+// as a keyword: a raw identifier (r#type) for most keywords, and a trailing
+// underscore for crate, self, Self and super, which cannot be raw
+// identifiers. Any other identifier is returned as it is.
+func EscapeKeyword(identifier string) string {
+	if !IsRustKeyword(identifier) {
+		return identifier
+	}
+	switch identifier {
+	case "crate", "self", "Self", "super":
+		return identifier + "_"
+	}
+	return "r#" + identifier
+}
+
 // CollapseUnderscores normalizes consecutive underscores into a single underscore.
 func CollapseUnderscores(value string) string {
 	for strings.Contains(value, "__") {

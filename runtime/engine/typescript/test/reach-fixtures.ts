@@ -362,6 +362,10 @@ export const holder = defineBehavior<HolderConfig>({
     return undefined;
   },
   afterReferenceChange(context, reference, change) {
+    // Its own write changed what it holds: noting it now would be a cycle.
+    if (context.writing) {
+      return;
+    }
     context.instances.invoke(context.schema, context.id, 'note', { schema: reference.schema, id: reference.id, kind: change.kind });
     if (change.kind === 'delete' && context.config.leave !== true) {
       context.instances.invoke(context.schema, context.id, 'release', { schema: reference.schema, id: reference.id, key: reference.key });

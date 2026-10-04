@@ -1,0 +1,89 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "c1abdce86e55af2401ef1ce31bbadfb55e1744fe57daeeacb199c3b3b33e0f32",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE order_tag (\n  order_id UUID NOT NULL,\n  tag_id UUID NOT NULL,\n  CONSTRAINT order_tag_pkey PRIMARY KEY (order_id, tag_id)\n)",
+        "COMMENT ON TABLE order_tag IS 'Join table for order.labels'"
+      ],
+      "subject": "table/order_tag",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE tag (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  \"name\" CITEXT NOT NULL,\n  CONSTRAINT tag_pkey PRIMARY KEY (id),\n  CONSTRAINT tag_name_key UNIQUE (\"name\")\n)",
+        "COMMENT ON TABLE tag IS 'A label an order can carry.'"
+      ],
+      "subject": "table/tag",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_tag ADD CONSTRAINT fk_order_tag_order_id FOREIGN KEY (order_id) REFERENCES \"order\" (id) ON DELETE CASCADE"
+      ],
+      "subject": "table/order_tag/constraint/fk_order_tag_order_id",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_tag ADD CONSTRAINT fk_order_tag_tag_id FOREIGN KEY (tag_id) REFERENCES tag (id) ON DELETE CASCADE"
+      ],
+      "subject": "table/order_tag/constraint/fk_order_tag_tag_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order_label",
+          "reason": "Dropping join table order_label deletes the links of Order.labels.",
+          "subject": "table/order_label"
+        }
+      ],
+      "index": 5,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE order_label"
+      ],
+      "subject": "table/order_label",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/label",
+          "reason": "Dropping table label deletes its rows (Label). It may be a rename: table tag has the same columns. If it is, plan with --rename label=tag.",
+          "subject": "table/label"
+        }
+      ],
+      "index": 6,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE label"
+      ],
+      "subject": "table/label",
+      "transactional": true
+    }
+  ],
+  "to": "ccc8a2324c5e494436fbcc47b9caeaf40881ff709b7f98a7c1d595062ae2b836",
+  "toModel": null,
+  "version": 1
+}

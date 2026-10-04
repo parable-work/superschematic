@@ -18,8 +18,8 @@ set. Extensions that implement `cli.CommandProvider` add subcommands at
 resolves, so the same command tree serves a core-only binary and one that
 carries extensions.
 
-The core binary has five commands: `build`, `build-all`, `json-schema`,
-`format` and `behaviors`.
+The core binary has six commands: `build`, `build-all`, `migrate`,
+`json-schema`, `format` and `behaviors`.
 
 ## `build <service-dir>`
 
@@ -89,10 +89,21 @@ uses; siblings outside the closure are not built. It writes no
 `.deps.json` and runs no `BuildAllHook`s, since both describe the whole
 services root. It cannot be combined with `--emit-ir`.
 
+`--api-language` builds the target's API server in another language
+(`GO`, `RUST` or `TYPESCRIPT`, any case) than its config's
+`outputs.api.language`, for example a Rust server of a service whose
+committed config builds a Go one. It changes the target only, never a
+dependency that `--with-deps` builds, and leaves the config on disk as it
+was. The target must enable `outputs.api` and the types of that language,
+as a committed language must. Pair it with `--out`, so the two servers do
+not share an output root; a build's cache stamps come from `build-all`,
+which has no such flag.
+
 ```
 superschematic build ./schemas/services/shop-db
 superschematic build ./schemas/services/shop-db --emit-ir | jq .types
 superschematic build --with-deps ./schemas/services/shop-api
+superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust ./schemas/services/shop-api
 ```
 
 | Flag | Default | Meaning |
@@ -103,6 +114,7 @@ superschematic build --with-deps ./schemas/services/shop-api
 | `--profile` | false | emit build phase timings to stderr |
 | `--skip-format` | false | skip developer-friendly formatting for generated files |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
+| `--api-language` | the config's | build the target's API server in this language (`GO`, `RUST` or `TYPESCRIPT`) |
 
 ## `build-all <services-root>`
 
@@ -167,6 +179,62 @@ files elsewhere under the schemas root that its documents import. The
 input hash covers those files' contents. `build`, `build --with-deps` and
 `build-all` all write it under the schemas root they resolved, whatever the
 schemas root is named and wherever `--out` points.
+
+## `migrate plan <service-dir>`
+
+Plan the migration of a DB service's database from a previous version of
+its schema to the one in `<service-dir>`, with no database at hand. The
+plan is ordered steps in two phases, `expand` before the new servers roll
+out and `contract` after, each with its SQL and its hazards.
+`superschematic-migrate` applies it.
+[Schema migrations](/superschematic/reference/migrations/) covers the plan,
+the hazard classes, readers, renames and the runner.
+
+The previous version is another checkout of the service (`--from
+<service-dir>`), the model a database recorded (`--from <model.json>`), or
+the schemas root at a git ref (`--from-ref`); with none, the plan starts
+from an empty database. Each version loads with its dependencies resolved
+from its own schemas root, as `build --with-deps` resolves them, and with
+its own naming file when it has one. Both resolve to models with the
+options a build passes the `sql` generator.
+
+The API and General services in each version's schemas root are that
+version's readers: the columns their `@source` views read. A step that
+drops, renames or retypes a column a reader live at its phase reads is
+`api-breaking` for that reader. `--reader` adds a service that lives
+elsewhere; it counts on both sides.
+
+`--dialect sqlite` plans the service's SQLite database, with the copy-table
+rebuild where SQLite's `ALTER TABLE` falls short
+([SQLite](/superschematic/reference/migrations/#sqlite)). The service's
+`outputs.sql.dialects` must list `sqlite`.
+
+`--format` prints the plan to stdout; notes, such as planning from an empty
+database, go to stderr. With `--fail-on`, the command prints the plan,
+then lists on stderr each hazard of a listed class that no `--allow` names,
+with the `--allow` that lets it pass, and exits 1.
+
+```
+superschematic migrate plan ./schemas/services/shop-db
+superschematic migrate plan ./schemas/services/shop-db --from-ref origin/main --format markdown --fail-on destructive,compat
+superschematic migrate plan ./schemas/services/shop-db --from-ref origin/main --rename order.total=order.amount --out plan.json
+superschematic migrate plan ./schemas/services/shop-db --from applied-model.json --out plan.json
+superschematic migrate plan ./schemas/services/shop-db --print-model > model.json
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--from` | none | the previous version: another checkout of the service directory, or a model JSON file as `superschematic-migrate status --model` prints it |
+| `--from-ref` | none | the previous version: the schemas root at this git ref, read with `git archive`; cannot be combined with `--from` |
+| `--rename` | none | a rename: `old=new` for a table, `oldTable.oldColumn=newTable.newColumn` for a column; repeatable |
+| `--reader` | none | an API or General service directory outside the schemas root whose `@source` views read the database; repeatable |
+| `--dialect` | `postgres` | the database dialect: `postgres`, or `sqlite` for a service whose `outputs.sql.dialects` lists it |
+| `--out` | none | write the plan JSON, in canonical form, to this file |
+| `--format` | `sql` | print the plan to stdout as `json`, `sql` or `markdown` |
+| `--fail-on` | none | hazard classes, comma-separated, or `all`; exit 1 when the plan has a hazard of one that no `--allow` names |
+| `--allow` | none | a hazard id `--fail-on` lets pass; repeatable |
+| `--print-model` | false | print the new version's model as canonical JSON, for `superschematic-migrate adopt`, and plan nothing; takes none of the plan flags |
+| `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 
 ## `json-schema`
 

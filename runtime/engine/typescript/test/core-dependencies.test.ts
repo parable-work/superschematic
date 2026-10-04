@@ -467,8 +467,12 @@ for (const driver of drivers) {
       assert.deepEqual(issues([{ id: 't9' }]), [{ path: '/behaviors/Dependencies/blockers/0/id', message: 'Task t9 does not exist' }]);
       // An instance cannot block itself: the edge would be a cycle.
       assert.deepEqual(issues([{ id: 't4' }]), [{ path: '/behaviors/Dependencies/blockers/0/id', message: 'Task t4 cannot block itself' }]);
+      // A veto of a create's blocker carries addBlocker's declared code, and its entry.
       const twice = thrown(create([{ id: 't1' }, { schema: 'Task', id: 't1' }]), BehaviorVetoError);
-      assert.deepEqual([twice.behavior, twice.action, twice.reason], ['Dependencies', 'create', 'Task t1 already blocks it']);
+      assert.deepEqual(
+        [twice.behavior, twice.action, twice.reason, twice.vetoCode, twice.vetoDetails],
+        ['Dependencies', 'create', 'Task t1 already blocks it', 'already_blocking', { path: '/behaviors/Dependencies/blockers/1' }]
+      );
       // Its createParamsSchema holds the shape.
       assert.deepEqual(issues('t1'), [{ path: '/behaviors/Dependencies/blockers', message: 'must be array' }]);
       assert.deepEqual(issues([{ id: 't1', open: true }]), [{ path: '/behaviors/Dependencies/blockers/0', message: 'must NOT have additional properties: open' }]);
@@ -491,9 +495,10 @@ for (const driver of drivers) {
         publish(engine, schema('Gate', [{ name: 'Dependencies', config: dependencies }, { name: 'Workflow', config: gateFlow }]));
       const create = (blocker: Record<string, unknown>) => engine.instances.create(alice, 'Gate', { title: 'g1' }, { behaviors: { Dependencies: { blockers: [blocker] } } });
       gate({ schemas: ['Task', 'Check'] });
-      assert.equal(
-        thrown(() => create({ schema: 'Task', id: 't1' }), BehaviorVetoError).reason,
-        'it is done, a gated state no transition leaves, so it takes no blocker that is not finished: Task t1 (todo)'
+      const gated = thrown(() => create({ schema: 'Task', id: 't1' }), BehaviorVetoError);
+      assert.deepEqual(
+        [gated.action, gated.reason, gated.vetoCode],
+        ['create', 'it is done, a gated state no transition leaves, so it takes no blocker that is not finished: Task t1 (todo)', 'gated']
       );
       // A failed check is terminal, and still not finished: satisfiedBy lists success alone.
       assert.equal(

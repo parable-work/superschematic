@@ -1,0 +1,39 @@
+{
+  "dialect": "postgres",
+  "from": "3a8a1fab228cd38bf3cfebbb3d306d0e9e9e751ac003759aeafaf92a221fd12f",
+  "hash": "3d232e47dc21aea7ee7598b2400124f4963dbd7afff356f06e7e13cd51fbd72e",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order_history/index/idx_order_history_recorded",
+          "reason": "order_history is partitioned, so the index is built without CONCURRENTLY and blocks writes to it for the length of the build.",
+          "subject": "table/order_history/index/idx_order_history_recorded"
+        }
+      ],
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_order_history_recorded ON order_history USING BTREE (recorded_at)"
+      ],
+      "subject": "table/order_history/index/idx_order_history_recorded",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_prune_history(retention_days INTEGER DEFAULT 30, max_rows INTEGER DEFAULT NULL) RETURNS BIGINT AS $$\nDECLARE\n  deleted_count BIGINT;\nBEGIN\n  WITH candidates AS (\n    SELECT h.history_id\n    FROM order_history h\n    WHERE h.recorded_at \u003c now() - make_interval(days =\u003e retention_days)\n      AND EXISTS (\n        SELECT 1\n        FROM order_history newer\n        WHERE newer.id = h.id\n          AND newer._version \u003e h._version\n      )\n    LIMIT max_rows\n  ),\n  deleted AS (\n    DELETE FROM order_history h\n    USING candidates c\n    WHERE h.history_id = c.history_id\n    RETURNING 1\n  )\n  SELECT count(*) INTO deleted_count FROM deleted;\n  RETURN deleted_count;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_prune_history",
+      "transactional": true
+    }
+  ],
+  "to": "c567a394542b444c799d9c960caf9d1ec01d0fa692df78c6195109488fd12ca2",
+  "toModel": null,
+  "version": 1
+}

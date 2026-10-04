@@ -69,13 +69,14 @@ type (
 	SchemaCatalogEntry = registry.SchemaCatalogEntry
 
 	// BehaviorSpec registers a behavior from its JSON declaration, whose
-	// shape is BehaviorDeclaration with its BehaviorField and
-	// BehaviorOperation entries. Behavior is a registered one, as
-	// Registry.Behavior returns it.
+	// shape is BehaviorDeclaration with its BehaviorField,
+	// BehaviorOperation and BehaviorVeto entries. Behavior is a
+	// registered one, as Registry.Behavior returns it.
 	BehaviorSpec        = registry.BehaviorSpec
 	BehaviorDeclaration = registry.BehaviorDeclaration
 	BehaviorField       = registry.BehaviorField
 	BehaviorOperation   = registry.BehaviorOperation
+	BehaviorVeto        = registry.BehaviorVeto
 	Behavior            = registry.Behavior
 
 	// EnvConfig is a schema's resolved @envVars contract: the fields an

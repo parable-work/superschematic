@@ -198,7 +198,8 @@ for (const driver of drivers) {
       engine.instances.update(nora, 'Run', 'r1', { title: 'Twice?' });
       assert.equal(allSteps(engine).length, 1);
       // The child's run link is required, so the parent's delete is refused while it stands.
-      assert.equal(thrown(() => engine.instances.delete(nora, 'Run', 'r1'), BehaviorVetoError).behavior, 'Links');
+      const kept = thrown(() => engine.instances.delete(nora, 'Run', 'r1'), BehaviorVetoError);
+      assert.deepEqual([kept.behavior, kept.vetoCode], ['Links', 'required_target']);
     });
   });
 
@@ -262,6 +263,29 @@ for (const driver of drivers) {
       );
       // Its other fields stay open.
       assert.equal(engine.instances.update(wren, 'Step', build.id, { title: 'Build it well' }).data.title, 'Build it well');
+    });
+
+    test("a stamp checks the child schema's live Constants again: one a later version dropped is vetoed not_constant, and nothing is stamped", () => {
+      const engine = world();
+      const links = { run: { schema: 'Run', required: true } };
+      // A later version of Step drops topic from Constants, then Constants
+      // altogether: Run's published version is not refused for it.
+      publish(engine, documentOf('Step', stepFields, [{ name: 'Workflow', config: stepFlow }, { name: 'Constants', config: { fields: ['step'] } }, { name: 'Dependencies' }, { name: 'Links', config: { links } }]));
+      const loose = thrown(() => engine.instances.create(nora, 'Run', { title: 'Loose', topic: 'public' }, { id: 'r1' }), BehaviorVetoError);
+      assert.deepEqual(
+        [loose.behavior, loose.action, loose.vetoCode, loose.vetoDetails, loose.reason],
+        ['Blueprint', 'create', 'not_constant', { fields: ['topic'] }, "Step's Constants does not list topic, which each stamp sets and nothing may change after"]
+      );
+      publish(engine, documentOf('Step', stepFields, stepBehaviors(links).filter((ref) => ref.name !== 'Constants')));
+      const none = thrown(() => engine.instances.create(nora, 'Run', { title: 'None' }, { id: 'r2' }), BehaviorVetoError);
+      assert.deepEqual([none.vetoCode, none.vetoDetails], ['not_constant', { fields: ['step', 'topic'] }]);
+      assert.equal(engine.instances.get(alice, 'Run', 'r1'), undefined);
+      assert.equal(engine.instances.get(alice, 'Run', 'r2'), undefined);
+      assert.equal(allSteps(engine).length, 0);
+      // Constants back over both, the stamp goes ahead.
+      publish(engine, documentOf('Step', stepFields, stepBehaviors(links)));
+      engine.instances.create(nora, 'Run', { title: 'Kept' }, { id: 'r3' });
+      assert.equal((childrenOf(engine, 'r3') as Child[]).length, 4);
     });
 
     test('a pinned parentLink needs Revisions listed before Blueprint, and pins the parent revision its create records', () => {
@@ -386,14 +410,15 @@ for (const driver of drivers) {
       engine.instances.create(nora, 'Run', { title: 'Old plan' }, { id: 'r2', behaviors: { Links: { plan: { id: 'p1', revision: 1 } } } });
       assert.deepEqual(edges(engine, 'r2'), { first: [], second: ['first'] });
       // Stamped at its create, the run's from link cannot move.
-      assert.equal(thrown(() => link(engine, nora, 'r1', 'plan', 'p1', 1), BehaviorVetoError).behavior, 'Blueprint');
+      const moved = thrown(() => link(engine, nora, 'r1', 'plan', 'p1', 1), BehaviorVetoError);
+      assert.deepEqual([moved.behavior, moved.vetoCode], ['Blueprint', 'stamped']);
 
       engine.instances.create(alice, 'Plan', { title: 'Cyclic', steps: { a: { after: ['b'] }, b: { after: ['a'] } } }, { id: 'bad' });
       const before = allSteps(engine).length;
       const refused = thrown(() => engine.instances.create(nora, 'Run', { title: 'Doomed' }, { id: 'r3', behaviors: { Links: { plan: 'bad' } } }), BehaviorVetoError);
       assert.deepEqual(
-        [refused.behavior, refused.action, refused.reason],
-        ['Blueprint', 'create', 'the steps of Plan bad revision 1 are invalid: the steps form a cycle: a -> b -> a']
+        [refused.behavior, refused.action, refused.reason, refused.vetoCode],
+        ['Blueprint', 'create', 'the steps of Plan bad revision 1 are invalid: the steps form a cycle: a -> b -> a', 'invalid_steps']
       );
       assert.equal(engine.instances.get(alice, 'Run', 'r3'), undefined);
       assert.equal(allSteps(engine).length, before);
@@ -409,7 +434,7 @@ for (const driver of drivers) {
       assert.deepEqual(Object.keys(edges(engine, 'r1')), ['first', 'second', 'third']);
       assert.deepEqual(Object.keys(edges(engine, 'r2')), ['only']);
       const refused = thrown(() => link(engine, nora, 'r1', 'plan', 'p1'), BehaviorVetoError);
-      assert.equal(refused.reason, 'its children were stamped from the revision its link plan pins, so the link cannot move');
+      assert.deepEqual([refused.reason, refused.vetoCode], ['its children were stamped from the revision its link plan pins, so the link cannot move', 'stamped']);
       assert.equal(allSteps(engine).length, 4);
     });
 
@@ -420,7 +445,9 @@ for (const driver of drivers) {
       engine.instances.create(alice, 'Plan', { title: 'No steps' }, { id: 'none' });
       engine.instances.create(alice, 'Plan', { title: 'A list', steps: ['a'] }, { id: 'list' });
       engine.instances.create(nora, 'Run', { title: 'Run' }, { id: 'r1' });
-      const reasons = ['bad', 'odd', 'none', 'list'].map((id) => thrown(() => link(engine, nora, 'r1', 'plan', id), BehaviorVetoError).reason);
+      const vetoes = ['bad', 'odd', 'none', 'list'].map((id) => thrown(() => link(engine, nora, 'r1', 'plan', id), BehaviorVetoError));
+      assert.deepEqual(new Set(vetoes.map((veto) => veto.vetoCode)), new Set(['invalid_steps']));
+      const reasons = vetoes.map((veto) => veto.reason);
       assert.deepEqual(reasons, [
         'the steps of Plan bad revision 1 are invalid: the steps form a cycle: a -> b -> a',
         'the steps of Plan odd revision 1 are invalid: step a: when names size, which is not a field of Run (its fields: title, topic, flags)',

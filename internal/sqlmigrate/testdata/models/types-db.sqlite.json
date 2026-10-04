@@ -1,0 +1,126 @@
+{
+  "dialect": "sqlite",
+  "service": "types-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Sample.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "text",
+          "origin": "Sample.text",
+          "type": "TEXT"
+        },
+        {
+          "name": "short",
+          "nullable": true,
+          "origin": "Sample.short",
+          "type": "TEXT"
+        },
+        {
+          "name": "folded",
+          "nullable": true,
+          "origin": "Sample.folded",
+          "type": "TEXT COLLATE NOCASE"
+        },
+        {
+          "default": "(strftime('%Y-%m-%d', 'now'))",
+          "name": "day",
+          "origin": "Sample.day",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%H:%M:%f', 'now'))",
+          "name": "clock",
+          "origin": "Sample.clock",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "at",
+          "origin": "Sample.at",
+          "type": "TEXT"
+        },
+        {
+          "name": "span",
+          "nullable": true,
+          "origin": "Sample.span",
+          "type": "TEXT"
+        },
+        {
+          "name": "address",
+          "nullable": true,
+          "origin": "Sample.address",
+          "type": "TEXT"
+        },
+        {
+          "name": "small",
+          "nullable": true,
+          "origin": "Sample.small",
+          "type": "INTEGER"
+        },
+        {
+          "name": "count",
+          "origin": "Sample.count",
+          "type": "INTEGER"
+        },
+        {
+          "name": "flag",
+          "origin": "Sample.flag",
+          "type": "INTEGER"
+        },
+        {
+          "name": "ratio",
+          "nullable": true,
+          "origin": "Sample.ratio",
+          "type": "REAL"
+        },
+        {
+          "name": "amount",
+          "nullable": true,
+          "origin": "Sample.amount",
+          "type": "NUMERIC"
+        },
+        {
+          "name": "doc",
+          "nullable": true,
+          "origin": "Sample.doc",
+          "type": "TEXT"
+        },
+        {
+          "default": "'[]'",
+          "name": "tags",
+          "origin": "Sample.tags",
+          "type": "TEXT"
+        },
+        {
+          "name": "bytes",
+          "nullable": true,
+          "origin": "Sample.bytes",
+          "type": "BLOB"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "stamp",
+          "nullable": true,
+          "origin": "Sample.stamp",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "sample",
+      "origin": "Sample",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "sample_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

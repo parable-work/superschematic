@@ -1,0 +1,40 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "55f30e62f53f4b6ce8c4f738b6a84efadee2419046edbd5eb6925f10258417da",
+  "service": "shop-db",
+  "steps": [
+    {
+      "foreignKeysOff": true,
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer",
+          "reason": "Copying customer holds the database's write lock for time that grows with the table.",
+          "subject": "table/customer"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/customer",
+          "reason": "SQLite's ALTER TABLE cannot change the default of referrer_id, so the step rebuilds customer: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "subject": "table/customer"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"_new_customer\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"email\" TEXT COLLATE NOCASE NOT NULL,\n  \"created_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  \"referrer_id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),\n  PRIMARY KEY (\"id\")\n)",
+        "INSERT INTO \"_new_customer\" (\"id\", \"name\", \"email\", \"created_at\", \"referrer_id\")\nSELECT \"id\", \"name\", \"email\", \"created_at\", \"referrer_id\"\nFROM \"customer\"",
+        "DROP TABLE \"customer\"",
+        "ALTER TABLE \"_new_customer\" RENAME TO \"customer\"",
+        "CREATE UNIQUE INDEX \"customer_email_key\" ON \"customer\" (\"email\")"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    }
+  ],
+  "to": "e1af392a2995841f576a639028e2a0c2e30aebc20a53a86c733907e49225af74",
+  "toModel": null,
+  "version": 1
+}

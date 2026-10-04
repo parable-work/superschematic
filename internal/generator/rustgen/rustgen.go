@@ -903,15 +903,7 @@ func toRustFieldName(name string) string {
 	if fieldName[0] >= '0' && fieldName[0] <= '9' {
 		fieldName = "_" + fieldName
 	}
-	if rustutil.IsRustKeyword(fieldName) {
-		// crate / self / Self / super cannot be raw identifiers.
-		switch fieldName {
-		case "crate", "self", "Self", "super":
-			return fieldName + "_"
-		}
-		return "r#" + fieldName
-	}
-	return fieldName
+	return rustutil.EscapeKeyword(fieldName)
 }
 
 func hasMapFields(types []TypeInfo) bool {

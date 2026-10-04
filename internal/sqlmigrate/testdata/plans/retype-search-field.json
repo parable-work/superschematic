@@ -1,0 +1,48 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "09ec756b082947a4815088c18dadc1d06ad4f1e1505d84d301261ee3dad47e1d",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/product/column/title",
+          "reason": "The change rewrites product and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/product/column/title"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/product/column/title",
+          "reason": "Product.title changes from VARCHAR(80) to TEXT: servers built from the previous version still read and write VARCHAR(80).",
+          "subject": "table/product/column/title"
+        }
+      ],
+      "index": 1,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product\n  DROP COLUMN search_text,\n  ALTER COLUMN title TYPE TEXT,\n  ADD COLUMN search_text TEXT GENERATED ALWAYS AS (COALESCE(title, '')) STORED"
+      ],
+      "subject": "table/product/column/title",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_product_search_trgm"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_product_search_trgm ON product USING GIN (search_text gin_trgm_ops)"
+      ],
+      "subject": "table/product/index/idx_product_search_trgm",
+      "transactional": false
+    }
+  ],
+  "to": "8c525ba2aa19b2935e75a2090755c9a5a0923bfdddb1786d0618cf3d0c49cc9e",
+  "toModel": null,
+  "version": 1
+}

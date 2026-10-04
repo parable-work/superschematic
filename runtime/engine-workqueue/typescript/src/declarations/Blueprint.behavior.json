@@ -144,5 +144,31 @@
       "name": "blueprint",
       "description": "What was stamped: children, each step's key and its child's id, in the order they were created; absent until the instance is stamped."
     }
+  ],
+  "vetoes": [
+    {
+      "code": "stamped",
+      "description": "Links' link moving the from link once the instance's children were stamped from the revision it pins."
+    },
+    {
+      "code": "no_dependencies",
+      "description": "A stamp whose steps come after others, while the child schema does not compose Dependencies."
+    },
+    {
+      "code": "not_constant",
+      "description": "A stamp while the child schema's Constants does not keep keyField and every copied field, which a later version of it dropped; details.fields lists the ones it does not keep."
+    },
+    {
+      "code": "no_revision",
+      "description": "A stamp from a from link that records no revision to read the steps from."
+    },
+    {
+      "code": "unreadable",
+      "description": "A stamp from a pinned revision of the definition the principal cannot read."
+    },
+    {
+      "code": "invalid_steps",
+      "description": "A stamp from a map of steps that is not valid for this type."
+    }
   ]
 }

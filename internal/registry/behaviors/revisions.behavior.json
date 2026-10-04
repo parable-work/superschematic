@@ -195,5 +195,9 @@
         }
       }
     }
+  ],
+  "vetoes": [
+    { "code": "no_review", "description": "propose, approve, reject or listProposals on a type whose Revisions config sets no review." },
+    { "code": "not_pending", "description": "approve or reject of a proposal that is no longer pending." }
   ]
 }

@@ -560,6 +560,8 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
 
 - `name` is `<extension>.<Name>`, with the extension's own `Name()` as
   the prefix. Only the core declares bare names.
+- `description` says what the behavior adds; the describe document
+  shows it.
 - `configSchema` is the JSON Schema of what a type passes; leave it out
   for a behavior that takes no config.
 - `createParamsSchema`, optional, is the JSON Schema of the parameters a
@@ -578,6 +580,15 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   and the engine both refuse one that does not.
   `invocationPolicy` is a value of the registry's tool invocation policy;
   left out, the policy's default applies.
+- `vetoes` lists the codes the behavior's refusals carry, each
+  `{ code, description }` in lowercase snake case, so a client can
+  branch on `details.code` of a 409 `vetoed`. The engine refuses a veto
+  with a code the declaration does not list.
+- `preconditionSchema`, a closed object schema, declares what a caller
+  may assert to the behavior with a write: the entry it sends under the
+  behavior's name in the preconditions of an update, a delete or an
+  operation, which the engine checks and hands to the behavior's guard.
+  Lease's is `{ token }`.
 
 Assembly fails on a malformed declaration, and `Finalize` on a
 `requires` or `conflicts` name nobody registered or an invocation policy
@@ -691,15 +702,26 @@ also reads its own columns across every instance of the schema, with
 their own fields, through a read-only relation the engine names
 (`sql.instances()`), asking the access policy for read as the caller. A
 guard may veto an update, a delete or any behavior's operation on the
-type, and another behavior changes this one's state only by calling its
-operations, so those guards always run. Where a config names a permission, the
+type, with a reason or `{ reason, code, details }` whose code the
+declaration lists, and reads the caller's precondition for its behavior
+in `request.precondition`; another behavior changes this one's state only
+by calling its operations, so those guards always run. Where a config names a permission, the
 behavior asks `can(permission)`, which the permission matcher the
 deployment gives the engine answers. An operation can change the
 instance's own fields with `update(patch)`, which runs the checks and
 guards of an update. A `validate` function judges the fields a create or
 an update would store and returns issues at their paths, which refuse
-the write as `invalid_instance`, as the live version's own do. The
-engine's README ("Behaviors") has the whole interface.
+the write as `invalid_instance`, as the live version's own do, before
+any guard is asked; it never sees a precondition, which is the guard's
+to judge. `checkedTypes` names the document's types it checks values
+against, which the compatibility rule then holds, and `instanceSchema`
+shows clients what it holds the fields to, under `allOf` in the describe
+document and the create and update tools. The engine's README
+("Behaviors") has the whole interface: `parseConfig`, `configChange`,
+`afterConfigChange`, `migrations`, `initialize`, `validate`,
+`checkedTypes`, `instanceSchema`, `guard`, `operations`,
+`schemaOperations`, `fields`, `afterChange`, `guardReference`,
+`afterReferenceChange`, `reactions` and `schedules`.
 
 A deployment registers the implementation with the engine and passes the
 meta-schema its binary writes, which declares the behavior, and the tool

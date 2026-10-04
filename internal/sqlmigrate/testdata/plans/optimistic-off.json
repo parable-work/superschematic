@@ -1,0 +1,49 @@
+{
+  "dialect": "postgres",
+  "from": "f410e89d4a8d1d5dec25da83da56b04ab3945f1b948cef0452adc49e24813a85",
+  "hash": "a512d7c070e1533be55e2ec31f8664719f243edc73498dd5b3f8709200658a5b",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_product_bump_version ON product"
+      ],
+      "subject": "trigger/product/trg_product_bump_version",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropFunction",
+      "phase": "contract",
+      "statements": [
+        "DROP FUNCTION product_bump_version()"
+      ],
+      "subject": "function/product_bump_version",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product/column/_version",
+          "reason": "Dropping product._version deletes its values.",
+          "subject": "table/product/column/_version"
+        }
+      ],
+      "index": 3,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE product DROP COLUMN _version"
+      ],
+      "subject": "table/product/column/_version",
+      "transactional": true
+    }
+  ],
+  "to": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "toModel": null,
+  "version": 1
+}

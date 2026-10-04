@@ -1,0 +1,112 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "7f1f40eaf4f9b7f5eb68f1ab45716582c884a484d1943718431e76791c6ddbce",
+  "renames": [
+    "order=purchase"
+  ],
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchase",
+          "reason": "Table order is renamed to purchase: servers built from the previous version still use the old name.",
+          "subject": "table/purchase"
+        },
+        {
+          "class": "api-breaking",
+          "id": "api-breaking:table/purchase@shop-api/OrderView.total",
+          "reader": "shop-api/OrderView.total",
+          "reason": "shop-api reads order.total through OrderView.total, and this step renames its table to purchase.",
+          "subject": "table/purchase"
+        }
+      ],
+      "index": 1,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME TO \"purchase\""
+      ],
+      "subject": "table/purchase",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchase_label",
+          "reason": "Table order_label is renamed to purchase_label, following --rename order=purchase: servers built from the previous version still use the old name.",
+          "subject": "table/purchase_label"
+        }
+      ],
+      "index": 2,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order_label\" RENAME TO \"purchase_label\""
+      ],
+      "subject": "table/purchase_label",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order_line/column/purchase_id",
+          "reason": "order_line.order_id is renamed to order_line.purchase_id, following --rename order=purchase: servers built from the previous version still use the old name.",
+          "subject": "table/order_line/column/purchase_id"
+        }
+      ],
+      "index": 3,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order_line\" RENAME COLUMN \"order_id\" TO \"purchase_id\""
+      ],
+      "subject": "table/order_line/column/purchase_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchase_label/column/purchase_id",
+          "reason": "order_label.order_id is renamed to purchase_label.purchase_id, following --rename order=purchase: servers built from the previous version still use the old name.",
+          "subject": "table/purchase_label/column/purchase_id"
+        }
+      ],
+      "index": 4,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"purchase_label\" RENAME COLUMN \"order_id\" TO \"purchase_id\""
+      ],
+      "subject": "table/purchase_label/column/purchase_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/purchase/index/idx_purchase_customer_placed_at",
+          "reason": "SQLite cannot rename an index, so the step drops it and builds it again under its new name holds the database's write lock for time that grows with purchase.",
+          "subject": "table/purchase/index/idx_purchase_customer_placed_at"
+        }
+      ],
+      "index": 5,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "DROP INDEX \"idx_order_customer_placed_at\"",
+        "CREATE INDEX \"idx_purchase_customer_placed_at\" ON \"purchase\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/purchase/index/idx_purchase_customer_placed_at",
+      "transactional": true
+    }
+  ],
+  "to": "f0252318bfd1a7c9310c7c1c291966a22362bf557e8f0c16a6719bff3fa4925a",
+  "toModel": null,
+  "version": 1
+}

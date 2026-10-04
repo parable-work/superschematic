@@ -183,7 +183,7 @@ Each `Register*` method checks its own spec:
 | `RegisterToolHook` | an empty name, no `Edit`, a duplicate name |
 | `RegisterScalars` | an empty owner, a nil catalog, a second catalog |
 | `RegisterToolInvocationPolicy` | no `Extension`, a key, value list or default that fails `Validate`, a second policy |
-| `RegisterBehavior` | a declaration that does not decode or has an unknown key, a malformed name or one that does not belong to the registering extension, a duplicate name, a schema that does not compile, a params schema that is not an object schema or does not set `"additionalProperties": false`, an operation or field name that is malformed or repeats, an operation named like one every schema has (section 3.16) |
+| `RegisterBehavior` | a declaration that does not decode or has an unknown key, a malformed name or one that does not belong to the registering extension, a duplicate name, a schema that does not compile, a params or precondition schema that is not an object schema or does not set `"additionalProperties": false`, a create params schema that is not an object schema or whose `additionalProperties` is neither `false` nor a schema, an operation or field name that is malformed or repeats, an operation named like one every schema has, a veto code that is not lowercase snake case or repeats (section 3.16) |
 
 Every one of them fails after `Finalize`.
 
@@ -371,7 +371,7 @@ The core generators:
 | Name | Output key | Writes |
 | --- | --- | --- |
 | `types` | `types` | Go, TypeScript, Python and Rust types, one switch per language |
-| `sql` | `sql` | Postgres DDL, projection views with their migrations and Arrow schemas; implied by the DB kind, and `outputs.sql` places the view migrations (`migrationsDir`) and sets their role (`viewOwner`) |
+| `sql` | `sql` | Postgres DDL, projection views with their migrations and Arrow schemas, and SQLite DDL when `outputs.sql.dialects` lists `sqlite`; implied by the DB kind, and `outputs.sql` places the view migrations (`migrationsDir`), sets their role (`viewOwner`) and lists the dialects (`dialects`) |
 | `orm` | none | the Go ORM; implied by the DB kind |
 | `api` | `api` | the Go chi server, the Rust axum crate or the TypeScript Hono package (`outputs.api.language`), and OpenAPI |
 | `sdks` | `sdk` | TypeScript, Go, Python and Rust clients, one switch per language |
@@ -723,6 +723,8 @@ shape is `BehaviorDeclaration`:
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
 | `fields` | the fields it adds: `name` and `description` |
 | `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+| `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
+| `vetoes` | the codes its refusals carry, each `code` (lowercase snake case, at most 64 characters) and `description`; an engine refuses a veto whose code is not listed |
 
 An operation's `scope` says what a call names: `instance`, one instance
 by id, or `schema`, the schema as a whole with no instance, which an
@@ -740,7 +742,9 @@ registering extension's `Name()`; inside `Use` the spec's `Extension` must
 be the extension whose `Register` is running, so an extension cannot
 declare a core name. An operation may not be named `create`, `get`,
 `list`, `update` or `delete`, which every schema has (D16), or declare a
-scope other than `instance` or `schema`. `Finalize`
+scope other than `instance` or `schema`. A `preconditionSchema` is held
+to a `paramsSchema`'s rule, and a veto code that is not lowercase snake
+case, or is listed twice, is refused (D16, amended). `Finalize`
 checks `requires`, `conflicts` and the invocation policy values, since the
 policy is fixed only once every extension has registered.
 `Registry.Behavior(name)` returns a registered `Behavior`: the declaration,
@@ -854,7 +858,12 @@ distribution's policy need not have the core's values; each operation
 takes the policy's default. Every
 `paramsSchema` sets `additionalProperties: false`. `Links` and
 `Dependencies` declare a `createParamsSchema`: a create's links by name
-and its blockers. A config a
+and its blockers. `Lease` declares a `preconditionSchema`, `{ token }`.
+`Workflow`, `Revisions`, `Dependencies`, `Links` and every work-queue
+behavior list the codes of their vetoes. `Constants` and `Variants`
+declare no field, operation, parameter, precondition or code: what they
+refuse is an issue at a field (`invalid_instance`), which the engine's
+implementation returns from its `validate` hook, not a veto. A config a
 declaration's `configSchema` accepts can still fail in the engine, whose
 implementation checks what JSON Schema cannot (a Workflow transition
 that names a state the config does not list, a Workflow outcome for a
@@ -880,13 +889,15 @@ engine; without them the engine refuses a schema that composes one.
 | `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`, `outcomes`); required | `rollups` | none |
 | `Search` | `fields`, `weights`; required | none | `search`, of scope `schema` |
 | `Reactions` | `rules` (each a `when`, `enters`, `allTerminal` or `anyTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
-| `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `acquirePermission`, `overridePermission`, `directPermission`; optional; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
+| `Constants` | `fields`, `permission`; required | none | none |
+| `Variants` | `field`, `by`, `types` (by a value of `by`, a type of the document); required | none | none |
+| `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`; optional; a `preconditionSchema`, `{ token }`; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
-| `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext`, of scope `schema` |
+| `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext` and the read-only `countClaimable`, of scope `schema` |
 | `Presence` | `ttlMs`, `principalField`, `onMissed` and `onBeat` (`transition`, `from`), `releaseLeases`, `sweepMs`; required; `@superschematic/engine-workqueue` | `presence` | `beat`, `miss` |
 | `Blueprint` | `schema`, `parentLink`, `keyField`, one of `steps` (by key: `after`, `when`, `data`) and `from` (`link`, `field`), `copyFields`, `copyLinks`; required; `@superschematic/engine-workqueue` | `blueprint` | none |
-| `Budget` | `meters` (by name: `limit` or `limitField`, `reserve` or `reserveField`, `scope`, `reset`), `limitPermission`, `onExceeded` (`direct`); required; `@superschematic/engine-workqueue` | `budget` | `reserve`, `recordUsage`, `settle`, `setLimit`, `reserveFor`, `settleFor`, `recordUsageFor` |
-| `Retries` | `classes` (by name: `attempts`, or `terminal`), `totalAttempts`, `limitsField`, `keepBest` (`minDelta`, `neverRegress`), `stuckAfter`, `resultField`, `exhaustedState`, `from`, `permission`; required; requires `Workflow`; `@superschematic/engine-workqueue` | `retries` | `recordAttempt` |
+| `Budget` | `meters` (by name: `limit` or `limitField`, `reserve` and `reserveField`, `scope`, `reset`), `limitPermission`, `onExceeded` (`direct`), `escalate` (`transition`, `from`); required; `@superschematic/engine-workqueue` | `budget` | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, `reserveFor`, `settleFor`, `recordUsageFor` |
+| `Retries` | `classes` (by name: `attempts` and `hint`, or `terminal`), `totalAttempts`, `limitsField`, `limitsPermission`, `keepBest` (`minDelta`, `neverRegress`), `stuckAfter`, `resultField`, `exhaustedState`, `from`, `permission`; required; requires `Workflow`; `@superschematic/engine-workqueue` | `retries` | `recordAttempt` |
 
 `Dependencies`, `Links` and `Rollups` reach other instances (D16,
 amended): a blocker, a link target or the instances a rollup reads are
@@ -960,7 +971,8 @@ with `--package @superschematic/engine` and
 declarations it implements, and `make behaviors-check`, part of `make
 test` and CI's go job, fails on a stale copy in either. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
-Schema's object keys sorted (`createParamsSchema` included), two-space
+Schema's object keys sorted (`createParamsSchema` and `preconditionSchema`
+included), two-space
 indents and a final newline, so it changes only when the declaration
 does.
 

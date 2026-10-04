@@ -250,7 +250,7 @@ export interface VariantsConfig {
 export interface LeaseConfig {
   /** How long a lease lasts after its acquire or its last heartbeat, in milliseconds, at least 1000; 60000 when absent. */
   readonly ttlMs?: number;
-  /** How often the holder should send a heartbeat, in milliseconds, less than ttlMs; a third of ttlMs when absent. */
+  /** How often the holder should send a heartbeat, in milliseconds, at most half of ttlMs; a third of ttlMs when absent. */
   readonly heartbeatMs?: number;
   /** How often the engine's runner expires lapsed leases, in milliseconds, at least 1000; 5000 when absent. */
   readonly sweepMs?: number;
@@ -260,16 +260,22 @@ export interface LeaseConfig {
   readonly maxHoldField?: string;
   /**
    * Moves the instance's Workflow status, through transition, when a lease
-   * ends with the work unfinished: at an expiry, and at a release, while
-   * the status is one of from. Needs Workflow on the type.
+   * ends with the work unfinished: at an expiry, an abandon and a release,
+   * while the status is one of from. Needs Workflow on the type.
    */
   readonly onExpiry?: LeaseTransition;
-  /** How many expiries an instance may have before its lease cannot be acquired again. */
+  /** How many expiries an instance may have, abandons included, before its lease cannot be acquired again. */
   readonly maxExpiries?: number;
-  /** Used instead of onExpiry at the expiry that reaches maxExpiries, which it needs. */
+  /** Used instead of onExpiry at the expiry or abandon that reaches maxExpiries, which it needs. */
   readonly escalate?: LeaseTransition;
   /** Writing operations of the type's other behaviors, as `<Behavior>.<operation>`, that other principals may run while the lease is active. */
   readonly exempt?: readonly string[];
+  /**
+   * Refuses a write to an instance with an active lease that does not
+   * present the current token as Lease's precondition, the holder's own
+   * included, so every process of a principal fences its writes.
+   */
+  readonly requireToken?: boolean;
   /** The permission a principal needs to acquire a lease. */
   readonly acquirePermission?: string;
   /** The permission that releases another principal's lease, writes while another holds it, resets expiries, and sends directives when directPermission is absent. */
@@ -296,7 +302,7 @@ export interface QueueConfig {
   readonly claim: { readonly from: readonly string[]; readonly to: string };
   /** An integer field of the type that orders claimNext: higher first, an instance without a value last. */
   readonly priorityField?: string;
-  /** The type's own top-level scalar fields claimNext may filter on, by equality. */
+  /** The type's own top-level scalar fields claimNext and countClaimable may filter on, by a value or a list of values. */
   readonly match?: readonly string[];
   /** The most instances one claimNext tries; 100 when absent. */
   readonly maxCandidates?: number;
@@ -368,6 +374,8 @@ export interface BudgetConfig {
   readonly limitPermission?: string;
   /** A directive sent to the holder of the active lease when usage takes the instance or an enclosing scope over its limit; needs Lease. */
   readonly onExceeded?: { readonly direct: string };
+  /** Moves the instance's Workflow status, through transition, when usage leaves it over a limit while the status is one of from; needs Workflow. */
+  readonly escalate?: { readonly transition: string; readonly from: readonly string[] };
 }
 
 /** One meter of a Budget config. */
@@ -376,9 +384,9 @@ export interface BudgetMeter {
   readonly limit?: number;
   /** An integer field of the type that holds the instance's limit; not with limit. */
   readonly limitField?: string;
-  /** The amount reserve takes for the meter when it is given no meter. */
+  /** The amount reserve takes for the meter when it is given no meter; with reserveField, when the field holds no positive integer. */
   readonly reserve?: number;
-  /** An integer field of the type whose positive value is that amount; not with reserve. */
+  /** An integer field of the type whose positive value is that amount, in place of reserve. */
   readonly reserveField?: string;
   /** A link of the type's Links config whose target, which composes Budget with the meter, is the enclosing scope. */
   readonly scope?: string;
@@ -388,12 +396,18 @@ export interface BudgetMeter {
 
 /** Retries' config. */
 export interface RetriesConfig {
-  /** The failure classes, by name: a cap of attempts each, or terminal. */
-  readonly classes: { readonly [failure: string]: { readonly attempts: number } | "terminal" };
+  /** The failure classes, by name: a cap of attempts each, with a hint recordAttempt returns for a failure of the class, or terminal. */
+  readonly classes: { readonly [failure: string]: { readonly attempts: number; readonly hint?: string } | "terminal" };
   /** How many failures of every class together an instance may have. */
   readonly totalAttempts: number;
   /** An object field of the type with the instance's own caps, by class name and totalAttempts. */
   readonly limitsField?: string;
+  /**
+   * The permission that changes limitsField once the instance exists; absent, the caps it was created with stay.
+   * Never the holder of the instance's active lease, with it or without: Retries guards its own field, where
+   * Constants, the general rule for a field nothing changes, would let any caller with its permission.
+   */
+  readonly limitsPermission?: string;
   /** Keeps the best scoring result: by at least minDelta, and never losing a neverRegress predicate. */
   readonly keepBest?: { readonly minDelta?: number; readonly neverRegress?: readonly string[] };
   /** How many failures in a row, none kept, with the same signature exhaust the instance as stuck. */

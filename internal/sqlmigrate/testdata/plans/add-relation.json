@@ -1,0 +1,41 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "b288c7d2e5ae83823da785a03b5b1fc1db55e24ed382e93e530539bee1d0db34",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_line ADD COLUMN product_id UUID"
+      ],
+      "subject": "table/order_line/column/product_id",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_line ADD CONSTRAINT fk_order_line_product_id FOREIGN KEY (product_id) REFERENCES product (id) ON DELETE CASCADE NOT VALID"
+      ],
+      "subject": "table/order_line/constraint/fk_order_line_product_id",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "validateForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_line VALIDATE CONSTRAINT fk_order_line_product_id"
+      ],
+      "subject": "table/order_line/constraint/fk_order_line_product_id",
+      "transactional": true
+    }
+  ],
+  "to": "5354e0bcaafbe156db34a756971b256c3f8a105216520d0690ca67a6427bf601",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,70 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "a6f27c915096e2fb720afa6d2947a5b8973b62fa02d5f9f062ce408a3e70a011",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"order_tag\" (\n  \"order_id\" TEXT NOT NULL,\n  \"tag_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"tag_id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"order\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"tag_id\") REFERENCES \"tag\" (\"id\") ON DELETE CASCADE\n)"
+      ],
+      "subject": "table/order_tag",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"tag\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"name\" TEXT COLLATE NOCASE NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "CREATE UNIQUE INDEX \"tag_name_key\" ON \"tag\" (\"name\")"
+      ],
+      "subject": "table/tag",
+      "transactional": true
+    },
+    {
+      "foreignKeysOff": true,
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order_label",
+          "reason": "Dropping join table order_label deletes the links of Order.labels.",
+          "subject": "table/order_label"
+        }
+      ],
+      "index": 3,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE \"order_label\""
+      ],
+      "subject": "table/order_label",
+      "transactional": true
+    },
+    {
+      "foreignKeysOff": true,
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/label",
+          "reason": "Dropping table label deletes its rows (Label). It may be a rename: table tag has the same columns. If it is, plan with --rename label=tag.",
+          "subject": "table/label"
+        }
+      ],
+      "index": 4,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE \"label\""
+      ],
+      "subject": "table/label",
+      "transactional": true
+    }
+  ],
+  "to": "21e5db4707e8ca380d85641e78c9b8d7968289c7ca05bd21f70574ef95a65421",
+  "toModel": null,
+  "version": 1
+}
