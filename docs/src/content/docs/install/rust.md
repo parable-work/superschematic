@@ -140,8 +140,9 @@ let sdk = CatalogSdk::new(ClientConfig {
 ```
 
 `auth_token` is static. `auth_token_provider` / `refresh_auth_token` cover
-per-request tokens and a one-shot refresh on 401. Operation sets become
-fields on the SDK struct.
+per-request tokens and a one-shot refresh on 401. Each namespace is a
+field of the SDK struct: `ProductQueries` and `ProductMutations` both live
+on `sdk.product`, so a call is `sdk.product.get_product(id, None).await`.
 
 An operation without an input type takes its arguments as one input
 struct, `<Operation>Input`, whose fields are sent under the arguments'

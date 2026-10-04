@@ -22,6 +22,7 @@ TypeScript.
 | `extends Authenticated` on the set | a caller, on every route of the set |
 | `@auth` on a method | a caller |
 | `@requirePermission([...])` on a method | a caller holding one of the permissions |
+| `@requireOwnership` on a method | a caller, as `@auth` does; whether the caller owns the resource is for your implementation to check |
 | none of these | nothing: anyone may call it |
 
 Mark a route that anyone may call `@publicRoute`, so an open route reads as
@@ -49,9 +50,8 @@ route that needs a caller.
 ## Turn it on: `public` and `authDb`
 
 An API whose routes need callers is marked `public: true` in its config.
-That renders the auth provider's code into the Go server, the bearer scheme
-into OpenAPI and token handling into the SDKs. `authDb` names the DB schema
-the auth provider reads:
+That renders the auth provider's code and middleware into the Go server.
+`authDb` names the DB schema the auth provider reads:
 
 <Snippet file="schemas/services/shop-orders/schema.config.ts" from="public: true" to="authDb" />
 
@@ -102,10 +102,13 @@ who holds whatever permissions a test grants:
 
 ## Send credentials from an SDK
 
-An SDK for a `public` API sends `Authorization: Bearer <token>` on every
-request. A static token is the simplest form; each SDK also takes a
+An SDK sends `Authorization: Bearer <token>` when its API has an
+operation that needs a caller (`@auth`, `@requirePermission`,
+`@requireOwnership` or `extends Authenticated`), whether or not the config
+sets `public`; the OpenAPI document's bearer scheme follows the same
+operations. A static token is the simplest form; each SDK also takes a
 function that returns the token per request, and one that refreshes it
-after a 401.
+after a 401. An SDK given no token sends none.
 
 <Tabs syncKey="lang">
   <TabItem label="Go">
@@ -122,7 +125,8 @@ after a 401.
   </TabItem>
 </Tabs>
 
-An SDK attaches the token only for an API marked `public`. The storefront
-is served by the TypeScript router, which has no use for an `authDb`, so
-its app sets the header itself; see
+`public` and `authDb` matter only to the Go server, whose auth provider
+reads the stores. The storefront is served by the TypeScript router, which
+reads no store, so its config sets neither; its SDK still sends the token,
+and the app's `authenticate` reads it. See
 [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/#call-it-from-typescript).
