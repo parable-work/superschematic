@@ -617,7 +617,7 @@ func TestGenerateConfiguredVersionedTableHistoryDDL(t *testing.T) {
 		t.Fatalf("read drop.sql: %v", err)
 	}
 	for _, want := range []string{
-		"DROP FUNCTION IF EXISTS event_log_prune_history(INTEGER);",
+		"DROP FUNCTION IF EXISTS event_log_prune_history(INTEGER, INTEGER);",
 		"DROP INDEX IF EXISTS idx_event_log_history_event_id_version CASCADE;",
 		"DROP TABLE IF EXISTS event_log_history_default CASCADE;",
 	} {

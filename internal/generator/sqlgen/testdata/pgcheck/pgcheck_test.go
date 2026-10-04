@@ -15,6 +15,8 @@
 // TestUserTableOnPostgres (user_table_test.go) checks a User table's
 // create.sql and drop.sql. TestListDefaultsOnPostgres (list_defaults_test.go)
 // checks the defaults of required temporal, list and JSONB columns.
+// TestPruneHistoryDropOnPostgres (prune_history_test.go) checks that drop.sql
+// drops the prune functions create.sql makes.
 package pgcheck
 
 import (
