@@ -1,0 +1,208 @@
+{
+  "dialect": "postgres",
+  "from": "9cb975595241c3c3e894f274259c72b71bc6a47bc6d6e471e82b6d285a743ca7",
+  "hash": "c112fbdad3fc3504d95e5c8e41c93893000b0792bc587910d9c4819fffd016e8",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE account_history (\n  history_id UUID DEFAULT gen_random_uuid() NOT NULL,\n  id UUID NOT NULL,\n  _version BIGINT NOT NULL,\n  operation TEXT NOT NULL,\n  \"data\" JSONB NOT NULL,\n  recorded_at TIMESTAMPTZ DEFAULT clock_timestamp() NOT NULL,\n  CONSTRAINT account_history_pkey PRIMARY KEY (history_id)\n)",
+        "COMMENT ON TABLE account_history IS 'Version history for account'"
+      ],
+      "subject": "table/account_history",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE account ADD COLUMN _version BIGINT DEFAULT 1 NOT NULL"
+      ],
+      "subject": "table/account/column/_version",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_account_history_id_recorded ON account_history USING BTREE (id, recorded_at)"
+      ],
+      "subject": "table/account_history/index/idx_account_history_id_recorded",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX uq_account_history_id_version ON account_history USING BTREE (id, _version)"
+      ],
+      "subject": "table/account_history/index/uq_account_history_id_version",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION account_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version.\n    INSERT INTO account_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO account_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/account_capture_history",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/account_history",
+          "reason": "Seeding account_history writes one image of every row of account while the new triggers' lock blocks writes to it.",
+          "subject": "table/account_history"
+        }
+      ],
+      "index": 6,
+      "op": "seedHistory",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER trg_account_bump_version\n  BEFORE UPDATE ON account\n  FOR EACH ROW EXECUTE FUNCTION account_capture_history()",
+        "CREATE TRIGGER trg_account_capture_history_write\n  AFTER INSERT OR UPDATE ON account\n  FOR EACH ROW EXECUTE FUNCTION account_capture_history()",
+        "CREATE TRIGGER trg_account_capture_history_delete\n  AFTER DELETE ON account\n  FOR EACH ROW EXECUTE FUNCTION account_capture_history()",
+        "INSERT INTO account_history (id, _version, operation, data)\nSELECT src.id, src._version, 'INSERT', to_jsonb(src)\nFROM account AS src"
+      ],
+      "subject": "table/account_history",
+      "transactional": true
+    }
+  ],
+  "to": "87ea3230d28e4d6c0df1c7ec2822f7cfc140039ea9e4c7f830821a2bc4f2a746",
+  "toModel": {
+    "dialect": "postgres",
+    "extensions": [
+      "pgcrypto"
+    ],
+    "functions": [
+      {
+        "definition": "CREATE OR REPLACE FUNCTION account_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version.\n    INSERT INTO account_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO account_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+        "name": "account_capture_history",
+        "origin": "Account"
+      }
+    ],
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "name",
+            "origin": "Account.name",
+            "type": "TEXT"
+          },
+          {
+            "default": "1",
+            "name": "_version",
+            "type": "BIGINT"
+          }
+        ],
+        "comment": "Generated from schema type: Account",
+        "history": "account_history",
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      },
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "history_id",
+            "type": "UUID"
+          },
+          {
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "_version",
+            "type": "BIGINT"
+          },
+          {
+            "name": "operation",
+            "type": "TEXT"
+          },
+          {
+            "name": "data",
+            "type": "JSONB"
+          },
+          {
+            "default": "clock_timestamp()",
+            "name": "recorded_at",
+            "type": "TIMESTAMPTZ"
+          }
+        ],
+        "comment": "Version history for account",
+        "indexes": [
+          {
+            "columns": [
+              "id",
+              "recorded_at"
+            ],
+            "method": "BTREE",
+            "name": "idx_account_history_id_recorded"
+          },
+          {
+            "columns": [
+              "id",
+              "_version"
+            ],
+            "method": "BTREE",
+            "name": "uq_account_history_id_version",
+            "unique": true
+          }
+        ],
+        "kind": "history",
+        "name": "account_history",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "history_id"
+          ],
+          "name": "account_history_pkey"
+        }
+      }
+    ],
+    "triggers": [
+      {
+        "definition": "CREATE TRIGGER trg_account_bump_version\n  BEFORE UPDATE ON account\n  FOR EACH ROW EXECUTE FUNCTION account_capture_history()",
+        "name": "trg_account_bump_version",
+        "origin": "Account",
+        "table": "account"
+      },
+      {
+        "definition": "CREATE TRIGGER trg_account_capture_history_delete\n  AFTER DELETE ON account\n  FOR EACH ROW EXECUTE FUNCTION account_capture_history()",
+        "name": "trg_account_capture_history_delete",
+        "origin": "Account",
+        "table": "account"
+      },
+      {
+        "definition": "CREATE TRIGGER trg_account_capture_history_write\n  AFTER INSERT OR UPDATE ON account\n  FOR EACH ROW EXECUTE FUNCTION account_capture_history()",
+        "name": "trg_account_capture_history_write",
+        "origin": "Account",
+        "table": "account"
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

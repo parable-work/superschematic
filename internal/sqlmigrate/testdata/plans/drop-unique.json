@@ -1,0 +1,21 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "cc21a74212e61304cd469db1ede0e9fb25872d8a4728c131609361739499b115",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropUnique",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE customer DROP CONSTRAINT customer_email_key"
+      ],
+      "subject": "table/customer/constraint/customer_email_key",
+      "transactional": true
+    }
+  ],
+  "to": "9486695fcd011579e89d2c90f62ad4a7f94cb1b7c827957dfdc3dafe19576c68",
+  "toModel": null,
+  "version": 1
+}

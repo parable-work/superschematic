@@ -1,0 +1,21 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "0baf212ac3a162ae7cd3373fb3fc65bca346433b9a67564648df870f3d068e8b",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ADD COLUMN discount BIGINT"
+      ],
+      "subject": "table/order/column/discount",
+      "transactional": true
+    }
+  ],
+  "to": "50d48c236774791bbf844b7f8ea94b2c76e505657147efbcc9ddc48744ad5701",
+  "toModel": null,
+  "version": 1
+}

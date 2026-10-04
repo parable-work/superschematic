@@ -1,0 +1,84 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "f62f77a2fac2ef903cf19e9f9d8c11b87f5222b8aef367e4ec01ed38f2347a15",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE order_history (\n  history_id UUID DEFAULT gen_random_uuid() NOT NULL,\n  id UUID NOT NULL,\n  _version BIGINT NOT NULL,\n  operation TEXT NOT NULL,\n  \"data\" JSONB NOT NULL,\n  recorded_at TIMESTAMPTZ DEFAULT clock_timestamp() NOT NULL\n) PARTITION BY RANGE (recorded_at)",
+        "CREATE TABLE order_history_default PARTITION OF order_history DEFAULT",
+        "COMMENT ON TABLE order_history IS 'Version history for order'"
+      ],
+      "subject": "table/order_history",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ADD COLUMN _version BIGINT DEFAULT 1 NOT NULL"
+      ],
+      "subject": "table/order/column/_version",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_order_history_id_recorded ON order_history USING BTREE (id, recorded_at)"
+      ],
+      "subject": "table/order_history/index/idx_order_history_id_recorded",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_order_history_id_version ON order_history USING BTREE (id, _version)"
+      ],
+      "subject": "table/order_history/index/idx_order_history_id_version",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version.\n    INSERT INTO order_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO order_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_capture_history",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order_history",
+          "reason": "Seeding order_history writes one image of every row of order while the new triggers' lock blocks writes to it.",
+          "subject": "table/order_history"
+        }
+      ],
+      "index": 6,
+      "op": "seedHistory",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER trg_order_bump_version\n  BEFORE UPDATE ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_capture_history()",
+        "CREATE TRIGGER trg_order_capture_history_write\n  AFTER INSERT OR UPDATE ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_capture_history()",
+        "CREATE TRIGGER trg_order_capture_history_delete\n  AFTER DELETE ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_capture_history()",
+        "INSERT INTO order_history (id, _version, operation, data)\nSELECT src.id, src._version, 'INSERT', to_jsonb(src)\nFROM \"order\" AS src"
+      ],
+      "subject": "table/order_history",
+      "transactional": true
+    }
+  ],
+  "to": "3a8a1fab228cd38bf3cfebbb3d306d0e9e9e751ac003759aeafaf92a221fd12f",
+  "toModel": null,
+  "version": 1
+}

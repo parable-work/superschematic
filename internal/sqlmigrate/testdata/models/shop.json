@@ -1,0 +1,362 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "citext",
+    "pg_trgm",
+    "pgcrypto"
+  ],
+  "schemas": [
+    "report"
+  ],
+  "service": "shop",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Customer.id",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "Customer.name",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "email",
+          "origin": "Customer.email",
+          "type": "CITEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "Customer.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "referrer_id",
+          "nullable": true,
+          "origin": "Customer.referrerId",
+          "type": "UUID"
+        }
+      ],
+      "comment": "A customer of the shop.",
+      "kind": "entity",
+      "name": "customer",
+      "origin": "Customer",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "customer_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "email"
+          ],
+          "name": "customer_email_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Label.id",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "Label.name",
+          "type": "CITEXT"
+        }
+      ],
+      "comment": "A label an order can carry.",
+      "kind": "entity",
+      "name": "label",
+      "origin": "Label",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "label_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "name"
+          ],
+          "name": "label_name_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Order.id",
+          "type": "UUID"
+        },
+        {
+          "name": "code",
+          "origin": "Order.code",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "customer_id",
+          "origin": "Order.customer",
+          "type": "UUID"
+        },
+        {
+          "name": "total",
+          "origin": "Order.total",
+          "type": "BIGINT"
+        },
+        {
+          "name": "reference",
+          "nullable": true,
+          "origin": "Order.reference",
+          "type": "TEXT"
+        },
+        {
+          "name": "note",
+          "nullable": true,
+          "origin": "Order.note",
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "placed_at",
+          "origin": "Order.placedAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "An order a customer placed.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "customer_id"
+          ],
+          "name": "fk_order_customer_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "customer"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "customer_id",
+            "placed_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_order_customer_placed_at"
+        }
+      ],
+      "kind": "entity",
+      "name": "order",
+      "origin": "Order",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "order_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "order_id",
+          "type": "UUID"
+        },
+        {
+          "name": "label_id",
+          "type": "UUID"
+        }
+      ],
+      "comment": "Join table for order.labels",
+      "foreignKeys": [
+        {
+          "columns": [
+            "label_id"
+          ],
+          "name": "fk_order_label_label_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "label"
+        },
+        {
+          "columns": [
+            "order_id"
+          ],
+          "name": "fk_order_label_order_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "order"
+        }
+      ],
+      "kind": "join",
+      "name": "order_label",
+      "origin": "Order.labels",
+      "primaryKey": {
+        "columns": [
+          "order_id",
+          "label_id"
+        ],
+        "name": "order_label_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "OrderLine.id",
+          "type": "UUID"
+        },
+        {
+          "name": "sku",
+          "origin": "OrderLine.sku",
+          "type": "TEXT"
+        },
+        {
+          "name": "quantity",
+          "origin": "OrderLine.quantity",
+          "type": "BIGINT"
+        },
+        {
+          "name": "order_id",
+          "origin": "Order.lines",
+          "type": "UUID"
+        }
+      ],
+      "comment": "One line of an order.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "order_id"
+          ],
+          "name": "fk_order_line_order_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "order"
+        }
+      ],
+      "kind": "entity",
+      "name": "order_line",
+      "origin": "OrderLine",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "order_line_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Product.id",
+          "type": "UUID"
+        },
+        {
+          "name": "title",
+          "origin": "Product.title",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "price",
+          "origin": "Product.price",
+          "type": "BIGINT"
+        },
+        {
+          "generated": "COALESCE(title, '')",
+          "name": "search_text",
+          "nullable": true,
+          "type": "TEXT"
+        }
+      ],
+      "comment": "A product in the catalog, searchable by title.",
+      "indexes": [
+        {
+          "columns": [
+            "search_text"
+          ],
+          "method": "GIN",
+          "name": "idx_product_search_trgm",
+          "opclass": "gin_trgm_ops"
+        }
+      ],
+      "kind": "entity",
+      "name": "product",
+      "origin": "Product",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "product_pkey"
+      }
+    }
+  ],
+  "version": 1,
+  "views": [
+    {
+      "columns": [
+        {
+          "name": "code",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "total",
+          "type": "BIGINT"
+        },
+        {
+          "name": "customer_name",
+          "type": "VARCHAR(80)"
+        }
+      ],
+      "definition": [
+        "CREATE VIEW report.order_summary WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\nSELECT -- noqa: ST06\n  base.code,\n  base.total,\n  customer.\"name\" AS customer_name\nFROM \"order\" AS base\n  INNER JOIN customer AS customer ON base.customer_id = customer.id\n",
+        "COMMENT ON VIEW report.order_summary IS 'Orders with their customer''s name, for reporting.'"
+      ],
+      "name": "order_summary",
+      "origin": "OrderSummary",
+      "reads": [
+        {
+          "column": "id",
+          "table": "customer"
+        },
+        {
+          "column": "name",
+          "table": "customer"
+        },
+        {
+          "column": "code",
+          "table": "order"
+        },
+        {
+          "column": "customer_id",
+          "table": "order"
+        },
+        {
+          "column": "total",
+          "table": "order"
+        }
+      ],
+      "schema": "report"
+    }
+  ]
+}

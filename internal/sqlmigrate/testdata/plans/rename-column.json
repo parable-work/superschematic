@@ -1,0 +1,59 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "ce4dfa49e56dfde0f2368586eeb1bcdf6fdd0c34207d059fd1c74b743486301a",
+  "renames": [
+    "order.customer_id=order.buyer_id"
+  ],
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/buyer_id",
+          "reason": "order.customer_id is renamed to order.buyer_id (Order.buyer): servers built from the previous version still use the old name.",
+          "subject": "table/order/column/buyer_id"
+        },
+        {
+          "class": "api-breaking",
+          "id": "api-breaking:table/order/column/buyer_id@shop-api/OrderView.customer",
+          "reader": "shop-api/OrderView.customer",
+          "reason": "shop-api reads order.customer_id through OrderView.customer, and this step renames it to order.buyer_id.",
+          "subject": "table/order/column/buyer_id"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME COLUMN customer_id TO buyer_id"
+      ],
+      "subject": "table/order/column/buyer_id",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME CONSTRAINT fk_order_customer_id TO fk_order_buyer_id"
+      ],
+      "subject": "table/order/constraint/fk_order_buyer_id",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX idx_order_customer_placed_at RENAME TO idx_order_buyer_placed_at"
+      ],
+      "subject": "table/order/index/idx_order_buyer_placed_at",
+      "transactional": true
+    }
+  ],
+  "to": "56316a0b570a36f1f34e000bd31c11180f12e53d7abcaa5d5ca0786cb0cb70c5",
+  "toModel": null,
+  "version": 1
+}

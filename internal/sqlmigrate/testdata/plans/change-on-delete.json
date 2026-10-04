@@ -1,0 +1,32 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "be9b41ac23dd50c1c389300094f5691c98adac72a6ab30d90fa4e22a1d25dd42",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "replaceForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" DROP CONSTRAINT fk_order_customer_id",
+        "ALTER TABLE \"order\" ADD CONSTRAINT fk_order_customer_id FOREIGN KEY (customer_id) REFERENCES customer (id) ON DELETE CASCADE NOT VALID"
+      ],
+      "subject": "table/order/constraint/fk_order_customer_id",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "validateForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" VALIDATE CONSTRAINT fk_order_customer_id"
+      ],
+      "subject": "table/order/constraint/fk_order_customer_id",
+      "transactional": true
+    }
+  ],
+  "to": "1af03ece390cc8305f74f30ffc9639e2290111f0ca2346c9662198083ebfb83b",
+  "toModel": null,
+  "version": 1
+}

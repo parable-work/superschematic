@@ -1,0 +1,80 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "7ed450f05f10f8d88673df3370673e76a6e3e6a77573be1802f7c47bfd6d56e9",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropNotNull",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ALTER COLUMN customer_id DROP NOT NULL"
+      ],
+      "subject": "table/order/column/customer_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "api-breaking",
+          "id": "api-breaking:view/report.order_summary@report.order_summary",
+          "reader": "report.order_summary",
+          "reason": "The projection view report.order_summary publishes (code VARCHAR(80), total BIGINT, customer_name VARCHAR(80)) and now publishes (code VARCHAR(80), total BIGINT): its readers' Arrow schema changes.",
+          "subject": "view/report.order_summary"
+        }
+      ],
+      "index": 2,
+      "op": "replaceView",
+      "phase": "expand",
+      "statements": [
+        "DROP VIEW report.order_summary",
+        "CREATE VIEW report.order_summary WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\nSELECT -- noqa: ST06\n  base.code,\n  base.total\nFROM \"order\" AS base\n",
+        "COMMENT ON VIEW report.order_summary IS 'Orders with their customer''s name, for reporting.'"
+      ],
+      "subject": "view/report.order_summary",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "dropForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" DROP CONSTRAINT fk_order_customer_id"
+      ],
+      "subject": "table/order/constraint/fk_order_customer_id",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "dropIndex",
+      "phase": "contract",
+      "statements": [
+        "DROP INDEX idx_order_customer_placed_at"
+      ],
+      "subject": "table/order/index/idx_order_customer_placed_at",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order/column/customer_id",
+          "reason": "Dropping order.customer_id deletes the values of Order.customer.",
+          "subject": "table/order/column/customer_id"
+        }
+      ],
+      "index": 5,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" DROP COLUMN customer_id"
+      ],
+      "subject": "table/order/column/customer_id",
+      "transactional": true
+    }
+  ],
+  "to": "45f96c14cb887104f2ad6a8fac251174f7bdd991cdf94b0c32c3c48b090bcea2",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,39 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "f0db933c16f12491bbd04bbb62115d66cba2dfbb2e63c25ca7b070ed849c825a",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE customer ADD CONSTRAINT fk_customer_referrer_id FOREIGN KEY (referrer_id) REFERENCES customer (id) ON DELETE SET NULL NOT VALID"
+      ],
+      "subject": "table/customer/constraint/fk_customer_referrer_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/customer/constraint/fk_customer_referrer_id",
+          "reason": "Validating fk_customer_referrer_id fails when a row of customer has a referrer_id that customer(id) does not hold.",
+          "subject": "table/customer/constraint/fk_customer_referrer_id"
+        }
+      ],
+      "index": 2,
+      "op": "validateForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE customer VALIDATE CONSTRAINT fk_customer_referrer_id"
+      ],
+      "subject": "table/customer/constraint/fk_customer_referrer_id",
+      "transactional": true
+    }
+  ],
+  "to": "6882a6a674423493fe5d0733564dd1e8e567cfca6b468bc360d2cf1779306408",
+  "toModel": null,
+  "version": 1
+}

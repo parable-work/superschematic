@@ -1,0 +1,42 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "6ca678bd163454abc833104a9b489a5b6c54ec12880b4cd09d0a0b50eab10dea",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE product_label (\n  product_id UUID NOT NULL,\n  label_id UUID NOT NULL,\n  CONSTRAINT product_label_pkey PRIMARY KEY (product_id, label_id)\n)",
+        "COMMENT ON TABLE product_label IS 'Join table for product.labels'"
+      ],
+      "subject": "table/product_label",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product_label ADD CONSTRAINT fk_product_label_label_id FOREIGN KEY (label_id) REFERENCES label (id) ON DELETE CASCADE"
+      ],
+      "subject": "table/product_label/constraint/fk_product_label_label_id",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product_label ADD CONSTRAINT fk_product_label_product_id FOREIGN KEY (product_id) REFERENCES product (id) ON DELETE CASCADE"
+      ],
+      "subject": "table/product_label/constraint/fk_product_label_product_id",
+      "transactional": true
+    }
+  ],
+  "to": "59d2340173e58aa169d2840cd4c46990abeebb54aeb0f0ac35e6385bc72e136b",
+  "toModel": null,
+  "version": 1
+}

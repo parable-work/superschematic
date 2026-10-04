@@ -1,0 +1,34 @@
+{
+  "dialect": "postgres",
+  "from": "8f8a634659902bbb610a36f200465aa34f1aaa89666f553f0340f89cacc221f6",
+  "hash": "6f09df909ba28cf0290a006f6a8db8d649a411c4a12361cdb20088412b9e16b7",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_order_history_recorded"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_order_history_recorded ON order_history USING BTREE (recorded_at)"
+      ],
+      "subject": "table/order_history/index/idx_order_history_recorded",
+      "transactional": false
+    },
+    {
+      "index": 2,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_prune_history(retention_days INTEGER DEFAULT 30, max_rows INTEGER DEFAULT NULL) RETURNS BIGINT AS $$\nDECLARE\n  deleted_count BIGINT;\nBEGIN\n  WITH candidates AS (\n    SELECT h.history_id\n    FROM order_history h\n    WHERE h.recorded_at \u003c now() - make_interval(days =\u003e retention_days)\n      AND EXISTS (\n        SELECT 1\n        FROM order_history newer\n        WHERE newer.id = h.id\n          AND newer._version \u003e h._version\n      )\n    LIMIT max_rows\n  ),\n  deleted AS (\n    DELETE FROM order_history h\n    USING candidates c\n    WHERE h.history_id = c.history_id\n    RETURNING 1\n  )\n  SELECT count(*) INTO deleted_count FROM deleted;\n  RETURN deleted_count;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_prune_history",
+      "transactional": true
+    }
+  ],
+  "to": "31212a21c0f0f5bd1dbeb697a04bf371066d8af2618ef60d69087d8fc60e7998",
+  "toModel": null,
+  "version": 1
+}

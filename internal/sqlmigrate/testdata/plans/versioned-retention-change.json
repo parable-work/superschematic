@@ -1,0 +1,21 @@
+{
+  "dialect": "postgres",
+  "from": "31212a21c0f0f5bd1dbeb697a04bf371066d8af2618ef60d69087d8fc60e7998",
+  "hash": "b1a0efc8a6462d6c9b11b78560fd23f30d258eba918742972b9606b7dccfdfe8",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "replaceFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_prune_history(retention_days INTEGER DEFAULT 90, max_rows INTEGER DEFAULT NULL) RETURNS BIGINT AS $$\nDECLARE\n  deleted_count BIGINT;\nBEGIN\n  WITH candidates AS (\n    SELECT h.history_id\n    FROM order_history h\n    WHERE h.recorded_at \u003c now() - make_interval(days =\u003e retention_days)\n      AND EXISTS (\n        SELECT 1\n        FROM order_history newer\n        WHERE newer.id = h.id\n          AND newer._version \u003e h._version\n      )\n    LIMIT max_rows\n  ),\n  deleted AS (\n    DELETE FROM order_history h\n    USING candidates c\n    WHERE h.history_id = c.history_id\n    RETURNING 1\n  )\n  SELECT count(*) INTO deleted_count FROM deleted;\n  RETURN deleted_count;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_prune_history",
+      "transactional": true
+    }
+  ],
+  "to": "b0859cc3ebc7807fb0b510405650505bf5bdd5ef96dccf00a6b15339d08f76b9",
+  "toModel": null,
+  "version": 1
+}

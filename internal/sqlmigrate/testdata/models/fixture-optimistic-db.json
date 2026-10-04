@@ -1,0 +1,155 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "pgcrypto"
+  ],
+  "functions": [
+    {
+      "definition": "CREATE OR REPLACE FUNCTION shelf_bump_version() RETURNS trigger AS $$\nBEGIN\n  -- BEFORE UPDATE: the stored row takes the next version.\n  NEW._version := OLD._version + 1;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "shelf_bump_version",
+      "origin": "Shelf"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION stock_bump_version() RETURNS trigger AS $$\nBEGIN\n  -- BEFORE UPDATE: the stored row takes the next version.\n  NEW._version := OLD._version + 1;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "stock_bump_version",
+      "origin": "Stock"
+    }
+  ],
+  "service": "fixture-optimistic-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Shelf.id",
+          "type": "UUID"
+        },
+        {
+          "name": "label",
+          "origin": "Shelf.label",
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "Shelf.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "created_by",
+          "origin": "Shelf.createdBy",
+          "type": "UUID"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "origin": "Shelf.updatedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "updated_by",
+          "origin": "Shelf.updatedBy",
+          "type": "UUID"
+        },
+        {
+          "name": "deleted_at",
+          "nullable": true,
+          "origin": "Shelf.deletedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "deleted_by",
+          "nullable": true,
+          "origin": "Shelf.deletedBy",
+          "type": "UUID"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "A shelf of the pantry. A delete sets deletedAt.",
+      "kind": "entity",
+      "name": "shelf",
+      "optimistic": true,
+      "origin": "Shelf",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "shelf_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Stock.id",
+          "type": "UUID"
+        },
+        {
+          "name": "shelf_id",
+          "origin": "Stock.shelf",
+          "type": "UUID"
+        },
+        {
+          "name": "ingredient",
+          "origin": "Stock.ingredient",
+          "type": "TEXT"
+        },
+        {
+          "name": "quantity",
+          "origin": "Stock.quantity",
+          "type": "BIGINT"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "How much of one ingredient a shelf holds. A delete removes the row.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "shelf_id"
+          ],
+          "name": "fk_stock_shelf_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "shelf"
+        }
+      ],
+      "kind": "entity",
+      "name": "stock",
+      "optimistic": true,
+      "origin": "Stock",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "stock_pkey"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER trg_shelf_bump_version\n  BEFORE UPDATE ON shelf\n  FOR EACH ROW EXECUTE FUNCTION shelf_bump_version()",
+      "name": "trg_shelf_bump_version",
+      "origin": "Shelf",
+      "table": "shelf"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_stock_bump_version\n  BEFORE UPDATE ON stock\n  FOR EACH ROW EXECUTE FUNCTION stock_bump_version()",
+      "name": "trg_stock_bump_version",
+      "origin": "Stock",
+      "table": "stock"
+    }
+  ],
+  "version": 1
+}

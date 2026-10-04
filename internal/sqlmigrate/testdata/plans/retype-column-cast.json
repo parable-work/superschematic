@@ -1,0 +1,41 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "5413a7d5dd95eabf47b5fb070532a9a624a1d3af7237a3e66e5ae89eacda8fb8",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order/column/reference",
+          "reason": "The change rewrites order and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/order/column/reference"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/reference",
+          "reason": "Order.reference changes from TEXT to UUID: servers built from the previous version still read and write TEXT.",
+          "subject": "table/order/column/reference"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/column/reference",
+          "reason": "Order.reference changes from TEXT to UUID: the cast fails on a value UUID cannot hold.",
+          "subject": "table/order/column/reference"
+        }
+      ],
+      "index": 1,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\"\n  ALTER COLUMN reference TYPE UUID USING reference::UUID"
+      ],
+      "subject": "table/order/column/reference",
+      "transactional": true
+    }
+  ],
+  "to": "f413c50b57825bb041417ea6a9a0a6167c66755b76046335aca74f172aad96bf",
+  "toModel": null,
+  "version": 1
+}

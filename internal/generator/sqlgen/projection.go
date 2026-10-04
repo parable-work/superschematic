@@ -67,6 +67,17 @@ type ProjectionView struct {
 	DistinctOn []string
 	OrderBy    []string
 	collapseBy []string
+
+	// Reads are the table columns the view reads anywhere (a selected
+	// column, a join key, a rule, a collapse key, a function argument),
+	// sorted by table, then column.
+	Reads []ProjectionRead
+}
+
+// ProjectionRead is one table column a view reads.
+type ProjectionRead struct {
+	Table  string
+	Column string
 }
 
 // ProjectionColumn is one column of a view.
@@ -152,6 +163,8 @@ func buildProjections(schema *ir.Schema, deps map[string]*ir.Schema, tableMap ma
 type projectionAliases struct {
 	tables   map[string]*Table
 	nullable map[string]bool
+	// reads records every column a reference resolved to.
+	reads map[ProjectionRead]bool
 }
 
 // column resolves alias.field to the table column it names.
@@ -168,7 +181,25 @@ func (a *projectionAliases) column(ref string) (alias string, col *Column, err e
 	if col == nil {
 		return "", nil, fmt.Errorf("%q: table %s has no column for field %q", ref, table.Name, field)
 	}
+	if a.reads != nil {
+		a.reads[ProjectionRead{Table: table.Name, Column: col.Name}] = true
+	}
 	return alias, col, nil
+}
+
+// sortedReads returns the recorded reads by table, then column.
+func (a *projectionAliases) sortedReads() []ProjectionRead {
+	reads := make([]ProjectionRead, 0, len(a.reads))
+	for read := range a.reads {
+		reads = append(reads, read)
+	}
+	slices.SortFunc(reads, func(x, y ProjectionRead) int {
+		if c := strings.Compare(x.Table, y.Table); c != 0 {
+			return c
+		}
+		return strings.Compare(x.Column, y.Column)
+	})
+	return reads
 }
 
 func (a *projectionAliases) expr(ref string) (string, *Column, bool, error) {
@@ -226,6 +257,7 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 	aliases := &projectionAliases{
 		tables:   map[string]*Table{ir.ProjectionBaseAlias: base},
 		nullable: map[string]bool{},
+		reads:    map[ProjectionRead]bool{},
 	}
 	view := ProjectionView{
 		TypeName:        td.Name,
@@ -505,6 +537,7 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 			view.OrderBy = append(view.OrderBy, rendered)
 		}
 	}
+	view.Reads = aliases.sortedReads()
 	return view, nil
 }
 

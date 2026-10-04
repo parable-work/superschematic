@@ -1,0 +1,29 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "c955bc5fd985b3c27a09a9461219caa2875b6efeb803c73a35a8e717fa4d1dfa",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order_label",
+          "reason": "Dropping join table order_label deletes the links of Order.labels.",
+          "subject": "table/order_label"
+        }
+      ],
+      "index": 1,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE order_label"
+      ],
+      "subject": "table/order_label",
+      "transactional": true
+    }
+  ],
+  "to": "c343900927c81fcde9e36ffe8efca8d6c42cdad57f1008fd009f1786792744b6",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,188 @@
+{
+  "dialect": "postgres",
+  "from": "",
+  "hash": "6296a467053926e2a9c8020a5d1eb92fb496e834e39d63085bd2b109550153d2",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createExtension",
+      "phase": "expand",
+      "statements": [
+        "CREATE EXTENSION IF NOT EXISTS citext"
+      ],
+      "subject": "extension/citext",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createExtension",
+      "phase": "expand",
+      "statements": [
+        "CREATE EXTENSION IF NOT EXISTS pg_trgm"
+      ],
+      "subject": "extension/pg_trgm",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createExtension",
+      "phase": "expand",
+      "statements": [
+        "CREATE EXTENSION IF NOT EXISTS pgcrypto"
+      ],
+      "subject": "extension/pgcrypto",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "createSchema",
+      "phase": "expand",
+      "statements": [
+        "CREATE SCHEMA IF NOT EXISTS report"
+      ],
+      "subject": "schema/report",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE customer (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  \"name\" VARCHAR(80) NOT NULL,\n  email CITEXT NOT NULL,\n  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  referrer_id UUID,\n  CONSTRAINT customer_pkey PRIMARY KEY (id),\n  CONSTRAINT customer_email_key UNIQUE (email)\n)",
+        "COMMENT ON TABLE customer IS 'A customer of the shop.'"
+      ],
+      "subject": "table/customer",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE label (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  \"name\" CITEXT NOT NULL,\n  CONSTRAINT label_pkey PRIMARY KEY (id),\n  CONSTRAINT label_name_key UNIQUE (\"name\")\n)",
+        "COMMENT ON TABLE label IS 'A label an order can carry.'"
+      ],
+      "subject": "table/label",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"order\" (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  code VARCHAR(80) NOT NULL,\n  customer_id UUID NOT NULL,\n  total BIGINT NOT NULL,\n  reference TEXT,\n  note TEXT,\n  placed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  CONSTRAINT order_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE \"order\" IS 'An order a customer placed.'"
+      ],
+      "subject": "table/order",
+      "transactional": true
+    },
+    {
+      "index": 8,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE order_label (\n  order_id UUID NOT NULL,\n  label_id UUID NOT NULL,\n  CONSTRAINT order_label_pkey PRIMARY KEY (order_id, label_id)\n)",
+        "COMMENT ON TABLE order_label IS 'Join table for order.labels'"
+      ],
+      "subject": "table/order_label",
+      "transactional": true
+    },
+    {
+      "index": 9,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE order_line (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  sku TEXT NOT NULL,\n  quantity BIGINT NOT NULL,\n  order_id UUID NOT NULL,\n  CONSTRAINT order_line_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE order_line IS 'One line of an order.'"
+      ],
+      "subject": "table/order_line",
+      "transactional": true
+    },
+    {
+      "index": 10,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE product (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  title VARCHAR(80) NOT NULL,\n  price BIGINT NOT NULL,\n  search_text TEXT GENERATED ALWAYS AS (COALESCE(title, '')) STORED,\n  CONSTRAINT product_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE product IS 'A product in the catalog, searchable by title.'"
+      ],
+      "subject": "table/product",
+      "transactional": true
+    },
+    {
+      "index": 11,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_order_customer_placed_at ON \"order\" USING BTREE (customer_id, placed_at)"
+      ],
+      "subject": "table/order/index/idx_order_customer_placed_at",
+      "transactional": true
+    },
+    {
+      "index": 12,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_search_trgm ON product USING GIN (search_text gin_trgm_ops)"
+      ],
+      "subject": "table/product/index/idx_product_search_trgm",
+      "transactional": true
+    },
+    {
+      "index": 13,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ADD CONSTRAINT fk_order_customer_id FOREIGN KEY (customer_id) REFERENCES customer (id) ON DELETE RESTRICT"
+      ],
+      "subject": "table/order/constraint/fk_order_customer_id",
+      "transactional": true
+    },
+    {
+      "index": 14,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_label ADD CONSTRAINT fk_order_label_label_id FOREIGN KEY (label_id) REFERENCES label (id) ON DELETE CASCADE"
+      ],
+      "subject": "table/order_label/constraint/fk_order_label_label_id",
+      "transactional": true
+    },
+    {
+      "index": 15,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_label ADD CONSTRAINT fk_order_label_order_id FOREIGN KEY (order_id) REFERENCES \"order\" (id) ON DELETE CASCADE"
+      ],
+      "subject": "table/order_label/constraint/fk_order_label_order_id",
+      "transactional": true
+    },
+    {
+      "index": 16,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_line ADD CONSTRAINT fk_order_line_order_id FOREIGN KEY (order_id) REFERENCES \"order\" (id) ON DELETE CASCADE"
+      ],
+      "subject": "table/order_line/constraint/fk_order_line_order_id",
+      "transactional": true
+    },
+    {
+      "index": 17,
+      "op": "createView",
+      "phase": "expand",
+      "statements": [
+        "CREATE VIEW report.order_summary WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\nSELECT -- noqa: ST06\n  base.code,\n  base.total,\n  customer.\"name\" AS customer_name\nFROM \"order\" AS base\n  INNER JOIN customer AS customer ON base.customer_id = customer.id\n",
+        "COMMENT ON VIEW report.order_summary IS 'Orders with their customer''s name, for reporting.'"
+      ],
+      "subject": "view/report.order_summary",
+      "transactional": true
+    }
+  ],
+  "to": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "toModel": null,
+  "version": 1
+}
