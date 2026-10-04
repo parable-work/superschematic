@@ -191,21 +191,38 @@ decryptor, which in a deployment calls a key service. On such a route
 
 ## Webhooks
 
-`@webhook` marks an operation a third party calls, not your clients. The
-Go and TypeScript SDKs leave it out; the Python and Rust SDKs still
-generate a method for it.
+`@webhook` marks an operation a third party calls, not your clients.
+Every SDK leaves it out, methods and tools alike, since the provider
+sends its own request from its own servers and no SDK holds the signing
+secret `@hmacVerified` checks. A route your own clients or services call
+is an ordinary route, not a webhook.
 
 `@hmacVerified({ provider: "stripe" })` puts a signature check in front of
-the route in the Go server. `Implementations` gains `WebhookVerifiers`, a
-map from provider name to a `WebhookVerifier`
-(`func(http.Handler) http.Handler`) that you write, and
-`ValidateImplementations` fails until every provider the schema names has
-one. The verifier runs before the rate limit, the body limit and the
-permission check, so an unsigned request costs nothing else.
+the route, in every server. `Implementations` gains a verifier for each
+provider the schema names, which you write, and the server does not start
+without one for every provider. The verifier runs before the rate limit,
+the body limit and the permission check, so an unsigned request costs
+nothing else. It also runs before the body limit caps the body, so cap
+the read in the verifier if a large body matters.
 
-Only the Go server applies `@hmacVerified`. The TypeScript and Rust
-servers do not read it, so a webhook served by either must check the
-signature in its own handler.
+| Server | The verifier | Without one |
+|---|---|---|
+| Go | `WebhookVerifiers["stripe"]`, a `WebhookVerifier` (`func(http.Handler) http.Handler`) | `ValidateImplementations` fails |
+| TypeScript | `webhookVerifiers.stripe`, a `WebhookVerifier` from `@superschematic/http-runtime/hono` (Hono middleware) | tsc fails, and `buildRouter` throws |
+| Rust | `webhook_verifiers["stripe"]`, an `Arc<dyn WebhookVerifier>` whose `verify(request, next)` is axum middleware | `build_router` panics |
+
+A verifier answers a request it refuses and passes one it accepts on. One
+that reads the body to check the signature passes the body on with it: the
+Go verifier replaces `r.Body`, and the Rust verifier rebuilds the request
+it hands to `next`. The TypeScript router gives the route a copy of the
+request taken before the verifier ran, so its verifier can call
+`c.req.text()`.
+
+A `@manualRouteRegistration` webhook needs its provider's verifier too.
+The TypeScript router runs it before the service's handler. The Go and Rust
+routers do not mount the route, so the service wraps the route it adds: in
+Go with the verifier from `WebhookVerifiers`, in Rust with
+`webhook_verified(route, verifier)`.
 
 ## OpenAPI
 

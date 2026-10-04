@@ -44,6 +44,8 @@ export interface OperationSpec {
   readonly rateLimitPerMinute?: number;
   /** @timeout: seconds the operation may take before the adapter answers 504 (the Go runtime's Timeout middleware). */
   readonly timeoutSeconds?: number;
+  /** @hmacVerified: the provider whose webhook verifier checks the request before every other step. */
+  readonly webhookProvider?: string;
   /** @manualRouteRegistration: the service supplies the handler through the router options. */
   readonly manual: boolean;
 }

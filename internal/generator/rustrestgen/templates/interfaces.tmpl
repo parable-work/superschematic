@@ -6,8 +6,16 @@
 {{- end }}
 
 use async_trait::async_trait;
+{{- if .WebhookProviders }}
+use axum::extract::Request;
+use axum::middleware::Next;
+use axum::response::Response;
+{{- end }}
 use {{ .RuntimeCrateIdent }}::{ApiError, RequestContext};
 use serde_json::Value;
+{{- if .WebhookProviders }}
+use std::collections::HashMap;
+{{- end }}
 use std::sync::Arc;
 
 {{- range .Namespaces }}
@@ -24,10 +32,41 @@ pub trait {{ toPascalCase . }}Implementation: Send + Sync + 'static {
 {{- end }}
 }
 {{ end }}
+{{- if .WebhookProviders }}
+
+/// Checks the signature of an @hmacVerified provider's requests before
+/// every other step of their routes, the handler's extractors included. It
+/// is axum middleware: it answers a request it refuses and passes one it
+/// accepts to `next`, rebuilt with the body's bytes when it read them.
+#[async_trait]
+pub trait WebhookVerifier: Send + Sync + 'static {
+    async fn verify(&self, request: Request, next: Next) -> Response;
+}
+{{- end }}
 
 #[derive(Clone)]
 pub struct Implementations {
 {{- range .Namespaces }}
     pub {{ toSnakeCase . }}: Arc<dyn {{ toPascalCase . }}Implementation>,
 {{- end }}
+{{- if .WebhookProviders }}
+    /// The verifier of each @hmacVerified provider, keyed by provider.
+    /// `build_router` panics without one for every provider.
+    pub webhook_verifiers: HashMap<String, Arc<dyn WebhookVerifier>>,
+{{- end }}
 }
+{{- if .WebhookProviders }}
+
+impl Implementations {
+    /// Checks that `webhook_verifiers` has a verifier for every @hmacVerified
+    /// provider of the schema.
+    pub fn validate_implementations(&self) -> Result<(), String> {
+        for provider in [{{ range $i, $p := .WebhookProviders }}{{ if $i }}, {{ end }}{{ rustString $p }}{{ end }}] {
+            if !self.webhook_verifiers.contains_key(provider) {
+                return Err(format!("Implementations.webhook_verifiers for provider {provider} is required"));
+            }
+        }
+        Ok(())
+    }
+}
+{{- end }}

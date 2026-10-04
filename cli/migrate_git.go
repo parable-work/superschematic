@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,8 +74,14 @@ func extractSchemasRoot(ctx context.Context, schemasRoot, ref string) (dir strin
 }
 
 // untar writes the directories, files and symbolic links of a tar stream
-// under dir. An entry whose path leaves dir is an error.
+// under dir. An entry whose path leaves dir, through ".." or through a
+// link extracted before it, is an error, and so is a link that points
+// outside dir: a later entry could otherwise write through it.
 func untar(r io.Reader, dir string) error {
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
 	tr := tar.NewReader(r)
 	for {
 		header, err := tr.Next()
@@ -85,10 +92,10 @@ func untar(r io.Reader, dir string) error {
 			return err
 		}
 		name := filepath.FromSlash(header.Name)
-		if !filepath.IsLocal(name) {
+		if !insideRoot(root, name) {
 			return fmt.Errorf("archive entry %q is outside the archive", header.Name)
 		}
-		target := filepath.Join(dir, name)
+		target := filepath.Join(root, name)
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o755); err != nil {
@@ -110,15 +117,57 @@ func untar(r io.Reader, dir string) error {
 				return err
 			}
 		case tar.TypeSymlink:
+			link := filepath.FromSlash(header.Linkname)
+			if filepath.IsAbs(link) || !insideRoot(root, filepath.Join(filepath.Dir(name), link)) {
+				return fmt.Errorf("archive entry %q links to %q, outside the archive", header.Name, header.Linkname)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
-			if err := os.Symlink(header.Linkname, target); err != nil {
+			if err := os.Symlink(link, target); err != nil {
 				return err
 			}
 		}
 		// Other entries, such as the pax header git writes with the commit
 		// id, carry nothing to extract.
+	}
+}
+
+// insideRoot reports whether candidate, a path relative to root, stays
+// inside root once every link on it is resolved. root is resolved itself.
+// The part of candidate not extracted yet cannot hold a link, so only the
+// part that exists is resolved.
+func insideRoot(root, candidate string) bool {
+	if filepath.IsAbs(candidate) {
+		return false
+	}
+	resolved, err := evalSymlinksExisting(filepath.Join(root, candidate))
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(root, resolved)
+	return err == nil && !strings.HasPrefix(filepath.Clean(rel), "..")
+}
+
+// evalSymlinksExisting is filepath.EvalSymlinks for a path whose tail may
+// not exist yet: it resolves the longest prefix that exists and joins the
+// rest to it.
+func evalSymlinksExisting(path string) (string, error) {
+	var rest []string
+	for {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err == nil {
+			return filepath.Join(append([]string{resolved}, rest...)...), nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return "", err
+		}
+		rest = append([]string{filepath.Base(path)}, rest...)
+		path = parent
 	}
 }
 
