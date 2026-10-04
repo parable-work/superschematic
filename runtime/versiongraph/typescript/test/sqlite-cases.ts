@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { sqlRefusal } from "../../../engine/typescript/src/behaviors/sql.ts";
 import {
   CanonicalError,
+  canonicalRow,
   errorCode,
   NameTakenError,
   NotFoundError,
@@ -53,6 +54,16 @@ const fixture = new URL("../../testdata/fixture/recipe.json", import.meta.url);
 const descriptor = readFileSync(fixture, "utf8");
 
 const core = initSync();
+
+/** Each kind's columns' value classes, as the fixture declares them. */
+const columns = new Map(
+  (JSON.parse(descriptor) as { kinds: { kind: string; columns: Record<string, string> }[] }).kinds.map((k) => [k.kind, k.columns]),
+);
+
+/** Asserts a row the adapter returned is a canonical row of its kind: the canonical rules leave it as it is, members sorted. */
+function assertCanonicalRow(kind: string, row: string): void {
+  assert.equal(canonicalRow(columns.get(kind)!, row), row, `a ${kind} row is canonical: ${row}`);
+}
 
 const graph = "recipe";
 const cook = "Cook";
@@ -231,6 +242,7 @@ export const cases: Case[] = [
           ],
         );
         for (const image of images) {
+          assertCanonicalRow("step", image["data"] as string);
           assert.equal(member(image["data"] as string, "scratch"), undefined, "an image leaves scratch out");
           assert.equal(member(image["data"] as string, "_version"), String(image["_version"]));
         }
@@ -334,6 +346,7 @@ export const cases: Case[] = [
             timings: {},
           }),
         );
+        assertCanonicalRow("step", inserted);
         assert.notEqual(member(inserted, "id"), '"Elsewhere"');
         assert.equal(member(inserted, "_version"), "1");
         assert.equal(member(inserted, "ref_id"), JSON.stringify(ref.id));
@@ -345,6 +358,9 @@ export const cases: Case[] = [
         // A column the insert lacks holds null.
         assert.equal(member(inserted, "scratch"), "null");
         const updated = write(JSON.stringify({ entity_key: "Mix", instruction: "Stir", created_by: "Somebody" }), true, "Baker");
+        assertCanonicalRow("step", updated);
+        const [read] = s.storage.transact((tx) => tx.rows("step", ref.id));
+        assert.equal(read, updated);
         assert.equal(member(updated, "id"), member(inserted, "id"));
         assert.equal(member(updated, "_version"), "2");
         assert.equal(member(updated, "deleted_on_ref"), "true");
