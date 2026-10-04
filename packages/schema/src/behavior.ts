@@ -63,7 +63,15 @@ export interface WorkflowConfig {
   readonly initial?: string;
   /** The moves the status may make. A state that no transition leaves is terminal. */
   readonly transitions: readonly WorkflowTransition[];
+  /**
+   * The outcome of each terminal state it names. A terminal state it does
+   * not name is a success; a state a transition leaves has no outcome.
+   */
+  readonly outcomes?: Readonly<Record<string, WorkflowOutcome>>;
 }
+
+/** The outcome of a Workflow's terminal state, which blockers, rollups and reactions read. */
+export type WorkflowOutcome = "success" | "failure" | "neutral";
 
 /** One move a Workflow's status may make. */
 export interface WorkflowTransition {
@@ -87,11 +95,16 @@ export interface DependenciesConfig {
   /** The schemas whose instances may block this type's, each composing Workflow; the type's own schema when absent. */
   readonly schemas?: readonly string[];
   /**
-   * The terminal states of the type's Workflow that a transition into
-   * waits for every blocker to reach a terminal state of its own; every
-   * terminal state when absent.
+   * The states of the type's Workflow that a transition into waits for
+   * every blocker to finish; every terminal state when absent.
    */
   readonly gatedStates?: readonly string[];
+  /**
+   * The outcomes of a blocker's terminal state that finish it; success
+   * when absent. A blocker in a terminal state with another outcome blocks
+   * until it is removed.
+   */
+  readonly satisfiedBy?: readonly WorkflowOutcome[];
 }
 
 /** Links' config. */
@@ -128,7 +141,8 @@ export interface RollupSource {
  * One rollup of a Rollups config. count, all and any take no field;
  * countBy takes a string, enum or boolean field, or status, and sum, min
  * and max a number or integer field. all and any may gate states of the
- * type's Workflow.
+ * type's Workflow, and count only terminal states with the outcomes they
+ * list.
  */
 export type RollupConfig =
   | (RollupSource & { readonly function: "count" })
@@ -137,6 +151,8 @@ export type RollupConfig =
       readonly function: "all" | "any";
       /** The states of the type's Workflow that a transition into waits for the rollup to hold. */
       readonly gatedStates?: readonly string[];
+      /** The outcomes a linked instance's terminal state must have to count; every outcome when absent. */
+      readonly outcomes?: readonly WorkflowOutcome[];
     });
 
 /** Search's config. */
@@ -159,7 +175,7 @@ export interface ReactionRule {
   readonly then: ReactionThen;
 }
 
-/** What sets a rule off: one of enters and allTerminal. */
+/** What sets a rule off: one of enters, allTerminal and anyTerminal. */
 export type ReactionWhen =
   | {
       /** A state of the type's Workflow: the rule fires when the instance's status becomes it, by a create or a transition. */
@@ -169,11 +185,28 @@ export type ReactionWhen =
       /**
        * The rule fires on an instance when an instance of schema that links
        * to it through link changes or goes, and every instance that links to
-       * it there is in a terminal state of its own schema's Workflow, at
-       * least one.
+       * it there is in a terminal state of its own schema's Workflow, with
+       * an outcome outcomes lists when it is given, at least one.
        */
-      readonly allTerminal: { readonly schema: string; readonly link: string };
+      readonly allTerminal: ReactionSource & { readonly outcomes?: readonly WorkflowOutcome[] };
+    }
+  | {
+      /**
+       * The rule fires on an instance when an instance of schema that links
+       * to it through link enters a terminal state of its own schema's
+       * Workflow whose outcome outcomes lists, or is linked to it while in
+       * one.
+       */
+      readonly anyTerminal: ReactionSource & { readonly outcomes: readonly WorkflowOutcome[] };
     };
+
+/** The instances an allTerminal or anyTerminal rule hears. */
+export interface ReactionSource {
+  /** The schema of the linking instances, which composes Links and Workflow. */
+  readonly schema: string;
+  /** The link of that schema's Links config that points at this type's schema. */
+  readonly link: string;
+}
 
 /** What a rule does: move the instance, or the instance its link points to, to a state through Workflow's transition. */
 export interface ReactionThen {

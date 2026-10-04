@@ -1,6 +1,6 @@
 {
   "name": "Rollups",
-  "description": "Values derived from the instances that point at this one through a link of their schema's Links config: how many there are, how many hold each value of a field, the sum, least or greatest of a numeric field, and whether every one or some one is in a terminal state of its schema's Workflow. A value is computed when the instance is read, as the caller, from at most 500 linked instances; a rollup over more has none. A rollup of every or some one may gate states of the type's Workflow: a transition into one waits until the rollup holds.",
+  "description": "Values derived from the instances that point at this one through a link of their schema's Links config: how many there are, how many hold each value of a field, the sum, least or greatest of a numeric field, and whether every one or some one is in a terminal state of its schema's Workflow, optionally one with a listed outcome. A value is computed when the instance is read, as the caller, from at most 500 linked instances; a rollup over more has none. A rollup of every or some one may gate states of the type's Workflow: a transition into one waits until the rollup holds.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
@@ -50,6 +50,23 @@
                   }
                 }
               }
+            },
+            {
+              "if": {
+                "required": [
+                  "outcomes"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "function": {
+                    "enum": [
+                      "all",
+                      "any"
+                    ]
+                  }
+                }
+              }
             }
           ],
           "properties": {
@@ -59,7 +76,7 @@
               "type": "string"
             },
             "function": {
-              "description": "count: how many instances point here. countBy: how many hold each value of field. sum, min, max: of the numeric field. all, any: whether every one, or some one, is in a terminal state of its schema's Workflow.",
+              "description": "count: how many instances point here. countBy: how many hold each value of field. sum, min, max: of the numeric field. all, any: whether every one, or some one, is in a terminal state of its schema's Workflow, with an outcome outcomes lists when it is given.",
               "enum": [
                 "count",
                 "countBy",
@@ -84,6 +101,19 @@
               "description": "The link of that schema's Links config that points at this schema.",
               "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
               "type": "string"
+            },
+            "outcomes": {
+              "description": "For all and any, the outcomes a linked instance's terminal state must have to count; every outcome when absent.",
+              "items": {
+                "enum": [
+                  "success",
+                  "failure",
+                  "neutral"
+                ]
+              },
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
             },
             "schema": {
               "description": "The schema whose instances point at this one; it composes Links.",

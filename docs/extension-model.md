@@ -856,9 +856,10 @@ takes the policy's default. Every
 and its blockers. A config a
 declaration's `configSchema` accepts can still fail in the engine, whose
 implementation checks what JSON Schema cannot (a Workflow transition
-that names a state the config does not list, a gated state of
-`Dependencies` that is not a terminal state of the type's Workflow, or a
-rollup whose linked schema has no such link, say);
+that names a state the config does not list, a Workflow outcome for a
+state a transition leaves, a gated state of `Dependencies` that is not a
+state of the type's Workflow, or a rollup whose linked schema has no
+such link, say);
 `runtime/engine/README.md`, "Core behaviors", has each engine
 behavior's config, fields and operations, and
 `runtime/engine-workqueue/README.md` each work-queue behavior's. The
@@ -870,14 +871,14 @@ engine; without them the engine refuses a schema that composes one.
 
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |
-| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`); required | `status` | `transition` |
+| `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status` | `transition` |
 | `Comments` | none | `commentCount` | `comment`, `listComments` |
 | `Revisions` | `review` (`permission`), optional | `revision` | `listRevisions`, `propose`, `approve`, `reject`, `listProposals` |
-| `Dependencies` | `schemas`, `gatedStates`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
+| `Dependencies` | `schemas`, `gatedStates`, `satisfiedBy`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
 | `Links` | `links` (by name: `schema`, `required`, `pinned`); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |
-| `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`); required | `rollups` | none |
+| `Rollups` | `rollups` (by name: `schema`, `link`, `function`, `field`, `gatedStates`, `outcomes`); required | `rollups` | none |
 | `Search` | `fields`, `weights`; required | none | `search`, of scope `schema` |
-| `Reactions` | `rules` (each a `when`, `enters` or `allTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
+| `Reactions` | `rules` (each a `when`, `enters`, `allTerminal` or `anyTerminal`, and a `then`, `transition` and `link`); required; requires `Workflow` | none | none |
 | `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `acquirePermission`, `overridePermission`, `directPermission`; optional; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
 | `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
 | `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext`, of scope `schema` |
@@ -907,8 +908,8 @@ TypeScript twin to the same IR as well.
 applies its rules after a change commits (D16, amended), and a rule's
 links and states are checked by the engine, which sees the type's
 Workflow and Links configs. `make cli-smoke` loads
-`fixture-reactions-json`, whose projects start and finish their parent,
-and its TypeScript twin loads to the same IR.
+`fixture-reactions-json`, whose projects start, finish and fail their
+parent, and its TypeScript twin loads to the same IR.
 
 `Lease`, `Assignment`, `Queue`, `Budget` and `Retries` name the type's
 fields (`maxHoldField`, `priorityField`, `match`, `limitField`,

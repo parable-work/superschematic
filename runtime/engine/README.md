@@ -1251,12 +1251,12 @@ A state machine on the instance's `status`.
 
 | | |
 | --- | --- |
-| Config | `states` (one or more names: a letter, then letters, digits, `_` and `-`), `initial` (the first state when absent), `transitions`: `{ from, to, permission? }` |
+| Config | `states` (one or more names: a letter, then letters, digits, `_` and `-`), `initial` (the first state when absent), `transitions`: `{ from, to, permission? }`, `outcomes`: by terminal state, `success`, `failure` or `neutral`, optional |
 | Fields | `status` |
 | Operations | `transition({ to })` -> `{ from, to }`, writes |
 | Guards | its own `transition`, whoever asks: `to` not a state is `invalid_argument`; the state the instance is in, a transition the config does not list and a move out of a terminal state are `vetoed`; a transition that names a permission the caller lacks (`can`) is `forbidden` |
 | Events | `transition`'s operation event, `patch: { status }` |
-| `configChange` | every old state stays; transitions, permissions and `initial` may change. Not added to or removed from a schema with instances |
+| `configChange` | every old state stays; transitions, permissions, `initial` and `outcomes` may change. Not added to or removed from a schema with instances |
 
 A new instance starts in `initial`. The status is Workflow's own column,
 so a create or an update that sets it is refused (`readOnly`), and
@@ -1273,6 +1273,37 @@ A state that no transition leaves is terminal. `isTerminalState(config,
 state)`, exported by the package, answers that for a config as a schema
 holds it (`schemas.behaviors` lists it): true for one of its states that
 no transition leaves.
+
+A terminal state has an outcome, which says how the work it ends went:
+`success`, `failure` or `neutral`. `outcomes` names it for the terminal
+states it lists, and every other terminal state is a `success`, so a
+config without `outcomes` means what it did before outcomes existed. A
+key that is not a state, or names a state a transition leaves, is
+refused. `stateOutcome(config, state)`, exported beside
+`isTerminalState`, gives the outcome of a terminal state of a config as a
+schema holds it, and `undefined` for any other state. Workflow reads no
+outcome itself: a move into a failure state is a move like any other.
+`Dependencies`, `Rollups` and `Reactions` read the outcome of another
+schema's state, so a blocker or a child that failed does not count as one
+that finished well.
+
+```json
+{ "name": "Workflow", "config": {
+    "states": ["todo", "doing", "passed", "failed", "cancelled"],
+    "transitions": [
+      { "from": "todo", "to": "doing" },
+      { "from": "doing", "to": "passed" },
+      { "from": "doing", "to": "failed" },
+      { "from": "todo", "to": "cancelled" } ],
+    "outcomes": { "failed": "failure", "cancelled": "neutral" } } }
+```
+
+Outcomes are read when another instance's field is computed or a rule
+runs, as transitions are, and nothing stores them: a new version that
+changes an outcome, or makes a state terminal or not, changes which
+blockers are open and which rollups hold at their next read, for the
+instances already in that state. Nothing that already moved is moved
+back.
 
 #### Comments
 
@@ -1335,34 +1366,57 @@ Blockers between instances, which hold up the type's Workflow.
 
 | | |
 | --- | --- |
-| Config | `schemas`: the schemas a blocker may be an instance of, each composing Workflow (the type's own when absent); `gatedStates`: the terminal states of the type's Workflow a transition into waits for every blocker (every terminal state when absent). Requires `Workflow` |
-| Fields | `blocked`: whether a blocker's status is not a terminal state of its own schema's Workflow |
+| Config | `schemas`: the schemas a blocker may be an instance of, each composing Workflow (the type's own when absent); `gatedStates`: the states of the type's Workflow a transition into waits for every blocker to finish, terminal or not (every terminal state when absent); `satisfiedBy`: the outcomes of a blocker's terminal state that finish it (`["success"]` when absent). Requires `Workflow` |
+| Fields | `blocked`: whether a blocker is not finished |
 | Operations | `addBlocker({ schema?, id })` -> `{ schema, id, status?, open }`, writes; `removeBlocker({ schema?, id })` -> `{ schema, id }`, writes; `listBlockers({ limit?, cursor? })` -> a page of `{ schema, id, status?, open }`, read-only; `listDependents({ limit?, cursor? })` -> a page of `{ schema, id }`, read-only |
-| Create parameters | `{ blockers?: [{ schema?, id }] }`, at most 500: the instance's blockers from its create, each added with `addBlocker`'s checks |
+| Create parameters | `{ blockers?: [{ schema?, id }] }`, at most 500: the instance's blockers from its create, each added with `addBlocker`'s checks, against the Workflow's initial state: open until it finishes by `satisfiedBy`, and refused while open when the initial state is gated and no transition leaves it |
 | Guards | a Workflow `transition` of the instance into a gated state, whoever asks, while `blocked`: `vetoed`, naming the open blockers |
-| Refusals | `addBlocker`: the instance itself, a schema the config does not list, one without Workflow, an instance that does not exist (`invalid_argument`); a blocker already added, an edge that would close a cycle, an open blocker of an instance in a gated state (`vetoed`). A create's blockers: the same, at `/behaviors/Dependencies/blockers/<i>/schema` or `/id` (`invalid_argument`), or `vetoed` with action `create`. `removeBlocker` of an instance that does not block it (`invalid_argument`) |
+| Refusals | `addBlocker`: the instance itself, a schema the config does not list, one without Workflow, an instance that does not exist (`invalid_argument`); a blocker already added, an edge that would close a cycle, an open blocker of an instance in a gated state no transition leaves (`vetoed`). A create's blockers: the same, at `/behaviors/Dependencies/blockers/<i>/schema` or `/id` (`invalid_argument`), or `vetoed` with action `create`. `removeBlocker` of an instance that does not block it (`invalid_argument`). At define, a gated state the type's Workflow lacks (`invalid_schema`) |
 | Deletes | deleting a blocker removes its edges: its reference hook invokes `removeBlocker` on each dependent, as the caller, each with its own event. Deleting a dependent deletes its edges |
 | Events | `addBlocker`'s and `removeBlocker`'s operation events carry `blocked` when it changes |
-| `configChange` | `schemas` and `gatedStates` may change (edges made before stay); added to a schema with instances, which start with none; not removed from one, since its edges and references would stay behind |
+| `configChange` | `schemas`, `gatedStates` and `satisfiedBy` may change (edges made before stay); added to a schema with instances, which start with none; not removed from one, since its edges and references would stay behind |
 
-A blocker is open while its status is not a terminal state of its own
-schema's Workflow config (`isTerminalState` over what `schemas.config`
-returns), whatever the gated states say. One function answers that for
-the `blocked` field and the guard, over every blocker in every schema, so
-they cannot disagree. The guard reads the state a transition moves to
-from its `to`, the one parameter Workflow's closed `paramsSchema` takes,
-and it runs before any handler for a caller's transition, another
-behavior's `call()` and another instance's invoke alike. `parseConfig`
-holds `gatedStates` to the terminal states of the type's Workflow, which
-it reads in `target.configs`.
+A blocker is finished once its status is a terminal state of its own
+schema's Workflow config whose outcome `satisfiedBy` lists
+(`stateOutcome` over what `schemas.config` returns), and open until then,
+whatever the gated states say. With the default, a blocker that ends in a
+`failure` or `neutral` state stays open: a failed check does not let the
+step after it through. Removing it (`removeBlocker`) is how the work goes
+on without it; a dependent that may go on after a blocker was cancelled
+lists `neutral` too. A blocker whose schema declares no outcomes finishes
+in any terminal state, as before outcomes existed. One function answers
+that for the `blocked` field and the guard, over every blocker in every
+schema, so they cannot disagree. The guard reads the state a transition
+moves to from its `to`, the one parameter Workflow's closed
+`paramsSchema` takes, and it runs before any handler for a caller's
+transition, another behavior's `call()` and another instance's invoke
+alike. `parseConfig` holds `gatedStates` to the states of the type's
+Workflow, which it reads in `target.configs`.
+
+A gated state need not be terminal. Gating `doing` holds the start of
+work while a blocker is open, for a caller's transition as for a claim:
+
+```json
+{ "name": "Dependencies", "config": { "gatedStates": ["doing", "done"], "satisfiedBy": ["success", "neutral"] } }
+```
+
+An instance in a gated state that no transition leaves takes no open
+blocker: its gate let it in with every blocker finished, it never moves
+again, so `blocked` stays false. One in a gated state a transition
+leaves, `doing` above, takes one: a dependency found during the work
+holds up the instance's next move into a gated state, `done`, not the
+state it is in.
 
 A create's blockers are recorded in `initialize`, so the instance is
 `blocked` in its create event and every other behavior's `afterChange`
 sees the edges: a queue never finds it claimable before they exist. The
 instance's status then is its Workflow's initial state, whichever of the
-two the type lists first. An instance has no dependents at its create,
-so the cycle a create's blockers can close is the instance blocking
-itself.
+two the type lists first, and the rules above hold as they do for
+`addBlocker`: a blocker is open until it finishes by `satisfiedBy`, an
+initial state that is gated and that no transition leaves takes no open
+blocker, and one a transition leaves takes any, which hold up its first
+move into a gated state. An instance has no dependents at its create, so
+the cycle a create's blockers can close is the instance blocking itself.
 
 Blockers are read as the caller: a caller who may not read a blocker's
 schema cannot read `blocked` on the instances it blocks, or list them.
@@ -1416,7 +1470,7 @@ of their schema's `Links` config: a parent's view of its children.
 
 | | |
 | --- | --- |
-| Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates? }`; at least one. `function` is `count`, `countBy`, `sum`, `min`, `max`, `all` or `any`. `countBy`, `sum`, `min` and `max` take `field`, the others none; only `all` and `any` take `gatedStates` |
+| Config | `rollups`: by camelCase name, `{ schema, link, function, field?, gatedStates?, outcomes? }`; at least one. `function` is `count`, `countBy`, `sum`, `min`, `max`, `all` or `any`. `countBy`, `sum`, `min` and `max` take `field`, the others none; only `all` and `any` take `gatedStates` and `outcomes` |
 | Fields | `rollups`: `{ <name>: value }`, computed at each read |
 | Operations | none |
 | Guards | a Workflow `transition` of the instance into a state an `all` or `any` rollup gates, whoever asks, unless the rollup holds: `vetoed`, naming the rollup and how many linked instances keep it from holding |
@@ -1428,13 +1482,17 @@ of their schema's `Links` config: a parent's view of its children.
 { "name": "Rollups", "config": { "rollups": {
     "tasks": { "schema": "tasks", "link": "project", "function": "count" },
     "tasksByStatus": { "schema": "tasks", "link": "project", "function": "countBy", "field": "status" },
-    "tasksFinished": { "schema": "tasks", "link": "project", "function": "all", "gatedStates": ["done"] } } } }
+    "tasksFinished": { "schema": "tasks", "link": "project", "function": "all", "gatedStates": ["done"] },
+    "tasksFailed": { "schema": "tasks", "link": "project", "function": "any", "outcomes": ["failure"] } } } }
 ```
 
 On a `projects` schema, with the `tasks` above, a project then reads
 `"rollups": { "tasks": 2, "tasksByStatus": { "doing": 1, "todo": 1 },
-"tasksFinished": false }`, and cannot move to `done` until every one of
-its tasks is done or dropped.
+"tasksFailed": false, "tasksFinished": false }`, and cannot move to
+`done` until every one of its tasks is done or dropped. With
+`"outcomes": ["success"]` beside its `gatedStates`, `tasksFinished` would
+hold only once every task ended in a success, so a task that failed
+would keep the project from `done`.
 
 | Function | Value | Over no instance |
 | --- | --- | --- |
@@ -1442,13 +1500,15 @@ its tasks is done or dropped.
 | `countBy` | `{ <value>: count }` over the field's values, keys sorted; a boolean's are `"true"` and `"false"`; an instance with no value is not counted | `{}` |
 | `sum` | the sum of the field over the instances that hold a value | `0` |
 | `min`, `max` | the least or greatest value | absent |
-| `all` | whether every one is in a terminal state of its schema's Workflow (`isTerminalState`) | `true` |
+| `all` | whether every one is in a terminal state of its schema's Workflow (`isTerminalState`), with an outcome `outcomes` lists when it is given (`stateOutcome`) | `true` |
 | `any` | whether some one is | `false` |
 
 The set is closed so that each function is one pass over the records it
 reads, has one JSON type, and has a rule `parseConfig` checks against
 the linked schema when the schema is defined; filters, averages or
-expressions would make the config a query language.
+expressions would make the config a query language. `outcomes` is an
+argument of `all` and `any` from a closed set of three, as `field` is of
+`sum`, not a filter: it says which terminal states the two count.
 
 A value is computed when the instance is read, as the caller (D16,
 amended), and nothing is stored: a linked instance's change shows at
@@ -1583,20 +1643,47 @@ Rules that move Workflow statuses after a change commits.
 
 | | |
 | --- | --- |
-| Config | `rules`: one to 64, each one `when` and one `then`. `when` is `{ enters: <state> }` or `{ allTerminal: { schema, link } }`; `then` is `{ transition: <state>, link? }`. Requires `Workflow` |
+| Config | `rules`: one to 64, each one `when` and one `then`. `when` is `{ enters: <state> }`, `{ allTerminal: { schema, link, outcomes? } }` or `{ anyTerminal: { schema, link, outcomes } }`; `outcomes` is a list of `success`, `failure` and `neutral`. `then` is `{ transition: <state>, link? }`. Requires `Workflow` |
 | Fields, operations | none |
-| Reactions | `enters`: the instance's status became the state, by a create or a transition. `allTerminal`: an instance of `schema` that links to this one through `link` changed or went, and every instance linking here through it is in a terminal state of its own schema's Workflow, at least one. `then` moves this instance, or the one its `link` points to, to the state |
-| Refusals at define | a state the type's Workflow lacks, in `enters` or in a `then` on the instance itself; a `then.link` the type's Links lacks, or Links absent; an `allTerminal` on the type's own schema whose link does not point at it; a `then` on the instance itself that no transition of its Workflow allows; `enters` rules on the instance itself whose states cycle |
-| Failures at run | a target schema without Workflow, a state its Workflow lacks, an `allTerminal` schema that does not link here through `link`: the subscription retries, then halts |
+| Reactions | `enters`: the instance's status became the state, by a create or a transition. `allTerminal`: an instance of `schema` that links to this one through `link` changed or went, and every instance linking here through it is in a terminal state of its own schema's Workflow, with an outcome `outcomes` lists when it is given, at least one. `anyTerminal`: an instance of `schema` that links here through `link` entered a terminal state whose outcome `outcomes` lists, by a create or a transition, or was linked here while in one. `then` moves this instance, or the one its `link` points to, to the state |
+| Refusals at define | a state the type's Workflow lacks, in `enters` or in a `then` on the instance itself; a `then.link` the type's Links lacks, or Links absent; an `allTerminal` or `anyTerminal` on the type's own schema whose link does not point at it; a `then` on the instance itself that no transition of its Workflow allows; `enters` rules on the instance itself whose states cycle |
+| Failures at run | a target schema without Workflow, a state its Workflow lacks, an `allTerminal` or `anyTerminal` schema without Workflow or that does not link here through `link`: the subscription retries, then halts |
 | Events | each move is Workflow's `transition` operation event on the target, actor the runner's principal, `cause` the event that set it off |
 | `configChange` | any; added to and removed from a schema with instances, since it keeps no state |
 
 The rules run in order on each event the subscription hears: the
-schema's own events, and those of each `allTerminal` schema. An
-`allTerminal` rule looks at the instance the event's instance links to
-now and, after a delete or a change of its links, the one it linked to
-before (`before`), and finds the instances linking there with Links'
-`listLinked`, as the runner's principal.
+schema's own events, and those of each `allTerminal` and `anyTerminal`
+schema. An `allTerminal` rule looks at the instance the event's instance
+links to now and, after a delete or a change of its links, the one it
+linked to before (`before`), and finds the instances linking there with
+Links' `listLinked`, as the runner's principal. An `anyTerminal` rule
+looks at the instance the event's instance links to now, and only when
+the event moved its status into a terminal state with a listed outcome
+or moved that link here while its status is one: a later change that
+moves neither, an update say, does not set it off again.
+
+A parent that completes when its children all succeed and fails when
+one fails says both on its own schema:
+
+```json
+{ "name": "Reactions", "config": { "rules": [
+    { "when": { "allTerminal": { "schema": "steps", "link": "run", "outcomes": ["success"] } }, "then": { "transition": "completed" } },
+    { "when": { "anyTerminal": { "schema": "steps", "link": "run", "outcomes": ["failure"] } }, "then": { "transition": "failed" } } ] } }
+```
+
+Both rules run in the parent schema's one subscription, on each child's
+event in log order, and `allTerminal` reads every child as it is when it
+runs. A child in a terminal state stays there, so `completed` needs
+every child to have succeeded, and the parent never completes while a
+child has failed, whatever order the children's events, the rules and
+the runner's passes come in; the `anyTerminal` rule fails it instead. A
+rule on the child that fails its parent, `enters: failed` with a `then`
+through the parent link, runs in the child schema's subscription, which
+may run before or after the parent's: beside `allTerminal` without
+`outcomes`, the last child failing could complete the parent or fail it,
+by which ran first. With `outcomes: ["success"]` it cannot complete it.
+A child that ends `neutral` holds up the rule above; list `neutral` with
+`success` for a parent that completes past cancelled children.
 
 A rule acts only where it can. A target already in the state, with no
 transition to it from where it is now, or whose guards veto the

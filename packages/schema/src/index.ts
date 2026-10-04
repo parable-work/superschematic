@@ -41,6 +41,7 @@ export type {
   PresenceConfig,
   PresenceTransition,
   ReactionRule,
+  ReactionSource,
   ReactionThen,
   ReactionWhen,
   QueueConfig,
@@ -52,6 +53,7 @@ export type {
   RollupsConfig,
   SearchConfig,
   WorkflowConfig,
+  WorkflowOutcome,
   WorkflowTransition,
 } from "./behavior";
 export { trait } from "./trait";

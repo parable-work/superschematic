@@ -2,6 +2,12 @@
 #![allow(unused_imports)]
 
 use crate::interfaces::Implementations;
+{{- if .WebhookProviders }}
+use crate::interfaces::WebhookVerifier;
+use axum::extract::Request;
+use axum::middleware::Next;
+use axum::routing::MethodRouter;
+{{- end }}
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Method, Uri};
@@ -25,17 +31,61 @@ pub struct RouterState {
 /// returned router:
 ///
 {{- range .ManualEndpoints }}
-/// - `{{ toUpper .Method }} {{ .Path }}` ({{ .Namespace }}.{{ .Name }})
+/// - `{{ toUpper .Method }} {{ .Path }}` ({{ .Namespace }}.{{ .Name }}){{ if .WebhookProvider }}, @hmacVerified:
+///   wrap its route in `webhook_verified` with the {{ .WebhookProvider }} verifier
 {{- end }}
+{{- end }}
+{{- end }}
+{{- if .WebhookProviders }}
+{{- if not .ManualEndpoints }}
+/// Mounts every operation.
+{{- end }}
+///
+/// An @hmacVerified operation's route runs its provider's verifier first.
+///
+/// # Panics
+///
+/// When `implementations.webhook_verifiers` lacks the verifier of a
+/// provider (`Implementations::validate_implementations`).
 {{- end }}
 pub fn build_router(implementations: Implementations) -> Router {
+{{- if .WebhookProviders }}
+    if let Err(message) = implementations.validate_implementations() {
+        panic!("{message}");
+    }
+{{- end }}
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
 {{- range .Endpoints }}
+{{- if .WebhookProvider }}
+    router = router.route(
+        "{{ .Path }}",
+        webhook_verified(
+            {{ .Method }}(handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}),
+            Arc::clone(&state.implementations.webhook_verifiers[{{ rustString .WebhookProvider }}]),
+        ),
+    );
+{{- else }}
     router = router.route("{{ .Path }}", {{ .Method }}(handle_{{ toSnakeCase .Namespace }}_{{ .FunctionName }}));
+{{- end }}
 {{- end }}
     router.with_state(state)
 }
+{{- if .WebhookProviders }}
+
+/// Runs `verifier` before `route`'s handler, so before its extractors read
+/// the body. `build_router` wraps each @hmacVerified operation's route in it;
+/// the service wraps the route it adds for a @manualRouteRegistration one.
+pub fn webhook_verified<S>(route: MethodRouter<S>, verifier: Arc<dyn WebhookVerifier>) -> MethodRouter<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    route.route_layer(axum::middleware::from_fn(move |request: Request, next: Next| {
+        let verifier = Arc::clone(&verifier);
+        async move { verifier.verify(request, next).await }
+    }))
+}
+{{- end }}
 
 fn method_from_str(method: &str) -> Method {
     match method {

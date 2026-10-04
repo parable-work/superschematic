@@ -415,8 +415,10 @@ failure at any child refuses the change, and the parent, every child,
 link and edge roll back together. Children come in
 an order where each follows its blockers, ties in the map's order. A
 child schema that composes `Queue` makes the children claimable work:
-`claimNext` claims each once its blockers are in a terminal state, so the
-steps are claimed in the order their edges give.
+`claimNext` claims each once its blockers have finished, in a terminal
+state whose outcome the child's `Dependencies` `satisfiedBy` lists (a
+success by default), so the steps are claimed in the order their edges
+give, and the steps after one that failed are not claimed.
 
 Inline `steps` are stamped in the instance's create. `from` steps are
 stamped when the `from` link is first set: in the create when the
