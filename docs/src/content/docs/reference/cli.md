@@ -333,8 +333,8 @@ extension's declarations are registered only in its own binary: acme's
 copy comes from `acme-schematic`, and its smoke runs `--check`. The core
 binary writes the behaviors the core declares into the two packages that
 implement them: `Workflow`, `Comments`, `Revisions`, `Dependencies`,
-`Links`, `Rollups`, `Search` and `Reactions` with `--package
-@superschematic/engine`, and `Lease`, `Assignment`, `Queue`, `Presence`,
+`Links`, `Rollups`, `Search`, `Reactions`, `Constants` and `Variants`
+with `--package @superschematic/engine`, and `Lease`, `Assignment`, `Queue`, `Presence`,
 `Blueprint`, `Budget` and `Retries` with `--package
 @superschematic/engine-workqueue` (`make behaviors`; `make
 behaviors-check` in CI). Without `--extension`, an extension's binary

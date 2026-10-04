@@ -278,7 +278,7 @@ of a child schema an instance has, and which block which.
 
 | | |
 | --- | --- |
-| Config | `schema` (the child schema), `parentLink` (its link back here) and `keyField` (a string field of the child), required; `steps` inline or `from` (`{ link, field }`, a map read from a pinned revision); `copyFields`, `copyLinks` |
+| Config | `schema` (the child schema, which keeps `keyField` and the copied fields with `Constants`), `parentLink` (its link back here) and `keyField` (a string field of the child), required; `steps` inline or `from` (`{ link, field }`, a map read from a pinned revision); `copyFields`, `copyLinks` |
 | Steps | by key: `{ after?, when?, data? }`; `after` lists the steps that block this one, `when` is `{ field, equals }` or `{ field, includes }` |
 | Field | `blueprint`: `{ children: [{ key, id }] }` |
 
@@ -300,18 +300,32 @@ export abstract class Batch {
 }
 ```
 
-Creating a batch creates its steps, links each to the batch, and adds
-their `Dependencies` edges, in one transaction with the batch. A step
-whose `when` does not hold is left out and the chain closes over it: a
-batch with `topic: "copy"` gets `fetch` and `index`, with `index` blocked
-by `fetch`. When the child schema composes `Queue`, `claimNext` claims
-each step once its blockers finish. A step that ends in a failure state
-(`outcomes: { failed: "failure" }` on the child's `Workflow`) stays a
-blocker, so the steps after it are not claimed until someone removes
-the edge. The child schema needs `Links` with the `parentLink`, and
-`Dependencies` when steps use `after`. To settle the parent from its
-steps, give it `Reactions` with `allTerminal` and `anyTerminal` rules
-([Reactions](/superschematic/guides/engine-behaviors/#reactions)).
+Creating a batch creates its steps in one transaction with the batch,
+each step created with its link to the batch and its `Dependencies`
+edges as
+[create parameters](/superschematic/guides/engine-behaviors/#create-parameters),
+so a step is blocked from its first event and `claimNext` never finds it
+early. A step whose `when` does not hold is left out and the chain
+closes over it: a batch with `topic: "copy"` gets `fetch` and `index`,
+with `index` blocked by `fetch`. When the child schema composes `Queue`,
+`claimNext` claims each step once its blockers finish. A step that ends
+in a failure state (`outcomes: { failed: "failure" }` on the child's
+`Workflow`) stays a blocker, so the steps after it are not claimed until
+someone removes the edge. The child schema needs `Links` with the
+`parentLink`, `Dependencies` when steps use `after`, and
+[`Constants`](/superschematic/guides/engine-behaviors/#constants-and-variants)
+over `keyField` and every copied field, so no one, the worker holding a
+step's lease included, can turn a step into another one:
+
+```ts
+@behavior("Constants", { fields: ["step", "topic"] })
+```
+
+Make the `parentLink` `required` and no step can be created without its
+batch, by Blueprint or anyone else. With `from`, a create that gives the
+definition's link stamps the steps in that create. To settle the parent
+from its steps, give it `Reactions` with `allTerminal` and `anyTerminal`
+rules ([Reactions](/superschematic/guides/engine-behaviors/#reactions)).
 
 ## Budget
 
