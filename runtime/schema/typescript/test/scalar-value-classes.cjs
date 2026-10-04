@@ -28,6 +28,7 @@ function test(name, fn) {
 }
 
 test('the package root exports the value classes the runtime entry point does', () => {
+  assert.strictEqual(typeof BUILTIN_SCALAR_VALUE_CLASSES, 'object');
   assert.strictEqual(root.BUILTIN_SCALAR_VALUE_CLASSES, BUILTIN_SCALAR_VALUE_CLASSES);
 });
 
