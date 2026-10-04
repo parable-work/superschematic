@@ -271,6 +271,47 @@ export const cases: Case[] = [
     },
   },
   {
+    name: "prune deletes a kind's images past its retention but each row's newest and every pinned one, at most a batch, and nothing of a kind without retention",
+    run(binding) {
+      let now = 1_800_000_000_000_000;
+      const s = setup(binding, { clock: () => now });
+      using([s], () => {
+        const main = s.engine.createPrimary(cook, bread, "main");
+        let draft = s.engine.branch(cook, main.id, "draft");
+        for (const instruction of ["Knead", "Knead well", "Knead hard"]) {
+          draft = s.engine.save(cook, draft.id, draft.version, {
+            step: { upsert: [stepRow("Knead", instruction)] },
+            utensil: { upsert: [`{"entity_key": "Whisk", "name": ${JSON.stringify(instruction)}}`] },
+          }).ref;
+        }
+        // The commit pins version 3 of each; versions 1 and 2 are unpinned.
+        draft = s.engine.commit(cook, draft.id, draft.version).ref;
+        draft = s.engine.save(cook, draft.id, draft.version, { step: { upsert: [stepRow("Knead", "Knead softly")] } }).ref;
+        const prune = (kind: string, days: number, batch: number) => s.storage.transact((tx) => tx.prune(kind, days, batch));
+        const versions = (kind: string) =>
+          s.client.all(`SELECT _version FROM "graph_member_history" WHERE kind = ?1 ORDER BY _version`, [kind]).map((r) => r["_version"]);
+        // Within the step kind's 365 days, nothing goes.
+        now += 364 * 86_400_000_000;
+        assert.equal(prune("step", 0, 0), 0);
+        // An argument other than 0 is the retention, in days.
+        assert.equal(prune("step", 400, 0), 0);
+        now += 2 * 86_400_000_000;
+        assert.equal(prune("step", 400, 0), 0);
+        // Past the declared 365 days: versions 1 and 2, a batch at a time.
+        assert.equal(prune("step", 0, 1), 1);
+        assert.deepEqual(versions("step"), [2, 3, 4]);
+        assert.equal(prune("step", 0, 0), 1);
+        assert.deepEqual(versions("step"), [3, 4], "the pinned version 3 and the newest, version 4, stay");
+        assert.equal(prune("step", 1, 0), 0);
+        // utensil declares no retention, so nothing of it goes, whatever the argument.
+        assert.equal(prune("utensil", 0, 0), 0);
+        assert.equal(prune("utensil", 1, 0), 0);
+        assert.deepEqual(versions("utensil"), [1, 2, 3]);
+        assert.throws(() => prune("step", 0, -1), /a batch is a whole number/);
+      });
+    },
+  },
+  {
     name: "the adapter writes a row's ref, root, tombstone, actor and time, never its id or version, and keeps or defaults what it lacks",
     run(binding) {
       const s = setup(binding, { clock: () => 1_800_000_000_000_000 });
@@ -499,15 +540,24 @@ export const cases: Case[] = [
           const b = new SqliteAdapter(descriptor, { graph }).storage(second.client);
           let waited = 0;
           let busy: unknown;
+          let ran = false;
           a.storage.transact((tx) => {
             tx.createRef({ root: bread, parent: null, base: null, name: "main", actor: cook });
             const started = Date.now();
-            busy = thrown(() => b.transact((other) => other.createRef({ root: "Soup", parent: null, base: null, name: "main", actor: cook })));
+            busy = thrown(() =>
+              b.transact((other) => {
+                ran = true;
+                return other.readRef("Missing");
+              }),
+            );
             waited = Date.now() - started;
           });
           assert.ok(busy instanceof SqliteError, String(busy));
           assert.equal(busy.code, 5, "SQLITE_BUSY");
           assert.ok(waited >= 250, `waited ${waited}ms for the lock`);
+          // The transaction begins by taking the write lock, so even one that
+          // would only read never starts.
+          assert.equal(ran, false);
           // Once the first transaction commits, the second connection writes, and reads what the first wrote.
           b.transact((other) => other.createRef({ root: "Soup", parent: null, base: null, name: "main", actor: cook }));
           assert.equal(second.client.get(`SELECT count(*) AS n FROM "graph_ref"`)?.["n"], 2);
