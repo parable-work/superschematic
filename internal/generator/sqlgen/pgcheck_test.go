@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/parable-work/superschematic/internal/loader"
 )
 
 // runPGCheck copies testdata/pgcheck to a temporary module and runs its
@@ -49,6 +51,36 @@ func TestUserTableCreateSQLOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	runPGCheck(t, "TestUserTableOnPostgres",
+		"PGCHECK_DATABASE_URL="+dsn,
+		"PGCHECK_SQL_DIR="+sqlDir,
+	)
+}
+
+// TestPruneHistoryDropSQLOnPostgres applies the create.sql and drop.sql
+// generated for fixture-version-graph-db, whose step and ingredient tables
+// declare retentionDays, to a real Postgres; testdata/pgcheck's
+// TestPruneHistoryDropOnPostgres holds the checks. drop.sql used to drop
+// each prune function by a one-INTEGER signature that matched nothing, so
+// the functions outlived it. Set SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL as
+// for TestProjectionMigrationsOnPostgres.
+func TestPruneHistoryDropSQLOnPostgres(t *testing.T) {
+	dsn := os.Getenv("SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL to apply fixture-version-graph-db's create.sql and drop.sql against Postgres")
+	}
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-version-graph-db"))
+	if err != nil {
+		t.Fatalf("load fixture-version-graph-db: %v", err)
+	}
+	output, err := Generate(schema, Options{SchemaName: "fixture-version-graph-db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDir := t.TempDir()
+	if err := WriteDDL(output, sqlDir); err != nil {
+		t.Fatal(err)
+	}
+	runPGCheck(t, "TestPruneHistoryDropOnPostgres",
 		"PGCHECK_DATABASE_URL="+dsn,
 		"PGCHECK_SQL_DIR="+sqlDir,
 	)
