@@ -1,0 +1,29 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "643e4061d9b24ff8366f2f2774c60aff7ccdd3906c9310a9ff56ef5659b1ff32",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product",
+          "reason": "Dropping table product deletes its rows (Product).",
+          "subject": "table/product"
+        }
+      ],
+      "index": 1,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE product"
+      ],
+      "subject": "table/product",
+      "transactional": true
+    }
+  ],
+  "to": "88be97dd4bd2ee3c1979057f60f6a705ccd1a0c49f876ba8e41a3c829a44af66",
+  "toModel": null,
+  "version": 1
+}

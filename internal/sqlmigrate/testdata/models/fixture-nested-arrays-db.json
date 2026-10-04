@@ -1,0 +1,51 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "pgcrypto"
+  ],
+  "service": "fixture-nested-arrays-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Board.id",
+          "type": "UUID"
+        },
+        {
+          "name": "labels",
+          "origin": "Board.labels",
+          "type": "JSONB"
+        },
+        {
+          "name": "states",
+          "origin": "Board.states",
+          "type": "JSONB"
+        },
+        {
+          "name": "walls",
+          "origin": "Board.walls",
+          "type": "JSONB"
+        },
+        {
+          "name": "scores",
+          "nullable": true,
+          "origin": "Board.scores",
+          "type": "JSONB"
+        }
+      ],
+      "comment": "A game board whose columns are lists of lists.",
+      "kind": "entity",
+      "name": "board",
+      "origin": "Board",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "board_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

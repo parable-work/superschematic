@@ -1,0 +1,21 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "fff8a8a77c9ea63dacab9a27cd4455164c57e112fb072649d6c8b1613f92607b",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ADD COLUMN tags TEXT[] DEFAULT '{}' NOT NULL"
+      ],
+      "subject": "table/order/column/tags",
+      "transactional": true
+    }
+  ],
+  "to": "217029c8f7c5bfd0363588482239a642a7ea91c42a22d79678870097bc92beec",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,42 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "59fd084a6e9048055d27ba922c2e332c802f989cdc44463aea50fd130f666a9d",
+  "renames": [
+    "customer.email=customer.contact_email"
+  ],
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/customer/column/contact_email",
+          "reason": "customer.email is renamed to customer.contact_email (Customer.contactEmail): servers built from the previous version still use the old name.",
+          "subject": "table/customer/column/contact_email"
+        }
+      ],
+      "index": 1,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE customer RENAME COLUMN email TO contact_email"
+      ],
+      "subject": "table/customer/column/contact_email",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE customer RENAME CONSTRAINT customer_email_key TO customer_contact_email_key"
+      ],
+      "subject": "table/customer/constraint/customer_contact_email_key",
+      "transactional": true
+    }
+  ],
+  "to": "d827a886b58679c8e9b7b1efbf74e593096a0128865e95ccd86c56c28dae7082",
+  "toModel": null,
+  "version": 1
+}

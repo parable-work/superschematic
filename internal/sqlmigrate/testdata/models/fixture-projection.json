@@ -1,0 +1,328 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "citext",
+    "pgcrypto"
+  ],
+  "schemas": [
+    "app"
+  ],
+  "service": "fixture-projection",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Channel.id",
+          "type": "UUID"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "Channel.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "updated_at",
+          "nullable": true,
+          "origin": "Channel.updatedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "account",
+          "origin": "Channel.account",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "Channel.name",
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "handle",
+          "origin": "Channel.handle",
+          "type": "CITEXT"
+        }
+      ],
+      "comment": "A release channel of an app: the line a preference row resolves against.",
+      "kind": "entity",
+      "name": "channel",
+      "origin": "Channel",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "channel_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Preference.id",
+          "type": "UUID"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "Preference.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "updated_at",
+          "nullable": true,
+          "origin": "Preference.updatedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "account",
+          "origin": "Preference.account",
+          "type": "UUID"
+        },
+        {
+          "name": "channel_id",
+          "origin": "Preference.channel",
+          "type": "UUID"
+        },
+        {
+          "name": "branch_id",
+          "nullable": true,
+          "origin": "Preference.branch",
+          "type": "UUID"
+        },
+        {
+          "name": "commit",
+          "nullable": true,
+          "origin": "Preference.commit",
+          "type": "UUID"
+        },
+        {
+          "name": "scope",
+          "origin": "Preference.scope",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "nullable": true,
+          "origin": "Preference.userId",
+          "type": "UUID"
+        },
+        {
+          "name": "slot_key",
+          "origin": "Preference.slotKey",
+          "type": "UUID"
+        },
+        {
+          "name": "handle",
+          "origin": "Preference.handle",
+          "type": "CITEXT"
+        },
+        {
+          "name": "value",
+          "origin": "Preference.value",
+          "type": "JSONB"
+        },
+        {
+          "name": "revision",
+          "origin": "Preference.revision",
+          "type": "BIGINT"
+        },
+        {
+          "default": "'{}'",
+          "name": "tags",
+          "origin": "Preference.tags",
+          "type": "CITEXT[]"
+        },
+        {
+          "name": "archived_at",
+          "nullable": true,
+          "origin": "Preference.archivedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "hidden",
+          "origin": "Preference.hidden",
+          "type": "BOOLEAN"
+        }
+      ],
+      "comment": "One stored preference value for a slot, scoped to an app, a team, or a\nuser.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "branch_id"
+          ],
+          "name": "fk_preference_branch_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "channel"
+        },
+        {
+          "columns": [
+            "channel_id"
+          ],
+          "name": "fk_preference_channel_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "channel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "account",
+            "slot_key"
+          ],
+          "method": "BTREE",
+          "name": "idx_preference_account_slot_key"
+        }
+      ],
+      "kind": "entity",
+      "name": "preference",
+      "origin": "Preference",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "preference_pkey"
+      }
+    }
+  ],
+  "version": 1,
+  "views": [
+    {
+      "columns": [
+        {
+          "name": "slot_key",
+          "type": "UUID"
+        },
+        {
+          "name": "handle",
+          "type": "CITEXT"
+        },
+        {
+          "name": "scope",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "nullable": true,
+          "type": "UUID"
+        },
+        {
+          "name": "channel_id",
+          "type": "UUID"
+        },
+        {
+          "name": "channel_handle",
+          "type": "CITEXT"
+        },
+        {
+          "name": "branch_name",
+          "nullable": true,
+          "type": "VARCHAR(80)"
+        },
+        {
+          "name": "value",
+          "type": "JSONB"
+        },
+        {
+          "name": "revision",
+          "type": "BIGINT"
+        },
+        {
+          "name": "tags",
+          "type": "CITEXT[]"
+        },
+        {
+          "name": "updated_at",
+          "nullable": true,
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "definition": [
+        "CREATE VIEW app.preferences WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\nSELECT DISTINCT ON (base.slot_key) -- noqa: ST06\n  base.slot_key,\n  base.handle,\n  base.scope,\n  base.user_id,\n  base.channel_id,\n  channel.handle AS channel_handle,\n  branch.\"name\" AS branch_name,\n  base.value,\n  base.revision,\n  base.tags,\n  base.updated_at\nFROM preference AS base\n  INNER JOIN channel AS channel ON base.channel_id = channel.id\n  LEFT JOIN channel AS branch ON base.branch_id = branch.id\nWHERE base.account = current_setting('app.account_id')::uuid\n  AND base.channel_id = current_setting('app.channel_id')::uuid\n  AND (base.scope IS DISTINCT FROM 'user' OR base.user_id = current_setting('app.user_id')::uuid)\n  AND (base.scope IS DISTINCT FROM 'app' OR (base.branch_id = NULLIF(current_setting('app.branch_id', true), '')::uuid OR base.\"commit\" = NULLIF(current_setting('app.commit_id', true), '')::uuid))\n  AND base.archived_at IS null\n  AND base.hidden = false\n  AND (base.scope IS DISTINCT FROM 'user' OR base.user_id IS NOT null)\nORDER BY base.slot_key ASC, CASE base.scope WHEN 'user' THEN 0 WHEN 'team' THEN 1 WHEN 'app' THEN 2 ELSE 3 END ASC, base.branch_id ASC NULLS LAST",
+        "COMMENT ON VIEW app.preferences IS 'Preference values visible to the current account, channel and user: app and team rows for the selected channel, and user rows only for the user whose session runs the query. App rows resolve by the branch or the released commit the caller names (either setting may be left unset), and one row per slot survives: user over team over app, and a branch row before the released commit''s.'",
+        "COMMENT ON COLUMN app.preferences.slot_key IS 'Stable identity of the slot the value belongs to.'"
+      ],
+      "name": "preferences",
+      "origin": "AppPreference",
+      "reads": [
+        {
+          "column": "handle",
+          "table": "channel"
+        },
+        {
+          "column": "id",
+          "table": "channel"
+        },
+        {
+          "column": "name",
+          "table": "channel"
+        },
+        {
+          "column": "account",
+          "table": "preference"
+        },
+        {
+          "column": "archived_at",
+          "table": "preference"
+        },
+        {
+          "column": "branch_id",
+          "table": "preference"
+        },
+        {
+          "column": "channel_id",
+          "table": "preference"
+        },
+        {
+          "column": "commit",
+          "table": "preference"
+        },
+        {
+          "column": "handle",
+          "table": "preference"
+        },
+        {
+          "column": "hidden",
+          "table": "preference"
+        },
+        {
+          "column": "revision",
+          "table": "preference"
+        },
+        {
+          "column": "scope",
+          "table": "preference"
+        },
+        {
+          "column": "slot_key",
+          "table": "preference"
+        },
+        {
+          "column": "tags",
+          "table": "preference"
+        },
+        {
+          "column": "updated_at",
+          "table": "preference"
+        },
+        {
+          "column": "user_id",
+          "table": "preference"
+        },
+        {
+          "column": "value",
+          "table": "preference"
+        }
+      ],
+      "schema": "app"
+    }
+  ]
+}

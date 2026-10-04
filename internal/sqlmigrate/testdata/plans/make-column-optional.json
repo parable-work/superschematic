@@ -1,0 +1,21 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "b871eed2f816d3e8aab54962b5596557c87e49d92ef68c333a80c1ba6fb2fd97",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropNotNull",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ALTER COLUMN total DROP NOT NULL"
+      ],
+      "subject": "table/order/column/total",
+      "transactional": true
+    }
+  ],
+  "to": "a251f67f859d32ce26b352b558962c8b602816c19548acfc33946e62d125ec52",
+  "toModel": null,
+  "version": 1
+}

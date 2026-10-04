@@ -1,0 +1,35 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "0600307221ebfe1f3e79f39a08a825334a5979ee3e3019712dd1c74a11387f51",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/channel",
+          "reason": "Order.channel is required and has no default: servers built from the previous version insert rows without it.",
+          "subject": "table/order/column/channel"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/column/channel",
+          "reason": "Order.channel is required and has no default: adding it fails when order has rows.",
+          "subject": "table/order/column/channel"
+        }
+      ],
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ADD COLUMN channel TEXT NOT NULL"
+      ],
+      "subject": "table/order/column/channel",
+      "transactional": true
+    }
+  ],
+  "to": "5f0ce1828faabfad0b1ce84ecf56de0b56f3eb6e89dbb7c6761ad92fe2ec3b1d",
+  "toModel": null,
+  "version": 1
+}

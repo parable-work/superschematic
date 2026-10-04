@@ -96,6 +96,10 @@ type Table struct {
 	// History names the history table of a @versioned table; empty
 	// otherwise.
 	History string `json:"history,omitempty"`
+	// HistoryExclude lists the columns @versioned({ exclude }) leaves out of
+	// every history image, in declaration order. A plan seeds a new history
+	// table with images that leave them out too.
+	HistoryExclude []string `json:"historyExclude,omitempty"`
 	// Optimistic is true for an @optimistic table (a _version bump with no
 	// history).
 	Optimistic bool `json:"optimistic,omitempty"`

@@ -1,0 +1,128 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "d3f65acd0d3709208b013c865d6c1c9d1d3601981cb53074dce51b0f7539a463",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/buyer_id",
+          "reason": "Order.buyer is required and has no default: servers built from the previous version insert rows without it.",
+          "subject": "table/order/column/buyer_id"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/column/buyer_id",
+          "reason": "Order.buyer is required and has no default: adding it fails when order has rows.",
+          "subject": "table/order/column/buyer_id"
+        }
+      ],
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ADD COLUMN buyer_id UUID NOT NULL"
+      ],
+      "subject": "table/order/column/buyer_id",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropNotNull",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ALTER COLUMN customer_id DROP NOT NULL"
+      ],
+      "subject": "table/order/column/customer_id",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_order_buyer_placed_at"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_order_buyer_placed_at ON \"order\" USING BTREE (buyer_id, placed_at)"
+      ],
+      "subject": "table/order/index/idx_order_buyer_placed_at",
+      "transactional": false
+    },
+    {
+      "index": 4,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ADD CONSTRAINT fk_order_buyer_id FOREIGN KEY (buyer_id) REFERENCES customer (id) ON DELETE RESTRICT NOT VALID"
+      ],
+      "subject": "table/order/constraint/fk_order_buyer_id",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "validateForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" VALIDATE CONSTRAINT fk_order_buyer_id"
+      ],
+      "subject": "table/order/constraint/fk_order_buyer_id",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "replaceView",
+      "phase": "expand",
+      "statements": [
+        "DROP VIEW report.order_summary",
+        "CREATE VIEW report.order_summary WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\nSELECT -- noqa: ST06\n  base.code,\n  base.total,\n  customer.\"name\" AS customer_name\nFROM \"order\" AS base\n  INNER JOIN customer AS customer ON base.buyer_id = customer.id\n",
+        "COMMENT ON VIEW report.order_summary IS 'Orders with their customer''s name, for reporting.'"
+      ],
+      "subject": "view/report.order_summary",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "dropForeignKey",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" DROP CONSTRAINT fk_order_customer_id"
+      ],
+      "subject": "table/order/constraint/fk_order_customer_id",
+      "transactional": true
+    },
+    {
+      "index": 8,
+      "op": "dropIndex",
+      "phase": "contract",
+      "statements": [
+        "DROP INDEX idx_order_customer_placed_at"
+      ],
+      "subject": "table/order/index/idx_order_customer_placed_at",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order/column/customer_id",
+          "reason": "Dropping order.customer_id deletes the values of Order.customer. It may be a rename: order.buyer_id is added with the same type, nullability and default. If it is, plan with --rename order.customer_id=order.buyer_id.",
+          "subject": "table/order/column/customer_id"
+        }
+      ],
+      "index": 9,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" DROP COLUMN customer_id"
+      ],
+      "subject": "table/order/column/customer_id",
+      "transactional": true
+    }
+  ],
+  "to": "56316a0b570a36f1f34e000bd31c11180f12e53d7abcaa5d5ca0786cb0cb70c5",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,1957 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "pgcrypto"
+  ],
+  "functions": [
+    {
+      "definition": "CREATE OR REPLACE FUNCTION cover_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version.\n    INSERT INTO cover_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO cover_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "cover_capture_history",
+      "origin": "Cover"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION ingredient_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version.\n    INSERT INTO ingredient_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO ingredient_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "ingredient_capture_history",
+      "origin": "Ingredient"
+    },
+    {
+      "arguments": "INTEGER, INTEGER",
+      "definition": "CREATE OR REPLACE FUNCTION ingredient_prune_history(retention_days INTEGER DEFAULT 365, max_rows INTEGER DEFAULT NULL) RETURNS BIGINT AS $$\nDECLARE\n  deleted_count BIGINT;\nBEGIN\n  WITH candidates AS (\n    SELECT h.history_id\n    FROM ingredient_history h\n    WHERE h.recorded_at \u003c now() - make_interval(days =\u003e retention_days)\n      AND EXISTS (\n        SELECT 1\n        FROM ingredient_history newer\n        WHERE newer.id = h.id\n          AND newer._version \u003e h._version\n      )\n      AND NOT EXISTS (\n        SELECT 1\n        FROM recipe_patch pin_1\n        WHERE pin_1.entity_id = h.id\n          AND pin_1.entity_version = h._version\n      )\n      AND NOT EXISTS (\n        SELECT 1\n        FROM recipe_snapshot_entry pin_2\n        WHERE pin_2.entity_id = h.id\n          AND pin_2.entity_version = h._version\n      )\n    LIMIT max_rows\n  ),\n  deleted AS (\n    DELETE FROM ingredient_history h\n    USING candidates c\n    WHERE h.history_id = c.history_id\n    RETURNING 1\n  )\n  SELECT count(*) INTO deleted_count FROM deleted;\n  RETURN deleted_count;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "ingredient_prune_history",
+      "origin": "Ingredient"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION note_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version.\n    INSERT INTO note_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO note_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "note_capture_history",
+      "origin": "Note"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION recipe_ref_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version. Its deleted_by is the actor a hard delete set in\n    -- superschematic.history_actor_id for the statement, else the row's own value.\n    INSERT INTO recipe_ref_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1,\n        'deleted_by', COALESCE(\n          NULLIF(current_setting('superschematic.history_actor_id', true), '')::UUID,\n          OLD.deleted_by\n        )\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO recipe_ref_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "recipe_ref_capture_history",
+      "origin": "RecipeRef"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION recipe_release_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version. Its updated_by is the actor a hard delete set in\n    -- superschematic.history_actor_id for the statement, else the row's own value.\n    INSERT INTO recipe_release_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1,\n        'updated_by', COALESCE(\n          NULLIF(current_setting('superschematic.history_actor_id', true), '')::UUID,\n          OLD.updated_by\n        )\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO recipe_release_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "recipe_release_capture_history",
+      "origin": "RecipeRelease"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION step_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version. Its updated_by is the actor a hard delete set in\n    -- superschematic.history_actor_id for the statement, else the row's own value.\n    -- Every image leaves out scratch.\n    INSERT INTO step_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      (to_jsonb(OLD) - ARRAY['scratch']) || jsonb_build_object(\n        '_version', OLD._version + 1,\n        'updated_by', COALESCE(\n          NULLIF(current_setting('superschematic.history_actor_id', true), '')::UUID,\n          OLD.updated_by\n        )\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO step_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW) - ARRAY['scratch']);\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "step_capture_history",
+      "origin": "Step"
+    },
+    {
+      "arguments": "INTEGER, INTEGER",
+      "definition": "CREATE OR REPLACE FUNCTION step_prune_history(retention_days INTEGER DEFAULT 365, max_rows INTEGER DEFAULT NULL) RETURNS BIGINT AS $$\nDECLARE\n  deleted_count BIGINT;\nBEGIN\n  WITH candidates AS (\n    SELECT h.history_id\n    FROM step_history h\n    WHERE h.recorded_at \u003c now() - make_interval(days =\u003e retention_days)\n      AND EXISTS (\n        SELECT 1\n        FROM step_history newer\n        WHERE newer.id = h.id\n          AND newer._version \u003e h._version\n      )\n      AND NOT EXISTS (\n        SELECT 1\n        FROM recipe_patch pin_1\n        WHERE pin_1.entity_id = h.id\n          AND pin_1.entity_version = h._version\n      )\n      AND NOT EXISTS (\n        SELECT 1\n        FROM recipe_snapshot_entry pin_2\n        WHERE pin_2.entity_id = h.id\n          AND pin_2.entity_version = h._version\n      )\n    LIMIT max_rows\n  ),\n  deleted AS (\n    DELETE FROM step_history h\n    USING candidates c\n    WHERE h.history_id = c.history_id\n    RETURNING 1\n  )\n  SELECT count(*) INTO deleted_count FROM deleted;\n  RETURN deleted_count;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "step_prune_history",
+      "origin": "Step"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION tasting_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version.\n    INSERT INTO tasting_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO tasting_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "tasting_capture_history",
+      "origin": "Tasting"
+    },
+    {
+      "definition": "CREATE OR REPLACE FUNCTION utensil_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version.\n    INSERT INTO utensil_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      to_jsonb(OLD) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO utensil_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW));\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+      "name": "utensil_capture_history",
+      "origin": "Utensil"
+    }
+  ],
+  "graphs": [
+    {
+      "members": [
+        {
+          "content": [
+            "photo_url"
+          ],
+          "table": "cover"
+        },
+        {
+          "content": [
+            "quantity",
+            "step_key",
+            "substitutes"
+          ],
+          "table": "ingredient"
+        },
+        {
+          "content": [
+            "body",
+            "reply_to"
+          ],
+          "table": "note"
+        },
+        {
+          "content": [
+            "instruction",
+            "position",
+            "timings"
+          ],
+          "table": "step"
+        },
+        {
+          "content": [
+            "bites",
+            "helpers",
+            "remarks",
+            "rested",
+            "salty",
+            "score",
+            "served_at",
+            "servings",
+            "tags",
+            "tasted_at",
+            "tasted_on",
+            "taster",
+            "verdict"
+          ],
+          "table": "tasting"
+        },
+        {
+          "content": [
+            "name"
+          ],
+          "table": "utensil"
+        }
+      ],
+      "name": "Recipe",
+      "schemaEpoch": 1
+    }
+  ],
+  "service": "fixture-version-graph-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Cover.id",
+          "type": "UUID"
+        },
+        {
+          "name": "recipe_id",
+          "origin": "Cover.recipe",
+          "type": "UUID"
+        },
+        {
+          "name": "photo_url",
+          "origin": "Cover.photoUrl",
+          "type": "TEXT"
+        },
+        {
+          "default": "gen_random_uuid()",
+          "name": "entity_key",
+          "origin": "Cover.entityKey",
+          "type": "UUID"
+        },
+        {
+          "name": "ref_id",
+          "origin": "Cover.ref",
+          "type": "UUID"
+        },
+        {
+          "name": "deleted_on_ref",
+          "origin": "Cover.deletedOnRef",
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "The recipe's cover photo: at most one per ref.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "recipe_id"
+          ],
+          "name": "fk_cover_recipe_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe"
+        },
+        {
+          "columns": [
+            "ref_id"
+          ],
+          "name": "fk_cover_ref_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_ref"
+        }
+      ],
+      "history": "cover_history",
+      "indexes": [
+        {
+          "columns": [
+            "entity_key",
+            "ref_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_cover_entity_ref",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "cover",
+      "origin": "Cover",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "cover_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "history_id",
+          "type": "UUID"
+        },
+        {
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "_version",
+          "type": "BIGINT"
+        },
+        {
+          "name": "operation",
+          "type": "TEXT"
+        },
+        {
+          "name": "data",
+          "type": "JSONB"
+        },
+        {
+          "default": "clock_timestamp()",
+          "name": "recorded_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Version history for cover",
+      "indexes": [
+        {
+          "columns": [
+            "id",
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_cover_history_id_recorded"
+        },
+        {
+          "columns": [
+            "id",
+            "_version"
+          ],
+          "method": "BTREE",
+          "name": "uq_cover_history_id_version",
+          "unique": true
+        }
+      ],
+      "kind": "history",
+      "name": "cover_history",
+      "origin": "Cover",
+      "primaryKey": {
+        "columns": [
+          "history_id"
+        ],
+        "name": "cover_history_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Ingredient.id",
+          "type": "UUID"
+        },
+        {
+          "name": "recipe_id",
+          "origin": "Ingredient.recipe",
+          "type": "UUID"
+        },
+        {
+          "name": "step_key",
+          "origin": "Ingredient.stepKey",
+          "type": "UUID"
+        },
+        {
+          "name": "quantity",
+          "origin": "Ingredient.quantity",
+          "type": "TEXT"
+        },
+        {
+          "name": "substitutes",
+          "origin": "Ingredient.substitutes",
+          "type": "JSONB"
+        },
+        {
+          "default": "gen_random_uuid()",
+          "name": "entity_key",
+          "origin": "Ingredient.entityKey",
+          "type": "UUID"
+        },
+        {
+          "name": "ref_id",
+          "origin": "Ingredient.ref",
+          "type": "UUID"
+        },
+        {
+          "name": "deleted_on_ref",
+          "origin": "Ingredient.deletedOnRef",
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "An ingredient one step uses.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "recipe_id"
+          ],
+          "name": "fk_ingredient_recipe_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe"
+        },
+        {
+          "columns": [
+            "ref_id"
+          ],
+          "name": "fk_ingredient_ref_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_ref"
+        }
+      ],
+      "history": "ingredient_history",
+      "indexes": [
+        {
+          "columns": [
+            "entity_key",
+            "ref_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_ingredient_entity_ref",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "ingredient",
+      "origin": "Ingredient",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ingredient_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "history_id",
+          "type": "UUID"
+        },
+        {
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "_version",
+          "type": "BIGINT"
+        },
+        {
+          "name": "operation",
+          "type": "TEXT"
+        },
+        {
+          "name": "data",
+          "type": "JSONB"
+        },
+        {
+          "default": "clock_timestamp()",
+          "name": "recorded_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Version history for ingredient",
+      "indexes": [
+        {
+          "columns": [
+            "id",
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_ingredient_history_id_recorded"
+        },
+        {
+          "columns": [
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_ingredient_history_recorded"
+        },
+        {
+          "columns": [
+            "id",
+            "_version"
+          ],
+          "method": "BTREE",
+          "name": "uq_ingredient_history_id_version",
+          "unique": true
+        }
+      ],
+      "kind": "history",
+      "name": "ingredient_history",
+      "origin": "Ingredient",
+      "primaryKey": {
+        "columns": [
+          "history_id"
+        ],
+        "name": "ingredient_history_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Note.id",
+          "type": "UUID"
+        },
+        {
+          "name": "recipe_id",
+          "origin": "Note.recipe",
+          "type": "UUID"
+        },
+        {
+          "name": "reply_to",
+          "nullable": true,
+          "origin": "Note.replyTo",
+          "type": "UUID"
+        },
+        {
+          "name": "body",
+          "origin": "Note.body",
+          "type": "TEXT"
+        },
+        {
+          "default": "gen_random_uuid()",
+          "name": "entity_key",
+          "origin": "Note.entityKey",
+          "type": "UUID"
+        },
+        {
+          "name": "ref_id",
+          "origin": "Note.ref",
+          "type": "UUID"
+        },
+        {
+          "name": "deleted_on_ref",
+          "origin": "Note.deletedOnRef",
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "A cook's note, threaded under another note.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "recipe_id"
+          ],
+          "name": "fk_note_recipe_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe"
+        },
+        {
+          "columns": [
+            "ref_id"
+          ],
+          "name": "fk_note_ref_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_ref"
+        }
+      ],
+      "history": "note_history",
+      "indexes": [
+        {
+          "columns": [
+            "entity_key",
+            "ref_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_note_entity_ref",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "note",
+      "origin": "Note",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "note_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "history_id",
+          "type": "UUID"
+        },
+        {
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "_version",
+          "type": "BIGINT"
+        },
+        {
+          "name": "operation",
+          "type": "TEXT"
+        },
+        {
+          "name": "data",
+          "type": "JSONB"
+        },
+        {
+          "default": "clock_timestamp()",
+          "name": "recorded_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Version history for note",
+      "indexes": [
+        {
+          "columns": [
+            "id",
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_note_history_id_recorded"
+        },
+        {
+          "columns": [
+            "id",
+            "_version"
+          ],
+          "method": "BTREE",
+          "name": "uq_note_history_id_version",
+          "unique": true
+        }
+      ],
+      "kind": "history",
+      "name": "note_history",
+      "origin": "Note",
+      "primaryKey": {
+        "columns": [
+          "history_id"
+        ],
+        "name": "note_history_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Recipe.id",
+          "type": "UUID"
+        },
+        {
+          "name": "title",
+          "origin": "Recipe.title",
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "Recipe.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "created_by",
+          "origin": "Recipe.createdBy",
+          "type": "UUID"
+        }
+      ],
+      "comment": "A recipe: the stable identity its steps and ingredients are versioned under.",
+      "kind": "entity",
+      "name": "recipe",
+      "origin": "Recipe",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "recipe_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "RecipeCommit.id",
+          "type": "UUID"
+        },
+        {
+          "name": "root_id",
+          "origin": "RecipeCommit.root",
+          "type": "UUID"
+        },
+        {
+          "name": "ref_id",
+          "origin": "RecipeCommit.ref",
+          "type": "UUID"
+        },
+        {
+          "name": "parent_commit_id",
+          "nullable": true,
+          "origin": "RecipeCommit.parentCommit",
+          "type": "UUID"
+        },
+        {
+          "name": "message",
+          "nullable": true,
+          "origin": "RecipeCommit.message",
+          "type": "TEXT"
+        },
+        {
+          "name": "schema_epoch",
+          "origin": "RecipeCommit.schemaEpoch",
+          "type": "BIGINT"
+        },
+        {
+          "name": "content_hash",
+          "origin": "RecipeCommit.contentHash",
+          "type": "TEXT"
+        },
+        {
+          "name": "sequence",
+          "nullable": true,
+          "origin": "RecipeCommit.sequence",
+          "type": "BIGINT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "RecipeCommit.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "created_by",
+          "origin": "RecipeCommit.createdBy",
+          "type": "UUID"
+        }
+      ],
+      "comment": "A commit of the Recipe version graph: the exact row versions one ref sealed.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "parent_commit_id"
+          ],
+          "name": "fk_recipe_commit_parent_commit_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_commit"
+        },
+        {
+          "columns": [
+            "ref_id"
+          ],
+          "name": "fk_recipe_commit_ref_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_ref"
+        },
+        {
+          "columns": [
+            "root_id"
+          ],
+          "name": "fk_recipe_commit_root_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "root_id",
+            "sequence"
+          ],
+          "method": "BTREE",
+          "name": "uq_recipe_commit_root_sequence",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "recipe_commit",
+      "origin": "RecipeCommit",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "recipe_commit_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "RecipePatch.id",
+          "type": "UUID"
+        },
+        {
+          "name": "commit_id",
+          "origin": "RecipePatch.commit",
+          "type": "UUID"
+        },
+        {
+          "name": "entity_kind",
+          "origin": "RecipePatch.entityKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "entity_key",
+          "origin": "RecipePatch.entityKey",
+          "type": "UUID"
+        },
+        {
+          "name": "entity_id",
+          "origin": "RecipePatch.entityId",
+          "type": "UUID"
+        },
+        {
+          "name": "entity_version",
+          "origin": "RecipePatch.entityVersion",
+          "type": "BIGINT"
+        },
+        {
+          "name": "operation",
+          "origin": "RecipePatch.operation",
+          "type": "TEXT"
+        }
+      ],
+      "comment": "One entity a commit of the Recipe version graph changed, pinned to the row version it sealed.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "commit_id"
+          ],
+          "name": "fk_recipe_patch_commit_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_commit"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "entity_id",
+            "entity_version"
+          ],
+          "method": "BTREE",
+          "name": "idx_recipe_patch_entity_version"
+        },
+        {
+          "columns": [
+            "commit_id",
+            "entity_kind",
+            "entity_key"
+          ],
+          "method": "BTREE",
+          "name": "uq_recipe_patch_entity",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "recipe_patch",
+      "origin": "RecipePatch",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "recipe_patch_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "RecipeRef.id",
+          "type": "UUID"
+        },
+        {
+          "name": "root_id",
+          "origin": "RecipeRef.root",
+          "type": "UUID"
+        },
+        {
+          "name": "parent_ref_id",
+          "nullable": true,
+          "origin": "RecipeRef.parentRef",
+          "type": "UUID"
+        },
+        {
+          "name": "base_commit_id",
+          "nullable": true,
+          "origin": "RecipeRef.baseCommit",
+          "type": "UUID"
+        },
+        {
+          "name": "head_commit_id",
+          "nullable": true,
+          "origin": "RecipeRef.headCommit",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "RecipeRef.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "sealed_at",
+          "nullable": true,
+          "origin": "RecipeRef.sealedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "RecipeRef.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "created_by",
+          "origin": "RecipeRef.createdBy",
+          "type": "UUID"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "origin": "RecipeRef.updatedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "updated_by",
+          "origin": "RecipeRef.updatedBy",
+          "type": "UUID"
+        },
+        {
+          "name": "deleted_at",
+          "nullable": true,
+          "origin": "RecipeRef.deletedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "deleted_by",
+          "nullable": true,
+          "origin": "RecipeRef.deletedBy",
+          "type": "UUID"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "A line of the Recipe version graph: a primary line when parentRef is null, else a change set.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "base_commit_id"
+          ],
+          "name": "fk_recipe_ref_base_commit_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_commit"
+        },
+        {
+          "columns": [
+            "head_commit_id"
+          ],
+          "name": "fk_recipe_ref_head_commit_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_commit"
+        },
+        {
+          "columns": [
+            "parent_ref_id"
+          ],
+          "name": "fk_recipe_ref_parent_ref_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_ref"
+        },
+        {
+          "columns": [
+            "root_id"
+          ],
+          "name": "fk_recipe_ref_root_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe"
+        }
+      ],
+      "history": "recipe_ref_history",
+      "indexes": [
+        {
+          "columns": [
+            "root_id",
+            "name"
+          ],
+          "method": "BTREE",
+          "name": "uq_recipe_ref_root_name",
+          "unique": true,
+          "where": "deleted_at IS NULL"
+        }
+      ],
+      "kind": "entity",
+      "name": "recipe_ref",
+      "origin": "RecipeRef",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "recipe_ref_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "history_id",
+          "type": "UUID"
+        },
+        {
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "_version",
+          "type": "BIGINT"
+        },
+        {
+          "name": "operation",
+          "type": "TEXT"
+        },
+        {
+          "name": "data",
+          "type": "JSONB"
+        },
+        {
+          "default": "clock_timestamp()",
+          "name": "recorded_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Version history for recipe_ref",
+      "indexes": [
+        {
+          "columns": [
+            "id",
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_recipe_ref_history_id_recorded"
+        },
+        {
+          "columns": [
+            "id",
+            "_version"
+          ],
+          "method": "BTREE",
+          "name": "uq_recipe_ref_history_id_version",
+          "unique": true
+        }
+      ],
+      "kind": "history",
+      "name": "recipe_ref_history",
+      "origin": "RecipeRef",
+      "primaryKey": {
+        "columns": [
+          "history_id"
+        ],
+        "name": "recipe_ref_history_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "RecipeRelease.id",
+          "type": "UUID"
+        },
+        {
+          "name": "root_id",
+          "origin": "RecipeRelease.root",
+          "type": "UUID"
+        },
+        {
+          "name": "commit_id",
+          "origin": "RecipeRelease.commit",
+          "type": "UUID"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "RecipeRelease.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "created_by",
+          "origin": "RecipeRelease.createdBy",
+          "type": "UUID"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "origin": "RecipeRelease.updatedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "updated_by",
+          "origin": "RecipeRelease.updatedBy",
+          "type": "UUID"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "The released commit of one root of the Recipe version graph; its history is the release log.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "commit_id"
+          ],
+          "name": "fk_recipe_release_commit_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_commit"
+        },
+        {
+          "columns": [
+            "root_id"
+          ],
+          "name": "fk_recipe_release_root_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe"
+        }
+      ],
+      "history": "recipe_release_history",
+      "indexes": [
+        {
+          "columns": [
+            "root_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_recipe_release_root",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "recipe_release",
+      "origin": "RecipeRelease",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "recipe_release_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "history_id",
+          "type": "UUID"
+        },
+        {
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "_version",
+          "type": "BIGINT"
+        },
+        {
+          "name": "operation",
+          "type": "TEXT"
+        },
+        {
+          "name": "data",
+          "type": "JSONB"
+        },
+        {
+          "default": "clock_timestamp()",
+          "name": "recorded_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Version history for recipe_release",
+      "indexes": [
+        {
+          "columns": [
+            "id",
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_recipe_release_history_id_recorded"
+        },
+        {
+          "columns": [
+            "id",
+            "_version"
+          ],
+          "method": "BTREE",
+          "name": "uq_recipe_release_history_id_version",
+          "unique": true
+        }
+      ],
+      "kind": "history",
+      "name": "recipe_release_history",
+      "origin": "RecipeRelease",
+      "primaryKey": {
+        "columns": [
+          "history_id"
+        ],
+        "name": "recipe_release_history_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "RecipeSnapshotEntry.id",
+          "type": "UUID"
+        },
+        {
+          "name": "commit_id",
+          "origin": "RecipeSnapshotEntry.commit",
+          "type": "UUID"
+        },
+        {
+          "name": "entity_kind",
+          "origin": "RecipeSnapshotEntry.entityKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "entity_key",
+          "origin": "RecipeSnapshotEntry.entityKey",
+          "type": "UUID"
+        },
+        {
+          "name": "entity_id",
+          "origin": "RecipeSnapshotEntry.entityId",
+          "type": "UUID"
+        },
+        {
+          "name": "entity_version",
+          "origin": "RecipeSnapshotEntry.entityVersion",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "One entity of a snapshotted commit of the Recipe version graph, pinned to the row version its tree holds.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "commit_id"
+          ],
+          "name": "fk_recipe_snapshot_entry_commit_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_commit"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "entity_id",
+            "entity_version"
+          ],
+          "method": "BTREE",
+          "name": "idx_recipe_snapshot_entry_entity_version"
+        },
+        {
+          "columns": [
+            "commit_id",
+            "entity_kind",
+            "entity_key"
+          ],
+          "method": "BTREE",
+          "name": "uq_recipe_snapshot_entry_entity",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "recipe_snapshot_entry",
+      "origin": "RecipeSnapshotEntry",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "recipe_snapshot_entry_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Step.id",
+          "type": "UUID"
+        },
+        {
+          "name": "recipe_id",
+          "origin": "Step.recipe",
+          "type": "UUID"
+        },
+        {
+          "name": "position",
+          "origin": "Step.position",
+          "type": "BIGINT"
+        },
+        {
+          "name": "instruction",
+          "origin": "Step.instruction",
+          "type": "TEXT"
+        },
+        {
+          "name": "timings",
+          "origin": "Step.timings",
+          "type": "JSONB"
+        },
+        {
+          "name": "scratch",
+          "nullable": true,
+          "origin": "Step.scratch",
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "Step.createdAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "created_by",
+          "origin": "Step.createdBy",
+          "type": "UUID"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "origin": "Step.updatedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "updated_by",
+          "origin": "Step.updatedBy",
+          "type": "UUID"
+        },
+        {
+          "default": "gen_random_uuid()",
+          "name": "entity_key",
+          "origin": "Step.entityKey",
+          "type": "UUID"
+        },
+        {
+          "name": "ref_id",
+          "origin": "Step.ref",
+          "type": "UUID"
+        },
+        {
+          "name": "deleted_on_ref",
+          "origin": "Step.deletedOnRef",
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "One step of a recipe, ordered by position; updatedBy names its row's writer.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "recipe_id"
+          ],
+          "name": "fk_step_recipe_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe"
+        },
+        {
+          "columns": [
+            "ref_id"
+          ],
+          "name": "fk_step_ref_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_ref"
+        }
+      ],
+      "history": "step_history",
+      "historyExclude": [
+        "scratch"
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "entity_key",
+            "ref_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_step_entity_ref",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "step",
+      "origin": "Step",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "step_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "history_id",
+          "type": "UUID"
+        },
+        {
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "_version",
+          "type": "BIGINT"
+        },
+        {
+          "name": "operation",
+          "type": "TEXT"
+        },
+        {
+          "name": "data",
+          "type": "JSONB"
+        },
+        {
+          "default": "clock_timestamp()",
+          "name": "recorded_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Version history for step",
+      "indexes": [
+        {
+          "columns": [
+            "id",
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_step_history_id_recorded"
+        },
+        {
+          "columns": [
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_step_history_recorded"
+        },
+        {
+          "columns": [
+            "id",
+            "_version"
+          ],
+          "method": "BTREE",
+          "name": "uq_step_history_id_version",
+          "unique": true
+        }
+      ],
+      "kind": "history",
+      "name": "step_history",
+      "origin": "Step",
+      "primaryKey": {
+        "columns": [
+          "history_id"
+        ],
+        "name": "step_history_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Tasting.id",
+          "type": "UUID"
+        },
+        {
+          "name": "recipe_id",
+          "origin": "Tasting.recipe",
+          "type": "UUID"
+        },
+        {
+          "name": "taster",
+          "origin": "Tasting.taster",
+          "type": "UUID"
+        },
+        {
+          "name": "salty",
+          "origin": "Tasting.salty",
+          "type": "BOOLEAN"
+        },
+        {
+          "name": "score",
+          "origin": "Tasting.score",
+          "type": "DOUBLE PRECISION"
+        },
+        {
+          "name": "servings",
+          "origin": "Tasting.servings",
+          "type": "BIGINT"
+        },
+        {
+          "default": "CURRENT_DATE",
+          "name": "tasted_on",
+          "origin": "Tasting.tastedOn",
+          "type": "DATE"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "tasted_at",
+          "origin": "Tasting.tastedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_TIME",
+          "name": "served_at",
+          "origin": "Tasting.servedAt",
+          "type": "TIME"
+        },
+        {
+          "name": "rested",
+          "origin": "Tasting.rested",
+          "type": "INTERVAL"
+        },
+        {
+          "name": "verdict",
+          "origin": "Tasting.verdict",
+          "type": "TEXT"
+        },
+        {
+          "name": "remarks",
+          "origin": "Tasting.remarks",
+          "type": "JSONB"
+        },
+        {
+          "default": "'{}'",
+          "name": "tags",
+          "origin": "Tasting.tags",
+          "type": "TEXT[]"
+        },
+        {
+          "default": "'{}'",
+          "name": "helpers",
+          "origin": "Tasting.helpers",
+          "type": "UUID[]"
+        },
+        {
+          "name": "bites",
+          "origin": "Tasting.bites",
+          "type": "JSONB"
+        },
+        {
+          "default": "gen_random_uuid()",
+          "name": "entity_key",
+          "origin": "Tasting.entityKey",
+          "type": "UUID"
+        },
+        {
+          "name": "ref_id",
+          "origin": "Tasting.ref",
+          "type": "UUID"
+        },
+        {
+          "name": "deleted_on_ref",
+          "origin": "Tasting.deletedOnRef",
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "A tasting of the recipe. Its columns hold a value of every class a\ndescriptor names.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "recipe_id"
+          ],
+          "name": "fk_tasting_recipe_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe"
+        },
+        {
+          "columns": [
+            "ref_id"
+          ],
+          "name": "fk_tasting_ref_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_ref"
+        }
+      ],
+      "history": "tasting_history",
+      "indexes": [
+        {
+          "columns": [
+            "entity_key",
+            "ref_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_tasting_entity_ref",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "tasting",
+      "origin": "Tasting",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "tasting_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "history_id",
+          "type": "UUID"
+        },
+        {
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "_version",
+          "type": "BIGINT"
+        },
+        {
+          "name": "operation",
+          "type": "TEXT"
+        },
+        {
+          "name": "data",
+          "type": "JSONB"
+        },
+        {
+          "default": "clock_timestamp()",
+          "name": "recorded_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Version history for tasting",
+      "indexes": [
+        {
+          "columns": [
+            "id",
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_tasting_history_id_recorded"
+        },
+        {
+          "columns": [
+            "id",
+            "_version"
+          ],
+          "method": "BTREE",
+          "name": "uq_tasting_history_id_version",
+          "unique": true
+        }
+      ],
+      "kind": "history",
+      "name": "tasting_history",
+      "origin": "Tasting",
+      "primaryKey": {
+        "columns": [
+          "history_id"
+        ],
+        "name": "tasting_history_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Utensil.id",
+          "type": "UUID"
+        },
+        {
+          "name": "recipe_id",
+          "origin": "Utensil.recipe",
+          "type": "UUID"
+        },
+        {
+          "name": "name",
+          "origin": "Utensil.name",
+          "type": "TEXT"
+        },
+        {
+          "default": "gen_random_uuid()",
+          "name": "entity_key",
+          "origin": "Utensil.entityKey",
+          "type": "UUID"
+        },
+        {
+          "name": "ref_id",
+          "origin": "Utensil.ref",
+          "type": "UUID"
+        },
+        {
+          "name": "deleted_on_ref",
+          "origin": "Utensil.deletedOnRef",
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "BIGINT"
+        }
+      ],
+      "comment": "A utensil the recipe needs, keyed by a plain UUID rather than an\nAutoGenerate one.",
+      "foreignKeys": [
+        {
+          "columns": [
+            "recipe_id"
+          ],
+          "name": "fk_utensil_recipe_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe"
+        },
+        {
+          "columns": [
+            "ref_id"
+          ],
+          "name": "fk_utensil_ref_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "recipe_ref"
+        }
+      ],
+      "history": "utensil_history",
+      "indexes": [
+        {
+          "columns": [
+            "entity_key",
+            "ref_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_utensil_entity_ref",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "utensil",
+      "origin": "Utensil",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "utensil_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "history_id",
+          "type": "UUID"
+        },
+        {
+          "name": "id",
+          "type": "UUID"
+        },
+        {
+          "name": "_version",
+          "type": "BIGINT"
+        },
+        {
+          "name": "operation",
+          "type": "TEXT"
+        },
+        {
+          "name": "data",
+          "type": "JSONB"
+        },
+        {
+          "default": "clock_timestamp()",
+          "name": "recorded_at",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "Version history for utensil",
+      "indexes": [
+        {
+          "columns": [
+            "id",
+            "recorded_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_utensil_history_id_recorded"
+        },
+        {
+          "columns": [
+            "id",
+            "_version"
+          ],
+          "method": "BTREE",
+          "name": "uq_utensil_history_id_version",
+          "unique": true
+        }
+      ],
+      "kind": "history",
+      "name": "utensil_history",
+      "origin": "Utensil",
+      "primaryKey": {
+        "columns": [
+          "history_id"
+        ],
+        "name": "utensil_history_pkey"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER trg_cover_bump_version\n  BEFORE UPDATE ON cover\n  FOR EACH ROW EXECUTE FUNCTION cover_capture_history()",
+      "name": "trg_cover_bump_version",
+      "origin": "Cover",
+      "table": "cover"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_cover_capture_history_delete\n  AFTER DELETE ON cover\n  FOR EACH ROW EXECUTE FUNCTION cover_capture_history()",
+      "name": "trg_cover_capture_history_delete",
+      "origin": "Cover",
+      "table": "cover"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_cover_capture_history_write\n  AFTER INSERT OR UPDATE ON cover\n  FOR EACH ROW EXECUTE FUNCTION cover_capture_history()",
+      "name": "trg_cover_capture_history_write",
+      "origin": "Cover",
+      "table": "cover"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_ingredient_bump_version\n  BEFORE UPDATE ON ingredient\n  FOR EACH ROW EXECUTE FUNCTION ingredient_capture_history()",
+      "name": "trg_ingredient_bump_version",
+      "origin": "Ingredient",
+      "table": "ingredient"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_ingredient_capture_history_delete\n  AFTER DELETE ON ingredient\n  FOR EACH ROW EXECUTE FUNCTION ingredient_capture_history()",
+      "name": "trg_ingredient_capture_history_delete",
+      "origin": "Ingredient",
+      "table": "ingredient"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_ingredient_capture_history_write\n  AFTER INSERT OR UPDATE ON ingredient\n  FOR EACH ROW EXECUTE FUNCTION ingredient_capture_history()",
+      "name": "trg_ingredient_capture_history_write",
+      "origin": "Ingredient",
+      "table": "ingredient"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_note_bump_version\n  BEFORE UPDATE ON note\n  FOR EACH ROW EXECUTE FUNCTION note_capture_history()",
+      "name": "trg_note_bump_version",
+      "origin": "Note",
+      "table": "note"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_note_capture_history_delete\n  AFTER DELETE ON note\n  FOR EACH ROW EXECUTE FUNCTION note_capture_history()",
+      "name": "trg_note_capture_history_delete",
+      "origin": "Note",
+      "table": "note"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_note_capture_history_write\n  AFTER INSERT OR UPDATE ON note\n  FOR EACH ROW EXECUTE FUNCTION note_capture_history()",
+      "name": "trg_note_capture_history_write",
+      "origin": "Note",
+      "table": "note"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_recipe_ref_bump_version\n  BEFORE UPDATE ON recipe_ref\n  FOR EACH ROW EXECUTE FUNCTION recipe_ref_capture_history()",
+      "name": "trg_recipe_ref_bump_version",
+      "origin": "RecipeRef",
+      "table": "recipe_ref"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_recipe_ref_capture_history_delete\n  AFTER DELETE ON recipe_ref\n  FOR EACH ROW EXECUTE FUNCTION recipe_ref_capture_history()",
+      "name": "trg_recipe_ref_capture_history_delete",
+      "origin": "RecipeRef",
+      "table": "recipe_ref"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_recipe_ref_capture_history_write\n  AFTER INSERT OR UPDATE ON recipe_ref\n  FOR EACH ROW EXECUTE FUNCTION recipe_ref_capture_history()",
+      "name": "trg_recipe_ref_capture_history_write",
+      "origin": "RecipeRef",
+      "table": "recipe_ref"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_recipe_release_bump_version\n  BEFORE UPDATE ON recipe_release\n  FOR EACH ROW EXECUTE FUNCTION recipe_release_capture_history()",
+      "name": "trg_recipe_release_bump_version",
+      "origin": "RecipeRelease",
+      "table": "recipe_release"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_recipe_release_capture_history_delete\n  AFTER DELETE ON recipe_release\n  FOR EACH ROW EXECUTE FUNCTION recipe_release_capture_history()",
+      "name": "trg_recipe_release_capture_history_delete",
+      "origin": "RecipeRelease",
+      "table": "recipe_release"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_recipe_release_capture_history_write\n  AFTER INSERT OR UPDATE ON recipe_release\n  FOR EACH ROW EXECUTE FUNCTION recipe_release_capture_history()",
+      "name": "trg_recipe_release_capture_history_write",
+      "origin": "RecipeRelease",
+      "table": "recipe_release"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_step_bump_version\n  BEFORE UPDATE ON step\n  FOR EACH ROW EXECUTE FUNCTION step_capture_history()",
+      "name": "trg_step_bump_version",
+      "origin": "Step",
+      "table": "step"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_step_capture_history_delete\n  AFTER DELETE ON step\n  FOR EACH ROW EXECUTE FUNCTION step_capture_history()",
+      "name": "trg_step_capture_history_delete",
+      "origin": "Step",
+      "table": "step"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_step_capture_history_write\n  AFTER INSERT OR UPDATE ON step\n  FOR EACH ROW EXECUTE FUNCTION step_capture_history()",
+      "name": "trg_step_capture_history_write",
+      "origin": "Step",
+      "table": "step"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_tasting_bump_version\n  BEFORE UPDATE ON tasting\n  FOR EACH ROW EXECUTE FUNCTION tasting_capture_history()",
+      "name": "trg_tasting_bump_version",
+      "origin": "Tasting",
+      "table": "tasting"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_tasting_capture_history_delete\n  AFTER DELETE ON tasting\n  FOR EACH ROW EXECUTE FUNCTION tasting_capture_history()",
+      "name": "trg_tasting_capture_history_delete",
+      "origin": "Tasting",
+      "table": "tasting"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_tasting_capture_history_write\n  AFTER INSERT OR UPDATE ON tasting\n  FOR EACH ROW EXECUTE FUNCTION tasting_capture_history()",
+      "name": "trg_tasting_capture_history_write",
+      "origin": "Tasting",
+      "table": "tasting"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_utensil_bump_version\n  BEFORE UPDATE ON utensil\n  FOR EACH ROW EXECUTE FUNCTION utensil_capture_history()",
+      "name": "trg_utensil_bump_version",
+      "origin": "Utensil",
+      "table": "utensil"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_utensil_capture_history_delete\n  AFTER DELETE ON utensil\n  FOR EACH ROW EXECUTE FUNCTION utensil_capture_history()",
+      "name": "trg_utensil_capture_history_delete",
+      "origin": "Utensil",
+      "table": "utensil"
+    },
+    {
+      "definition": "CREATE TRIGGER trg_utensil_capture_history_write\n  AFTER INSERT OR UPDATE ON utensil\n  FOR EACH ROW EXECUTE FUNCTION utensil_capture_history()",
+      "name": "trg_utensil_capture_history_write",
+      "origin": "Utensil",
+      "table": "utensil"
+    }
+  ],
+  "version": 1
+}

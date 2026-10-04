@@ -1,0 +1,32 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "c3c0cd15bfb2cad61d39ecfe9ea0b5e8c2b8ee70a0552ebdc4907966870413b8",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "api-breaking",
+          "id": "api-breaking:view/report.order_summary@report.order_summary",
+          "reader": "report.order_summary",
+          "reason": "The projection view report.order_summary publishes (code VARCHAR(80), total BIGINT, customer_name VARCHAR(80)) and now publishes (code VARCHAR(80), total BIGINT, customer_name VARCHAR(80), placed_at TIMESTAMPTZ): its readers' Arrow schema changes.",
+          "subject": "view/report.order_summary"
+        }
+      ],
+      "index": 1,
+      "op": "replaceView",
+      "phase": "expand",
+      "statements": [
+        "DROP VIEW report.order_summary",
+        "CREATE VIEW report.order_summary WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\nSELECT -- noqa: ST06\n  base.code,\n  base.total,\n  customer.\"name\" AS customer_name,\n  base.placed_at\nFROM \"order\" AS base\n  INNER JOIN customer AS customer ON base.customer_id = customer.id\n",
+        "COMMENT ON VIEW report.order_summary IS 'Orders with their customer''s name, for reporting.'"
+      ],
+      "subject": "view/report.order_summary",
+      "transactional": true
+    }
+  ],
+  "to": "e1ec8fac4f5b2e7d16566ac9def2da3eadfe3e27ec6f9186ad0180470fe7a674",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,22 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "4f0b86463e1514ffa5ebfe98e5994966f49d75c979d5accb62721490ee1c6e7d",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE coupon (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  code TEXT NOT NULL,\n  percent BIGINT NOT NULL,\n  CONSTRAINT coupon_pkey PRIMARY KEY (id),\n  CONSTRAINT coupon_code_key UNIQUE (code)\n)",
+        "COMMENT ON TABLE coupon IS 'A discount code.'"
+      ],
+      "subject": "table/coupon",
+      "transactional": true
+    }
+  ],
+  "to": "d5de1b43c07c4a4789e4eb5742f6e7da25718424fdbc56fb350364762b30bddc",
+  "toModel": null,
+  "version": 1
+}

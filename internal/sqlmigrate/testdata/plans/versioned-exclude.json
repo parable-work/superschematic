@@ -1,0 +1,29 @@
+{
+  "dialect": "postgres",
+  "from": "8f8a634659902bbb610a36f200465aa34f1aaa89666f553f0340f89cacc221f6",
+  "hash": "c82253464bf6839542d30c2424ee14de3cd1d3c19778c1ff320fff393aff68c0",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "history",
+          "id": "history:function/order_capture_history",
+          "reason": "The history of order now leaves out note: images recorded before this change keep their old shape, and the plan does not scrub them.",
+          "subject": "function/order_capture_history"
+        }
+      ],
+      "index": 1,
+      "op": "replaceFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_capture_history() RETURNS trigger AS $$\nBEGIN\n  IF (TG_WHEN = 'BEFORE') THEN\n    -- BEFORE UPDATE: the stored row takes the next version.\n    NEW._version := OLD._version + 1;\n    RETURN NEW;\n  END IF;\n  IF (TG_OP = 'DELETE') THEN\n    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so\n    -- the unique history index holds and the latest history row for a deleted key\n    -- is the DELETE. The data payload is the pre-delete image at the tombstone's\n    -- version.\n    -- Every image leaves out note.\n    INSERT INTO order_history (id, _version, operation, data)\n    VALUES (\n      OLD.id,\n      OLD._version + 1,\n      'DELETE',\n      (to_jsonb(OLD) - ARRAY['note']) || jsonb_build_object(\n        '_version', OLD._version + 1\n      )\n    );\n    RETURN OLD;\n  END IF;\n  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON\n  -- CONFLICT DO UPDATE records the one UPDATE it made.\n  INSERT INTO order_history (id, _version, operation, data)\n  VALUES (NEW.id, NEW._version, TG_OP, to_jsonb(NEW) - ARRAY['note']);\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_capture_history",
+      "transactional": true
+    }
+  ],
+  "to": "8e0fa61cbac416deec85a1684c77364fd159ca1f00b64eb507e663328eb65ce0",
+  "toModel": null,
+  "version": 1
+}

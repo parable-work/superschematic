@@ -1,0 +1,38 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "a2765d90e867ec1e5410ee4b988aa1c9764dfff2f22193023e6391cd469c874b",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order_line/index/uq_order_line_sku",
+          "reason": "OrderLine.sku becomes unique: servers built from the previous version may write duplicates.",
+          "subject": "table/order_line/index/uq_order_line_sku"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order_line/index/uq_order_line_sku",
+          "reason": "Building the unique index fails when order_line holds duplicate values of OrderLine.sku.",
+          "subject": "table/order_line/index/uq_order_line_sku"
+        }
+      ],
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS uq_order_line_sku"
+      ],
+      "statements": [
+        "CREATE UNIQUE INDEX CONCURRENTLY uq_order_line_sku ON order_line USING BTREE (sku)"
+      ],
+      "subject": "table/order_line/index/uq_order_line_sku",
+      "transactional": false
+    }
+  ],
+  "to": "52def35659c4974612fe5bdc7cbb439569f10ced768d7acfb854d71b8243cc4d",
+  "toModel": null,
+  "version": 1
+}
