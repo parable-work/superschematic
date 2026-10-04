@@ -14,6 +14,7 @@ export type { AccessPolicy, AccessRequest, Action, Principal } from './access.js
 export {
   BehaviorError,
   BehaviorVetoError,
+  CreateParamsError,
   EngineError,
   IncompatibleChangeError,
   InstanceValidationError,
@@ -76,6 +77,7 @@ export type {
   ConfigSchema,
   ConfigSchemas,
   ConfigTarget,
+  CreateInstanceOptions,
   FieldReader,
   FrozenJSON,
   GuardRequest,

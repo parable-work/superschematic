@@ -8,7 +8,8 @@ the schema registry and the instance store, so the access policy answers
 each one.
 
 A tool is one operation: create, get, list, update and delete of every
-live schema the namespace reaches, each operation its behaviors add (a
+live schema the namespace reaches (create takes the parameters its
+behaviors declare a createParamsSchema for, under behaviors), each operation its behaviors add (a
 schema-level one takes its parameters and no instance id), and three
 tools for writing schemas: list, describe and define a draft. No
 tool publishes: a draft goes live only through an HTTP call the access
@@ -191,6 +192,8 @@ interface ToolSpec {
   schema?: SchemaRecord;
   behavior?: ComposedBehavior;
   operation?: BehaviorOperationDeclaration;
+  /** For create, the schema's behaviors that take create parameters, in list order. */
+  createParams?: ComposedBehavior[];
   /** Why the tool is hidden; absent for a visible one. */
   hidden?: string;
 }
@@ -313,12 +316,17 @@ export class ToolCatalog {
         return draft;
       }
       case 'create': {
-        only(tool, input, ['id', 'data']);
+        only(tool, input, ['id', 'data', 'behaviors']);
         const id = optionalString(tool, input, 'id');
         if (!('data' in input)) {
           throw new EngineError('invalid_argument', `${tool.handle}: data, the instance, is required`);
         }
-        return this.instances.create(principal, schema, input.data, { namespace, ...(id !== undefined ? { id } : {}) });
+        const behaviors = input.behaviors ?? undefined;
+        return this.instances.create(principal, schema, input.data, {
+          namespace,
+          ...(id !== undefined ? { id } : {}),
+          ...(behaviors !== undefined ? { behaviors: behaviors as Record<string, unknown> } : {}),
+        });
       }
       case 'get': {
         only(tool, input, ['id']);
@@ -480,14 +488,19 @@ export class ToolCatalog {
       schema: record,
       ...parts,
     });
+    const createParams = behaviors.filter((behavior) => behavior.declaration.createParamsSchema !== undefined);
     const tools: ToolSpec[] = [
       spec('create', 'create', {
         title: `Create ${name}`,
-        description: `Creates a ${name}: validates the instance, data, against the schema's live version and stores it under id, or under a new id when none is given.`,
+        description:
+          createParams.length === 0
+            ? `Creates a ${name}: validates the instance, data, against the schema's live version and stores it under id, or under a new id when none is given.`
+            : `Creates a ${name}: validates the instance, data, against the schema's live version and stores it under id, or under a new id when none is given. behaviors gives its behaviors their create parameters (${createParams.map((behavior) => behavior.name).join(', ')}), which hold from the create on.`,
         writes: true,
         policy: invocation.create,
         httpMethod: 'POST',
         httpPath: instances,
+        createParams,
       }),
       spec('get', 'get', {
         title: `Get ${name}`,
@@ -622,14 +635,17 @@ export class ToolCatalog {
         return schema([['name', { type: 'string', description: 'The schema name', pattern: SCHEMA_NAME.source }]], ['name']);
       case 'defineSchema':
         return schema([['document', { raw: { type: 'object', description: 'The schema-file document: kind General, a name, and the types; superschematic format --to=json writes it' } }]], ['document']);
-      case 'create':
-        return schema(
-          [
-            ['id', { ...id, description: 'The instance id; the engine makes one when it is absent' }],
-            ['data', this.dataProperty(tool.schema as SchemaRecord)],
-          ],
-          ['data']
-        );
+      case 'create': {
+        const properties: Array<[string, Property]> = [
+          ['id', { ...id, description: 'The instance id; the engine makes one when it is absent' }],
+          ['data', this.dataProperty(tool.schema as SchemaRecord)],
+        ];
+        const takers = tool.createParams ?? [];
+        if (takers.length > 0) {
+          properties.push(['behaviors', { raw: createParamsOf(takers) }]);
+        }
+        return schema(properties, ['data']);
+      }
       case 'get':
         return schema([['id', id]], ['id']);
       case 'list':
@@ -769,6 +785,24 @@ export class ToolCatalog {
       }
     }
   }
+}
+
+/**
+ * createParamsOf is a create's behaviors argument: by behavior name, the
+ * createParamsSchema of each behavior that declares one, as its
+ * declaration holds it.
+ */
+function createParamsOf(behaviors: readonly ComposedBehavior[]): JSONSchemaObject {
+  const properties: Record<string, unknown> = {};
+  for (const behavior of behaviors) {
+    properties[behavior.name] = behavior.declaration.createParamsSchema;
+  }
+  return {
+    type: 'object',
+    description: "Each behavior's create parameters, by behavior name; they hold from the create on, in its transaction",
+    additionalProperties: false,
+    properties,
+  };
 }
 
 /** The JSON Schema of an instance as the engine returns it. */

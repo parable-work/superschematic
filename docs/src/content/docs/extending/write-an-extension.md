@@ -562,6 +562,10 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   the prefix. Only the core declares bare names.
 - `configSchema` is the JSON Schema of what a type passes; leave it out
   for a behavior that takes no config.
+- `createParamsSchema`, optional, is the JSON Schema of the parameters a
+  create gives the behavior for the new instance, which its
+  `initialize` gets: an object schema whose `additionalProperties` is
+  `false` or a schema, so every key is checked.
 - `requires` and `conflicts` name other behaviors a type must, or may not,
   list with this one.
 - `fields` carry a name and a description. The loader refuses a field

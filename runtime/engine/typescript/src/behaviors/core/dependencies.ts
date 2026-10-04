@@ -19,7 +19,10 @@ open blocker, so a finished instance is never blocked.
 
 addBlocker refuses an edge that would close a cycle, in any schema: the
 new blocker must not be blocked by the dependent, directly or through
-others. Each edge is also a reference the engine records, so deleting a
+others. A create may give blockers too, in its parameters (initialize),
+each held to addBlocker's checks in the create's transaction, so an
+instance is blocked from its first event and never claimable before its
+edges exist; its status then is its Workflow's initial state. Each edge is also a reference the engine records, so deleting a
 blocker runs afterReferenceChange on each dependent, which removes the
 edge with removeBlocker, as the caller: its own event records it.
 Deleting a dependent deletes its edges. Blockers are read as the caller,
@@ -33,7 +36,7 @@ start with no blockers, and cannot be removed from one: its edges and
 references would stay behind.
 */
 
-import { BehaviorVetoError, OperationParamsError } from '../../errors.js';
+import { BehaviorVetoError, CreateParamsError, OperationParamsError } from '../../errors.js';
 import type { Row } from '../../storage/driver.js';
 import { BehaviorConfigError, defineBehavior, type InstanceContext, type InstanceView } from '../behavior.js';
 import { page, pageRequest } from '../paging.js';
@@ -147,13 +150,99 @@ function reaches(view: InstanceView<unknown>, from: { schema: string; id: string
   return false;
 }
 
-function blockerParams(context: InstanceContext<DependenciesConfig>, operation: string, params: Readonly<Record<string, unknown>>): { schema: string; id: string } {
+/**
+ * How an edge's checks refuse: at the parameter they name (the blocker's
+ * schema or id), or as a veto. addBlocker and removeBlocker refuse their
+ * own parameters; a create, the blocker's entry of its parameters.
+ */
+interface EdgeRefusals {
+  param(at: 'schema' | 'id', message: string): Error;
+  veto(reason: string): Error;
+}
+
+function operationRefusals(context: InstanceContext<DependenciesConfig>, operation: string): EdgeRefusals {
+  return {
+    param: (at, message) => new OperationParamsError(NAME, operation, [{ path: `/${at}`, message }]),
+    veto: (reason) => new BehaviorVetoError(NAME, operation, context.schema, context.id, reason),
+  };
+}
+
+function createRefusals(context: InstanceContext<DependenciesConfig>, index: number): EdgeRefusals {
+  return {
+    param: (at, message) => new CreateParamsError(context.schema, [{ path: `/behaviors/${NAME}/blockers/${index}/${at}`, message }]),
+    veto: (reason) => new BehaviorVetoError(NAME, 'create', context.schema, context.id, reason),
+  };
+}
+
+function blockerParams(context: InstanceContext<DependenciesConfig>, params: Readonly<Record<string, unknown>>, refuse: EdgeRefusals): { schema: string; id: string } {
   const schema = (params.schema as string | undefined) ?? context.schema;
   const id = params.id as string;
   if (schema === context.schema && id === context.id) {
-    throw new OperationParamsError(NAME, operation, [{ path: '/id', message: `${context.schema} ${context.id} cannot block itself` }]);
+    throw refuse.param('id', `${context.schema} ${context.id} cannot block itself`);
   }
   return { schema, id };
+}
+
+// statusOf reads the instance's Workflow status as the caller; at its
+// create, before Workflow's initialize when the type lists it later, the
+// initial state its Workflow config gives.
+function statusOf(context: InstanceContext<DependenciesConfig>): string | undefined {
+  const status = context.instances.get(context.schema, context.id, { fields: ['status'] })?.data.status;
+  if (typeof status === 'string') {
+    return status;
+  }
+  const flow = context.schemas.config(context.schema, 'Workflow') as { states?: unknown; initial?: unknown } | undefined;
+  if (typeof flow?.initial === 'string') {
+    return flow.initial;
+  }
+  return Array.isArray(flow?.states) && typeof flow.states[0] === 'string' ? flow.states[0] : undefined;
+}
+
+/**
+ * addEdge makes a blocker block the instance, with addBlocker's checks: a
+ * schema the config lists that composes Workflow, a blocker that exists,
+ * read as the caller, not one already added, no cycle, and no open
+ * blocker of an instance in a gated state. It records the edge and its
+ * reference, and returns the blocker.
+ */
+function addEdge(context: InstanceContext<DependenciesConfig>, params: Readonly<Record<string, unknown>>, refuse: EdgeRefusals): BlockerRecord {
+  const target = blockerParams(context, params, refuse);
+  if (!context.config.schemas.includes(target.schema)) {
+    throw refuse.param('schema', `a blocker of ${context.schema} is an instance of ${context.config.schemas.join(', ')}, not ${target.schema}`);
+  }
+  if (context.schemas.config(target.schema, 'Workflow') === undefined) {
+    throw refuse.param('schema', `${target.schema} does not compose Workflow, so its instances cannot block`);
+  }
+  if (context.instances.get(target.schema, target.id, { fields: [] }) === undefined) {
+    throw refuse.param('id', `${target.schema} ${target.id} does not exist`);
+  }
+  const table = context.sql.table('edges');
+  if (
+    context.sql.get(`SELECT 1 AS found FROM ${table} WHERE namespace = ? AND schema = ? AND id = ? AND blocker_schema = ? AND blocker_id = ?`, [
+      ...key(context),
+      target.schema,
+      target.id,
+    ])
+  ) {
+    throw refuse.veto(`${target.schema} ${target.id} already blocks it`);
+  }
+  if (reaches(context, target, { schema: context.schema, id: context.id })) {
+    throw refuse.veto(`${target.schema} ${target.id} is blocked by ${context.schema} ${context.id}, directly or through others: the edge would close a cycle`);
+  }
+  const [blocker] = blockers(context, [{ edge: 0, ...target }]);
+  const status = statusOf(context);
+  if (blocker.open && status !== undefined && context.config.gatedStates.includes(status)) {
+    throw refuse.veto(`it is ${status}, a gated state, so it takes no blocker that is not done: ${describe(blocker)}`);
+  }
+  context.sql.run(`INSERT INTO ${table} (namespace, schema, id, blocker_schema, blocker_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, [
+    ...key(context),
+    target.schema,
+    target.id,
+    context.principal.subject,
+    context.now,
+  ]);
+  context.references.add(target.schema, target.id);
+  return blocker;
 }
 
 function describe(blocker: { schema: string; id: string; status?: string }): string {
@@ -232,61 +321,23 @@ export const dependencies = defineBehavior<DependenciesConfig>({
     return `${view.schema} ${view.id} cannot move to ${to} while it is blocked by ${open.map(describe).join(', ')}`;
   },
 
+  // A create's blockers, each added with addBlocker's checks.
+  initialize(context, params) {
+    const given = (params.blockers ?? []) as ReadonlyArray<Readonly<Record<string, unknown>>>;
+    given.forEach((blocker, index) => {
+      addEdge(context, blocker, createRefusals(context, index));
+    });
+  },
+
   operations: {
     addBlocker(context, params) {
-      const target = blockerParams(context, 'addBlocker', params);
-      if (!context.config.schemas.includes(target.schema)) {
-        throw new OperationParamsError(NAME, 'addBlocker', [
-          { path: '/schema', message: `a blocker of ${context.schema} is an instance of ${context.config.schemas.join(', ')}, not ${target.schema}` },
-        ]);
-      }
-      if (context.schemas.config(target.schema, 'Workflow') === undefined) {
-        throw new OperationParamsError(NAME, 'addBlocker', [
-          { path: '/schema', message: `${target.schema} does not compose Workflow, so its instances cannot block` },
-        ]);
-      }
-      if (context.instances.get(target.schema, target.id, { fields: [] }) === undefined) {
-        throw new OperationParamsError(NAME, 'addBlocker', [{ path: '/id', message: `${target.schema} ${target.id} does not exist` }]);
-      }
-      const table = context.sql.table('edges');
-      if (
-        context.sql.get(`SELECT 1 AS found FROM ${table} WHERE namespace = ? AND schema = ? AND id = ? AND blocker_schema = ? AND blocker_id = ?`, [
-          ...key(context),
-          target.schema,
-          target.id,
-        ])
-      ) {
-        throw new BehaviorVetoError(NAME, 'addBlocker', context.schema, context.id, `${target.schema} ${target.id} already blocks it`);
-      }
-      if (reaches(context, target, { schema: context.schema, id: context.id })) {
-        throw new BehaviorVetoError(
-          NAME,
-          'addBlocker',
-          context.schema,
-          context.id,
-          `${target.schema} ${target.id} is blocked by ${context.schema} ${context.id}, directly or through others: the edge would close a cycle`
-        );
-      }
-      const [blocker] = blockers(context, [{ edge: 0, ...target }]);
-      const status = context.instances.get(context.schema, context.id, { fields: ['status'] })?.data.status;
-      if (blocker.open && typeof status === 'string' && context.config.gatedStates.includes(status)) {
-        throw new BehaviorVetoError(NAME, 'addBlocker', context.schema, context.id, `it is ${status}, a gated state, so it takes no blocker that is not done: ${describe(blocker)}`);
-      }
-      context.sql.run(`INSERT INTO ${table} (namespace, schema, id, blocker_schema, blocker_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, [
-        ...key(context),
-        target.schema,
-        target.id,
-        context.principal.subject,
-        context.now,
-      ]);
-      context.references.add(target.schema, target.id);
-      return blocker;
+      return addEdge(context, params, operationRefusals(context, 'addBlocker'));
     },
 
     // removeBlocker reads nothing of the blocker, which may be the
     // instance whose delete is removing its edges.
     removeBlocker(context, params) {
-      const target = blockerParams(context, 'removeBlocker', params);
+      const target = blockerParams(context, params, operationRefusals(context, 'removeBlocker'));
       const removed = context.sql.run(
         `DELETE FROM ${context.sql.table('edges')} WHERE namespace = ? AND schema = ? AND id = ? AND blocker_schema = ? AND blocker_id = ?`,
         [...key(context), target.schema, target.id]

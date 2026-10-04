@@ -292,13 +292,19 @@ export abstract class Batch {
 }
 ```
 
-Creating a batch creates its steps, links each to the batch, and adds
-their `Dependencies` edges, in one transaction with the batch. A step
-whose `when` does not hold is left out and the chain closes over it: a
-batch with `topic: "copy"` gets `fetch` and `index`, with `index` blocked
-by `fetch`. When the child schema composes `Queue`, `claimNext` claims
-each step once its blockers finish. The child schema needs `Links` with
-the `parentLink`, and `Dependencies` when steps use `after`.
+Creating a batch creates its steps in one transaction with the batch,
+each step created with its link to the batch and its `Dependencies`
+edges as
+[create parameters](/superschematic/guides/engine-behaviors/#create-parameters),
+so a step is blocked from its first event and `claimNext` never finds it
+early. A step whose `when` does not hold is left out and the chain
+closes over it: a batch with `topic: "copy"` gets `fetch` and `index`,
+with `index` blocked by `fetch`. When the child schema composes `Queue`,
+`claimNext` claims each step once its blockers finish. The child schema
+needs `Links` with the `parentLink`, and `Dependencies` when steps use
+`after`. Make the `parentLink` `required` and no step can be created
+without its batch, by Blueprint or anyone else. With `from`, a create
+that gives the definition's link stamps the steps in that create.
 
 ## Budget
 

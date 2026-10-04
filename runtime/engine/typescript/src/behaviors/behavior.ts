@@ -22,8 +22,9 @@ and gets a context that reaches only what the behavior may touch:
   one only in a write (D16, amended);
 - instances.create, wherever a writing operation can be invoked: a new
   instance of the namespace, created as engine.instances.create would
-  create it for the principal, with every behavior's initialize and
-  afterChange and its event (D16, amended);
+  create it for the principal, with the parameters a create gives its
+  behaviors (its links and blockers, say), every behavior's guard,
+  initialize and afterChange and its event (D16, amended);
 - references: the instances this one refers to, recorded with the engine
   so the behavior hears when one of them changes or goes;
 - in a write, call(), which runs another behavior's operation on the same
@@ -223,18 +224,32 @@ export interface Instances {
    * Creates an instance of a schema, the namespace's own, as
    * engine.instances.create would for the call's principal: it asks the
    * access policy for write on the schema, validates data (the instance's
-   * own fields) against the live version, and runs every behavior's
-   * initialize and afterChange on the new instance and appends its create
-   * event, which records the runner's cause in the runner's work. It runs
-   * in this call's transaction, in a savepoint that rolls back alone when
-   * it throws, and nests like an invoke. The id is options.id, or one the
-   * engine's id generator makes. Returns the instance's record,
+   * own fields) against the live version and options.behaviors against
+   * the createParamsSchema of each behavior it names, asks every
+   * behavior's guard, runs every behavior's initialize, with its own
+   * parameters, and afterChange on the new instance, and appends its
+   * create event, which records the runner's cause in the runner's work.
+   * It runs in this call's transaction, in a savepoint that rolls back
+   * alone when it throws, and nests like an invoke. The id is options.id,
+   * or one the engine's id generator makes. Returns the instance's record,
    * deep-frozen. Where instances.invoke reaches only read-only
    * operations, from a guard, a field reader and a read-only operation,
    * it is a BehaviorError; so is creating an instance whose write is still
    * running up the call.
    */
-  create(schema: string, data: FrozenJSON, options?: { readonly id?: string }): InstanceRecord;
+  create(schema: string, data: FrozenJSON, options?: CreateInstanceOptions): InstanceRecord;
+}
+
+/** What a behavior's instances.create takes beside the schema and the data. */
+export interface CreateInstanceOptions {
+  /** The id; the engine's id generator makes one when absent. */
+  readonly id?: string;
+  /**
+   * The parameters the create gives the new instance's behaviors, by
+   * behavior name, each held to its createParamsSchema: Links' links and
+   * Dependencies' blockers, say, which then hold from the create on.
+   */
+  readonly behaviors?: Readonly<Record<string, unknown>>;
 }
 
 /** The schemas the namespace reaches, as the call's principal may read them. */
@@ -460,8 +475,22 @@ export interface OperationContext<Config> extends InstanceContext<Config> {
   validateUpdate(patch: FrozenJSON): readonly ValidationIssue[];
 }
 
-/** What a guard is asked to allow. The instance before the change is the view's data. */
+/**
+ * What a guard is asked to allow. The instance before the change is the
+ * view's data; for a create, the new instance's own fields.
+ */
 export type GuardRequest =
+  | {
+      readonly kind: 'create';
+      /** The new instance's own fields, as the create gives them and the view's data holds them. */
+      readonly data: FrozenJSON;
+      /**
+       * The create's parameters, by behavior name, as it gives them: an
+       * entry for each behavior it gives one, checked against that
+       * behavior's createParamsSchema.
+       */
+      readonly behaviors: Readonly<Record<string, FrozenJSON>>;
+    }
   | {
       readonly kind: 'update';
       readonly patch: FrozenJSON;
@@ -645,14 +674,24 @@ export interface BehaviorImplementation<Config = unknown> {
   /** The storage it owns, created when a schema that composes it is published. */
   readonly migrations?: readonly BehaviorMigration[];
 
-  /** Sets up its state for a new instance, in the create's transaction, in list order. */
-  initialize?(context: InstanceContext<Config>): void;
+  /**
+   * Sets up its state for a new instance, in the create's transaction, in
+   * list order, once every guard has allowed the create. params is its own
+   * entry of the create's parameters (CreateInstanceOptions.behaviors),
+   * which its createParamsSchema accepted; {} when the create gives none.
+   * A parameter its config refuses (a name it does not give) throws
+   * CreateParamsError, at a pointer under /behaviors/<its name>.
+   */
+  initialize?(context: InstanceContext<Config>, params: FrozenJSON): void;
 
   /**
-   * May veto an update, a delete or an operation of any behavior on the
-   * type: return a reason. Every behavior's guard runs in list order and
-   * the first veto wins; the change is refused with a BehaviorVetoError
-   * (vetoed).
+   * May veto a create, an update, a delete or an operation of any behavior
+   * on the type: return a reason. Every behavior's guard runs in list order
+   * and the first veto wins; the change is refused with a
+   * BehaviorVetoError (vetoed). A create is asked once its row is
+   * inserted and before any initialize, so the view's data is the new
+   * instance's own fields and its columns hold their defaults; a veto
+   * leaves nothing of it.
    */
   guard?(context: InstanceView<Config>, request: GuardRequest): string | undefined | void;
 

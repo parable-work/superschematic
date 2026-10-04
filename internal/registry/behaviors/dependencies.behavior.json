@@ -1,6 +1,6 @@
 {
   "name": "Dependencies",
-  "description": "Blockers between instances. An instance is blocked while one of its blockers is in a state that is not terminal in its own schema's Workflow, and a transition of its own Workflow into a gated state waits until none blocks it. A blocker is an instance of the type's own schema, or of a schema the config lists, that composes Workflow; an edge that would close a cycle is refused. Deleting a blocker removes its edges.",
+  "description": "Blockers between instances. An instance is blocked while one of its blockers is in a state that is not terminal in its own schema's Workflow, and a transition of its own Workflow into a gated state waits until none blocks it. A blocker is an instance of the type's own schema, or of a schema the config lists, that composes Workflow; an edge that would close a cycle is refused. A create may give its blockers. Deleting a blocker removes its edges.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -18,6 +18,26 @@
         "minItems": 1,
         "uniqueItems": true,
         "items": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "createParamsSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "blockers": {
+        "description": "The instance's blockers from its create, each held to addBlocker's rules.",
+        "type": "array",
+        "maxItems": 500,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": {
+            "schema": { "description": "The blocker's schema; the instance's own when absent.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
+            "id": { "description": "The blocker's id.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" }
+          }
+        }
       }
     }
   },

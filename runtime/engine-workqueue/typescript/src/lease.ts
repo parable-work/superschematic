@@ -512,8 +512,11 @@ export const lease = defineBehavior<LeaseConfig>({
     },
   ],
 
-  // The lease's exclusion: see the header.
+  // The lease's exclusion: see the header. A new instance holds no lease.
   guard(view, request) {
+    if (request.kind === 'create') {
+      return undefined;
+    }
     if (request.kind === 'operation' && request.behavior === NAME) {
       return request.operation === 'direct' && request.caller === undefined ? directGuard(view) : undefined;
     }

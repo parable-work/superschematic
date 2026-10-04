@@ -1,15 +1,18 @@
-// Blueprint: inline steps stamped at create with their parent link,
-// copied fields, data and edges; when (equals and includes) leaving steps
-// out and passing their edges on; the config checks against this type
-// and the child schema; steps kept in a definition, read from the
-// revision the link pins and stamped when the link is set; copied links
-// with their revision; the creator's permissions; and one transaction for
-// the parent and every child. Real SQLite, a real engine.
+// Blueprint: inline steps stamped at create, each child created with its
+// required parent link, copied links and edges as create parameters, in
+// one event; copied fields and data; when (equals and includes) leaving
+// steps out and passing their edges on; the config checks against this
+// type and the child schema; steps kept in a definition, read from the
+// revision the link pins and stamped when the link is set, by the create
+// that gives it or a later link; copied links with their revision; the
+// creator's permissions; and one transaction for the parent and every
+// child. Real SQLite, a real engine.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import {
   BehaviorVetoError,
+  CreateParamsError,
   EngineError,
   IncompatibleChangeError,
   InstanceValidationError,
@@ -118,6 +121,44 @@ for (const driver of drivers) {
       // The children are the creator's, as engine.instances.create would make them.
       assert.deepEqual(new Set(children.map((child) => engine.instances.get(alice, 'Step', child.id)?.createdBy)), new Set(['nora']));
       assert.equal(stepOf(engine, children[1].id).blocked, true);
+      // Each child holds its link and its edges from its create: one event each.
+      const events = engine.events.read(alice, { schema: 'Step', instanceId: children[1].id }).events;
+      assert.deepEqual(
+        events.map((event) => [event.kind, event.change]),
+        [['create', { step: 'build', title: 'Build it', topic: 'public', status: 'todo', blocked: true, links: { run: { schema: 'Run', id: 'r1' } } }]]
+      );
+    });
+
+    test("the child schema's required parentLink is given at every create, so a step never stands without its run", () => {
+      const engine = world();
+      const refused = thrown(() => engine.instances.create(nora, 'Step', { step: 'loose' }), CreateParamsError);
+      assert.deepEqual(refused.issues, [{ path: '/behaviors/Links', message: 'link run is required, so a create of Step gives it' }]);
+      engine.instances.create(nora, 'Run', { title: 'First' }, { id: 'r1' });
+      const extra = engine.instances.create(nora, 'Step', { step: 'extra' }, { behaviors: { Links: { run: 'r1' } } });
+      assert.deepEqual(extra.data.links, { run: { schema: 'Run', id: 'r1' } });
+      // A step created later is not among what was stamped.
+      assert.equal((childrenOf(engine, 'r1') as Child[]).some((child) => child.id === extra.id), false);
+    });
+
+    test('copyLinks copies the links the create gives to every child of inline steps', () => {
+      const engine = openTestEngine({ driver });
+      publish(engine, documentOf('Area', [{ name: 'name', typeRef: { name: 'string' } }], []));
+      publish(engine, documentOf('Step', stepFields, stepBehaviors({ run: { schema: 'Run', required: true }, area: { schema: 'Area' } })));
+      publish(
+        engine,
+        documentOf('Run', runFields, [
+          { name: 'Links', config: { links: { area: { schema: 'Area' } } } },
+          { name: 'Blueprint', config: { ...inline, steps: { a: {}, b: { after: ['a'] } }, copyLinks: ['area'] } },
+        ])
+      );
+      engine.instances.create(alice, 'Area', { name: 'North' }, { id: 'a1' });
+      engine.instances.create(nora, 'Run', { title: 'Mapped' }, { id: 'r1', behaviors: { Links: { area: 'a1' } } });
+      for (const child of childrenOf(engine, 'r1') as Child[]) {
+        assert.deepEqual(stepOf(engine, child.id).links, { run: { schema: 'Run', id: 'r1' }, area: { schema: 'Area', id: 'a1' } });
+      }
+      // A run that holds no area gives its children none.
+      engine.instances.create(nora, 'Run', { title: 'Bare' }, { id: 'r2' });
+      assert.deepEqual(stepOf(engine, (childrenOf(engine, 'r2') as Child[])[0].id).links, { run: { schema: 'Run', id: 'r2' } });
     });
 
     test('when leaves out the steps whose field does not equal or include the value, and passes their edges on', () => {
@@ -213,7 +254,8 @@ for (const driver of drivers) {
       assert.match(refusal(engine, { ...inline, steps: { a: { when: { field: 'topic', includes: 'x' } } } }), /step a: when includes reads topic as a list/);
       assert.match(refusal(engine, { ...inline, steps: { a: { data: { step: 'b' } } } }), /step a: data sets step, which holds the step's key/);
       assert.match(refusal(engine, { ...inline, steps: { a: { data: { color: 'red' } } } }), /step a: data sets color, which is not a field of Step/);
-      assert.match(refusal(engine, { ...inline, copyLinks: ['run'] }, [{ name: 'Links', config: { links: { run: { schema: 'Run' } } } }]), /copyLinks needs from/);
+      assert.match(refusal(engine, { ...inline, copyLinks: ['area'] }), /copyLinks reads links of the type's Links, which the type does not list/);
+      assert.match(refusal(engine, { ...inline, copyLinks: ['run'] }, [{ name: 'Links', config: { links: { run: { schema: 'Run' } } } }]), /copyLinks names run, the link each child points at its parent through/);
       // The configSchema holds the shape: one of steps and from, a step's keys, when's one comparison.
       assert.match(refusal(engine, { schema: 'Step', parentLink: 'run', keyField: 'step' }), /config: must match exactly one schema in oneOf/);
       assert.match(refusal(engine, { ...inline, steps: { a: { when: { field: 'topic', equals: 'x', includes: 'y' } } } }), /when: must match exactly one schema in oneOf/);
@@ -290,6 +332,36 @@ for (const driver of drivers) {
       assert.deepEqual(edges(engine, 'r2'), { first: [], second: ['first'] });
       const second = stepOf(engine, (childrenOf(engine, 'r2') as Child[])[1].id);
       assert.deepEqual(second.links, { run: { schema: 'Run', id: 'r2' }, plan: { schema: 'Plan', id: 'p1', revision: 1, stale: true } });
+    });
+
+    test('a create that gives the from link stamps in the create; a map that breaks a rule refuses the create, and leaves nothing', () => {
+      const engine = definitions();
+      const created = engine.instances.create(nora, 'Run', { title: 'Run', topic: 'public' }, { id: 'r1', behaviors: { Links: { plan: 'p1', area: 'a1' } } });
+      assert.deepEqual(
+        (created.data.blueprint as { children: Child[] }).children.map((child) => child.key),
+        ['first', 'second', 'third']
+      );
+      assert.deepEqual(edges(engine, 'r1'), { first: [], second: ['first'], third: ['second'] });
+      assert.deepEqual(stepOf(engine, (childrenOf(engine, 'r1') as Child[])[0].id).links, {
+        run: { schema: 'Run', id: 'r1' },
+        plan: { schema: 'Plan', id: 'p1', revision: 2, stale: false },
+        area: { schema: 'Area', id: 'a1' },
+      });
+      // A create pinned to an earlier revision stamps that revision's map.
+      engine.instances.create(nora, 'Run', { title: 'Old plan' }, { id: 'r2', behaviors: { Links: { plan: { id: 'p1', revision: 1 } } } });
+      assert.deepEqual(edges(engine, 'r2'), { first: [], second: ['first'] });
+      // Stamped at its create, the run's from link cannot move.
+      assert.equal(thrown(() => link(engine, nora, 'r1', 'plan', 'p1', 1), BehaviorVetoError).behavior, 'Blueprint');
+
+      engine.instances.create(alice, 'Plan', { title: 'Cyclic', steps: { a: { after: ['b'] }, b: { after: ['a'] } } }, { id: 'bad' });
+      const before = allSteps(engine).length;
+      const refused = thrown(() => engine.instances.create(nora, 'Run', { title: 'Doomed' }, { id: 'r3', behaviors: { Links: { plan: 'bad' } } }), BehaviorVetoError);
+      assert.deepEqual(
+        [refused.behavior, refused.action, refused.reason],
+        ['Blueprint', 'create', 'the steps of Plan bad revision 1 are invalid: the steps form a cycle: a -> b -> a']
+      );
+      assert.equal(engine.instances.get(alice, 'Run', 'r3'), undefined);
+      assert.equal(allSteps(engine).length, before);
     });
 
     test("a later revision of the definition changes what new runs stamp, not a stamped run's children; its link cannot move", () => {

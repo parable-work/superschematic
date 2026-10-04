@@ -295,7 +295,7 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	require.Len(t, crossJSON.Behaviors, 3)
 	assert.Equal(t, []string{"Workflow", "Dependencies", "Links"}, []string{crossJSON.Behaviors[0].Name, crossJSON.Behaviors[1].Name, crossJSON.Behaviors[2].Name})
 	assert.JSONEq(t, `{"schemas": ["tasks", "documents"], "gatedStates": ["done"]}`, string(crossJSON.Behaviors[1].Config))
-	assert.JSONEq(t, `{"links": {"spec": {"schema": "documents", "pinned": true}, "parent": {"schema": "tasks", "required": true}, "project": {"schema": "projects"}}}`, string(crossJSON.Behaviors[2].Config))
+	assert.JSONEq(t, `{"links": {"spec": {"schema": "documents", "pinned": true}, "parent": {"schema": "tasks"}, "project": {"schema": "projects", "required": true}}}`, string(crossJSON.Behaviors[2].Config))
 	assert.Equal(t, crossJSON, load(filepath.Join(tsreaderTestdata, "fixture-cross-instance")).Types["Task"])
 
 	// Rollups, whose config names the tasks' project link, loads in both

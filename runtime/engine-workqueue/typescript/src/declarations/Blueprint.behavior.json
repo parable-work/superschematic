@@ -1,6 +1,6 @@
 {
   "name": "Blueprint",
-  "description": "Creates the instance's children from a map of steps: one instance of the child schema per step, linked to the instance and blocked by the children of the steps it comes after, all in one transaction that a failure refuses whole. The steps are inline in the config, stamped when the instance is created, or held by a definition the instance links to, pinned to a revision, stamped when that link is first set. A step can depend on the instance's fields (when); a step left out passes its dependencies on to the steps that come after it.",
+  "description": "Creates the instance's children from a map of steps: one instance of the child schema per step, created with its link to the instance and blocked by the children of the steps it comes after, all in one transaction that a failure refuses whole. The steps are inline in the config, stamped when the instance is created, or held by a definition the instance links to, pinned to a revision, stamped when that link is first set, by the create that gives it or a later link. A step can depend on the instance's fields (when); a step left out passes its dependencies on to the steps that come after it.",
   "configSchema": {
     "additionalProperties": false,
     "oneOf": [
@@ -26,7 +26,7 @@
         "uniqueItems": true
       },
       "copyLinks": {
-        "description": "Links of this type copied to every child, a link of the child's Links config of the same name to the same schema, keeping the revision a pinned one records. Only with from: an instance holds no link when it is created.",
+        "description": "Links of this type copied to every child, a link of the child's Links config of the same name to the same schema, keeping the revision a pinned one records: the links the instance holds when it is stamped, which for inline steps are the ones its create gives.",
         "items": {
           "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
           "type": "string"
@@ -36,7 +36,7 @@
       },
       "from": {
         "additionalProperties": false,
-        "description": "Where the steps are kept as an instance: a pinned link of this type's Links config, and the field of the linked instance that holds a map of steps of the same form as steps. The steps are read from the revision the link pins and stamped when the link is first set.",
+        "description": "Where the steps are kept as an instance: a pinned link of this type's Links config, and the field of the linked instance that holds a map of steps of the same form as steps. The steps are read from the revision the link pins and stamped when the link is first set, by the create that gives it or a later link.",
         "properties": {
           "field": {
             "description": "The field of the linked instance's type that holds the steps.",

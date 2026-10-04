@@ -104,7 +104,7 @@ export interface LinksConfig {
 export interface LinkConfig {
   /** The schema of the instance the link points at. */
   readonly schema: string;
-  /** Once set, the link can be moved to another target but not unlinked, and the delete of its target is refused. */
+  /** Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused. */
   readonly required?: boolean;
   /** The link records the target's revision and reports whether the target has moved past it; the schema must compose Revisions. */
   readonly pinned?: boolean;
@@ -274,7 +274,7 @@ export interface BlueprintBase {
   readonly keyField: string;
   /** Fields of this type copied to every child. */
   readonly copyFields?: readonly string[];
-  /** Links of this type copied to every child, keeping a pinned one's revision; only with from. */
+  /** Links of this type copied to every child, keeping a pinned one's revision: the ones the instance holds when it is stamped. */
   readonly copyLinks?: readonly string[];
 }
 

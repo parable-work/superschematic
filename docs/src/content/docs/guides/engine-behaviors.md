@@ -1,15 +1,16 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; schema-level operations; the runner that runs reactions and schedules; and the core's Dependencies, Links, Rollups, Search and Reactions behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; create parameters; schema-level operations; the runner that runs reactions and schedules; and the core's Dependencies, Links, Rollups, Search and Reactions behaviors.
 sidebar:
   order: 7
 ---
 
 [The engine](/superschematic/guides/engine/) guide builds a notes server
 with `Workflow`, `Comments` and `Revisions`. This page covers the rest of
-the behaviors the engine runs with no extension, and the two mechanisms
-the newer ones lean on: operations that run on a whole schema, and the
-runner that does work after a change commits.
+the behaviors the engine runs with no extension, and the mechanisms the
+newer ones lean on: parameters a create gives its behaviors, operations
+that run on a whole schema, and the runner that does work after a change
+commits.
 
 The
 [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#core-behaviors)
@@ -54,8 +55,8 @@ In the JSON data form the engine reads:
   { "name": "Dependencies", "config": { "schemas": ["tasks", "documents"], "gatedStates": ["done"] } },
   { "name": "Links", "config": { "links": {
       "spec": { "schema": "documents", "pinned": true },
-      "parent": { "schema": "tasks", "required": true },
-      "project": { "schema": "projects" } } } }
+      "parent": { "schema": "tasks" },
+      "project": { "schema": "projects", "required": true } } } }
 ]
 ```
 
@@ -79,8 +80,8 @@ import { Validate, behavior } from "@superschematic/schema";
 @behavior("Links", {
   links: {
     spec: { schema: "documents", pinned: true },
-    parent: { schema: "tasks", required: true },
-    project: { schema: "projects" },
+    parent: { schema: "tasks" },
+    project: { schema: "projects", required: true },
   },
 })
 export abstract class Task {
@@ -96,6 +97,43 @@ the JSON form to hand to the engine. A behavior an extension adds joins
 `BehaviorConfigs` by module augmentation;
 [Write an extension](/superschematic/extending/write-an-extension/#a-behavior)
 shows how.
+
+## Create parameters
+
+Some behaviors take parameters when an instance is created, so the
+instance holds what they set from its first event: `Links` takes its
+links, `Dependencies` its blockers. Without them a task would be created
+first and linked after, and in between a queue could claim it with no
+project or blockers. A create gives them under `behaviors`, by behavior
+name:
+
+```ts
+engine.instances.create(alice, 'tasks', { title: 'Build' }, {
+  id: 'build',
+  behaviors: {
+    Links: { project: 'launch', spec: { id: 'doc-1', revision: 2 } },
+    Dependencies: { blockers: [{ id: 'plan' }] },
+  },
+});
+```
+
+Over HTTP they sit beside `data` in the body of
+`POST /namespaces/{namespace}/schemas/tasks/instances`, and over MCP the
+create tool (`tasks_create`) takes them as its `behaviors` argument:
+
+```json
+{ "id": "build", "data": { "title": "Build" }, "behaviors": { "Links": { "project": "launch" } } }
+```
+
+- Each behavior declares what it takes (`createParamsSchema`), and the
+  describe document and the create tool show it.
+- A parameter is held to the same checks as the operation it stands in
+  for (`link`, `addBlocker`). A refusal is `invalid_argument` (400), with
+  each issue at a JSON pointer such as `/behaviors/Links/project`, or
+  `vetoed` (409), and nothing of the create is left.
+- Every behavior's guard can refuse a create too, before any behavior
+  sets anything up.
+- The create, its links and its edges are one event, in one transaction.
 
 ## Schema-level operations
 
@@ -192,6 +230,7 @@ cannot be done while a task it waits on is open.
 | Config | `schemas`: the schemas a blocker may belong to, each composing Workflow (the type's own when absent); `gatedStates`: the terminal states a transition into waits on (every terminal state when absent) |
 | Field | `blocked`: whether any blocker is not yet in a terminal state of its own Workflow |
 | Operations | `addBlocker({ schema?, id })`, `removeBlocker({ schema?, id })`, and the read-only `listBlockers` and `listDependents`, which page with `limit` and `cursor` |
+| Create parameters | `{ blockers: [{ schema?, id }] }`, each held to `addBlocker`'s checks |
 | Guard | a transition into a gated state while `blocked` is `vetoed` (409), naming the open blockers |
 
 ```ts
@@ -202,6 +241,8 @@ engine.instances.get(alice, 'Task', 't1')?.data;
 ```
 
 - A cycle and an instance blocking itself are refused.
+- Blockers a create gives block it from its create, so a queue never sees
+  it unblocked first.
 - `blocked` is computed at each read, so a blocker finishing shows at the
   dependent's next read, with no event on the dependent.
 - Deleting a blocker removes its edges: each dependent gets a
@@ -219,6 +260,7 @@ a task's project, its parent, the spec it implements.
 | Config | `links`: by camelCase name, `{ schema, required?, pinned? }`. A `pinned` link's target schema must compose `Revisions` |
 | Field | `links`: `{ <name>: { schema, id, revision?, stale? } }`, absent when the instance holds none |
 | Operations | `link({ name, id, revision? })`, `unlink({ name })`, and the schema-level, read-only `listLinked({ name, id, stale?, limit?, cursor? })` |
+| Create parameters | by link name, the target's `id`, or `{ id, revision? }` for a pinned link |
 | Guard | deleting the target of a required link is `vetoed` |
 
 ```ts
@@ -229,8 +271,10 @@ engine.instances.invokeSchema(alice, 'Task', 'listLinked', { name: 'spec', id: '
 ```
 
 - `link` again moves a link to another target.
-- A **required** link can be moved but not unlinked, and its target
-  cannot be deleted while it points there.
+- A **required** link is given at every create, so every instance holds
+  it: a create without it is refused, it can be moved but not unlinked,
+  and its target cannot be deleted while it points there. A new version
+  cannot make a link required, as it cannot make a field required.
 - An **optional** link is cleared when its target is deleted, with an
   `unlink` event on each instance that pointed there.
 - A **pinned** link records the target's revision, and `links` reports

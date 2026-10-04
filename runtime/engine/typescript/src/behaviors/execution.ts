@@ -9,16 +9,19 @@ nest and which instances are being written. Everything here is synchronous
 (D16): a function that returns a promise is a BehaviorError, which rolls
 the write back.
 
-Each function gets a context for its own behavior (behavior.ts). A guard
-and a field reader get a view: read-only columns and SQL, reads of other
-instances and their read-only operations. initialize, afterChange and a
-writing operation get a writable context, call(), references, and invoke
-of writing operations on other instances and create; a read-only
-operation gets one whose writes refuse and whose call() and invoke reach
-only read-only operations. An operation's context also has update(),
-which changes the instance's own fields with instances.update's checks
-and every guard, and validateUpdate(). A called operation runs in a
-savepoint, so a failure the caller catches leaves nothing of it behind.
+A create checks the parameters it gives the type's behaviors against
+their createParamsSchema (checkCreateParams), asks every guard, and
+hands each initialize its own. Each function gets a context for its own
+behavior (behavior.ts). A guard and a field reader get a view: read-only
+columns and SQL, reads of other instances and their read-only
+operations. initialize, afterChange and a writing operation get a
+writable context, call(), references, and invoke of writing operations
+on other instances and create; a read-only operation gets one whose
+writes refuse and whose call() and invoke reach only read-only
+operations. An operation's context also has update(), which changes the
+instance's own fields with instances.update's checks and every guard,
+and validateUpdate(). A called operation runs in a savepoint, so a
+failure the caller catches leaves nothing of it behind.
 
 What a behavior reaches beyond its instance goes through the Reach, which
 the instance store implements: reads, invokes, creates and references
@@ -34,10 +37,20 @@ principal, on a chain whose cause the events it writes record.
 import type { PermissionMatcher } from '@superschematic/http-runtime';
 
 import type { Principal } from '../access.js';
-import { BehaviorError, BehaviorVetoError, EngineError, InstanceValidationError, OperationParamsError, type ValidationIssue } from '../errors.js';
+import {
+  BehaviorError,
+  BehaviorVetoError,
+  CreateParamsError,
+  EngineError,
+  InstanceValidationError,
+  OperationParamsError,
+  type SchemaIssue,
+  type ValidationIssue,
+} from '../errors.js';
 import type { EngineEvent, EventCause } from '../events/log.js';
 import type { InstanceRecord } from '../instances/store.js';
 import { isPlainObject, jsonEqual, mergePatch, setMember } from '../instances/patch.js';
+import { pointer } from '../registry/document.js';
 import { readOnlyIssue } from '../registry/validator.js';
 import type { SqlValue } from '../storage/driver.js';
 import type { Storage } from '../storage/storage.js';
@@ -45,6 +58,7 @@ import type { SqlMode } from './sql.js';
 import type {
   BehaviorReactions,
   BehaviorSchedule,
+  CreateInstanceOptions,
   FrozenJSON,
   GuardRequest,
   InstanceChange,
@@ -171,10 +185,19 @@ export interface Reach {
   invokeSchema(chain: Chain, from: string, schema: string, operation: string, params: unknown, writes: boolean): unknown;
   /**
    * Creates an instance as instances.create does, inside the chain's
-   * transaction, in a savepoint; asks write. data is a JSON object; a
-   * read (writes false) is refused.
+   * transaction, in a savepoint; asks write. data is a JSON object, and
+   * behaviors, when given, a JSON object of create parameters by behavior
+   * name; a read (writes false) is refused.
    */
-  create(chain: Chain, from: string, schema: string, data: Record<string, unknown>, id: string | undefined, writes: boolean): InstanceRecord;
+  create(
+    chain: Chain,
+    from: string,
+    schema: string,
+    data: Record<string, unknown>,
+    id: string | undefined,
+    behaviors: Record<string, unknown> | undefined,
+    writes: boolean
+  ): InstanceRecord;
   /** Asks read on a schema, as a read of its instances does; throws forbidden on a refusal. */
   allowRead(chain: Chain, schema: string): void;
   /** The instance of an event as the log had it just before the event; asks read on its schema. */
@@ -258,12 +281,17 @@ export class Execution {
     }
   }
 
-  /** initialize runs every behavior's initialize in list order, for a new instance. */
-  initialize(): void {
+  /**
+   * initialize runs every behavior's initialize in list order, for a new
+   * instance, each with its own entry of the create's parameters (checked
+   * by checkCreateParams), {} when the create gives it none.
+   */
+  initialize(params: Readonly<Record<string, FrozenJSON>>): void {
     for (const bound of this.composition.behaviors) {
       const initialize = bound.behavior.implementation.initialize;
       if (initialize) {
-        synchronous(bound.behavior.name, 'initialize', initialize.call(bound.behavior.implementation, this.context(bound, true)));
+        const own = Object.prototype.hasOwnProperty.call(params, bound.behavior.name) ? params[bound.behavior.name] : NO_PARAMS;
+        synchronous(bound.behavior.name, 'initialize', initialize.call(bound.behavior.implementation, this.context(bound, true), own));
       }
     }
   }
@@ -665,10 +693,10 @@ function instancesOf(chain: Chain, reach: Reach, behavior: string, invokeWrites:
       checkName(behavior, 'instances.invokeSchema', 'operation', operation);
       return reach.invokeSchema(chain, behavior, schema, operation, params ?? {}, invokeWrites);
     },
-    create: (schema: string, data: FrozenJSON, options?: { readonly id?: string }) => {
+    create: (schema: string, data: FrozenJSON, options?: CreateInstanceOptions) => {
       checkName(behavior, 'instances.create', 'schema', schema);
       if (options !== undefined && (typeof options !== 'object' || options === null)) {
-        throw new BehaviorError(behavior, 'instances.create takes options { id? }');
+        throw new BehaviorError(behavior, 'instances.create takes options { id?, behaviors? }');
       }
       if (options?.id !== undefined) {
         checkName(behavior, 'instances.create', 'id', options.id);
@@ -681,7 +709,18 @@ function instancesOf(chain: Chain, reach: Reach, behavior: string, invokeWrites:
         throw new BehaviorError(behavior, "instances.create takes the instance's own fields: a JSON object");
       }
       const fields = copied.value;
-      return chain.nest(behavior, 'instances.create', () => reach.create(chain, behavior, schema, fields, options?.id, invokeWrites));
+      let params: Record<string, unknown> | undefined;
+      if (options?.behaviors !== undefined) {
+        const given = jsonCopy(options.behaviors);
+        if (!('value' in given)) {
+          throw new BehaviorError(behavior, `instances.create: behaviors is not JSON${given.path ? ` at ${given.path}` : ''}: ${given.problem}`);
+        }
+        if (!isPlainObject(given.value)) {
+          throw new BehaviorError(behavior, "instances.create takes behaviors, the create's parameters by behavior name: a JSON object");
+        }
+        params = given.value;
+      }
+      return chain.nest(behavior, 'instances.create', () => reach.create(chain, behavior, schema, fields, options?.id, params, invokeWrites));
     },
   });
 }
@@ -769,6 +808,72 @@ function checkResult(operation: OperationSpec, result: unknown): unknown {
     throw new BehaviorError(operation.behavior.name, `operation ${operation.name} returned a result its resultSchema refuses: ${detail}`);
   }
   return value;
+}
+
+/** What initialize gets from a create that gives its behavior no parameters. */
+const NO_PARAMS: FrozenJSON = Object.freeze({});
+
+/**
+ * checkCreateParams copies the parameters a create gives the type's
+ * behaviors and checks them: a JSON object by behavior name, each entry
+ * for a behavior the type composes that declares a createParamsSchema,
+ * which accepts it; a behavior with a createParamsSchema the create gives
+ * nothing must accept {}. It returns the entries, deep-frozen: what every
+ * guard is asked with and each initialize gets its own of. A refusal is a
+ * CreateParamsError with every issue, at JSON pointers under /behaviors.
+ */
+export function checkCreateParams(composition: Composition, schema: string, behaviors: unknown): Readonly<Record<string, FrozenJSON>> {
+  if (behaviors === undefined) {
+    behaviors = {};
+  }
+  if (!isPlainObject(behaviors)) {
+    throw new CreateParamsError(schema, [{ path: '/behaviors', message: "behaviors is the create's parameters by behavior name: a JSON object" }]);
+  }
+  const issues: SchemaIssue[] = [];
+  const out: Record<string, FrozenJSON> = {};
+  const check = (bound: BoundBehavior, at: string, entry: unknown): void => {
+    const validate = bound.behavior.createParams as NonNullable<typeof bound.behavior.createParams>;
+    if (!validate(entry)) {
+      issues.push(...BehaviorRegistry.issues(validate.errors).map((issue) => ({ path: `${at}${issue.path}`, message: issue.message })));
+    }
+  };
+  for (const [name, entry] of Object.entries(behaviors)) {
+    if (entry === undefined) {
+      continue;
+    }
+    const at = `/behaviors${pointer(name)}`;
+    const bound = composition.bound(name);
+    if (!bound) {
+      const taking = composition.behaviors.filter((candidate) => candidate.behavior.createParams !== undefined).map((candidate) => candidate.behavior.name);
+      issues.push({
+        path: at,
+        message: `${schema} does not compose behavior ${name} (its behaviors that take create parameters: ${taking.length > 0 ? taking.join(', ') : 'none'})`,
+      });
+      continue;
+    }
+    if (bound.behavior.createParams === undefined) {
+      issues.push({ path: at, message: `behavior ${name} takes no create parameters` });
+      continue;
+    }
+    const copied = jsonCopy(entry);
+    if (!('value' in copied)) {
+      issues.push({ path: `${at}${pathPointer(copied.path)}`, message: copied.problem });
+      continue;
+    }
+    check(bound, at, copied.value);
+    out[name] = copied.value as FrozenJSON;
+  }
+  const given = behaviors;
+  for (const bound of composition.behaviors) {
+    const name = bound.behavior.name;
+    if (bound.behavior.createParams !== undefined && (!Object.prototype.hasOwnProperty.call(given, name) || given[name] === undefined)) {
+      check(bound, `/behaviors${pointer(name)}`, {});
+    }
+  }
+  if (issues.length > 0) {
+    throw new CreateParamsError(schema, issues);
+  }
+  return deepFreeze(out);
 }
 
 /**

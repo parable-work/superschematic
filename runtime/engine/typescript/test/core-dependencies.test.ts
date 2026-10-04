@@ -1,12 +1,14 @@
 // Dependencies, the core's blockers: the blocked field and the Workflow
 // gate over one rule, across schemas; the edges addBlocker refuses; the
-// lists; a blocker's delete, which removes its edges as the caller; reads
-// as the caller; and its config rules.
+// blockers a create gives, held to the same checks; the lists; a
+// blocker's delete, which removes its edges as the caller; reads as the
+// caller; and its config rules.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import {
   BehaviorVetoError,
+  CreateParamsError,
   EngineError,
   IncompatibleChangeError,
   OperationParamsError,
@@ -333,6 +335,78 @@ for (const driver of drivers) {
           message: 'behavior Dependencies cannot be removed from type Task, which has instances: the edges and references its instances hold would stay behind',
         },
       ]);
+    });
+
+    test("a create gives blockers, of its own schema or one the config lists: it is blocked from its create's event", () => {
+      const engine = world();
+      const created = engine.instances.create(
+        alice,
+        'Task',
+        { title: 't4' },
+        { id: 't4', behaviors: { Dependencies: { blockers: [{ id: 't1' }, { schema: 'Milestone', id: 'm1' }] } } }
+      );
+      assert.deepEqual(created.data, { title: 't4', status: 'todo', blocked: true });
+      assert.deepEqual(
+        engine.events.read(alice, { schema: 'Task', instanceId: 't4' }).events.map((event) => [event.kind, event.change]),
+        [['create', { title: 't4', status: 'todo', blocked: true }]]
+      );
+      assert.deepEqual(
+        (engine.instances.invoke(alice, 'Task', 't4', 'listBlockers', {}) as { items: unknown[] }).items,
+        [
+          { schema: 'Task', id: 't1', status: 'todo', open: true },
+          { schema: 'Milestone', id: 'm1', status: 'active', open: true },
+        ]
+      );
+      move(engine, 't4', 'doing');
+      assert.equal(thrown(() => move(engine, 't4', 'done'), BehaviorVetoError).behavior, 'Dependencies');
+      // The edges are references, as addBlocker's are: a blocker's delete removes its edge.
+      assert.equal(engine.instances.delete(alice, 'Milestone', 'm1'), true);
+      assert.deepEqual(engine.events.read(alice, { schema: 'Task', instanceId: 't4' }).events.at(-1)?.change, {
+        behavior: 'Dependencies',
+        operation: 'removeBlocker',
+        params: { schema: 'Milestone', id: 'm1' },
+        patch: {},
+      });
+      assert.deepEqual(engine.instances.invoke(alice, 'Task', 't1', 'listDependents', {}), { items: [{ schema: 'Task', id: 't4' }], next: null });
+    });
+
+    test("a create's blockers are held to addBlocker's checks, at pointers into its parameters; a refused one leaves nothing", () => {
+      const engine = world();
+      const create = (blockers: unknown) => () => engine.instances.create(alice, 'Task', { title: 't4' }, { id: 't4', behaviors: { Dependencies: { blockers } } });
+      const issues = (blockers: unknown) => thrown(create(blockers), CreateParamsError).issues;
+      assert.deepEqual(issues([{ id: 't1' }, { schema: 'Note', id: 'n1' }]), [
+        { path: '/behaviors/Dependencies/blockers/1/schema', message: 'a blocker of Task is an instance of Task, Milestone, not Note' },
+      ]);
+      assert.deepEqual(issues([{ id: 't9' }]), [{ path: '/behaviors/Dependencies/blockers/0/id', message: 'Task t9 does not exist' }]);
+      // An instance cannot block itself: the edge would be a cycle.
+      assert.deepEqual(issues([{ id: 't4' }]), [{ path: '/behaviors/Dependencies/blockers/0/id', message: 'Task t4 cannot block itself' }]);
+      const twice = thrown(create([{ id: 't1' }, { schema: 'Task', id: 't1' }]), BehaviorVetoError);
+      assert.deepEqual([twice.behavior, twice.action, twice.reason], ['Dependencies', 'create', 'Task t1 already blocks it']);
+      // Its createParamsSchema holds the shape.
+      assert.deepEqual(issues('t1'), [{ path: '/behaviors/Dependencies/blockers', message: 'must be array' }]);
+      assert.deepEqual(issues([{ id: 't1', open: true }]), [{ path: '/behaviors/Dependencies/blockers/0', message: 'must NOT have additional properties: open' }]);
+      assert.deepEqual(
+        thrown(() => engine.instances.create(alice, 'Task', { title: 't4' }, { behaviors: { Dependencies: { blocker: [] } } }), CreateParamsError).issues,
+        [{ path: '/behaviors/Dependencies', message: 'must NOT have additional properties: blocker' }]
+      );
+      assert.equal(engine.instances.get(alice, 'Task', 't4'), undefined);
+      assert.deepEqual(engine.instances.invoke(alice, 'Task', 't1', 'listDependents', {}), { items: [], next: null });
+    });
+
+    test("a create in a gated state takes no open blocker, wherever the type lists Workflow", () => {
+      const engine = world();
+      // Gate starts done, a terminal state and so gated; it lists Dependencies before Workflow.
+      const gateFlow = { states: ['todo', 'done'], initial: 'done', transitions: [{ from: 'todo', to: 'done' }] };
+      publish(engine, schema('Gate', [{ name: 'Dependencies', config: { schemas: ['Task'] } }, { name: 'Workflow', config: gateFlow }]));
+      const refused = thrown(
+        () => engine.instances.create(alice, 'Gate', { title: 'g1' }, { behaviors: { Dependencies: { blockers: [{ schema: 'Task', id: 't1' }] } } }),
+        BehaviorVetoError
+      );
+      assert.equal(refused.reason, 'it is done, a gated state, so it takes no blocker that is not done: Task t1 (todo)');
+      move(engine, 't1', 'doing');
+      move(engine, 't1', 'done');
+      const created = engine.instances.create(alice, 'Gate', { title: 'g1' }, { behaviors: { Dependencies: { blockers: [{ schema: 'Task', id: 't1' }] } } });
+      assert.deepEqual(created.data, { title: 'g1', blocked: false, status: 'done' });
     });
   });
 }

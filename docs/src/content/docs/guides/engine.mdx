@@ -257,7 +257,11 @@ them, the fields its behaviors add: Workflow's `status`, Comments'
 `commentCount` and Revisions' `revision`. Those are read-only; a create or
 an update that sets one is 422. `seq` is the sequence of the note's last
 event, and the response sends it as the `ETag`, `"1"`. Without an `id`, the
-engine makes a random UUID.
+engine makes a random UUID. A body may also carry `behaviors`, the
+parameters a create gives the note's behaviors by name, such as the links
+and blockers it holds from its create;
+[create parameters](/superschematic/guides/engine-behaviors/#create-parameters)
+has them.
 
 carol, a reader, may not create one:
 
@@ -477,8 +481,9 @@ declaration its Go package registers; the binary's
 [`behaviors --out`](/superschematic/reference/cli/) command copies it into
 the npm package that implements it. The engine half is a
 `BehaviorImplementation`, built with `defineBehavior`: a handler per
-operation, a reader per field, guards, and migrations for its own
-storage, and optionally schema-level operations, reactions and schedules
+operation, a reader per field, guards (which may refuse a create too),
+an `initialize` that gets the parameters a create gives it, and
+migrations for its own storage, and optionally schema-level operations, reactions and schedules
 for the runner, and hooks that run when an instance it references
 changes. A server registers it with `openEngine({ behaviors, metaSchema })`,
 where `metaSchema` is the extension binary's `json-schema` output, which
@@ -494,7 +499,8 @@ access policy is asked at each step. Beyond one instance, a behavior
 reads its own columns across every instance of its schema with SQL, on a
 read-only relation the engine names (`sql.instances()`) and a migration
 can index; creates instances wherever it may invoke a writing operation
-(`instances.create`), so a parent's children commit with it; and runs
+(`instances.create`), with their behaviors' create parameters, so a
+parent's children commit with it, linked and blocked; and runs
 schedules at an interval its schema's config can set. The README's
 [behaviors](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#behaviors)
 section has the whole interface.
