@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 
@@ -37,12 +38,33 @@ type buildServiceOptions struct {
 	// DependencyConfig is generator.Options.DependencyConfig: build-all and
 	// build --with-deps set it, a single build leaves it nil.
 	DependencyConfig func(name string) (*schemaconfig.SchemaConfig, bool)
+
+	// APILanguage, when set, replaces the loaded config's
+	// outputs.api.language (build --api-language).
+	APILanguage string
 }
 
 type buildServiceResult struct {
 	Schema          *ir.Schema
 	Config          *schemaconfig.SchemaConfig
 	GeneratorResult *generator.Result
+}
+
+// withAPILanguage returns a copy of cfg whose outputs.api.language is
+// language, leaving cfg as it was. The config must enable outputs.api; the
+// generator then checks that it enables the types the language's server
+// needs, as it checks a committed language.
+func withAPILanguage(cfg *schemaconfig.SchemaConfig, language string) (*schemaconfig.SchemaConfig, error) {
+	api, _ := cfg.Outputs["api"].(map[string]any)
+	if enabled, _ := api["enabled"].(bool); !enabled {
+		return nil, fmt.Errorf("--api-language %s: %s does not enable outputs.api", language, cfg.Name)
+	}
+	overridden := *cfg
+	overridden.Outputs = maps.Clone(cfg.Outputs)
+	apiOutput := maps.Clone(api)
+	apiOutput["language"] = language
+	overridden.Outputs["api"] = apiOutput
+	return &overridden, nil
 }
 
 func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
@@ -58,6 +80,13 @@ func buildService(opts buildServiceOptions) (*buildServiceResult, error) {
 		return err
 	}); err != nil {
 		return nil, err
+	}
+	if opts.APILanguage != "" {
+		overridden, err := withAPILanguage(cfg, opts.APILanguage)
+		if err != nil {
+			return nil, err
+		}
+		cfg = overridden
 	}
 
 	if opts.EmitIR {
