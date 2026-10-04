@@ -648,14 +648,16 @@ returns it, or the core's code for an input the core refused.
 `SyncEngine` runs the same operations, written once, over synchronous
 storage, for a database whose driver blocks, as SQLite's does in bun and
 Node: `SyncStorage.transact<T>(fn: (tx: SyncTx) => T): T`, and `SyncTx` has
-every method of `Tx` returning its value. Each operation returns its value
-or throws, with `Engine`'s arguments, rules and errors. A `SyncEngine` is
-built over a core already instantiated, which `initSync` from
-`@superschematic/versiongraph` instantiates without awaiting: from the
-module's bytes or a compiled `WebAssembly.Module`, or, given neither under
-bun and Node, from the wasm file the package ships. A `SyncEngine` has no
-`runSweeper`, since a loop that waits between passes would block its
-thread, so its host schedules `sweep`.
+every method of `Tx` returning its value (`undefined` for the three with
+none, so an async method does not type-check). Each operation returns its
+value or throws, with `Engine`'s arguments, rules and errors, and a
+`SyncTx` method or a `transact` that returns a promise ends it with a
+`TypeError`. A `SyncEngine` is built over a core already instantiated,
+which `initSync` from `@superschematic/versiongraph` instantiates without
+awaiting: from the module's bytes or a compiled `WebAssembly.Module`, or,
+given neither under bun and Node, from the wasm file the package ships. A
+`SyncEngine` has no `runSweeper`, since a loop that waits between passes
+would block its thread, so its host schedules `sweep`.
 
 ```ts
 import { initSync } from "@superschematic/versiongraph";

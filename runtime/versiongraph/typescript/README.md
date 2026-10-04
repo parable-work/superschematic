@@ -94,11 +94,17 @@ const main = engine.createPrimary(actor, root, "main");
 ```
 
 `SyncEngine` has `Engine`'s operations, arguments and errors, each
-returning its value or throwing: an argument it refuses throws before a
-transaction begins, as `Engine`'s rejects. It is built over a core already
-instantiated, so it has no `create`, and it has no `runSweeper`, since a
-loop that waits between passes would block its thread; its host schedules
-`sweep`. The facade stays asynchronous, over `Engine`.
+returning its value or throwing. An actor or an id it refuses throws before
+a transaction begins, where `Engine` rejects; the entity keys of a save's
+deletes and unsets and of a merge's or a rebase's resolutions are checked
+inside the transaction, under both. A `SyncTx` method that returns a
+promise, or a `transact` that does, ends the operation with a `TypeError`
+naming it, and `SyncTx`'s methods with no value return `undefined`, not
+`void`, so tsc refuses an async one (a class declares them `: undefined`).
+`SyncEngine` is built over a core already instantiated, so it has no
+`create`, and it has no `runSweeper`, since a loop that waits between
+passes would block its thread; its host schedules `sweep`. The facade stays
+asynchronous, over `Engine`.
 
 The adapter builds its statements at run time from the descriptor
 (version 2) and reaches Postgres through `Client`, whose `query` returns
