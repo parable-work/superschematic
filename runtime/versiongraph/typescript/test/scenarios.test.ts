@@ -5,7 +5,9 @@
 // scenario_test.go: the same files, the same rules for reading them, the
 // same checks. It needs the Postgres SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL
 // names, and skips without it; make versiongraph-scenarios-ts fails
-// without it.
+// without it. Each engine operation is also replayed through SyncEngine
+// (test/replay.ts), which must make the same storage calls and return the
+// same result.
 import { beforeAll, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import type pg from "pg";
@@ -33,6 +35,7 @@ import {
 import { init, type VersionGraph } from "../dist/index.js";
 import { PostgresAdapter, pgClient, pgPool } from "../dist/postgres.js";
 import { dsn, descriptor, rawTypes, scratchSchema, type Scratch } from "./postgres.js";
+import { replayed } from "./replay.js";
 
 // The schema epoch and snapshot interval the fixture's Recipe graph declares,
 // which the engine of every step runs at unless the step names another.
@@ -216,7 +219,7 @@ class Runner {
   static async open(): Promise<Runner> {
     const scratch = await scratchSchema("vg_scenario_ts");
     const adapter = new PostgresAdapter(descriptor);
-    const engine = new Engine(core, descriptor, adapter.storage(pgPool(scratch.pool)), {
+    const engine = replayed(core, descriptor, adapter.storage(pgPool(scratch.pool)), {
       schemaEpoch: fixtureSchemaEpoch,
       snapshotEvery: fixtureSnapshotEvery,
     });
@@ -288,7 +291,7 @@ class Runner {
     const schemaEpoch = num(step.get("schemaEpoch"));
     const snapshotEvery = num(step.get("snapshotEvery")) ?? 0;
     if (schemaEpoch !== undefined || snapshotEvery !== 0) {
-      engine = new Engine(core, descriptor, this.adapter.storage(pgPool(this.scratch.pool)), {
+      engine = replayed(core, descriptor, this.adapter.storage(pgPool(this.scratch.pool)), {
         schemaEpoch: schemaEpoch ?? fixtureSchemaEpoch,
         snapshotEvery: snapshotEvery !== 0 ? snapshotEvery : fixtureSnapshotEvery,
       });
