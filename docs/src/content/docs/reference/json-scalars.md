@@ -110,7 +110,7 @@ but it also has the pattern `^-?\d+(\.\d+)?,-?\d+(\.\d+)?$` and the example
   `{"Lat": 37.7749, "Lon": -122.4194}` and refuses `"37.7749,-122.4194"`.
   The generated Go `Validate` tests the pattern on the struct and does not
   build.
-- The generated TypeScript and Python validators test the pattern, so they
+- The generated TypeScript, Python and Rust validators test the pattern, so they
   accept `"37.7749,-122.4194"` and refuse `{"lat": 37.7749, "lon": -122.4194}`.
 - The schema runtimes check it as a string with that pattern.
 

@@ -7,6 +7,10 @@ use serde::ser::{Serialize, SerializeMap, SerializeStruct, Serializer};
 /// schema requires one.
 pub const REQUIRED_MESSAGE: &str = "required field";
 
+/// The verdict on one value, as a scalar or enum validator returns it: the
+/// errors to set at the value's path, or none.
+pub type ScalarResult = Result<(), Vec<ValidationError>>;
+
 /// One broken rule: the validator's name (`required`, `type`, `minLength`,
 /// `pattern`, ...) and a message for a reader.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,8 +73,9 @@ impl ValidationErrors {
         Self::default()
     }
 
-    /// Appends an error at path. A path that held nested errors holds this
-    /// error alone afterwards.
+    /// Appends an error at path. A path that holds a nested object's errors
+    /// keeps them and takes no error of its own, as superscalar's
+    /// TypeScript `addFieldError` leaves such a path.
     pub fn add(
         &mut self,
         path: impl Into<String>,
@@ -83,10 +88,11 @@ impl ValidationErrors {
     /// Appends error at path, as [`ValidationErrors::add`] does.
     pub fn push(&mut self, path: impl Into<String>, error: ValidationError) {
         match self.0.entry(path.into()) {
-            std::collections::btree_map::Entry::Occupied(mut slot) => match slot.get_mut() {
-                Entry::Errors(errors) => errors.push(error),
-                nested @ Entry::Nested(_) => *nested = Entry::Errors(vec![error]),
-            },
+            std::collections::btree_map::Entry::Occupied(mut slot) => {
+                if let Entry::Errors(errors) = slot.get_mut() {
+                    errors.push(error);
+                }
+            }
             std::collections::btree_map::Entry::Vacant(slot) => {
                 slot.insert(Entry::Errors(vec![error]));
             }
@@ -98,6 +104,14 @@ impl ValidationErrors {
     pub fn set(&mut self, path: impl Into<String>, errors: Vec<ValidationError>) {
         if !errors.is_empty() {
             self.0.insert(path.into(), Entry::Errors(errors));
+        }
+    }
+
+    /// Sets the errors of a failed verdict at path, as
+    /// [`ValidationErrors::set`] does; a passing verdict changes nothing.
+    pub fn set_result(&mut self, path: impl Into<String>, result: ScalarResult) {
+        if let Err(errors) = result {
+            self.set(path, errors);
         }
     }
 
@@ -225,14 +239,24 @@ mod tests {
     }
 
     #[test]
-    fn add_appends_and_replaces_nested_errors() {
+    fn add_appends_and_leaves_nested_errors_alone() {
         let mut errors = sample();
         errors.add("title", "type", "expected a string");
         assert_eq!(errors.errors_at("title").map(<[_]>::len), Some(2));
         errors.add("items[0]", "type", "expected an object");
+        assert!(matches!(errors.get("items[0]"), Some(Entry::Nested(_))));
+    }
+
+    #[test]
+    fn set_result_sets_a_failed_verdict_only() {
+        let mut errors = ValidationErrors::new();
+        errors.set_result("a", Ok(()));
+        assert!(errors.is_empty());
+        errors.add("b", "type", "expected a string");
+        errors.set_result("b", Err(vec![ValidationError::required()]));
         assert_eq!(
-            errors.errors_at("items[0]"),
-            Some(&[ValidationError::new("type", "expected an object")][..])
+            errors.errors_at("b"),
+            Some(&[ValidationError::required()][..])
         );
     }
 

@@ -129,11 +129,7 @@ func TestListsOfListsSerde(t *testing.T) {
 // is not on crates.io yet; without the checkout the test is skipped.
 func cargoTestGeneratedCrate(t *testing.T, cargoPath string, output *ModuleOutput, targetDir, name, source string) {
 	t.Helper()
-	extraToml := "\n[dev-dependencies]\nserde_json = \"1.0\"\n"
-	if output.UsesScalarLib {
-		paths := testpaths.Local(t)
-		extraToml += "\n[patch.crates-io]\n" + output.Naming.ScalarRustCrate + " = { path = \"" + filepath.ToSlash(paths.ScalarRust) + "\" }\n"
-	}
+	extraToml := "\n[dev-dependencies]\nserde_json = \"1.0\"\n\n" + testpaths.RustPatch(testpaths.Local(t), output.Naming)
 	outDir := filepath.Join(t.TempDir(), output.CrateName)
 	if err := WriteTypes(output, outDir); err != nil {
 		t.Fatalf("write types: %v", err)

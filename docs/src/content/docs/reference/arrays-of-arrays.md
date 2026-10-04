@@ -113,9 +113,10 @@ argument.
 
 ## List rules
 
-The generated Go, TypeScript and Python validators, the Go, TypeScript
-and Python schema runtimes and the Go API routes' body arguments apply one
-set of rules, to `T[]` and to the outer list of `T[][]` alike:
+The generated Go, TypeScript, Python and Rust validators, the Go,
+TypeScript and Python schema runtimes and the Go API routes' body
+arguments apply one set of rules, to `T[]` and to the outer list of
+`T[][]` alike:
 
 - **Required means present, not non-empty.** `[]` satisfies a required
   list, and so does an empty outer list. Declare non-emptiness with
@@ -200,8 +201,10 @@ The same paths appear where each target checks a payload:
   `CreateOne`, `CreateMany`, `UpdateOne` and `UpdateMany` refuse a
   `Generic.JSON` list with a null element before they write; no other
   list's Go elements can hold a null.
-- The Rust types carry no validators: serde refuses a null inner list, and
-  list bounds are not checked.
+- The Rust validators check the JSON value before serde decodes it, as the
+  TypeScript ones do, so they report a null inner list and a null element
+  as `required` at its index. serde then refuses either too, so
+  `parse_<type>` never decodes one.
 
 The known differences between the generated validators, and the vectors
 every validator and runtime is tested against, are recorded in

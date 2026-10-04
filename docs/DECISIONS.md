@@ -1984,3 +1984,39 @@ golden tree pins each SDK. Output for a schema without `@webhook` is
 unchanged byte for byte.
 
 The rule is reversible until the first release.
+
+## D31. The Rust types carry the D14 validators
+
+The Go, TypeScript and Python types each come with generated validators
+that report D14's verdicts and run the parity vectors. The Rust types
+crate had serde structs only. A value of the wrong JSON type, a missing
+required field or a null list element reached serde, which refused it
+with an error that names no rule, and a value that broke a constraint (a
+`maxLength`, a `pattern`, a `listMax`) decoded without a word. Nothing that
+reads JSON into the Rust types, the Rust API server included, could check
+it the way the other languages do.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each Rust types crate has `src/validators.rs`. `validate_<type>(&Value) -> ValidationErrors` checks a JSON value as each type the crate generates. `validators::scalars` has `validate_<scalar>` and `validate_<scalar>_required` for each scalar the schema uses, and each enum a field holds has `validate_<enum>` and `validate_<enum>_required`. `parse_<type>(Value, UnknownFields)` fills the type's `@default` values, refuses undeclared keys when asked, validates the value and decodes it, and its `ParseError` says which step refused. | Validating the decoded struct, as Go's `Validate()` does. serde refuses a missing required field or a value of the wrong JSON type before such a validator runs, so it could not name `required` or `type` at a path, nor tell null from absent (D14, amended). |
+| The validators port tsgen's validator templates block for block: the same order (presence, then the JSON type, then the rules), the same paths, and the scalar core asked only once the rules pass. They have the same scope too: a field whose type is a union, an object type of another crate or the object primitive is checked for presence only. | Porting Go's, which asks the core first and validates after decoding. TypeScript's is the other JSON-level validator, so the two read side by side. Validating another crate's object types, which no generated validator does yet. |
+| The scalar core is superscalar's Rust crate, called in process. A scalar with its own validator goes through `coerce_lenient`, as the TypeScript binding's `validateWithBackend` does, and `Generic.JSON` through the scalar's `validate` on the value's JSON text, as the binding validates it. The core's error kinds are reported as it names them, as the TypeScript binding reports them. `scalar_rust_registry` names the registry, `<scalar crate>::Registry::builtin()` by default, so a scalar crate that adds scalars passes its assembled registry. | Renaming the core's kinds to D14's rule names (`length` to `maxLength`), which no language does for a failure only the core finds. A fixed registry, which refuses every value of an extension's scalar as an unknown scalar. |
+| What the validators share is a crate of its own, `superschematic-schema-runtime` (`runtime/schema/rust`), with no superscalar dependency: the error map, serialized as superscalar's Go `ValidationErrors` marshals; the JSON type checks with D14's messages; code-point lengths; a field's rules; and patterns compiled once, with `\d`, `\w`, `\s` and `\b` read as ASCII, as RE2 reads them. A types crate depends on it by path through `[paths] schema_runtime_rust`, or else by version. | Generating the helpers into every crate. Taking them from superscalar, which would tie them to the scalar crate's name. Compiling a pattern as written, where the `regex` crate reads `\w` as Unicode and matches `é`, which Go and TypeScript do not. |
+| An error added at a path that holds a nested object's errors is dropped, as superscalar's TypeScript `addFieldError` drops it. A missing required map field with rules of its own is one `required`, where the TypeScript template adds it twice. | Go's `AddFieldError`, which panics on such a path. |
+
+superscalar's default `lossless-json` feature turns on serde_json's
+`arbitrary_precision` and `preserve_order`, and Cargo applies them to every
+crate in a build that uses superscalar. The runtime crate's serializers are
+written by hand and its number checks read `serde_json::Number` through
+its accessors, so neither feature changes a verdict; `make rust` and the CI
+`rust` job run its tests with and without them.
+
+`internal/generator/parity` runs every vector through `parse_<type>` of the
+generated Rust crate. Rust joins `decodeRejects` for `structured_text`,
+where its types hold a map and a vector and serde refuses their JSON text,
+as Go's do; every other vector gets the expected verdicts. The `rust`
+subtest needs cargo and the superscalar checkout. Every Rust types crate
+gains `validators.rs` and the runtime dependency; its other files are
+unchanged.
+
+The rule is reversible until the first release.

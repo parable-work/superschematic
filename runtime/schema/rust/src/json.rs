@@ -98,6 +98,16 @@ pub fn expect_object<'a>(
     }
 }
 
+/// The items of a JSON array, or `None` for any other value or none.
+pub fn as_array(value: Option<&Value>) -> Option<&Vec<Value>> {
+    value.and_then(Value::as_array)
+}
+
+/// The entries of a JSON object, or `None` for any other value or none.
+pub fn as_object(value: Option<&Value>) -> Option<&Map<String, Value>> {
+    value.and_then(Value::as_object)
+}
+
 /// The number as f64 when it is finite.
 pub fn finite_number(number: &Number) -> Option<f64> {
     number.as_f64().filter(|value| value.is_finite())

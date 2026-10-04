@@ -240,6 +240,17 @@ type ModuleOutput struct {
 	// the output directory, set by SetVersionGraphPath. Empty names the
 	// crate's version instead.
 	VersionGraphDepPath string
+
+	// Validators is src/validators.rs: a validator for every scalar the
+	// schema uses, every enum a field holds and every type, and a parse for
+	// every type. Nil when the crate has none of them.
+	Validators *ValidatorsInfo
+
+	// SchemaRuntimeDepPath is the Cargo.toml path entry for the schema
+	// runtime crate (Naming.SchemaRuntimeRustCrate) the validators call,
+	// relative to the output directory, set by SetSchemaRuntimePath. Empty
+	// names the crate's version instead.
+	SchemaRuntimeDepPath string
 }
 
 // CompositeDefaultInfo is one generated fresh-value accessor.
@@ -362,6 +373,19 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		output.Unions[i].PreserveJSON = containsGenericJSON(schema, output.Unions[i].Name, opts.Dependencies, map[string]bool{})
 	}
 
+	validatedTypes := append(append([]codegen.TypeInfo{}, objectTypes...), inputTypes...)
+	if len(codegenScalars) > 0 || len(validatedTypes) > 0 || len(output.Enums) > 0 {
+		output.Validators = buildValidators(validatorInputs{
+			schema:        schema,
+			scalars:       codegenScalars,
+			types:         validatedTypes,
+			localEnums:    output.Enums,
+			importedEnums: imported.enums,
+			enumLookup:    enumLookup,
+			naming:        opts.Naming,
+		})
+	}
+
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
 	if output.VersionGraphs, err = versionGraphs(schema, output.Types); err != nil {
 		return nil, err
@@ -388,6 +412,30 @@ func SetScalarLibPath(output *ModuleOutput, paths naming.LocalPaths, outputDir s
 	}
 	output.ScalarLibDepPath = rel
 	return nil
+}
+
+// SetSchemaRuntimePath computes the Cargo.toml path entry for the schema
+// runtime crate relative to outputDir. An unset path emits no path entry.
+func SetSchemaRuntimePath(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
+	rel, err := naming.RelPath(outputDir, paths.SchemaRuntimeRust)
+	if err != nil {
+		return fmt.Errorf("schema runtime crate path: %w", err)
+	}
+	output.SchemaRuntimeDepPath = rel
+	return nil
+}
+
+// SetLocalPaths points every runtime crate the types crate depends on at
+// its directory under paths: the scalar library, the version graph's engine
+// and the schema runtime. An unset path names the crate's version instead.
+func SetLocalPaths(output *ModuleOutput, paths naming.LocalPaths, outputDir string) error {
+	if err := SetScalarLibPath(output, paths, outputDir); err != nil {
+		return err
+	}
+	if err := SetVersionGraphPath(output, paths, outputDir); err != nil {
+		return err
+	}
+	return SetSchemaRuntimePath(output, paths, outputDir)
 }
 
 // buildEnumLookup reports whether a type name refers to a local or imported enum.
@@ -915,6 +963,9 @@ func usesScalarLib(output *ModuleOutput) bool {
 	if output.HasVersionedTypes {
 		return true
 	}
+	if v := output.Validators; v != nil && (v.CallsCore || v.ParsesCore || v.ValidatesJSON) {
+		return true
+	}
 	for _, union := range output.Unions {
 		if union.PreserveJSON {
 			return true
@@ -953,6 +1004,10 @@ func collectExternalCrateDeps(output *ModuleOutput) []ExternalCrateDep {
 	}
 	// The optional Generic.JSON adapter returns a serde_json::Value.
 	if output.HasOptionalJSONFields {
+		crateNames["serde_json"] = struct{}{}
+	}
+	// The validators read and parse serde_json values.
+	if output.Validators != nil {
 		crateNames["serde_json"] = struct{}{}
 	}
 

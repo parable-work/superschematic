@@ -62,7 +62,7 @@ func TestCatalogRustTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The Generic.JSON field decodes through the scalar crate's adapter.
-	if err := SetScalarLibPath(output, testpaths.Local(t), outDir); err != nil {
+	if err := SetLocalPaths(output, testpaths.Local(t), outDir); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteTypes(output, outDir); err != nil {

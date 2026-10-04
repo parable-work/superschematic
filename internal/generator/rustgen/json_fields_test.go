@@ -154,7 +154,7 @@ func TestGeneratedGenericJSONFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SetScalarLibPath(output, testpaths.Local(t), outDir); err != nil {
+	if err := SetLocalPaths(output, testpaths.Local(t), outDir); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteTypes(output, outDir); err != nil {

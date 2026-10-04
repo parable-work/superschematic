@@ -151,7 +151,10 @@ assert Ordinary.model_validate({'name': 'ordinary', 'future': True}).name == 'or
 		if err != nil {
 			t.Fatal(err)
 		}
-		dir := t.TempDir()
+		dir := testpaths.TempDir(t)
+		if err := rustgen.SetLocalPaths(out, testpaths.Local(t), dir); err != nil {
+			t.Fatal(err)
+		}
 		if err := rustgen.WriteTypes(out, dir); err != nil {
 			t.Fatal(err)
 		}

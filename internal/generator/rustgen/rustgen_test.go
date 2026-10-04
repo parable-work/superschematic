@@ -11,6 +11,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -353,7 +354,10 @@ func TestGeneratedCardAndWireUnionRoundTripGolden(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 
-	outDir := t.TempDir()
+	outDir := testpaths.TempDir(t)
+	if err := SetLocalPaths(output, testpaths.Local(t), outDir); err != nil {
+		t.Fatal(err)
+	}
 	if err := WriteTypes(output, outDir); err != nil {
 		t.Fatalf("write types: %v", err)
 	}
@@ -674,7 +678,10 @@ func TestDenyUnknownFieldsDecoratorRejectsUnknownKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	outDir := t.TempDir()
+	outDir := testpaths.TempDir(t)
+	if err := SetLocalPaths(output, testpaths.Local(t), outDir); err != nil {
+		t.Fatal(err)
+	}
 	if err := WriteTypes(output, outDir); err != nil {
 		t.Fatalf("write types: %v", err)
 	}
