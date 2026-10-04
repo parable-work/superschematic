@@ -145,13 +145,16 @@ export abstract class Dev {}
 
 @environment({
   target: "gcp",
-  gcp: { project: "acme-staging", region: "us-east1", domain: "staging.acme.dev" },
+  gcp: { project: "acme-staging", region: "us-east1" },
+  domain: "staging.acme.dev",
+  dns: { cloudflare: { zone: "acme.dev" } },
 })
 export abstract class Staging {}
 
 @environment({
   target: "gcp",
-  gcp: { project: "acme-prod", region: "us-east1", domain: "acme.dev" },
+  gcp: { project: "acme-prod", region: "us-east1" },
+  domain: "acme.dev",
   settings: [
     { of: ShopDb, tier: "db-custom-2-7680", highAvailability: true },
     { of: ShopApi, minInstances: 1, env: { LOG_LEVEL: "warn" } },
@@ -172,10 +175,13 @@ export abstract class Preview extends Staging {}
   replaces shop-orders' default server with one that calls shop-api.
 - **`target`** picks a target (section 6.3). `gcp` holds that target's
   values, checked against the schema the target registers.
+- **`domain`** is where exposed servers are reached, and **`dns`** places
+  its records on a DNS platform (section 6.9). Production omits `dns` and
+  gets the target's default, Cloud DNS.
 - **`settings`** sets values per deployable. `of` is a service handle or a
   declared deployable's class. The loader checks each key against the
   platform's settings schema, and `env` keys against the server's
-  `@envVars` fields.
+  `@envVars` fields. tsc checks the same in the editor (section 4.3).
 - **`Preview extends Staging`** inherits Staging's values, and `parameters`
   makes it a family of environments, one per value (section 5.4).
 
@@ -186,12 +192,101 @@ references are.
 ### 4.2 Secrets
 
 A `Secret<T>` field of a server's `@envVars` is a secret in every
-environment. The platform stores it (Secret Manager on GCP, a gitignored
-file locally) under a name derived from the server and the field. A value
-is entered with `superschematic stack secrets set <environment> <server>
-<FIELD>` and never written into a file. Resolution checks that every secret
-field has a binding; a cloud preview (section 10) checks that a value
-exists.
+environment. A secret is identified by the type that declares the field
+and the field's name, not by the server that reads it. The IR already
+records where an inherited field was declared (`FieldDef.InheritedFrom`,
+`ir/types.go:312`).
+
+So a value declared once is stored once:
+
+```ts
+export abstract class PaymentsSecrets {
+  STRIPE_KEY: Secret<string>;
+}
+
+@envVars export abstract class ShopApiConfig extends PaymentsSecrets {
+  LOG_LEVEL: Default<LogLevel, "info">;
+}
+
+@envVars export abstract class OrdersConfig extends PaymentsSecrets {}
+```
+
+- In each environment, `PaymentsSecrets.STRIPE_KEY` is one secret. Every
+  server whose config includes the field gets an accessor grant to it:
+  here, shop-api and the orders server.
+- Two servers whose config is the same type share all its secrets with no
+  further declaration.
+- The platform stores the secret (Secret Manager on GCP, a gitignored file
+  locally) under a name derived from the declaring type and the field.
+
+A value is entered with `superschematic stack secrets set <environment>`,
+which prompts for every secret in the environment that has no value, or
+with one secret named (`PaymentsSecrets.STRIPE_KEY`). A value is never
+written into a file. Resolution checks that every secret field has a
+binding; a cloud preview (section 10) checks that a value exists.
+
+Credentials a platform generates are not secrets in this sense, and nobody
+enters them: a database password where IAM authentication is unavailable,
+or an edge's key pair (section 6.2).
+
+Not taken:
+
+- Secret classes declared in the stack and bound to each server's field,
+  which is a second declaration plus a binding per server.
+- One secret per field name across servers, which makes a string the
+  identity: `API_TOKEN` means different things to different servers.
+- One secret per server and field, which enters and rotates a shared value
+  once per server.
+
+### 4.3 Typed authoring
+
+tsc checks what the loader checks, so a mistake shows in the editor where
+it is typed. The loader stays the source of truth and runs every check
+again; the types are the early warning. Nothing here changes how
+superschematic reads a schema, because the walker evaluates decorator
+arguments as data either way.
+
+- **Handles carry their kind and config type.** The generated
+  `service.generated.ts` writes the handle with two phantom type
+  parameters: `service<"API", ShopApiConfig>({ name: "shop-api", kind:
+  SchemaKind.API })`. The second names the service's `@envVars` type,
+  wherever it lives, so the sentinel is written after the service loads. A
+  DB or General handle has no config type. No person writes either
+  parameter.
+- **Targets type their own values and settings.** `@superschematic/stack`
+  declares an empty `Targets` interface. Each target's authoring package
+  augments it with the target's environment values and a settings type per
+  deployable kind, the way D16 types each behavior's config:
+
+  ```ts
+  declare module "@superschematic/stack" {
+    interface Targets {
+      gcp: { values: GcpValues; server: CloudRunSettings; database: CloudSqlSettings };
+    }
+  }
+  ```
+
+- **`@environment` infers each settings element.** Its signature uses a
+  `const` type parameter over the `settings` tuple and maps each element by
+  its `of`. The handle's kind picks the settings type from the chosen
+  target's entry, and `env` is typed from the handle's config type: the
+  keys are its fields, `Secret<T>` fields are left out so a literal for
+  one fails, and `Default<T, V>` is unwrapped to `T`. The wrappers in
+  `packages/schema/src/wrappers.ts` gain a phantom base type so a mapped
+  type can unwrap them.
+
+`@ts-expect-error` fixtures under the authoring packages pin the behavior,
+and run with tsc in `make ts`.
+
+Not taken:
+
+- Checks in the loader only, which leaves every mistake to `superschematic
+  build`.
+- Settings as class fields with type-level literals, such as
+  `shopApi: Settings<typeof ShopApi, {...}>`, after `Relation<Product,
+  {...}>`. The walker would have to resolve `typeof` on a handle, and a
+  field type cannot see the decorator's `target`, so platform settings
+  would stay unchecked.
 
 ## 5. Resolution
 
@@ -285,24 +380,45 @@ Cloud SQL over sql, Cloud Run to Cloud Run over http. It returns the
 resources the edge needs (an IAM grant, a Cloud SQL connection on the
 service) and the value of the derived binding.
 
-A generic connector over a public endpoint and a credential covers any pair
-that no specific connector serves. An environment that spans platforms
-therefore resolves before anyone writes a connector for that pair.
+A generic connector covers a pair of platforms on different providers that
+no specific connector serves, such as a Cloudflare Worker calling a Cloud
+Run server. It reaches the callee at its exposed address, and it
+authenticates with a key pair generated for the edge:
+
+- the private key goes into the caller's secret store;
+- the public key goes into the callee's config;
+- the caller signs a short-lived token with the key, and the callee's
+  `ServiceAuthenticator` (section 9.2) verifies it.
+
+This works between any two platforms and needs no long-lived cloud
+credential, such as a service account key, on the other provider. It lands
+with the second target (section 14), when there is a second provider to
+mix with.
 
 ### 6.3 Target
 
 A target is a named bundle of:
 
 - a platform for each deployable kind;
-- the schema of its environment values (`project`, `region`, `domain` for
+- the schema of its environment values (`project` and `region` for
   `gcp`);
+- its default DNS platform (section 6.9);
 - policy rules over the resource graph.
 
 `gcp` is Cloud Run, Cloud SQL, Secret Manager, Cloud Build with Artifact
 Registry, and a load balancer. `local` is processes, a Postgres container
-and a dotenv file. An environment may override the platform for a single
-deployable; environments that mix targets are an open question
-(section 15).
+and a dotenv file.
+
+Every deployable records its own placement in the IR from the start; the
+environment's target is only the default. A `settings` entry can place one
+deployable on another target's platform, for example a TypeScript server on
+Cloudflare Workers in an otherwise gcp environment. Until the generic
+connector lands (section 6.2), only edges a specific connector serves
+resolve. In v1 those are same-target edges, and any other edge is a resolve
+error that names the pair: "no connector from cloudflare.workers to
+gcp.cloudrun over http". The provisioner already runs several providers in
+one program, so adding mixing later changes connectors, not the IR or the
+provisioner.
 
 ### 6.4 Resource graph
 
@@ -394,12 +510,40 @@ and a provisioner with no core edit.
 Resolution refuses a Go or Rust server on Workers, by the languages the
 platform declares (section 5.2).
 
+### 6.9 DNS
+
+An environment with a `domain` places the domain's records on a DNS
+platform. DNS is a platform kind of its own rather than part of a target,
+because a domain's DNS often lives with a different provider than its
+compute.
+
+Exposure produces records in a neutral shape (name, type, value): the host
+of each exposed server, and the records its certificate needs for
+validation. The DNS platform lowers them to its provider's resources, in the
+same provisioner run as the rest of the environment.
+
+v1 has two DNS platforms:
+
+- **Cloud DNS**, the gcp target's default. It writes into the managed zone
+  in the environment's project that holds the domain.
+- **Cloudflare DNS.** It writes into the named zone, with an API token the
+  engineer enters at bootstrap. Records are DNS-only by default; proxying
+  through Cloudflare is a setting.
+
+An environment whose domain has no DNS platform the provisioner can write
+gets `manual`, and `stack plan` prints the records to create.
+
+Being a platform kind makes DNS the first mix of providers in v1, before
+compute can mix (section 6.3). DNS records are not edges, so this needs no
+connector.
+
 ## 7. The gcp target
 
 ### 7.1 What the engineer enters
 
 - `project` and `region`, which are required;
-- `domain`, which is optional;
+- `domain`, which is optional, and its DNS platform: Cloud DNS by default,
+  or Cloudflare with a zone and an API token (section 6.9);
 - secret values, through `stack secrets set`.
 
 Bootstrap reads the GitHub repository from the git remote.
@@ -413,7 +557,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | sql edge | `roles/cloudsql.client` and an IAM database user for the server's account; a Cloud SQL connection on the service |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's URL in the caller's config |
 | internal server | internal-only ingress; callers reach it over Direct VPC egress |
-| exposure | a global external Application Load Balancer, with a Google-managed certificate on a host under the domain; without a domain, the `run.app` URL |
+| exposure | a global external Application Load Balancer, with a Google-managed certificate on a host under the domain and records written by the environment's DNS platform (section 6.9); without a domain, the `run.app` URL |
 | secret | a Secret Manager secret, an accessor grant to the server's account, and an environment variable that references it |
 | image | built by Cloud Build, pushed to Artifact Registry and deployed by digest |
 | parameter | names suffixed with the value; a database per value on the parent's instance |
@@ -432,6 +576,9 @@ credentials (application default credentials), and is safe to run again:
    - Workload Identity Federation for the repository the git remote names;
    - a VPC with a subnet for Direct VPC egress, when a server is internal
      and called.
+4. When the environment's DNS platform is Cloudflare, it asks for an API
+   token scoped to the zone's DNS, and stores it in Secret Manager where
+   only the `deployer` and `planner` accounts can read it.
 
 ### 7.4 Database connections
 
@@ -626,9 +773,11 @@ registrations.
    - Class values in the arguments of any registered decorator. Today the
      walker special-cases the decorators that take classes
      (`internal/registry/core_decorators.go:58`).
-   - `ServiceHandle` typed by kind (`ServiceHandle<"DB">`,
-     `packages/schema-config/src/index.ts:31`), so TypeScript can restrict
-     a handle argument. The loader checks a handle's kind against the
+   - `ServiceHandle` typed by kind and config type
+     (`ServiceHandle<"API", ShopApiConfig>`,
+     `packages/schema-config/src/index.ts:31`), written by the sentinel
+     generator (section 4.3), so TypeScript can restrict a handle argument
+     and type its settings. The loader checks a handle's kind against the
      service it names; `internal/loader/schemaconfig/config.go:177` checks
      only that the kind exists.
    - Build-order edges from the handles a schema references, so a stack does
@@ -649,9 +798,33 @@ registrations.
   platforms, connectors and bootstrap, and its pinned provider schemas.
 - **`extensions/pulumi`**, a Go module of its own: the provisioner and the
   binding generator.
+- **`extensions/cloudflare`**: the Cloudflare DNS platform in v1, and
+  Workers and D1 later.
+- **`cmd/superschematic`**, a Go module of its own: the installed binary.
+  It is a distribution of the core and the official extensions, by
+  `cli.New(cli.Config{Name: "superschematic"}, gcp.Extension{},
+  pulumi.Extension{}, ...)`. An engineer installs one binary and gets every
+  official target.
 
 The Pulumi SDK and the GCP client libraries stay out of the root module, as
-the compiler keeps its TypeScript parser out of the runtimes.
+the compiler keeps its TypeScript parser out of the runtimes. The root
+module never depends on an extension module.
+
+The installed binary is no longer the core-only program. Goal 2 of
+`docs/extension-model.md` still holds: `cli.New(cli.Config{})` is the
+core-only program, and the tests that prove the core works with no
+extension linked run it. A downstream distribution links whichever
+official extensions it wants beside its own, in the same way.
+
+Not taken:
+
+- A second binary beside a core-only `superschematic`, which would make
+  users choose a binary by task.
+- Targets and provisioners as separate executables the core starts at
+  deploy time, as Terraform loads providers. That adds a versioned protocol
+  between processes, and section 2 of `docs/extension-model.md` rules out
+  loading code at run time. Revisit it only if third parties need to ship
+  a target without rebuilding the binary.
 `extensions/deploy` and `extensions/platform` are rewritten over the stack
 model, or retired, when it lands.
 
@@ -666,7 +839,8 @@ model, or retired, when it lands.
    Done when a test extension adds a platform and a provisioner with no
    core edit.
 3. **GCP and Pulumi.** Bootstrap, the gcp platforms and connectors, the
-   Pulumi provisioner, Cloud Build, secrets, `plan` and `deploy`. Done when
+   Cloud DNS and Cloudflare DNS platforms, the Pulumi provisioner, Cloud
+   Build, secrets, `plan` and `deploy`. Done when
    a fresh project plus a project id and a region gives a live acme-shop.
    A nightly job proves it against a sandbox project.
 4. **Service auth.** Admission and identity (section 9) on Cloud Run.
@@ -674,21 +848,23 @@ model, or retired, when it lands.
    deploys, the hazard gate and the deploy manifest.
 6. **CI generation and parameterized environments.**
 7. **Breadth.** Jobs and scheduled jobs, buckets, queues and static sites,
-   and a second target (GKE or Cloudflare) added as a registration.
+   and a second target (GKE or Cloudflare) added as a registration, with
+   the generic connector (section 6.2) so compute can mix.
 
 ## 15. Open questions
 
-1. **The binary.** Does `cmd/superschematic` link the official deploy
-   extensions, or does a second binary? Goal 2 of
-   `docs/extension-model.md` says the core-only binary has no extensions.
-2. **Environments that mix targets.** An edge across targets, such as a
-   Worker calling a Cloud Run server, needs the callee's address as seen
-   from outside and a credential both platforms accept. The generic
-   connector covers this in principle; nothing tests it yet.
-3. **Typed settings in TypeScript.** The loader checks `settings` keys.
-   Checking them in tsc needs a handle that carries its server's config
-   type.
-4. **Shared secrets.** A value two servers read is two secrets today.
+1. **The binary.** Settled: the installed binary is a distribution of the
+   core and the official extensions, in a Go module of its own (section 13).
+2. **Environments that mix targets.** Settled. Placement is per deployable
+   in the IR from v1, and the target is the default (section 6.3). The
+   generic connector, with a key pair per edge, lands with the second
+   target (section 6.2). DNS is a platform kind from v1 (section 6.9).
+3. **Typed settings in TypeScript.** Settled: handles carry their kind and
+   config type, targets augment a `Targets` interface, and `@environment`
+   infers each settings element (section 4.3).
+4. **Shared secrets.** Settled: a secret is identified by the type that
+   declares the field and the field's name, so servers that include the
+   same declared field share one secret (section 4.2).
 5. **Where a server's implementation lives.** Is it named once on the
    server, or found by a convention for default servers?
 6. **The resource vocabulary.** Pulumi's schemas are a choice of
