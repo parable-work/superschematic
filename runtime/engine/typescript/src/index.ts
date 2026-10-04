@@ -83,6 +83,7 @@ export type {
   GuardRequest,
   InstanceChange,
   InstanceContext,
+  InstanceSchemaForm,
   InstanceView,
   Instances,
   OperationContext,
@@ -103,6 +104,9 @@ export type {
   StoredInstance,
   TableReader,
   TableWriter,
+  TypeSchema,
+  ValidationContext,
+  ValidationRequest,
   WorkContext,
   WritableColumns,
 } from './behaviors/behavior.js';
@@ -124,6 +128,7 @@ export { MAX_ROLLUP_READ, isTerminalState, stateOutcome } from './behaviors/core
 export type {
   BlockerRecord,
   CommentRecord,
+  ConstantsConfig,
   DependenciesConfig,
   DependentRecord,
   LinkRecord,
@@ -145,6 +150,7 @@ export type {
   SearchConfig,
   SearchHit,
   SnippetPart,
+  VariantsConfig,
   WorkflowConfig,
   WorkflowOutcome,
   WorkflowStates,

@@ -55,7 +55,7 @@ func TestBehaviorsThroughTheCommands(t *testing.T) {
 	require.ErrorContains(t, err, "generator: types does not render behaviors yet: type Item composes behavior acme.Stock")
 
 	_, err = runCommandWith(t, nil, "build", service, "--emit-ir", "--out", t.TempDir())
-	require.ErrorContains(t, err, `behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Workflow)`)
+	require.ErrorContains(t, err, `behavior "acme.Stock" on type "Item" is not a registered behavior (registered: Assignment, Blueprint, Budget, Comments, Constants, Dependencies, Lease, Links, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, Variants, Workflow)`)
 
 	yamlOut, err := runCommandWith(t, acme, "format", "--to=yaml", "--stdout", filepath.Join(service, "src/item.schema.json"))
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestBehaviorsThroughTheCommands(t *testing.T) {
 		} `json:"$defs"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(schemaOut), &def))
-	assert.Equal(t, []string{"Assignment", "Blueprint", "Budget", "Comments", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Workflow", "acme.Audited", "acme.Stock"}, def.Defs.BehaviorRef.Properties.Name.Enum)
+	assert.Equal(t, []string{"Assignment", "Blueprint", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow", "acme.Audited", "acme.Stock"}, def.Defs.BehaviorRef.Properties.Name.Enum)
 	compileSchema(t, []byte(schemaOut), "superschematic://schema-file.json")
 }
 
@@ -170,7 +170,7 @@ func TestBehaviorsCommand_Extension(t *testing.T) {
 	assert.Len(t, files, 2)
 
 	_, err = runCommandWith(t, acme, "behaviors", "--out", out, "--extension", "shop", "--check")
-	require.EqualError(t, err, `behaviors: extension "shop" registers no behavior in this binary (registered: Assignment (core), Blueprint (core), Budget (core), Comments (core), Dependencies (core), Lease (core), Links (core), Presence (core), Queue (core), Reactions (core), Retries (core), Revisions (core), Rollups (core), Search (core), Workflow (core), acme.Audited (extension acme), acme.Stock (extension acme))`)
+	require.EqualError(t, err, `behaviors: extension "shop" registers no behavior in this binary (registered: Assignment (core), Blueprint (core), Budget (core), Comments (core), Constants (core), Dependencies (core), Lease (core), Links (core), Presence (core), Queue (core), Reactions (core), Retries (core), Revisions (core), Rollups (core), Search (core), Variants (core), Workflow (core), acme.Audited (extension acme), acme.Stock (extension acme))`)
 
 	_, err = runCommandWith(t, acme, "behaviors", "--out", out, "--extension", "acme", "--check")
 	require.NoError(t, err)
@@ -178,12 +178,12 @@ func TestBehaviorsCommand_Extension(t *testing.T) {
 	core := filepath.Join(t.TempDir(), "core")
 	log, err := runCommandWith(t, nil, "behaviors", "--out", core)
 	require.NoError(t, err)
-	assert.Equal(t, "behaviors: 15 declaration(s) in "+core+"\n", log)
+	assert.Equal(t, "behaviors: 17 declaration(s) in "+core+"\n", log)
 	written, err := behaviorFiles(core)
 	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{"Assignment.behavior.json", "Blueprint.behavior.json", "Budget.behavior.json", "Comments.behavior.json", "Dependencies.behavior.json", "Lease.behavior.json",
+	assert.ElementsMatch(t, []string{"Assignment.behavior.json", "Blueprint.behavior.json", "Budget.behavior.json", "Comments.behavior.json", "Constants.behavior.json", "Dependencies.behavior.json", "Lease.behavior.json",
 		"Links.behavior.json", "Presence.behavior.json", "Queue.behavior.json", "Reactions.behavior.json", "Retries.behavior.json", "Revisions.behavior.json", "Rollups.behavior.json",
-		"Search.behavior.json", "Workflow.behavior.json"}, sortedKeys(written))
+		"Search.behavior.json", "Variants.behavior.json", "Workflow.behavior.json"}, sortedKeys(written))
 	_, err = runCommandWith(t, nil, "behaviors", "--out", out, "--check")
 	require.ErrorContains(t, err, "acme.Audited.behavior.json is no registered behavior's declaration")
 
@@ -200,11 +200,11 @@ func TestBehaviorsCommand_Package(t *testing.T) {
 	engine := filepath.Join(t.TempDir(), "engine")
 	log, err := runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine", "--out", engine)
 	require.NoError(t, err)
-	assert.Equal(t, "behaviors: 8 declaration(s) in "+engine+"\n", log)
+	assert.Equal(t, "behaviors: 10 declaration(s) in "+engine+"\n", log)
 	files, err := behaviorFiles(engine)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"Comments.behavior.json", "Dependencies.behavior.json", "Links.behavior.json", "Reactions.behavior.json",
-		"Revisions.behavior.json", "Rollups.behavior.json", "Search.behavior.json", "Workflow.behavior.json"}, sortedKeys(files))
+	assert.Equal(t, []string{"Comments.behavior.json", "Constants.behavior.json", "Dependencies.behavior.json", "Links.behavior.json", "Reactions.behavior.json",
+		"Revisions.behavior.json", "Rollups.behavior.json", "Search.behavior.json", "Variants.behavior.json", "Workflow.behavior.json"}, sortedKeys(files))
 
 	workqueue := filepath.Join(t.TempDir(), "workqueue")
 	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine-workqueue", "--out", workqueue)
@@ -218,9 +218,9 @@ func TestBehaviorsCommand_Package(t *testing.T) {
 	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine-workqueue", "--out", workqueue, "--check")
 	require.NoError(t, err)
 	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine", "--out", workqueue, "--check")
-	require.EqualError(t, err, "behaviors: "+workqueue+": Comments.behavior.json is missing; Dependencies.behavior.json is missing; Links.behavior.json is missing; "+
+	require.EqualError(t, err, "behaviors: "+workqueue+": Comments.behavior.json is missing; Constants.behavior.json is missing; Dependencies.behavior.json is missing; Links.behavior.json is missing; "+
 		"Reactions.behavior.json is missing; Revisions.behavior.json is missing; Rollups.behavior.json is missing; Search.behavior.json is missing; "+
-		"Workflow.behavior.json is missing; Assignment.behavior.json is no registered behavior's declaration; Blueprint.behavior.json is no registered behavior's declaration; "+
+		"Variants.behavior.json is missing; Workflow.behavior.json is missing; Assignment.behavior.json is no registered behavior's declaration; Blueprint.behavior.json is no registered behavior's declaration; "+
 		"Budget.behavior.json is no registered behavior's declaration; Lease.behavior.json is no registered behavior's declaration; "+
 		"Presence.behavior.json is no registered behavior's declaration; Queue.behavior.json is no registered behavior's declaration; "+
 		"Retries.behavior.json is no registered behavior's declaration; run: superschematic behaviors --out "+workqueue+" --package @superschematic/engine")
@@ -287,7 +287,7 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 		} `json:"$defs"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(schemaOut), &def))
-	assert.Equal(t, []string{"Assignment", "Blueprint", "Budget", "Comments", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Workflow"}, def.Defs.BehaviorRef.Properties.Name.Enum)
+	assert.Equal(t, []string{"Assignment", "Blueprint", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow"}, def.Defs.BehaviorRef.Properties.Name.Enum)
 
 	// Dependencies and Links, whose configs name other schemas, load in both
 	// forms to the same IR; the loader resolves none of those names.
@@ -329,6 +329,18 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 		{"when": {"allTerminal": {"schema": "projects", "link": "parent", "outcomes": ["success"]}}, "then": {"transition": "done"}},
 		{"when": {"anyTerminal": {"schema": "projects", "link": "parent", "outcomes": ["failure"]}}, "then": {"transition": "failed"}}]}`, string(reactionsJSON.Behaviors[2].Config))
 	assert.Equal(t, reactionsJSON, load(filepath.Join(tsreaderTestdata, "fixture-reactions")).Types["Project"])
+
+	// Constants and Variants, whose configs name the type's fields and the
+	// document's other types, load in both forms to the same IR; the engine
+	// checks those names, and the types, when the schema is defined.
+	variantsJSON := load(filepath.Join(loaderTestdata, "fixture-variants-json")).Types
+	variantsTS := load(filepath.Join(tsreaderTestdata, "fixture-variants")).Types
+	require.Len(t, variantsJSON["Step"].Behaviors, 2)
+	assert.JSONEq(t, `{"fields": ["kind"]}`, string(variantsJSON["Step"].Behaviors[0].Config))
+	assert.JSONEq(t, `{"field": "result", "by": "kind", "types": {"verify": "VerifyResult", "review": "ReviewResult"}}`, string(variantsJSON["Step"].Behaviors[1].Config))
+	for _, name := range []string{"Step", "VerifyResult", "Check", "ReviewResult"} {
+		assert.Equal(t, variantsJSON[name], variantsTS[name], name)
+	}
 
 	// Lease, Assignment, Queue, Budget and Retries, whose configs name the
 	// type's fields and Workflow states, load in both forms to the same IR;

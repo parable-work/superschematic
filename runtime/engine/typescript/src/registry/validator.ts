@@ -15,6 +15,10 @@ stored instance can hold:
   field a behavior on the instance type adds is declared too, but it is
   the behavior's to change: an instance written with one is refused with
   the `readOnly` rule rather than `unknown`.
+
+validateType holds a value to another type of the document by the same
+rules, for a behavior that types a field the document leaves open (a
+Generic.JSON field Variants types by another field's value).
 */
 
 import { Runtime, parseSchemaIR } from '@superschematic/schema-runtime';
@@ -27,7 +31,8 @@ type RuntimeErrors = ReturnType<Runtime['validateType']>;
 
 export class SchemaValidator {
   private readonly runtime: Runtime;
-  private readonly isInput: boolean;
+  // The runtime's object types; every other type of the document is an input.
+  private readonly objectTypes: ReadonlySet<string>;
 
   /**
    * behaviorFields maps each field the instance type's behaviors add to
@@ -39,7 +44,12 @@ export class SchemaValidator {
   ) {
     const schema = parseSchemaIR(runtimeDocument(model.document));
     this.runtime = new Runtime(schema);
-    this.isInput = !Object.prototype.hasOwnProperty.call(schema.types ?? {}, model.instanceType);
+    this.objectTypes = new Set(Object.keys(schema.types ?? {}));
+  }
+
+  // errorsOf runs the schema runtime's checks of a type's fields.
+  private errorsOf(typeName: string, value: Record<string, unknown>): RuntimeErrors {
+    return this.objectTypes.has(typeName) ? this.runtime.validateType(typeName, value) : this.runtime.validateInput(typeName, value);
   }
 
   /** validate returns every issue with value as an instance; empty means valid. */
@@ -60,10 +70,32 @@ export class SchemaValidator {
       }
     }
     undeclaredKeys(this.model.document, this.model.instanceType, value, '', issues, this.behaviorFields);
-    const errors = this.isInput
-      ? this.runtime.validateInput(this.model.instanceType, value)
-      : this.runtime.validateType(this.model.instanceType, value);
-    flatten(errors, '', issues);
+    flatten(this.errorsOf(this.model.instanceType, value), '', issues);
+    return issues;
+  }
+
+  /**
+   * validateType returns every issue with value as a value of one of the
+   * document's types besides the instance type, by the rules a field of
+   * that type is held to: a JSON object, each field's value, and no key
+   * the type does not declare, at any depth. Each issue's path is under
+   * path. A name that is no such type is a TypeError.
+   */
+  validateType(typeName: string, value: unknown, path: string): ValidationIssue[] {
+    if (typeName === this.model.instanceType || refKind(this.model.document, typeName) !== 'type') {
+      throw new TypeError(`${typeName} is not a type of schema ${this.model.name} besides its instance type`);
+    }
+    const issues: ValidationIssue[] = [];
+    if (!isPlainObject(value)) {
+      issues.push({ path, rule: 'type', message: `a ${typeName} is a JSON object` });
+      return issues;
+    }
+    jsonIssues(value, path, issues);
+    if (issues.length > 0) {
+      return issues;
+    }
+    undeclaredKeys(this.model.document, typeName, value, path, issues);
+    flatten(this.errorsOf(typeName, value), path, issues);
     return issues;
   }
 }

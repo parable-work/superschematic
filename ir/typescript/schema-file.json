@@ -163,7 +163,7 @@
                     "type": "string"
                   },
                   "schema": {
-                    "description": "The child schema. It composes Links with parentLink, Dependencies when a step comes after another, and not Blueprint.",
+                    "description": "The child schema. It composes Links with parentLink, Constants over keyField and every copied field, Dependencies when a step comes after another, and not Blueprint.",
                     "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
                     "type": "string"
                   },
@@ -363,6 +363,47 @@
                 "type": "object"
               }
             }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "Constants"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "fields": {
+                    "description": "The type's own top-level fields, by JSON key, that keep the value their create gives them.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 64,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "permission": {
+                    "description": "The permission a caller needs to change them after the create; nobody may when absent.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "fields"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
           }
         },
         {
@@ -1277,6 +1318,56 @@
           "if": {
             "properties": {
               "name": {
+                "const": "Variants"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "by": {
+                    "description": "The type's own string or enum field, by JSON key, whose value picks the type.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "field": {
+                    "description": "The type's own field the variants type, by JSON key: a Generic.JSON field, or one of a scalar whose values are JSON objects.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "types": {
+                    "additionalProperties": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "description": "By a value of by, the type of the schema document, besides the instance type, that field holds while by holds the value.",
+                    "maxProperties": 256,
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "field",
+                  "by",
+                  "types"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "config"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
                 "const": "Workflow"
               }
             }
@@ -1368,6 +1459,7 @@
             "Blueprint",
             "Budget",
             "Comments",
+            "Constants",
             "Dependencies",
             "Lease",
             "Links",
@@ -1378,6 +1470,7 @@
             "Revisions",
             "Rollups",
             "Search",
+            "Variants",
             "Workflow"
           ],
           "type": "string"

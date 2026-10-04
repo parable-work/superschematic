@@ -841,7 +841,8 @@ No core generator sets the flag. `build --emit-ir`, `format` and
 The core declares the behaviors `@superschematic/engine` implements
 (D16), one file each in `internal/registry/behaviors/`, which `New`
 registers with no extension: `Workflow`, `Comments`, `Revisions`,
-`Dependencies`, `Links`, `Rollups`, `Search` and `Reactions`. It
+`Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`
+and `Variants`. It
 declares the work-queue behaviors the optional
 `@superschematic/engine-workqueue` package implements the same way:
 `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`. Each spec names its package
@@ -1394,7 +1395,7 @@ its provider, which supplies those two functions. D15 in
 | Auth providers | `session` (section 8.2) |
 | Scalar catalog | the superscalar Go package (section 3.10) |
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
-| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions` (section 3.16) |
+| Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` (section 3.16) |
 | Documents | none |
 | Build-all hooks | none |
 | Checks, OpenAPI hooks, tool hooks | none |

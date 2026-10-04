@@ -375,7 +375,7 @@ which.
 
 | | |
 | --- | --- |
-| Config | `schema` (the child schema), `parentLink` (a link of its Links config to this schema) and `keyField` (a string field of its type), required; one of `steps` (inline) and `from` (`{ link, field }`); `copyFields`, `copyLinks` |
+| Config | `schema` (the child schema, which composes `Constants` over `keyField` and every copied field), `parentLink` (a link of its Links config to this schema) and `keyField` (a string field of its type), required; one of `steps` (inline) and `from` (`{ link, field }`); `copyFields`, `copyLinks` |
 | Steps | by key (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`, at most 500): `{ after?, when?, data? }`; `after`, the keys of the steps whose children block this one's; `when`, `{ field, equals }` or `{ field, includes }`; `data`, more fields of the child |
 | Fields | `blueprint`: `{ children: [{ key, id }] }`, in the order they were created; absent until the instance is stamped |
 | Operations | none |
@@ -393,6 +393,12 @@ which.
       "check": { "after": ["fetch"], "when": { "field": "topic", "equals": "search" } },
       "index": { "after": ["check"], "data": { "title": "Index what was fetched" } } },
     "copyFields": ["topic"] } }
+```
+
+The child schema, `steps`, keeps what a stamp sets:
+
+```json
+{ "name": "Constants", "config": { "fields": ["step", "topic"] } }
 ```
 
 ### Stamping
@@ -449,7 +455,8 @@ When the schema is defined or published, `parseConfig` checks the child
 schema's live version as the definer may read it: it composes Links with
 `parentLink` pointing at this schema (and this type lists Revisions
 before Blueprint when that link is pinned, so the parent has a revision
-to pin), Dependencies with its own schema among its
+to pin), `Constants` over `keyField` and every copied field,
+Dependencies with its own schema among its
 blockers' schemas when a step has `after`, and not Blueprint; `keyField`
 is a string field of its type, `copyFields` are fields of both types of
 one JSON type, and `data` sets fields of its type. `when` names a field
@@ -460,6 +467,16 @@ link of this type's Links to a schema that composes Revisions and has
 the field, an object or JSON; `copyLinks` are links of both Links
 configs to one schema. A map read through `from` is held to the same
 rules against this type when it is stamped.
+
+A child is routed by what its stamp set: the step it is, in `keyField`,
+and the fields it copied. Any writer of the child, the holder of its
+lease included, could change them after and turn it into another step,
+so the child schema's `Constants` (`runtime/engine/README.md`) keeps
+them: an update that changes one is `invalid_instance`, with the rule
+`constant` at the field. A later version of the child schema can drop
+them from `Constants`; the check runs again only when this schema is
+defined or published, since a published version is not refused for
+another schema's change.
 
 ### What was stamped
 

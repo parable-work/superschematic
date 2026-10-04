@@ -1065,11 +1065,13 @@ Status: built are the schema-file types and meta-schema
 `@behavior` decorator (section 3.16 of `docs/extension-model.md`), and
 `@superschematic/engine` (`runtime/engine/README.md`) with its HTTP API,
 event stream, MCP tools, the reach and publish hook of the first
-amendment below and the runner of the second. The core declares
-`Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`,
-`Search` (full-text, on FTS5) and `Reactions`, and the engine registers
-them when it opens, which meets D10's done criterion (`make cli-smoke`,
-`test/core-behaviors.test.ts`, acme's `scripts/smoke.sh`). The core also
+amendment below, the runner of the second, create parameters and the
+validation hook of the last two. The core declares `Workflow`,
+`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`
+(full-text, on FTS5), `Reactions`, `Constants` and `Variants`, and the
+engine registers them when it opens, which meets D10's done criterion
+(`make cli-smoke`, `test/core-behaviors.test.ts`, acme's
+`scripts/smoke.sh`). The core also
 declares the work-queue behaviors `Lease`, `Assignment`, `Queue`,
 `Presence`, `Blueprint`, `Budget` and `Retries`, each registered with the
 npm package that implements it, and `superschematic behaviors --package`
@@ -1220,6 +1222,51 @@ transaction, and every guard is asked first.
 | `Links` takes its links at create, by name: a target's id, or `{ id, revision? }`, set with `link`'s checks in `initialize`. `required` now means every instance holds the link: every create gives it (a create without it is `invalid_argument`), it is moved and never unlinked, and its target's delete is refused. As a field cannot become required, a link cannot: `configChange` refuses a link made required and a new required link, and adding `Links` with a required link to a schema with instances. A required link to the type's own schema would leave a root nothing to point at, so the cross-instance fixture's task now requires its `project` and its `parent` is optional. | A separate key beside `required`, which keeps a required link an instance may lack; allowing a link to become required, which leaves instances the live version accepted without it |
 | `Dependencies` takes `{ blockers: [{ schema?, id }] }`, each added with `addBlocker`'s checks in `initialize`, so every behavior's `afterChange` (Queue's copy of `blocked`) sees the edges and the instance is blocked in its create event. Its status at create is its Workflow's initial state, whichever the type lists first, and the amendment above holds there as for `addBlocker`: a blocker is open until it finishes by `satisfiedBy`, an initial state that is gated and that no transition leaves takes no open blocker, and one a transition leaves takes any. | Adding them in `afterChange`, which a behavior listed before `Dependencies` runs ahead of |
 | `Blueprint` creates each child with its parent link, its copied links and its edges as create parameters, so a child schema's `parentLink` can be required and each child is one event. A create that gives the `from` link stamps in the create, and a refused stamp refuses it; a later `link` still stamps an instance created without it. `copyLinks` works with inline steps too, copying the links the create gives. The create governance the work-queue README listed as not ported is schema config: a required `parentLink`. | `link` and `addBlocker` on each child after its create, which cannot stamp a child whose parent link is required; stamping a `from` blueprint only on a later `link` |
+
+### D16, amended: behaviors judge the fields a write stores
+
+Work is routed by what an instance is: a step's kind, the key a
+blueprint stamped it with, the fields a child copied from its parent.
+Any writer could change them after the create, the holder of a lease
+included, so a worker could turn the step it held into another one, and
+three work-queue behaviors each kept one field of their own from
+changing. A field whose shape depends on another, a step's result per
+kind, could only be `Generic.JSON`, since the engine refuses a union the
+schema runtime does not check, so a result in the wrong shape was stored
+without a word. A guard could refuse either write, but only as a veto
+(409) with a reason and no field, and `validateUpdate()`, which
+`Revisions` asks before it stores a proposal, did not see it. A behavior
+now judges the fields a write would store, as the live version does,
+and two core behaviors use it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A behavior's `validate(context, request)` returns issues, `{ path, rule, message }` as the live version writes them (`result.checks[0].ok`), or nothing. `request` is `{ kind: 'create', data }` or `{ kind: 'update', before, after, caller? }`, the instance's own fields. It runs on every write of the fields: a caller's create and update, a behavior's `instances.create`, an operation's `update()`; `validateUpdate()` reports what it returns without writing. Every behavior's runs, in list order, and their issues together are one `InstanceValidationError` (`invalid_instance`, 422), as the live version's are. | A guard's veto, which carries no field, is a 409 rather than a refused instance, and is not in `validateUpdate()`; JSON pointers, `CreateParamsError`'s form, which would give `invalid_instance` two path forms |
+| It runs once the live version accepts the fields and before anything else: before a create's parameters are checked and its row inserted, so before every guard, and before an update's "nothing changed" check, as the live version's validation is. A hook sees only fields of their declared types; a write refused for a field is never asked of a guard. | Beside the live version's checks, with every issue at once, where a hook would read a value of the wrong type; after the guards, where a veto would hide a refused field |
+| Its context has the behavior, its config, the call (`namespace`, `schema`, `version`, `id`, `principal`, `now`), `can()` and `checkType()`, and no storage, other instance or schema. | A guard's view, whose columns a create's row does not have yet; reads of other instances, which are a guard's to make |
+| `checkType(type, value, path)` holds a value to a type of the schema document as the live version holds a field of that type: a JSON object, each field, no undeclared key at any depth. It reaches only the types the implementation's `checkedTypes(config)` names; `define` refuses a name that is not a type of the document besides the instance type, and a type it reaches whose field the schema runtime cannot check (a union, a map). | Any type of the document, which the compatibility rule could not know to protect |
+| The compatibility rule already left types no field reaches free to change, so a new version could add a required field to a type a stored value was checked against, and refuse that instance at its next update. It now walks, beside the instance type, each type that both versions' configs of a behavior name in `checkedTypes`. One only the new config names checked no stored value; one only the old names checks none from now on; whether a config may make either change is the behavior's `configChange`. | Diffing every type of the document, which refuses changes to types nothing reads; leaving it to each behavior's `configChange`, which sees configs, not types |
+| `instanceSchema(config, form, typeSchema)` returns JSON Schemas the describe document's `instance`, the create tool's `data` and the update tool's `patch` carry under `allOf`, so a client or an agent sees the shape a write takes. `form` is `instance` or `patch`, and `typeSchema` renders a type `checkedTypes` names as a nested type is rendered, with nothing required in a patch. | A hook that edits the whole argument schema; JSON Schema the engine writes for one behavior by name |
+| `schemas.validate` stays the version's own rules. | Asking `validate` there, which has no instance before an update and so cannot answer for a rule like `Constants` |
+
+The first behavior built on it is `Constants`:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Constants` is a plain noun for fields whose value does not change, as `Comments` and `Revisions` are. Its config lists the type's own top-level fields (`fields`) and optionally a `permission`. | `Identity`, which a budget's limit is not, and which names a principal elsewhere; `WriteOnce` and `Immutable`, not nouns; a field flag in the IR, which every generator would have to honor |
+| An update that changes a listed field, compared as JSON, is refused with the rule `constant` at the field, whoever makes it, a caller or an operation's `update()` (a `Revisions` approval, a `Retries` result), unless the caller holds `permission`. A create is never refused. | Exempting behaviors' operations, through which an approval could rename a step; a veto |
+| A field the create leaves absent stays absent: setting it later is a change. Absent and null are one value, as a merge patch has it. | The first write wins, so any writer could give a step its kind after the create, the failure it prevents; requiring the field at create, which `required` already says and the compatibility rule governs |
+| `configChange` allows any change, and it is added to and removed from a schema with instances: it keeps no state, and stored instances satisfy any list. | Freezing the list once instances exist |
+| `Blueprint` requires that its child schema compose `Constants` over `keyField` and every copied field, checked through `ConfigTarget.schemas` when the parent schema is defined or published, as its other checks of the child are. A later version of the child can drop them; the first amendment keeps a published version from being refused for that. | Blueprint guarding its children's updates itself, which a guard on another schema cannot; leaving the stamped fields open |
+
+The second is `Variants`:
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Variants` is a plain noun for the shapes a field takes. Its config is `{ field, by, types }`: `field` an own field whose values are open JSON objects (`Generic.JSON`, or a scalar whose values are objects), `by` an own string or enum field, `types` a type of the document besides the instance type for each value of `by`, each a member when `by` is an enum. `parseConfig` checks all of it. A type lists a behavior once, so one field per type. | `Union`, a type the engine refuses; a union field in the IR, which every generator would have to render; a list of fields, which no case needs yet |
+| While `by` holds a listed value, `field`, when it holds a value, is held to that value's type with `checkType`. While `by` holds another value or none, `field` holds none, refused with the rule `variant`. So a required `field` admits only the listed values. | Leaving `field` open for an unlisted value, which lets a result in the wrong shape through and makes giving that value a type later break stored instances; refusing the value of `by`, which its enum or the type's own rules decide |
+| `instanceSchema` writes an `if`/`then` per listed value (`if` `by` is the value, `then` `field` is the type) and one more (`if` `by` is none of them, `then` `field` is null), under `allOf`. In a patch, `if` needs `by` in the patch, since a patch that leaves it alone does not show it. | `oneOf` over whole objects, which needs a branch for every other value, holds exactly one, and reports a failure as matching none of them |
+| `checkedTypes` names the types, so the compatibility rule holds them. `configChange` keeps `field` and `by`, keeps each value's type, and lets a value gain one, since no stored instance holds a value for it; it is removed from a schema with instances, not added to one, whose values no type checked. | Allowing a value's type to change to another that accepts as much, which would compare two types where the rule compares versions of one |
 
 ## D17. A version graph over versioned tables, with one merge core
 

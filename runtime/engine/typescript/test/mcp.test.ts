@@ -20,7 +20,7 @@ import { defineBehavior, type AccessPolicy, type Engine, type EngineOptions } fr
 import { engineApp } from '../dist/http/index.js';
 import { MCP_PATH, engineMcp, type EngineMcpOptions } from '../dist/mcp/index.js';
 import { openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, documentsDocument, notesDocument, openTestEngine, orderDocument, projectsDocument, tasksDocument } from './helpers.ts';
+import { alice, cleanup, documentsDocument, notesDocument, openTestEngine, orderDocument, projectsDocument, stepsDocument, tasksDocument } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 
 // The bearer token is the caller's subject; reader may only read.
@@ -461,6 +461,43 @@ describe("the core's behaviors", () => {
     const published = await call(pat, 'documents_transition', { id: 'doc-1', params: { to: 'published' }, expectedSeq: 3 });
     assert.deepEqual(published.structuredContent, { from: 'review', to: 'published' });
     assert.equal(engine.instances.get(alice, 'documents', 'doc-1')?.data.status, 'published');
+  });
+
+  test("Constants and Variants add no tool: create's data and update's patch show each variant, and a result in the wrong shape and a changed kind are tool errors with the 422 problem", async () => {
+    const { url, engine } = await withDocument();
+    engine.schemas.define(everything, stepsDocument());
+    engine.schemas.publish(everything, 'Step');
+    const { client } = await connect(endpoint(url));
+    const tools = (await client.listTools()).tools.filter((tool) => tool.name.startsWith('step_'));
+    assert.deepEqual(
+      tools.map((tool) => tool.name),
+      ['step_create', 'step_get', 'step_list', 'step_update', 'step_delete']
+    );
+    const described = engine.tools.describe(alice, 'Step');
+    const data = (tools[0].inputSchema.properties as Record<string, Record<string, unknown>>).data;
+    assert.deepEqual(data.allOf, described.instance.allOf);
+    const patch = (tools[3].inputSchema.properties as Record<string, Record<string, unknown>>).patch;
+    assert.equal((patch.allOf as unknown[]).length, 3);
+
+    const wrong = problemOf(await call(client, 'step_create', { data: { title: 'Look', kind: 'review', result: { passed: true } } }));
+    assert.deepEqual(
+      [wrong.status, wrong.code, wrong.details.issues.map((issue: { path: string; rule: string }) => [issue.path, issue.rule])],
+      [
+        422,
+        'invalid_instance',
+        [
+          ['result.passed', 'unknown'],
+          ['result.approved', 'required'],
+        ],
+      ]
+    );
+    const created = await call(client, 'step_create', { id: 's1', data: { title: 'Look', kind: 'review', result: { approved: true } } });
+    assert.equal(created.isError, undefined);
+    const renamed = problemOf(await call(client, 'step_update', { id: 's1', patch: { kind: 'verify', result: null } }));
+    assert.deepEqual(
+      [renamed.status, renamed.code, renamed.details.issues],
+      [422, 'invalid_instance', [{ path: 'kind', rule: 'constant', message: 'kind is a constant of Step: its create sets it and nothing changes it after' }]]
+    );
   });
 
   test('Search is a tool with no id that only reads: a reader calls it, and a query FTS5 cannot parse is a tool error with the 400 problem', async () => {

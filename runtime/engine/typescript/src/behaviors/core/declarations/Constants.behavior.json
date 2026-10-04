@@ -1,0 +1,29 @@
+{
+  "name": "Constants",
+  "description": "Fields of the type that its create sets and nothing changes after: an update that changes one, a caller's or one a behavior's operation applies, is refused at the field, unless the caller holds the config's permission. A field the create leaves absent stays absent. What routes an instance, such as a step's kind or the key a blueprint stamped it with, stays what its create gave it.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "fields": {
+        "description": "The type's own top-level fields, by JSON key, that keep the value their create gives them.",
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "maxItems": 64,
+        "minItems": 1,
+        "type": "array",
+        "uniqueItems": true
+      },
+      "permission": {
+        "description": "The permission a caller needs to change them after the create; nobody may when absent.",
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "fields"
+    ],
+    "type": "object"
+  }
+}

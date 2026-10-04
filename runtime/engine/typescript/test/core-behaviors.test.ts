@@ -4,15 +4,16 @@
 // composes Workflow, Comments and Revisions, fixture-cross-instance-json,
 // whose tasks wait on tasks and documents and link to both and to the
 // project every create gives, fixture-rollups-json, whose projects roll their tasks up,
-// fixture-search-json, whose notes are searched, and
+// fixture-search-json, whose notes are searched,
 // fixture-reactions-json, whose projects start, finish and fail their
-// parent.
+// parent, and fixture-variants-json, whose steps keep their kind and hold
+// a result of the kind's shape.
 // They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import { EngineError, defineBehavior, type Principal } from '../dist/index.js';
-import { alice, cleanup, documentsDocument, drivers, notesDocument, openTestEngine, projectTreeDocument, projectsDocument, tasksDocument } from './helpers.ts';
+import { alice, cleanup, documentsDocument, drivers, notesDocument, openTestEngine, projectTreeDocument, projectsDocument, stepsDocument, tasksDocument } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -31,7 +32,7 @@ for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'Workflow']);
+      assert.deepEqual(engine.behaviors.names(), ['Comments', 'Constants', 'Dependencies', 'Links', 'Reactions', 'Revisions', 'Rollups', 'Search', 'Variants', 'Workflow']);
       assert.deepEqual(engine.behaviors.declaration('Workflow')?.fields, [{ name: 'status', description: 'The state the instance is in.' }]);
       const impostor = defineBehavior({ declaration: { name: 'Workflow' } });
       assert.throws(() => engine.behaviors.register(impostor), /behavior Workflow is already registered with this engine/);
@@ -310,6 +311,25 @@ for (const driver of drivers) {
         ['release', 'docs', 'site'].map((id) => engine.instances.get(alice, 'projects', id)?.data.status),
         ['failed', 'failed', 'done']
       );
+    });
+
+    test("it runs the steps document: a step's kind stays what its create gave it, and its result has the kind's shape", () => {
+      const engine = openTestEngine({ driver });
+      engine.schemas.define(alice, stepsDocument());
+      engine.schemas.publish(alice, 'Step');
+      const check = engine.instances.create(writer, 'Step', { title: 'Lint', kind: 'verify', result: { passed: true, checks: [{ name: 'eslint', ok: true }] } });
+      assert.equal(check.seq, 1);
+      assert.deepEqual(
+        thrown(() => engine.instances.update(writer, 'Step', check.id, { kind: 'note', result: null })).message,
+        'Step in namespace default (version 1): kind: kind is a constant of Step: its create sets it and nothing changes it after'
+      );
+      assert.equal(thrown(() => engine.instances.update(writer, 'Step', check.id, { result: { passed: 'yes' } })).code, 'invalid_instance');
+      assert.equal(thrown(() => engine.instances.create(writer, 'Step', { title: 'Idea', kind: 'note', result: { passed: true } })).code, 'invalid_instance');
+      assert.deepEqual(engine.instances.update(writer, 'Step', check.id, { result: { passed: false } }).data, {
+        title: 'Lint',
+        kind: 'verify',
+        result: { passed: false, checks: [{ name: 'eslint', ok: true }] },
+      });
     });
   });
 }

@@ -231,7 +231,8 @@ export function pointer(...tokens: string[]): string {
   return tokens.map((token) => `/${token.replace(/~/g, '~0').replace(/\//g, '~1')}`).join('');
 }
 
-function fieldTypeIssue(document: Document, typeName: string, field: FieldDef): string | undefined {
+/** fieldTypeIssue says why the schema runtime cannot validate a field's type, or undefined when it can. */
+export function fieldTypeIssue(document: Document, typeName: string, field: FieldDef): string | undefined {
   const label = `field ${typeName}.${field.name}`;
   if (field.typeRef.isMap) {
     return `${label} is a map, which the schema runtime does not validate`;

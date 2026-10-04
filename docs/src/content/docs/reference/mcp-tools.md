@@ -326,13 +326,15 @@ schemas, and none publishes. The engine
 writes empty guidance, takes the invocation policy and the vendor keys
 above as options, and takes a behavior operation's policy from its
 declaration, else the default: the core's behaviors (`Workflow`,
-`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`
-and `Reactions`, which has no operations), which every engine registers,
-name none, and neither do the work-queue behaviors
-`@superschematic/engine-workqueue` implements.
+`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
+and `Reactions`, `Constants` and `Variants`, which have no operations),
+which every engine registers, name none, and neither do the work-queue
+behaviors `@superschematic/engine-workqueue` implements.
 Its argument schemas are the generators':
 `runtime/engine/testdata/tool_parameters_parity.json` holds them to
-`toolsutil`. `runtime/engine/README.md` ("Tools", "MCP") has the rest, and
+`toolsutil`. A create's `data` and an update's `patch` also carry, under
+`allOf`, what a behavior holds the fields to, `Variants`' type for each
+value of a field, which no generator writes. `runtime/engine/README.md` ("Tools", "MCP") has the rest, and
 [the engine guide](/superschematic/guides/engine/#mcp-tools) lists and calls
 them on a running server.
 

@@ -40,10 +40,11 @@ then the step's data.
 parseConfig checks the config when the schema is defined or published:
 the child schema composes Links with parentLink pointing at this schema
 (and this type lists Revisions before Blueprint when that link is
-pinned), Dependencies (with its own schema among its blockers' schemas)
-when a step comes after another, and not Blueprint; keyField is a string
-field of the child's type; copyFields are fields of both types, of one
-JSON type; when's fields are fields of this type, a list for includes;
+pinned), Constants over keyField and every copied field, Dependencies
+(with its own schema among its blockers' schemas) when a step comes after
+another, and not Blueprint; keyField is a string field of the child's
+type; copyFields are fields of both types, of one JSON type; when's
+fields are fields of this type, a list for includes;
 inline steps name only steps the map has in after, form no cycle, and
 set no keyField in data. A map read through from is held to the same
 rules (against this type) when it is stamped, and an invalid one refuses
@@ -51,6 +52,15 @@ the change that stamps. copyLinks are links of both Links configs to one
 schema, copied with the revision a pinned one records: the ones the
 instance holds when it is stamped, which for inline steps are the ones
 its create gives.
+
+A child is routed by what the stamp set: the step it is, in keyField, and
+the fields it copied. Any writer of the child, the holder of its lease
+included, could change them after, and turn the child into another
+step, so the child schema's Constants keeps them as the stamp set them.
+A later version of the child schema can drop them from Constants; the
+check runs again only when this schema is defined or published (D16,
+amended: a published version is not refused for another schema's
+change).
 
 What was stamped is kept in Blueprint's own table: the blueprint field
 lists each step's key and its child's id, in the order they were
@@ -359,6 +369,17 @@ function checkChild(config: BlueprintConfig, target: ConfigTarget, child: Config
     if (type !== 'any' && own.length > 0 && !own.includes(type)) {
       throw new BehaviorConfigError(`copyFields: ${target.type}'s ${field} holds ${own.join(' or ')}, and ${child.type}'s holds ${type}`);
     }
+  }
+  const constant = [config.keyField, ...config.copyFields];
+  if (!child.behaviors.includes('Constants')) {
+    throw new BehaviorConfigError(
+      `${at} does not compose Constants, so the fields each stamp sets in a child could change after it: compose Constants with fields ${constant.join(', ')}`
+    );
+  }
+  const kept = (child.configs.Constants as { fields?: readonly string[] } | undefined)?.fields ?? [];
+  const loose = constant.filter((field) => !kept.includes(field));
+  if (loose.length > 0) {
+    throw new BehaviorConfigError(`${at}'s Constants does not list ${loose.join(', ')}, which each stamp sets and nothing may change after`);
   }
   for (const step of config.steps ?? []) {
     for (const field of Object.keys(step.data)) {
