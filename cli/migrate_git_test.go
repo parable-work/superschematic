@@ -63,6 +63,7 @@ func TestUntarRefusesPathsOutsideTheArchive(t *testing.T) {
 		want    string
 	}{
 		{"a name with ..", []tarEntry{{name: "../escape.json", body: "{}"}}, `"../escape.json" is outside the archive`},
+		{"an absolute name", []tarEntry{{name: "/escape.json", body: "{}"}}, `"/escape.json" is outside the archive`},
 		{"an absolute link", []tarEntry{{name: "etc", link: "/etc"}}, `"etc" links to "/etc", outside the archive`},
 		{"a link up and out", []tarEntry{{name: "a/up", link: "../.."}}, `"a/up" links to "../..", outside the archive`},
 		{

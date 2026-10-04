@@ -8,7 +8,11 @@ the schema registry and the instance store, so the access policy answers
 each one.
 
 A tool is one operation: create, get, list, update and delete of every
-live schema the namespace reaches, each operation its behaviors add (a
+live schema the namespace reaches (create takes the parameters its
+behaviors declare a createParamsSchema for, under behaviors, and create's
+data, update's patch and the describe document's instance carry what the
+behaviors' validate holds the fields to, as allOf entries their
+instanceSchema writes), each operation its behaviors add (a
 schema-level one takes its parameters and no instance id), and three
 tools for writing schemas: list, describe and define a draft. No
 tool publishes: a draft goes live only through an HTTP call the access
@@ -28,13 +32,16 @@ be called by its handle: the call is refused.
 */
 
 import { checkPrincipal, type Access, type Action, type Principal } from '../access.js';
+import type { InstanceSchemaForm, TypeSchema } from '../behaviors/behavior.js';
 import type { BehaviorOperationDeclaration, OperationScope } from '../behaviors/declaration.js';
-import { EngineError } from '../errors.js';
+import { jsonCopy } from '../behaviors/json.js';
+import { synchronous } from '../behaviors/storage.js';
+import { BehaviorError, EngineError } from '../errors.js';
 import { isPlainObject } from '../instances/patch.js';
 import { INSTANCE_ID, type InstanceStore } from '../instances/store.js';
 import type { Namespaces } from '../namespaces.js';
 import { MAX_PAGE_SIZE } from '../paging.js';
-import type { SchemaRecord, SchemaSummary } from '../registry/catalog.js';
+import type { SchemaCatalog, SchemaRecord, SchemaSummary } from '../registry/catalog.js';
 import { SCHEMA_NAME } from '../registry/document.js';
 import type { ComposedBehavior, SchemaRegistry } from '../registry/registry.js';
 import type { BuiltinTool, ResolvedToolOptions } from './options.js';
@@ -43,6 +50,7 @@ import {
   FieldSchemas,
   argumentsDigest,
   renderArguments,
+  renderProperty,
   type ArgumentSchema,
   type JSONSchemaValue,
   type Property,
@@ -191,6 +199,8 @@ interface ToolSpec {
   schema?: SchemaRecord;
   behavior?: ComposedBehavior;
   operation?: BehaviorOperationDeclaration;
+  /** For create, the schema's behaviors that take create parameters, in list order. */
+  createParams?: ComposedBehavior[];
   /** Why the tool is hidden; absent for a visible one. */
   hidden?: string;
 }
@@ -198,9 +208,16 @@ interface ToolSpec {
 const TOOL_SCHEMA = 'https://json-schema.org/draft/2020-12/schema';
 const EMPTY_GUIDANCE = (): ToolDefinition['guidance'] => ({ useWhen: '', doNotUseWhen: '', success: '', errors: [] });
 
+/** A version's argument schemas: its instance type's fields, and what its behaviors hold them to in each form. */
+interface InstanceSchemas {
+  readonly input: ArgumentSchema;
+  readonly fields: FieldSchemas;
+  readonly rules: Readonly<Record<InstanceSchemaForm, readonly unknown[]>>;
+}
+
 export class ToolCatalog {
   // The argument schemas of each published version, which never changes.
-  private readonly instanceSchemas = new Map<string, { input: ArgumentSchema; fields: FieldSchemas }>();
+  private readonly instanceSchemas = new Map<string, InstanceSchemas>();
 
   constructor(
     private readonly namespaces: Namespaces,
@@ -208,7 +225,9 @@ export class ToolCatalog {
     private readonly schemas: SchemaRegistry,
     private readonly instances: InstanceStore,
     /** The invocation policy, the built-in tools' policies and the vendor keys. */
-    readonly options: ResolvedToolOptions
+    readonly options: ResolvedToolOptions,
+    /** The versions' runtimes, for what their behaviors hold an instance's fields to; the registry has asked the policy. */
+    private readonly catalog: SchemaCatalog
   ) {}
 
   /**
@@ -313,12 +332,17 @@ export class ToolCatalog {
         return draft;
       }
       case 'create': {
-        only(tool, input, ['id', 'data']);
+        only(tool, input, ['id', 'data', 'behaviors']);
         const id = optionalString(tool, input, 'id');
         if (!('data' in input)) {
           throw new EngineError('invalid_argument', `${tool.handle}: data, the instance, is required`);
         }
-        return this.instances.create(principal, schema, input.data, { namespace, ...(id !== undefined ? { id } : {}) });
+        const behaviors = input.behaviors ?? undefined;
+        return this.instances.create(principal, schema, input.data, {
+          namespace,
+          ...(id !== undefined ? { id } : {}),
+          ...(behaviors !== undefined ? { behaviors: behaviors as Record<string, unknown> } : {}),
+        });
       }
       case 'get': {
         only(tool, input, ['id']);
@@ -480,14 +504,19 @@ export class ToolCatalog {
       schema: record,
       ...parts,
     });
+    const createParams = behaviors.filter((behavior) => behavior.declaration.createParamsSchema !== undefined);
     const tools: ToolSpec[] = [
       spec('create', 'create', {
         title: `Create ${name}`,
-        description: `Creates a ${name}: validates the instance, data, against the schema's live version and stores it under id, or under a new id when none is given.`,
+        description:
+          createParams.length === 0
+            ? `Creates a ${name}: validates the instance, data, against the schema's live version and stores it under id, or under a new id when none is given.`
+            : `Creates a ${name}: validates the instance, data, against the schema's live version and stores it under id, or under a new id when none is given. behaviors gives its behaviors their create parameters (${createParams.map((behavior) => behavior.name).join(', ')}), which hold from the create on.`,
         writes: true,
         policy: invocation.create,
         httpMethod: 'POST',
         httpPath: instances,
+        createParams,
       }),
       spec('get', 'get', {
         title: `Get ${name}`,
@@ -622,14 +651,17 @@ export class ToolCatalog {
         return schema([['name', { type: 'string', description: 'The schema name', pattern: SCHEMA_NAME.source }]], ['name']);
       case 'defineSchema':
         return schema([['document', { raw: { type: 'object', description: 'The schema-file document: kind General, a name, and the types; superschematic format --to=json writes it' } }]], ['document']);
-      case 'create':
-        return schema(
-          [
-            ['id', { ...id, description: 'The instance id; the engine makes one when it is absent' }],
-            ['data', this.dataProperty(tool.schema as SchemaRecord)],
-          ],
-          ['data']
-        );
+      case 'create': {
+        const properties: Array<[string, Property]> = [
+          ['id', { ...id, description: 'The instance id; the engine makes one when it is absent' }],
+          ['data', this.dataProperty(tool.schema as SchemaRecord)],
+        ];
+        const takers = tool.createParams ?? [];
+        if (takers.length > 0) {
+          properties.push(['behaviors', { raw: createParamsOf(takers) }]);
+        }
+        return schema(properties, ['data']);
+      }
       case 'get':
         return schema([['id', id]], ['id']);
       case 'list':
@@ -640,15 +672,18 @@ export class ToolCatalog {
           ],
           []
         );
-      case 'update':
+      case 'update': {
+        const record = tool.schema as SchemaRecord;
+        const patch = patchOf(this.dataProperty(record), `A JSON merge patch of the ${record.instanceType}`);
         return schema(
           [
             ['id', id],
-            ['patch', patchOf(this.dataProperty(tool.schema as SchemaRecord), `A JSON merge patch of the ${(tool.schema as SchemaRecord).instanceType}`)],
+            ['patch', withRules(patch, this.fieldsOf(record).rules.patch)],
             ['expectedSeq', expectedSeq],
           ],
           ['id', 'patch']
         );
+      }
       case 'delete':
         return schema(
           [
@@ -677,40 +712,84 @@ export class ToolCatalog {
     }
   }
 
-  // dataProperty is the instance's own fields: the schema a create takes.
+  // dataProperty is the instance's own fields: the schema a create takes,
+  // with what the behaviors hold them to.
   private dataProperty(record: SchemaRecord): Property {
-    const { input } = this.fieldsOf(record);
-    return {
-      type: 'object',
-      description: `${record.instanceType} object`,
-      additionalProperties: false,
-      properties: input.properties,
-      required: input.required,
-    };
+    const { input, rules } = this.fieldsOf(record);
+    return withRules(
+      {
+        type: 'object',
+        description: `${record.instanceType} object`,
+        additionalProperties: false,
+        properties: input.properties,
+        required: input.required,
+      },
+      rules.instance
+    );
   }
 
   // instanceSchema is an instance's data as reads return it: its own
-  // fields, then its behaviors' fields, read-only.
+  // fields, then its behaviors' fields, read-only, with what the behaviors
+  // hold the own fields to.
   private instanceSchema(record: SchemaRecord, behaviors: ComposedBehavior[]): JSONSchemaObject {
-    const { input } = this.fieldsOf(record);
+    const { input, rules } = this.fieldsOf(record);
     const properties = new Map(input.properties);
     for (const behavior of behaviors) {
       for (const field of behavior.declaration.fields ?? []) {
         properties.set(field.name, { raw: { ...(field.description ? { description: field.description } : {}), readOnly: true } });
       }
     }
-    return renderArguments({ vendor: [], properties, required: input.required }, this.options.keys.scalar);
+    const schema = renderArguments({ vendor: [], properties, required: input.required }, this.options.keys.scalar);
+    return rules.instance.length > 0 ? { ...schema, allOf: [...rules.instance] } : schema;
   }
 
-  private fieldsOf(record: SchemaRecord): { input: ArgumentSchema; fields: FieldSchemas } {
+  private fieldsOf(record: SchemaRecord): InstanceSchemas {
     const key = `${record.namespace}\u0000${record.name}\u0000${String(record.version)}\u0000${record.hash}`;
     let cached = this.instanceSchemas.get(key);
     if (!cached) {
       const fields = new FieldSchemas(record.document);
-      cached = { input: fields.object(record.instanceType), fields };
+      cached = {
+        input: fields.object(record.instanceType),
+        fields,
+        rules: { instance: this.instanceRules(record, fields, 'instance'), patch: this.instanceRules(record, fields, 'patch') },
+      };
       this.instanceSchemas.set(key, cached);
     }
     return cached;
+  }
+
+  // instanceRules is what a version's behaviors hold an instance's own
+  // fields to, in a form: each behavior's instanceSchema, in list order,
+  // which renders the types its checkedTypes names as this document
+  // renders a nested type.
+  private instanceRules(record: SchemaRecord, fields: FieldSchemas, form: InstanceSchemaForm): unknown[] {
+    const rules: unknown[] = [];
+    for (const bound of this.catalog.runtimeOf(record).composition.behaviors) {
+      const instanceSchema = bound.behavior.implementation.instanceSchema;
+      if (!instanceSchema) {
+        continue;
+      }
+      const name = bound.behavior.name;
+      const typeSchema: TypeSchema = (type, options) => {
+        if (typeof type !== 'string' || !bound.checked.includes(type)) {
+          throw new BehaviorError(
+            name,
+            `instanceSchema: ${String(type)} is not a type its checkedTypes names (${bound.checked.length > 0 ? bound.checked.join(', ') : 'none'})`
+          );
+        }
+        const value = fields.type(type);
+        const shaped = form === 'patch' ? patchOf(value) : value;
+        return renderProperty({ ...shaped, nullable: options?.nullable === true }, this.options.keys.scalar);
+      };
+      const answer: unknown = instanceSchema.call(bound.behavior.implementation, bound.config, form, typeSchema);
+      synchronous(name, 'instanceSchema', answer);
+      const copied = jsonCopy(answer);
+      if (!('value' in copied) || !Array.isArray(copied.value)) {
+        throw new BehaviorError(name, 'instanceSchema returns a list of JSON Schemas');
+      }
+      rules.push(...(copied.value as unknown[]));
+    }
+    return rules;
   }
 
   private resultSchema(tool: ToolSpec, behaviors: ComposedBehavior[]): JSONSchemaValue {
@@ -771,6 +850,24 @@ export class ToolCatalog {
   }
 }
 
+/**
+ * createParamsOf is a create's behaviors argument: by behavior name, the
+ * createParamsSchema of each behavior that declares one, as its
+ * declaration holds it.
+ */
+function createParamsOf(behaviors: readonly ComposedBehavior[]): JSONSchemaObject {
+  const properties: Record<string, unknown> = {};
+  for (const behavior of behaviors) {
+    properties[behavior.name] = behavior.declaration.createParamsSchema;
+  }
+  return {
+    type: 'object',
+    description: "Each behavior's create parameters, by behavior name; they hold from the create on, in its transaction",
+    additionalProperties: false,
+    properties,
+  };
+}
+
 /** The JSON Schema of an instance as the engine returns it. */
 function instanceRecordSchema(data: JSONSchemaObject): JSONSchemaObject {
   return {
@@ -793,6 +890,12 @@ function instanceRecordSchema(data: JSONSchemaObject): JSONSchemaObject {
   };
 }
 
+// withRules adds what the behaviors hold an object to, as allOf, when
+// they hold it to anything.
+function withRules(property: Property, rules: readonly unknown[]): Property {
+  return rules.length > 0 ? { ...property, allOf: rules } : property;
+}
+
 // patchOf is the schema of a merge patch of an object: its properties
 // with none required, down through nested objects, which a patch merges.
 // A list is replaced whole, so its items keep theirs.
@@ -804,7 +907,8 @@ function patchOf(property: Property, description?: string): Property {
   for (const [key, child] of property.properties) {
     properties.set(key, patchOf(child));
   }
-  return { ...property, ...(description ? { description } : {}), properties, required: [] };
+  const { allOf: _allOf, ...rest } = property;
+  return { ...rest, ...(description ? { description } : {}), properties, required: [] };
 }
 
 // typeOf is a result schema's type as ir.ToolSchemaType holds it: its

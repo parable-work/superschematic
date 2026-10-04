@@ -246,7 +246,7 @@ for (const driver of drivers) {
       assert.deepEqual(issuesOf(() => engine.schemas.define(alice, document)), [
         {
           path: '/types/Order/behaviors/0/name',
-          message: 'must be one of "Assignment", "Blueprint", "Budget", "Comments", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Workflow"',
+          message: 'must be one of "Assignment", "Blueprint", "Budget", "Comments", "Constants", "Dependencies", "Lease", "Links", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "Variants", "Workflow"',
         },
       ]);
     });
@@ -355,6 +355,33 @@ for (const driver of drivers) {
       engine.schemas.publish(alice, 'Order');
       assert.notEqual(engine.schemas.validator(alice, 'Order'), validator);
       assert.equal(engine.schemas.validator(alice, 'Order', { version: 1 }), validator);
+    });
+
+    test('a catalog scalar the document declares, as format --to=json writes it, validates as the catalog has it', () => {
+      const engine = open();
+      const declared = schemaDocument(
+        'Reading',
+        [
+          { name: 'meta', typeRef: { name: 'Generic.JSON' } },
+          { name: 'count', typeRef: { name: 'Generic.Int64' } },
+        ],
+        {
+          scalars: {
+            'Generic.JSON': { name: 'Generic.JSON', languagePrimitive: 'object', typeMappings: { sql: 'JSONB' } },
+            'Generic.Int64': { name: 'Generic.Int64', languagePrimitive: 'number' },
+          },
+        }
+      );
+      engine.schemas.define(alice, declared);
+      engine.schemas.publish(alice, 'Reading');
+      assert.deepEqual(engine.schemas.validate(alice, 'Reading', { meta: { a: [1, 'b'] }, count: 2 }), []);
+      assert.deepEqual(
+        engine.schemas.validate(alice, 'Reading', { count: 1.5 }).map((issue) => issue.path),
+        ['count']
+      );
+      // A version that stops declaring them changes no scalar.
+      engine.schemas.define(alice, { ...declared, scalars: {} });
+      assert.equal(engine.schemas.publish(alice, 'Reading').version, 2);
     });
 
     test('validating a schema with no live version is not_found', () => {

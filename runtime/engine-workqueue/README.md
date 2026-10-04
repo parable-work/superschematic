@@ -375,12 +375,12 @@ which.
 
 | | |
 | --- | --- |
-| Config | `schema` (the child schema), `parentLink` (a link of its Links config to this schema) and `keyField` (a string field of its type), required; one of `steps` (inline) and `from` (`{ link, field }`); `copyFields`, `copyLinks` |
+| Config | `schema` (the child schema, which composes `Constants` over `keyField` and every copied field), `parentLink` (a link of its Links config to this schema) and `keyField` (a string field of its type), required; one of `steps` (inline) and `from` (`{ link, field }`); `copyFields`, `copyLinks` |
 | Steps | by key (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`, at most 500): `{ after?, when?, data? }`; `after`, the keys of the steps whose children block this one's; `when`, `{ field, equals }` or `{ field, includes }`; `data`, more fields of the child |
 | Fields | `blueprint`: `{ children: [{ key, id }] }`, in the order they were created; absent until the instance is stamped |
 | Operations | none |
 | Guards | with `from`, once stamped, Links' `link` of the `from` link: `vetoed` |
-| Refusals | with `from`, a map the pinned revision holds that breaks a rule (`vetoed`, on the link); whatever a child's create, link or edge is refused for (its own error), which refuses the change that stamps |
+| Refusals | with `from`, a map the pinned revision holds that breaks a rule (`vetoed`, on the create that gives the link or on the link); whatever a child's create, with its links and edges, is refused for (its own error), which refuses the change that stamps |
 | `configChange` | any config may change; it applies to the stamps that come after. Added to a schema with instances; not removed from one, since the record of what was stamped would stay behind |
 
 ```json
@@ -395,19 +395,30 @@ which.
     "copyFields": ["topic"] } }
 ```
 
+The child schema, `steps`, keeps what a stamp sets:
+
+```json
+{ "name": "Constants", "config": { "fields": ["step", "topic"] } }
+```
+
 ### Stamping
 
 Stamping creates a child per step with `instances.create`, its fields its
 key in `keyField`, the `copyFields` this instance holds, then the step's
-`data`; links it to this instance through the child's own `Links.link`
-for `parentLink`, and for each `copyLinks` link this instance holds, with
-the revision a pinned one records when the child's link is pinned too;
-and adds its edges with the child's own `Dependencies.addBlocker`. Each
-child runs its behaviors' `initialize` and `afterChange`, its guards and
-its events. Everything runs in one transaction, as the principal that
-made the change, who therefore needs `write` on the child schema and
-`read` on this one: a failure at any child refuses the change, and the
-parent, every child, link and edge roll back together. Children come in
+`data`, and its links and edges as create parameters
+(`runtime/engine/README.md`, "Create parameters"): `Links` gets
+`parentLink`, pointing at this instance, and each `copyLinks` link this
+instance holds, with the revision a pinned one records when the child's
+link is pinned too; `Dependencies` gets the children of the steps it
+comes after as its blockers. A child therefore holds its parent link
+from its create, so the child schema can make `parentLink` `required`,
+and it is blocked in its create event, so `claimNext` never finds it
+before its edges exist. Each child runs its behaviors' guards,
+`initialize` and `afterChange` and gets one create event. Everything
+runs in one transaction, as the principal that made the change, who
+therefore needs `write` on the child schema and `read` on this one: a
+failure at any child refuses the change, and the parent, every child,
+link and edge roll back together. Children come in
 an order where each follows its blockers, ties in the map's order. A
 child schema that composes `Queue` makes the children claimable work:
 `claimNext` claims each once its blockers have finished, in a terminal
@@ -415,16 +426,17 @@ state whose outcome the child's `Dependencies` `satisfiedBy` lists (a
 success by default), so the steps are claimed in the order their edges
 give, and the steps after one that failed are not claimed.
 
-Inline `steps` are stamped in the instance's create. A create sets no
-link, since a link is set by `Links.link` on an instance that exists, so
-`from` steps are stamped when the `from` link is first set, in that
-link's transaction: the link and the children commit together, or
-neither does. The map is read from the revision the link pins, through
-`Revisions`' `listRevisions` on the definition, as the principal (who
-needs `read` on its schema): a later revision of the definition changes
-only what is stamped from then on, and `link` with a `revision` stamps
-an earlier one. `copyLinks` needs `from`, since an instance holds no
-link at its create.
+Inline `steps` are stamped in the instance's create. `from` steps are
+stamped when the `from` link is first set: in the create when the
+create gives it (`Links` create parameters), else in the transaction of
+the first `link`, so the link and the children commit together, or
+neither does, and a refused stamp refuses the create or the link. The
+map is read from the revision the link pins, through `Revisions`'
+`listRevisions` on the definition, as the principal (who needs `read`
+on its schema): a later revision of the definition changes only what is
+stamped from then on, and a `revision` given with the link stamps an
+earlier one. `copyLinks` copies the links the instance holds when it is
+stamped: for inline steps, the ones its create gives.
 
 ### when
 
@@ -443,7 +455,8 @@ When the schema is defined or published, `parseConfig` checks the child
 schema's live version as the definer may read it: it composes Links with
 `parentLink` pointing at this schema (and this type lists Revisions
 before Blueprint when that link is pinned, so the parent has a revision
-to pin), Dependencies with its own schema among its
+to pin), `Constants` over `keyField` and every copied field,
+Dependencies with its own schema among its
 blockers' schemas when a step has `after`, and not Blueprint; `keyField`
 is a string field of its type, `copyFields` are fields of both types of
 one JSON type, and `data` sets fields of its type. `when` names a field
@@ -455,6 +468,16 @@ the field, an object or JSON; `copyLinks` are links of both Links
 configs to one schema. A map read through `from` is held to the same
 rules against this type when it is stamped.
 
+A child is routed by what its stamp set: the step it is, in `keyField`,
+and the fields it copied. Any writer of the child, the holder of its
+lease included, could change them after and turn it into another step,
+so the child schema's `Constants` (`runtime/engine/README.md`) keeps
+them: an update that changes one is `invalid_instance`, with the rule
+`constant` at the field. A later version of the child schema can drop
+them from `Constants`; the check runs again only when this schema is
+defined or published, since a published version is not refused for
+another schema's change.
+
 ### What was stamped
 
 Blueprint keeps what it stamped in its own table, so `blueprint` lists
@@ -462,10 +485,13 @@ each step's key and its child's id from that record and not from the
 links that point here: a child linked to the instance later is not among
 them, and one deleted later still is.
 
-Not ported from the source implementation: create governance, which
-checked the child schema's own creates for a parent link and an edge,
-and the trial flag. A step map is checked when it is stamped, not when
-the definition is written.
+Create governance, which refused a child created without its parent
+link, is schema config here: a `required` `parentLink` in the child
+schema's `Links` config makes every create of a child give it, whoever
+creates it, and a create gives its edges with it through `Dependencies`'
+create parameters. No config requires a child to have an edge. Not
+ported from the source implementation: the trial flag. A step map is
+checked when it is stamped, not when the definition is written.
 ## Budget
 
 Reserve-then-settle budgets in units the deployment names: each meter
