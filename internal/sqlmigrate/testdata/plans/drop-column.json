@@ -1,0 +1,36 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "9fd803e25aa14dff1625736c9337f521ad203a082bab874f65d41560e43a62a3",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order/column/note",
+          "reason": "Dropping order.note deletes the values of Order.note.",
+          "subject": "table/order/column/note"
+        },
+        {
+          "class": "api-breaking",
+          "id": "api-breaking:table/order/column/note@lagging-api/OrderView.note",
+          "reader": "lagging-api/OrderView.note",
+          "reason": "lagging-api reads order.note through OrderView.note, and this step drops it.",
+          "subject": "table/order/column/note"
+        }
+      ],
+      "index": 1,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" DROP COLUMN note"
+      ],
+      "subject": "table/order/column/note",
+      "transactional": true
+    }
+  ],
+  "to": "6a6a0cbf648b37681b96f66569bd5ac768b5373f00177b74769bb4027daed98e",
+  "toModel": null,
+  "version": 1
+}

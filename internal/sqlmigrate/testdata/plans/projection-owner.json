@@ -1,0 +1,25 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "803839ddf747809e405a4795666f1ba11de3c6e4c4697741e4678c87d5d29917",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "replaceView",
+      "phase": "expand",
+      "statements": [
+        "DROP VIEW report.order_summary",
+        "SET LOCAL ROLE report_owner",
+        "CREATE VIEW report.order_summary WITH (security_barrier = true) AS\n-- Projection column order is the published Arrow contract.\nSELECT -- noqa: ST06\n  base.code,\n  base.total,\n  customer.\"name\" AS customer_name\nFROM \"order\" AS base\n  INNER JOIN customer AS customer ON base.customer_id = customer.id\n",
+        "COMMENT ON VIEW report.order_summary IS 'Orders with their customer''s name, for reporting.'",
+        "RESET ROLE"
+      ],
+      "subject": "view/report.order_summary",
+      "transactional": true
+    }
+  ],
+  "to": "5d55c6886149435464133ba54691b7d3a5b094401d029d5b40a4b83cedef9132",
+  "toModel": null,
+  "version": 1
+}

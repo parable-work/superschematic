@@ -1,0 +1,39 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "219dc04ee73a4f0787c4328ac80037dba081efb3859fe34de3c8d2bf409b91dd",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropNotNull",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_line ALTER COLUMN sku DROP NOT NULL"
+      ],
+      "subject": "table/order_line/column/sku",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order_line/column/sku",
+          "reason": "Dropping order_line.sku deletes the values of OrderLine.sku.",
+          "subject": "table/order_line/column/sku"
+        }
+      ],
+      "index": 2,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE order_line DROP COLUMN sku"
+      ],
+      "subject": "table/order_line/column/sku",
+      "transactional": true
+    }
+  ],
+  "to": "21fc3735d73212a86eef9b4494fe03353807ade06ae2fc070eef2695d35c285c",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,118 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "403e8b2625de45c83469d7b38c2032814c60e12024edd9bcb18f78fd0e262b33",
+  "renames": [
+    "label=tag"
+  ],
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order_tag",
+          "reason": "Table order_label is renamed to order_tag, following --rename label=tag: servers built from the previous version still use the old name.",
+          "subject": "table/order_tag"
+        }
+      ],
+      "index": 1,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_label RENAME TO order_tag"
+      ],
+      "subject": "table/order_tag",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/tag",
+          "reason": "Table label is renamed to tag: servers built from the previous version still use the old name.",
+          "subject": "table/tag"
+        }
+      ],
+      "index": 2,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE label RENAME TO tag"
+      ],
+      "subject": "table/tag",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order_tag/column/tag_id",
+          "reason": "order_label.label_id is renamed to order_tag.tag_id, following --rename label=tag: servers built from the previous version still use the old name.",
+          "subject": "table/order_tag/column/tag_id"
+        }
+      ],
+      "index": 3,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_tag RENAME COLUMN label_id TO tag_id"
+      ],
+      "subject": "table/order_tag/column/tag_id",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_tag RENAME CONSTRAINT fk_order_label_order_id TO fk_order_tag_order_id"
+      ],
+      "subject": "table/order_tag/constraint/fk_order_tag_order_id",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_tag RENAME CONSTRAINT fk_order_label_label_id TO fk_order_tag_tag_id"
+      ],
+      "subject": "table/order_tag/constraint/fk_order_tag_tag_id",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_tag RENAME CONSTRAINT order_label_pkey TO order_tag_pkey"
+      ],
+      "subject": "table/order_tag/constraint/order_tag_pkey",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE tag RENAME CONSTRAINT label_name_key TO tag_name_key"
+      ],
+      "subject": "table/tag/constraint/tag_name_key",
+      "transactional": true
+    },
+    {
+      "index": 8,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE tag RENAME CONSTRAINT label_pkey TO tag_pkey"
+      ],
+      "subject": "table/tag/constraint/tag_pkey",
+      "transactional": true
+    }
+  ],
+  "to": "ccc8a2324c5e494436fbcc47b9caeaf40881ff709b7f98a7c1d595062ae2b836",
+  "toModel": null,
+  "version": 1
+}

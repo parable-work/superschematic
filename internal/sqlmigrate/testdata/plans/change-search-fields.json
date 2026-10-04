@@ -1,0 +1,52 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "5d54eb3845618a5fae660a5a0f582a49f721a510ff0c516784abfb6b480895af",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product ADD COLUMN blurb TEXT"
+      ],
+      "subject": "table/product/column/blurb",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/product/column/search_text",
+          "reason": "The change rewrites product and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/product/column/search_text"
+        }
+      ],
+      "index": 2,
+      "op": "regenerateColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product\n  DROP COLUMN search_text,\n  ADD COLUMN search_text TEXT GENERATED ALWAYS AS (COALESCE(title, '') || ' ' || COALESCE(blurb, '')) STORED"
+      ],
+      "subject": "table/product/column/search_text",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_product_search_trgm"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_product_search_trgm ON product USING GIN (search_text gin_trgm_ops)"
+      ],
+      "subject": "table/product/index/idx_product_search_trgm",
+      "transactional": false
+    }
+  ],
+  "to": "a2cb2956904c6e6c74a63698b84a90a79765c33315873683bb4bcec2380ddcf2",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,65 @@
+{
+  "dialect": "postgres",
+  "from": "",
+  "hash": "172045902ba09335a2ec27db2d4dd428903748bca26701c707cd7b4b1b94fe2c",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createExtension",
+      "phase": "expand",
+      "statements": [
+        "CREATE EXTENSION IF NOT EXISTS pgcrypto"
+      ],
+      "subject": "extension/pgcrypto",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE account (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  \"name\" TEXT NOT NULL,\n  CONSTRAINT account_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE account IS 'Generated from schema type: Account'"
+      ],
+      "subject": "table/account",
+      "transactional": true
+    }
+  ],
+  "to": "9cb975595241c3c3e894f274259c72b71bc6a47bc6d6e471e82b6d285a743ca7",
+  "toModel": {
+    "dialect": "postgres",
+    "extensions": [
+      "pgcrypto"
+    ],
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "name",
+            "origin": "Account.name",
+            "type": "TEXT"
+          }
+        ],
+        "comment": "Generated from schema type: Account",
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

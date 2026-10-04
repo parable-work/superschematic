@@ -1,0 +1,24 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "3065f6cee12c8fe15f2c4c59d17510dc36498d851597c82d1c668b39575101b9",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_order_line_sku"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_order_line_sku ON order_line USING BTREE (sku)"
+      ],
+      "subject": "table/order_line/index/idx_order_line_sku",
+      "transactional": false
+    }
+  ],
+  "to": "4c21021466c053fe79a824ad84b6b0bc1f43f2add9f5ce732c9d81c387b4840b",
+  "toModel": null,
+  "version": 1
+}

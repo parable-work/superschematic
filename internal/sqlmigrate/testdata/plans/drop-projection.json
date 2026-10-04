@@ -1,0 +1,30 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "ee7d39119f59d274eb00b5fa0f365120f38b251eabdc60641c615bf8f0e89f0b",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "api-breaking",
+          "id": "api-breaking:view/report.order_summary@report.order_summary",
+          "reader": "report.order_summary",
+          "reason": "The projection view report.order_summary is dropped: its readers lose the relation and its Arrow schema.",
+          "subject": "view/report.order_summary"
+        }
+      ],
+      "index": 1,
+      "op": "dropView",
+      "phase": "contract",
+      "statements": [
+        "DROP VIEW report.order_summary"
+      ],
+      "subject": "view/report.order_summary",
+      "transactional": true
+    }
+  ],
+  "to": "a9fae04e1a859e8b38054d42071e57e9dac679ef81df13cb352c945f74beedbb",
+  "toModel": null,
+  "version": 1
+}

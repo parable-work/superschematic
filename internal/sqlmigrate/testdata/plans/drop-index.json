@@ -1,0 +1,21 @@
+{
+  "dialect": "postgres",
+  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "hash": "c3fd6f11779bc45d4c5eeb5f9f67cf30deaf7942b46b07f66e171369a8de1d1f",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropIndex",
+      "phase": "contract",
+      "statements": [
+        "DROP INDEX idx_order_customer_placed_at"
+      ],
+      "subject": "table/order/index/idx_order_customer_placed_at",
+      "transactional": true
+    }
+  ],
+  "to": "4a05d237627aeae1848817da9229bfc98975dca98beec5c8289fb77d39207b90",
+  "toModel": null,
+  "version": 1
+}

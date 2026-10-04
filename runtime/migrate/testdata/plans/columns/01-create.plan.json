@@ -1,0 +1,70 @@
+{
+  "dialect": "postgres",
+  "from": "",
+  "hash": "79747821b2633c516f17a82d71afa9a9b50ee4d29548add774bda3f22a35381d",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createExtension",
+      "phase": "expand",
+      "statements": [
+        "CREATE EXTENSION IF NOT EXISTS pgcrypto"
+      ],
+      "subject": "extension/pgcrypto",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE account (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  \"name\" TEXT NOT NULL,\n  balance DOUBLE PRECISION NOT NULL,\n  CONSTRAINT account_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE account IS 'Generated from schema type: Account'"
+      ],
+      "subject": "table/account",
+      "transactional": true
+    }
+  ],
+  "to": "9a7520f1e299eda4d142c6bd9e1fd1fd576782068f04e593b93ee2ec9abc4ea1",
+  "toModel": {
+    "dialect": "postgres",
+    "extensions": [
+      "pgcrypto"
+    ],
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "name",
+            "origin": "Account.name",
+            "type": "TEXT"
+          },
+          {
+            "name": "balance",
+            "origin": "Account.balance",
+            "type": "DOUBLE PRECISION"
+          }
+        ],
+        "comment": "Generated from schema type: Account",
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

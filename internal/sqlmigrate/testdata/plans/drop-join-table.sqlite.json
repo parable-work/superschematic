@@ -1,0 +1,30 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "21b198debbee6e8fda372dde9e2e2bb63b51cb94742748ad6075ea0f49727937",
+  "service": "shop-db",
+  "steps": [
+    {
+      "foreignKeysOff": true,
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order_label",
+          "reason": "Dropping join table order_label deletes the links of Order.labels.",
+          "subject": "table/order_label"
+        }
+      ],
+      "index": 1,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE \"order_label\""
+      ],
+      "subject": "table/order_label",
+      "transactional": true
+    }
+  ],
+  "to": "7984fccd2cca5c42f59fdd8b2b74d944c780974042e07bdd6bf7834c1cf341b5",
+  "toModel": null,
+  "version": 1
+}

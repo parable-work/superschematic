@@ -54,13 +54,10 @@ COMMENT ON TABLE {{ $jt.QuotedName }} IS 'Join table for {{ $jt.LeftTable }}.{{ 
 {{- range $history := .HistoryTables }}
 
 CREATE TABLE {{ $history.QuotedName }} (
-  history_id UUID DEFAULT gen_random_uuid() NOT NULL{{ if ne $history.PartitionBy "month" }} PRIMARY KEY{{ end }},
-  {{ $history.QuotedKeyColumn }} {{ $history.KeyColumnType }} NOT NULL,
-  _version BIGINT NOT NULL,
-  operation TEXT NOT NULL,
-  data JSONB NOT NULL,
-  recorded_at TIMESTAMPTZ DEFAULT clock_timestamp() NOT NULL
-){{ if eq $history.PartitionBy "month" }} PARTITION BY RANGE (recorded_at){{ end }};
+{{- range $i, $col := $history.Columns }}{{ if $i }},{{ end }}
+  {{ $col.QuotedName }} {{ $col.Type }}{{ if $col.DefaultValue }} DEFAULT {{ $col.DefaultValue }}{{ end }}{{ if not $col.Nullable }} NOT NULL{{ end }}{{ if $col.IsPrimaryKey }} PRIMARY KEY{{ end }}
+{{- end }}
+){{ if $history.Partitioned }} PARTITION BY {{ $history.PartitionClause }}{{ end }};
 {{ if eq $history.PartitionBy "month" }}
 CREATE TABLE {{ $history.QuotedDefaultPartition }} PARTITION OF {{ $history.QuotedName }} DEFAULT;
 {{ end -}}
@@ -132,100 +129,18 @@ CREATE INDEX idx_{{ $table.Name }}_search_trgm ON {{ $table.QuotedName }} USING 
 -- Create history capture functions and triggers
 {{- range $history := .HistoryTables }}
 
-CREATE OR REPLACE FUNCTION {{ $history.FunctionName }}() RETURNS trigger AS $$
-BEGIN
-  IF (TG_WHEN = 'BEFORE') THEN
-    -- BEFORE UPDATE: the stored row takes the next version.
-    NEW._version := OLD._version + 1;
-    RETURN NEW;
-  END IF;
-  IF (TG_OP = 'DELETE') THEN
-    -- Tombstone at OLD._version + 1: keeps (key, _version) strictly monotonic so
-    -- the unique history index holds and the latest history row for a deleted key
-    -- is the DELETE. The data payload is the pre-delete image at the tombstone's
-    -- version.
-{{- if $history.ActorColumn }} Its {{ $history.ActorColumn }} is the actor a hard delete set in
-    -- {{ $history.ActorSetting }} for the statement, else the row's own value.
-{{- end }}
-{{- if $history.ExcludeArray }}
-    -- Every image leaves out {{ join $history.ExcludedColumns ", " }}.
-{{- end }}
-    INSERT INTO {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version, operation, data)
-    VALUES (
-      OLD.{{ $history.QuotedKeyColumn }},
-      OLD._version + 1,
-      'DELETE',
-      {{ if $history.ExcludeArray }}(to_jsonb(OLD) - {{ $history.ExcludeArray }}){{ else }}to_jsonb(OLD){{ end }} || jsonb_build_object(
-        '_version', OLD._version + 1
-{{- if $history.ActorColumn }},
-        '{{ $history.ActorColumn }}', COALESCE(
-          NULLIF(current_setting('{{ $history.ActorSetting }}', true), '')::{{ $history.ActorColumnType }},
-          OLD.{{ $history.QuotedActorColumn }}
-        )
-{{- end }}
-      )
-    );
-    RETURN OLD;
-  END IF;
-  -- AFTER INSERT OR UPDATE: record the row as stored, so an INSERT ... ON
-  -- CONFLICT DO UPDATE records the one UPDATE it made.
-  INSERT INTO {{ $history.QuotedName }} ({{ $history.QuotedKeyColumn }}, _version, operation, data)
-  VALUES (NEW.{{ $history.QuotedKeyColumn }}, NEW._version, TG_OP, to_jsonb(NEW){{ if $history.ExcludeArray }} - {{ $history.ExcludeArray }}{{ end }});
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+{{ $history.CaptureFunctionSQL }};
+{{- range $trigger := $history.Triggers }}
 
-CREATE TRIGGER {{ $history.VersionTriggerName }}
-  BEFORE UPDATE ON {{ $history.QuotedSourceTableName }}
-  FOR EACH ROW EXECUTE FUNCTION {{ $history.FunctionName }}();
-
-CREATE TRIGGER {{ $history.WriteTriggerName }}
-  AFTER INSERT OR UPDATE ON {{ $history.QuotedSourceTableName }}
-  FOR EACH ROW EXECUTE FUNCTION {{ $history.FunctionName }}();
-
-CREATE TRIGGER {{ $history.DeleteTriggerName }}
-  AFTER DELETE ON {{ $history.QuotedSourceTableName }}
-  FOR EACH ROW EXECUTE FUNCTION {{ $history.FunctionName }}();
+{{ $trigger.SQL }};
+{{- end }}
 {{- if gt $history.RetentionDays 0 }}
 
 -- max_rows caps one call so a caller can drain a backlog in committed chunks
 -- instead of one unbounded DELETE; NULL means no cap. The retention filter uses
 -- now() (STABLE, folded once per statement and indexable) rather than
 -- clock_timestamp() (VOLATILE, re-evaluated per row).
-CREATE OR REPLACE FUNCTION {{ $history.PruneFunctionName }}(retention_days INTEGER DEFAULT {{ $history.RetentionDays }}, max_rows INTEGER DEFAULT NULL) RETURNS BIGINT AS $$
-DECLARE
-  deleted_count BIGINT;
-BEGIN
-  WITH candidates AS (
-    SELECT h.history_id
-    FROM {{ $history.QuotedName }} h
-    WHERE h.recorded_at < now() - make_interval(days => retention_days)
-      AND EXISTS (
-        SELECT 1
-        FROM {{ $history.QuotedName }} newer
-        WHERE newer.{{ $history.QuotedKeyColumn }} = h.{{ $history.QuotedKeyColumn }}
-          AND newer._version > h._version
-      )
-{{- range $pin := $history.PruneKeep }}
-      AND NOT EXISTS (
-        SELECT 1
-        FROM {{ $pin.QuotedTable }} {{ $pin.Alias }}
-        WHERE {{ $pin.Alias }}.{{ $pin.QuotedKeyColumn }} = h.{{ $history.QuotedKeyColumn }}
-          AND {{ $pin.Alias }}.{{ $pin.QuotedVersionColumn }} = h._version
-      )
-{{- end }}
-    LIMIT max_rows
-  ),
-  deleted AS (
-    DELETE FROM {{ $history.QuotedName }} h
-    USING candidates c
-    WHERE h.history_id = c.history_id
-    RETURNING 1
-  )
-  SELECT count(*) INTO deleted_count FROM deleted;
-  RETURN deleted_count;
-END;
-$$ LANGUAGE plpgsql;
+{{ $history.PruneFunctionSQL }};
 {{- end }}
 {{- end }}
 {{- end }}
@@ -234,17 +149,9 @@ $$ LANGUAGE plpgsql;
 -- Create version bump functions and triggers for optimistic entities
 {{- range $optimistic := .OptimisticTables }}
 
-CREATE OR REPLACE FUNCTION {{ $optimistic.FunctionName }}() RETURNS trigger AS $$
-BEGIN
-  -- BEFORE UPDATE: the stored row takes the next version.
-  NEW._version := OLD._version + 1;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+{{ $optimistic.BumpFunctionSQL }};
 
-CREATE TRIGGER {{ $optimistic.TriggerName }}
-  BEFORE UPDATE ON {{ $optimistic.QuotedTableName }}
-  FOR EACH ROW EXECUTE FUNCTION {{ $optimistic.FunctionName }}();
+{{ $optimistic.Trigger.SQL }};
 {{- end }}
 {{- end }}
 {{- if .Projections }}

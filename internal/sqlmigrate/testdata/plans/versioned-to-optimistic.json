@@ -1,0 +1,80 @@
+{
+  "dialect": "postgres",
+  "from": "d7937702261a0294ea478b93c91f045867d34978c33e3fb078b6ec3675f07c9f",
+  "hash": "ec4ac180ea4a1a4350a2c04153acc65d0b7efa5a7d64c45345a15b3c9754cc7e",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION product_bump_version() RETURNS trigger AS $$\nBEGIN\n  -- BEFORE UPDATE: the stored row takes the next version.\n  NEW._version := OLD._version + 1;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/product_bump_version",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "replaceTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_product_bump_version ON product",
+        "CREATE TRIGGER trg_product_bump_version\n  BEFORE UPDATE ON product\n  FOR EACH ROW EXECUTE FUNCTION product_bump_version()"
+      ],
+      "subject": "trigger/product/trg_product_bump_version",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_product_capture_history_delete ON product"
+      ],
+      "subject": "trigger/product/trg_product_capture_history_delete",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_product_capture_history_write ON product"
+      ],
+      "subject": "trigger/product/trg_product_capture_history_write",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "dropFunction",
+      "phase": "contract",
+      "statements": [
+        "DROP FUNCTION product_capture_history()"
+      ],
+      "subject": "function/product_capture_history",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product_history",
+          "reason": "Dropping product_history deletes every recorded version of Product.",
+          "subject": "table/product_history"
+        }
+      ],
+      "index": 6,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE product_history"
+      ],
+      "subject": "table/product_history",
+      "transactional": true
+    }
+  ],
+  "to": "f410e89d4a8d1d5dec25da83da56b04ab3945f1b948cef0452adc49e24813a85",
+  "toModel": null,
+  "version": 1
+}

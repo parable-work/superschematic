@@ -1,0 +1,63 @@
+{
+  "dialect": "sqlite",
+  "from": "733614d3c86dc2cd44d76e0df9c42ead48e1ccf95a5f8ed42b475d31a847d888",
+  "hash": "b1d683ce719f685468dabb07c8de86a6bd1343b29dae2d21eabdf4cc9378ce17",
+  "service": "shop-db",
+  "steps": [
+    {
+      "foreignKeysOff": true,
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order_line",
+          "reason": "Copying order_line holds the database's write lock for time that grows with the table.",
+          "subject": "table/order_line"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/order_line",
+          "reason": "SQLite's ALTER TABLE cannot drop NOT NULL from sku, so the step rebuilds order_line: it copies the rows into a new table, drops the old one and renames the new one, with foreign keys off.",
+          "subject": "table/order_line"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"order_id\" TEXT NOT NULL,\n  \"sku\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"order\" (\"id\") ON DELETE CASCADE\n)",
+        "INSERT INTO \"_new_order_line\" (\"id\", \"quantity\", \"order_id\", \"sku\")\nSELECT \"id\", \"quantity\", \"order_id\", \"sku\"\nFROM \"order_line\"",
+        "DROP TABLE \"order_line\"",
+        "ALTER TABLE \"_new_order_line\" RENAME TO \"order_line\""
+      ],
+      "subject": "table/order_line",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order_line/column/sku",
+          "reason": "Dropping order_line.sku deletes the values of OrderLine.sku.",
+          "subject": "table/order_line/column/sku"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/order_line/column/sku",
+          "reason": "SQLite rewrites order_line to drop the column, holding the database's write lock for time that grows with the table.",
+          "subject": "table/order_line/column/sku"
+        }
+      ],
+      "index": 2,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order_line\" DROP COLUMN \"sku\""
+      ],
+      "subject": "table/order_line/column/sku",
+      "transactional": true
+    }
+  ],
+  "to": "a029c21cd85628f70dcdce1e9b8e76e396bce437776359cff720794b6f257d92",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,285 @@
+{
+  "dialect": "sqlite",
+  "service": "shop-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Customer.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Customer.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "email",
+          "origin": "Customer.email",
+          "type": "TEXT COLLATE NOCASE"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Customer.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "referrer_id",
+          "nullable": true,
+          "origin": "Customer.referrerId",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "customer",
+      "origin": "Customer",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "customer_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "email"
+          ],
+          "name": "customer_email_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Label.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Label.name",
+          "type": "TEXT COLLATE NOCASE"
+        }
+      ],
+      "kind": "entity",
+      "name": "label",
+      "origin": "Label",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "label_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "name"
+          ],
+          "name": "label_name_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Order.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "code",
+          "origin": "Order.code",
+          "type": "TEXT"
+        },
+        {
+          "name": "customer_id",
+          "origin": "Order.customer",
+          "type": "TEXT"
+        },
+        {
+          "name": "total",
+          "origin": "Order.total",
+          "type": "INTEGER"
+        },
+        {
+          "name": "reference",
+          "nullable": true,
+          "origin": "Order.reference",
+          "type": "TEXT"
+        },
+        {
+          "name": "note",
+          "nullable": true,
+          "origin": "Order.note",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "placed_at",
+          "origin": "Order.placedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "customer_id"
+          ],
+          "name": "fk_order_customer_id",
+          "onDelete": "RESTRICT",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "customer"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "customer_id",
+            "placed_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_order_customer_placed_at"
+        }
+      ],
+      "kind": "entity",
+      "name": "order",
+      "origin": "Order",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "order_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "order_id",
+          "type": "TEXT"
+        },
+        {
+          "name": "label_id",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "label_id"
+          ],
+          "name": "fk_order_label_label_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "label"
+        },
+        {
+          "columns": [
+            "order_id"
+          ],
+          "name": "fk_order_label_order_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "order"
+        }
+      ],
+      "kind": "join",
+      "name": "order_label",
+      "origin": "Order.labels",
+      "primaryKey": {
+        "columns": [
+          "order_id",
+          "label_id"
+        ],
+        "name": "order_label_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "OrderLine.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "sku",
+          "origin": "OrderLine.sku",
+          "type": "TEXT"
+        },
+        {
+          "name": "quantity",
+          "origin": "OrderLine.quantity",
+          "type": "INTEGER"
+        },
+        {
+          "name": "order_id",
+          "origin": "Order.lines",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "order_id"
+          ],
+          "name": "fk_order_line_order_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "order"
+        }
+      ],
+      "kind": "entity",
+      "name": "order_line",
+      "origin": "OrderLine",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "order_line_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Product.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "title",
+          "origin": "Product.title",
+          "type": "TEXT"
+        },
+        {
+          "name": "price",
+          "origin": "Product.price",
+          "type": "INTEGER"
+        }
+      ],
+      "kind": "entity",
+      "name": "product",
+      "origin": "Product",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "product_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

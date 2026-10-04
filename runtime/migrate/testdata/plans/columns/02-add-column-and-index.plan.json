@@ -1,0 +1,87 @@
+{
+  "dialect": "postgres",
+  "from": "9a7520f1e299eda4d142c6bd9e1fd1fd576782068f04e593b93ee2ec9abc4ea1",
+  "hash": "523311e631e85a62e87e1ff8bb7e3c9ce4798bca0463d91dd04d27a86e6784ce",
+  "service": "ledger-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE account ADD COLUMN email TEXT"
+      ],
+      "subject": "table/account/column/email",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_account_email"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_account_email ON account USING BTREE (email)"
+      ],
+      "subject": "table/account/index/idx_account_email",
+      "transactional": false
+    }
+  ],
+  "to": "1d64906138f97c4817b8f19e7183a82e2084a0360395677ba52be394fd099865",
+  "toModel": {
+    "dialect": "postgres",
+    "extensions": [
+      "pgcrypto"
+    ],
+    "service": "ledger-db",
+    "tables": [
+      {
+        "columns": [
+          {
+            "default": "gen_random_uuid()",
+            "name": "id",
+            "type": "UUID"
+          },
+          {
+            "name": "name",
+            "origin": "Account.name",
+            "type": "TEXT"
+          },
+          {
+            "name": "balance",
+            "origin": "Account.balance",
+            "type": "DOUBLE PRECISION"
+          },
+          {
+            "name": "email",
+            "nullable": true,
+            "origin": "Account.email",
+            "type": "TEXT"
+          }
+        ],
+        "comment": "Generated from schema type: Account",
+        "indexes": [
+          {
+            "columns": [
+              "email"
+            ],
+            "method": "BTREE",
+            "name": "idx_account_email"
+          }
+        ],
+        "kind": "entity",
+        "name": "account",
+        "origin": "Account",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "account_pkey"
+        }
+      }
+    ],
+    "version": 1
+  },
+  "version": 1
+}

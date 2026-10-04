@@ -1,0 +1,87 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "pgcrypto"
+  ],
+  "service": "fixture-list-defaults-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Tasting.id",
+          "type": "UUID"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "tasted_at",
+          "origin": "Tasting.tastedAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_DATE",
+          "name": "tasted_on",
+          "origin": "Tasting.tastedOn",
+          "type": "DATE"
+        },
+        {
+          "default": "CURRENT_TIME",
+          "name": "poured_at",
+          "origin": "Tasting.pouredAt",
+          "type": "TIME"
+        },
+        {
+          "default": "'{}'",
+          "name": "retasted_at",
+          "origin": "Tasting.retastedAt",
+          "type": "TIMESTAMPTZ[]"
+        },
+        {
+          "default": "'{}'",
+          "name": "retasted_on",
+          "origin": "Tasting.retastedOn",
+          "type": "DATE[]"
+        },
+        {
+          "default": "'{}'",
+          "name": "repoured_at",
+          "origin": "Tasting.repouredAt",
+          "type": "TIME[]"
+        },
+        {
+          "default": "'{}'",
+          "name": "restocked_at",
+          "origin": "Tasting.restockedAt",
+          "type": "TIMESTAMPTZ[]"
+        },
+        {
+          "name": "flights",
+          "origin": "Tasting.flights",
+          "type": "JSONB"
+        },
+        {
+          "name": "opened_at",
+          "origin": "Tasting.openedAt",
+          "type": "JSONB"
+        },
+        {
+          "name": "bottled_at",
+          "origin": "Tasting.bottledAt",
+          "type": "JSONB"
+        }
+      ],
+      "comment": "A tasting whose required columns hold temporal values. A required\ntemporal scalar defaults to the current date or time; a required list of\none defaults to an empty array; a list of lists, a map or a JSON field\nholding one has no default.",
+      "kind": "entity",
+      "name": "tasting",
+      "origin": "Tasting",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "tasting_pkey"
+      }
+    }
+  ],
+  "version": 1
+}

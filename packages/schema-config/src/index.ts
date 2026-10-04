@@ -63,7 +63,12 @@ export type ApiOutputConfig = {
 export type SdkOutputConfig = Partial<Record<TargetLanguage, TargetOutputConfig>>;
 
 /**
- * The DB kind's sql output. The DDL and the ORM are implied by the kind; this block places and owns the generated projection view migrations.
+ * A database the DB kind's sql output is built for.
+ */
+export type SqlDialect = "postgres" | "sqlite";
+
+/**
+ * The DB kind's sql output. The DDL and the ORM are implied by the kind; this block places and owns the generated projection view migrations and lists the dialects the DDL is written for.
  */
 export type SqlOutputConfig = {
   /**
@@ -74,6 +79,10 @@ export type SqlOutputConfig = {
    * The Postgres role the migrations create the views as: SET ROLE around the view DDL and RESET ROLE after it, so the schema's default privileges for that role apply. The migration runner must be a member of the role. Unset creates the views as the runner.
    */
   readonly viewOwner?: string;
+  /**
+   * The databases the service is built for. With sqlite listed, the build also writes sqlite/create.sql and refuses a schema that uses what SQLite does not support, and migrate plan --dialect sqlite plans for it. The list must hold postgres: the Go ORM the kind always generates runs on Postgres. Unset is ["postgres"].
+   */
+  readonly dialects?: readonly SqlDialect[];
 };
 
 export type SchemaOutputs = {
