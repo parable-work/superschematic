@@ -81,8 +81,10 @@ With nothing declared, each API service in a stack is one server and each
 DB service is one database. A deployable is declared only to change that:
 
 - to run several APIs in one process;
-- to host several DB schemas on one database;
-- to add an edge the schemas cannot show (`calls`, section 3.3).
+- to host several DB schemas on one database.
+
+A declared deployable only groups. It declares no needs: a server's edges
+are the union of its APIs' edges, so grouping APIs never restates one.
 
 ### 3.3 Edges
 
@@ -91,12 +93,34 @@ An edge is a need met by something that provides it. v1 has two kinds:
 | Edge | From | To | Derived from |
 | --- | --- | --- | --- |
 | sql | server | database | the database each served API already names: its `authDb`, or its one DB-kind dependency, as `resolveUpstreamAuth` in `internal/generator/dispatch.go` reads it |
-| http | server | server | `calls` on the calling server, a list of service handles |
+| http | server | server | `calls` in the config of each API the calling server serves |
 
 `calls` is the one wiring fact a person writes, because no schema says that
-one server's code calls another's API. It is written once, as a handle. The
-config field, the URL, the invoker grant and the network rule all follow
-from it.
+one API's implementation calls another API. It sits in the API service's
+config next to `authDb`, because both describe what the implementation
+needs, and the implementation belongs to the API (section 8.5):
+
+```ts
+// schemas/services/shop-orders/schema.config.ts
+export default defineConfig({
+  name: "shop-orders",
+  kind: SchemaKind.API,
+  authDb: service({ name: "shop-db", kind: SchemaKind.DB }),
+  calls: [service({ name: "shop-api", kind: SchemaKind.API })],
+  outputs: { /* ... */ },
+});
+```
+
+It is written once, as a handle in the form `authDb` already takes (open
+question 7 in section 15). The config field, the SDK client in the
+implementation's `Deps`, the URL, the invoker grant and the network rule
+all follow from it. A call between two APIs that one server serves stays an
+HTTP call to the server's own address.
+
+`calls` is also a build dependency, since the caller's generated `Deps`
+imports the callee's SDK. Two APIs that call each other form a cycle
+between services, so the build plan orders outputs (SDKs before APIs)
+rather than whole services (section 12).
 
 ### 3.4 Bindings in the generated config
 
@@ -138,8 +162,8 @@ import { environment, server, stack } from "@superschematic/stack";
 @stack({ deploy: [ShopApi, ShopOrders], expose: [ShopApi] })
 export abstract class Shop {}
 
-@server({ serves: [ShopOrders], calls: [ShopApi] })
-export abstract class Orders {}
+@server({ serves: [ShopApi, ShopOrders] })
+export abstract class Backend {}
 
 @environment({ target: "local" })
 export abstract class Dev {}
@@ -158,7 +182,7 @@ export abstract class Staging {}
   domain: "acme.dev",
   settings: [
     { of: ShopDb, tier: "db-custom-2-7680", highAvailability: true },
-    { of: ShopApi, minInstances: 1, env: { LOG_LEVEL: "warn" } },
+    { of: Backend, minInstances: 1, env: { LOG_LEVEL: "warn" } },
   ],
 })
 export abstract class Production {}
@@ -173,7 +197,9 @@ export abstract class Preview extends Staging {}
 - **`expose`** names what is reachable from outside the environment.
   Everything else is internal, and reachable only along its edges.
 - **`@server`** declares a deployable only to change a default. Here it
-  replaces shop-orders' default server with one that calls shop-api.
+  runs both APIs in one process in place of their two default servers. Its
+  edges are its APIs' edges: shop-db through `authDb`, and shop-api
+  through shop-orders' `calls` (section 3.3).
 - **`target`** picks a target (section 6.3). `gcp` holds that target's
   values, checked against the schema the target registers.
 - **`domain`** is where exposed servers are reached, and **`dns`** places
@@ -214,7 +240,7 @@ export abstract class PaymentsSecrets {
 
 - In each environment, `PaymentsSecrets.STRIPE_KEY` is one secret. Every
   server whose config includes the field gets an accessor grant to it:
-  here, shop-api and the orders server.
+  here, the servers of shop-api and shop-orders.
 - Two servers whose config is the same type share all its secrets with no
   further declaration.
 - The platform stores the secret (Secret Manager on GCP, a gitignored file
@@ -446,6 +472,37 @@ the types it uses. A Go tool with a `-check` mode keeps them current, as
 `internal/tools/scalarcatalog` does for the scalar catalog, so properties
 validate offline.
 
+Each pinned file also records the type's Terraform name and any property
+renames, taken from the bridged provider's published mapping:
+
+```json
+{
+  "token": "gcp:cloudrunv2/service:Service",
+  "terraform": {
+    "type": "google_cloud_run_v2_service",
+    "renames": { "invokerIamDisabled": "invoker_iam_disabled" }
+  },
+  "inputProperties": { "...": "..." }
+}
+```
+
+The Pulumi provisioner uses the token as it is. A Terraform-family
+provisioner such as OpenTofu uses `terraform.type` and `renames`, so adding
+one is a lookup, not a translation layer. A round-trip test, from Pulumi
+names to Terraform and back over every pinned type, lands with that
+provisioner. Kubernetes types need no mapping, because a token is an
+apiVersion and a kind.
+
+Not taken:
+
+- Terraform provider schemas as the vocabulary. They are the most widely
+  shared: OpenTofu speaks them, and Pulumi and Crossplane both generate
+  providers from them. But the first provisioner would run them through
+  Pulumi's bridge for arbitrary Terraform providers, a less mature path
+  than its native GCP provider, and Kubernetes fits them poorly.
+- A vocabulary of superschematic's own, which re-models every cloud
+  resource it uses and needs a mapping per resource per provisioner.
+
 ### 6.5 Provisioner
 
 A provisioner takes a resource graph to running resources and back:
@@ -615,9 +672,10 @@ A generator per server language, Go first, writes a `main` that:
   endpoints;
 - sets up OpenTelemetry and graceful shutdown.
 
-The engineer still writes the implementation interfaces. They also write one
-constructor, whose signature the generator writes, in a package the server
-names once. A mismatch fails to compile at level 2 of section 10.
+The engineer writes the implementation of each served API, and nothing else
+(section 8.5). The entrypoint calls each implementation's constructor with
+its `Deps`. A mismatch between the code and the generated signature fails
+to compile at level 2 of section 10.
 
 ### 8.2 Container image
 
@@ -653,6 +711,44 @@ them: `superschematic migrate plan` and the `superschematic-migrate` runner
   locally;
 - a check that a plan does not drop or retype a column that an `@source`
   view of a deployed API reads.
+
+### 8.5 Where the implementation lives
+
+The unit of implementation is the API service, not the server. Each API
+service has one implementation per language, at a conventional location,
+found with no declaration:
+
+- **Location.** The naming file holds a path template per language (for
+  example `go/{service}`, from the repository root), with a core default.
+  The service name fills it. A distribution changes the template, not each
+  service.
+- **Scaffold.** When the package is missing, superschematic writes it once,
+  with each method returning a not-implemented error. From then on the
+  package is the engineer's and is never regenerated.
+- **Signature.** The API generator writes `Deps` and the constructor's
+  signature: `func New(deps Deps) (Implementations, error)` in Go, and the
+  equivalent in TypeScript and Rust. `Deps` is typed and filled by the
+  entrypoint:
+
+  ```go
+  type Deps struct {
+      Config  Config                 // the API's @envVars, derived fields included
+      DB      orm.DatabaseInterface  // from authDb
+      ShopApi *shopapisdk.Client     // from calls, with service credentials
+      Logger  *slog.Logger
+  }
+  ```
+
+A server that serves several APIs calls each one's constructor with that
+API's `Deps`, built from the server's shared connections and clients.
+
+Not taken:
+
+- A package path named on each server, such as `@server({ go:
+  "example.com/acme/orders" })`. That is a string per server, and default
+  servers would still need a convention.
+- A `main` the engineer writes, calling a generated `Run(impl)`. That brings
+  hand wiring back, and the server still has to name its main package.
 
 ## 9. End-user auth and service auth
 
@@ -783,7 +879,7 @@ registrations.
 
 ## 12. Core changes
 
-1. **IR.** `authDb` and `dependencies` move into the IR (`ir/schema.go`
+1. **IR.** `authDb`, `dependencies` and `calls` move into the IR (`ir/schema.go`
    records only `Imports` today), and the Stack IR types are added.
 2. **Loader:**
    - Class values in the arguments of any registered decorator. Today the
@@ -799,12 +895,19 @@ registrations.
    - Build-order edges from the handles a schema references, so a stack does
      not restate them in `dependencies` (`internal/buildplan/buildplan.go:31`).
 3. **envgen.** The derived binding fields of section 3.4.
-4. **Generators.** The server entrypoint and the Dockerfile.
-5. **Runtimes.** `ServiceAuthenticator` and `ServiceCaller` in the Go, Rust
+4. **Generators.** The server entrypoint, the Dockerfile, each API's `Deps`
+   and constructor signature, and the one-time implementation scaffold
+   (section 8.5).
+5. **Config and build plan.** `calls` in the schema config, beside
+   `authDb`, in the TypeScript type and the data-form schema. The build
+   plan orders outputs (an SDK before the APIs that call it) where `calls`
+   forms a cycle between services. A naming-file key holds the
+   implementation path templates.
+6. **Runtimes.** `ServiceAuthenticator` and `ServiceCaller` in the Go, Rust
    and TypeScript HTTP runtimes, and a service credential source in the
    SDKs.
-6. **Registry.** The four specs of section 6.7.
-7. **CLI.** The `stack` command group.
+7. **Registry.** The four specs of section 6.7.
+8. **CLI.** The `stack` command group.
 
 ## 13. Module layout
 
@@ -881,11 +984,23 @@ model, or retired, when it lands.
 4. **Shared secrets.** Settled: a secret is identified by the type that
    declares the field and the field's name, so servers that include the
    same declared field share one secret (section 4.2).
-5. **Where a server's implementation lives.** Is it named once on the
-   server, or found by a convention for default servers?
-6. **The resource vocabulary.** Pulumi's schemas are a choice of
-   convenience. If OpenTofu becomes a first-class provisioner, test the
-   name translation in both directions.
+5. **Where a server's implementation lives.** Settled: one implementation
+   per API service per language at a naming-file path template, scaffolded
+   once, with a generated `Deps`. `calls` moves to the API service's config
+   (sections 3.3 and 8.5).
+6. **The resource vocabulary.** Settled: Pulumi's package schemas, with
+   each pinned type's Terraform name and property renames recorded beside
+   it from v1, and a round-trip test with the first Terraform-family
+   provisioner (section 6.4).
+7. **References in `schema.config.ts`.** A config names another service
+   as `service({ name, kind })`, because `checkConfigPurity`
+   (`internal/buildplan/buildplan.go:161`) lets it import only
+   `@superschematic/schema-config`. So `authDb`, `dependencies` and `calls`
+   are handles the loader checks, not imported references. The rule's
+   comment gives its reason: a platform model imports configs as identity
+   references and runs them. superschematic reads configs statically, so
+   letting a config import a sibling's generated sentinel may now be safe.
+   That is a core change of its own, for every config reference.
 
 ## 16. What the source tree taught
 
