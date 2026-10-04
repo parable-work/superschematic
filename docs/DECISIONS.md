@@ -1861,6 +1861,42 @@ type-checks a package with a field of every scalar in the linked catalog.
 
 The rule is reversible until the first release.
 
+## D26. Every server runs an `@hmacVerified` provider's verifier first
+
+`@hmacVerified({ provider })` reached only the Go server. apigen read the
+provider, `Implementations` gained a `WebhookVerifiers` map that
+`ValidateImplementations` required for every provider, and the route ran
+the provider's verifier ahead of the rate limit, the body limit and the
+permission check. The TypeScript and Rust server generators never read the
+provider, so a webhook route served by either took unsigned requests, and
+nothing said so.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The TypeScript and Rust servers enforce it, as the Go server does: `Implementations` has a verifier for each provider the schema names (`webhookVerifiers`, `webhook_verifiers`), the server does not start without one for every provider, and a provider's verifier runs before every other step of its routes. | Refusing such an operation at build time unless it is `@manualRouteRegistration`, as both servers refuse an encrypted one (D15, D20 amended). That is less code, but it leaves the signature check to a hand-written route in two servers of three. |
+| The TypeScript verifier is Hono middleware (`WebhookVerifier`, exported by `@superschematic/http-runtime/hono`), the counterpart of Go's `func(http.Handler) http.Handler`. The operation table names the provider (`webhookProvider`), and `mountOperation` and `mountManualOperation` throw at mount when such a spec has no verifier. `webhookVerifiers` has a property per provider, so tsc catches a missing one; `buildRouter` throws `Implementations.webhookVerifiers for provider <provider> is required`, as Go and Rust word it, for a caller tsc did not check. | A predicate the runtime calls with the headers and the raw body, answering 401 itself. It is simpler to write, but it fixes the refusal's status and body, and the Go verifier answers for itself. |
+| The TypeScript verifier may read the body. The route reads a copy of the request (`Request.clone()`) taken before the verifier ran. | Asking the verifier to read a clone. One that calls `c.req.text()`, as provider examples do, would leave the route a used body and a 500. |
+| The TypeScript router runs the verifier on a `@manualRouteRegistration` route too, before the service's handler, as it runs the rate limit and the gate there. | |
+| The Rust verifier is an async trait whose `verify(request, next)` is axum middleware, the counterpart of `axum::middleware::from_fn`. `webhook_verifiers` is a `HashMap<String, Arc<dyn WebhookVerifier>>` keyed by provider, as Go's map is. `webhook_verified(route, verifier)` adds it with `route_layer`, so it runs before the handler's extractors read the body and not on a 405. `build_router` panics without a verifier for every provider, as axum panics on a route it cannot mount; `validate_implementations` returns the message. | A struct with a field per provider, which the compiler would check, but which needs a Rust identifier from every provider string and keys the verifiers differently from Go and TypeScript; `build_router` returning a `Result`, which changes its signature for every crate |
+| `build_router` does not mount a `@manualRouteRegistration` operation (D20 amended), so it applies no verifier to one. The service wraps the route it adds in `webhook_verified`, and `build_router`'s doc says so for each such operation. Its provider still needs a verifier in `webhook_verifiers`, as in Go and TypeScript. | Requiring verifiers only for the providers of mounted operations, which gives the three servers different rules |
+
+In all three servers the verifier runs before the body limit, so it reads
+a body of any size; a verifier that cares caps its own read, as the Rust
+one must in `to_bytes`. The Rust router applies none of the other traffic
+controls or the permission check, so there the verifier is the only step
+before the handler. The Python and Rust SDKs still generate a method for a
+`@webhook` operation, which the Go and TypeScript SDKs leave out; this
+entry does not change that.
+
+`fixture-webhooks-api` declares two providers, a manual webhook and a
+route that is not one. `runtime/http/typescript/src/hono.test.ts`,
+`internal/generator/tsrestgen/webhooks_test.go` (under Bun) and
+`internal/generator/rustrestgen/webhooks_test.go` (under cargo) check the
+order, the refusal at startup and the body the route receives. Output for
+a schema without `@hmacVerified` is unchanged byte for byte.
+
+The rule is reversible until the first release.
+
 ## D27. Schema migrations: a plan between two versions of a schema
 
 `sqlgen` writes the whole DDL of a DB service, `create.sql`, for Postgres
@@ -2028,3 +2064,38 @@ SQLite and `foreignKeysOff` on Postgres. SQLite comes next through the
 same seam: its model and `create.sql`, its steps with the copy-table
 rebuild, and `outputs.sql.dialects`; its runner driver is built. Each
 change that lands a piece updates this paragraph.
+
+## D28. No SDK has a method for a `@webhook` operation
+
+`@webhook` marks an operation a third party calls. The Go and TypeScript
+SDKs have skipped one since the bootstrap commit (`0b783d15`), which
+brought the check over from the source tree with no recorded reason; those
+two checks were the only readers of `IsWebhook`. The Python and Rust SDK
+generators never read it, so both generated a client method for every
+webhook. The Rust SDK also listed it in its tool schema and audit
+documents and validated its input type before a request. D26 noted the
+gap and left it; this entry supersedes that sentence.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@webhook` means a third party calls the route, and no SDK has a method for it. An SDK is the client for the service's own callers. A webhook's caller is the provider (Stripe, GitHub), which sends its own request from its own servers, so a generated method has no real user. | Dropping the skip in every SDK. Each SDK would gain a method nobody can use, and a reader of the SDK would take the route for one its callers call. |
+| Under `@hmacVerified` such a method cannot work: no SDK signs a request, so the provider's verifier refuses every call it sends (D26). Making it work would put the provider's signing secret in a client. | Skipping only `@hmacVerified` webhooks, which makes `@webhook` mean two things: a route a third party calls, and one the service's clients call unsigned |
+| A route the service's own clients or services call, an internal callback say, is an ordinary route and is not declared `@webhook`. | |
+| The Python and Rust SDKs skip an operation whose `EndpointInfo.IsWebhook` is set, where the Go and TypeScript SDKs do: it has no method, and a namespace whose operations are all webhooks is not generated. The Rust SDK's tool documents leave it out too, as the Go and TypeScript SDKs' already did, since theirs come from the TypeScript SDK's methods. The Rust SDK's validation schemas leave out the webhook's input type, which no method validates. | Rust tool documents that follow the operations rather than the SDK's methods, which would list tools the Rust crate has no method for and the other SDKs leave out |
+
+The OpenAPI document keeps the route, since it tells the provider where to
+post. The provider tool lists (`openai.json`, `anthropic.json`) hold only
+operations published through `@mcp`, so they change only for a webhook a
+schema published that way, which only the Rust lists carried. An SDK still
+carries its auth surface when only a webhook needs a caller, since
+`APIOutput.HasAuth` counts every operation (D15, amended); all four SDKs
+agree on that.
+
+`internal/generator/pysdkgen/webhooks_test.go` and
+`internal/generator/rustsdkgen/webhooks_test.go` check that the SDK of
+`fixture-webhooks-api` (D26) has `event.get_event` and no other method,
+and the Rust test that its tools and validation schemas hold no webhook. A
+golden tree pins each SDK. Output for a schema without `@webhook` is
+unchanged byte for byte.
+
+The rule is reversible until the first release.
