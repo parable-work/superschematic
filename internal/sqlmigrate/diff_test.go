@@ -250,8 +250,9 @@ func TestRenameInView(t *testing.T) {
 
 // TestDialectSeam plans through a dialect whose ALTER TABLE cannot change
 // a column's type or drop a column, as SQLite's cannot change a type: the
-// planner hands those changes, by table and phase, to rebuild, and every
-// other change to render, with no change to the diff.
+// planner hands those changes, by table and phase, to rebuild, with the
+// other changes of the table in that phase, and every other change to
+// render, with no change to the diff.
 func TestDialectSeam(t *testing.T) {
 	pc := planCase{after: func(s *ir.Schema) {
 		fieldNamed(s, "OrderLine", "sku").TypeRef = ir.TypeRef{Name: "Contact.PhoneNumber"}

@@ -192,6 +192,11 @@ drops, renames or retypes a column a reader live at its phase reads is
 `api-breaking` for that reader. `--reader` adds a service that lives
 elsewhere; it counts on both sides.
 
+`--dialect sqlite` plans the service's SQLite database, with the copy-table
+rebuild where SQLite's `ALTER TABLE` falls short
+([SQLite](/superschematic/reference/migrations/#sqlite)). The service's
+`outputs.sql.dialects` must list `sqlite`.
+
 `--format` prints the plan to stdout; notes, such as planning from an empty
 database, go to stderr. With `--fail-on`, the command prints the plan,
 then lists on stderr each hazard of a listed class that no `--allow` names,
@@ -211,7 +216,7 @@ superschematic migrate plan ./schemas/services/shop-db --print-model > model.jso
 | `--from-ref` | none | the previous version: the schemas root at this git ref, read with `git archive`; cannot be combined with `--from` |
 | `--rename` | none | a rename: `old=new` for a table, `oldTable.oldColumn=newTable.newColumn` for a column; repeatable |
 | `--reader` | none | an API or General service directory outside the schemas root whose `@source` views read the database; repeatable |
-| `--dialect` | `postgres` | the database dialect: `postgres`, or `sqlite` once that dialect lands |
+| `--dialect` | `postgres` | the database dialect: `postgres`, or `sqlite` for a service whose `outputs.sql.dialects` lists it |
 | `--out` | none | write the plan JSON, in canonical form, to this file |
 | `--format` | `sql` | print the plan to stdout as `json`, `sql` or `markdown` |
 | `--fail-on` | none | hazard classes, comma-separated, or `all`; exit 1 when the plan has a hazard of one that no `--allow` names |

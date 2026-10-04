@@ -22,10 +22,12 @@ import (
 //     copy-table for a table it rebuilds.
 //
 // The planner calls canAlter on every change to a table the previous
-// version has. A change the dialect can make goes to render on its own; the
-// changes of one table in one phase that it cannot make go to rebuild
-// together, so a dialect whose ALTER TABLE is narrow (SQLite) rebuilds a
-// table once per phase however many of its columns change.
+// version has. A change the dialect can make goes to render on its own.
+// When the dialect cannot make one of a phase's changes to a table, every
+// change the phase makes to that table but the renames of the table and its
+// columns goes to rebuild together, so a dialect whose ALTER TABLE is
+// narrow (SQLite) rebuilds a table once per phase however many of its
+// columns change.
 type dialect interface {
 	// name is the dialect's name in models and plans.
 	name() Dialect
@@ -48,11 +50,11 @@ type dialect interface {
 	// rendered.main names and sets each step's phase and index.
 	render(c *change) (rendered, error)
 
-	// rebuild turns the changes canAlter refused for one table in one phase
-	// into the steps that rebuild it by copying it: from before, the table
-	// as it is when the phase reaches it, to after, the table as the phase
-	// leaves it. The planner adds every change's shared hazards to the step
-	// rendered.main names.
+	// rebuild turns the changes of one table in one phase, one of which
+	// canAlter refused, into the steps that rebuild it by copying it: from
+	// before, the table as it is when the phase reaches it, after the
+	// renames, to after, the table as the phase leaves it. The planner adds
+	// every change's shared hazards to the step rendered.main names.
 	rebuild(before, after *Table, changes []*change) (rendered, error)
 }
 

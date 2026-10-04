@@ -83,6 +83,9 @@ The API and General services in each version's schemas root are that
 version's readers: the columns their @source views read. --reader adds a
 service that lives elsewhere; it counts on both sides.
 
+--dialect sqlite plans the service's SQLite database; its
+outputs.sql.dialects must list sqlite.
+
 --out writes the plan JSON the runner applies. --format prints the plan
 as json, sql or markdown. --fail-on exits non-zero, after printing, when
 the plan has a hazard of a listed class that no --allow names.
